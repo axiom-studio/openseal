@@ -1,0 +1,338 @@
+apiVersion: axiom.studio/v1
+kind: AgentLibraryVersion
+metadata:
+  category: custom
+  name: Document Processor V2
+  version: 1.0.22
+spec:
+  connections:
+  - id: edge-temp-1768324042067-2-temp-1768324487756-5
+    sourceHandle: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    sourceNodeId: temp-1768324042067-2
+    targetNodeId: temp-1768324487756-5
+  - id: edge-temp-1768324487756-5-temp-1768501835110-2-default-default
+    sourceNodeId: temp-1768324487756-5
+    targetNodeId: temp-1768501835110-2
+  - id: edge-temp-1768582970499-2-temp-1768517985003-1-default-default
+    sourceNodeId: temp-1768582970499-2
+    targetNodeId: temp-1768517985003-1
+  - id: edge-temp-1768323773757-1-temp-1768324042067-2-default-default
+    sourceNodeId: temp-1768323773757-1
+    targetNodeId: temp-1768324042067-2
+  - id: edge-temp-1768582970499-2-temp-1768582869129-1-default-default
+    sourceNodeId: temp-1768582970499-2
+    targetNodeId: temp-1768582869129-1
+  - id: edge-temp-1768668686673-2-temp-1768582970499-2-default-default
+    sourceNodeId: temp-1768668686673-2
+    targetNodeId: temp-1768582970499-2
+  - id: edge-temp-1768582869129-1-temp-1768668107931-1-default-default
+    sourceNodeId: temp-1768582869129-1
+    targetNodeId: temp-1768668107931-1
+  - id: edge-temp-1768681361235-1-temp-1768668686673-2-default-default
+    sourceNodeId: temp-1768681361235-1
+    targetNodeId: temp-1768668686673-2
+  - id: edge-temp-1768475869277-2-temp-1768681361235-1-default-default
+    sourceNodeId: temp-1768475869277-2
+    targetNodeId: temp-1768681361235-1
+  - id: edge-temp-1769042421398-1-temp-1768501835110-2-default-default
+    sourceNodeId: temp-1769042421398-1
+    targetNodeId: temp-1768501835110-2
+  - id: edge-temp-1768324042067-2-temp-1769042421398-1-application/octet-stream-default
+    sourceHandle: application/octet-stream
+    sourceNodeId: temp-1768324042067-2
+    targetNodeId: temp-1769042421398-1
+  - id: edge-temp-1768324042067-2-temp-1769044897371-1-text/html-default
+    sourceHandle: text/html
+    sourceNodeId: temp-1768324042067-2
+    targetNodeId: temp-1769044897371-1
+  - id: edge-temp-1769044897371-1-temp-1768501835110-2-default-default
+    sourceNodeId: temp-1769044897371-1
+    targetNodeId: temp-1768501835110-2
+  - id: edge-temp-1768324042067-2-temp-1769042421398-1-application/vnd.ms-outlook-default
+    sourceHandle: application/vnd.ms-outlook
+    sourceNodeId: temp-1768324042067-2
+    targetNodeId: temp-1769042421398-1
+  - id: edge-temp-1769539368669-1-temp-1768681361235-1-default-default
+    sourceNodeId: temp-1769539368669-1
+    targetNodeId: temp-1768681361235-1
+  - id: edge-temp-1768501835110-2-temp-1769880127682-1-default-default
+    sourceNodeId: temp-1768501835110-2
+    targetNodeId: temp-1769880127682-1
+  - id: edge-temp-1768715448723-1-temp-1770049924808-2-default-default
+    sourceNodeId: temp-1768715448723-1
+    targetNodeId: temp-1770049924808-2
+  - id: edge-temp-1770049924808-2-temp-1768681361235-1-default-default
+    sourceNodeId: temp-1770049924808-2
+    targetNodeId: temp-1768681361235-1
+  - id: edge-temp-1769130095495-1-temp-1768475869277-2-tool-output-tools-target
+    sourceHandle: tool-output
+    sourceNodeId: temp-1769130095495-1
+    targetNodeId: temp-1768475869277-2
+  - id: edge-temp-1770057365655-1-temp-1768715448723-1-default-default
+    sourceNodeId: temp-1770057365655-1
+    targetNodeId: temp-1768715448723-1
+  - id: edge-temp-1769130095495-1-temp-1769539368669-1-tool-output-tools-target
+    sourceHandle: tool-output
+    sourceNodeId: temp-1769130095495-1
+    targetNodeId: temp-1769539368669-1
+  - id: edge-temp-1770653649501-2-temp-1768501835110-2-default-default
+    sourceNodeId: temp-1770653649501-2
+    targetNodeId: temp-1768501835110-2
+  - id: edge-temp-1768324042067-2-temp-1770653649501-2-application/pdf-default
+    sourceHandle: application/pdf
+    sourceNodeId: temp-1768324042067-2
+    targetNodeId: temp-1770653649501-2
+  - id: edge-temp-1769880127682-1-temp-1770057365655-1-default-default
+    sourceNodeId: temp-1769880127682-1
+    targetNodeId: temp-1770057365655-1
+  - id: edge-temp-1769130095495-1-temp-1768715448723-1-tool-output-tools-target
+    sourceHandle: tool-output
+    sourceNodeId: temp-1769130095495-1
+    targetNodeId: temp-1768715448723-1
+  nodes:
+  - id: temp-1768323773757-1
+    name: File-Upload
+    position:
+      x: -416
+      y: 352
+    type: manual
+  - config:
+      cases:
+        application/octet-stream: ""
+        application/pdf: ""
+        application/vnd.ms-outlook: ""
+        application/vnd.openxmlformats-officedocument.wordprocessingml.document: ""
+        text/html: ""
+      default: ""
+      expression: '{{nodes.File-Upload.document.mimeType}}'
+    id: temp-1768324042067-2
+    name: Switch-2
+    position:
+      x: -128
+      y: 336
+    type: switch
+  - config:
+      code: "import mammoth\nfrom io import BytesIO\n\ndocx_bytes = get_file(nodes['File-Upload']['document'])\ndocx_file_like = BytesIO(docx_bytes)\nresult = mammoth.convert_to_html(docx_file_like)\nhtml_value = result.value\noutput_stream = BytesIO()\noutput_stream.write(html_value.encode('utf8')) \nhtml = output_stream.getvalue().decode(\"utf-8\")\n\nresult={\n    \"success\": True,\n    \"html\": html\n}"
+      language: python
+      requirements:
+      - mammoth
+    id: temp-1768324487756-5
+    name: docx-to-html
+    position:
+      x: 144
+      y: 464
+    type: code
+  - config:
+      apiKey: AIzaSyBrnxTIA5kBIIt4mj4beZTKST7BT_BQ9BM
+      maxTokens: 200000
+      model: gemini-3-pro-preview
+      prompt: "Here is the document in HTML format:\n\n{{prev.html}}\n\n1) Extract document sender information.\n2) Extract all products or parts or items mentioned in the document.\n3) In some cases product or parts or items may not be explicitly mentioned, but might refer to repetition of product or parts or items in the document. Interpret them clearly as additional products or parts or items.\n4) In some cases product or part or item may be referred to as being in the subject, in this case use the rest of the body to only infer quantity while using the subject field to determin part or product or item\n\nReturn a valid JSON object following the specified schema.\nOnly include items explicitly present in the document.\nDo not include any text outside the JSON. Do not encapsulate the json in any language hints such as ```json  and trailing ```"
+      provider: gemini
+      systemPrompt: "You are a document processing agent.\n\nYou receive documents in HTML format.\n\nYou can recieve documents in HTML format that can be e-mail threads. The original sender is at the bottom of the thread towards the end of the document and not at the begining.\n\nYour task is to extract all products or parts or items mentioned in the document. You also need to extract sender information for who prepared the document."
+      temperature: 0
+    id: temp-1768475869277-2
+    name: google-gemini
+    position:
+      x: 1376
+      y: 624
+    type: ai
+  - config:
+      executionMode: continue
+    id: temp-1768501835110-2
+    name: multi-llm-splitter
+    position:
+      x: 416
+      y: 384
+    type: split
+  - config:
+      channel: '#build-notifications-studio-env'
+      text: '{{prev}}'
+      webhookUrl: https://hooks.slack.com/services/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
+    id: temp-1768517985003-1
+    name: Slack-1
+    position:
+      x: 2176
+      y: 160
+    type: slack
+  - config:
+      body: "file: '{{nodes.File-Upload.document}}'\nfileField: file\nmethod: POST\nurl: http://docu-ui-production.documentprocessing.svc.cluster.local/api/upload"
+    id: temp-1768582869129-1
+    name: http-upload-document
+    position:
+      x: 2176
+      y: 320
+    type: http
+  - id: temp-1768582970499-2
+    name: Split-2
+    position:
+      x: 1920
+      y: 272
+    type: split
+  - config:
+      body:
+        agreement_type: '{{nodes.code-output-json-partial.agreement_type}}'
+        blob_id: '{{prev.body.blob_id}}'
+        currency: '{{nodes.code-output-json-partial.currency}}'
+        customer_reference: '{{nodes.code-output-json-partial.customer_reference}}'
+        delivery_due_date: '{{nodes.code-output-json-partial.delivery_due_date}}'
+        items: '{{nodes.code-output-json-partial.items}}'
+        name: '{{nodes.code-output-json-partial.name}}'
+        quote_due_date: '{{nodes.code-output-json-partial.quote_due_date}}'
+        response_date: '{{nodes.code-output-json-partial.response_date}}'
+        score: '{{nodes.code-output-json-partial.score}}'
+        sender: '{{nodes.code-output-json-partial.sender}}'
+        ship_to_address: '{{nodes.code-output-json-partial.ship_to_address}}'
+        source: '{{nodes.code-output-json-partial.source}}'
+      method: POST
+      url: http://docu-ui-production.documentprocessing.svc.cluster.local/api/metadata
+    id: temp-1768668107931-1
+    name: http-upload-metadata
+    position:
+      x: 2416
+      y: 352
+    type: http
+  - config:
+      code: "import json\n\nrespObj = json.loads(prev['response'])\n\nif isinstance(respObj, list):\n    if len(respObj) <= 0:\n        raise ValueError(\"invalid response\")\n    items = respObj[0].get('items', [])\n    sender = respObj[0].get('sender','unknown|unknown')\nelif isinstance(respObj, dict):\n    items = respObj.get('items', [])\n    sender = respObj.get('sender','unknown|unknown')\nelse:\n    items = []\n    sender = 'unknown|unknown'\n\nmin_score = min(x['similarity'] for x in items) if items else 0\n\nresult = {\n    \"name\": trigger['data']['document']['filename'],\n    \"score\": min_score,\n    \"ship_to_address\": respObj.get('ship_to_address', \"\"),\n    \"response_date\": respObj.get('response_date', \"\"),\n    \"delivery_date\": respObj.get('delivery_date', \"\"),\n    \"customer_reference\": respObj.get('customer_reference',\"\"),\n    \"agreement_type\": respObj.get('agreement_type',\"\"),\n    \"quote_due_date\": respObj.get('quote_due_date', \"\"),\n    \"naics_code\": respObj.get('naics_code', \"\"),\n    \"currency\": respObj.get('currency', \"\"),\n    \"source\": prev['model'],\n    \"sender\": sender,\n    \"items\": items,\n    \"duration_seconds\": elapsed_ms / 1000\n}"
+      language: python
+    id: temp-1768668686673-2
+    name: code-output-json-partial
+    position:
+      x: 1696
+      y: 288
+    type: code
+  - config:
+      mode: stream
+    id: temp-1768681361235-1
+    name: Join-1
+    position:
+      x: 1664
+      y: 160
+    type: join
+  - config:
+      apiKey: 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
+      baseUrl: ""
+      maxTokens: 64000
+      maxToolIterations: 1000
+      model: gpt-5.2
+      prompt: "Here is the extracted document data:\n\n{{prev.response}}"
+      provider: openai
+      systemPrompt: "You are a validation and annotation agent.\nYou receive structured extraction output that represents immutable document truth."
+      temperature: 0
+    id: temp-1768715448723-1
+    name: Validator
+    position:
+      x: 1136
+      y: 160
+    type: ai
+  - config:
+      code: "from io import BytesIO\nimport tempfile\nimport extract_msg\nimport base64\nimport mammoth\n\nfrom pdfminer.high_level import extract_text_to_fp\nfrom pdfminer.layout import LAParams\nfrom pdfminer.converter import HTMLConverter\nfrom pdfminer.pdfinterp import PDFResourceManager\n\nATTACHMENTS_START = \"<!--__ATTACHMENTS_START__-->\"\nATTACHMENT_DELIM = \"<!--__ATTACHMENT__-->\"\nATTACHMENTS_END = \"<!--__ATTACHMENTS_END__-->\"\n\ndef s(value):\n    if value is None:\n        return \"\"\n    if isinstance(value, (bytes, bytearray)):\n        return value.decode(\"utf-8\", errors=\"ignore\")\n    return str(value)\n\ndef pdf_bytes_to_html(pdf_bytes: bytes) -> str:\n    input_stream = BytesIO(pdf_bytes)\n    output_stream = BytesIO()\n    resource_manager = PDFResourceManager()\n    laparams = LAParams(all_texts=True, detect_vertical=True, word_margin=0.1, char_margin=2.0, line_margin=0.5)\n    converter = HTMLConverter(resource_manager, output_stream, laparams=laparams, codec=\"utf-8\", scale=1.0)\n    try:\n        extract_text_to_fp(input_stream, output_stream, laparams=laparams, output_type=\"html\", codec=\"utf-8\", device=converter)\n        return output_stream.getvalue().decode(\"utf-8\", errors=\"ignore\")\n    finally:\n        converter.close()\n        input_stream.close()\n        output_stream.close()\n\ndef docx_bytes_to_html(docx_bytes: bytes) -> str:\n    docx_file_like = BytesIO(docx_bytes)\n    result = mammoth.convert_to_html(docx_file_like)\n    return result.value\n\ndef msg_bytes_to_html(data) -> dict:\n    if isinstance(data, str):\n        try:\n            data = base64.b64decode(data, validate=True)\n        except Exception:\n            raise ValueError(\"MSG input must be bytes or base64 string\")\n    if not isinstance(data, (bytes, bytearray)):\n        raise TypeError(\"MSG input must be bytes\")\n    attachment_blocks = []\n    with tempfile.NamedTemporaryFile(suffix=\".msg\") as tmp:\n        tmp.write(data)\n        tmp.flush()\n        msg = extract_msg.Message(tmp.name)\n    subject = s(msg.subject) or \"No Subject\"\n    sender = s(msg.sender) or \"Unknown\"\n    to = s(msg.to)\n    cc = s(msg.cc)\n    date = s(msg.date)\n    if msg.htmlBody:\n        body_html = s(msg.htmlBody)\n    else:\n        body_html = s(msg.body).replace(\"\\n\", \"<br>\")\n    for att in msg.attachments:\n        filename = s(att.longFilename or att.shortFilename or \"\").strip()\n        if not filename:\n            continue\n        lower = filename.lower()\n        if lower.endswith((\".png\", \".jpg\", \".jpeg\", \".gif\", \".webp\", \".bmp\", \".svg\")):\n            continue\n        try:\n            if lower.endswith(\".docx\"):\n                attachment_html = docx_bytes_to_html(att.data)\n            elif lower.endswith(\".pdf\"):\n                attachment_html = pdf_bytes_to_html(att.data)\n            else:\n                attachment_html = f\"<p>{filename}</p>\"\n        except Exception as e:\n            attachment_html = f\"<pre>Failed to render attachment: {s(e)}</pre>\"\n        attachment_blocks.append(f\"<div class=\"attachment\"><h3>{filename}</h3>{attachment_html}</div>\")\n    final_html = f\"<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{subject}</title><style>body {{ font-family: Arial, sans-serif; margin: 20px; }}</style></head><body><div class=\"header\"><p><span class=\"label\">From:</span> {sender}</p><p><span class=\"label\">To:</span> {to}</p><p><span class=\"label\">CC:</span> {cc}</p><p><span class=\"label\">Subject:</span> {subject}</p><p><span class=\"label\">Date:</span> {date}</p></div><div class=\"body\">{body_html}</div>{ATTACHMENTS_START}{ATTACHMENT_DELIM.join(attachment_blocks)}{ATTACHMENTS_END}</body></html>\"\n    return {\"html\": final_html}\n\nresult = msg_bytes_to_html(get_file(nodes[\"File-Upload\"][\"document\"]))"
+      language: python
+      requirements:
+      - extract-msg
+      - pdfminer.six
+      - mammoth
+    id: temp-1769042421398-1
+    name: msg-to-html
+    position:
+      x: 144
+      y: 176
+    type: code
+  - config:
+      code: "from io import BytesIO\n\nhtml=get_file(nodes['File-Upload']['document'])\n\nresult={\n    \"success\": True,\n    \"html\": html.decode('utf-8', errors='ignore')\n}"
+      language: python
+    id: temp-1769044897371-1
+    name: html-doc
+    position:
+      x: 144
+      y: 608
+    type: code
+  - config:
+      aggregationMethod: weighted
+      connectionString: postgres://postgres:vectorpass@pgvector.axiomcd.svc.cluster.local:5432/vectors?sslmode=disable
+      embeddingApiKey: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTc2MjQxNTUsImlhdCI6MTc2NjA4ODE1NSwianRpIjoiM2NlYjdmNmUtOWI1Ny00Yjk3LWEwMDctNTQyYjcyMmU0NThmIn0.uyFwWZylFOHODgkWF_3d-cwcqc2q4r0qEEMN3s4bzPgTQUMSn5CQZ2Hk8Bk7hykfcCsk214lLmTs0gRDNCRr_wjC2ntHAzyn5QNyBNPP0_mXy4B_iC0lx0DBaCS-BMMbNv8aOK4SgpEmnSJpTsfYORRiPhe110ZUXb6CwXv79TsRWoREYvqP655c4_v8wU2xQl69XJ3Cz2vR1J2TTtKnqF8CrVWaCQ66xxCbC3Gcg_PEn1cFPH54eGO0ROp_XfdBqUaqm-qheC38xOx3iLXeg831yKysUQoWJw2f_F2dr5XvLz66Ys4tir5oItbdoOWfL8uSebIDRFiY1x1ondN6pQ
+      embeddingBaseUrl: http://40.160.55.78:8089/v1
+      embeddingModel: nvidia/llama-embed-nemotron-8b
+      embeddingProvider: openai-compatible
+      returnColumns: name, mpn, description, manufacturer, class, type, internal_id
+      searchMode: advanced
+      table: catalog
+      tableName: ""
+      toolDescription: "Search for product items from the database."
+      toolName: search_catalog_over_mpn_and_metadata
+      topK: 5
+      vectorColumns: embedding_mpn, embedding_metadata
+      weights:
+        embedding_metadata: "0.50"
+        embedding_mpn: "0.50"
+    id: temp-1769130095495-1
+    name: Vector Search-2-nemotron
+    position:
+      x: 880
+      y: 704
+    type: tool_pgvector
+  - config:
+      apiKey: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjIwODQ4OTk1NzUsImlhdCI6MTc2OTUzOTU3NSwianRpIjoiZGMzMTJlMDktODAxMS00YjFiLWFiNjktOTdjMTk0NGExZjY0In0.mbMhQxAaFoupckxUGp1ZqXhrzO8ko_T5eCDSEt-Aw1_A6klTc4coI1VhdAY1UpqfhTGLaleJioQbSC8YZTquiva8J1k1uRe4tFiQbMzmBvWPpz7BUopA2Rdszp_HRxgK5IgZ-eoMLRUqiHyZWaq32BA1_uhVIesglX4zMoyNJP9V7XcclGlibzCnN9XtjaPcmbmm_PJnzkDru7-TLkvaDQ4ayAiqW0V4zm8fv0lrsNKOCa8W3NWKdhi5eDnq03XXzFS8vrc9J8253ecaY42seC09TeVcksHKSOEWfB9Br1OPTtPIU6EhNvxOTexTdfzGdYZHzc9DUAMmkT800n7RsQ
+      baseUrl: https://cloud.axiomstudio.ai/rest/v1/ai-gateway/v1/chat/completions
+      model: gpt-5.2
+      prompt: "Here is the document content in HTML or text-equivalent format:\n\n{{prev.html}}\n\nTasks:\n\nDetermine whether the document clearly represents an intent to purchase, place an order, or request a quote."
+      provider: openai-compatible
+      systemPrompt: "# Document Processing Agent Prompt\n\nYou are a document processing agent."
+      temperature: 0.7
+    id: temp-1769539368669-1
+    name: LLM-gateway
+    position:
+      x: 1328
+      y: 432
+    type: ai
+  - config:
+      code: "from markdownify import markdownify as md\n\nresult = {\n    \"markdown\": md(prev['html'])\n}"
+      language: python
+      requirements:
+      - markdownify
+    id: temp-1769880127682-1
+    name: html-to-md
+    position:
+      x: 656
+      y: 288
+    type: code
+  - config:
+      apiKey: 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
+      maxTokens: 128000
+      model: gpt-5.2
+      prompt: "You are given a list of accounting line items produced by a document processor.\n\nEach item includes:\n- name\n- description\n- similarity\n- distance\n- manufacturer\n- class\n- type\n- quantity\n\nTask:\n\nReconcile the extracted name with the provided description.\nAdjust the similarity score to reflect true confidence."
+      provider: openai
+      systemPrompt: "You are a reconciliation agent.\n\nYou receive extracted accounting line items with VectorDB results."
+      temperature: 0
+    id: temp-1770049924808-2
+    name: Reconciliation
+    position:
+      x: 1376
+      y: 128
+    type: ai
+  - config:
+      apiKey: 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
+      baseUrl: ""
+      maxTokens: 128000
+      model: gpt-5.2
+      prompt: "Here is the document content in HTML or text-equivalent format:\n\n{{prev.markdown}}"
+      provider: openai
+      systemPrompt: "# Document Extraction Agent System Prompt\n\n## Role\n\nYou are a document extraction agent.\n\nYou extract exactly and only what is explicitly stated in the document."
+      temperature: 0
+    id: temp-1770057365655-1
+    name: Extractor
+    position:
+      x: 896
+      y: 208
+    type: ai
+  - config:
+      code: "from io import BytesIO\nimport fitz\nimport pikepdf\nfrom xml.etree import ElementTree as ET\n\ndef _is_xfa_pdf(pdf_bytes):\n    try:\n        pdf = pikepdf.Pdf.open(BytesIO(pdf_bytes))\n        acroform = pdf.Root.get(\"/AcroForm\")\n        if acroform and \"/XFA\" in acroform:\n            return True\n        return False\n    except Exception:\n        return False\n\ndef _extract_xfa_xml(pdf_bytes):\n    pdf = pikepdf.Pdf.open(BytesIO(pdf_bytes))\n    xfa_array = pdf.Root.AcroForm.XFA\n    xfa_dict = {}\n    if isinstance(xfa_array, pikepdf.Array):\n        for i in range(0, len(xfa_array), 2):\n            label = str(xfa_array[i])\n            stream = xfa_array[i + 1]\n            if isinstance(stream, pikepdf.Stream):\n                xfa_dict[label] = stream.read_bytes().decode(\"utf-8\")\n    elif isinstance(xfa_array, pikepdf.Stream):\n        xfa_dict[\"xfa\"] = xfa_array.read_bytes().decode(\"utf-8\")\n    pdf.close()\n    return xfa_dict\n\ndef pdf_bytes_to_html():\n    pdf_bytes = get_file(nodes['File-Upload']['document'])\n    if not pdf_bytes:\n        return {\"success\": False, \"html\": \"\", \"error\": \"Empty or missing PDF file\"}\n    try:\n        if _is_xfa_pdf(pdf_bytes):\n            xfa_dict = _extract_xfa_xml(pdf_bytes)\n            html = _xfa_xml_to_html(xfa_dict)\n        else:\n            html = _extract_standard_pdf(pdf_bytes)\n        return {\"success\": True, \"html\": html}\n    except Exception as e:\n        return {\"success\": False, \"html\": \"\", \"error\": str(e)}\n\nresult = pdf_bytes_to_html()"
+      language: python
+      requirements:
+      - pymupdf
+      - pikepdf
+    id: temp-1770653649501-2
+    name: pdf-to-html-xfa-format-support
+    position:
+      x: 144
+      y: 304
+    type: code
