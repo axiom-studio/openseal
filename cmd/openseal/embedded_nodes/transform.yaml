@@ -1,0 +1,21 @@
+name: transform
+displayName: Transform
+category: data
+description: Transform data using JavaScript expressions
+icon: transform
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: input
+        type: json
+        label: Input Data
+        hint: Input data to transform
+  - title: Transformation
+    collapsible: false
+    fields:
+      - key: expression
+        type: expression
+        label: Expression
+        hint: JavaScript expression to transform data
+        default: "return input"

@@ -1,0 +1,198 @@
+name: pgvector
+displayName: PGVector Search
+category: action
+description: Semantic search using PostgreSQL pgvector
+icon: search
+sections:
+  - title: Operation
+    collapsible: false
+    fields:
+      - key: operation
+        type: select
+        label: Operation
+        hint: Operation to perform
+        default: search
+        options:
+          - label: Search
+            value: search
+          - label: Insert
+            value: insert
+          - label: Upsert
+            value: upsert
+          - label: Delete
+            value: delete
+  - title: Database
+    collapsible: false
+    fields:
+      - key: connectionString
+        type: text
+        label: Connection String
+        hint: PostgreSQL connection string with pgvector
+        placeholder: postgresql://user:pass@host:5432/db
+        sensitive: true
+        required: true
+      - key: table
+        type: text
+        label: Table Name
+        hint: PostgreSQL table with pgvector
+        required: true
+  - title: Search Configuration
+    collapsible: false
+    fields:
+      - key: text
+        type: textarea
+        label: Query Text
+        hint: Text to search for (will be embedded)
+        rows: 2
+      - key: vector
+        type: expression
+        label: Vector
+        hint: Pre-computed vector (overrides text embedding)
+      - key: topK
+        type: number
+        label: Top K Results
+        hint: Maximum results to return
+        default: 10
+        min: 1
+        max: 1000
+      - key: distanceMetric
+        type: select
+        label: Distance Metric
+        hint: Vector distance calculation
+        default: cosine
+        options:
+          - label: Cosine
+            value: cosine
+          - label: L2 (Euclidean)
+            value: l2
+          - label: Inner Product
+            value: inner_product
+      - key: selectColumns
+        type: text
+        label: Select Columns
+        hint: 'Columns to return (comma-separated, default: *)'
+        placeholder: id, content, metadata
+      - key: filter
+        type: json
+        label: Filter
+        hint: Metadata filter for search (key-value pairs)
+  - title: Insert/Upsert Configuration
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: data
+        type: json
+        label: Data
+        hint: Data to insert/upsert (JSON object or array)
+      - key: vectorConfigs
+        type: json
+        label: Vector Configs
+        hint: 'Array of {column, textTemplate} for multi-column embeddings'
+      - key: vectorColumns
+        type: text
+        label: Vector Columns
+        hint: Comma-separated vector column names (e.g., embedding, embedding_mpn)
+      - key: vectorColumn
+        type: text
+        label: Vector Column
+        hint: 'Single vector column name (default: embedding)'
+        default: embedding
+      - key: textColumn
+        type: text
+        label: Text Column
+        hint: Column containing text content
+        default: content
+      - key: conflictColumn
+        type: text
+        label: Conflict Column
+        hint: 'Column for upsert conflict detection (default: id)'
+        default: id
+      - key: upsertData
+        type: json
+        label: Upsert Data
+        hint: Data for upsert operation (alternative to data field)
+      - key: enableChunking
+        type: toggle
+        label: Enable Chunking
+        hint: Split large text into chunks before embedding
+        default: false
+      - key: chunkSize
+        type: number
+        label: Chunk Size
+        hint: Maximum characters per chunk
+        default: 1000
+        min: 100
+        max: 10000
+      - key: chunkOverlap
+        type: number
+        label: Chunk Overlap
+        hint: Overlap between chunks
+        default: 100
+        min: 0
+        max: 1000
+  - title: Multi-Vector Search
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: aggregationMethod
+        type: select
+        label: Aggregation Method
+        hint: How to combine distances from multiple vector columns
+        default: minimum
+        options:
+          - label: Minimum (best match)
+            value: minimum
+          - label: Maximum (all must match)
+            value: maximum
+          - label: Weighted (average)
+            value: weighted
+      - key: weights
+        type: json
+        label: Column Weights
+        hint: 'JSON weights per column, e.g. {"embedding_mpn": 0.7}'
+  - title: Delete Configuration
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: deleteFilter
+        type: json
+        label: Delete Filter
+        hint: Filter for rows to delete (required to prevent full table deletion)
+  - title: Embedding Configuration
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: embeddingProvider
+        type: select
+        label: Embedding Provider
+        hint: Provider for generating embeddings
+        default: openai
+        options:
+          - label: OpenAI
+            value: openai
+          - label: Cohere
+            value: cohere
+          - label: HuggingFace
+            value: huggingface
+          - label: Gemini
+            value: gemini
+          - label: Voyage
+            value: voyage
+          - label: OpenAI-Compatible
+            value: openai-compatible
+      - key: embeddingModel
+        type: text
+        label: Embedding Model
+        hint: Model name for embeddings
+        default: text-embedding-3-small
+        placeholder: text-embedding-3-small
+      - key: embeddingApiKey
+        type: text
+        label: API Key
+        hint: API key for embedding provider (or use environment variable)
+        sensitive: true
+      - key: embeddingBaseUrl
+        type: text
+        label: Base URL
+        hint: Custom base URL (optional, for self-hosted models)
+        placeholder: https://api.openai.com/v1

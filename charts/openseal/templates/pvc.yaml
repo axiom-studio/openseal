@@ -1,0 +1,17 @@
+{{- if .Values.skills.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openseal.fullname" . }}-skills
+  labels:
+    {{- include "openseal.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.skills.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.skills.persistence.size }}
+  {{- if .Values.skills.persistence.storageClass }}
+  storageClassName: {{ .Values.skills.persistence.storageClass }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,14 @@
+name: delay
+displayName: Delay
+category: control
+description: Wait for a specified duration before continuing execution
+icon: timer
+sections:
+  - title: Configuration
+    collapsible: false
+    fields:
+      - key: duration
+        type: number
+        label: Duration
+        hint: Delay duration in seconds
+        default: 5

@@ -1,0 +1,19 @@
+name: set
+displayName: Set Variable
+category: data
+description: Set a variable to a value
+icon: variable
+sections:
+  - title: Variable Configuration
+    collapsible: false
+    fields:
+      - key: variable
+        type: text
+        label: Variable
+        hint: Variable name to set
+        required: true
+      - key: value
+        type: expression
+        label: Value
+        hint: Value to set (supports expressions)
+        required: true

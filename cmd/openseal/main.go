@@ -1,7 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"os"
+
+	"github.com/axiom-studio/openseal/cmd/openseal/commands"
+)
 
 func main() {
-	fmt.Println("OpenSeal v0.1.0")
+	commands.Execute(os.Args[1:])
 }

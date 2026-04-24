@@ -1,0 +1,36 @@
+name: aggregate
+displayName: Aggregate
+category: data
+description: Aggregate values from an array
+icon: aggregate
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: items
+        type: json
+        label: Items
+        hint: Array to aggregate from
+  - title: Aggregation
+    collapsible: false
+    fields:
+      - key: property
+        type: text
+        label: Property
+        hint: Property name to aggregate
+      - key: operation
+        type: select
+        label: Operation
+        hint: Aggregation operation (sum, avg, min, max, count)
+        default: sum
+        options:
+          - label: Sum
+            value: sum
+          - label: Average
+            value: avg
+          - label: Minimum
+            value: min
+          - label: Maximum
+            value: max
+          - label: Count
+            value: count

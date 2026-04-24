@@ -1,0 +1,63 @@
+name: join
+displayName: Join
+category: control
+description: End point for parallel branches (Split) or loops - merges results back together
+icon: join
+sections:
+  - title: Join Mode
+    collapsible: false
+    fields:
+      - key: mode
+        type: select
+        label: Mode
+        hint: How to join branches or loop iterations
+        default: all
+        options:
+          - label: Wait for All
+            value: all
+            description: Collect all results from all branches/iterations (default)
+          - label: First Result
+            value: first
+            description: Use result from first completed branch/iteration only
+          - label: Pass Through
+            value: stream
+            description: Pass through each result immediately (FIFO), don't wait for others
+inputSchema:
+  type: object
+  properties:
+    mode:
+      type: string
+      title: Mode
+      description: Join mode (all, first, stream)
+outputSchema:
+  type: object
+  properties:
+    count:
+      type: number
+      title: Count
+      description: Number of results merged
+    results:
+      type: array
+      title: Results
+      description: Array of results from all branches/iterations
+    merged:
+      type: object
+      title: Merged
+      description: Merged results with indexed keys
+examples:
+  - name: End of Loop
+    description: Collect all iteration results
+    config:
+      mode: all
+  - name: End of Split (Parallel Branches)
+    description: Wait for all parallel branches to complete
+    config:
+      mode: all
+  - name: First Branch Wins
+    description: Use result from fastest branch
+    config:
+      mode: first
+  - name: Pass Through (FIFO)
+    description: Each branch result passes through immediately
+    config:
+      mode: stream

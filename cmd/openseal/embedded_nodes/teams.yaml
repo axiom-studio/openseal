@@ -1,0 +1,30 @@
+name: teams
+displayName: Microsoft Teams
+category: communication
+description: Send messages to Microsoft Teams
+icon: teams
+sections:
+  - title: Webhook
+    collapsible: false
+    fields:
+      - key: webhookUrl
+        type: text
+        label: Webhook URL
+        hint: Teams webhook URL
+        required: true
+  - title: Message
+    collapsible: false
+    fields:
+      - key: title
+        type: text
+        label: Title
+        hint: Message title
+      - key: text
+        type: textarea
+        label: Text
+        hint: Message text
+        rows: 3
+      - key: summary
+        type: text
+        label: Summary
+        hint: Card summary (for adaptive cards)

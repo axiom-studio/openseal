@@ -1,0 +1,41 @@
+{{- if .Values.rbac.create -}}
+# ClusterRole for cross-namespace job creation (OpenSeal runs in openseal, jobs run in openseal-agents)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "openseal.fullname" . }}-cluster-role
+  labels:
+    {{- include "openseal.labels" . | nindent 4 }}
+rules:
+  # For code execution via K8s jobs in agents namespace
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # For monitoring job pods
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # For config and secrets
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+  # For events (job status)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "openseal.fullname" . }}-cluster-rolebinding
+  labels:
+    {{- include "openseal.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "openseal.fullname" . }}-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "openseal.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

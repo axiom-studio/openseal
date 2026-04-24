@@ -1,0 +1,175 @@
+# OpenSeal Helm Chart Values
+# OpenSeal is the distributed runtime for executing agent pipelines
+
+# Override fullname to ensure service is named "openseal" (required for emit URL)
+fullnameOverride: openseal
+
+# Cluster configuration
+clusterId: 1
+namespace: openseal
+
+# Image configuration
+image:
+  repository: docker.io/openseal/openseal
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Scaling configuration
+replicaCount: 1
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  # Scale based on NATS queue depth or CPU
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# NATS configuration (connection to control plane)
+nats:
+  serverUrl: "nats://openseal-nats.openseal:4222"
+  # For external NATS (control plane), use full URL
+  # serverUrl: "nats://nats.control-plane.example.com:4222"
+
+# HTTP callbacks for status updates (only needed for cross-cluster communication)
+# Default: false (uses NATS for same-cluster communication)
+useHttpCallbacks: false
+
+# Worker configuration
+worker:
+  count: 1
+  heartbeatIntervalSeconds: 30
+  version: "v1.0.0"
+
+# Code executor configuration (for code steps)
+codeExecutor:
+  enabled: true
+  image: python:3.11-slim
+  namespace: ""  # Uses same namespace as OpenSeal if empty
+  # Python SDK for tool injection in code nodes
+  pythonSdk:
+    enabled: true
+    # ConfigMap name override (defaults to {release-name}-python-sdk)
+    configMapName: ""
+    # JWT secret for tool execution tokens (CHANGE IN PRODUCTION!)
+    jwtSecret: "change-me-in-production"
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: openseal
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+
+# Container security context
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  runAsUser: 1000
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Image pull secrets
+imagePullSecrets: []
+
+# File server configuration (for emit endpoint and file uploads)
+fileServer:
+  enabled: true
+  port: 8081
+
+# Health check configuration (uses metrics server port)
+healthCheck:
+  port: 9090
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Prometheus metrics
+metrics:
+  enabled: true
+  port: 9090
+  path: /metrics
+  # ServiceMonitor requires Prometheus Operator CRDs
+  serviceMonitor:
+    enabled: false
+
+# Hermes sidecar configuration
+# Hermes manages and runs external skills for OpenSeal
+# Named after the messenger god who delivers and manages
+hermes:
+  enabled: true
+  image:
+    repository: openseal/hermes
+    tag: latest
+    pullPolicy: IfNotPresent
+  # System skill repos to build on startup (comma-separated URLs)
+  systemSkillRepos: "https://github.com/openseal/skills.git"
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  # PostgreSQL connection for skill persistence (restores skills from DB on startup)
+  postgres:
+    host: postgresql-postgresql
+    port: 5432
+    user: postgres
+    database: openseal
+    # Secret containing the password
+    secretName: postgresql-postgresql
+    secretKey: postgresql-password
+
+# Skills storage configuration
+# Skills are gRPC-based extensions that add node types to OpenSeal
+skills:
+  # Directory where skills are stored
+  directory: /var/lib/openseal/skills
+  # Persistence configuration for skill binaries and repos
+  persistence:
+    enabled: true
+    # Storage class (use local-path for development, standard for production)
+    storageClass: local-path
+    # Access mode (ReadWriteOnce for single node, ReadWriteMany for multi-node)
+    accessMode: ReadWriteOnce
+    # Size of the PVC
+    size: 5Gi

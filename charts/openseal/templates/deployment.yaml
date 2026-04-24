@@ -1,0 +1,192 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openseal.fullname" . }}
+  labels:
+    {{- include "openseal.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openseal.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "openseal.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "openseal.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- if .Values.devMode }}
+          image: {{ .Values.image.repository | default "openseal-dev" }}:{{ .Values.image.tag | default "latest" }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "Never" | quote }}
+          command: ["/bin/bash", "/host/axiom/cortex/scripts/dev-entrypoint.sh"]
+          args: ["go build -mod=vendor -o openseal ./cmd/openseal", "./openseal"]
+          {{- else }}
+          image: {{ include "openseal.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- end }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.healthCheck.port }}
+              protocol: TCP
+            {{- if .Values.fileServer.enabled }}
+            - name: fileserver
+              containerPort: {{ .Values.fileServer.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if and .Values.metrics.enabled (ne (int .Values.metrics.port) (int .Values.healthCheck.port)) }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          envFrom:
+            - configMapRef:
+                name: {{ include "openseal.fullname" . }}-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: {{ if .Values.devMode }}60{{ else }}{{ .Values.healthCheck.livenessProbe.initialDelaySeconds }}{{ end }}
+            periodSeconds: {{ .Values.healthCheck.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: {{ if .Values.devMode }}60{{ else }}{{ .Values.healthCheck.readinessProbe.initialDelaySeconds }}{{ end }}
+            periodSeconds: {{ .Values.healthCheck.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.readinessProbe.failureThreshold }}
+          {{- if .Values.devMode }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: health
+            failureThreshold: 30
+            periodSeconds: 10
+          {{- end }}
+          {{- if not .Values.devMode }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: skills
+              mountPath: /var/lib/openseal/skills
+            {{- if .Values.devMode }}
+            - name: openseal-source
+              mountPath: {{ .Values.devContainerPath }}/openseal
+            - name: go-build-cache
+              mountPath: /home/k/.cache/go-build
+            - name: go-mod-cache
+              mountPath: /home/k/go/pkg/mod
+            {{- end }}
+        {{- if .Values.hermes.enabled }}
+        - name: hermes
+          securityContext:
+            {{- toYaml .Values.hermes.securityContext | nindent 12 }}
+          {{- if .Values.devMode }}
+          image: {{ .Values.hermes.image.repository | default "openseal-dev" }}:{{ .Values.hermes.image.tag | default "latest" }}
+          imagePullPolicy: {{ .Values.hermes.image.pullPolicy | default "Never" | quote }}
+          command: ["/bin/bash", "/host/axiom/cortex/scripts/dev-entrypoint.sh"]
+          args: ["go build -mod=vendor -o hermes ./cmd/hermes", "./hermes"]
+          {{- else }}
+          image: "{{ .Values.hermes.image.repository }}:{{ .Values.hermes.image.tag }}"
+          imagePullPolicy: {{ .Values.hermes.image.pullPolicy }}
+          {{- end }}
+          env:
+            - name: NATS_URL
+              value: {{ .Values.nats.serverUrl | default "nats://openseal-nats:4222" | quote }}
+            - name: SKILLS_DIR
+              value: {{ .Values.skills.directory | default "/var/lib/openseal/skills" | quote }}
+            - name: OPENSEAL_RELOAD_URL
+              value: "http://localhost:8081/internal/reload"
+            - name: SYSTEM_SKILL_REPOS
+              value: {{ .Values.hermes.systemSkillRepos | quote }}
+            {{- if .Values.hermes.postgres }}
+            - name: POSTGRES_HOST
+              value: {{ .Values.hermes.postgres.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.hermes.postgres.port | default "5432" | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.hermes.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hermes.postgres.secretName | default "postgresql-postgresql" }}
+                  key: {{ .Values.hermes.postgres.secretKey | default "postgresql-password" }}
+            - name: POSTGRES_DATABASE
+              value: {{ .Values.hermes.postgres.database | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: skills
+              mountPath: /var/lib/openseal/skills
+            {{- if .Values.devMode }}
+            - name: openseal-source
+              mountPath: {{ .Values.devContainerPath }}/openseal
+            - name: go-build-cache
+              mountPath: /home/k/.cache/go-build
+            - name: go-mod-cache
+              mountPath: /home/k/go/pkg/mod
+            {{- end }}
+          {{- if not .Values.devMode }}
+          resources:
+            {{- toYaml .Values.hermes.resources | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: skills
+        {{- if .Values.skills.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "openseal.fullname" . }}-skills
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.devMode }}
+        - name: openseal-source
+          hostPath:
+            path: {{ .Values.devContainerPath }}/openseal
+            type: Directory
+        - name: go-build-cache
+          hostPath:
+            path: /home/k/.cache/go-build
+            type: Directory
+        - name: go-mod-cache
+          hostPath:
+            path: /home/k/go/pkg/mod
+            type: Directory
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

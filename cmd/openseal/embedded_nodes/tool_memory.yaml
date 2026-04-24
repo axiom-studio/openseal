@@ -1,0 +1,130 @@
+name: tool_memory
+displayName: Memory Tool
+category: tool
+description: Long-term memory storage and retrieval using semantic search
+icon: brain
+sections:
+  - title: Tool Identity
+    collapsible: false
+    fields:
+      - key: toolName
+        type: text
+        label: Name
+        placeholder: memory
+        hint: Function name AI will call (e.g., remember, recall_memory)
+        required: true
+      - key: toolDescription
+        type: textarea
+        label: Description
+        placeholder: Store and retrieve long-term memories for the user
+        hint: Describe when and why AI should use this tool
+        rows: 2
+        required: true
+  - title: Memory Operation
+    collapsible: false
+    fields:
+      - key: operation
+        type: select
+        label: Operation
+        hint: Memory operation to perform
+        required: true
+        default: save
+        options:
+          - label: Save
+            value: save
+          - label: Recall
+            value: recall
+          - label: List
+            value: list
+          - label: Forget
+            value: forget
+      - key: scope
+        type: select
+        label: Scope
+        hint: Memory scope - session (current), user (persistent), global (shared)
+        default: session
+        options:
+          - label: Session
+            value: session
+          - label: User
+            value: user
+          - label: Global
+            value: global
+  - title: Memory Content
+    collapsible: false
+    fields:
+      - key: memory
+        type: textarea
+        label: Memory Content
+        placeholder: Enter memory content or search query
+        hint: Text to store (save) or search for (recall)
+        rows: 3
+      - key: key
+        type: text
+        label: Memory Key
+        placeholder: favorite_color
+        hint: Optional unique key for the memory
+      - key: limit
+        type: number
+        label: Result Limit
+        placeholder: "5"
+        default: 5
+        min: 1
+        max: 100
+        hint: Maximum memories to return (for recall/list)
+  - title: Database Connection
+    collapsible: false
+    fields:
+      - key: connectionString
+        type: text
+        label: Connection String
+        hint: PostgreSQL connection string with pgvector (or set MEMORY_DB_URL env var)
+        placeholder: postgresql://user:pass@host:5432/db
+        sensitive: true
+      - key: tableName
+        type: text
+        label: Table Name
+        hint: Table name for storing memories
+        default: agent_memories
+  - title: Embedding Configuration
+    collapsible: false
+    fields:
+      - key: embeddingProvider
+        type: select
+        label: Embedding Provider
+        hint: Provider for generating embeddings
+        default: openai
+        options:
+          - label: OpenAI
+            value: openai
+          - label: Cohere
+            value: cohere
+          - label: HuggingFace
+            value: huggingface
+          - label: Gemini
+            value: gemini
+      - key: embeddingModel
+        type: text
+        label: Embedding Model
+        hint: Model name for embeddings
+        default: text-embedding-3-small
+        placeholder: text-embedding-3-small
+      - key: embeddingApiKey
+        type: text
+        label: API Key
+        hint: API key for embedding provider (or set OPENAI_API_KEY env var)
+        sensitive: true
+  - title: Advanced Options
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: metadata
+        type: json
+        label: Metadata
+        hint: Additional metadata to store with the memory
+        height: 100
+      - key: useInMemory
+        type: toggle
+        label: Use In-Memory Store
+        hint: Use in-memory storage instead of pgvector (for testing only)
+        default: false

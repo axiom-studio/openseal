@@ -1,0 +1,20 @@
+name: loop
+displayName: Loop
+category: control
+description: Iterate over array items
+icon: loop
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: items
+        type: json
+        label: Items
+        hint: Array to iterate over
+  - title: Loop Body
+    collapsible: false
+    fields:
+      - key: nodes
+        type: json
+        label: Nodes
+        hint: Nodes to execute for each item

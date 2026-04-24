@@ -1,0 +1,109 @@
+name: invoke_agent
+displayName: Invoke Agent (A2A)
+category: action
+description: Invoke another A2A-compatible agent instance using the Agent-to-Agent protocol
+icon: agents
+sections:
+  - title: Target Agent
+    collapsible: false
+    fields:
+      - key: targetAgentInstanceId
+        type: number
+        label: Target Agent Instance ID
+        hint: The ID of the agent instance to invoke via A2A protocol
+        required: true
+        min: 1
+      - key: agentEndpoint
+        type: text
+        label: A2A Endpoint (optional)
+        placeholder: /api/v1/agent/a2a/rpc
+        hint: Custom A2A endpoint URL (uses default if not specified)
+  - title: Message Configuration
+    collapsible: false
+    fields:
+      - key: messageTemplate
+        type: textarea
+        label: Message Template
+        hint: Template for the message to send to the target agent (supports {{}} placeholders)
+        rows: 3
+      - key: parametersTemplate
+        type: json
+        label: Additional Parameters
+        hint: Additional parameters to pass to the target agent
+  - title: Execution Options
+    collapsible: false
+    fields:
+      - key: synchronous
+        type: toggle
+        label: Wait for Response
+        hint: Wait for the target agent to complete before continuing
+        default: true
+      - key: timeoutSeconds
+        type: number
+        label: Timeout (seconds)
+        hint: Maximum time to wait for the agent response
+        default: 300
+        min: 1
+        max: 3600
+inputSchema:
+  type: object
+  properties:
+    message:
+      type: string
+      title: Message
+      description: The message to forward to the target agent
+    context:
+      type: object
+      title: Context
+      description: Additional context data to pass along
+outputSchema:
+  type: object
+  properties:
+    task_id:
+      type: string
+      title: Task ID
+      description: Unique identifier for the A2A task
+    status:
+      type: string
+      title: Status
+      description: Execution status (submitted, working, completed, failed)
+    response:
+      type: string
+      title: Response
+      description: The target agent's response message
+    all_messages:
+      type: array
+      title: All Messages
+      description: Complete conversation history with the target agent
+      items:
+        type: string
+    progress:
+      type: number
+      title: Progress
+      description: Task progress (0.0 to 1.0)
+    error:
+      type: string
+      title: Error
+      description: Error message if the invocation failed
+examples:
+  - name: Basic Agent Invocation
+    description: Invoke another agent with a simple message
+    config:
+      targetAgentInstanceId: 5
+      messageTemplate: "Please analyze this data: {{trigger.data}}"
+      synchronous: true
+  - name: Agent Chain
+    description: Chain multiple agents together
+    config:
+      targetAgentInstanceId: "${bindings.analyzerAgentId}"
+      messageTemplate: "{{previous.output.response}}"
+      timeoutSeconds: 600
+  - name: With Custom Parameters
+    description: Invoke with additional context parameters
+    config:
+      targetAgentInstanceId: 10
+      messageTemplate: "{{trigger.query}}"
+      parametersTemplate:
+        priority: high
+        source: workflow
+        userId: "{{user.id}}"

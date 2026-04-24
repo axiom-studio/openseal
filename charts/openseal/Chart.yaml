@@ -1,0 +1,17 @@
+apiVersion: v2
+name: openseal
+description: OpenSeal - Distributed runtime for executing agent pipelines on Kubernetes clusters
+type: application
+version: 0.1.1
+appVersion: "1.0.0"
+keywords:
+  - openseal
+  - agent
+  - runtime
+  - openseal
+  - kubernetes
+maintainers:
+  - name: OpenSeal Team
+    email: support@openseal.io
+home: https://openseal.io
+icon: https://openseal.io/logo.png

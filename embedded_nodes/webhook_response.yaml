@@ -1,0 +1,46 @@
+name: webhook_response
+displayName: Webhook Response
+category: response
+description: Send HTTP response back to webhook caller (use in sync webhook workflows)
+icon: webhook
+sections:
+  - title: Response Configuration
+    collapsible: false
+    fields:
+      - key: statusCode
+        type: number
+        label: Status Code
+        hint: HTTP status code to return
+        default: 200
+        min: 100
+        max: 599
+      - key: contentType
+        type: select
+        label: Content Type
+        hint: Response content type
+        default: application/json
+        options:
+          - label: JSON
+            value: application/json
+          - label: Plain Text
+            value: text/plain
+          - label: HTML
+            value: text/html
+          - label: XML
+            value: application/xml
+      - key: body
+        type: expression
+        label: Response Body
+        hint: Response body (supports {{variable}} templates)
+        rows: 5
+        placeholder: '{"success": true, "data": {{result}}}'
+  - title: Headers
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: headers
+        type: keyvalue
+        label: Response Headers
+        hint: Custom headers to include in response
+        keyPlaceholder: Header-Name
+        valuePlaceholder: Header-Value

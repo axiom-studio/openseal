@@ -1,0 +1,199 @@
+name: ai
+displayName: AI / LLM
+category: action
+description: Call AI/LLM models for intelligent operations with tool support
+icon: ai
+sections:
+  - title: Model Configuration
+    collapsible: false
+    fields:
+      - key: provider
+        type: select
+        label: Provider
+        hint: AI provider to use
+        required: true
+        default: openai
+        options:
+          - label: OpenAI
+            value: openai
+          - label: Anthropic (Claude)
+            value: anthropic
+          - label: Google Gemini
+            value: gemini
+          - label: Ollama (Local)
+            value: ollama
+          - label: OpenAI-Compatible
+            value: openai-compatible
+      - key: model
+        type: text
+        label: Model
+        hint: Model to use (e.g., gpt-4, claude-3-5-sonnet-20241022, gemini-1.5-pro)
+        required: true
+        default: gpt-4
+        placeholder: gpt-4
+  - title: Prompt
+    collapsible: false
+    fields:
+      - key: systemPrompt
+        type: textarea
+        label: System Prompt
+        hint: System instructions for the AI (defines behavior and personality)
+        rows: 3
+        placeholder: You are a helpful assistant.
+      - key: prompt
+        type: textarea
+        label: User Prompt
+        hint: The main prompt/question to send to the AI (supports {{template}} variables)
+        rows: 4
+        required: true
+        placeholder: "{{trigger.message}}"
+  - title: File Attachments
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: file
+        type: text
+        label: File Attachment
+        hint: File to attach for vision/document analysis (supports {{trigger.document}})
+        placeholder: "{{trigger.document}}"
+  - title: Model Parameters
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: temperature
+        type: number
+        label: Temperature
+        hint: Sampling temperature (0.0 = deterministic, 1.0 = creative)
+        default: 0.7
+        min: 0
+        max: 2
+        step: 0.1
+      - key: maxTokens
+        type: number
+        label: Max Tokens
+        hint: Maximum tokens in the response
+        default: 1000
+        min: 1
+        max: 128000
+  - title: API Configuration
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: apiKey
+        type: text
+        label: API Key
+        hint: API key (falls back to environment variable if not set)
+        placeholder: sk-...
+        sensitive: true
+      - key: baseUrl
+        type: text
+        label: Base URL
+        hint: Custom API endpoint URL (for openai-compatible providers)
+        placeholder: https://api.openai.com/v1/chat/completions
+      - key: ollamaUrl
+        type: text
+        label: Ollama URL
+        hint: Ollama server URL (for ollama provider)
+        default: http://localhost:11434
+        placeholder: http://localhost:11434
+  - title: Tool Calling
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: maxToolIterations
+        type: number
+        label: Max Tool Iterations
+        hint: Maximum number of tool call iterations (prevents infinite loops)
+        default: 10
+        min: 1
+        max: 50
+inputSchema:
+  type: object
+  properties:
+    prompt:
+      type: string
+      title: Prompt
+      description: The prompt to send to the AI
+    systemPrompt:
+      type: string
+      title: System Prompt
+      description: System instructions for the AI
+    file:
+      type: object
+      title: File
+      description: File attachment for vision/document analysis
+outputSchema:
+  type: object
+  properties:
+    response:
+      type: string
+      title: Response
+      description: The AI's response text
+    model:
+      type: string
+      title: Model
+      description: The model used for generation
+    provider:
+      type: string
+      title: Provider
+      description: The provider used
+    usage:
+      type: object
+      title: Usage
+      description: Token usage statistics
+      properties:
+        prompt_tokens:
+          type: number
+        completion_tokens:
+          type: number
+        total_tokens:
+          type: number
+    toolCalls:
+      type: array
+      title: Tool Calls
+      description: Tool calls made during execution (if tools connected)
+      items:
+        type: object
+    toolResults:
+      type: array
+      title: Tool Results
+      description: Results from tool executions
+      items:
+        type: object
+examples:
+  - name: Simple Chat
+    description: Basic AI chat interaction
+    config:
+      provider: openai
+      model: gpt-4
+      prompt: "{{trigger.message}}"
+      temperature: 0.7
+  - name: Claude with System Prompt
+    description: Anthropic Claude with custom system instructions
+    config:
+      provider: anthropic
+      model: claude-3-5-sonnet-20241022
+      systemPrompt: "You are a DevOps expert. Help users with Kubernetes, Docker, and CI/CD questions."
+      prompt: "{{trigger.question}}"
+  - name: Local Ollama
+    description: Use local Ollama model
+    config:
+      provider: ollama
+      model: llama2
+      prompt: "{{trigger.message}}"
+      ollamaUrl: "http://ollama:11434"
+  - name: Vision Analysis
+    description: Analyze an image with GPT-4 Vision
+    config:
+      provider: openai
+      model: gpt-4o
+      prompt: "What's in this image?"
+      file: "{{trigger.image}}"
+  - name: Custom Endpoint
+    description: Use a custom OpenAI-compatible API
+    config:
+      provider: openai-compatible
+      model: custom-model
+      prompt: "{{trigger.message}}"
+      baseUrl: "https://my-llm-api.com/v1/chat/completions"
+      apiKey: "{{bindings.customApiKey}}"

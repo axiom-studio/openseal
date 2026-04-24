@@ -1,0 +1,60 @@
+name: tool_mcp
+displayName: MCP Tool
+category: tool
+description: Connect to MCP (Model Context Protocol) servers to use their tools
+icon: plug
+sections:
+  - title: Tool Identity
+    collapsible: false
+    fields:
+      - key: toolName
+        type: text
+        label: Name
+        placeholder: filesystem
+        hint: Function name AI will call (e.g., read_file, search_web)
+        required: true
+      - key: toolDescription
+        type: textarea
+        label: Description
+        placeholder: Read and write files from the filesystem
+        hint: Describe when and why AI should use this tool
+        rows: 2
+        required: true
+  - title: MCP Server
+    collapsible: false
+    fields:
+      - key: command
+        type: text
+        label: Server Command
+        placeholder: npx
+        hint: Command to run the MCP server (e.g., npx, uvx, /path/to/server)
+        required: true
+      - key: args
+        type: array
+        label: Arguments
+        placeholder: '["-y", "@modelcontextprotocol/server-filesystem", "/path"]'
+        hint: Arguments to pass to the MCP server command
+      - key: env
+        type: json
+        label: Environment Variables
+        hint: Environment variables to set for the MCP server
+        height: 100
+  - title: Tool Selection
+    collapsible: false
+    fields:
+      - key: tool
+        type: text
+        label: MCP Tool Name
+        placeholder: read_file
+        hint: Name of the specific MCP tool to call. If empty, AI must specify which tool to use.
+  - title: Advanced Options
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: timeout
+        type: number
+        label: Timeout (seconds)
+        hint: Maximum time to wait for tool execution
+        default: 60
+        min: 1
+        max: 300

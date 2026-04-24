@@ -1,0 +1,16 @@
+{{- if and .Values.codeExecutor.enabled .Values.codeExecutor.pythonSdk.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openseal.fullname" . }}-python-sdk
+  namespace: {{ .Values.codeExecutor.namespace | default "openseal-agents" }}
+  labels:
+    {{- include "openseal.labels" . | nindent 4 }}
+    component: code-runtime
+  annotations:
+    description: "Python SDK for agent code execution with tool support"
+    version: {{ .Chart.AppVersion | quote }}
+data:
+  axiom_sdk.py: |
+{{ .Files.Get "files/axiom_sdk.py" | indent 4 }}
+{{- end }}

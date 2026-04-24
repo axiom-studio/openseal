@@ -1,0 +1,30 @@
+name: sort
+displayName: Sort
+category: data
+description: Sort array items by a property
+icon: sort
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: items
+        type: json
+        label: Items
+        hint: Array to sort
+  - title: Sort Configuration
+    collapsible: false
+    fields:
+      - key: property
+        type: text
+        label: Property
+        hint: Property name to sort by
+      - key: order
+        type: select
+        label: Order
+        hint: Sort order (asc or desc)
+        default: asc
+        options:
+          - label: Ascending
+            value: asc
+          - label: Descending
+            value: desc

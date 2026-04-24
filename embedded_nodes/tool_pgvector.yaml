@@ -1,0 +1,121 @@
+name: tool_pgvector
+displayName: Vector Search
+category: tool
+description: Search vector database for similar content
+icon: database
+sections:
+  - title: Tool Configuration
+    collapsible: false
+    fields:
+      - key: toolName
+        type: text
+        label: Tool Name
+        hint: Name of the tool for LLM tool calling
+        required: true
+      - key: toolDescription
+        type: textarea
+        label: Tool Description
+        hint: Description shown to the LLM for when to use this tool
+        rows: 3
+        required: true
+  - title: Database Connection
+    collapsible: false
+    fields:
+      - key: connectionString
+        type: text
+        label: Connection String
+        hint: PostgreSQL connection string
+        placeholder: postgres://user:pass@host:5432/db?sslmode=disable
+        sensitive: true
+        required: true
+      - key: table
+        type: text
+        label: Table Name
+        hint: PostgreSQL table with pgvector extension
+        required: true
+  - title: Embedding Configuration
+    collapsible: false
+    fields:
+      - key: embeddingProvider
+        type: select
+        label: Embedding Provider
+        hint: Provider for generating embeddings
+        default: openai
+        options:
+          - label: OpenAI
+            value: openai
+          - label: OpenAI-Compatible
+            value: openai-compatible
+          - label: Ollama
+            value: ollama
+          - label: HuggingFace
+            value: huggingface
+          - label: Cohere
+            value: cohere
+          - label: Gemini
+            value: gemini
+          - label: Voyage
+            value: voyage
+      - key: embeddingModel
+        type: text
+        label: Embedding Model
+        hint: Model name for generating embeddings
+        placeholder: text-embedding-3-small
+      - key: embeddingApiKey
+        type: text
+        label: Embedding API Key
+        hint: API key for the embedding provider
+        sensitive: true
+      - key: embeddingBaseUrl
+        type: text
+        label: Embedding Base URL
+        hint: Base URL for custom embedding endpoints
+        placeholder: https://api.openai.com/v1
+  - title: Search Configuration
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: searchMode
+        type: select
+        label: Search Mode
+        default: basic
+        options:
+          - label: Basic
+            value: basic
+          - label: Advanced
+            value: advanced
+      - key: vectorColumns
+        type: text
+        label: Vector Columns
+        hint: Comma-separated vector column names (e.g., embedding_mpn, embedding_metadata)
+      - key: returnColumns
+        type: text
+        label: Return Columns
+        hint: Comma-separated columns to return in results
+      - key: topK
+        type: number
+        label: Top K Results
+        hint: Number of results to return
+        default: 5
+        min: 1
+        max: 1000
+  - title: Multi-Vector Search
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: aggregationMethod
+        type: select
+        label: Aggregation Method
+        hint: How to combine distances from multiple vector columns
+        default: minimum
+        options:
+          - label: Minimum (best match)
+            value: minimum
+          - label: Maximum (all must match)
+            value: maximum
+          - label: Weighted (average)
+            value: weighted
+      - key: weights
+        type: json
+        label: Column Weights
+        hint: 'JSON object mapping vector columns to weights, e.g. {"embedding_mpn": "0.50"}'

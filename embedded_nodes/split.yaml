@@ -1,0 +1,26 @@
+name: split
+displayName: Split
+category: data
+description: Split string or array into multiple parts
+icon: split
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: input
+        type: text
+        label: Input
+        hint: String to split
+        required: true
+  - title: Configuration
+    collapsible: false
+    fields:
+      - key: separator
+        type: text
+        label: Separator
+        hint: Separator to split by
+        default: ","
+      - key: limit
+        type: number
+        label: Limit
+        hint: Maximum number of parts to return

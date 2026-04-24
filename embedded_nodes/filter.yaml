@@ -1,0 +1,21 @@
+name: filter
+displayName: Filter
+category: data
+description: Filter array items based on a condition
+icon: filter
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: items
+        type: json
+        label: Items
+        hint: Array to filter
+  - title: Filter Condition
+    collapsible: false
+    fields:
+      - key: condition
+        type: expression
+        label: Condition
+        hint: JavaScript expression to evaluate for each item
+        required: true

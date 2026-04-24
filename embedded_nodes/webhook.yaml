@@ -1,0 +1,130 @@
+name: webhook
+displayName: Webhook
+category: trigger
+description: Trigger workflow on incoming HTTP webhook requests
+icon: webhook
+sections:
+  - title: Endpoint Configuration
+    collapsible: false
+    fields:
+      - key: path
+        type: text
+        label: Webhook Path
+        placeholder: my-webhook
+        hint: Custom path for the webhook endpoint
+      - key: method
+        type: select
+        label: HTTP Method
+        hint: Allowed HTTP method for this webhook
+        default: POST
+        options:
+          - label: GET
+            value: GET
+          - label: POST
+            value: POST
+          - label: PUT
+            value: PUT
+          - label: DELETE
+            value: DELETE
+          - label: PATCH
+            value: PATCH
+  - title: Response Mode
+    collapsible: false
+    fields:
+      - key: responseMode
+        type: select
+        label: Response Mode
+        hint: How to respond to webhook caller
+        default: async
+        options:
+          - label: Async (immediate)
+            value: async
+          - label: Sync (wait for workflow)
+            value: sync
+      - key: timeout
+        type: number
+        label: Timeout (seconds)
+        hint: Maximum time to wait for sync response
+        default: 30
+        min: 1
+        max: 300
+        showIf:
+          field: responseMode
+          equals: sync
+  - title: Input Parameters
+    collapsible: true
+    fields:
+      - key: inputs
+        type: inputSchema
+        label: Expected Payload Parameters
+        hint: Define the expected structure of the webhook payload
+  - title: Security
+    collapsible: false
+    fields:
+      - key: secret
+        type: text
+        label: Secret Token
+        hint: Optional secret token for webhook validation
+        sensitive: true
+inputSchema:
+  type: object
+  properties:
+    path:
+      type: string
+      title: Webhook Path
+    method:
+      type: string
+      title: HTTP Method
+    responseMode:
+      type: string
+      title: Response Mode
+    timeout:
+      type: number
+      title: Timeout
+    inputs:
+      type: object
+      title: Input Parameters Schema
+    secret:
+      type: string
+      title: Secret Token
+outputSchema:
+  type: object
+  properties:
+    headers:
+      type: object
+      title: Request Headers
+    body:
+      type: object
+      title: Request Body
+    method:
+      type: string
+      title: HTTP Method
+    path:
+      type: string
+      title: Request Path
+    query:
+      type: object
+      title: Query Parameters
+examples:
+  - name: Simple Webhook
+    description: Basic webhook with no payload validation
+    config:
+      path: my-webhook
+      method: POST
+      responseMode: async
+  - name: Webhook with Payload Schema
+    description: Webhook that expects specific payload fields
+    config:
+      path: tickets-webhook
+      method: POST
+      responseMode: sync
+      timeout: 60
+      inputs:
+        ticketId:
+          type: string
+          description: Ticket ID
+          required: true
+        action:
+          type: string
+          description: Action performed
+          required: true

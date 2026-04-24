@@ -1,0 +1,31 @@
+name: email
+displayName: Email
+category: communication
+description: Send emails
+icon: email
+sections:
+  - title: Recipients
+    collapsible: false
+    fields:
+      - key: to
+        type: json
+        label: To
+        hint: Recipient email addresses (array of strings)
+  - title: Content
+    collapsible: false
+    fields:
+      - key: subject
+        type: text
+        label: Subject
+        hint: Email subject
+        required: true
+      - key: body
+        type: textarea
+        label: Body
+        hint: Email body (HTML or plain text)
+        rows: 5
+      - key: isHtml
+        type: toggle
+        label: Is HTML
+        hint: Whether body is HTML
+        default: false

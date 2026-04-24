@@ -1,0 +1,60 @@
+name: manual
+displayName: Manual Trigger
+category: trigger
+description: Trigger workflow manually on-demand with optional input parameters
+icon: manual
+sections:
+  - title: Configuration
+    collapsible: false
+    fields:
+      - key: confirmation
+        type: toggle
+        label: Require Confirmation
+        hint: Require user confirmation before executing
+        default: false
+  - title: Input Parameters
+    collapsible: true
+    fields:
+      - key: inputs
+        type: inputSchema
+        label: Define Input Parameters
+        hint: Parameters that can be passed when triggering this workflow
+inputSchema:
+  type: object
+  properties:
+    confirmation:
+      type: boolean
+      title: Require Confirmation
+    inputs:
+      type: object
+      title: Input Parameters Schema
+outputSchema:
+  type: object
+  properties:
+    triggeredAt:
+      type: string
+      title: Triggered At
+    triggeredBy:
+      type: number
+      title: Triggered By User ID
+    data:
+      type: object
+      title: Input Data
+examples:
+  - name: No Parameters
+    description: Simple manual trigger with no input parameters
+    config:
+      confirmation: false
+  - name: With Input Parameters
+    description: Manual trigger that accepts ticket ID and priority
+    config:
+      confirmation: true
+      inputs:
+        ticketId:
+          type: string
+          description: Ticket ID to process
+          required: true
+        priority:
+          type: string
+          description: Priority level (low, medium, high)
+          required: false

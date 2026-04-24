@@ -1,0 +1,44 @@
+name: tool_debug
+displayName: Debug Tool
+category: tool
+description: Debug and diagnostic operations
+icon: bug
+sections:
+  - title: Tool Identity
+    collapsible: false
+    fields:
+      - key: operation
+        type: select
+        label: Operation
+        hint: Debug operation to perform
+        default: log
+        required: true
+        options:
+          - label: Log
+            value: log
+          - label: Inspect
+            value: inspect
+          - label: Trace
+            value: trace
+      - key: level
+        type: select
+        label: Level
+        hint: Log level
+        default: info
+        options:
+          - label: Debug
+            value: debug
+          - label: Info
+            value: info
+          - label: Warning
+            value: warn
+          - label: Error
+            value: error
+  - title: Message
+    collapsible: false
+    fields:
+      - key: message
+        type: textarea
+        label: Message
+        hint: Message or variable to log/inspect
+        rows: 3

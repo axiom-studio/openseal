@@ -1,0 +1,62 @@
+name: http
+displayName: HTTP Request
+category: action
+description: Make HTTP requests to external services
+icon: http
+sections:
+  - title: Request Configuration
+    collapsible: false
+    fields:
+      - key: url
+        type: text
+        label: URL
+        hint: The URL to send the HTTP request to
+        required: true
+      - key: method
+        type: select
+        label: Method
+        hint: HTTP method (GET, POST, PUT, DELETE, etc.)
+        default: GET
+        options:
+          - label: GET
+            value: GET
+          - label: POST
+            value: POST
+          - label: PUT
+            value: PUT
+          - label: DELETE
+            value: DELETE
+          - label: PATCH
+            value: PATCH
+          - label: HEAD
+            value: HEAD
+  - title: Request Body
+    collapsible: false
+    fields:
+      - key: headers
+        type: json
+        label: Headers
+        hint: HTTP headers as key-value pairs
+      - key: body
+        type: json
+        label: Body
+        hint: Request body (JSON object or text string)
+      - key: file
+        type: expression
+        label: File
+        hint: File reference from previous node (e.g., {{nodes.File-Upload.document}})
+      - key: fileField
+        type: text
+        label: File Field Name
+        hint: Form field name for file upload
+  - title: Advanced Options
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: timeout
+        type: number
+        label: Timeout
+        hint: Request timeout in seconds
+        default: 30
+        min: 1
+        max: 300

@@ -1,0 +1,26 @@
+name: discord
+displayName: Discord
+category: communication
+description: Send messages to Discord
+icon: discord
+sections:
+  - title: Channel
+    collapsible: false
+    fields:
+      - key: channelId
+        type: text
+        label: Channel ID
+        hint: Discord channel ID
+        required: true
+  - title: Message
+    collapsible: false
+    fields:
+      - key: content
+        type: textarea
+        label: Content
+        hint: Message content
+        rows: 3
+      - key: embeds
+        type: json
+        label: Embeds
+        hint: Discord embeds for rich content

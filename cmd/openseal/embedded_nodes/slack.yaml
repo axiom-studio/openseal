@@ -1,0 +1,49 @@
+name: slack
+displayName: Slack
+category: communication
+description: Send messages to Slack
+icon: slack
+sections:
+  - title: Configuration
+    collapsible: false
+    fields:
+      - key: webhookUrl
+        type: text
+        label: Webhook URL
+        hint: Slack incoming webhook URL
+        sensitive: true
+        required: true
+      - key: channel
+        type: text
+        label: Channel
+        hint: Slack channel ID or name (e.g., #build-notifications)
+  - title: Message
+    collapsible: false
+    fields:
+      - key: text
+        type: expression
+        label: Message Text
+        hint: Message to send (supports template variables like {{prev}})
+        rows: 3
+      - key: blocks
+        type: json
+        label: Blocks
+        hint: Slack Block Kit blocks for rich formatting
+      - key: attachments
+        type: json
+        label: Attachments
+        hint: Slack message attachments for secondary content
+  - title: Appearance
+    collapsible: true
+    defaultExpanded: false
+    fields:
+      - key: username
+        type: text
+        label: Bot Username
+        hint: Override the bot display name
+        placeholder: Axiom Bot
+      - key: iconEmoji
+        type: text
+        label: Icon Emoji
+        hint: Override the bot icon with an emoji
+        placeholder: ':robot_face:'

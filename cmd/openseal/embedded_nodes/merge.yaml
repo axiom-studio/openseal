@@ -1,0 +1,13 @@
+name: merge
+displayName: Merge
+category: data
+description: Merge multiple objects into one
+icon: merge
+sections:
+  - title: Input
+    collapsible: false
+    fields:
+      - key: sources
+        type: json
+        label: Sources
+        hint: Array of objects to merge

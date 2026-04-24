@@ -1,0 +1,25 @@
+name: if
+displayName: If/Else
+category: control
+description: Conditional branching based on expression evaluation
+icon: branch
+sections:
+  - title: Condition
+    collapsible: false
+    fields:
+      - key: condition
+        type: expression
+        label: Condition
+        hint: Boolean expression to evaluate
+        required: true
+  - title: Branches
+    collapsible: false
+    fields:
+      - key: then
+        type: json
+        label: Then
+        hint: Nodes to execute if condition is true
+      - key: else
+        type: json
+        label: Else
+        hint: Nodes to execute if condition is false

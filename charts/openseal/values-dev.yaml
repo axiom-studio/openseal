@@ -1,0 +1,19 @@
+# Dev mode for OpenSeal chart
+devMode: true
+
+# Dev image
+image:
+  repository: "openseal-dev"
+  tag: "latest"
+  pullPolicy: "Never"
+
+# hostPath volume mount
+devHostPath: "/home/k/axiom"
+devContainerPath: "/host/axiom"
+
+# Hermes sidecar dev config
+hermes:
+  image:
+    repository: "openseal-dev"
+    tag: "latest"
+    pullPolicy: "Never"

@@ -1,0 +1,67 @@
+name: cron
+displayName: Schedule (Cron)
+category: trigger
+description: Trigger workflow on a cron schedule
+icon: cron
+sections:
+  - title: Schedule Configuration
+    collapsible: false
+    fields:
+      - key: expression
+        type: text
+        label: Cron Expression
+        placeholder: "0 */6 * * *"
+        hint: Cron expression for scheduling (e.g., "0 */6 * * *" for every 6 hours)
+        required: true
+      - key: timezone
+        type: text
+        label: Timezone
+        hint: Timezone for the cron schedule
+        default: UTC
+  - title: Input Parameters
+    collapsible: true
+    fields:
+      - key: inputs
+        type: inputSchema
+        label: Static Input Parameters
+        hint: Static parameters to pass with each scheduled execution
+inputSchema:
+  type: object
+  properties:
+    expression:
+      type: string
+      title: Cron Expression
+    timezone:
+      type: string
+      title: Timezone
+    inputs:
+      type: object
+      title: Static Input Parameters
+outputSchema:
+  type: object
+  properties:
+    scheduledAt:
+      type: string
+      title: Scheduled At
+    data:
+      type: object
+      title: Input Data
+examples:
+  - name: Every 6 Hours
+    description: Run every 6 hours with no input parameters
+    config:
+      expression: "0 */6 * * *"
+      timezone: UTC
+  - name: Daily Report with Parameters
+    description: Daily report with static parameters
+    config:
+      expression: "0 9 * * *"
+      timezone: America/New_York
+      inputs:
+        reportType:
+          type: string
+          description: Type of report to generate
+          default: daily
+        recipients:
+          type: array
+          description: List of email recipients

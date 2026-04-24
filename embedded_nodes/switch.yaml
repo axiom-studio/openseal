@@ -1,0 +1,21 @@
+name: switch
+displayName: Switch
+category: control
+description: Branch execution based on expression matching
+icon: switch
+sections:
+  - title: Expression
+    collapsible: false
+    fields:
+      - key: expression
+        type: expression
+        label: Expression
+        hint: JavaScript expression to evaluate
+        required: true
+  - title: Cases
+    collapsible: false
+    fields:
+      - key: cases
+        type: json
+        label: Cases
+        hint: Array of case objects with expression, nodes, and optional default

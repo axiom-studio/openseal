@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openseal.fullname" . }}-config
+  labels:
+    {{- include "openseal.labels" . | nindent 4 }}
+data:
+  CLUSTER_ID: {{ .Values.clusterId | quote }}
+  NAMESPACE: {{ .Values.namespace | default .Release.Namespace | quote }}
+  NATS_SERVER_HOST: {{ .Values.nats.serverUrl | quote }}
+  HEARTBEAT_INTERVAL_SECONDS: {{ .Values.worker.heartbeatIntervalSeconds | quote }}
+  WORKER_COUNT: {{ .Values.worker.count | quote }}
+  VERSION: {{ .Values.worker.version | quote }}
+  USE_HTTP_CALLBACKS: {{ .Values.useHttpCallbacks | default "true" | quote }}
+  {{- if .Values.codeExecutor.enabled }}
+  CODE_EXECUTOR_IMAGE: {{ .Values.codeExecutor.image | quote }}
+  AGENTS_NAMESPACE: {{ .Values.codeExecutor.namespace | default "openseal-agents" | quote }}
+  {{- if .Values.codeExecutor.pythonSdk.enabled }}
+  PYTHON_SDK_CONFIGMAP: {{ .Values.codeExecutor.pythonSdk.configMapName | default (printf "%s-python-sdk" (include "openseal.fullname" .)) | quote }}
+  TOOL_EXECUTION_JWT_SECRET: {{ .Values.codeExecutor.pythonSdk.jwtSecret | default "change-me-in-production" | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if .Values.fileServer.enabled }}
+  FILE_SERVER_PORT: {{ .Values.fileServer.port | quote }}
+  {{- end }}
+  {{- if .Values.metrics.enabled }}
+  METRICS_PORT: {{ .Values.metrics.port | quote }}
+  METRICS_PATH: {{ .Values.metrics.path | quote }}
+  {{- end }}

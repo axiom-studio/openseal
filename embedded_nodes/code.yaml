@@ -1,0 +1,52 @@
+name: code
+displayName: Code Execution
+category: action
+description: Execute Python code in isolated containers
+icon: code
+sections:
+  - title: Code Configuration
+    collapsible: false
+    fields:
+      - key: language
+        type: select
+        label: Language
+        hint: Programming language (python, javascript, etc.)
+        default: python
+        options:
+          - label: Python
+            value: python
+          - label: JavaScript
+            value: javascript
+          - label: TypeScript
+            value: typescript
+          - label: Go
+            value: go
+      - key: code
+        type: code
+        label: Code
+        hint: The code to execute. Use {{prev.response}}, {{trigger.inputs.field}}, etc. to access data.
+        language: python
+        height: 300
+  - title: Dependencies
+    collapsible: true
+    fields:
+      - key: requirements
+        type: tags
+        label: Python Packages
+        hint: Python packages to install (e.g., requests, pandas, numpy)
+        placeholder: requests
+  - title: Execution Options
+    collapsible: true
+    fields:
+      - key: timeout
+        type: number
+        label: Timeout (seconds)
+        hint: Maximum execution time in seconds
+        default: 600
+        min: 1
+        max: 3600
+      - key: stream
+        type: toggle
+        label: Stream Output
+        hint: Stream output in real-time during execution
+        default: true
