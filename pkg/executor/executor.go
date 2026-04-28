@@ -67,8 +67,9 @@ type Registry struct {
 // NewRegistry creates a new executor registry
 // DEPRECATED: Use NewEmptyRegistry() and load skills via skill.PluginLoader instead
 // For backward compatibility, this still auto-registers all executors
-// For K8s executors, pass a CortexK8sClient to enable multi-cluster operations via Cortex API
-func NewRegistry(cortexK8sClient CortexK8sClient) *Registry {
+// For K8s executors, pass a K8sClient to enable K8s operations.
+// OpenSeal provides a direct-K8s implementation; Cortex/Atlas injects a remote proxy.
+func NewRegistry(k8sClient K8sClient) *Registry {
 	r := &Registry{
 		executors: make(map[string]StepExecutor),
 	}
@@ -103,18 +104,18 @@ func NewRegistry(cortexK8sClient CortexK8sClient) *Registry {
 	// Register PGVector executor
 	r.Register(NewPGVectorExecutor())
 
-	// Register K8s executors with Cortex API client
-	// This allows OpenSeal to operate on any cluster Cortex is connected to,
-	// regardless of where OpenSeal is deployed
-	if cortexK8sClient != nil {
-		r.Register(NewK8sGetExecutor(cortexK8sClient))
-		r.Register(NewK8sListExecutor(cortexK8sClient))
-		r.Register(NewK8sLogsExecutor(cortexK8sClient))
-		r.Register(NewK8sEventsExecutor(cortexK8sClient))
-		r.Register(NewK8sRestartExecutor(cortexK8sClient))
-		r.Register(NewK8sScaleExecutor(cortexK8sClient))
-		r.Register(NewK8sPatchExecutor(cortexK8sClient))
-		r.Register(NewK8sDeleteExecutor(cortexK8sClient))
+	// Register K8s executors when a K8sClient is provided
+	// OpenSeal provides a direct-K8s implementation for standalone mode.
+	// Cortex/Atlas injects a remote proxy that delegates to the Cortex API.
+	if k8sClient != nil {
+		r.Register(NewK8sGetExecutor(k8sClient))
+		r.Register(NewK8sListExecutor(k8sClient))
+		r.Register(NewK8sLogsExecutor(k8sClient))
+		r.Register(NewK8sEventsExecutor(k8sClient))
+		r.Register(NewK8sRestartExecutor(k8sClient))
+		r.Register(NewK8sScaleExecutor(k8sClient))
+		r.Register(NewK8sPatchExecutor(k8sClient))
+		r.Register(NewK8sDeleteExecutor(k8sClient))
 	}
 
 	// Register code executor if k8s is available

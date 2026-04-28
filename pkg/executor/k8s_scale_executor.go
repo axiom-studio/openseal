@@ -6,12 +6,12 @@ import (
 )
 
 type K8sScaleExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sScaleExecutor(cortexClient CortexK8sClient) *K8sScaleExecutor {
+func NewK8sScaleExecutor(k8sClient K8sClient) *K8sScaleExecutor {
 	return &K8sScaleExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -53,8 +53,11 @@ func (e *K8sScaleExecutor) Execute(ctx context.Context, step *StepDefinition, re
 		},
 	}
 
-	// Use Cortex API to update resource - works for any cluster Cortex manages
-	_, err = e.cortexClient.UpdateResource(ctx, clusterId, namespace, name, kind, patchMap)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-scale", fmt.Errorf("k8s client not configured"))
+	}
+
+	_, err = e.k8sClient.UpdateResource(ctx, clusterId, namespace, name, kind, patchMap)
 	if err != nil {
 		return nil, wrapK8sError("k8s-scale", err)
 	}

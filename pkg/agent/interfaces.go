@@ -1,10 +1,6 @@
 package agent
 
 import (
-	"context"
-	"io"
-	"time"
-
 	"github.com/axiom-studio/openseal/pkg/types"
 )
 
@@ -23,30 +19,11 @@ const (
 	RunStatusFailed    = types.RunStatusFailed
 )
 
-// FileStore manages temporary file storage for agent workflows.
-// This interface defines only the methods needed by the runtime package.
-type FileStore interface {
-	// Store saves data and returns a unique file ID
-	Store(data []byte, filename string, mimeType string) (*StoredFile, error)
+// FileStore is an alias so runtime code can continue using agent.FileStore.
+type FileStore = types.FileStore
 
-	// Get retrieves file metadata by ID
-	Get(fileId string) (*StoredFile, error)
-
-	// GetReader returns a reader for the file content
-	GetReader(fileId string) (io.ReadCloser, error)
-}
-
-// StoredFile represents metadata about a stored file
-type StoredFile struct {
-	Id        string    `json:"id"`
-	Filename  string    `json:"filename"`
-	MimeType  string    `json:"mimeType"`
-	Size      int64     `json:"size"`
-	Path      string    `json:"-"` // Internal path, not exposed
-	RunId     string    `json:"runId,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
-}
+// StoredFile is an alias so runtime code can continue using agent.StoredFile.
+type StoredFile = types.StoredFile
 
 // AgentInstanceService manages agent instances.
 // This interface defines only the methods needed by the runtime package.
@@ -58,15 +35,6 @@ type AgentInstanceService interface {
 	GetTriggersForInstance(instanceId int) ([]*types.AgentTriggerBean, error)
 }
 
-// AgentOrchestrator handles pipeline execution for agents.
-// This interface defines only the methods needed by the runtime package.
-type AgentOrchestrator interface {
-	// TriggerAgent starts a new agent run
-	TriggerAgent(ctx context.Context, req *types.TriggerAgentRequest) (*types.AgentRunBean, error)
-
-	// WaitForRunCompletion waits for a run to complete (for synchronous webhook execution)
-	WaitForRunCompletion(ctx context.Context, runId int, timeout time.Duration) (*types.AgentRunBean, error)
-
-	// GetFileStore returns the file store for serving files
-	GetFileStore() FileStore
-}
+// AgentOrchestrator is defined in pkg/types.
+// Runtime code should use types.AgentOrchestrator directly.
+type AgentOrchestrator = types.AgentOrchestrator

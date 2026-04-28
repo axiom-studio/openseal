@@ -3,7 +3,6 @@ module github.com/axiom-studio/openseal
 go 1.26.0
 
 require (
-	github.com/axiom-studio/cortex v1.0.1
 	github.com/axiom-studio/skills.sdk v0.0.0-20260403203113-eb1a3e5d8c53
 	github.com/caarlos0/env v3.5.0+incompatible
 	github.com/go-pg/pg v6.15.1+incompatible
@@ -25,8 +24,6 @@ require (
 	k8s.io/apimachinery v0.36.0
 	k8s.io/client-go v0.36.0
 )
-
-replace github.com/axiom-studio/cortex-lib/common-lib => /home/k/axiom/cortex-lib/common-lib
 
 require (
 	github.com/agext/levenshtein v1.2.1 // indirect

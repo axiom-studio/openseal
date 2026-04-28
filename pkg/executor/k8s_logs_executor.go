@@ -8,12 +8,12 @@ import (
 )
 
 type K8sLogsExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sLogsExecutor(cortexClient CortexK8sClient) *K8sLogsExecutor {
+func NewK8sLogsExecutor(k8sClient K8sClient) *K8sLogsExecutor {
 	return &K8sLogsExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -58,8 +58,11 @@ func (e *K8sLogsExecutor) Execute(ctx context.Context, step *StepDefinition, res
 		sinceSeconds = int(ss)
 	}
 
-	// Use Cortex API to get logs - works for any cluster Cortex manages
-	logs, err := e.cortexClient.GetPodLogs(ctx, clusterId, namespace, podName, container, tailLines, sinceSeconds)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-logs", fmt.Errorf("k8s client not configured"))
+	}
+
+	logs, err := e.k8sClient.GetPodLogs(ctx, clusterId, namespace, podName, container, tailLines, sinceSeconds)
 	if err != nil {
 		return nil, wrapK8sError("k8s-logs", err)
 	}

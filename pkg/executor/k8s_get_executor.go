@@ -5,9 +5,10 @@ import (
 	"fmt"
 )
 
-// CortexK8sClient interface for K8s operations via Cortex API
-// This allows OpenSeal to operate on any cluster Cortex is connected to
-type CortexK8sClient interface {
+// K8sClient is the interface for K8s operations.
+// OpenSeal ships with a direct-K8s implementation for standalone mode.
+// Cortex/Atlas injects a remote implementation that proxies to the Cortex API
+type K8sClient interface {
 	GetResource(ctx context.Context, clusterId int, namespace, name, kind string) (map[string]interface{}, error)
 	ListResources(ctx context.Context, clusterId int, namespace, kind, labelSelector, fieldSelector string) ([]map[string]interface{}, error)
 	DeleteResource(ctx context.Context, clusterId int, namespace, name, kind string) error
@@ -18,12 +19,12 @@ type CortexK8sClient interface {
 }
 
 type K8sGetExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sGetExecutor(cortexClient CortexK8sClient) *K8sGetExecutor {
+func NewK8sGetExecutor(k8sClient K8sClient) *K8sGetExecutor {
 	return &K8sGetExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -49,8 +50,11 @@ func (e *K8sGetExecutor) Execute(ctx context.Context, step *StepDefinition, reso
 
 	clusterId := extractClusterId(config)
 
-	// Use Cortex API to get resource - works for any cluster Cortex manages
-	obj, err := e.cortexClient.GetResource(ctx, clusterId, namespace, name, kind)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-get", fmt.Errorf("k8s client not configured"))
+	}
+
+	obj, err := e.k8sClient.GetResource(ctx, clusterId, namespace, name, kind)
 	if err != nil {
 		return nil, wrapK8sError("k8s-get", err)
 	}

@@ -7,12 +7,12 @@ import (
 )
 
 type K8sPatchExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sPatchExecutor(cortexClient CortexK8sClient) *K8sPatchExecutor {
+func NewK8sPatchExecutor(k8sClient K8sClient) *K8sPatchExecutor {
 	return &K8sPatchExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -59,8 +59,11 @@ func (e *K8sPatchExecutor) Execute(ctx context.Context, step *StepDefinition, re
 
 	clusterId := extractClusterId(config)
 
-	// Use Cortex API to update/patch resource - works for any cluster Cortex manages
-	result, err := e.cortexClient.UpdateResource(ctx, clusterId, namespace, name, kind, patchMap)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-patch", fmt.Errorf("k8s client not configured"))
+	}
+
+	result, err := e.k8sClient.UpdateResource(ctx, clusterId, namespace, name, kind, patchMap)
 	if err != nil {
 		return nil, wrapK8sError("k8s-patch", err)
 	}
