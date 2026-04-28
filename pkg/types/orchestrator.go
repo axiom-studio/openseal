@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -85,8 +86,26 @@ type TestWorkflowNATSResponse struct {
 	Error         string                `json:"error,omitempty"`
 }
 
-// FileStore is an interface for serving files
+// FileStore manages temporary file storage for agent workflows.
 type FileStore interface {
-	// ServeFile serves a file by path
-	ServeFile(path string) ([]byte, error)
+	// Store saves data and returns a unique file ID
+	Store(data []byte, filename string, mimeType string) (*StoredFile, error)
+
+	// Get retrieves file metadata by ID
+	Get(fileId string) (*StoredFile, error)
+
+	// GetReader returns a reader for the file content
+	GetReader(fileId string) (io.ReadCloser, error)
+}
+
+// StoredFile represents metadata about a stored file
+type StoredFile struct {
+	Id        string    `json:"id"`
+	Filename  string    `json:"filename"`
+	MimeType  string    `json:"mimeType"`
+	Size      int64     `json:"size"`
+	Path      string    `json:"-"` // Internal path, not exposed
+	RunId     string    `json:"runId,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }

@@ -6,12 +6,12 @@ import (
 )
 
 type K8sEventsExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sEventsExecutor(cortexClient CortexK8sClient) *K8sEventsExecutor {
+func NewK8sEventsExecutor(k8sClient K8sClient) *K8sEventsExecutor {
 	return &K8sEventsExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -41,8 +41,11 @@ func (e *K8sEventsExecutor) Execute(ctx context.Context, step *StepDefinition, r
 
 	clusterId := extractClusterId(config)
 
-	// Use Cortex API to list events - works for any cluster Cortex manages
-	events, err := e.cortexClient.ListEvents(ctx, clusterId, namespace, kind, name)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-events", fmt.Errorf("k8s client not configured"))
+	}
+
+	events, err := e.k8sClient.ListEvents(ctx, clusterId, namespace, kind, name)
 	if err != nil {
 		return nil, wrapK8sError("k8s-events", err)
 	}

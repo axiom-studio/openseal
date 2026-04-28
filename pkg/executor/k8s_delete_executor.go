@@ -6,12 +6,12 @@ import (
 )
 
 type K8sDeleteExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sDeleteExecutor(cortexClient CortexK8sClient) *K8sDeleteExecutor {
+func NewK8sDeleteExecutor(k8sClient K8sClient) *K8sDeleteExecutor {
 	return &K8sDeleteExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -37,8 +37,11 @@ func (e *K8sDeleteExecutor) Execute(ctx context.Context, step *StepDefinition, r
 
 	clusterId := extractClusterId(config)
 
-	// Use Cortex API to delete resource - works for any cluster Cortex manages
-	err = e.cortexClient.DeleteResource(ctx, clusterId, namespace, name, kind)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-delete", fmt.Errorf("k8s client not configured"))
+	}
+
+	err = e.k8sClient.DeleteResource(ctx, clusterId, namespace, name, kind)
 	if err != nil {
 		return nil, wrapK8sError("k8s-delete", err)
 	}

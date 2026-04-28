@@ -2,8 +2,6 @@ github.com/agext/levenshtein v1.2.1 h1:QmvMAjj2aEICytGiWzmxoE0x2KZvE0fvmqMOfy2tj
 github.com/agext/levenshtein v1.2.1/go.mod h1:JEDfjyjHDjOF/1e4FlBE/PkbqA9OfWu2ki2W0IB5558=
 github.com/apparentlymart/go-textseg/v15 v15.0.0 h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=
 github.com/apparentlymart/go-textseg/v15 v15.0.0/go.mod h1:K8XmNZdhEBkdlyDdvbmmsvpAG721bKi0joRfFdHIWJ4=
-github.com/axiom-studio/cortex v1.0.1 h1:hLYfYq/s3RvgHIwYoODXo+C4erSfYwo2O2kyZFCDVWI=
-github.com/axiom-studio/cortex v1.0.1/go.mod h1:4aXfOD4GQ/kMUxCVgKskEV99sRmeHaF5TsaakURU/BA=
 github.com/axiom-studio/skills.sdk v0.0.0-20260403203113-eb1a3e5d8c53 h1:9RsZQsnj6ZLxDpFjxvs170mMaRP6i/jlHuxjAMVznDs=
 github.com/axiom-studio/skills.sdk v0.0.0-20260403203113-eb1a3e5d8c53/go.mod h1:UD4ZUD7CijEuVO/kf7vkVGKPAl2+88pReih85o8Y1Qo=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=

@@ -16,7 +16,7 @@ import (
 type WorkflowToolAdapter struct {
 	personaService   persona.PersonaService
 	agentService     agent.AgentInstanceService
-	orchestrator     agent.AgentOrchestrator
+	orchestrator     types.AgentOrchestrator
 	fileStore        agent.FileStore
 	skillNodeAdapter *SkillNodeToolAdapter
 	logger           *zap.SugaredLogger
@@ -26,7 +26,7 @@ type WorkflowToolAdapter struct {
 func NewWorkflowToolAdapter(
 	personaService persona.PersonaService,
 	agentService agent.AgentInstanceService,
-	orchestrator agent.AgentOrchestrator,
+	orchestrator types.AgentOrchestrator,
 	logger *zap.SugaredLogger,
 ) *WorkflowToolAdapter {
 	fileStore := orchestrator.GetFileStore()

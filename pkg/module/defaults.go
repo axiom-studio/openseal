@@ -23,7 +23,6 @@ func NewDefaultRegistryWithConfig(config *RegistryConfig) (*Registry, error) {
 		NewFuncExecutor("merge", mergeExecute),
 		NewFuncExecutor("delay", delayExecute),
 		NewFuncExecutor("http", httpExecute),
-		NewFuncExecutor("invoke_agent", invokeAgentExecute),
 	}
 
 	for _, exec := range executors {

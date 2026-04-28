@@ -11,14 +11,15 @@ import (
 	"go.uber.org/zap"
 )
 
-type CortexK8sClient struct {
+// RemoteK8sClient proxies K8s operations to a remote API (e.g. Cortex/Atlas).
+type RemoteK8sClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *zap.SugaredLogger
 }
 
-func NewCortexK8sClient(baseURL string, logger *zap.SugaredLogger) *CortexK8sClient {
-	return &CortexK8sClient{
+func NewRemoteK8sClient(baseURL string, logger *zap.SugaredLogger) *RemoteK8sClient {
+	return &RemoteK8sClient{
 		baseURL:    baseURL,
 		httpClient: &http.Client{},
 		logger:     logger,
@@ -50,7 +51,7 @@ type ResourceResponse struct {
 	Manifest map[string]interface{} `json:"manifest"`
 }
 
-func (c *CortexK8sClient) GetResource(ctx context.Context, clusterId int, namespace, name, kind string) (map[string]interface{}, error) {
+func (c *RemoteK8sClient) GetResource(ctx context.Context, clusterId int, namespace, name, kind string) (map[string]interface{}, error) {
 	gvk, err := parseKind(kind)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kind: %w", err)
@@ -100,7 +101,7 @@ func (c *CortexK8sClient) GetResource(ctx context.Context, clusterId int, namesp
 	return result.ManifestResponse.Manifest, nil
 }
 
-func (c *CortexK8sClient) ListResources(ctx context.Context, clusterId int, namespace, kind, labelSelector, fieldSelector string) ([]map[string]interface{}, error) {
+func (c *RemoteK8sClient) ListResources(ctx context.Context, clusterId int, namespace, kind, labelSelector, fieldSelector string) ([]map[string]interface{}, error) {
 	gvk, err := parseKind(kind)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kind: %w", err)
@@ -151,7 +152,7 @@ func (c *CortexK8sClient) ListResources(ctx context.Context, clusterId int, name
 	return result.Resources.Items, nil
 }
 
-func (c *CortexK8sClient) DeleteResource(ctx context.Context, clusterId int, namespace, name, kind string) error {
+func (c *RemoteK8sClient) DeleteResource(ctx context.Context, clusterId int, namespace, name, kind string) error {
 	gvk, err := parseKind(kind)
 	if err != nil {
 		return fmt.Errorf("failed to parse kind: %w", err)
@@ -194,7 +195,7 @@ func (c *CortexK8sClient) DeleteResource(ctx context.Context, clusterId int, nam
 	return nil
 }
 
-func (c *CortexK8sClient) UpdateResource(ctx context.Context, clusterId int, namespace, name, kind string, patch map[string]interface{}) (map[string]interface{}, error) {
+func (c *RemoteK8sClient) UpdateResource(ctx context.Context, clusterId int, namespace, name, kind string, patch map[string]interface{}) (map[string]interface{}, error) {
 	gvk, err := parseKind(kind)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kind: %w", err)
@@ -280,7 +281,7 @@ func mergeMaps(target, source map[string]interface{}) map[string]interface{} {
 	return result
 }
 
-func (c *CortexK8sClient) GetPodLogs(ctx context.Context, clusterId int, namespace, podName, containerName string, tailLines int, sinceSeconds int) (string, error) {
+func (c *RemoteK8sClient) GetPodLogs(ctx context.Context, clusterId int, namespace, podName, containerName string, tailLines int, sinceSeconds int) (string, error) {
 	request := struct {
 		ClusterId     int    `json:"clusterId"`
 		Namespace     string `json:"namespace"`
@@ -335,7 +336,7 @@ func (c *CortexK8sClient) GetPodLogs(ctx context.Context, clusterId int, namespa
 	return string(responseBody), nil
 }
 
-func (c *CortexK8sClient) ListEvents(ctx context.Context, clusterId int, namespace, resourceKind, resourceName string) ([]map[string]interface{}, error) {
+func (c *RemoteK8sClient) ListEvents(ctx context.Context, clusterId int, namespace, resourceKind, resourceName string) ([]map[string]interface{}, error) {
 	gvk, err := parseKind(resourceKind)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kind: %w", err)
@@ -387,7 +388,7 @@ func (c *CortexK8sClient) ListEvents(ctx context.Context, clusterId int, namespa
 	return result.Events.Items, nil
 }
 
-func (c *CortexK8sClient) RestartResource(ctx context.Context, clusterId int, namespace, name, kind string) error {
+func (c *RemoteK8sClient) RestartResource(ctx context.Context, clusterId int, namespace, name, kind string) error {
 	gvk, err := parseKind(kind)
 	if err != nil {
 		return fmt.Errorf("failed to parse kind: %w", err)

@@ -6,12 +6,12 @@ import (
 )
 
 type K8sRestartExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sRestartExecutor(cortexClient CortexK8sClient) *K8sRestartExecutor {
+func NewK8sRestartExecutor(k8sClient K8sClient) *K8sRestartExecutor {
 	return &K8sRestartExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -41,9 +41,11 @@ func (e *K8sRestartExecutor) Execute(ctx context.Context, step *StepDefinition, 
 
 	clusterId := extractClusterId(config)
 
-	// Use Cortex API to restart resource - works for any cluster Cortex manages
-	// Cortex has a dedicated rotate endpoint for this operation
-	err = e.cortexClient.RestartResource(ctx, clusterId, namespace, name, kind)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-restart", fmt.Errorf("k8s client not configured"))
+	}
+
+	err = e.k8sClient.RestartResource(ctx, clusterId, namespace, name, kind)
 	if err != nil {
 		return nil, wrapK8sError("k8s-restart", err)
 	}

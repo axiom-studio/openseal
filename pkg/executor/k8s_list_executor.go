@@ -6,12 +6,12 @@ import (
 )
 
 type K8sListExecutor struct {
-	cortexClient CortexK8sClient
+	k8sClient K8sClient
 }
 
-func NewK8sListExecutor(cortexClient CortexK8sClient) *K8sListExecutor {
+func NewK8sListExecutor(k8sClient K8sClient) *K8sListExecutor {
 	return &K8sListExecutor{
-		cortexClient: cortexClient,
+		k8sClient: k8sClient,
 	}
 }
 
@@ -37,8 +37,11 @@ func (e *K8sListExecutor) Execute(ctx context.Context, step *StepDefinition, res
 	labelSelector := extractLabelSelector(config, resolver)
 	fieldSelector := extractFieldSelector(config, resolver)
 
-	// Use Cortex API to list resources - works for any cluster Cortex manages
-	list, err := e.cortexClient.ListResources(ctx, clusterId, namespace, kind, labelSelector, fieldSelector)
+	if e.k8sClient == nil {
+		return nil, wrapK8sError("k8s-list", fmt.Errorf("k8s client not configured"))
+	}
+
+	list, err := e.k8sClient.ListResources(ctx, clusterId, namespace, kind, labelSelector, fieldSelector)
 	if err != nil {
 		return nil, wrapK8sError("k8s-list", err)
 	}
