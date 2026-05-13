@@ -1,5 +1,7 @@
 # OpenSeal
 
+![Openseal - AI Automation platform](./openseal.jpeg)
+
 A modern agent execution platform for building, deploying, and running AI-powered automation workflows.
 
 ## Overview
