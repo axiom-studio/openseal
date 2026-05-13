@@ -63,7 +63,7 @@ Options:
 		sugar.Infow("loaded workflow", "name", wf.Name, "source", wf.SourceFile)
 	}
 
-	reg := executor.NewEmptyRegistry()
+	reg := executor.NewRegistry(nil)
 	pe := executor.NewPipelineExecutor(reg, sugar)
 
 	tm := daemon.NewTriggerManager(sugar, cfg.Webhook.BaseURL)
