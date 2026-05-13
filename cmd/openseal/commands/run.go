@@ -51,7 +51,7 @@ Options:
 		"source", wf.SourceFile,
 	)
 
-	reg := executor.NewEmptyRegistry()
+	reg := executor.NewRegistry(nil)
 	pe := executor.NewPipelineExecutor(reg, sugar)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
