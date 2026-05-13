@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -74,6 +75,12 @@ Options:
 		"status", result.Status,
 		"duration", result.CompletedAt.Sub(result.StartedAt),
 	)
+
+	fmt.Println("\n--- Node Outputs ---")
+	for _, nr := range result.NodeResults {
+		out, _ := json.MarshalIndent(nr.Output, "", "  ")
+		fmt.Printf("\n[%s] %s (%s):\n%s\n", nr.NodeId, nr.NodeName, nr.NodeType, out)
+	}
 }
 
 func convertNodes(nodes []workflow.Node) []*executor.NodeDefinition {
