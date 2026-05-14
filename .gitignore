@@ -31,3 +31,9 @@ Thumbs.db
 # Build output
 bin/
 dist/
+web/node_modules/
+web/dist/
+
+# Local config
+daemon.yaml
+workflow.hcl
