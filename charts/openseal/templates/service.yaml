@@ -11,17 +11,5 @@ spec:
       targetPort: health
       protocol: TCP
       name: health
-    {{- if .Values.fileServer.enabled }}
-    - port: {{ .Values.fileServer.port }}
-      targetPort: fileserver
-      protocol: TCP
-      name: fileserver
-    {{- end }}
-    {{- if and .Values.metrics.enabled (ne (int .Values.metrics.port) (int .Values.healthCheck.port)) }}
-    - port: {{ .Values.metrics.port }}
-      targetPort: metrics
-      protocol: TCP
-      name: metrics
-    {{- end }}
   selector:
     {{- include "openseal.selectorLabels" . | nindent 4 }}

@@ -100,12 +100,7 @@ affinity: {}
 # Image pull secrets
 imagePullSecrets: []
 
-# File server configuration (for emit endpoint and file uploads)
-fileServer:
-  enabled: true
-  port: 8081
-
-# Health check configuration (uses metrics server port)
+# Health check configuration
 healthCheck:
   port: 9090
   livenessProbe:
@@ -118,15 +113,6 @@ healthCheck:
     periodSeconds: 5
     timeoutSeconds: 3
     failureThreshold: 3
-
-# Prometheus metrics
-metrics:
-  enabled: true
-  port: 9090
-  path: /metrics
-  # ServiceMonitor requires Prometheus Operator CRDs
-  serviceMonitor:
-    enabled: false
 
 # Skills storage configuration
 # Skills are gRPC-based extensions that add node types to OpenSeal

@@ -324,23 +324,6 @@ kubectl logs -n axiom deployment/openseal | grep "execution context"
 
 ## Monitoring
 
-### Metrics
-
-OpenSeal exposes Prometheus metrics:
-
-```bash
-# Port-forward to metrics endpoint
-kubectl port-forward -n axiom deployment/openseal 9090:9090
-
-# View metrics
-curl http://localhost:9090/metrics | grep tool
-```
-
-**Useful Metrics:**
-- `openseal_tool_executions_total` - Total tool invocations
-- `openseal_tool_execution_errors_total` - Failed tool executions
-- `openseal_execution_contexts_active` - Current active contexts
-
 ### Logging
 
 **Structured Logs:**
