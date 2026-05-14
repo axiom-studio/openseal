@@ -20,10 +20,3 @@ data:
   TOOL_EXECUTION_JWT_SECRET: {{ .Values.codeExecutor.pythonSdk.jwtSecret | default "change-me-in-production" | quote }}
   {{- end }}
   {{- end }}
-  {{- if .Values.fileServer.enabled }}
-  FILE_SERVER_PORT: {{ .Values.fileServer.port | quote }}
-  {{- end }}
-  {{- if .Values.metrics.enabled }}
-  METRICS_PORT: {{ .Values.metrics.port | quote }}
-  METRICS_PATH: {{ .Values.metrics.path | quote }}
-  {{- end }}

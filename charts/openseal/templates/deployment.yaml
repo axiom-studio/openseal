@@ -42,16 +42,6 @@ spec:
             - name: health
               containerPort: {{ .Values.healthCheck.port }}
               protocol: TCP
-            {{- if .Values.fileServer.enabled }}
-            - name: fileserver
-              containerPort: {{ .Values.fileServer.port }}
-              protocol: TCP
-            {{- end }}
-            {{- if and .Values.metrics.enabled (ne (int .Values.metrics.port) (int .Values.healthCheck.port)) }}
-            - name: metrics
-              containerPort: {{ .Values.metrics.port }}
-              protocol: TCP
-            {{- end }}
           env:
             - name: POD_IP
               valueFrom:
