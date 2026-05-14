@@ -6,10 +6,7 @@ A modern agent execution platform for building, deploying, and running AI-powere
 
 ## Overview
 
-OpenSeal provides a flexible runtime environment for executing AI agents with support for skills, triggers, and event-driven workflows. It consists of two main binaries:
-
-- **OpenSeal**: The core execution engine
-- **Hermes**: The agent runtime coordinator
+OpenSeal provides a flexible runtime environment for executing AI agents with support for skills, triggers, and event-driven workflows.
 
 ## Project Structure
 
@@ -26,9 +23,8 @@ openseal/
 ## Development
 
 ```bash
-# Build binaries
-make build    # Build openseal
-make hermes   # Build hermes
+# Build binary
+make build
 
 # Run tests
 make test

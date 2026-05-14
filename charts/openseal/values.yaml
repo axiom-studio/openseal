@@ -128,37 +128,6 @@ metrics:
   serviceMonitor:
     enabled: false
 
-# Hermes sidecar configuration
-# Hermes manages and runs external skills for OpenSeal
-# Named after the messenger god who delivers and manages
-hermes:
-  enabled: true
-  image:
-    repository: openseal/hermes
-    tag: latest
-    pullPolicy: IfNotPresent
-  # System skill repos to build on startup (comma-separated URLs)
-  systemSkillRepos: "https://github.com/openseal/skills.git"
-  securityContext:
-    runAsUser: 1000
-    runAsNonRoot: true
-  resources:
-    limits:
-      cpu: 500m
-      memory: 1Gi
-    requests:
-      cpu: 100m
-      memory: 256Mi
-  # PostgreSQL connection for skill persistence (restores skills from DB on startup)
-  postgres:
-    host: postgresql-postgresql
-    port: 5432
-    user: postgres
-    database: openseal
-    # Secret containing the password
-    secretName: postgresql-postgresql
-    secretKey: postgresql-password
-
 # Skills storage configuration
 # Skills are gRPC-based extensions that add node types to OpenSeal
 skills:
