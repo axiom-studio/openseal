@@ -3,17 +3,24 @@ package trigger
 import (
 	"context"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
+func newTestK8sEventTrigger() *K8sEventTrigger {
+	logger, _ := zap.NewDevelopment()
+	return NewK8sEventTrigger(nil, nil, nil, nil, logger.Sugar())
+}
+
 func TestK8sEventTrigger_Type(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 	if trigger.Type() != "k8s-event" {
 		t.Errorf("Expected type 'k8s-event', got %s", trigger.Type())
 	}
 }
 
 func TestK8sEventTrigger_ValidateConfig(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	configs := []map[string]interface{}{
 		{},
@@ -89,7 +96,7 @@ func TestK8sEventTrigger_Setup(t *testing.T) {
 		},
 	}
 
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,7 +112,7 @@ func TestK8sEventTrigger_Setup(t *testing.T) {
 }
 
 func TestK8sEventTrigger_SetupTeardown(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	config := map[string]interface{}{
 		"namespace": "default",
@@ -136,7 +143,7 @@ func TestK8sEventTrigger_SetupTeardown(t *testing.T) {
 }
 
 func TestK8sEventTrigger_MultipleInstances(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	configs := []map[string]interface{}{
 		{"namespace": "default", "reason": "BackOff"},
@@ -172,7 +179,7 @@ func TestK8sEventTrigger_MultipleInstances(t *testing.T) {
 }
 
 func TestK8sEventTrigger_ReplaceInstance(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	config1 := map[string]interface{}{
 		"namespace": "default",
@@ -207,7 +214,7 @@ func TestK8sEventTrigger_ReplaceInstance(t *testing.T) {
 }
 
 func TestK8sEventTrigger_InstanceConfig(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	config := map[string]interface{}{
 		"namespace":          "test-ns",
@@ -248,7 +255,7 @@ func TestK8sEventTrigger_InstanceConfig(t *testing.T) {
 }
 
 func TestK8sEventTrigger_DefaultValues(t *testing.T) {
-	trigger := NewK8sEventTrigger()
+	trigger := newTestK8sEventTrigger()
 
 	config := map[string]interface{}{}
 

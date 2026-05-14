@@ -78,7 +78,7 @@ func TestVectorSearchToolExecutor_Execute_Validation(t *testing.T) {
 				"tableName":        "documents",
 			},
 			args:        map[string]interface{}{},
-			expectedErr: "query argument is required",
+			expectedErr: "query argument is required for simple mode",
 		},
 		{
 			name: "empty query argument",
@@ -90,7 +90,7 @@ func TestVectorSearchToolExecutor_Execute_Validation(t *testing.T) {
 			args: map[string]interface{}{
 				"query": "",
 			},
-			expectedErr: "query argument is required",
+			expectedErr: "query argument is required for simple mode",
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestVectorSearchToolExecutor_GetEmbeddingConfig(t *testing.T) {
 			config: map[string]interface{}{
 				"embeddingProvider": "ollama",
 				"embeddingModel":    "nomic-embed-text",
-				"ollamaUrl":         "http://custom:11434",
+				"embeddingBaseUrl":  "http://custom:11434",
 			},
 			expectedProv:  "ollama",
 			expectedModel: "nomic-embed-text",
