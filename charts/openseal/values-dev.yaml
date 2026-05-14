@@ -11,9 +11,3 @@ image:
 devHostPath: "/home/k/axiom"
 devContainerPath: "/host/axiom"
 
-# Hermes sidecar dev config
-hermes:
-  image:
-    repository: "openseal-dev"
-    tag: "latest"
-    pullPolicy: "Never"
