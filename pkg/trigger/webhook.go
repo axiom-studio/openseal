@@ -224,19 +224,25 @@ func (t *WebhookTrigger) HandleWebhookWithResult(ctx context.Context, path strin
 		Timeout:      timeout,
 	}
 
-	// Call the handler - this triggers the workflow
-	// The handler should return the runId somehow
-	// For now, we need to modify the handler interface
-	if t.handlerWithRunId == nil {
-		return nil, 0, fmt.Errorf("handler with runId not configured")
-	}
-	runId, err := t.handlerWithRunId(ctx, instanceId, event)
-	if err != nil {
-		return nil, 0, err
+	// Call the handler - prefer handlerWithRunId if available, fall back to handler
+	if t.handlerWithRunId != nil {
+		runId, err := t.handlerWithRunId(ctx, instanceId, event)
+		if err != nil {
+			return nil, 0, err
+		}
+		result.RunId = runId
+		return result, runId, nil
 	}
 
-	result.RunId = runId
-	return result, runId, nil
+	if t.handler != nil {
+		if err := t.handler(ctx, instanceId, event); err != nil {
+			return nil, 0, err
+		}
+		result.RunId = 0
+		return result, 0, nil
+	}
+
+	return nil, 0, fmt.Errorf("no handler registered")
 }
 
 // SetHandlerWithRunId sets the handler that returns runId

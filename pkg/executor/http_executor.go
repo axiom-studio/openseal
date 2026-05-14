@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -84,6 +85,12 @@ func (e *HTTPExecutor) Execute(ctx context.Context, step *StepDefinition, resolv
 				if fileObj, err := ParseFileObject(resolvedConfig[key]); err == nil {
 					files = append(files, fileObj)
 				}
+			} else if urlStr, ok := resolvedConfig[key].(string); ok && urlStr != "" {
+				files = append(files, &FileObject{
+					Type:     "file",
+					URL:      urlStr,
+					Filename: filepath.Base(urlStr),
+				})
 			}
 		}
 	} else if IsFileObject(config["file"]) {
