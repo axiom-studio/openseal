@@ -361,6 +361,8 @@ func (e *VectorSearchToolExecutor) getEmbeddingConfig(config map[string]interfac
 			cfg.BaseURL = "https://api.cohere.ai/v1"
 		case "gemini":
 			cfg.BaseURL = "https://generativelanguage.googleapis.com/v1beta"
+		case "ollama":
+			cfg.BaseURL = "http://localhost:11434"
 		}
 	}
 

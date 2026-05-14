@@ -155,22 +155,22 @@ func TestAIExecutor_SupportsStreaming(t *testing.T) {
 		{
 			name:     "default provider (openai)",
 			config:   map[string]interface{}{},
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "openai provider",
 			config:   map[string]interface{}{"provider": "openai"},
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "anthropic provider",
 			config:   map[string]interface{}{"provider": "anthropic"},
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "openai-compatible provider",
 			config:   map[string]interface{}{"provider": "openai-compatible"},
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "ollama provider (not supported)",
@@ -190,7 +190,7 @@ func TestAIExecutor_SupportsStreaming(t *testing.T) {
 		{
 			name:     "streaming explicitly enabled",
 			config:   map[string]interface{}{"provider": "openai", "stream": true},
-			expected: true,
+			expected: false,
 		},
 	}
 

@@ -3,10 +3,17 @@ package trigger
 import (
 	"context"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
+func newTestK8sWatchTrigger() *K8sWatchTrigger {
+	logger, _ := zap.NewDevelopment()
+	return NewK8sWatchTrigger(nil, nil, nil, nil, logger.Sugar())
+}
+
 func TestK8sWatchTrigger_Type(t *testing.T) {
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 	if trigger.Type() != "k8s-watch" {
 		t.Errorf("Expected type 'k8s-watch', got %s", trigger.Type())
 	}
@@ -92,7 +99,7 @@ func TestK8sWatchTrigger_ValidateConfig(t *testing.T) {
 		},
 	}
 
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,7 +168,7 @@ func TestK8sWatchTrigger_Setup(t *testing.T) {
 		},
 	}
 
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,7 +184,7 @@ func TestK8sWatchTrigger_Setup(t *testing.T) {
 }
 
 func TestK8sWatchTrigger_SetupTeardown(t *testing.T) {
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	config := map[string]interface{}{
 		"resource":  "pods",
@@ -202,7 +209,7 @@ func TestK8sWatchTrigger_SetupTeardown(t *testing.T) {
 }
 
 func TestK8sWatchTrigger_MultipleInstances(t *testing.T) {
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	configs := []map[string]interface{}{
 		{"resource": "pods", "namespace": "default"},
@@ -238,7 +245,7 @@ func TestK8sWatchTrigger_MultipleInstances(t *testing.T) {
 }
 
 func TestK8sWatchTrigger_ReplaceInstance(t *testing.T) {
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	config1 := map[string]interface{}{
 		"resource":  "pods",
@@ -271,7 +278,7 @@ func TestK8sWatchTrigger_ReplaceInstance(t *testing.T) {
 }
 
 func TestK8sWatchTrigger_ShouldFireEvent(t *testing.T) {
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	instance := &k8sWatchInstance{
 		events: []string{"ADDED", "MODIFIED"},
@@ -298,7 +305,7 @@ func TestK8sWatchTrigger_ShouldFireEvent(t *testing.T) {
 }
 
 func TestK8sWatchTrigger_DefaultEvents(t *testing.T) {
-	trigger := NewK8sWatchTrigger()
+	trigger := newTestK8sWatchTrigger()
 
 	config := map[string]interface{}{
 		"resource": "pods",
