@@ -197,20 +197,14 @@ type FileServer struct {
 	grpcSkillRegistry *executor.GRPCSkillRegistry
 	sentinelURL       string
 	workerID          string
-	portManager       *PortManager
 }
 
 func NewFileServer(port int, logger *zap.SugaredLogger) *FileServer {
 	return &FileServer{
-		logger:      logger,
-		fileStore:   NewFileStore(logger),
-		port:        port,
-		portManager: NewPortManager(logger),
+		logger:    logger,
+		fileStore: NewFileStore(logger),
+		port:      port,
 	}
-}
-
-func (s *FileServer) GetPortManager() *PortManager {
-	return s.portManager
 }
 
 func (s *FileServer) SetGRPCSkillRegistry(registry *executor.GRPCSkillRegistry) {
@@ -251,19 +245,10 @@ func (s *FileServer) Start() error {
 		w.Write([]byte("ok"))
 	}).Methods("GET")
 
-	router.HandleFunc("/internal/skills/register", s.handleSkillRegister).Methods("POST")
-	router.HandleFunc("/internal/ports/lease", s.handleLeasePort).Methods("POST")
-	router.HandleFunc("/internal/ports/release", s.handleReleasePort).Methods("POST")
-	router.HandleFunc("/internal/ports/renew", s.handleRenewPort).Methods("POST")
-	router.HandleFunc("/internal/ports/stats", s.handlePortStats).Methods("GET")
-
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
 		Handler: router,
 	}
-
-	portManagerStopCh := make(chan struct{})
-	go s.portManager.StartCleanup(portManagerStopCh)
 
 	s.logger.Infow("starting file server", "port", s.port)
 	return s.server.ListenAndServe()
@@ -487,126 +472,3 @@ func respondJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-type SkillRegistrationRequest struct {
-	SkillID   string   `json:"skillId"`
-	Address   string   `json:"address"`
-	NodeTypes []string `json:"nodeTypes"`
-}
-
-type PortLeaseRequest struct {
-	SkillID string `json:"skillId"`
-}
-
-type PortLeaseResponse struct {
-	Success bool   `json:"success"`
-	Port    int    `json:"port"`
-	Address string `json:"address"`
-}
-
-type PortReleaseRequest struct {
-	SkillID string `json:"skillId"`
-	Port    int    `json:"port"`
-}
-
-type PortRenewRequest struct {
-	SkillID string `json:"skillId"`
-	Port    int    `json:"port"`
-}
-
-func (s *FileServer) handleLeasePort(w http.ResponseWriter, r *http.Request) {
-	var req PortLeaseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
-		return
-	}
-
-	if req.SkillID == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "skillId is required"})
-		return
-	}
-
-	port, err := s.portManager.LeasePort(req.SkillID)
-	if err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	respondJSON(w, http.StatusOK, PortLeaseResponse{
-		Success: true,
-		Port:    port,
-		Address: fmt.Sprintf("localhost:%d", port),
-	})
-}
-
-func (s *FileServer) handleReleasePort(w http.ResponseWriter, r *http.Request) {
-	var req PortReleaseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
-		return
-	}
-
-	if req.Port == 0 {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "port is required"})
-		return
-	}
-
-	if err := s.portManager.ReleasePort(req.Port); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"port":    req.Port,
-	})
-}
-
-func (s *FileServer) handleRenewPort(w http.ResponseWriter, r *http.Request) {
-	var req PortRenewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
-		return
-	}
-
-	if req.Port == 0 || req.SkillID == "" {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "port and skillId are required"})
-		return
-	}
-
-	if err := s.portManager.RenewLease(req.Port, req.SkillID); err != nil {
-		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"port":    req.Port,
-	})
-}
-
-func (s *FileServer) handlePortStats(w http.ResponseWriter, r *http.Request) {
-	stats := s.portManager.GetStats()
-	respondJSON(w, http.StatusOK, stats)
-}
-
-func (s *FileServer) handleSkillRegister(w http.ResponseWriter, r *http.Request) {
-	var req SkillRegistrationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
-		return
-	}
-
-	if s.grpcSkillRegistry != nil {
-		if err := s.grpcSkillRegistry.RegisterSkill(r.Context(), req.Address); err != nil {
-			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"success":   true,
-		"skillId":   req.SkillID,
-		"address":   req.Address,
-		"nodeTypes": req.NodeTypes,
-	})
-}
