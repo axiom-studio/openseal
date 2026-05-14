@@ -19,8 +19,17 @@ type DaemonConfig struct {
 	// Webhook server settings (used when a webhook trigger is present).
 	Webhook WebhookConfig `yaml:"webhook"`
 
+	// API server settings for the web GUI.
+	API APIConfig `yaml:"api"`
+
 	// LogLevel controls verbosity: "debug", "info", "warn", "error".
 	LogLevel string `yaml:"logLevel"`
+}
+
+// APIConfig configures the HTTP API server for the web GUI.
+type APIConfig struct {
+	// ListenAddr is the host:port the API server binds to.
+	ListenAddr string `yaml:"listenAddr"`
 }
 
 // TriggerConfigs groups trigger definitions by type.
@@ -82,6 +91,9 @@ func LoadDaemonConfig(filepath string) (*DaemonConfig, error) {
 	}
 	if cfg.Webhook.BaseURL == "" {
 		cfg.Webhook.BaseURL = "http://localhost:9090"
+	}
+	if cfg.API.ListenAddr == "" {
+		cfg.API.ListenAddr = ":8080"
 	}
 
 	if err := cfg.Validate(); err != nil {

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/axiom-studio/openseal/internal/daemon"
+	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/internal/workflow"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/trigger"
@@ -65,6 +66,17 @@ Options:
 
 	reg := executor.NewRegistry(nil)
 	pe := executor.NewPipelineExecutor(reg, sugar)
+
+	// API server for web GUI
+	runStore := server.NewRunStore(100)
+	apiServer := server.NewServer(reg, pe, runStore, sugar)
+	apiServer.SetWorkflows(workflows)
+
+	go func() {
+		if err := apiServer.ListenAndServe(cfg.API.ListenAddr); err != nil && err != http.ErrServerClosed {
+			sugar.Errorw("API server error", "error", err)
+		}
+	}()
 
 	tm := daemon.NewTriggerManager(sugar, cfg.Webhook.BaseURL)
 
@@ -136,4 +148,5 @@ Options:
 		sugar.Errorw("trigger stop error", "error", err)
 	}
 	server.Shutdown(ctx)
+	apiServer.Shutdown(ctx)
 }
