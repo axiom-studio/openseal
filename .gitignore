@@ -37,3 +37,5 @@ web/dist/
 # Local config
 daemon.yaml
 workflow.hcl
+__pycache__/
+*.pyc
