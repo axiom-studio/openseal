@@ -1,0 +1,184 @@
+// Package openseal provides the stable public API for embedding OpenSeal
+// as a library. Atlas and other consumers should import this package
+// rather than reaching into individual pkg/ subpackages.
+package openseal
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/types"
+	"go.uber.org/zap"
+)
+
+// Re-export key types so consumers only import this package.
+type (
+	NodeDefinition       = executor.NodeDefinition
+	ConnectionDefinition = executor.ConnectionDefinition
+	ExecutionResult      = executor.ExecutionResult
+	NodeResult           = executor.NodeResult
+	Registry             = executor.Registry
+	StepExecutor         = executor.StepExecutor
+	ExecutionGraph       = executor.ExecutionGraph
+
+	AgentNodeDefinition   = types.AgentNodeDefinition
+	AgentConnection       = types.AgentConnection
+	AgentLibraryBean      = types.AgentLibraryBean
+	AgentInstanceBean     = types.AgentInstanceBean
+	AgentWorkflow         = types.AgentWorkflow
+	AgentWorkflowBean     = types.AgentWorkflowBean
+
+	RunRecord      = runtime.RunRecord
+	RetryPolicy    = runtime.RetryPolicy
+	ExecutionStore = runtime.ExecutionStore
+)
+
+// Engine is the primary entry point for OpenSeal.
+// It wires together the registry, execution store, worker pool, and scheduler.
+type Engine struct {
+	registry  *executor.Registry
+	store     runtime.ExecutionStore
+	pool      *runtime.WorkerPool
+	scheduler *runtime.Scheduler
+	logger    *zap.SugaredLogger
+}
+
+// Option configures an Engine.
+type Option func(*Engine) error
+
+// New creates an Engine with the given options.
+// Defaults: MemoryStore (100 runs), 4 workers, default retry policy.
+func New(opts ...Option) (*Engine, error) {
+	logger, _ := zap.NewProduction()
+	sugar := logger.Sugar()
+
+	reg := executor.NewRegistry(nil)
+	store := runtime.NewMemoryStore(100)
+	pool := runtime.NewWorkerPool(
+		executor.NewPipelineExecutor(reg, sugar),
+		store,
+		sugar,
+		4,
+		runtime.DefaultRetryPolicy(),
+	)
+
+	e := &Engine{
+		registry:  reg,
+		store:     store,
+		pool:      pool,
+		scheduler: runtime.NewScheduler(pool, store),
+		logger:    sugar,
+	}
+
+	for _, opt := range opts {
+		if err := opt(e); err != nil {
+			return nil, fmt.Errorf("engine option: %w", err)
+		}
+	}
+
+	return e, nil
+}
+
+// Start begins background goroutines (worker pool).
+func (e *Engine) Start(ctx context.Context) {
+	e.pool.Start(ctx)
+}
+
+// Stop gracefully shuts down background goroutines.
+func (e *Engine) Stop() {
+	e.pool.Stop()
+}
+
+// ExecuteWorkflow runs a workflow synchronously and returns the result.
+// For async execution, use ScheduleWorkflow.
+func (e *Engine) ExecuteWorkflow(
+	ctx context.Context,
+	nodes []*executor.NodeDefinition,
+	connections []*executor.ConnectionDefinition,
+	startNodeID string,
+	triggerData map[string]interface{},
+) (*executor.ExecutionResult, error) {
+	pe := executor.NewPipelineExecutor(e.registry, e.logger)
+	return pe.Execute(ctx, 0, nodes, connections, startNodeID, triggerData, nil)
+}
+
+// ScheduleWorkflow enqueues a workflow for async execution.
+// Returns the run ID immediately. Check the store for completion status.
+func (e *Engine) ScheduleWorkflow(
+	ctx context.Context,
+	workflowName string,
+	nodes []*executor.NodeDefinition,
+	connections []*executor.ConnectionDefinition,
+	startNodeID string,
+	triggerData map[string]interface{},
+) (int, error) {
+	entry := runtime.WorkflowEntry{
+		Name:        workflowName,
+		Nodes:       nodes,
+		Connections: connections,
+		StartNodeID: startNodeID,
+	}
+	return e.scheduler.Schedule(ctx, entry, triggerData)
+}
+
+// Registry returns the executor registry for registering custom executors.
+func (e *Engine) Registry() *executor.Registry {
+	return e.registry
+}
+
+// Store returns the execution store.
+func (e *Engine) Store() runtime.ExecutionStore {
+	return e.store
+}
+
+// Logger returns the engine's logger.
+func (e *Engine) Logger() *zap.SugaredLogger {
+	return e.logger
+}
+
+// WithRegistry replaces the default registry.
+func WithRegistry(reg *executor.Registry) Option {
+	return func(e *Engine) error {
+		e.registry = reg
+		// Rebuild pool with new registry
+		pe := executor.NewPipelineExecutor(reg, e.logger)
+		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, 4, runtime.DefaultRetryPolicy())
+		e.scheduler = runtime.NewScheduler(e.pool, e.store)
+		return nil
+	}
+}
+
+// WithStore replaces the default in-memory store.
+func WithStore(store runtime.ExecutionStore) Option {
+	return func(e *Engine) error {
+		e.store = store
+		e.pool.SetStore(store)
+		e.scheduler = runtime.NewScheduler(e.pool, store)
+		return nil
+	}
+}
+
+// WithLogger replaces the default logger.
+func WithLogger(logger *zap.SugaredLogger) Option {
+	return func(e *Engine) error {
+		e.logger = logger
+		return nil
+	}
+}
+
+// WithWorkerPool configures the async worker pool.
+func WithWorkerPool(concurrency int, retry *runtime.RetryPolicy) Option {
+	return func(e *Engine) error {
+		pe := executor.NewPipelineExecutor(e.registry, e.logger)
+		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, concurrency, retry)
+		e.scheduler = runtime.NewScheduler(e.pool, e.store)
+		return nil
+	}
+}
+
+// BuildGraph is a convenience wrapper for executor.BuildGraph.
+func BuildGraph(nodes []*executor.NodeDefinition, connections []*executor.ConnectionDefinition) (*executor.ExecutionGraph, error) {
+	return executor.BuildGraph(nodes, connections)
+}

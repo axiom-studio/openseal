@@ -56,7 +56,9 @@ Options:
 		os.Exit(1)
 	}
 
-	result := validator.Validate(wf)
+	// Convert internal workflow type to validation type
+	vwf := toValidationWorkflow(wf)
+	result := validator.Validate(vwf)
 
 	if *jsonOut {
 		out, _ := json.MarshalIndent(result, "", "  ")
@@ -68,6 +70,29 @@ Options:
 	if !result.Valid {
 		os.Exit(1)
 	}
+}
+
+func toValidationWorkflow(wf *workflow.Workflow) *validation.Workflow {
+	vwf := &validation.Workflow{
+		Name:  wf.Name,
+		Nodes: make([]validation.Node, len(wf.Nodes)),
+		Edges: make([]validation.Edge, len(wf.Edges)),
+	}
+	for i, n := range wf.Nodes {
+		vwf.Nodes[i] = validation.Node{
+			ID:     n.ID,
+			Type:   n.Type,
+			Config: n.Config,
+		}
+	}
+	for i, e := range wf.Edges {
+		vwf.Edges[i] = validation.Edge{
+			From:      e.From,
+			To:        e.To,
+			Condition: e.Condition,
+		}
+	}
+	return vwf
 }
 
 func printValidationResult(result *validation.Result) {
