@@ -1,5 +1,5 @@
 // Package openseal provides the stable public API for embedding OpenSeal
-// as a library. Atlas and other consumers should import this package
+// as a library. Downstream consumers should import this package
 // rather than reaching into individual pkg/ subpackages.
 package openseal
 

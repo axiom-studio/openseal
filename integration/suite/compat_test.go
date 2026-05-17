@@ -30,7 +30,7 @@ func TestYAMLParsesAllFields(t *testing.T) {
 	}
 }
 
-func TestNodeCountAndTypesMatchAtlas(t *testing.T) {
+func TestNodeCountAndTypesMatchPlatform(t *testing.T) {
 	wf, err := LoadWorkflowYAML("document_processor_v2.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load workflow YAML: %v", err)
@@ -77,7 +77,7 @@ func TestNodeCountAndTypesMatchAtlas(t *testing.T) {
 	}
 }
 
-func TestAllAtlasNodeTypesHaveExecutors(t *testing.T) {
+func TestAllPlatformNodeTypesHaveExecutors(t *testing.T) {
 	wf, err := LoadWorkflowYAML("document_processor_v2.yaml")
 	if err != nil {
 		t.Fatalf("Failed to load workflow YAML: %v", err)

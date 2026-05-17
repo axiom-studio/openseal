@@ -7,7 +7,7 @@ import (
 
 // K8sClient is the interface for K8s operations.
 // OpenSeal ships with a direct-K8s implementation for standalone mode.
-// Cortex/Atlas injects a remote implementation that proxies to the Cortex API
+// The platform injects a remote implementation that proxies to the upstream API
 type K8sClient interface {
 	GetResource(ctx context.Context, clusterId int, namespace, name, kind string) (map[string]interface{}, error)
 	ListResources(ctx context.Context, clusterId int, namespace, kind, labelSelector, fieldSelector string) ([]map[string]interface{}, error)

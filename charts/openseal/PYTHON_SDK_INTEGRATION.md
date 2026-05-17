@@ -97,7 +97,7 @@ When Helm renders the chart, the `python-sdk-configmap.yaml` template:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "atlas.fullname" . }}-python-sdk
+  name: {{ include "openseal.fullname" . }}-python-sdk
   # ...
 data:
   axiom_sdk.py: |
