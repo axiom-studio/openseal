@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/axiom-studio/openseal/internal/workflow"
 	"github.com/axiom-studio/openseal/pkg/executor"
 )
 
@@ -39,7 +38,7 @@ func NewValidator(reg *executor.Registry) *Validator {
 }
 
 // Validate checks a workflow for structural and schema issues.
-func (v *Validator) Validate(wf *workflow.Workflow) *Result {
+func (v *Validator) Validate(wf *Workflow) *Result {
 	var issues []Issue
 
 	issues = append(issues, v.validateNodeIDs(wf)...)
@@ -68,7 +67,7 @@ func (v *Validator) Validate(wf *workflow.Workflow) *Result {
 	}
 }
 
-func (v *Validator) validateNodeIDs(wf *workflow.Workflow) []Issue {
+func (v *Validator) validateNodeIDs(wf *Workflow) []Issue {
 	var issues []Issue
 	seen := make(map[string]bool)
 	for _, n := range wf.Nodes {
@@ -84,7 +83,7 @@ func (v *Validator) validateNodeIDs(wf *workflow.Workflow) []Issue {
 	return issues
 }
 
-func (v *Validator) validateNodeTypes(wf *workflow.Workflow) []Issue {
+func (v *Validator) validateNodeTypes(wf *Workflow) []Issue {
 	var issues []Issue
 	for _, n := range wf.Nodes {
 		if n.Type == "" {
@@ -101,7 +100,7 @@ func (v *Validator) validateNodeTypes(wf *workflow.Workflow) []Issue {
 	return issues
 }
 
-func (v *Validator) validateEdges(wf *workflow.Workflow) []Issue {
+func (v *Validator) validateEdges(wf *Workflow) []Issue {
 	var issues []Issue
 	nodeSet := make(map[string]bool)
 	for _, n := range wf.Nodes {
@@ -126,7 +125,7 @@ func (v *Validator) validateEdges(wf *workflow.Workflow) []Issue {
 	return issues
 }
 
-func (v *Validator) validateNodeConfig(wf *workflow.Workflow) []Issue {
+func (v *Validator) validateNodeConfig(wf *Workflow) []Issue {
 	var issues []Issue
 	for _, n := range wf.Nodes {
 		meta, ok := v.nodeMeta[n.Type]
@@ -168,7 +167,7 @@ func (v *Validator) validateNodeConfig(wf *workflow.Workflow) []Issue {
 	return issues
 }
 
-func (v *Validator) validateGraph(wf *workflow.Workflow) []Issue {
+func (v *Validator) validateGraph(wf *Workflow) []Issue {
 	var issues []Issue
 
 	// Detect cycles
