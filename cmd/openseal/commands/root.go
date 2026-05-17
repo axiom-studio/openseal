@@ -20,6 +20,8 @@ func Execute(args []string) {
 		runCmd(args[1:])
 	case "daemon":
 		daemonCmd(args[1:])
+	case "validate":
+		validateCmd(args[1:])
 	case "skill":
 		skillCmd(args[1:])
 	case "workflow":
@@ -44,6 +46,7 @@ Usage:
 Commands:
   run       Execute a workflow from an HCL file
   daemon    Start the daemon with trigger-driven execution
+  validate  Validate a workflow HCL file
   skill     Manage skills (install, list)
   workflow  Manage workflows (create)
   version   Print version
