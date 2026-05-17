@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  openseal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: axiom-studio/openseal:latest
+    container_name: openseal
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # API + Web GUI
+      - "9090:9090"   # Webhook server
+    volumes:
+      - ./workflows:/app/workflows:ro
+      - ./docker/daemon.yaml:/app/daemon.yaml:ro
+      - openseal-data:/app/data
+    environment:
+      - OPENSEAL_LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+
+volumes:
+  openseal-data:
+    driver: local
