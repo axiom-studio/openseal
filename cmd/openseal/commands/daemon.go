@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/internal/workflow"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/trigger"
 	"go.uber.org/zap"
 )
@@ -67,9 +68,20 @@ Options:
 	reg := executor.NewRegistry(nil)
 	pe := executor.NewPipelineExecutor(reg, sugar)
 
+	// Execution store
+	store := runtime.NewMemoryStore(100)
+
+	// Worker pool for async execution
+	pool := runtime.NewWorkerPool(pe, store, sugar, 4, nil)
+	scheduler := runtime.NewScheduler(pool, store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pool.Start(ctx)
+
 	// API server for web GUI
-	runStore := server.NewRunStore(100)
-	apiServer := server.NewServer(reg, pe, runStore, sugar)
+	apiServer := server.NewServer(reg, pe, store, sugar)
 	apiServer.SetWorkflows(workflows)
 
 	go func() {
@@ -80,12 +92,37 @@ Options:
 
 	tm := daemon.NewTriggerManager(sugar, cfg.Webhook.BaseURL)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	instanceToWorkflow, err := tm.RegisterAll(ctx, cfg)
 	if err != nil {
 		sugar.Fatalf("failed to register triggers: %v", err)
+	}
+
+	// Build workflow entries once for scheduling
+	workflowEntries := make(map[string]runtime.WorkflowEntry)
+	for _, wf := range workflows {
+		entry := runtime.WorkflowEntry{
+			Name: wf.Name,
+		}
+		for _, n := range wf.Nodes {
+			entry.Nodes = append(entry.Nodes, &executor.NodeDefinition{
+				Id:     n.ID,
+				Name:   n.ID,
+				Type:   n.Type,
+				Config: n.Config,
+			})
+		}
+		for i, e := range wf.Edges {
+			entry.Connections = append(entry.Connections, &executor.ConnectionDefinition{
+				Id:           fmt.Sprintf("edge-%d", i),
+				SourceNodeId: e.From,
+				TargetNodeId: e.To,
+				Label:        e.Condition,
+			})
+		}
+		if len(entry.Nodes) > 0 {
+			entry.StartNodeID = entry.Nodes[0].Id
+		}
+		workflowEntries[wf.SourceFile] = entry
 	}
 
 	handler := trigger.TriggerHandler(func(ctx context.Context, instanceID int, event trigger.TriggerEvent) error {
@@ -94,26 +131,19 @@ Options:
 			sugar.Warnw("no workflow for instance", "instanceId", instanceID)
 			return nil
 		}
-		wf, ok := workflowMap[wfFile]
+		entry, ok := workflowEntries[wfFile]
 		if !ok {
-			sugar.Warnw("workflow file not found", "file", wfFile)
+			sugar.Warnw("workflow entry not found", "file", wfFile)
 			return nil
 		}
-		sugar.Infow("executing workflow from trigger", "workflow", wf.Name, "instanceId", instanceID)
-
-		nodes := convertNodes(wf.Nodes)
-		connections := convertEdges(wf.Edges)
-		startNodeId := ""
-		if len(nodes) > 0 {
-			startNodeId = nodes[0].Id
-		}
+		sugar.Infow("scheduling workflow from trigger", "workflow", entry.Name, "instanceId", instanceID)
 
 		triggerData := map[string]interface{}{
-			"type":  event.Type,
+			"type":   event.Type,
 			"source": event.Source,
-			"data":  event.Payload,
+			"data":   event.Payload,
 		}
-		_, err := pe.Execute(ctx, instanceID, nodes, connections, startNodeId, triggerData, nil)
+		_, err := scheduler.Schedule(ctx, entry, triggerData)
 		return err
 	})
 
@@ -128,13 +158,13 @@ Options:
 	})
 
 	sugar.Infow("starting webhook server", "addr", cfg.Webhook.ListenAddr)
-	server := &http.Server{
+	webhookServer := &http.Server{
 		Addr:    cfg.Webhook.ListenAddr,
 		Handler: mux,
 	}
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := webhookServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			sugar.Errorw("webhook server error", "error", err)
 		}
 	}()
@@ -147,6 +177,7 @@ Options:
 	if err := tm.Stop(ctx); err != nil {
 		sugar.Errorw("trigger stop error", "error", err)
 	}
-	server.Shutdown(ctx)
+	pool.Stop()
+	webhookServer.Shutdown(ctx)
 	apiServer.Shutdown(ctx)
 }

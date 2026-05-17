@@ -25,7 +25,12 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runID := s.store.Create(wf.Name)
+	ctx := context.Background()
+	runID, err := s.store.CreateRun(ctx, wf.Name)
+	if err != nil {
+		s.respondError(w, 500, "failed to create run: "+err.Error())
+		return
+	}
 
 	go func() {
 		nodes := make([]*executor.NodeDefinition, len(wf.Nodes))
@@ -52,19 +57,19 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 			startNodeID = nodes[0].Id
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		execCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		result, err := s.pe.Execute(ctx, runID, nodes, connections, startNodeID, nil, nil)
+		result, err := s.pe.Execute(execCtx, runID, nodes, connections, startNodeID, nil, nil)
 		if err != nil {
-			s.store.Complete(runID, "failed", err)
+			s.store.UpdateRunStatus(execCtx, runID, "failed", err)
 			return
 		}
 
 		for nodeID, nr := range result.NodeResults {
-			s.store.UpdateNodeResult(runID, nodeID, nr)
+			s.store.UpdateNodeResult(execCtx, runID, nodeID, nr)
 		}
-		s.store.Complete(runID, result.Status, result.Error)
+		s.store.UpdateRunStatus(execCtx, runID, result.Status, result.Error)
 	}()
 
 	s.respondJSON(w, 202, map[string]interface{}{
@@ -75,7 +80,12 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	runs := s.store.List()
+	ctx := context.Background()
+	runs, err := s.store.ListRuns(ctx, 0)
+	if err != nil {
+		s.respondError(w, 500, "failed to list runs: "+err.Error())
+		return
+	}
 	s.respondJSON(w, 200, runs)
 }
 
@@ -92,8 +102,13 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, ok := s.store.Get(id)
-	if !ok {
+	ctx := context.Background()
+	run, err := s.store.GetRun(ctx, id)
+	if err != nil {
+		s.respondError(w, 500, "failed to get run: "+err.Error())
+		return
+	}
+	if run == nil {
 		s.respondError(w, 404, "run not found")
 		return
 	}
