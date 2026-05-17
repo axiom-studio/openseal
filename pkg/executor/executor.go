@@ -68,7 +68,7 @@ type Registry struct {
 // DEPRECATED: Use NewEmptyRegistry() and load skills via skill.PluginLoader instead
 // For backward compatibility, this still auto-registers all executors
 // For K8s executors, pass a K8sClient to enable K8s operations.
-// OpenSeal provides a direct-K8s implementation; Cortex/Atlas injects a remote proxy.
+// OpenSeal provides a direct-K8s implementation; the platform injects a remote proxy.
 func NewRegistry(k8sClient K8sClient) *Registry {
 	r := &Registry{
 		executors: make(map[string]StepExecutor),
@@ -106,7 +106,7 @@ func NewRegistry(k8sClient K8sClient) *Registry {
 
 	// Register K8s executors when a K8sClient is provided
 	// OpenSeal provides a direct-K8s implementation for standalone mode.
-	// Cortex/Atlas injects a remote proxy that delegates to the Cortex API.
+	// The platform injects a remote proxy that delegates to the upstream API.
 	if k8sClient != nil {
 		r.Register(NewK8sGetExecutor(k8sClient))
 		r.Register(NewK8sListExecutor(k8sClient))

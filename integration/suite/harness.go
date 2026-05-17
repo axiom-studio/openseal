@@ -1,5 +1,5 @@
 // Package suite provides integration test utilities for verifying OpenSeal workflow
-// execution compatibility with Atlas behavior.
+// execution compatibility with platform behavior.
 package suite
 
 import (
@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// WorkflowYAML represents the top-level YAML structure exported by Atlas/Axiom Studio.
+// WorkflowYAML represents the top-level YAML structure exported by the platform.
 // This mirrors AgentLibraryVersionExport but uses YAML struct tags for parsing.
 type WorkflowYAML struct {
 	APIVersion string                    `yaml:"apiVersion"`
