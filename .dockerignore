@@ -1,11 +1,10 @@
 # Binaries
+openseal
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary
 *.test
 
 # Output of the go coverage tool
@@ -13,9 +12,6 @@
 
 # Dependency directories
 vendor/
-
-# Go workspace file
-go.work
 
 # IDE
 .idea/
@@ -31,10 +27,25 @@ Thumbs.db
 # Build output
 bin/
 dist/
+
+# Node modules
 web/node_modules/
 web/dist/
 
-# Local config (root level only)
-/daemon.yaml
-/workflow.hcl
-/skills/repos/skills/repos/
+# Local config
+daemon.yaml
+workflow.hcl
+bad_workflow.hcl
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+*.md
+LICENSE
