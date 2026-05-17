@@ -3,9 +3,25 @@ package daemon
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
+
+// DefaultDaemonConfig returns a sensible default configuration.
+func DefaultDaemonConfig() *DaemonConfig {
+	return &DaemonConfig{
+		WorkflowsDir: "workflows",
+		LogLevel:     "info",
+		Webhook: WebhookConfig{
+			ListenAddr: ":9090",
+			BaseURL:    "http://localhost:9090",
+		},
+		API: APIConfig{
+			ListenAddr: ":8080",
+		},
+	}
+}
 
 // DaemonConfig is the top-level configuration for the daemon,
 // loaded from a YAML file (typically daemon.yaml).
@@ -72,9 +88,17 @@ type WebhookConfig struct {
 }
 
 // LoadDaemonConfig reads and validates a daemon config file.
-func LoadDaemonConfig(filepath string) (*DaemonConfig, error) {
-	data, err := os.ReadFile(filepath)
+// If the file does not exist, a default config is written and returned.
+func LoadDaemonConfig(path string) (*DaemonConfig, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			cfg := DefaultDaemonConfig()
+			if err := WriteDaemonConfig(path, cfg); err != nil {
+				return nil, fmt.Errorf("write default config: %w", err)
+			}
+			return cfg, nil
+		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
@@ -101,6 +125,18 @@ func LoadDaemonConfig(filepath string) (*DaemonConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// WriteDaemonConfig serializes a config to YAML and writes it to disk.
+func WriteDaemonConfig(path string, cfg *DaemonConfig) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // Validate checks that required fields are present and trigger configs are valid.

@@ -48,6 +48,10 @@ Options:
 		sugar.Fatalf("failed to load config: %v", err)
 	}
 
+	if _, statErr := os.Stat(*configPath); os.IsNotExist(statErr) {
+		sugar.Infow("auto-created default config", "path", *configPath)
+	}
+
 	sugar.Infow("daemon config loaded",
 		"workflowsDir", cfg.WorkflowsDir,
 		"logLevel", cfg.LogLevel,
