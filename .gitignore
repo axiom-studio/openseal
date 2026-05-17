@@ -37,5 +37,4 @@ web/dist/
 # Local config
 daemon.yaml
 workflow.hcl
-__pycache__/
-*.pyc
+skills/repos/skills/repos/
