@@ -9,6 +9,7 @@ import (
 	"time"
 
 	internalWorkflow "github.com/axiom-studio/openseal/internal/workflow"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"go.uber.org/zap"
 )
@@ -17,7 +18,7 @@ import (
 type Server struct {
 	registry     *executor.Registry
 	pe           *executor.PipelineExecutor
-	store        *RunStore
+	store        runtime.ExecutionStore
 	workflows    map[string]*WorkflowEntry
 	muWorkflows  sync.RWMutex
 	logger       *zap.SugaredLogger
@@ -48,7 +49,7 @@ type WorkflowEdge struct {
 }
 
 // NewServer creates a new API server.
-func NewServer(registry *executor.Registry, pe *executor.PipelineExecutor, store *RunStore, logger *zap.SugaredLogger) *Server {
+func NewServer(registry *executor.Registry, pe *executor.PipelineExecutor, store runtime.ExecutionStore, logger *zap.SugaredLogger) *Server {
 	s := &Server{
 		registry:  registry,
 		pe:        pe,
