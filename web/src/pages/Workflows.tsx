@@ -32,12 +32,12 @@ export default function Workflows() {
 
   return (
     <div className="page">
-      <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <header className="page-header">
         <div>
           <h1>Workflows</h1>
           <p className="page-subtitle">{workflows.length} workflow{workflows.length !== 1 ? 's' : ''} loaded</p>
         </div>
-        <Link to="/builder" className="btn-primary" style={{ textDecoration: 'none' }}>
+        <Link to="/builder" className="btn-primary">
           + New Workflow
         </Link>
       </header>

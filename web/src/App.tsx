@@ -1,4 +1,4 @@
-import { Routes, Route, NavLink } from 'react-router-dom';
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import Workflows from './pages/Workflows';
 import Runs from './pages/Runs';
 import Execution from './pages/Execution';
@@ -6,6 +6,9 @@ import Skills from './pages/Skills';
 import Builder from './pages/Builder';
 
 function App() {
+  const location = useLocation();
+  const isBuilder = location.pathname === '/builder';
+
   return (
     <div className="app">
       <nav className="sidebar">
@@ -36,7 +39,7 @@ function App() {
           <span>System Online</span>
         </div>
       </nav>
-      <main className="content">
+      <main className={isBuilder ? 'content content-full' : 'content'}>
         <Routes>
           <Route path="/" element={<Workflows />} />
           <Route path="/builder" element={<Builder />} />

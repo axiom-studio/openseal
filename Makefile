@@ -2,6 +2,7 @@
 
 build-web:
 	cd web && npm install && npm run build
+	rm -rf pkg/webui/dist
 	cp -r web/dist pkg/webui/dist
 
 build: build-web

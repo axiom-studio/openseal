@@ -1,568 +1,530 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { api, type WorkflowEntry, type WorkflowEdge, type ExecutorInfo } from '../api/client';
-import WorkflowGraph from '../components/WorkflowGraph';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { api, type WorkflowEntry, type ExecutorInfo } from '../api/client';
 
-type BuilderStep =
-  | 'start'
-  | 'name'
-  | 'trigger_type'
-  | 'trigger_config'
-  | 'add_action'
-  | 'action_config'
-  | 'connect'
-  | 'review';
-
-interface ChatMessage {
-  role: 'system' | 'user';
-  text: string;
-  quickActions?: string[];
-}
-
-interface DraftNode {
+interface CanvasNode {
   id: string;
   type: string;
+  x: number;
+  y: number;
   config: Record<string, unknown>;
 }
 
-const TRIGGER_TYPES = ['webhook', 'cron', 'manual', 'k8s-event', 'k8s-watch'];
+interface CanvasEdge {
+  id: string;
+  from: string;
+  to: string;
+}
 
-const TRIGGER_PROMPTS: Record<string, Record<string, string>> = {
-  webhook: { path: 'Webhook path (e.g. /webhook)', method: 'HTTP method (GET, POST, etc.)' },
-  cron: { expression: 'Cron expression (with seconds field, e.g. "0 */5 * * * *")' },
-  manual: {},
-  'k8s-event': { namespace: 'Namespace to watch', resource: 'Resource type' },
-  'k8s-watch': { namespace: 'Namespace to watch', resource: 'Resource type' },
-};
+type DragState =
+  | { kind: 'idle' }
+  | { kind: 'node'; nodeId: string; offsetX: number; offsetY: number }
+  | { kind: 'connect'; fromId: string };
+
+const NODE_W = 168;
+const NODE_H = 72;
+const PORT_R = 5;
 
 export default function Builder() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [step, setStep] = useState<BuilderStep>('start');
-  const [draftName, setDraftName] = useState('');
-  const [draftNodes, setDraftNodes] = useState<DraftNode[]>([]);
-  const [draftEdges, setDraftEdges] = useState<WorkflowEdge[]>([]);
+  const [workflowName, setWorkflowName] = useState('untitled');
+  const [nodes, setNodes] = useState<CanvasNode[]>([]);
+  const [edges, setEdges] = useState<CanvasEdge[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<DragState>({ kind: 'idle' });
+  const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const [skills, setSkills] = useState<ExecutorInfo[]>([]);
-  const [configuringNodeIdx, setConfiguringNodeIdx] = useState<number | null>(null);
-  const [configuringKeys, setConfiguringKeys] = useState<string[]>([]);
-  const [configuringKeyIdx, setConfiguringKeyIdx] = useState(0);
-  const [pendingConfig, setPendingConfig] = useState<Record<string, unknown>>({});
-  const [hclPreview, setHclPreview] = useState('');
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  useEffect(scrollToBottom, [messages]);
+  const [validation, setValidation] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.listSkills().then(setSkills).catch(() => {});
   }, []);
 
-  const sendSystem = useCallback((text: string, quickActions?: string[]) => {
-    setMessages((prev) => [...prev, { role: 'system', text, quickActions }]);
-  }, []);
-
-  const sendUser = useCallback((text: string) => {
-    setMessages((prev) => [...prev, { role: 'user', text }]);
-  }, []);
-
-  const draftWorkflow = useCallback((): WorkflowEntry => ({
-    name: draftName,
-    source: `${draftName}.hcl`,
-    nodes: draftNodes.map((n) => ({ id: n.id, type: n.type, config: n.config })),
-    edges: draftEdges,
-  }), [draftName, draftNodes, draftEdges]);
-
-  const updateHCLPreview = useCallback(async () => {
-    if (draftNodes.length === 0) {
-      setHclPreview('');
-      return;
-    }
-    const wf = draftWorkflow();
-    try {
-      const res = await api.validateWorkflow(wf);
-      if (res.valid) {
-        // Build a pseudo-HCL for preview since we don't have a client-side renderer
-        let hcl = `workflow "${wf.name}" {\n`;
-        for (const n of wf.nodes) {
-          hcl += `  node ${n.type} "${n.id}" {\n`;
-          for (const [k, v] of Object.entries(n.config || {})) {
-            const val = typeof v === 'string' ? `"${v}"` : String(v);
-            hcl += `    ${k} = ${val}\n`;
-          }
-          hcl += `  }\n`;
-        }
-        for (const e of wf.edges) {
-          hcl += `  edge "${e.from}" "${e.to}"`;
-          if (e.condition) hcl += ` { condition = "${e.condition}" }`;
-          hcl += '\n';
-        }
-        hcl += '}\n';
-        setHclPreview(hcl);
-      } else {
-        setHclPreview(`// Validation issues:\n${res.issues.map((i) => `// [${i.level}] ${i.message}`).join('\n')}`);
-      }
-    } catch {
-      setHclPreview('// Unable to generate preview');
-    }
-  }, [draftWorkflow, draftNodes.length]);
-
+  // Keyboard shortcuts
   useEffect(() => {
-    updateHCLPreview();
-  }, [updateHCLPreview]);
-
-  const startBuilder = () => {
-    setStep('name');
-    sendSystem('What would you like to name your workflow?', []);
-  };
-
-  const handleName = (text: string) => {
-    const name = text.trim();
-    if (!name) {
-      sendSystem('Please provide a valid workflow name.', []);
-      return;
-    }
-    setDraftName(name);
-    setStep('trigger_type');
-    sendSystem(
-      `Great. Let's add a trigger node. Pick a trigger type:`,
-      TRIGGER_TYPES,
-    );
-  };
-
-  const handleTriggerType = (text: string) => {
-    const type_ = text.trim().toLowerCase();
-    if (!TRIGGER_TYPES.includes(type_)) {
-      sendSystem(`Unknown trigger type "${type_}". Pick from: ${TRIGGER_TYPES.join(', ')}`, TRIGGER_TYPES);
-      return;
-    }
-    const nodeId = type_ === 'manual' ? 'trigger' : `${type_.replace(/-/g, '_')}_trigger`;
-    const newNode: DraftNode = { id: nodeId, type: type_, config: {} };
-    setDraftNodes([newNode]);
-    const prompts = TRIGGER_PROMPTS[type_] || {};
-    const keys = Object.keys(prompts);
-    if (keys.length === 0) {
-      setStep('add_action');
-      sendSystem(
-        `Trigger node "${nodeId}" (${type_}) added. What action nodes should run next?`,
-        skills.filter((s) => !TRIGGER_TYPES.includes(s.type)).map((s) => s.type),
-      );
-    } else {
-      setStep('trigger_config');
-      setConfiguringNodeIdx(0);
-      setConfiguringKeys(keys);
-      setConfiguringKeyIdx(0);
-      setPendingConfig({});
-      sendSystem(`${keys[0]}: ${prompts[keys[0]]}`, []);
-    }
-  };
-
-  const handleConfig = (text: string) => {
-    const key = configuringKeys[configuringKeyIdx];
-    const nextIdx = configuringKeyIdx + 1;
-    const updatedConfig = { ...pendingConfig, [key]: text.trim() };
-    setPendingConfig(updatedConfig);
-
-    if (nextIdx < configuringKeys.length) {
-      setConfiguringKeyIdx(nextIdx);
-      const prompts = TRIGGER_PROMPTS[draftNodes[configuringNodeIdx!].type] || {};
-      const nextKey = configuringKeys[nextIdx];
-      sendSystem(`${nextKey}: ${prompts[nextKey]}`, []);
-    } else {
-      // Done configuring this node
-      setDraftNodes((prev) => {
-        const copy = [...prev];
-        copy[configuringNodeIdx!] = { ...copy[configuringNodeIdx!], config: updatedConfig };
-        return copy;
-      });
-      setConfiguringNodeIdx(null);
-      setConfiguringKeys([]);
-      setConfiguringKeyIdx(0);
-      setPendingConfig({});
-      setStep('add_action');
-      sendSystem(
-        `Node configured. What action nodes should run next?`,
-        skills.filter((s) => !TRIGGER_TYPES.includes(s.type)).map((s) => s.type),
-      );
-    }
-  };
-
-  const handleAddAction = (text: string) => {
-    const type_ = text.trim().toLowerCase();
-    if (type_ === 'done' || type_ === 'no more' || type_ === 'finish') {
-      if (draftNodes.length <= 1) {
-        sendSystem('Add at least one action node before finishing.', []);
-        return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedId) {
+          deleteNode(selectedId);
+        }
       }
-      setStep('connect');
-      sendSystem(
-        `How should nodes connect? You can type pairs like "a -> b", or click "Use linear" to connect them in order.`,
-        ['Use linear'],
-      );
-      return;
-    }
-    const skill = skills.find((s) => s.type === type_);
-    if (!skill) {
-      sendSystem(
-        `Unknown node type "${type_}". Pick from the list or type "done" to finish.`,
-        [...skills.filter((s) => !TRIGGER_TYPES.includes(s.type)).map((s) => s.type), 'done'],
-      );
-      return;
-    }
-    const id = `${type_.replace(/-/g, '_')}_${draftNodes.filter((n) => n.type === type_).length + 1}`;
-    const newNode: DraftNode = { id, type: type_, config: {} };
-    setDraftNodes((prev) => [...prev, newNode]);
-    setConfiguringNodeIdx(draftNodes.length); // index of the new node
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId, nodes, edges]);
 
-    // Build config keys from inputSchema if available
-    const schema = skill.inputSchema || {};
-    const props = (schema.properties || {}) as Record<string, { type?: string; description?: string }>;
-    const required = (schema.required || []) as string[];
-    const keys = Object.keys(props).filter((k) => required.includes(k));
-    if (keys.length > 0) {
-      setStep('action_config');
-      setConfiguringKeys(keys);
-      setConfiguringKeyIdx(0);
-      setPendingConfig({});
-      sendSystem(`${keys[0]} (${props[keys[0]]?.type || 'string'}): ${props[keys[0]]?.description || 'Required config'}`, []);
-    } else {
-      sendSystem(
-        `Added "${id}" (${type_}). Add another node or type "done" to finish.`,
-        [...skills.filter((s) => !TRIGGER_TYPES.includes(s.type)).map((s) => s.type), 'done'],
-      );
+  const toWorkflow = useCallback((): WorkflowEntry => ({
+    name: workflowName,
+    source: `${workflowName}.hcl`,
+    nodes: nodes.map((n) => ({ id: n.id, type: n.type, config: n.config })),
+    edges: edges.map((e) => ({ from: e.from, to: e.to })),
+  }), [workflowName, nodes, edges]);
+
+  const addNode = useCallback((type: string, x: number, y: number) => {
+    const count = nodes.filter((n) => n.type === type).length;
+    const id = `${type}_${count + 1}`;
+    setNodes((prev) => [...prev, { id, type, x: x - NODE_W / 2, y: y - NODE_H / 2, config: {} }]);
+    setSelectedId(id);
+  }, [nodes]);
+
+  const deleteNode = useCallback((id: string) => {
+    setNodes((prev) => prev.filter((n) => n.id !== id));
+    setEdges((prev) => prev.filter((e) => e.from !== id && e.to !== id));
+    if (selectedId === id) setSelectedId(null);
+  }, [selectedId]);
+
+  const updateNodeConfig = useCallback((id: string, config: Record<string, unknown>) => {
+    setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, config } : n)));
+  }, []);
+
+  const updateNodeId = useCallback((oldId: string, newId: string) => {
+    if (!newId || newId === oldId) return;
+    if (nodes.some((n) => n.id === newId)) return;
+    setNodes((prev) => prev.map((n) => (n.id === oldId ? { ...n, id: newId } : n)));
+    setEdges((prev) => prev.map((e) => ({
+      ...e,
+      from: e.from === oldId ? newId : e.from,
+      to: e.to === oldId ? newId : e.to,
+    })));
+    setSelectedId(newId);
+  }, [nodes]);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const type = e.dataTransfer.getData('skillType');
+    if (!type || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    addNode(type, e.clientX - rect.left, e.clientY - rect.top);
+  };
+
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (e.target === canvasRef.current || (e.target as HTMLElement).classList.contains('canvas-grid')) {
+      setSelectedId(null);
     }
   };
 
-  const handleActionConfig = (text: string) => {
-    const key = configuringKeys[configuringKeyIdx];
-    const nextIdx = configuringKeyIdx + 1;
-    const updatedConfig = { ...pendingConfig, [key]: text.trim() };
-    setPendingConfig(updatedConfig);
+  const handleNodeMouseDown = (e: React.MouseEvent, node: CanvasNode) => {
+    e.stopPropagation();
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('port-output')) {
+      setDrag({ kind: 'connect', fromId: node.id });
+      setSelectedId(node.id);
+      return;
+    }
+    setSelectedId(node.id);
+    setDrag({
+      kind: 'node',
+      nodeId: node.id,
+      offsetX: e.clientX,
+      offsetY: e.clientY,
+    });
+  };
 
-    if (nextIdx < configuringKeys.length) {
-      setConfiguringKeyIdx(nextIdx);
-      const skill = skills.find((s) => s.type === draftNodes[configuringNodeIdx!].type);
-      const schema = skill?.inputSchema || {};
-      const props = (schema.properties || {}) as Record<string, { type?: string; description?: string }>;
-      const nextKey = configuringKeys[nextIdx];
-      sendSystem(`${nextKey} (${props[nextKey]?.type || 'string'}): ${props[nextKey]?.description || 'Required config'}`, []);
-    } else {
-      setDraftNodes((prev) => {
-        const copy = [...prev];
-        copy[configuringNodeIdx!] = { ...copy[configuringNodeIdx!], config: updatedConfig };
-        return copy;
-      });
-      setConfiguringNodeIdx(null);
-      setConfiguringKeys([]);
-      setConfiguringKeyIdx(0);
-      setPendingConfig({});
-      setStep('add_action');
-      sendSystem(
-        `Node configured. Add another node or type "done" to finish.`,
-        [...skills.filter((s) => !TRIGGER_TYPES.includes(s.type)).map((s) => s.type), 'done'],
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setMouse({ x, y });
+
+    if (drag.kind === 'node') {
+      const dx = e.clientX - drag.offsetX;
+      const dy = e.clientY - drag.offsetY;
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === drag.nodeId ? { ...n, x: n.x + dx, y: n.y + dy } : n
+        )
       );
+      setDrag({ ...drag, offsetX: e.clientX, offsetY: e.clientY });
     }
   };
 
-  const handleConnect = (text: string) => {
-    if (text.trim().toLowerCase() === 'use linear') {
-      const edges: WorkflowEdge[] = [];
-      for (let i = 0; i < draftNodes.length - 1; i++) {
-        edges.push({ from: draftNodes[i].id, to: draftNodes[i + 1].id });
+  const handleMouseUp = (e: React.MouseEvent) => {
+    if (drag.kind === 'connect' && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      // Find if we dropped on a node's input port
+      for (const n of nodes) {
+        if (n.id === drag.fromId) continue;
+        const px = n.x + NODE_W / 2;
+        const py = n.y;
+        const dist = Math.hypot(mx - px, my - py);
+        if (dist < 20) {
+          const exists = edges.some((ed) => ed.from === drag.fromId && ed.to === n.id);
+          if (!exists) {
+            setEdges((prev) => [
+              ...prev,
+              { id: `${drag.fromId}-${n.id}-${Date.now()}`, from: drag.fromId, to: n.id },
+            ]);
+          }
+          break;
+        }
       }
-      setDraftEdges(edges);
-      setStep('review');
-      sendSystem(
-        `Workflow "${draftName}" is ready. Review the graph and HCL on the right, then click Save.`,
-        ['Save workflow', 'Add more nodes', 'Reset edges'],
-      );
-      return;
     }
-    // Parse "a -> b" format
-    const match = text.trim().match(/(.+?)\s*->\s*(.+)/);
-    if (!match) {
-      sendSystem('Type connections as "from -> to" or click "Use linear".', ['Use linear']);
-      return;
-    }
-    const from = match[1].trim();
-    const to = match[2].trim();
-    const fromExists = draftNodes.some((n) => n.id === from);
-    const toExists = draftNodes.some((n) => n.id === to);
-    if (!fromExists || !toExists) {
-      sendSystem(`Unknown node(s). Available: ${draftNodes.map((n) => n.id).join(', ')}`, ['Use linear']);
-      return;
-    }
-    setDraftEdges((prev) => [...prev, { from, to }]);
-    sendSystem(
-      `Added edge ${from} -> ${to}. Type another connection or click "Done connecting".`,
-      ['Done connecting', 'Use linear'],
-    );
+    setDrag({ kind: 'idle' });
   };
 
-  const handleReviewAction = (text: string) => {
-    const t = text.trim().toLowerCase();
-    if (t === 'save workflow') {
-      saveWorkflow();
-    } else if (t === 'add more nodes') {
-      setStep('add_action');
-      sendSystem(
-        'What action node should we add?',
-        skills.filter((s) => !TRIGGER_TYPES.includes(s.type)).map((s) => s.type),
-      );
-    } else if (t === 'reset edges') {
-      setDraftEdges([]);
-      setStep('connect');
-      sendSystem(
-        'Edges cleared. How should nodes connect?',
-        ['Use linear'],
-      );
-    } else if (t === 'done connecting') {
-      setStep('review');
-      sendSystem(
-        `Workflow "${draftName}" is ready. Review and click Save when satisfied.`,
-        ['Save workflow', 'Add more nodes', 'Reset edges'],
-      );
-    } else {
-      sendSystem('Click an action above or type your choice.', ['Save workflow', 'Add more nodes', 'Reset edges']);
+  const handleSave = async () => {
+    if (nodes.length === 0) {
+      setValidation('Add at least one node before saving.');
+      return;
     }
-  };
-
-  const saveWorkflow = async () => {
     setSaving(true);
-    setSaveError('');
+    setValidation(null);
     try {
-      const wf = draftWorkflow();
-      await api.createWorkflow(wf);
-      sendSystem(`Workflow "${draftName}" saved successfully! It will appear on the Workflows page.`, ['Build another']);
-      setStep('start');
-      setDraftName('');
-      setDraftNodes([]);
-      setDraftEdges([]);
-      setHclPreview('');
-    } catch (e: any) {
-      setSaveError(e.message || 'Failed to save');
-      sendSystem(`Error saving: ${e.message || 'unknown error'}`, ['Retry save', 'Edit more']);
+      await api.createWorkflow(toWorkflow());
+      setValidation('Workflow saved successfully.');
+    } catch (err: any) {
+      setValidation(`Save failed: ${err.message}`);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    const text = input.trim();
-    setInput('');
-    sendUser(text);
-
-    switch (step) {
-      case 'start':
-        startBuilder();
-        break;
-      case 'name':
-        handleName(text);
-        break;
-      case 'trigger_type':
-        handleTriggerType(text);
-        break;
-      case 'trigger_config':
-        handleConfig(text);
-        break;
-      case 'action_config':
-        handleActionConfig(text);
-        break;
-      case 'add_action':
-        handleAddAction(text);
-        break;
-      case 'connect':
-        handleConnect(text);
-        break;
-      case 'review':
-        handleReviewAction(text);
-        break;
+  const handleValidate = async () => {
+    setValidation(null);
+    try {
+      const res = await api.validateWorkflow(toWorkflow());
+      setValidation(res.valid ? 'Workflow is valid.' : `Invalid: ${res.issues.map((i) => i.message).join('; ')}`);
+    } catch (err: any) {
+      setValidation(`Validation error: ${err.message}`);
     }
   };
 
-  const handleQuickAction = (action: string) => {
-    setInput(action);
-    setTimeout(() => {
-      setInput('');
-      sendUser(action);
-      switch (step) {
-        case 'start':
-          startBuilder();
-          break;
-        case 'name':
-          handleName(action);
-          break;
-        case 'trigger_type':
-          handleTriggerType(action);
-          break;
-        case 'trigger_config':
-          handleConfig(action);
-          break;
-        case 'action_config':
-          handleActionConfig(action);
-          break;
-        case 'add_action':
-          handleAddAction(action);
-          break;
-        case 'connect':
-          handleConnect(action);
-          break;
-        case 'review':
-          handleReviewAction(action);
-          break;
+  const handleAutoLayout = () => {
+    if (nodes.length === 0) return;
+    const levels = new Map<string, number>();
+    const incoming = new Map<string, number>();
+    const adj = new Map<string, string[]>();
+    for (const n of nodes) {
+      incoming.set(n.id, 0);
+      adj.set(n.id, []);
+    }
+    for (const e of edges) {
+      incoming.set(e.to, (incoming.get(e.to) || 0) + 1);
+      adj.set(e.from, [...(adj.get(e.from) || []), e.to]);
+    }
+    const queue: string[] = [];
+    for (const [id, count] of incoming) {
+      if (count === 0) queue.push(id);
+    }
+    let qi = 0;
+    while (qi < queue.length) {
+      const id = queue[qi++];
+      const lvl = levels.get(id) || 0;
+      for (const next of adj.get(id) || []) {
+        levels.set(next, Math.max(levels.get(next) || 0, lvl + 1));
+        incoming.set(next, (incoming.get(next) || 0) - 1);
+        if (incoming.get(next) === 0) queue.push(next);
       }
-    }, 0);
+    }
+    const byLevel = new Map<number, string[]>();
+    let maxLevel = 0;
+    for (const [id, lvl] of levels) {
+      const arr = byLevel.get(lvl) || [];
+      arr.push(id);
+      byLevel.set(lvl, arr);
+      maxLevel = Math.max(maxLevel, lvl);
+    }
+    // Handle orphaned nodes (cycles or disconnected)
+    const placed = new Set(levels.keys());
+    for (const n of nodes) {
+      if (!placed.has(n.id)) {
+        const lvl = maxLevel + 1;
+        const arr = byLevel.get(lvl) || [];
+        arr.push(n.id);
+        byLevel.set(lvl, arr);
+      }
+    }
+    const colWidth = 240;
+    const rowHeight = 120;
+    const newNodes = [...nodes];
+    for (const [lvl, ids] of byLevel) {
+      ids.forEach((id, idx) => {
+        const i = newNodes.findIndex((n) => n.id === id);
+        if (i >= 0) {
+          newNodes[i] = {
+            ...newNodes[i],
+            x: 40 + lvl * colWidth,
+            y: 40 + idx * rowHeight,
+          };
+        }
+      });
+    }
+    setNodes(newNodes);
   };
 
-  const handleSkillClick = (skillType: string) => {
-    if (step === 'start') {
-      startBuilder();
-      return;
-    }
-    if (step === 'name') {
-      sendSystem('Please name your workflow first.', []);
-      return;
-    }
-    if (step === 'trigger_type') {
-      handleTriggerType(skillType);
-      return;
-    }
-    if (step === 'trigger_config' || step === 'action_config') {
-      sendSystem('Finish configuring the current node first.', []);
-      return;
-    }
-    if (step === 'connect' || step === 'review') {
-      sendSystem('You can add more nodes by clicking "Add more nodes" first.', []);
-      return;
-    }
-    // add_action
-    handleAddAction(skillType);
-  };
+  const selectedNode = nodes.find((n) => n.id === selectedId) || null;
+  const selectedSkill = skills.find((s) => s.type === selectedNode?.type);
 
-  const skillCategories = useMemo(() => {
-    const map = new Map<string, ExecutorInfo[]>();
-    for (const s of skills) {
-      const cat = s.category || 'other';
-      const arr = map.get(cat) || [];
-      arr.push(s);
-      map.set(cat, arr);
-    }
-    return map;
-  }, [skills]);
-
-  const wfEntry = draftWorkflow();
+  // Build skill categories
+  const skillCategories = new Map<string, ExecutorInfo[]>();
+  for (const s of skills) {
+    const cat = s.category || 'other';
+    const arr = skillCategories.get(cat) || [];
+    arr.push(s);
+    skillCategories.set(cat, arr);
+  }
 
   return (
-    <div className="page builder-page">
-      {/* Skills Sidebar */}
-      <div className={`builder-sidebar ${sidebarOpen ? 'open' : 'collapsed'}`}>
-        <div className="sidebar-header">
-          <span className="sidebar-title">▦ Skills</span>
-          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
-            {sidebarOpen ? '◀' : '▶'}
+    <div className="builder-page">
+      {/* Toolbar */}
+      <div className="builder-toolbar">
+        <div className="toolbar-left">
+          <div className="brand-mini">
+            <span className="brand-mark">◈</span>
+            <span className="brand-text">OpenSeal</span>
+          </div>
+          <input
+            className="workflow-name-input"
+            value={workflowName}
+            onChange={(e) => setWorkflowName(e.target.value)}
+            placeholder="Workflow name..."
+          />
+        </div>
+        <div className="toolbar-actions">
+          <button className="btn-toolbar" onClick={handleAutoLayout} disabled={nodes.length === 0}>
+            ◫ Auto Layout
+          </button>
+          <button className="btn-toolbar" onClick={handleValidate} disabled={nodes.length === 0}>
+            ◊ Validate
+          </button>
+          <button className="btn-toolbar btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? '...' : '↳ Save'}
           </button>
         </div>
-        {sidebarOpen && (
-          <div className="sidebar-body">
+      </div>
+
+      {/* Validation toast */}
+      {validation && (
+        <div className={`validation-toast ${validation.includes('failed') || validation.includes('Invalid') ? 'error' : 'success'}`}>
+          {validation}
+          <button className="toast-close" onClick={() => setValidation(null)}>×</button>
+        </div>
+      )}
+
+      <div className="builder-body">
+        {/* Skills Palette */}
+        <div className="builder-palette">
+          <div className="palette-header">▦ Skills</div>
+          <div className="palette-body">
             {Array.from(skillCategories.entries()).map(([cat, list]) => (
-              <div key={cat} className="skill-group">
-                <div className="skill-group-label">{cat}</div>
+              <div key={cat} className="palette-group">
+                <div className="palette-group-label">{cat}</div>
                 {list.map((s) => (
-                  <button
+                  <div
                     key={s.type}
-                    className="skill-item"
-                    onClick={() => handleSkillClick(s.type)}
+                    className="palette-item"
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('skillType', s.type)}
                     title={s.description}
                   >
-                    <span className="skill-item-icon">{s.icon || '▸'}</span>
-                    <span className="skill-item-name">{s.type}</span>
-                  </button>
+                    <span className="palette-item-icon">{s.icon || '◈'}</span>
+                    <span className="palette-item-name">{s.type}</span>
+                  </div>
                 ))}
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="builder-chat">
-        <header className="builder-header">
-          <h1>Workflow Builder</h1>
-          <p className="page-subtitle">Chat your way to a workflow</p>
-        </header>
-        <div className="chat-messages">
-          {messages.length === 0 && (
-            <div className="chat-empty">
-              <div className="chat-welcome">
-                <div className="welcome-icon">◈</div>
-                <h2>Build a workflow</h2>
-                <p>Describe what you want, and I'll assemble the nodes and connections.</p>
-                <button className="btn-primary btn-large" onClick={startBuilder}>
-                  Start Building
-                </button>
+        {/* Canvas */}
+        <div
+          className="builder-canvas"
+          ref={canvasRef}
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+        >
+          <div className="canvas-grid" />
+
+          {/* Connections SVG */}
+          <svg className="canvas-svg">
+            <defs>
+              <marker id="edge-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#3a3a3a" />
+              </marker>
+            </defs>
+            {edges.map((edge) => {
+              const from = nodes.find((n) => n.id === edge.from);
+              const to = nodes.find((n) => n.id === edge.to);
+              if (!from || !to) return null;
+              const fx = from.x + NODE_W / 2;
+              const fy = from.y + NODE_H;
+              const tx = to.x + NODE_W / 2;
+              const ty = to.y;
+              const mx = (fx + tx) / 2;
+              return (
+                <g key={edge.id}>
+                  <path
+                    d={`M ${fx} ${fy} C ${fx} ${fy + 40}, ${tx} ${ty - 40}, ${tx} ${ty}`}
+                    fill="none"
+                    stroke="#3a3a3a"
+                    strokeWidth={2}
+                    markerEnd="url(#edge-arrow)"
+                  />
+                  <rect
+                    x={mx - 6}
+                    y={(fy + ty) / 2 - 6}
+                    width={12}
+                    height={12}
+                    fill="#1c1c1c"
+                    stroke="#3a3a3a"
+                    rx={2}
+                    className="edge-delete"
+                    onClick={() => setEdges((prev) => prev.filter((e) => e.id !== edge.id))}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <text
+                    x={mx}
+                    y={(fy + ty) / 2 + 3}
+                    textAnchor="middle"
+                    fill="#8a8a8a"
+                    fontSize={8}
+                    pointerEvents="none"
+                  >
+                    ×
+                  </text>
+                </g>
+              );
+            })}
+            {/* Temp connection line */}
+            {drag.kind === 'connect' && (() => {
+              const from = nodes.find((n) => n.id === drag.fromId);
+              if (!from) return null;
+              const fx = from.x + NODE_W / 2;
+              const fy = from.y + NODE_H;
+              return (
+                <path
+                  d={`M ${fx} ${fy} C ${fx} ${fy + 40}, ${mouse.x} ${mouse.y - 40}, ${mouse.x} ${mouse.y}`}
+                  fill="none"
+                  stroke="var(--accent)"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                />
+              );
+            })()}
+          </svg>
+
+          {/* Nodes */}
+          {nodes.map((node) => (
+            <div
+              key={node.id}
+              className={`canvas-node ${selectedId === node.id ? 'selected' : ''}`}
+              style={{ left: node.x, top: node.y, width: NODE_W, height: NODE_H }}
+              onMouseDown={(e) => handleNodeMouseDown(e, node)}
+            >
+              {/* Input port */}
+              <div className="port port-input" style={{ left: NODE_W / 2 - PORT_R, top: -PORT_R }} />
+              {/* Output port */}
+              <div
+                className="port port-output"
+                style={{ left: NODE_W / 2 - PORT_R, top: NODE_H - PORT_R }}
+              />
+              <div className="node-content">
+                <div className="node-id">{node.id}</div>
+                <div className="node-type">{node.type}</div>
               </div>
-            </div>
-          )}
-          {messages.map((msg, i) => (
-            <div key={i} className={`chat-bubble ${msg.role}`}>
-              <div className="chat-avatar">{msg.role === 'system' ? '◈' : '◉'}</div>
-              <div className="chat-content">
-                <div className="chat-text">{msg.text}</div>
-                {msg.quickActions && msg.quickActions.length > 0 && (
-                  <div className="quick-actions">
-                    {msg.quickActions.map((a) => (
-                      <button key={a} className="quick-action" onClick={() => handleQuickAction(a)}>
-                        {a}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <button
+                className="node-delete-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteNode(node.id);
+                }}
+              >
+                ×
+              </button>
             </div>
           ))}
-          <div ref={messagesEndRef} />
         </div>
-        <div className="chat-input-bar">
-          <input
-            className="chat-input"
-            placeholder={step === 'start' ? 'Click Start Building...' : 'Type your response...'}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            disabled={step === 'start' || saving}
-          />
-          <button className="btn-primary" onClick={handleSend} disabled={!input.trim() || saving}>
-            {saving ? '...' : '↳'}
-          </button>
-        </div>
-        {saveError && <div className="chat-error">{saveError}</div>}
-      </div>
 
-      <div className="builder-preview">
-        <div className="preview-panel graph-panel">
-          <div className="panel-header">
-            <span className="panel-title">◫ Graph</span>
-            <span className="panel-meta">{draftNodes.length} node{draftNodes.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="panel-body">
-            {draftNodes.length > 0 ? (
-              <WorkflowGraph nodes={wfEntry.nodes} edges={wfEntry.edges} />
-            ) : (
-              <div className="graph-empty">Workflow graph will appear here</div>
+        {/* Properties Panel */}
+        <div className="builder-props">
+          <div className="props-header">◫ Properties</div>
+          <div className="props-body">
+            {!selectedNode && (
+              <div className="props-empty">
+                Select a node to edit its properties.
+                <br />
+                <br />
+                <strong>Shortcuts:</strong>
+                <ul>
+                  <li>Drag skill from left to canvas</li>
+                  <li>Drag node to move</li>
+                  <li>Drag output port → input port to connect</li>
+                  <li>Click node to select</li>
+                  <li>Delete key to remove selected</li>
+                </ul>
+              </div>
             )}
-          </div>
-        </div>
-        <div className="preview-panel hcl-panel">
-          <div className="panel-header">
-            <span className="panel-title">⌥ HCL</span>
-            <span className="panel-meta">{hclPreview ? `${hclPreview.split('\n').length} lines` : '—'}</span>
-          </div>
-          <div className="panel-body">
-            {hclPreview ? (
-              <pre className="hcl-preview">{hclPreview}</pre>
-            ) : (
-              <div className="graph-empty">Generated HCL will appear here</div>
+            {selectedNode && (
+              <div className="props-form">
+                <div className="prop-row">
+                  <label>ID</label>
+                  <input
+                    value={selectedNode.id}
+                    onChange={(e) => updateNodeId(selectedNode.id, e.target.value)}
+                    className="prop-input"
+                  />
+                </div>
+                <div className="prop-row">
+                  <label>Type</label>
+                  <div className="prop-readonly">{selectedNode.type}</div>
+                </div>
+                {selectedSkill?.inputSchema && (
+                  <>
+                    <div className="prop-divider" />
+                    <div className="prop-section">Configuration</div>
+                    {Object.entries((selectedSkill.inputSchema as any).properties || {}).map(
+                      ([key, schema]: [string, any]) => {
+                        const val = selectedNode.config[key];
+                        return (
+                          <div className="prop-row" key={key}>
+                            <label title={schema.description}>
+                              {key}
+                              {(selectedSkill.inputSchema as any).required?.includes(key) && (
+                                <span className="prop-required">*</span>
+                              )}
+                            </label>
+                            {schema.type === 'boolean' ? (
+                              <select
+                                className="prop-input"
+                                value={val === true ? 'true' : val === false ? 'false' : ''}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  updateNodeConfig(selectedNode.id, {
+                                    ...selectedNode.config,
+                                    [key]: v === 'true' ? true : v === 'false' ? false : undefined,
+                                  });
+                                }}
+                              >
+                                <option value="">—</option>
+                                <option value="true">true</option>
+                                <option value="false">false</option>
+                              </select>
+                            ) : (
+                              <input
+                                className="prop-input"
+                                value={val !== undefined && val !== null ? String(val) : ''}
+                                placeholder={schema.description || ''}
+                                onChange={(e) => {
+                                  updateNodeConfig(selectedNode.id, {
+                                    ...selectedNode.config,
+                                    [key]: e.target.value,
+                                  });
+                                }}
+                              />
+                            )}
+                          </div>
+                        );
+                      }
+                    )}
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
