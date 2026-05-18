@@ -70,6 +70,18 @@ export const api = {
   health: () => fetchJSON<{ status: string }>('/api/v1/health'),
   listWorkflows: () => fetchJSON<WorkflowEntry[]>('/api/v1/workflows'),
   getWorkflow: (id: string) => fetchJSON<WorkflowEntry>(`/api/v1/workflows/${encodeURIComponent(id)}`),
+  createWorkflow: (wf: WorkflowEntry) =>
+    fetchJSON<{ name: string; hcl: string; message: string }>('/api/v1/workflows', {
+      method: 'POST',
+      body: JSON.stringify(wf),
+    }),
+  validateWorkflow: (wf: WorkflowEntry) =>
+    fetchJSON<{ valid: boolean; issues: { level: string; message: string; nodeId?: string; edgeId?: string }[]; summary: string }>('/api/v1/workflows/validate', {
+      method: 'POST',
+      body: JSON.stringify(wf),
+    }),
+  getWorkflowHCL: (id: string) =>
+    fetch(`${API_BASE}/api/v1/workflows/${encodeURIComponent(id)}/hcl`).then((r) => r.text()),
   runWorkflow: (id: string) =>
     fetchJSON<{ runId: number; status: string; workflow: string }>(`/api/v1/workflows/${encodeURIComponent(id)}/run`, {
       method: 'POST',

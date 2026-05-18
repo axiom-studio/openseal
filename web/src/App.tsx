@@ -3,6 +3,7 @@ import Workflows from './pages/Workflows';
 import Runs from './pages/Runs';
 import Execution from './pages/Execution';
 import Skills from './pages/Skills';
+import Builder from './pages/Builder';
 
 function App() {
   return (
@@ -16,6 +17,10 @@ function App() {
           <NavLink to="/" className={({ isActive }) => (isActive ? 'active' : '')} end>
             <span className="nav-icon">▣</span>
             <span>Workflows</span>
+          </NavLink>
+          <NavLink to="/builder" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="nav-icon">◈</span>
+            <span>Builder</span>
           </NavLink>
           <NavLink to="/runs" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="nav-icon">▤</span>
@@ -34,6 +39,7 @@ function App() {
       <main className="content">
         <Routes>
           <Route path="/" element={<Workflows />} />
+          <Route path="/builder" element={<Builder />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/runs/:id" element={<Execution />} />
           <Route path="/skills" element={<Skills />} />
