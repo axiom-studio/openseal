@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type WorkflowEntry } from '../api/client';
 
 export default function Workflows() {
@@ -31,9 +32,14 @@ export default function Workflows() {
 
   return (
     <div className="page">
-      <header className="page-header">
-        <h1>Workflows</h1>
-        <p className="page-subtitle">{workflows.length} workflow{workflows.length !== 1 ? 's' : ''} loaded</p>
+      <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1>Workflows</h1>
+          <p className="page-subtitle">{workflows.length} workflow{workflows.length !== 1 ? 's' : ''} loaded</p>
+        </div>
+        <Link to="/builder" className="btn-primary" style={{ textDecoration: 'none' }}>
+          + New Workflow
+        </Link>
       </header>
       <div className="grid">
         {workflows.map((wf) => (
