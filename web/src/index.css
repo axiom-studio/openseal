@@ -652,7 +652,7 @@ html, body, #root {
 }
 
 .builder-chat {
-  flex: 0 0 420px;
+  flex: 0 0 380px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
@@ -906,9 +906,112 @@ html, body, #root {
   font-size: 14px;
 }
 
+/* Skills Sidebar in Builder */
+.builder-sidebar {
+  flex: 0 0 200px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: flex-basis 0.2s ease;
+}
+
+.builder-sidebar.collapsed {
+  flex: 0 0 40px;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sidebar-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.skill-group {
+  margin-bottom: 12px;
+}
+
+.skill-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 4px 6px;
+  margin-bottom: 4px;
+}
+
+.skill-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.skill-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.skill-item-icon {
+  font-size: 12px;
+  width: 16px;
+  text-align: center;
+}
+
+.skill-item-name {
+  font-family: var(--font-mono);
+}
+
 @media (max-width: 900px) {
   .builder-page {
     flex-direction: column;
+  }
+  .builder-sidebar {
+    flex: 0 0 auto;
+    max-height: 160px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .builder-sidebar.collapsed {
+    flex: 0 0 40px;
+    max-height: 40px;
   }
   .builder-chat {
     flex: 0 0 50vh;

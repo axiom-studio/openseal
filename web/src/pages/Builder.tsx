@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { api, type WorkflowEntry, type WorkflowEdge, type ExecutorInfo } from '../api/client';
 import WorkflowGraph from '../components/WorkflowGraph';
 
@@ -49,6 +49,7 @@ export default function Builder() {
   const [hclPreview, setHclPreview] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -383,7 +384,6 @@ export default function Builder() {
 
   const handleQuickAction = (action: string) => {
     setInput(action);
-    // Small delay so the input updates before handleSend reads it
     setTimeout(() => {
       setInput('');
       sendUser(action);
@@ -398,8 +398,10 @@ export default function Builder() {
           handleTriggerType(action);
           break;
         case 'trigger_config':
-        case 'action_config':
           handleConfig(action);
+          break;
+        case 'action_config':
+          handleActionConfig(action);
           break;
         case 'add_action':
           handleAddAction(action);
@@ -414,10 +416,76 @@ export default function Builder() {
     }, 0);
   };
 
+  const handleSkillClick = (skillType: string) => {
+    if (step === 'start') {
+      startBuilder();
+      return;
+    }
+    if (step === 'name') {
+      sendSystem('Please name your workflow first.', []);
+      return;
+    }
+    if (step === 'trigger_type') {
+      handleTriggerType(skillType);
+      return;
+    }
+    if (step === 'trigger_config' || step === 'action_config') {
+      sendSystem('Finish configuring the current node first.', []);
+      return;
+    }
+    if (step === 'connect' || step === 'review') {
+      sendSystem('You can add more nodes by clicking "Add more nodes" first.', []);
+      return;
+    }
+    // add_action
+    handleAddAction(skillType);
+  };
+
+  const skillCategories = useMemo(() => {
+    const map = new Map<string, ExecutorInfo[]>();
+    for (const s of skills) {
+      const cat = s.category || 'other';
+      const arr = map.get(cat) || [];
+      arr.push(s);
+      map.set(cat, arr);
+    }
+    return map;
+  }, [skills]);
+
   const wfEntry = draftWorkflow();
 
   return (
     <div className="page builder-page">
+      {/* Skills Sidebar */}
+      <div className={`builder-sidebar ${sidebarOpen ? 'open' : 'collapsed'}`}>
+        <div className="sidebar-header">
+          <span className="sidebar-title">▦ Skills</span>
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            {sidebarOpen ? '◀' : '▶'}
+          </button>
+        </div>
+        {sidebarOpen && (
+          <div className="sidebar-body">
+            {Array.from(skillCategories.entries()).map(([cat, list]) => (
+              <div key={cat} className="skill-group">
+                <div className="skill-group-label">{cat}</div>
+                {list.map((s) => (
+                  <button
+                    key={s.type}
+                    className="skill-item"
+                    onClick={() => handleSkillClick(s.type)}
+                    title={s.description}
+                  >
+                    <span className="skill-item-icon">{s.icon || '▸'}</span>
+                    <span className="skill-item-name">{s.type}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="builder-chat">
         <header className="builder-header">
           <h1>Workflow Builder</h1>
