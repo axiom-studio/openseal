@@ -43,12 +43,17 @@ Options:
 	sugar := logger.Sugar()
 	defer logger.Sync()
 
+	configMissing := false
+	if _, statErr := os.Stat(*configPath); os.IsNotExist(statErr) {
+		configMissing = true
+	}
+
 	cfg, err := daemon.LoadDaemonConfig(*configPath)
 	if err != nil {
 		sugar.Fatalf("failed to load config: %v", err)
 	}
 
-	if _, statErr := os.Stat(*configPath); os.IsNotExist(statErr) {
+	if configMissing {
 		sugar.Infow("auto-created default config", "path", *configPath)
 	}
 
