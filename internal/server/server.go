@@ -16,13 +16,14 @@ import (
 
 // Server is the HTTP API server for the OpenSeal web GUI.
 type Server struct {
-	registry     *executor.Registry
-	pe           *executor.PipelineExecutor
-	store        runtime.ExecutionStore
-	workflows    map[string]*WorkflowEntry
-	muWorkflows  sync.RWMutex
-	logger       *zap.SugaredLogger
-	mux          *http.ServeMux
+	registry      *executor.Registry
+	pe            *executor.PipelineExecutor
+	store         runtime.ExecutionStore
+	workflowsDir  string
+	workflows     map[string]*WorkflowEntry
+	muWorkflows   sync.RWMutex
+	logger        *zap.SugaredLogger
+	mux           *http.ServeMux
 }
 
 // WorkflowEntry holds a loaded workflow with its source info.
@@ -50,13 +51,19 @@ type WorkflowEdge struct {
 
 // NewServer creates a new API server.
 func NewServer(registry *executor.Registry, pe *executor.PipelineExecutor, store runtime.ExecutionStore, logger *zap.SugaredLogger) *Server {
+	return NewServerWithDir(registry, pe, store, "", logger)
+}
+
+// NewServerWithDir creates a new API server with a workflows directory for persistence.
+func NewServerWithDir(registry *executor.Registry, pe *executor.PipelineExecutor, store runtime.ExecutionStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
 	s := &Server{
-		registry:  registry,
-		pe:        pe,
-		store:     store,
-		workflows: make(map[string]*WorkflowEntry),
-		logger:    logger,
-		mux:       http.NewServeMux(),
+		registry:     registry,
+		pe:           pe,
+		store:        store,
+		workflowsDir: workflowsDir,
+		workflows:    make(map[string]*WorkflowEntry),
+		logger:       logger,
+		mux:          http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
