@@ -3,6 +3,7 @@ package openseal
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
@@ -127,4 +128,50 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if advanced.Run.Status != AgentRunStatusCompleted || advanced.Run.LastAppliedTurn != 1 || advanced.Event.TurnID != advanced.Turn.ID {
 		t.Fatalf("unexpected bounded advance: %#v", advanced)
 	}
+}
+
+func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
+	store := runtime.NewMemoryStore(20)
+	scope := Scope{Kind: "local", ID: "autonomous"}
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done"}, nil
+			}),
+		}, nil
+	})
+	engine, err := New(
+		WithStore(store),
+		WithAgentRunWorkers(AgentRunWorkerConfig{
+			Scope: scope, AssignedAgentID: "agent", PollInterval: 5 * time.Millisecond,
+			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+		}, resolver),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "finish autonomously", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Start(ctx)
+	defer engine.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		current, err := engine.GetAgentRun(ctx, scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == AgentRunStatusCompleted {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("autonomous Engine worker did not complete the run")
 }
