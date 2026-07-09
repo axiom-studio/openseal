@@ -89,6 +89,12 @@ type RunTransitionRequest struct {
 	CausationID      string
 	TurnID           string
 	AppliedTurn      int64
+	LeaseOwner       string
+}
+
+type AgentRunLeaseGuard struct {
+	WorkerID string
+	Now      time.Time
 }
 
 type ActivityFilter struct {
@@ -99,7 +105,7 @@ type ActivityFilter struct {
 }
 
 type RunActivityStore interface {
-	UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error)
+	UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error)
 	AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error)
 	ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error)
 }
@@ -130,6 +136,14 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	}
 	if req.ExpectedRevision != run.Revision {
 		return nil, nil, ErrRevisionConflict
+	}
+	var leaseGuard *AgentRunLeaseGuard
+	if req.LeaseOwner != "" {
+		now := s.now()
+		if run.LeaseOwner != req.LeaseOwner || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
+			return nil, nil, ErrLeaseLost
+		}
+		leaseGuard = &AgentRunLeaseGuard{WorkerID: req.LeaseOwner, Now: now}
 	}
 	if !canTransitionAgentRun(run.Status, req.Status) {
 		return nil, nil, fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, run.Status, req.Status)
@@ -166,6 +180,10 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.CompletedAt = &now
 		run.WakeCondition = nil
 	}
+	if isWaitingRunStatus(req.Status) || isTerminalAgentRunStatus(req.Status) || req.Status == AgentRunStatusQueued {
+		run.LeaseOwner = ""
+		run.LeaseExpiresAt = nil
+	}
 	severity := req.Severity
 	if severity == "" {
 		severity = ActivitySeverityInfo
@@ -188,7 +206,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	if err := event.Validate(); err != nil {
 		return nil, nil, err
 	}
-	persisted, err := s.activity.UpdateAgentRunWithEvent(ctx, run, req.ExpectedRevision, event)
+	persisted, err := s.activity.UpdateAgentRunWithEvent(ctx, run, req.ExpectedRevision, event, leaseGuard)
 	if err != nil {
 		return nil, nil, err
 	}

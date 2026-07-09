@@ -26,7 +26,7 @@ func migrateActivity(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -44,12 +44,19 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		return nil, err
 	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
+		query := `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
 			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
-			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`
+		args := []interface{}{
 			run.Status, run.Priority, run.AssignedAgentID, run.Revision, run.Deadline, run.AvailableAt,
 			run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, string(runPayload),
-			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision)
+			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision,
+		}
+		if lease != nil {
+			query += ` AND lease_owner = ? AND lease_expires_at > ?`
+			args = append(args, lease.WorkerID, lease.Now)
+		}
+		result, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -58,6 +65,9 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 			return err
 		}
 		if affected != 1 {
+			if lease != nil {
+				return ErrLeaseLost
+			}
 			return ErrRevisionConflict
 		}
 		return nil
