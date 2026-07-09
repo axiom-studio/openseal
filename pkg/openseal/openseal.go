@@ -363,3 +363,7 @@ func (e *Engine) RenewAgentRunLease(ctx context.Context, scope runtime.Scope, ru
 func (e *Engine) WakeAgentRuns(ctx context.Context, signal runtime.WakeSignal) (*runtime.WakeResult, error) {
 	return e.wake.Wake(ctx, signal)
 }
+
+func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at time.Time) (*runtime.WakeResult, error) {
+	return e.wake.WakeDueTimers(ctx, scope, at)
+}

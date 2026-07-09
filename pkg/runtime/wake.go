@@ -80,27 +80,72 @@ func (s *AgentRunWakeService) Wake(ctx context.Context, signal WakeSignal) (*Wak
 		if run.LastWakeSignalID == signal.ID || !wakeConditionMatches(run.WakeCondition, signal) {
 			continue
 		}
-		woken, event, err := s.activity.TransitionRun(ctx, signal.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusQueued,
-			Summary: fmt.Sprintf("Run woken by %s signal", signal.Type), Actor: signal.Actor,
-			Payload: signal.Payload, CorrelationID: signal.ID, WakeSignalID: signal.ID, EventType: "run.woken",
-			OccurredAt: &signal.At,
-		})
-		if errors.Is(err, ErrRevisionConflict) {
-			current, getErr := s.portfolio.GetAgentRun(ctx, signal.Scope, run.ID)
-			if getErr != nil {
-				return nil, getErr
-			}
-			if current.LastWakeSignalID == signal.ID || current.Status == AgentRunStatusQueued {
-				continue
-			}
-		}
+		woken, event, err := s.wakeOne(ctx, run, signal)
 		if err != nil {
 			return nil, err
 		}
-		result.Runs = append(result.Runs, WokenRun{Run: woken, Event: event})
+		if woken != nil {
+			result.Runs = append(result.Runs, WokenRun{Run: woken, Event: event})
+		}
 	}
 	return result, nil
+}
+
+func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at time.Time) (*WakeResult, error) {
+	if s == nil || s.portfolio == nil || s.activity == nil {
+		return nil, errors.New("agent run wake service is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if at.IsZero() {
+		at = s.now()
+	}
+	runs, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: scope, Statuses: []AgentRunStatus{AgentRunStatusSleeping},
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := &WakeResult{Runs: make([]WokenRun, 0)}
+	for _, run := range runs {
+		condition := run.WakeCondition
+		if condition == nil || condition.Type != "timer" || condition.WakeAt == nil || at.Before(*condition.WakeAt) {
+			continue
+		}
+		signal := WakeSignal{
+			ID: fmt.Sprintf("timer:%s:%d", run.ID, condition.WakeAt.UnixNano()), Scope: scope,
+			Type: "timer", Reference: condition.Reference, At: at,
+			Actor: ActivityActor{Type: "scheduler", ID: "timer"},
+		}
+		woken, event, err := s.wakeOne(ctx, run, signal)
+		if err != nil {
+			return nil, err
+		}
+		if woken != nil {
+			result.Runs = append(result.Runs, WokenRun{Run: woken, Event: event})
+		}
+	}
+	return result, nil
+}
+
+func (s *AgentRunWakeService) wakeOne(ctx context.Context, run *AgentRun, signal WakeSignal) (*AgentRun, *ActivityEvent, error) {
+	woken, event, err := s.activity.TransitionRun(ctx, signal.Scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued,
+		Summary: fmt.Sprintf("Run woken by %s signal", signal.Type), Actor: signal.Actor,
+		Payload: signal.Payload, CorrelationID: signal.ID, WakeSignalID: signal.ID, EventType: "run.woken",
+		OccurredAt: &signal.At,
+	})
+	if errors.Is(err, ErrRevisionConflict) {
+		current, getErr := s.portfolio.GetAgentRun(ctx, signal.Scope, run.ID)
+		if getErr != nil {
+			return nil, nil, getErr
+		}
+		if current.LastWakeSignalID == signal.ID || current.Status == AgentRunStatusQueued {
+			return nil, nil, nil
+		}
+	}
+	return woken, event, err
 }
 
 func wakeConditionMatches(condition *WakeCondition, signal WakeSignal) bool {
