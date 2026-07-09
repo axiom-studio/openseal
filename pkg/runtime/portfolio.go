@@ -18,8 +18,8 @@ var (
 	ErrRevisionConflict  = errors.New("objective revision conflict")
 )
 
-// Scope is the portable ownership boundary for every kernel resource. Atlas
-// maps this to a tenant; standalone OpenSeal normally uses
+// Scope is the portable ownership boundary for every kernel resource. Embedding
+// applications can map it to their own tenancy or namespace model; standalone OpenSeal normally uses
 // {kind: "local", id: "default"}.
 type Scope struct {
 	Kind string `json:"kind"`
@@ -218,8 +218,8 @@ type PortfolioStore interface {
 }
 
 // KernelStore is the complete persistence contract required by the OpenSeal
-// Engine. Atlas supplies an enterprise implementation; standalone OpenSeal
-// ships memory and SQLite implementations.
+// Engine. Embedding applications can supply an implementation; standalone
+// OpenSeal ships memory and SQLite implementations.
 type KernelStore interface {
 	ExecutionStore
 	PortfolioStore
