@@ -1,0 +1,70 @@
+package runtime
+
+import (
+	"context"
+	"time"
+)
+
+func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) (*AgentRun, error) {
+	if err := claim.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	activeByAgent := make(map[string]int)
+	if claim.MaxActiveForAgent > 0 {
+		for _, run := range s.agentRuns {
+			if run.Scope == claim.Scope && run.Status == AgentRunStatusRunning && run.AssignedAgentID != "" &&
+				run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(claim.Now) {
+				activeByAgent[run.AssignedAgentID]++
+			}
+		}
+	}
+	var selected *AgentRun
+	for _, run := range s.agentRuns {
+		if !agentRunEligible(run, claim) {
+			continue
+		}
+		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
+			continue
+		}
+		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {
+			selected = run
+		}
+	}
+	if selected == nil {
+		return nil, nil
+	}
+	expires := claim.Now.Add(claim.LeaseDuration)
+	selected.Status = AgentRunStatusRunning
+	selected.LeaseOwner = claim.WorkerID
+	selected.LeaseExpiresAt = &expires
+	selected.LastClaimedAt = &claim.Now
+	selected.Attempt++
+	selected.Revision++
+	selected.UpdatedAt = claim.Now
+	if selected.StartedAt == nil {
+		selected.StartedAt = &claim.Now
+	}
+	return cloneAgentRun(selected), nil
+}
+
+func (s *MemoryStore) RenewAgentRunLease(_ context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run := s.agentRuns[portfolioKey(scope, runID)]
+	if run == nil {
+		return nil, ErrRunNotFound
+	}
+	if run.Status != AgentRunStatusRunning || run.LeaseOwner != workerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
+		return nil, ErrLeaseLost
+	}
+	expires := now.Add(leaseDuration)
+	run.LeaseExpiresAt = &expires
+	run.UpdatedAt = now
+	run.Revision++
+	return cloneAgentRun(run), nil
+}
