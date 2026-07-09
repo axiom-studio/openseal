@@ -19,7 +19,8 @@ var (
 )
 
 // Scope is the portable ownership boundary for every kernel resource. Atlas
-// maps this to a tenant; standalone OpenSeal normally uses {kind: "local"}.
+// maps this to a tenant; standalone OpenSeal normally uses
+// {kind: "local", id: "default"}.
 type Scope struct {
 	Kind string `json:"kind"`
 	ID   string `json:"id"`
@@ -295,6 +296,9 @@ func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObject
 }
 
 func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, objectiveID string, req UpdateObjectiveRequest) (*Objective, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("portfolio store is not configured")
+	}
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -318,6 +322,33 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 		return nil, err
 	}
 	return current, nil
+}
+
+func (s *PortfolioService) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("portfolio store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	objective, err := s.store.GetObjective(ctx, scope, objectiveID)
+	if err != nil {
+		return nil, err
+	}
+	if objective == nil {
+		return nil, ErrObjectiveNotFound
+	}
+	return objective, nil
+}
+
+func (s *PortfolioService) ListObjectives(ctx context.Context, filter ObjectiveFilter) ([]*Objective, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("portfolio store is not configured")
+	}
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	return s.store.ListObjectives(ctx, filter)
 }
 
 func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRunRequest) (*AgentRun, error) {
@@ -360,6 +391,33 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 		return nil, err
 	}
 	return run, nil
+}
+
+func (s *PortfolioService) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("portfolio store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	run, err := s.store.GetAgentRun(ctx, scope, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, ErrRunNotFound
+	}
+	return run, nil
+}
+
+func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("portfolio store is not configured")
+	}
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	return s.store.ListAgentRuns(ctx, filter)
 }
 
 func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {

@@ -1,0 +1,213 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"sort"
+)
+
+func portfolioKey(scope Scope, id string) string { return scope.key() + ":" + id }
+
+func (s *MemoryStore) CreateObjective(_ context.Context, objective *Objective) error {
+	if err := objective.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objectives[portfolioKey(objective.Scope, objective.ID)] = cloneObjective(objective)
+	return nil
+}
+
+func (s *MemoryStore) GetObjective(_ context.Context, scope Scope, objectiveID string) (*Objective, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneObjective(s.objectives[portfolioKey(scope, objectiveID)]), nil
+}
+
+func (s *MemoryStore) ListObjectives(_ context.Context, filter ObjectiveFilter) ([]*Objective, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*Objective, 0)
+	for _, objective := range s.objectives {
+		if objective.Scope != filter.Scope || !matchesObjectiveFilter(objective, filter) {
+			continue
+		}
+		result = append(result, cloneObjective(objective))
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Priority != result[j].Priority {
+			return result[i].Priority > result[j].Priority
+		}
+		if !result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
+			return result[i].UpdatedAt.After(result[j].UpdatedAt)
+		}
+		return result[i].ID < result[j].ID
+	})
+	return pageObjectives(result, filter.Offset, filter.Limit), nil
+}
+
+func (s *MemoryStore) UpdateObjective(_ context.Context, objective *Objective, expectedRevision int64) error {
+	if err := objective.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := portfolioKey(objective.Scope, objective.ID)
+	current := s.objectives[key]
+	if current == nil {
+		return ErrObjectiveNotFound
+	}
+	if current.Revision != expectedRevision || objective.Revision != expectedRevision+1 {
+		return ErrRevisionConflict
+	}
+	s.objectives[key] = cloneObjective(objective)
+	return nil
+}
+
+func (s *MemoryStore) CreateAgentRun(_ context.Context, run *AgentRun) error {
+	if err := run.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentRuns[portfolioKey(run.Scope, run.ID)] = cloneAgentRun(run)
+	return nil
+}
+
+func (s *MemoryStore) GetAgentRun(_ context.Context, scope Scope, runID string) (*AgentRun, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneAgentRun(s.agentRuns[portfolioKey(scope, runID)]), nil
+}
+
+func (s *MemoryStore) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*AgentRun, 0)
+	for _, run := range s.agentRuns {
+		if run.Scope != filter.Scope || !matchesRunFilter(run, filter) {
+			continue
+		}
+		result = append(result, cloneAgentRun(run))
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Priority != result[j].Priority {
+			return result[i].Priority > result[j].Priority
+		}
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.Before(result[j].CreatedAt)
+		}
+		return result[i].ID < result[j].ID
+	})
+	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
+}
+
+func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
+	if filter.Owner != nil && objective.Owner != *filter.Owner {
+		return false
+	}
+	if !filter.IncludeRetired && objective.Status == ObjectiveStatusRetired {
+		return false
+	}
+	if len(filter.Statuses) > 0 && !containsObjectiveStatus(filter.Statuses, objective.Status) {
+		return false
+	}
+	return true
+}
+
+func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
+	if filter.ObjectiveID != "" && run.ObjectiveID != filter.ObjectiveID {
+		return false
+	}
+	if filter.ParentRunID != "" && run.ParentRunID != filter.ParentRunID {
+		return false
+	}
+	if filter.RootRunID != "" && run.RootRunID != filter.RootRunID {
+		return false
+	}
+	if filter.AssignedAgentID != "" && run.AssignedAgentID != filter.AssignedAgentID {
+		return false
+	}
+	if len(filter.Statuses) > 0 && !containsRunStatus(filter.Statuses, run.Status) {
+		return false
+	}
+	return true
+}
+
+func containsObjectiveStatus(statuses []ObjectiveStatus, status ObjectiveStatus) bool {
+	for _, candidate := range statuses {
+		if candidate == status {
+			return true
+		}
+	}
+	return false
+}
+
+func containsRunStatus(statuses []AgentRunStatus, status AgentRunStatus) bool {
+	for _, candidate := range statuses {
+		if candidate == status {
+			return true
+		}
+	}
+	return false
+}
+
+func pageObjectives(values []*Objective, offset, limit int) []*Objective {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(values) {
+		return []*Objective{}
+	}
+	values = values[offset:]
+	if limit > 0 && limit < len(values) {
+		values = values[:limit]
+	}
+	return values
+}
+
+func pageAgentRuns(values []*AgentRun, offset, limit int) []*AgentRun {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(values) {
+		return []*AgentRun{}
+	}
+	values = values[offset:]
+	if limit > 0 && limit < len(values) {
+		values = values[:limit]
+	}
+	return values
+}
+
+func cloneObjective(in *Objective) *Objective {
+	if in == nil {
+		return nil
+	}
+	var out Objective
+	data, _ := json.Marshal(in)
+	_ = json.Unmarshal(data, &out)
+	return &out
+}
+
+func cloneAgentRun(in *AgentRun) *AgentRun {
+	if in == nil {
+		return nil
+	}
+	var out AgentRun
+	data, _ := json.Marshal(in)
+	_ = json.Unmarshal(data, &out)
+	return &out
+}
