@@ -73,6 +73,9 @@ type (
 	AdvanceAgentRunResult  = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore  = runtime.AgentRunScheduleStore
 	AgentRunClaimRequest   = runtime.AgentRunClaimRequest
+	WakeSignal             = runtime.WakeSignal
+	WokenRun               = runtime.WokenRun
+	WakeResult             = runtime.WakeResult
 )
 
 const (
@@ -133,6 +136,7 @@ type Engine struct {
 	turns     *runtime.AgentTurnService
 	turnsRun  *runtime.TurnCoordinator
 	runQueue  *runtime.AgentRunScheduler
+	wake      *runtime.AgentRunWakeService
 	logger    *zap.SugaredLogger
 }
 
@@ -165,6 +169,7 @@ func New(opts ...Option) (*Engine, error) {
 		turns:     runtime.NewAgentTurnService(store, store),
 		turnsRun:  runtime.NewTurnCoordinator(store, store, store),
 		runQueue:  runtime.NewAgentRunScheduler(store),
+		wake:      runtime.NewAgentRunWakeService(store, store),
 		logger:    sugar,
 	}
 
@@ -257,6 +262,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.turns = runtime.NewAgentTurnService(store, store)
 		e.turnsRun = runtime.NewTurnCoordinator(store, store, store)
 		e.runQueue = runtime.NewAgentRunScheduler(store)
+		e.wake = runtime.NewAgentRunWakeService(store, store)
 		return nil
 	}
 }
@@ -352,4 +358,8 @@ func (e *Engine) ClaimNextAgentRun(ctx context.Context, req runtime.AgentRunClai
 
 func (e *Engine) RenewAgentRunLease(ctx context.Context, scope runtime.Scope, runID, workerID string, leaseDuration time.Duration) (*runtime.AgentRun, error) {
 	return e.runQueue.RenewLease(ctx, scope, runID, workerID, leaseDuration)
+}
+
+func (e *Engine) WakeAgentRuns(ctx context.Context, signal runtime.WakeSignal) (*runtime.WakeResult, error) {
+	return e.wake.Wake(ctx, signal)
 }
