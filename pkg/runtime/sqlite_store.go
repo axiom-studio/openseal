@@ -29,7 +29,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 }
 
 func migrate(db *sql.DB) error {
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS runs (
 			run_id INTEGER PRIMARY KEY AUTOINCREMENT,
 			workflow_name TEXT NOT NULL,
@@ -47,9 +47,69 @@ func migrate(db *sql.DB) error {
 			error TEXT,
 			retry_count INTEGER DEFAULT 0
 		);
+	`); err != nil {
+		return err
+	}
+	if err := addMissingRunColumns(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`
+		UPDATE runs SET
+			workflow_json = COALESCE(NULLIF(workflow_json, ''), '{}'),
+			trigger_data = COALESCE(NULLIF(trigger_data, ''), '{}'),
+			created_at = COALESCE(created_at, started_at, CURRENT_TIMESTAMP),
+			updated_at = COALESCE(updated_at, started_at, CURRENT_TIMESTAMP),
+			available_at = COALESCE(available_at, started_at, CURRENT_TIMESTAMP),
+			lease_owner = COALESCE(lease_owner, '');
 		CREATE INDEX IF NOT EXISTS idx_runs_runnable ON runs(status, available_at, lease_expires_at, run_id);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func addMissingRunColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		return err
+	}
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	additions := []struct {
+		name string
+		sql  string
+	}{
+		{"workflow_json", `ALTER TABLE runs ADD COLUMN workflow_json TEXT NOT NULL DEFAULT '{}'`},
+		{"trigger_data", `ALTER TABLE runs ADD COLUMN trigger_data TEXT NOT NULL DEFAULT '{}'`},
+		{"created_at", `ALTER TABLE runs ADD COLUMN created_at DATETIME`},
+		{"updated_at", `ALTER TABLE runs ADD COLUMN updated_at DATETIME`},
+		{"available_at", `ALTER TABLE runs ADD COLUMN available_at DATETIME`},
+		{"lease_owner", `ALTER TABLE runs ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''`},
+		{"lease_expires_at", `ALTER TABLE runs ADD COLUMN lease_expires_at DATETIME`},
+	}
+	for _, addition := range additions {
+		if columns[addition.name] {
+			continue
+		}
+		if _, err := db.Exec(addition.sql); err != nil {
+			return fmt.Errorf("add runs.%s: %w", addition.name, err)
+		}
+	}
+	return nil
 }
 
 // CreateRun implements ExecutionStore.

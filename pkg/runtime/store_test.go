@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/executor"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestExecutionStoreConformance(t *testing.T) {
@@ -175,6 +177,46 @@ func TestSQLiteRetrySurvivesRestart(t *testing.T) {
 	}
 	if claim == nil || claim.RunID != runID || claim.RetryCount != 1 {
 		t.Fatalf("unexpected recovered retry: %#v", claim)
+	}
+}
+
+func TestSQLiteStoreUpgradesLegacyRunSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE runs (
+			run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+			workflow_name TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			node_results TEXT DEFAULT '{}',
+			started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			completed_at DATETIME,
+			error TEXT,
+			retry_count INTEGER DEFAULT 0
+		);
+		INSERT INTO runs (workflow_name, status) VALUES ('legacy', 'completed');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	run, err := store.GetRun(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run == nil || run.WorkflowName != "legacy" || run.CreatedAt.IsZero() || run.AvailableAt.IsZero() {
+		t.Fatalf("legacy run was not upgraded: %#v", run)
 	}
 }
 
