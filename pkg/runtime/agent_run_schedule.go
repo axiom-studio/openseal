@@ -17,6 +17,19 @@ type AgentRunClaim struct {
 	MaxActiveForAgent int
 }
 
+func (c AgentRunClaim) Validate() error {
+	if err := c.Scope.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.WorkerID) == "" || c.Now.IsZero() || c.LeaseDuration <= 0 || c.AgingInterval <= 0 {
+		return errors.New("worker id, current time, lease duration, and aging interval are required")
+	}
+	if c.MaxActiveForAgent < 0 {
+		return errors.New("max active runs cannot be negative")
+	}
+	return nil
+}
+
 type AgentRunClaimRequest struct {
 	Scope             Scope
 	WorkerID          string
