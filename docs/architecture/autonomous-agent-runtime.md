@@ -13,11 +13,12 @@ multiple objectives concurrently. Skills are typed, governed capabilities. A
 workflow node is an optional adapter for composing or visualizing a skill; it is
 not the canonical capability model.
 
-OpenSeal is the canonical implementation. It exposes the runtime as a stable Go
-library and as a standalone daemon over the same `Engine`. Atlas embeds that
-library and registers enterprise adapters and additional capabilities. OpenSeal
-must not import Cortex or depend on an Atlas service to provide its core
-behavior.
+OpenSeal is the agent kernel and canonical implementation of portable execution
+semantics. It exposes the runtime as a stable Go library and as a standalone
+daemon over the same `Engine`. Atlas is the agent OS: it embeds that library and
+registers enterprise operating services, adapters, and additional capabilities.
+OpenSeal must not import Cortex or depend on an Atlas service to provide its
+core behavior.
 
 All work enters one execution model:
 
@@ -57,7 +58,7 @@ OpenSeal
        | github.com/axiom-studio/openseal/pkg/openseal
        |
 Atlas
-  Embedded OpenSeal Engine
+  Agent OS built around the embedded OpenSeal Engine
   Enterprise capability and infrastructure adapters
   Cluster-local execution and skill transports
        ^
