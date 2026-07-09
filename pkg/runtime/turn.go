@@ -65,6 +65,10 @@ type AgentTurn struct {
 	OutputSummary          string                 `json:"outputSummary,omitempty"`
 	Usage                  TurnUsage              `json:"usage,omitempty"`
 	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
+	NextRunStatus          AgentRunStatus         `json:"nextRunStatus,omitempty"`
+	WakeCondition          *WakeCondition         `json:"wakeCondition,omitempty"`
+	RunOutput              map[string]interface{} `json:"runOutput,omitempty"`
+	RunError               string                 `json:"runError,omitempty"`
 	Error                  string                 `json:"error,omitempty"`
 	LeaseOwner             string                 `json:"leaseOwner,omitempty"`
 	LeaseExpiresAt         *time.Time             `json:"leaseExpiresAt,omitempty"`
@@ -130,6 +134,10 @@ type FinishAgentTurnRequest struct {
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
+	NextRunStatus          AgentRunStatus
+	WakeCondition          *WakeCondition
+	RunOutput              map[string]interface{}
+	RunError               string
 	Error                  string
 	WorkerID               string
 }
@@ -203,6 +211,10 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	turn.OutputSummary = req.OutputSummary
 	turn.Usage = req.Usage
 	turn.ContinuationCheckpoint = req.ContinuationCheckpoint
+	turn.NextRunStatus = req.NextRunStatus
+	turn.WakeCondition = req.WakeCondition
+	turn.RunOutput = req.RunOutput
+	turn.RunError = req.RunError
 	turn.Error = req.Error
 	turn.LeaseOwner = ""
 	turn.LeaseExpiresAt = nil

@@ -46,6 +46,7 @@ type ActivityEvent struct {
 	AgentID          string                 `json:"agentId,omitempty"`
 	ObjectiveID      string                 `json:"objectiveId,omitempty"`
 	RunID            string                 `json:"runId"`
+	TurnID           string                 `json:"turnId,omitempty"`
 	ParentRunID      string                 `json:"parentRunId,omitempty"`
 	TeamID           string                 `json:"teamId,omitempty"`
 	ConversationRefs []string               `json:"conversationRefs,omitempty"`
@@ -86,6 +87,8 @@ type RunTransitionRequest struct {
 	Error            string
 	CorrelationID    string
 	CausationID      string
+	TurnID           string
+	AppliedTurn      int64
 }
 
 type ActivityFilter struct {
@@ -150,6 +153,12 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.Output = req.Output
 	}
 	run.Error = req.Error
+	if req.AppliedTurn > 0 {
+		if req.AppliedTurn != run.LastAppliedTurn+1 {
+			return nil, nil, fmt.Errorf("%w: applied turn %d after %d", ErrRevisionConflict, req.AppliedTurn, run.LastAppliedTurn)
+		}
+		run.LastAppliedTurn = req.AppliedTurn
+	}
 	if run.StartedAt == nil && (req.Status == AgentRunStatusPlanning || req.Status == AgentRunStatusRunning) {
 		run.StartedAt = &now
 	}
@@ -171,6 +180,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		ParentRunID: run.ParentRunID, Actor: req.Actor, Summary: req.Summary,
 		Payload: req.Payload, Visibility: visibility, CorrelationID: req.CorrelationID,
 		CausationID: req.CausationID, CreatedAt: now,
+		TurnID: req.TurnID,
 	}
 	if strings.TrimSpace(event.Summary) == "" {
 		event.Summary = fmt.Sprintf("Run moved from %s to %s", previousStatus, req.Status)
