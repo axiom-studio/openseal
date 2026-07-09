@@ -1,12 +1,11 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -25,52 +24,33 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
-	runID, err := s.store.CreateRun(ctx, wf.Name)
+	entry := runtime.WorkflowEntry{Name: wf.Name}
+	entry.Nodes = make([]*executor.NodeDefinition, len(wf.Nodes))
+	for i, n := range wf.Nodes {
+		entry.Nodes[i] = &executor.NodeDefinition{
+			Id:     n.ID,
+			Name:   n.ID,
+			Type:   n.Type,
+			Config: n.Config,
+		}
+	}
+	entry.Connections = make([]*executor.ConnectionDefinition, len(wf.Edges))
+	for i, e := range wf.Edges {
+		entry.Connections[i] = &executor.ConnectionDefinition{
+			Id:           "edge-" + strconv.Itoa(i),
+			SourceNodeId: e.From,
+			TargetNodeId: e.To,
+			Label:        e.Condition,
+		}
+	}
+	if len(entry.Nodes) > 0 {
+		entry.StartNodeID = entry.Nodes[0].Id
+	}
+	runID, err := s.scheduler.Schedule(r.Context(), entry, nil)
 	if err != nil {
-		s.respondError(w, 500, "failed to create run: "+err.Error())
+		s.respondError(w, 500, "failed to schedule run: "+err.Error())
 		return
 	}
-
-	go func() {
-		nodes := make([]*executor.NodeDefinition, len(wf.Nodes))
-		for i, n := range wf.Nodes {
-			nodes[i] = &executor.NodeDefinition{
-				Id:     n.ID,
-				Name:   n.ID,
-				Type:   n.Type,
-				Config: n.Config,
-			}
-		}
-		connections := make([]*executor.ConnectionDefinition, len(wf.Edges))
-		for i, e := range wf.Edges {
-			connections[i] = &executor.ConnectionDefinition{
-				Id:           "edge-" + strconv.Itoa(i),
-				SourceNodeId: e.From,
-				TargetNodeId: e.To,
-				Label:        e.Condition,
-			}
-		}
-
-		startNodeID := ""
-		if len(nodes) > 0 {
-			startNodeID = nodes[0].Id
-		}
-
-		execCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-
-		result, err := s.pe.Execute(execCtx, runID, nodes, connections, startNodeID, nil, nil)
-		if err != nil {
-			s.store.UpdateRunStatus(execCtx, runID, "failed", err)
-			return
-		}
-
-		for nodeID, nr := range result.NodeResults {
-			s.store.UpdateNodeResult(execCtx, runID, nodeID, nr)
-		}
-		s.store.UpdateRunStatus(execCtx, runID, result.Status, result.Error)
-	}()
 
 	s.respondJSON(w, 202, map[string]interface{}{
 		"runId":    runID,
@@ -80,8 +60,7 @@ func (s *Server) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-	runs, err := s.store.ListRuns(ctx, 0)
+	runs, err := s.store.ListRuns(r.Context(), 0)
 	if err != nil {
 		s.respondError(w, 500, "failed to list runs: "+err.Error())
 		return
@@ -102,8 +81,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
-	run, err := s.store.GetRun(ctx, id)
+	run, err := s.store.GetRun(r.Context(), id)
 	if err != nil {
 		s.respondError(w, 500, "failed to get run: "+err.Error())
 		return

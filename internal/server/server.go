@@ -9,30 +9,30 @@ import (
 	"time"
 
 	internalWorkflow "github.com/axiom-studio/openseal/internal/workflow"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
 
 // Server is the HTTP API server for the OpenSeal web GUI.
 type Server struct {
-	registry      *executor.Registry
-	pe            *executor.PipelineExecutor
-	store         runtime.ExecutionStore
-	workflowsDir  string
-	workflows     map[string]*WorkflowEntry
-	muWorkflows   sync.RWMutex
-	logger        *zap.SugaredLogger
-	mux           *http.ServeMux
+	registry     *executor.Registry
+	scheduler    *runtime.Scheduler
+	store        runtime.ExecutionStore
+	workflowsDir string
+	workflows    map[string]*WorkflowEntry
+	muWorkflows  sync.RWMutex
+	logger       *zap.SugaredLogger
+	mux          *http.ServeMux
 }
 
 // WorkflowEntry holds a loaded workflow with its source info.
 type WorkflowEntry struct {
-	Name        string                 `json:"name"`
-	Source      string                 `json:"source"`
-	Nodes       []WorkflowNode         `json:"nodes"`
-	Edges       []WorkflowEdge         `json:"edges"`
-	Config      map[string]interface{} `json:"config,omitempty"`
+	Name   string                 `json:"name"`
+	Source string                 `json:"source"`
+	Nodes  []WorkflowNode         `json:"nodes"`
+	Edges  []WorkflowEdge         `json:"edges"`
+	Config map[string]interface{} `json:"config,omitempty"`
 }
 
 // WorkflowNode is the JSON representation of a node.
@@ -50,15 +50,15 @@ type WorkflowEdge struct {
 }
 
 // NewServer creates a new API server.
-func NewServer(registry *executor.Registry, pe *executor.PipelineExecutor, store runtime.ExecutionStore, logger *zap.SugaredLogger) *Server {
-	return NewServerWithDir(registry, pe, store, "", logger)
+func NewServer(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.ExecutionStore, logger *zap.SugaredLogger) *Server {
+	return NewServerWithDir(registry, scheduler, store, "", logger)
 }
 
 // NewServerWithDir creates a new API server with a workflows directory for persistence.
-func NewServerWithDir(registry *executor.Registry, pe *executor.PipelineExecutor, store runtime.ExecutionStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
+func NewServerWithDir(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.ExecutionStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
 	s := &Server{
 		registry:     registry,
-		pe:           pe,
+		scheduler:    scheduler,
 		store:        store,
 		workflowsDir: workflowsDir,
 		workflows:    make(map[string]*WorkflowEntry),
