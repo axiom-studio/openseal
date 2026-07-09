@@ -2,12 +2,56 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
 )
+
+func TestSQLiteMigratesAgentTurnLeases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-turns.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE agent_turns (
+		id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, run_id TEXT NOT NULL,
+		sequence INTEGER NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL,
+		created_at DATETIME NOT NULL, payload TEXT NOT NULL,
+		PRIMARY KEY (scope_kind, scope_id, id), UNIQUE (scope_kind, scope_id, run_id, sequence));`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.db.Query(`PRAGMA table_info(agent_turns)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if !columns["lease_owner"] || !columns["lease_expires_at"] {
+		t.Fatalf("lease columns were not migrated: %#v", columns)
+	}
+}
 
 func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "turns.db")
