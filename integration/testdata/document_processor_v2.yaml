@@ -145,7 +145,7 @@ spec:
       y: 384
     type: split
   - config:
-      channel: '#build-notifications-studio-env'
+      channel: '#build-notifications'
       text: '{{prev}}'
       webhookUrl: https://hooks.slack.com/services/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
     id: temp-1768517985003-1
