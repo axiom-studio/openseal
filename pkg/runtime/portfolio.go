@@ -160,6 +160,7 @@ type AgentRun struct {
 	Output            map[string]interface{} `json:"output,omitempty"`
 	Error             string                 `json:"error,omitempty"`
 	WorkflowExecution *int                   `json:"workflowExecutionId,omitempty"`
+	LastAppliedTurn   int64                  `json:"lastAppliedTurn"`
 	Revision          int64                  `json:"revision"`
 	CreatedAt         time.Time              `json:"createdAt"`
 	UpdatedAt         time.Time              `json:"updatedAt"`
