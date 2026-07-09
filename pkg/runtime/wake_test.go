@@ -177,9 +177,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	result, err := NewAgentRunWakeService(reopened, reopened).Wake(ctx, WakeSignal{
-		ID: "timer-signal", Scope: scope, Type: "timer", Reference: "schedule", At: due,
-	})
+	result, err := NewAgentRunWakeService(reopened, reopened).WakeDueTimers(ctx, scope, due)
 	if err != nil {
 		t.Fatal(err)
 	}
