@@ -73,6 +73,10 @@ type (
 	AdvanceAgentRunResult  = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore  = runtime.AgentRunScheduleStore
 	AgentRunClaimRequest   = runtime.AgentRunClaimRequest
+	AgentRunWorkerConfig   = runtime.AgentRunWorkerConfig
+	TurnRunnerBinding      = runtime.TurnRunnerBinding
+	TurnRunnerResolver     = runtime.TurnRunnerResolver
+	TurnRunnerResolverFunc = runtime.TurnRunnerResolverFunc
 	WakeSignal             = runtime.WakeSignal
 	WokenRun               = runtime.WokenRun
 	WakeResult             = runtime.WakeResult
@@ -127,17 +131,24 @@ const (
 // Engine is the primary entry point for OpenSeal.
 // It wires together the registry, execution store, worker pool, and scheduler.
 type Engine struct {
-	registry  *executor.Registry
-	store     runtime.KernelStore
-	pool      *runtime.WorkerPool
-	scheduler *runtime.Scheduler
-	portfolio *runtime.PortfolioService
-	activity  *runtime.RunActivityService
-	turns     *runtime.AgentTurnService
-	turnsRun  *runtime.TurnCoordinator
-	runQueue  *runtime.AgentRunScheduler
-	wake      *runtime.AgentRunWakeService
-	logger    *zap.SugaredLogger
+	registry       *executor.Registry
+	store          runtime.KernelStore
+	pool           *runtime.WorkerPool
+	scheduler      *runtime.Scheduler
+	portfolio      *runtime.PortfolioService
+	activity       *runtime.RunActivityService
+	turns          *runtime.AgentTurnService
+	turnsRun       *runtime.TurnCoordinator
+	runQueue       *runtime.AgentRunScheduler
+	wake           *runtime.AgentRunWakeService
+	agentPoolSpecs []agentRunWorkerSpec
+	agentPools     []*runtime.AgentRunWorkerPool
+	logger         *zap.SugaredLogger
+}
+
+type agentRunWorkerSpec struct {
+	config   runtime.AgentRunWorkerConfig
+	resolver runtime.TurnRunnerResolver
 }
 
 // Option configures an Engine.
@@ -178,6 +189,9 @@ func New(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
 	}
+	if err := e.rebuildAgentWorkerPools(); err != nil {
+		return nil, fmt.Errorf("agent worker configuration: %w", err)
+	}
 
 	return e, nil
 }
@@ -185,10 +199,16 @@ func New(opts ...Option) (*Engine, error) {
 // Start begins background goroutines (worker pool).
 func (e *Engine) Start(ctx context.Context) {
 	e.pool.Start(ctx)
+	for _, pool := range e.agentPools {
+		pool.Start(ctx)
+	}
 }
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	for _, pool := range e.agentPools {
+		pool.Stop()
+	}
 	e.pool.Stop()
 }
 
@@ -282,6 +302,36 @@ func WithWorkerPool(concurrency int, retry *runtime.RetryPolicy) Option {
 		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, concurrency, retry)
 		e.scheduler = runtime.NewScheduler(e.pool, e.store)
 		return nil
+	}
+}
+
+// WithAgentRunWorkers adds a scope-bound autonomous portfolio worker pool.
+// The option may be repeated for additional scopes or agent deployments.
+func WithAgentRunWorkers(config runtime.AgentRunWorkerConfig, resolver runtime.TurnRunnerResolver) Option {
+	return func(e *Engine) error {
+		if resolver == nil {
+			return fmt.Errorf("turn runner resolver is required")
+		}
+		e.agentPoolSpecs = append(e.agentPoolSpecs, agentRunWorkerSpec{config: config, resolver: resolver})
+		return nil
+	}
+}
+
+func (e *Engine) rebuildAgentWorkerPools() error {
+	e.agentPools = make([]*runtime.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
+	for _, spec := range e.agentPoolSpecs {
+		pool, err := runtime.NewAgentRunWorkerPool(e.store, spec.resolver, e.logger, spec.config)
+		if err != nil {
+			return err
+		}
+		e.agentPools = append(e.agentPools, pool)
+	}
+	return nil
+}
+
+func (e *Engine) WakeAgentWorkers() {
+	for _, pool := range e.agentPools {
+		pool.Wake()
 	}
 }
 
