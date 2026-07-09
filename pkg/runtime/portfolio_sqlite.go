@@ -52,7 +52,10 @@ func migratePortfolio(db *sql.DB) error {
 	if err := addMissingAgentRunColumns(db); err != nil {
 		return err
 	}
-	return migrateActivity(db)
+	if err := migrateActivity(db); err != nil {
+		return err
+	}
+	return migrateAgentTurns(db)
 }
 
 func addMissingAgentRunColumns(db *sql.DB) error {
