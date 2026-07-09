@@ -270,5 +270,11 @@ func decodeAgentRun(payload string) (*AgentRun, error) {
 	if run.Revision == 0 {
 		run.Revision = 1
 	}
+	if run.AvailableAt.IsZero() {
+		run.AvailableAt = run.CreatedAt
+	}
+	if run.QueueEnteredAt.IsZero() {
+		run.QueueEnteredAt = run.CreatedAt
+	}
 	return &run, nil
 }

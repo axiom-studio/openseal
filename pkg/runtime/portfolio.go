@@ -151,6 +151,13 @@ type AgentRun struct {
 	Source            RunSource              `json:"source"`
 	Status            AgentRunStatus         `json:"status"`
 	Priority          int                    `json:"priority"`
+	Deadline          *time.Time             `json:"deadline,omitempty"`
+	AvailableAt       time.Time              `json:"availableAt"`
+	QueueEnteredAt    time.Time              `json:"queueEnteredAt"`
+	LeaseOwner        string                 `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt    *time.Time             `json:"leaseExpiresAt,omitempty"`
+	LastClaimedAt     *time.Time             `json:"lastClaimedAt,omitempty"`
+	Attempt           int                    `json:"attempt"`
 	Context           map[string]interface{} `json:"context,omitempty"`
 	Plan              map[string]interface{} `json:"plan,omitempty"`
 	Checkpoint        map[string]interface{} `json:"checkpoint,omitempty"`
@@ -268,6 +275,8 @@ type CreateAgentRunRequest struct {
 	Goal            string
 	Source          RunSource
 	Priority        int
+	Deadline        *time.Time
+	AvailableAt     *time.Time
 	Context         map[string]interface{}
 	Plan            map[string]interface{}
 	Checkpoint      map[string]interface{}
@@ -380,6 +389,10 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 		}
 	}
 	now := s.now()
+	availableAt := now
+	if req.AvailableAt != nil {
+		availableAt = *req.AvailableAt
+	}
 	runID := uuid.NewString()
 	rootID := runID
 	if req.ParentRunID != "" {
@@ -396,7 +409,8 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 		ID: runID, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
 		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: req.Source,
-		Status: AgentRunStatusQueued, Priority: req.Priority, Context: req.Context,
+		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
+		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
 		Budget: req.Budget, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
