@@ -83,10 +83,19 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 		t.Fatalf("unexpected activity: %#v", events)
 	}
 	autonomousRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Complete one bounded step", Source: RunSourceManual,
+		Scope: scope, Owner: owner, AssignedAgentID: "agent-2", Goal: "Complete one bounded step", Source: RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	claimed, err := engine.ClaimNextAgentRun(ctx, AgentRunClaimRequest{
+		Scope: scope, WorkerID: "test-worker", AssignedAgentID: "agent-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil || claimed.ID != autonomousRun.ID || claimed.LeaseOwner != "test-worker" {
+		t.Fatalf("unexpected scheduled claim: %#v", claimed)
 	}
 	advanced, err := engine.AdvanceAgentRun(ctx, AdvanceAgentRunRequest{
 		Scope: scope, RunID: autonomousRun.ID, WorkerID: "test-worker", Model: "test-model",

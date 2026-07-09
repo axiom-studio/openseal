@@ -6,6 +6,7 @@ package openseal
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -70,6 +71,8 @@ type (
 	TurnOutcome            = runtime.TurnOutcome
 	AdvanceAgentRunRequest = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult  = runtime.AdvanceAgentRunResult
+	AgentRunScheduleStore  = runtime.AgentRunScheduleStore
+	AgentRunClaimRequest   = runtime.AgentRunClaimRequest
 )
 
 const (
@@ -129,6 +132,7 @@ type Engine struct {
 	activity  *runtime.RunActivityService
 	turns     *runtime.AgentTurnService
 	turnsRun  *runtime.TurnCoordinator
+	runQueue  *runtime.AgentRunScheduler
 	logger    *zap.SugaredLogger
 }
 
@@ -160,6 +164,7 @@ func New(opts ...Option) (*Engine, error) {
 		activity:  runtime.NewRunActivityService(store, store),
 		turns:     runtime.NewAgentTurnService(store, store),
 		turnsRun:  runtime.NewTurnCoordinator(store, store, store),
+		runQueue:  runtime.NewAgentRunScheduler(store),
 		logger:    sugar,
 	}
 
@@ -251,6 +256,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.activity = runtime.NewRunActivityService(store, store)
 		e.turns = runtime.NewAgentTurnService(store, store)
 		e.turnsRun = runtime.NewTurnCoordinator(store, store, store)
+		e.runQueue = runtime.NewAgentRunScheduler(store)
 		return nil
 	}
 }
@@ -338,4 +344,12 @@ func (e *Engine) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFil
 // turn. The runner proposes actions; governed side effects execute separately.
 func (e *Engine) AdvanceAgentRun(ctx context.Context, req runtime.AdvanceAgentRunRequest, runner runtime.TurnRunner) (*runtime.AdvanceAgentRunResult, error) {
 	return e.turnsRun.Advance(ctx, req, runner)
+}
+
+func (e *Engine) ClaimNextAgentRun(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRun, error) {
+	return e.runQueue.ClaimNext(ctx, req)
+}
+
+func (e *Engine) RenewAgentRunLease(ctx context.Context, scope runtime.Scope, runID, workerID string, leaseDuration time.Duration) (*runtime.AgentRun, error) {
+	return e.runQueue.RenewLease(ctx, scope, runID, workerID, leaseDuration)
 }
