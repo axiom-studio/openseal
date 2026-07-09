@@ -47,6 +47,27 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if run.Status != AgentRunStatusRunning || event.Sequence != 1 {
 		t.Fatalf("unexpected transition: run=%#v event=%#v", run, event)
 	}
+	turn, err := engine.BeginAgentTurn(ctx, BeginAgentTurnRequest{
+		Scope: scope, RunID: run.ID, DefinitionID: "operator", DefinitionVersion: "1", Model: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err = engine.FinishAgentTurn(ctx, scope, turn.ID, FinishAgentTurnRequest{
+		ExpectedRevision: turn.Revision, Status: AgentTurnStatusCompleted,
+		Decisions:     []TurnDecision{{Summary: "Inspect dependencies", EvidenceRefs: []string{"artifact:health"}}},
+		OutputSummary: "Inspection plan ready", ContinuationCheckpoint: map[string]interface{}{"next": "inspect"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listedTurns, err := engine.ListAgentTurns(ctx, AgentTurnFilter{Scope: scope, RunID: run.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listedTurns) != 1 || listedTurns[0].ID != turn.ID || listedTurns[0].CompletedAt == nil {
+		t.Fatalf("unexpected turns: %#v", listedTurns)
+	}
 	_, err = engine.AppendActivity(ctx, &ActivityEvent{
 		Scope: scope, RunID: run.ID, EventType: "inspection.progress", Summary: "Checked the first subsystem",
 		Visibility: ActivityVisibilityTeam,
