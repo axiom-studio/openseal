@@ -64,6 +64,12 @@ type (
 	TurnUsage              = runtime.TurnUsage
 	BeginAgentTurnRequest  = runtime.BeginAgentTurnRequest
 	FinishAgentTurnRequest = runtime.FinishAgentTurnRequest
+	TurnExecutionContext   = runtime.TurnExecutionContext
+	TurnRunner             = runtime.TurnRunner
+	TurnRunnerFunc         = runtime.TurnRunnerFunc
+	TurnOutcome            = runtime.TurnOutcome
+	AdvanceAgentRunRequest = runtime.AdvanceAgentRunRequest
+	AdvanceAgentRunResult  = runtime.AdvanceAgentRunResult
 )
 
 const (
@@ -122,6 +128,7 @@ type Engine struct {
 	portfolio *runtime.PortfolioService
 	activity  *runtime.RunActivityService
 	turns     *runtime.AgentTurnService
+	turnsRun  *runtime.TurnCoordinator
 	logger    *zap.SugaredLogger
 }
 
@@ -152,6 +159,7 @@ func New(opts ...Option) (*Engine, error) {
 		portfolio: runtime.NewPortfolioService(store),
 		activity:  runtime.NewRunActivityService(store, store),
 		turns:     runtime.NewAgentTurnService(store, store),
+		turnsRun:  runtime.NewTurnCoordinator(store, store, store),
 		logger:    sugar,
 	}
 
@@ -242,6 +250,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.activity = runtime.NewRunActivityService(store, store)
 		e.turns = runtime.NewAgentTurnService(store, store)
+		e.turnsRun = runtime.NewTurnCoordinator(store, store, store)
 		return nil
 	}
 }
@@ -323,4 +332,10 @@ func (e *Engine) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID s
 
 func (e *Engine) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*runtime.AgentTurn, error) {
 	return e.turns.ListTurns(ctx, filter)
+}
+
+// AdvanceAgentRun performs or reconciles one bounded, provider-neutral agent
+// turn. The runner proposes actions; governed side effects execute separately.
+func (e *Engine) AdvanceAgentRun(ctx context.Context, req runtime.AdvanceAgentRunRequest, runner runtime.TurnRunner) (*runtime.AdvanceAgentRunResult, error) {
+	return e.turnsRun.Advance(ctx, req, runner)
 }

@@ -82,4 +82,24 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if len(events) != 2 || events[1].Sequence != 2 || events[1].Visibility != ActivityVisibilityTeam {
 		t.Fatalf("unexpected activity: %#v", events)
 	}
+	autonomousRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Complete one bounded step", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advanced, err := engine.AdvanceAgentRun(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: autonomousRun.ID, WorkerID: "test-worker", Model: "test-model",
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Bounded step complete",
+			RunOutput: map[string]interface{}{"result": "ok"},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advanced.Run.Status != AgentRunStatusCompleted || advanced.Run.LastAppliedTurn != 1 || advanced.Event.TurnID != advanced.Turn.ID {
+		t.Fatalf("unexpected bounded advance: %#v", advanced)
+	}
 }
