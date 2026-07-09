@@ -206,6 +206,19 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, ErrTurnLeaseHeld
 	}
 	turn.Status = req.Status
+	if req.NextRunStatus == "" {
+		switch req.Status {
+		case AgentTurnStatusCompleted:
+			req.NextRunStatus = AgentRunStatusRunning
+		case AgentTurnStatusFailed:
+			req.NextRunStatus = AgentRunStatusFailed
+		case AgentTurnStatusCanceled:
+			req.NextRunStatus = AgentRunStatusCanceled
+		}
+	}
+	if isWaitingRunStatus(req.NextRunStatus) && req.WakeCondition == nil {
+		return nil, errors.New("waiting turn outcome requires a wake condition")
+	}
 	turn.Decisions = req.Decisions
 	turn.RequestedActions = req.RequestedActions
 	turn.OutputSummary = req.OutputSummary
