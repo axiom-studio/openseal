@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/types"
 	"go.uber.org/zap"
 )
@@ -31,55 +32,69 @@ type (
 	AgentWorkflow       = types.AgentWorkflow
 	AgentWorkflowBean   = types.AgentWorkflowBean
 
-	RunRecord              = runtime.RunRecord
-	RetryPolicy            = runtime.RetryPolicy
-	ExecutionStore         = runtime.ExecutionStore
-	PortfolioStore         = runtime.PortfolioStore
-	KernelStore            = runtime.KernelStore
-	Scope                  = runtime.Scope
-	ObjectiveOwner         = runtime.ObjectiveOwner
-	Objective              = runtime.Objective
-	ObjectiveStatus        = runtime.ObjectiveStatus
-	ObjectiveFilter        = runtime.ObjectiveFilter
-	AgentRun               = runtime.AgentRun
-	AgentRunStatus         = runtime.AgentRunStatus
-	AgentRunFilter         = runtime.AgentRunFilter
-	RunSource              = runtime.RunSource
-	WakeCondition          = runtime.WakeCondition
-	CreateObjectiveRequest = runtime.CreateObjectiveRequest
-	UpdateObjectiveRequest = runtime.UpdateObjectiveRequest
-	CreateAgentRunRequest  = runtime.CreateAgentRunRequest
-	RunActivityStore       = runtime.RunActivityStore
-	ActivityEvent          = runtime.ActivityEvent
-	ActivityActor          = runtime.ActivityActor
-	ActivityFilter         = runtime.ActivityFilter
-	ActivitySeverity       = runtime.ActivitySeverity
-	ActivityVisibility     = runtime.ActivityVisibility
-	RunTransitionRequest   = runtime.RunTransitionRequest
-	AgentTurnStore         = runtime.AgentTurnStore
-	AgentTurn              = runtime.AgentTurn
-	AgentTurnStatus        = runtime.AgentTurnStatus
-	AgentTurnFilter        = runtime.AgentTurnFilter
-	TurnDecision           = runtime.TurnDecision
-	TurnAction             = runtime.TurnAction
-	TurnUsage              = runtime.TurnUsage
-	BeginAgentTurnRequest  = runtime.BeginAgentTurnRequest
-	FinishAgentTurnRequest = runtime.FinishAgentTurnRequest
-	TurnExecutionContext   = runtime.TurnExecutionContext
-	TurnRunner             = runtime.TurnRunner
-	TurnRunnerFunc         = runtime.TurnRunnerFunc
-	TurnOutcome            = runtime.TurnOutcome
-	AdvanceAgentRunRequest = runtime.AdvanceAgentRunRequest
-	AdvanceAgentRunResult  = runtime.AdvanceAgentRunResult
-	AgentRunScheduleStore  = runtime.AgentRunScheduleStore
-	AgentRunClaimRequest   = runtime.AgentRunClaimRequest
-	AgentRunWorkerConfig   = runtime.AgentRunWorkerConfig
-	TurnRunnerBinding      = runtime.TurnRunnerBinding
-	TurnRunnerResolver     = runtime.TurnRunnerResolver
-	TurnRunnerResolverFunc = runtime.TurnRunnerResolverFunc
-	WakeSignal             = runtime.WakeSignal
-	WokenRun               = runtime.WokenRun
-	WakeResult             = runtime.WakeResult
+	RunRecord                  = runtime.RunRecord
+	RetryPolicy                = runtime.RetryPolicy
+	ExecutionStore             = runtime.ExecutionStore
+	PortfolioStore             = runtime.PortfolioStore
+	KernelStore                = runtime.KernelStore
+	Scope                      = runtime.Scope
+	ObjectiveOwner             = runtime.ObjectiveOwner
+	Objective                  = runtime.Objective
+	ObjectiveStatus            = runtime.ObjectiveStatus
+	ObjectiveFilter            = runtime.ObjectiveFilter
+	AgentRun                   = runtime.AgentRun
+	AgentRunStatus             = runtime.AgentRunStatus
+	AgentRunFilter             = runtime.AgentRunFilter
+	RunSource                  = runtime.RunSource
+	WakeCondition              = runtime.WakeCondition
+	CreateObjectiveRequest     = runtime.CreateObjectiveRequest
+	UpdateObjectiveRequest     = runtime.UpdateObjectiveRequest
+	CreateAgentRunRequest      = runtime.CreateAgentRunRequest
+	RunActivityStore           = runtime.RunActivityStore
+	ActivityEvent              = runtime.ActivityEvent
+	ActivityActor              = runtime.ActivityActor
+	ActivityFilter             = runtime.ActivityFilter
+	ActivitySeverity           = runtime.ActivitySeverity
+	ActivityVisibility         = runtime.ActivityVisibility
+	RunTransitionRequest       = runtime.RunTransitionRequest
+	AgentTurnStore             = runtime.AgentTurnStore
+	AgentTurn                  = runtime.AgentTurn
+	AgentTurnStatus            = runtime.AgentTurnStatus
+	AgentTurnFilter            = runtime.AgentTurnFilter
+	TurnDecision               = runtime.TurnDecision
+	TurnAction                 = runtime.TurnAction
+	TurnUsage                  = runtime.TurnUsage
+	BeginAgentTurnRequest      = runtime.BeginAgentTurnRequest
+	FinishAgentTurnRequest     = runtime.FinishAgentTurnRequest
+	TurnExecutionContext       = runtime.TurnExecutionContext
+	TurnRunner                 = runtime.TurnRunner
+	TurnRunnerFunc             = runtime.TurnRunnerFunc
+	TurnOutcome                = runtime.TurnOutcome
+	AdvanceAgentRunRequest     = runtime.AdvanceAgentRunRequest
+	AdvanceAgentRunResult      = runtime.AdvanceAgentRunResult
+	AgentRunScheduleStore      = runtime.AgentRunScheduleStore
+	AgentRunClaimRequest       = runtime.AgentRunClaimRequest
+	AgentRunWorkerConfig       = runtime.AgentRunWorkerConfig
+	TurnRunnerBinding          = runtime.TurnRunnerBinding
+	TurnRunnerResolver         = runtime.TurnRunnerResolver
+	TurnRunnerResolverFunc     = runtime.TurnRunnerResolverFunc
+	WakeSignal                 = runtime.WakeSignal
+	WokenRun                   = runtime.WokenRun
+	WakeResult                 = runtime.WakeResult
+	SkillCatalog               = skill.Catalog
+	SkillDefinition            = skill.Definition
+	SkillAction                = skill.Action
+	SkillBinding               = skill.Binding
+	SkillScope                 = skill.ScopeReference
+	SkillRiskLevel             = skill.RiskLevel
+	SkillSideEffect            = skill.SideEffect
+	SkillIdempotencyMode       = skill.IdempotencyMode
+	SkillCredentialRequirement = skill.CredentialRequirement
+	SkillCredentialReference   = skill.CredentialReference
+	SkillTransportReference    = skill.TransportReference
+	SkillArgumentRule          = skill.ArgumentRule
+	ModelSkillAction           = skill.ModelAction
+	BoundSkillAction           = skill.BoundAction
 )
 
 const (
@@ -126,6 +141,22 @@ const (
 	AgentTurnStatusCompleted = runtime.AgentTurnStatusCompleted
 	AgentTurnStatusFailed    = runtime.AgentTurnStatusFailed
 	AgentTurnStatusCanceled  = runtime.AgentTurnStatusCanceled
+
+	SkillRiskRead        = skill.RiskLevelRead
+	SkillRiskWrite       = skill.RiskLevelWrite
+	SkillRiskExternal    = skill.RiskLevelExternal
+	SkillRiskProduction  = skill.RiskLevelProduction
+	SkillRiskDestructive = skill.RiskLevelDestructive
+
+	SkillSideEffectNone        = skill.SideEffectNone
+	SkillSideEffectRead        = skill.SideEffectRead
+	SkillSideEffectWrite       = skill.SideEffectWrite
+	SkillSideEffectExternal    = skill.SideEffectExternal
+	SkillSideEffectDestructive = skill.SideEffectDestructive
+
+	SkillIdempotencyNone      = skill.IdempotencyNone
+	SkillIdempotencySupported = skill.IdempotencySupported
+	SkillIdempotencyRequired  = skill.IdempotencyRequired
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -143,6 +174,7 @@ type Engine struct {
 	wake           *runtime.AgentRunWakeService
 	agentPoolSpecs []agentRunWorkerSpec
 	agentPools     []*runtime.AgentRunWorkerPool
+	skills         *skill.Catalog
 	logger         *zap.SugaredLogger
 }
 
@@ -181,6 +213,7 @@ func New(opts ...Option) (*Engine, error) {
 		turnsRun:  runtime.NewTurnCoordinator(store, store, store),
 		runQueue:  runtime.NewAgentRunScheduler(store),
 		wake:      runtime.NewAgentRunWakeService(store, store),
+		skills:    skill.NewCatalog(),
 		logger:    sugar,
 	}
 
@@ -317,6 +350,16 @@ func WithAgentRunWorkers(config runtime.AgentRunWorkerConfig, resolver runtime.T
 	}
 }
 
+func WithSkillCatalog(catalog *skill.Catalog) Option {
+	return func(e *Engine) error {
+		if catalog == nil {
+			return fmt.Errorf("skill catalog is required")
+		}
+		e.skills = catalog
+		return nil
+	}
+}
+
 func (e *Engine) rebuildAgentWorkerPools() error {
 	e.agentPools = make([]*runtime.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
 	for _, spec := range e.agentPoolSpecs {
@@ -416,4 +459,28 @@ func (e *Engine) WakeAgentRuns(ctx context.Context, signal runtime.WakeSignal) (
 
 func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at time.Time) (*runtime.WakeResult, error) {
 	return e.wake.WakeDueTimers(ctx, scope, at)
+}
+
+func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition) error {
+	return e.skills.Register(ctx, definition)
+}
+
+func (e *Engine) BindSkill(ctx context.Context, binding *skill.Binding) error {
+	return e.skills.Bind(ctx, binding)
+}
+
+func (e *Engine) ListModelSkillActions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.ModelAction, error) {
+	return e.skills.ListModelActions(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ResolveSkillAction(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string) (*skill.BoundAction, error) {
+	return e.skills.Resolve(ctx, scope, deploymentID, skillID, version, action)
+}
+
+func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {
+	return e.skills.ValidateInput(ctx, action, input)
+}
+
+func (e *Engine) ValidateSkillOutput(ctx context.Context, action *skill.BoundAction, output map[string]interface{}) error {
+	return e.skills.ValidateOutput(ctx, action, output)
 }
