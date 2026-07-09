@@ -160,6 +160,7 @@ type AgentRun struct {
 	Output            map[string]interface{} `json:"output,omitempty"`
 	Error             string                 `json:"error,omitempty"`
 	WorkflowExecution *int                   `json:"workflowExecutionId,omitempty"`
+	Revision          int64                  `json:"revision"`
 	CreatedAt         time.Time              `json:"createdAt"`
 	UpdatedAt         time.Time              `json:"updatedAt"`
 	StartedAt         *time.Time             `json:"startedAt,omitempty"`
@@ -394,7 +395,7 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: req.Source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
-		Budget: req.Budget, Policy: req.Policy, CreatedAt: now, UpdatedAt: now,
+		Budget: req.Budget, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := run.Validate(); err != nil {
 		return nil, err
