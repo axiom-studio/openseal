@@ -38,4 +38,27 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if len(objectives) != 1 || objectives[0].ID != objective.ID {
 		t.Fatalf("unexpected objectives: %#v", objectives)
 	}
+	run, event, err := engine.TransitionAgentRun(ctx, scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, Summary: "Health inspection started",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != AgentRunStatusRunning || event.Sequence != 1 {
+		t.Fatalf("unexpected transition: run=%#v event=%#v", run, event)
+	}
+	_, err = engine.AppendActivity(ctx, &ActivityEvent{
+		Scope: scope, RunID: run.ID, EventType: "inspection.progress", Summary: "Checked the first subsystem",
+		Visibility: ActivityVisibilityTeam,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := engine.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[1].Sequence != 2 || events[1].Visibility != ActivityVisibilityTeam {
+		t.Fatalf("unexpected activity: %#v", events)
+	}
 }
