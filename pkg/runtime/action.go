@@ -1,0 +1,189 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+var (
+	ErrActionNotFound   = errors.New("action call not found")
+	ErrApprovalNotFound = errors.New("approval checkpoint not found")
+)
+
+type ActionCallStatus string
+
+const (
+	ActionCallStatusReady           ActionCallStatus = "ready"
+	ActionCallStatusWaitingApproval ActionCallStatus = "waiting_for_approval"
+	ActionCallStatusDenied          ActionCallStatus = "denied"
+	ActionCallStatusRunning         ActionCallStatus = "running"
+	ActionCallStatusSucceeded       ActionCallStatus = "succeeded"
+	ActionCallStatusFailed          ActionCallStatus = "failed"
+	ActionCallStatusCanceled        ActionCallStatus = "canceled"
+	ActionCallStatusCompensating    ActionCallStatus = "compensating"
+	ActionCallStatusCompensated     ActionCallStatus = "compensated"
+)
+
+type ActionCall struct {
+	ID             string                               `json:"id"`
+	Scope          Scope                                `json:"scope"`
+	RunID          string                               `json:"runId"`
+	TurnID         string                               `json:"turnId,omitempty"`
+	DeploymentID   string                               `json:"deploymentId"`
+	SkillID        string                               `json:"skillId"`
+	SkillVersion   string                               `json:"skillVersion"`
+	Action         string                               `json:"action"`
+	Status         ActionCallStatus                     `json:"status"`
+	Risk           skill.RiskLevel                      `json:"risk"`
+	SideEffect     skill.SideEffect                     `json:"sideEffect"`
+	Arguments      map[string]interface{}               `json:"arguments,omitempty"`
+	CredentialRefs map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+	IdempotencyKey string                               `json:"idempotencyKey,omitempty"`
+	ApprovalID     string                               `json:"approvalId,omitempty"`
+	Attempt        int                                  `json:"attempt"`
+	MaxAttempts    int                                  `json:"maxAttempts"`
+	AvailableAt    time.Time                            `json:"availableAt"`
+	LeaseOwner     string                               `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt *time.Time                           `json:"leaseExpiresAt,omitempty"`
+	Output         map[string]interface{}               `json:"output,omitempty"`
+	Error          string                               `json:"error,omitempty"`
+	Revision       int64                                `json:"revision"`
+	CreatedAt      time.Time                            `json:"createdAt"`
+	UpdatedAt      time.Time                            `json:"updatedAt"`
+	StartedAt      *time.Time                           `json:"startedAt,omitempty"`
+	CompletedAt    *time.Time                           `json:"completedAt,omitempty"`
+}
+
+func (c *ActionCall) Validate() error {
+	if c == nil {
+		return errors.New("action call is required")
+	}
+	if err := c.Scope.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.RunID) == "" || strings.TrimSpace(c.DeploymentID) == "" ||
+		strings.TrimSpace(c.SkillID) == "" || strings.TrimSpace(c.SkillVersion) == "" || strings.TrimSpace(c.Action) == "" {
+		return errors.New("action identity, run, deployment, skill, version, and action are required")
+	}
+	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
+		return errors.New("action call lifecycle metadata is invalid")
+	}
+	return nil
+}
+
+type ApprovalStatus string
+
+const (
+	ApprovalStatusPending  ApprovalStatus = "pending"
+	ApprovalStatusApproved ApprovalStatus = "approved"
+	ApprovalStatusRejected ApprovalStatus = "rejected"
+	ApprovalStatusExpired  ApprovalStatus = "expired"
+	ApprovalStatusCanceled ApprovalStatus = "canceled"
+)
+
+type ApprovalPrincipal struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type ApprovalCheckpoint struct {
+	ID                     string                 `json:"id"`
+	Scope                  Scope                  `json:"scope"`
+	RunID                  string                 `json:"runId"`
+	ActionCallID           string                 `json:"actionCallId"`
+	Status                 ApprovalStatus         `json:"status"`
+	Risk                   skill.RiskLevel        `json:"risk"`
+	Summary                string                 `json:"summary"`
+	ProposedAction         map[string]interface{} `json:"proposedAction"`
+	EvidenceRefs           []string               `json:"evidenceRefs,omitempty"`
+	EligibleApprovers      []ApprovalPrincipal    `json:"eligibleApprovers"`
+	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
+	ExpiresAt              time.Time              `json:"expiresAt"`
+	DecisionBy             *ApprovalPrincipal     `json:"decisionBy,omitempty"`
+	DecisionReason         string                 `json:"decisionReason,omitempty"`
+	Revision               int64                  `json:"revision"`
+	CreatedAt              time.Time              `json:"createdAt"`
+	UpdatedAt              time.Time              `json:"updatedAt"`
+	DecidedAt              *time.Time             `json:"decidedAt,omitempty"`
+}
+
+func (a *ApprovalCheckpoint) Validate() error {
+	if a == nil {
+		return errors.New("approval checkpoint is required")
+	}
+	if err := a.Scope.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.RunID) == "" || strings.TrimSpace(a.ActionCallID) == "" ||
+		strings.TrimSpace(a.Summary) == "" || a.Revision < 1 || a.ExpiresAt.IsZero() || len(a.EligibleApprovers) == 0 {
+		return errors.New("approval identity, run, action, summary, expiry, approvers, and revision are required")
+	}
+	if !validApprovalStatus(a.Status) {
+		return errors.New("approval status is invalid")
+	}
+	for _, principal := range a.EligibleApprovers {
+		if strings.TrimSpace(principal.Type) == "" || strings.TrimSpace(principal.ID) == "" {
+			return errors.New("approval principals require type and id")
+		}
+	}
+	return nil
+}
+
+type ActionProposalRecord struct {
+	Call                *ActionCall
+	Approval            *ApprovalCheckpoint
+	Run                 *AgentRun
+	ExpectedRunRevision int64
+	Event               *ActivityEvent
+}
+
+type ActionProposalResult struct {
+	Call     *ActionCall
+	Approval *ApprovalCheckpoint
+	Event    *ActivityEvent
+	Created  bool
+}
+
+type ActionFilter struct {
+	Scope  Scope
+	RunID  string
+	Status []ActionCallStatus
+	Limit  int
+	Offset int
+}
+
+type ApprovalFilter struct {
+	Scope  Scope
+	RunID  string
+	Status []ApprovalStatus
+	Limit  int
+	Offset int
+}
+
+type ActionStore interface {
+	CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error)
+	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
+	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
+	GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error)
+	ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error)
+}
+
+func validActionCallStatus(status ActionCallStatus) bool {
+	switch status {
+	case ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusDenied,
+		ActionCallStatusRunning, ActionCallStatusSucceeded, ActionCallStatusFailed,
+		ActionCallStatusCanceled, ActionCallStatusCompensating, ActionCallStatusCompensated:
+		return true
+	default:
+		return false
+	}
+}
+
+func validApprovalStatus(status ApprovalStatus) bool {
+	return status == ApprovalStatusPending || status == ApprovalStatusApproved || status == ApprovalStatusRejected ||
+		status == ApprovalStatusExpired || status == ApprovalStatusCanceled
+}
