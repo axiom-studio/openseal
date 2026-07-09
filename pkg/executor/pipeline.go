@@ -193,7 +193,7 @@ type executionContext struct {
 	runMetadata     map[string]interface{}
 	onNodeUpdate    NodeUpdateFn
 	executionOrder  int
-	emitBaseURL     string          // Base URL for streaming emit endpoint (e.g., http://sentinel-service/orchestrator/agent/internal/emit)
+	emitBaseURL     string          // Base URL for the configured streaming emit endpoint.
 	execGraph       *ExecutionGraph // Public execution graph for tool discovery
 	mu              sync.Mutex      // Protects concurrent access to shared state
 	resultMu        *sync.Mutex     // Protects concurrent access to result.NodeResults
