@@ -217,6 +217,14 @@ type PortfolioStore interface {
 	ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error)
 }
 
+// KernelStore is the complete persistence contract required by the OpenSeal
+// Engine. Atlas supplies an enterprise implementation; standalone OpenSeal
+// ships memory and SQLite implementations.
+type KernelStore interface {
+	ExecutionStore
+	PortfolioStore
+}
+
 type CreateObjectiveRequest struct {
 	Scope            Scope
 	Owner            ObjectiveOwner

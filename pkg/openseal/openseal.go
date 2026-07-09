@@ -23,25 +23,61 @@ type (
 	StepExecutor         = executor.StepExecutor
 	ExecutionGraph       = executor.ExecutionGraph
 
-	AgentNodeDefinition   = types.AgentNodeDefinition
-	AgentConnection       = types.AgentConnection
-	AgentLibraryBean      = types.AgentLibraryBean
-	AgentInstanceBean     = types.AgentInstanceBean
-	AgentWorkflow         = types.AgentWorkflow
-	AgentWorkflowBean     = types.AgentWorkflowBean
+	AgentNodeDefinition = types.AgentNodeDefinition
+	AgentConnection     = types.AgentConnection
+	AgentLibraryBean    = types.AgentLibraryBean
+	AgentInstanceBean   = types.AgentInstanceBean
+	AgentWorkflow       = types.AgentWorkflow
+	AgentWorkflowBean   = types.AgentWorkflowBean
 
-	RunRecord      = runtime.RunRecord
-	RetryPolicy    = runtime.RetryPolicy
-	ExecutionStore = runtime.ExecutionStore
+	RunRecord              = runtime.RunRecord
+	RetryPolicy            = runtime.RetryPolicy
+	ExecutionStore         = runtime.ExecutionStore
+	PortfolioStore         = runtime.PortfolioStore
+	KernelStore            = runtime.KernelStore
+	Scope                  = runtime.Scope
+	ObjectiveOwner         = runtime.ObjectiveOwner
+	Objective              = runtime.Objective
+	ObjectiveStatus        = runtime.ObjectiveStatus
+	ObjectiveFilter        = runtime.ObjectiveFilter
+	AgentRun               = runtime.AgentRun
+	AgentRunStatus         = runtime.AgentRunStatus
+	AgentRunFilter         = runtime.AgentRunFilter
+	RunSource              = runtime.RunSource
+	WakeCondition          = runtime.WakeCondition
+	CreateObjectiveRequest = runtime.CreateObjectiveRequest
+	UpdateObjectiveRequest = runtime.UpdateObjectiveRequest
+	CreateAgentRunRequest  = runtime.CreateAgentRunRequest
+)
+
+const (
+	OwnerTypeAgent = runtime.OwnerTypeAgent
+	OwnerTypeTeam  = runtime.OwnerTypeTeam
+
+	ObjectiveStatusDraft     = runtime.ObjectiveStatusDraft
+	ObjectiveStatusActive    = runtime.ObjectiveStatusActive
+	ObjectiveStatusPaused    = runtime.ObjectiveStatusPaused
+	ObjectiveStatusSatisfied = runtime.ObjectiveStatusSatisfied
+	ObjectiveStatusFailed    = runtime.ObjectiveStatusFailed
+	ObjectiveStatusRetired   = runtime.ObjectiveStatusRetired
+
+	RunSourceManual    = runtime.RunSourceManual
+	RunSourceChat      = runtime.RunSourceChat
+	RunSourceSchedule  = runtime.RunSourceSchedule
+	RunSourceEvent     = runtime.RunSourceEvent
+	RunSourceWebhook   = runtime.RunSourceWebhook
+	RunSourceHandoff   = runtime.RunSourceHandoff
+	RunSourceObjective = runtime.RunSourceObjective
 )
 
 // Engine is the primary entry point for OpenSeal.
 // It wires together the registry, execution store, worker pool, and scheduler.
 type Engine struct {
 	registry  *executor.Registry
-	store     runtime.ExecutionStore
+	store     runtime.KernelStore
 	pool      *runtime.WorkerPool
 	scheduler *runtime.Scheduler
+	portfolio *runtime.PortfolioService
 	logger    *zap.SugaredLogger
 }
 
@@ -69,6 +105,7 @@ func New(opts ...Option) (*Engine, error) {
 		store:     store,
 		pool:      pool,
 		scheduler: runtime.NewScheduler(pool, store),
+		portfolio: runtime.NewPortfolioService(store),
 		logger:    sugar,
 	}
 
@@ -129,7 +166,7 @@ func (e *Engine) Registry() *executor.Registry {
 }
 
 // Store returns the execution store.
-func (e *Engine) Store() runtime.ExecutionStore {
+func (e *Engine) Store() runtime.KernelStore {
 	return e.store
 }
 
@@ -151,11 +188,12 @@ func WithRegistry(reg *executor.Registry) Option {
 }
 
 // WithStore replaces the default in-memory store.
-func WithStore(store runtime.ExecutionStore) Option {
+func WithStore(store runtime.KernelStore) Option {
 	return func(e *Engine) error {
 		e.store = store
 		e.pool.SetStore(store)
 		e.scheduler = runtime.NewScheduler(e.pool, store)
+		e.portfolio = runtime.NewPortfolioService(store)
 		return nil
 	}
 }
@@ -181,4 +219,32 @@ func WithWorkerPool(concurrency int, retry *runtime.RetryPolicy) Option {
 // BuildGraph is a convenience wrapper for executor.BuildGraph.
 func BuildGraph(nodes []*executor.NodeDefinition, connections []*executor.ConnectionDefinition) (*executor.ExecutionGraph, error) {
 	return executor.BuildGraph(nodes, connections)
+}
+
+func (e *Engine) CreateObjective(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.Objective, error) {
+	return e.portfolio.CreateObjective(ctx, req)
+}
+
+func (e *Engine) GetObjective(ctx context.Context, scope runtime.Scope, objectiveID string) (*runtime.Objective, error) {
+	return e.portfolio.GetObjective(ctx, scope, objectiveID)
+}
+
+func (e *Engine) ListObjectives(ctx context.Context, filter runtime.ObjectiveFilter) ([]*runtime.Objective, error) {
+	return e.portfolio.ListObjectives(ctx, filter)
+}
+
+func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, req runtime.UpdateObjectiveRequest) (*runtime.Objective, error) {
+	return e.portfolio.UpdateObjective(ctx, scope, objectiveID, req)
+}
+
+func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
+	return e.portfolio.CreateAgentRun(ctx, req)
+}
+
+func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {
+	return e.portfolio.GetAgentRun(ctx, scope, runID)
+}
+
+func (e *Engine) ListAgentRuns(ctx context.Context, filter runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
+	return e.portfolio.ListAgentRuns(ctx, filter)
 }
