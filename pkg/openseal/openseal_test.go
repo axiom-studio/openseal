@@ -82,6 +82,22 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if len(events) != 2 || events[1].Sequence != 2 || events[1].Visibility != ActivityVisibilityTeam {
 		t.Fatalf("unexpected activity: %#v", events)
 	}
+	waiting, _, err := engine.TransitionAgentRun(ctx, scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusWaitingForEvent,
+		WakeCondition: &WakeCondition{Type: "event", Reference: "health.changed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	woken, err := engine.WakeAgentRuns(ctx, WakeSignal{
+		ID: "health-signal", Scope: scope, Type: "event", Reference: "health.changed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(woken.Runs) != 1 || woken.Runs[0].Run.ID != waiting.ID || woken.Runs[0].Run.Status != AgentRunStatusQueued {
+		t.Fatalf("unexpected wake result: %#v", woken)
+	}
 	autonomousRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: "agent-2", Goal: "Complete one bounded step", Source: RunSourceManual,
 	})
