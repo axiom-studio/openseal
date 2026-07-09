@@ -41,7 +41,7 @@ func (e *K8sPatchExecutor) Execute(ctx context.Context, step *StepDefinition, re
 		return nil, wrapK8sError("k8s-patch", fmt.Errorf("'patch' is required"))
 	}
 
-	// Note: patchType is currently not used in Cortex API call
+	// Note: patchType is currently not used by the remote resource API call.
 	// The API uses strategic merge by default
 
 	var patchMap map[string]interface{}

@@ -231,7 +231,7 @@ func (s *LocalFileStore) StoreReader(ctx context.Context, runId string, filename
 	return fileId, nil
 }
 
-// StoreWithMime stores a file with mime type (for compatibility with cortex interface)
+// StoreWithMime stores a file with a MIME type for FileStore compatibility.
 func (s *LocalFileStore) StoreWithMime(ctx context.Context, runId string, filename string, mimeType string, content []byte) (string, error) {
 	return s.Store(ctx, runId, filename, content)
 }

@@ -10,8 +10,7 @@ import (
 )
 
 // TriggerManager wraps the trigger.Registry and coordinates trigger
-// lifecycles for the daemon. It is a standalone version that does NOT
-// import cortex repositories — all state comes from DaemonConfig.
+// lifecycles for the daemon. All standalone state comes from DaemonConfig.
 type TriggerManager struct {
 	logger   *zap.SugaredLogger
 	registry *trigger.Registry

@@ -13,8 +13,7 @@ type TemplateResolver = sdk.TemplateResolver
 type ContextProvider = sdk.ContextProvider
 type NodePosition = sdk.NodePosition
 
-// NodeDefinition is an alias for SDK's GraphNode
-// This allows cortex to use the same type for node definitions
+// NodeDefinition is an alias for the SDK graph node shared by the engine and skills.
 type NodeDefinition = sdk.GraphNode
 
 // StepExecutor interface from SDK
@@ -23,5 +22,4 @@ type StepExecutor = sdk.StepExecutor
 // StreamingExecutor interface from SDK
 type StreamingExecutor = sdk.StreamingExecutor
 
-// GraphProvider is defined locally because cortex uses its own ExecutionGraph type
-// This interface is implemented by Resolver for AI executors to discover connected tools
+// GraphProvider is implemented by Resolver for AI executors to discover connected tools.
