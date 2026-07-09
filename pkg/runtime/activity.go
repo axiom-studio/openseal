@@ -90,6 +90,9 @@ type RunTransitionRequest struct {
 	TurnID           string
 	AppliedTurn      int64
 	LeaseOwner       string
+	WakeSignalID     string
+	EventType        string
+	OccurredAt       *time.Time
 }
 
 type AgentRunLeaseGuard struct {
@@ -153,6 +156,9 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		return nil, nil, fmt.Errorf("%w: %s requires a wake condition", ErrInvalidRunTransition, req.Status)
 	}
 	now := s.now()
+	if req.OccurredAt != nil {
+		now = *req.OccurredAt
+	}
 	run.Status = req.Status
 	run.Revision++
 	run.UpdatedAt = now
@@ -167,6 +173,9 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.Output = req.Output
 	}
 	run.Error = req.Error
+	if req.WakeSignalID != "" {
+		run.LastWakeSignalID = req.WakeSignalID
+	}
 	if req.AppliedTurn > 0 {
 		if req.AppliedTurn != run.LastAppliedTurn+1 {
 			return nil, nil, fmt.Errorf("%w: applied turn %d after %d", ErrRevisionConflict, req.AppliedTurn, run.LastAppliedTurn)
@@ -184,6 +193,10 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.LeaseOwner = ""
 		run.LeaseExpiresAt = nil
 	}
+	if req.Status == AgentRunStatusQueued {
+		run.AvailableAt = now
+		run.QueueEnteredAt = now
+	}
 	severity := req.Severity
 	if severity == "" {
 		severity = ActivitySeverityInfo
@@ -192,8 +205,12 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	if visibility == "" {
 		visibility = ActivityVisibilityScope
 	}
+	eventType := req.EventType
+	if eventType == "" {
+		eventType = "run.transitioned"
+	}
 	event := &ActivityEvent{
-		ID: uuid.NewString(), Scope: scope, EventType: "run.transitioned", Severity: severity,
+		ID: uuid.NewString(), Scope: scope, EventType: eventType, Severity: severity,
 		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID,
 		ParentRunID: run.ParentRunID, Actor: req.Actor, Summary: req.Summary,
 		Payload: req.Payload, Visibility: visibility, CorrelationID: req.CorrelationID,
