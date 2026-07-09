@@ -44,9 +44,11 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		return nil, err
 	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?, payload = ?
+		result, err := conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
+			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
 			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
-			run.Status, run.Priority, run.AssignedAgentID, run.Revision, string(runPayload),
+			run.Status, run.Priority, run.AssignedAgentID, run.Revision, run.Deadline, run.AvailableAt,
+			run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, string(runPayload),
 			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision)
 		if err != nil {
 			return err

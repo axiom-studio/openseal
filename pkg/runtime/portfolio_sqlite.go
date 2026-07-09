@@ -37,6 +37,13 @@ func migratePortfolio(db *sql.DB) error {
 			status TEXT NOT NULL,
 			priority INTEGER NOT NULL DEFAULT 0,
 			revision INTEGER NOT NULL DEFAULT 1,
+			deadline DATETIME,
+			available_at DATETIME,
+			queue_entered_at DATETIME,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_expires_at DATETIME,
+			last_claimed_at DATETIME,
+			attempt INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			payload TEXT NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, id)
@@ -52,6 +59,10 @@ func migratePortfolio(db *sql.DB) error {
 	if err := addMissingAgentRunColumns(db); err != nil {
 		return err
 	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_runs_runnable
+		ON agent_runs(scope_kind, scope_id, status, available_at, lease_expires_at, priority, queue_entered_at)`); err != nil {
+		return err
+	}
 	if err := migrateActivity(db); err != nil {
 		return err
 	}
@@ -63,7 +74,7 @@ func addMissingAgentRunColumns(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	foundRevision := false
+	columns := make(map[string]bool)
 	for rows.Next() {
 		var cid int
 		var name, columnType string
@@ -72,7 +83,7 @@ func addMissingAgentRunColumns(db *sql.DB) error {
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
 			return err
 		}
-		foundRevision = foundRevision || name == "revision"
+		columns[name] = true
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -81,10 +92,27 @@ func addMissingAgentRunColumns(db *sql.DB) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if foundRevision {
-		return nil
+	additions := []struct{ name, statement string }{
+		{"revision", `ALTER TABLE agent_runs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`},
+		{"deadline", `ALTER TABLE agent_runs ADD COLUMN deadline DATETIME`},
+		{"available_at", `ALTER TABLE agent_runs ADD COLUMN available_at DATETIME`},
+		{"queue_entered_at", `ALTER TABLE agent_runs ADD COLUMN queue_entered_at DATETIME`},
+		{"lease_owner", `ALTER TABLE agent_runs ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''`},
+		{"lease_expires_at", `ALTER TABLE agent_runs ADD COLUMN lease_expires_at DATETIME`},
+		{"last_claimed_at", `ALTER TABLE agent_runs ADD COLUMN last_claimed_at DATETIME`},
+		{"attempt", `ALTER TABLE agent_runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0`},
 	}
-	_, err = db.Exec(`ALTER TABLE agent_runs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
+	for _, addition := range additions {
+		if columns[addition.name] {
+			continue
+		}
+		if _, err := db.Exec(addition.statement); err != nil {
+			return fmt.Errorf("add agent_runs.%s: %w", addition.name, err)
+		}
+	}
+	_, err = db.Exec(`UPDATE agent_runs SET available_at = COALESCE(available_at, created_at),
+		queue_entered_at = COALESCE(queue_entered_at, created_at), lease_owner = COALESCE(lease_owner, ''),
+		attempt = COALESCE(attempt, 0)`)
 	return err
 }
 
@@ -194,10 +222,12 @@ func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_runs
-		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision,
+		 deadline, available_at, queue_entered_at, lease_owner, lease_expires_at, last_claimed_at, attempt, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID,
-		run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.CreatedAt, string(payload))
+		run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt,
+		run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload))
 	return err
 }
 

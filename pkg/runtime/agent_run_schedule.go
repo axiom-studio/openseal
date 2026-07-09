@@ -100,7 +100,7 @@ func agentRunEligible(run *AgentRun, claim AgentRunClaim) bool {
 	case AgentRunStatusQueued:
 		return !run.AvailableAt.After(claim.Now) && (run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now))
 	case AgentRunStatusRunning:
-		return run.LeaseExpiresAt != nil && !run.LeaseExpiresAt.After(claim.Now)
+		return run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now)
 	default:
 		return false
 	}
