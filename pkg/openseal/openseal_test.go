@@ -48,13 +48,13 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 		t.Fatalf("unexpected transition: run=%#v event=%#v", run, event)
 	}
 	turn, err := engine.BeginAgentTurn(ctx, BeginAgentTurnRequest{
-		Scope: scope, RunID: run.ID, DefinitionID: "operator", DefinitionVersion: "1", Model: "test-model",
+		Scope: scope, RunID: run.ID, DefinitionID: "operator", DefinitionVersion: "1", Model: "test-model", WorkerID: "test-worker",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	turn, err = engine.FinishAgentTurn(ctx, scope, turn.ID, FinishAgentTurnRequest{
-		ExpectedRevision: turn.Revision, Status: AgentTurnStatusCompleted,
+		ExpectedRevision: turn.Revision, Status: AgentTurnStatusCompleted, WorkerID: "test-worker",
 		Decisions:     []TurnDecision{{Summary: "Inspect dependencies", EvidenceRefs: []string{"artifact:health"}}},
 		OutputSummary: "Inspection plan ready", ContinuationCheckpoint: map[string]interface{}{"next": "inspect"},
 	})
