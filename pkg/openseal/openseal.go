@@ -48,6 +48,13 @@ type (
 	CreateObjectiveRequest = runtime.CreateObjectiveRequest
 	UpdateObjectiveRequest = runtime.UpdateObjectiveRequest
 	CreateAgentRunRequest  = runtime.CreateAgentRunRequest
+	RunActivityStore       = runtime.RunActivityStore
+	ActivityEvent          = runtime.ActivityEvent
+	ActivityActor          = runtime.ActivityActor
+	ActivityFilter         = runtime.ActivityFilter
+	ActivitySeverity       = runtime.ActivitySeverity
+	ActivityVisibility     = runtime.ActivityVisibility
+	RunTransitionRequest   = runtime.RunTransitionRequest
 )
 
 const (
@@ -68,6 +75,27 @@ const (
 	RunSourceWebhook   = runtime.RunSourceWebhook
 	RunSourceHandoff   = runtime.RunSourceHandoff
 	RunSourceObjective = runtime.RunSourceObjective
+
+	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
+	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning
+	AgentRunStatusRunning              = runtime.AgentRunStatusRunning
+	AgentRunStatusSleeping             = runtime.AgentRunStatusSleeping
+	AgentRunStatusWaitingForDependency = runtime.AgentRunStatusWaitingForDependency
+	AgentRunStatusWaitingForAgent      = runtime.AgentRunStatusWaitingForAgent
+	AgentRunStatusWaitingForApproval   = runtime.AgentRunStatusWaitingForApproval
+	AgentRunStatusWaitingForEvent      = runtime.AgentRunStatusWaitingForEvent
+	AgentRunStatusCompleted            = runtime.AgentRunStatusCompleted
+	AgentRunStatusFailed               = runtime.AgentRunStatusFailed
+	AgentRunStatusCanceled             = runtime.AgentRunStatusCanceled
+
+	ActivitySeverityDebug   = runtime.ActivitySeverityDebug
+	ActivitySeverityInfo    = runtime.ActivitySeverityInfo
+	ActivitySeverityWarning = runtime.ActivitySeverityWarning
+	ActivitySeverityError   = runtime.ActivitySeverityError
+
+	ActivityVisibilityPrivate = runtime.ActivityVisibilityPrivate
+	ActivityVisibilityTeam    = runtime.ActivityVisibilityTeam
+	ActivityVisibilityScope   = runtime.ActivityVisibilityScope
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -78,6 +106,7 @@ type Engine struct {
 	pool      *runtime.WorkerPool
 	scheduler *runtime.Scheduler
 	portfolio *runtime.PortfolioService
+	activity  *runtime.RunActivityService
 	logger    *zap.SugaredLogger
 }
 
@@ -106,6 +135,7 @@ func New(opts ...Option) (*Engine, error) {
 		pool:      pool,
 		scheduler: runtime.NewScheduler(pool, store),
 		portfolio: runtime.NewPortfolioService(store),
+		activity:  runtime.NewRunActivityService(store, store),
 		logger:    sugar,
 	}
 
@@ -194,6 +224,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.pool.SetStore(store)
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
+		e.activity = runtime.NewRunActivityService(store, store)
 		return nil
 	}
 }
@@ -247,4 +278,16 @@ func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID str
 
 func (e *Engine) ListAgentRuns(ctx context.Context, filter runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
 	return e.portfolio.ListAgentRuns(ctx, filter)
+}
+
+func (e *Engine) TransitionAgentRun(ctx context.Context, scope runtime.Scope, runID string, req runtime.RunTransitionRequest) (*runtime.AgentRun, *runtime.ActivityEvent, error) {
+	return e.activity.TransitionRun(ctx, scope, runID, req)
+}
+
+func (e *Engine) AppendActivity(ctx context.Context, event *runtime.ActivityEvent) (*runtime.ActivityEvent, error) {
+	return e.activity.AppendActivity(ctx, event)
+}
+
+func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter) ([]*runtime.ActivityEvent, error) {
+	return e.activity.ListActivity(ctx, filter)
 }

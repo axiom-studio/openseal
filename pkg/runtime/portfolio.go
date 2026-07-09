@@ -224,6 +224,7 @@ type PortfolioStore interface {
 type KernelStore interface {
 	ExecutionStore
 	PortfolioStore
+	RunActivityStore
 }
 
 type CreateObjectiveRequest struct {

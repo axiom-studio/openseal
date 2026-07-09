@@ -189,6 +189,9 @@ func (s *RunActivityService) AppendActivity(ctx context.Context, event *Activity
 	if s == nil || s.activity == nil {
 		return nil, errors.New("run activity service is not configured")
 	}
+	if event == nil {
+		return nil, errors.New("activity event is required")
+	}
 	if event.ID == "" {
 		event.ID = uuid.NewString()
 	}
