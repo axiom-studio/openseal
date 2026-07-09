@@ -55,6 +55,15 @@ type (
 	ActivitySeverity       = runtime.ActivitySeverity
 	ActivityVisibility     = runtime.ActivityVisibility
 	RunTransitionRequest   = runtime.RunTransitionRequest
+	AgentTurnStore         = runtime.AgentTurnStore
+	AgentTurn              = runtime.AgentTurn
+	AgentTurnStatus        = runtime.AgentTurnStatus
+	AgentTurnFilter        = runtime.AgentTurnFilter
+	TurnDecision           = runtime.TurnDecision
+	TurnAction             = runtime.TurnAction
+	TurnUsage              = runtime.TurnUsage
+	BeginAgentTurnRequest  = runtime.BeginAgentTurnRequest
+	FinishAgentTurnRequest = runtime.FinishAgentTurnRequest
 )
 
 const (
@@ -96,6 +105,11 @@ const (
 	ActivityVisibilityPrivate = runtime.ActivityVisibilityPrivate
 	ActivityVisibilityTeam    = runtime.ActivityVisibilityTeam
 	ActivityVisibilityScope   = runtime.ActivityVisibilityScope
+
+	AgentTurnStatusRunning   = runtime.AgentTurnStatusRunning
+	AgentTurnStatusCompleted = runtime.AgentTurnStatusCompleted
+	AgentTurnStatusFailed    = runtime.AgentTurnStatusFailed
+	AgentTurnStatusCanceled  = runtime.AgentTurnStatusCanceled
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -107,6 +121,7 @@ type Engine struct {
 	scheduler *runtime.Scheduler
 	portfolio *runtime.PortfolioService
 	activity  *runtime.RunActivityService
+	turns     *runtime.AgentTurnService
 	logger    *zap.SugaredLogger
 }
 
@@ -136,6 +151,7 @@ func New(opts ...Option) (*Engine, error) {
 		scheduler: runtime.NewScheduler(pool, store),
 		portfolio: runtime.NewPortfolioService(store),
 		activity:  runtime.NewRunActivityService(store, store),
+		turns:     runtime.NewAgentTurnService(store, store),
 		logger:    sugar,
 	}
 
@@ -225,6 +241,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.activity = runtime.NewRunActivityService(store, store)
+		e.turns = runtime.NewAgentTurnService(store, store)
 		return nil
 	}
 }
@@ -290,4 +307,20 @@ func (e *Engine) AppendActivity(ctx context.Context, event *runtime.ActivityEven
 
 func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter) ([]*runtime.ActivityEvent, error) {
 	return e.activity.ListActivity(ctx, filter)
+}
+
+func (e *Engine) BeginAgentTurn(ctx context.Context, req runtime.BeginAgentTurnRequest) (*runtime.AgentTurn, error) {
+	return e.turns.BeginTurn(ctx, req)
+}
+
+func (e *Engine) FinishAgentTurn(ctx context.Context, scope runtime.Scope, turnID string, req runtime.FinishAgentTurnRequest) (*runtime.AgentTurn, error) {
+	return e.turns.FinishTurn(ctx, scope, turnID, req)
+}
+
+func (e *Engine) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID string) (*runtime.AgentTurn, error) {
+	return e.turns.GetTurn(ctx, scope, turnID)
+}
+
+func (e *Engine) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*runtime.AgentTurn, error) {
+	return e.turns.ListTurns(ctx, filter)
 }
