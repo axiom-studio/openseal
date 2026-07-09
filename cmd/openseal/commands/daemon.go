@@ -90,7 +90,7 @@ Options:
 	pool.Start(ctx)
 
 	// API server for web GUI
-	apiServer := server.NewServerWithDir(reg, pe, store, cfg.WorkflowsDir, sugar)
+	apiServer := server.NewServerWithDir(reg, scheduler, store, cfg.WorkflowsDir, sugar)
 	apiServer.SetWorkflows(workflows)
 
 	go func() {
