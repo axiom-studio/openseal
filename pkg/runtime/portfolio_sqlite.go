@@ -36,6 +36,7 @@ func migratePortfolio(db *sql.DB) error {
 			assigned_agent_id TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL,
 			priority INTEGER NOT NULL DEFAULT 0,
+			revision INTEGER NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL,
 			payload TEXT NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, id)
@@ -45,6 +46,42 @@ func migratePortfolio(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_agent_runs_lineage
 			ON agent_runs(scope_kind, scope_id, root_run_id, parent_run_id, created_at);
 	`)
+	if err != nil {
+		return err
+	}
+	if err := addMissingAgentRunColumns(db); err != nil {
+		return err
+	}
+	return migrateActivity(db)
+}
+
+func addMissingAgentRunColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(agent_runs)`)
+	if err != nil {
+		return err
+	}
+	foundRevision := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		foundRevision = foundRevision || name == "revision"
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if foundRevision {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE agent_runs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
 	return err
 }
 
@@ -154,10 +191,10 @@ func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_runs
-		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID,
-		run.AssignedAgentID, run.Status, run.Priority, run.CreatedAt, string(payload))
+		run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.CreatedAt, string(payload))
 	return err
 }
 
@@ -226,6 +263,9 @@ func decodeAgentRun(payload string) (*AgentRun, error) {
 	var run AgentRun
 	if err := json.Unmarshal([]byte(payload), &run); err != nil {
 		return nil, fmt.Errorf("decode agent run: %w", err)
+	}
+	if run.Revision == 0 {
+		run.Revision = 1
 	}
 	return &run, nil
 }
