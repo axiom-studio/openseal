@@ -4,8 +4,7 @@ import (
 	sdkResolver "github.com/axiom-studio/skills.sdk/resolver"
 )
 
-// Resolver wraps the SDK's Resolver and adds cortex-specific functionality
-// like graph access for AI executors
+// Resolver wraps the SDK's Resolver and adds graph access for AI executors.
 type Resolver struct {
 	*sdkResolver.Resolver
 	graph *ExecutionGraph

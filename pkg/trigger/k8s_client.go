@@ -79,13 +79,13 @@ func (c *K8sEventClient) ListEvents(ctx context.Context, clusterId int, namespac
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call Cortex API: %w", err)
+		return nil, fmt.Errorf("failed to call resource API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Cortex API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("resource API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -131,13 +131,13 @@ func (c *K8sEventClient) ListResources(ctx context.Context, clusterId int, names
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call Cortex API: %w", err)
+		return nil, fmt.Errorf("failed to call resource API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Cortex API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("resource API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {

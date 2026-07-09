@@ -3,8 +3,8 @@ package trigger
 import (
 	"os"
 
-	"github.com/axiom-studio/openseal/pkg/repository"
 	envRepository "github.com/axiom-studio/openseal/pkg/environment"
+	"github.com/axiom-studio/openseal/pkg/repository"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +48,7 @@ func NewDefaultRegistryWithRepository(baseURL string, triggerRepo repository.Age
 
 func NewDefaultRegistryWithHTTP(
 	baseURL string,
-	cortexBaseURL string,
+	resourceAPIBaseURL string,
 	triggerRepo repository.AgentTriggerRepository,
 	instanceRepo repository.AgentInstanceRepository,
 	environmentRepo envRepository.EnvironmentRepository,
@@ -56,7 +56,7 @@ func NewDefaultRegistryWithHTTP(
 ) (*Registry, error) {
 	r := NewRegistry()
 
-	k8sClient := NewK8sEventClient(cortexBaseURL, logger)
+	k8sClient := NewK8sEventClient(resourceAPIBaseURL, logger)
 
 	triggers := []Trigger{
 		NewWebhookTriggerWithRepository(baseURL, triggerRepo),

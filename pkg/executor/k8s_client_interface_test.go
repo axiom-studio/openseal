@@ -36,7 +36,7 @@ func (m *mockK8sClient) RestartResource(ctx context.Context, clusterId int, name
 }
 
 // TestK8sClientInterfaceExists verifies the generic K8sClient interface is
-// defined in this package (renamed from the old CortexK8sClient).
+// defined in this package.
 func TestK8sClientInterfaceExists(t *testing.T) {
 	// Compile-time check: ensure mockK8sClient implements K8sClient.
 	var _ K8sClient = (*mockK8sClient)(nil)
@@ -161,13 +161,12 @@ func (s *stubOrchestrator) WaitForRunCompletion(ctx context.Context, runId int, 
 	return nil, nil
 }
 func (s *stubOrchestrator) NotifyRunCompletion(runId int, status string) {}
-func (s *stubOrchestrator) GetFileStore() types.FileStore               { return nil }
+func (s *stubOrchestrator) GetFileStore() types.FileStore                { return nil }
 
 type stubFileStore struct{}
 
 func (s *stubFileStore) Store(data []byte, filename string, mimeType string) (*types.StoredFile, error) {
 	return nil, nil
 }
-func (s *stubFileStore) Get(fileId string) (*types.StoredFile, error)           { return nil, nil }
+func (s *stubFileStore) Get(fileId string) (*types.StoredFile, error)   { return nil, nil }
 func (s *stubFileStore) GetReader(fileId string) (io.ReadCloser, error) { return nil, nil }
-
