@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
@@ -30,12 +32,14 @@ func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < count; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			turn, beginErr := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, Model: "test"})
+			turn, beginErr := turns.BeginTurn(ctx, BeginAgentTurnRequest{
+				Scope: scope, RunID: run.ID, Model: "test", WorkerID: fmt.Sprintf("worker-%d", i),
+			})
 			_ = turn
 			errs <- beginErr
-		}()
+		}(i)
 	}
 	wg.Wait()
 	close(errs)
@@ -59,7 +63,7 @@ func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
 	}
 	first := listed[0]
 	finished, err := turns.FinishTurn(ctx, scope, first.ID, FinishAgentTurnRequest{
-		ExpectedRevision: first.Revision, Status: AgentTurnStatusCompleted,
+		ExpectedRevision: first.Revision, Status: AgentTurnStatusCompleted, WorkerID: first.LeaseOwner,
 		Decisions:              []TurnDecision{{Summary: "Continue", Rationale: "Evidence supports it"}},
 		ContinuationCheckpoint: map[string]interface{}{"step": float64(2)},
 	})
@@ -70,15 +74,27 @@ func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
 		t.Fatalf("turn did not finish durably: %#v", finished)
 	}
 	if _, err := turns.FinishTurn(ctx, scope, first.ID, FinishAgentTurnRequest{
-		ExpectedRevision: first.Revision, Status: AgentTurnStatusCompleted,
+		ExpectedRevision: first.Revision, Status: AgentTurnStatusCompleted, WorkerID: first.LeaseOwner,
 	}); err == nil {
 		t.Fatal("stale finish unexpectedly succeeded")
 	}
-	second, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, Model: "test"})
+	second, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, Model: "test", WorkerID: "worker-next"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if second.Sequence != 2 {
 		t.Fatalf("second turn sequence = %d, want 2", second.Sequence)
+	}
+	turns.now = func() time.Time { return second.LeaseExpiresAt.Add(-time.Second) }
+	if _, err := turns.ClaimTurn(ctx, scope, second.ID, "recovery-worker", time.Minute); !errors.Is(err, ErrTurnLeaseHeld) {
+		t.Fatalf("live lease claim error = %v", err)
+	}
+	turns.now = func() time.Time { return second.LeaseExpiresAt.Add(time.Second) }
+	reclaimed, err := turns.ClaimTurn(ctx, scope, second.ID, "recovery-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reclaimed.LeaseOwner != "recovery-worker" || reclaimed.Revision != second.Revision+1 {
+		t.Fatalf("unexpected reclaimed turn: %#v", reclaimed)
 	}
 }

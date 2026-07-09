@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -34,11 +35,13 @@ func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < contenders; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			_, beginErr := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, Model: "test-model"})
+			_, beginErr := turns.BeginTurn(ctx, BeginAgentTurnRequest{
+				Scope: scope, RunID: run.ID, Model: "test-model", WorkerID: fmt.Sprintf("worker-%d", i),
+			})
 			errs <- beginErr
-		}()
+		}(i)
 	}
 	wg.Wait()
 	close(errs)
@@ -61,13 +64,13 @@ func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 		t.Fatalf("unexpected turns: %#v", listed)
 	}
 	finished, err := turns.FinishTurn(ctx, scope, listed[0].ID, FinishAgentTurnRequest{
-		ExpectedRevision: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Turn complete",
+		ExpectedRevision: 1, Status: AgentTurnStatusCompleted, WorkerID: listed[0].LeaseOwner, OutputSummary: "Turn complete",
 		ContinuationCheckpoint: map[string]interface{}{"next": "inspect"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, Model: "test-model"})
+	second, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, Model: "test-model", WorkerID: "worker-next"})
 	if err != nil {
 		t.Fatal(err)
 	}

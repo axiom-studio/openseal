@@ -12,6 +12,7 @@ import (
 var (
 	ErrTurnNotFound     = errors.New("agent turn not found")
 	ErrActiveTurnExists = errors.New("an active turn already exists for the run")
+	ErrTurnLeaseHeld    = errors.New("agent turn lease is held by another worker")
 )
 
 type AgentTurnStatus string
@@ -65,6 +66,8 @@ type AgentTurn struct {
 	Usage                  TurnUsage              `json:"usage,omitempty"`
 	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
 	Error                  string                 `json:"error,omitempty"`
+	LeaseOwner             string                 `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt         *time.Time             `json:"leaseExpiresAt,omitempty"`
 	Revision               int64                  `json:"revision"`
 	CreatedAt              time.Time              `json:"createdAt"`
 	UpdatedAt              time.Time              `json:"updatedAt"`
@@ -102,7 +105,8 @@ type AgentTurnStore interface {
 	CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*AgentTurn, error)
 	GetAgentTurn(ctx context.Context, scope Scope, turnID string) (*AgentTurn, error)
 	ListAgentTurns(ctx context.Context, filter AgentTurnFilter) ([]*AgentTurn, error)
-	UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64) error
+	UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error
+	ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error)
 }
 
 type BeginAgentTurnRequest struct {
@@ -114,6 +118,8 @@ type BeginAgentTurnRequest struct {
 	Model             string
 	InputContextRefs  []string
 	PlanRevision      int64
+	WorkerID          string
+	LeaseDuration     time.Duration
 }
 
 type FinishAgentTurnRequest struct {
@@ -125,6 +131,7 @@ type FinishAgentTurnRequest struct {
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
 	Error                  string
+	WorkerID               string
 }
 
 type AgentTurnService struct {
@@ -151,12 +158,21 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 	if run.Status != AgentRunStatusPlanning && run.Status != AgentRunStatusRunning {
 		return nil, errors.New("agent run must be planning or running to begin a turn")
 	}
+	if strings.TrimSpace(req.WorkerID) == "" {
+		return nil, errors.New("agent turn worker id is required")
+	}
+	leaseDuration := req.LeaseDuration
+	if leaseDuration <= 0 {
+		leaseDuration = 5 * time.Minute
+	}
 	now := s.now()
+	leaseExpiresAt := now.Add(leaseDuration)
 	return s.turns.CreateAgentTurn(ctx, &AgentTurn{
 		ID: uuid.NewString(), Scope: req.Scope, RunID: req.RunID, Status: AgentTurnStatusRunning,
 		DefinitionID: req.DefinitionID, DefinitionVersion: req.DefinitionVersion,
 		ModelProvider: req.ModelProvider, Model: req.Model, InputContextRefs: req.InputContextRefs,
-		PlanRevision: req.PlanRevision, Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
+		PlanRevision: req.PlanRevision, LeaseOwner: req.WorkerID, LeaseExpiresAt: &leaseExpiresAt,
+		Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
 	})
 }
 
@@ -178,6 +194,9 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, errors.New("agent turn can only finish once from running")
 	}
 	now := s.now()
+	if strings.TrimSpace(req.WorkerID) == "" || turn.LeaseOwner != req.WorkerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
+		return nil, ErrTurnLeaseHeld
+	}
 	turn.Status = req.Status
 	turn.Decisions = req.Decisions
 	turn.RequestedActions = req.RequestedActions
@@ -185,10 +204,12 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	turn.Usage = req.Usage
 	turn.ContinuationCheckpoint = req.ContinuationCheckpoint
 	turn.Error = req.Error
+	turn.LeaseOwner = ""
+	turn.LeaseExpiresAt = nil
 	turn.CompletedAt = &now
 	turn.UpdatedAt = now
 	turn.Revision++
-	if err := s.turns.UpdateAgentTurn(ctx, turn, req.ExpectedRevision); err != nil {
+	if err := s.turns.UpdateAgentTurn(ctx, turn, req.ExpectedRevision, req.WorkerID); err != nil {
 		return nil, err
 	}
 	return turn, nil
@@ -207,6 +228,19 @@ func (s *AgentTurnService) GetTurn(ctx context.Context, scope Scope, turnID stri
 
 func (s *AgentTurnService) ListTurns(ctx context.Context, filter AgentTurnFilter) ([]*AgentTurn, error) {
 	return s.turns.ListAgentTurns(ctx, filter)
+}
+
+func (s *AgentTurnService) ClaimTurn(ctx context.Context, scope Scope, turnID, workerID string, leaseDuration time.Duration) (*AgentTurn, error) {
+	if s == nil || s.turns == nil {
+		return nil, errors.New("agent turn service is not configured")
+	}
+	if strings.TrimSpace(workerID) == "" {
+		return nil, errors.New("agent turn worker id is required")
+	}
+	if leaseDuration <= 0 {
+		leaseDuration = 5 * time.Minute
+	}
+	return s.turns.ClaimAgentTurn(ctx, scope, turnID, workerID, s.now(), leaseDuration)
 }
 
 func validAgentTurnStatus(status AgentTurnStatus) bool {

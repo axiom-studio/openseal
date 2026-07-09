@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"time"
 )
 
 func (s *MemoryStore) CreateAgentTurn(_ context.Context, turn *AgentTurn) (*AgentTurn, error) {
@@ -74,7 +75,7 @@ func (s *MemoryStore) ListAgentTurns(_ context.Context, filter AgentTurnFilter) 
 	return result, nil
 }
 
-func (s *MemoryStore) UpdateAgentTurn(_ context.Context, turn *AgentTurn, expectedRevision int64) error {
+func (s *MemoryStore) UpdateAgentTurn(_ context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
 	if err := turn.Validate(); err != nil {
 		return err
 	}
@@ -88,8 +89,38 @@ func (s *MemoryStore) UpdateAgentTurn(_ context.Context, turn *AgentTurn, expect
 	if current.Revision != expectedRevision || turn.Revision != expectedRevision+1 || current.Sequence != turn.Sequence {
 		return ErrRevisionConflict
 	}
+	if current.LeaseOwner == "" || current.LeaseOwner != workerID {
+		return ErrTurnLeaseHeld
+	}
 	s.turns[runKey][turn.ID] = cloneAgentTurn(turn)
 	return nil
+}
+
+func (s *MemoryStore) ClaimAgentTurn(_ context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, turns := range s.turns {
+		turn := turns[turnID]
+		if turn == nil || turn.Scope != scope {
+			continue
+		}
+		if turn.Status != AgentTurnStatusRunning {
+			return nil, ErrTurnLeaseHeld
+		}
+		if turn.LeaseOwner != workerID && turn.LeaseExpiresAt != nil && turn.LeaseExpiresAt.After(now) {
+			return nil, ErrTurnLeaseHeld
+		}
+		expires := now.Add(leaseDuration)
+		turn.LeaseOwner = workerID
+		turn.LeaseExpiresAt = &expires
+		turn.UpdatedAt = now
+		turn.Revision++
+		return cloneAgentTurn(turn), nil
+	}
+	return nil, ErrTurnNotFound
 }
 
 func cloneAgentTurn(in *AgentTurn) *AgentTurn {
