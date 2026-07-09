@@ -4,8 +4,6 @@
 
 **Date:** 2026-07-10
 
-**Tracking:** `axiom-zipb`, `axiom-zipb.1`
-
 ## Decision
 
 OpenSeal agents are prompt-first, durable autonomous workers that may own and pursue
@@ -15,10 +13,9 @@ not the canonical capability model.
 
 OpenSeal is the agent kernel and canonical implementation of portable execution
 semantics. It exposes the runtime as a stable Go library and as a standalone
-daemon over the same `Engine`. Atlas is the agent OS: it embeds that library and
-registers enterprise operating services, adapters, and additional capabilities.
-OpenSeal must not import Cortex or depend on an Atlas service to provide its
-core behavior.
+daemon over the same `Engine`. Embedding applications can register persistence,
+policy, identity, secret, event, model, artifact, and capability extensions
+without forking or bypassing the kernel.
 
 All work enters one execution model:
 
@@ -46,56 +43,36 @@ AgentDefinition + AgentDeployment
 Agent chat and team chat are command and observation surfaces over this model.
 They do not own separate execution engines, task types, or audit histories.
 
-## Repository and product boundaries
+## Packaging and extension boundaries
 
 ```text
 OpenSeal
   Portable models and contracts
   Engine, scheduler, workers, checkpoints, local stores
   Agent brain, skills, workflows, triggers, collaboration
-  Standalone daemon, API, CLI, and lightweight OSS UI
-       ^
-       | github.com/axiom-studio/openseal/pkg/openseal
+  Standalone daemon, API, CLI, and prompt-first TUI
        |
-Atlas
-  Agent OS built around the embedded OpenSeal Engine
-  Enterprise capability and infrastructure adapters
-  Cluster-local execution and skill transports
-       ^
-       | enterprise control and product APIs
-       |
-Cortex / Sentinel
-  Tenant and RBAC control plane, marketplace, policy administration,
-  deployment, vault, kubelink, NATS, enterprise persistence
-       ^
-       | capability schemas, commands, events, and projections
-       |
-Studio
-  Prompt-first authoring, observation, approvals, intervention, and audit
+       +-- embedded through github.com/axiom-studio/openseal/pkg/openseal
+       +-- extended through public kernel interfaces and capability contracts
 ```
-
-The import direction is one-way: Atlas imports OpenSeal. OpenSeal never imports
-Cortex packages. Atlas currently imports `cortex/pkg/agent/executor` and
-`cortex/pkg/agent/resolver`; those imports are transitional and will be replaced
-by the OpenSeal public facade and Atlas-owned adapters.
 
 The public facade must cover runtime construction, definitions, objectives,
 runs, skill contracts, activity subscriptions, and extension registration. A
 downstream consumer must not need to import OpenSeal `internal` packages or copy
 OpenSeal implementation packages into its own repository.
 
-Atlas extensions fall into two categories:
+Extensions fall into two categories:
 
 - **Adapters** implement OpenSeal interfaces for persistence, scope/identity,
   authorization and policy, secrets, artifacts, event publication, models, and
   skill transport.
-- **Capabilities** register Atlas-only skills and event sources such as
-  dashboards, tenant-aware kubelink operations, deployment systems, and other
-  enterprise services.
+- **Capabilities** register additional skills and event sources without changing
+  kernel execution semantics.
 
-Studio obtains a capability catalog and schemas from Atlas. It does not assume
-that the OpenSeal OSS capability set and the Atlas capability set are identical.
-The same API envelope and activity projection render both.
+Clients obtain the active capability catalog and schemas from the engine. They
+must not assume every OpenSeal deployment has an identical capability set. The
+same API envelope and activity projection render built-in and extended
+capabilities.
 
 ## Product principles
 
@@ -120,14 +97,14 @@ The same API envelope and activity projection render both.
 7. **Behavior changes are versioned.** An agent may learn and propose changes to
    its instructions, skills, heuristics, and objectives. Activation follows the
    definition's amendment policy and remains auditable and reversible.
-8. **The UI is optional for authoring.** The primary interface is prompt/API.
-   Studio exists for discovery, observation, intervention, approvals, policy,
-   audit, and advanced inspection.
+8. **The visual UI is optional for authoring.** The primary interactive surface
+   is a prompt-first TUI backed by the same API used by graphical clients.
 
 ## Canonical entities
 
-Every persisted entity below is tenant-owned. Cross-entity references must be
-validated in the active tenant by repositories and services, not only handlers.
+Every persisted entity below belongs to an explicit scope. Cross-entity
+references must be validated in that scope by repositories and services, not
+only handlers.
 
 ### AgentDefinition
 
@@ -397,30 +374,28 @@ as provenance.
 | Current component | Decision |
 | --- | --- |
 | OpenSeal `pkg/runtime` store, scheduler, worker, retries | Evolve into the Objective/Run kernel; replace channel-authoritative work items with store-driven claims, leases, and checkpoints |
-| OpenSeal `pkg/openseal` public facade | Retain and expand as Atlas's only supported embedding API |
+| OpenSeal `pkg/openseal` public facade | Retain and expand as the supported embedding API |
 | OpenSeal daemon REST execution goroutines | Route through the same `Engine` and durable scheduler used by embedded consumers |
 | OpenSeal workflow executor and graph | Retain as deterministic runbook execution beneath the agent runtime |
 | OpenSeal agent brain, persona, skills, triggers, and LLM packages | Consolidate behind canonical definition, skill, subscription, and turn contracts |
-| Cortex `pkg/autonomy` tasks, events, skill calls, artifacts, leases, handoffs | Migrate useful model and service behavior into OpenSeal; Cortex becomes an enterprise adapter/control plane and deletes its parallel kernel |
-| `agent_standing_goal` and mandate routes | Migrate to Objective; preserve temporary compatibility adapters, then delete aliases |
-| `AgentInstance` | Migrate runtime responsibilities to AgentDeployment; retain compatibility identity during data migration |
+| legacy standing-goal or mandate concepts | Normalize to Objective; preserve temporary import adapters only when needed |
+| `AgentInstance` compatibility types | Migrate runtime responsibilities to AgentDeployment and remove after data/API migration |
 | `Persona` shared primary key and persona CRUD | Move versioned behavior into AgentDefinition; deployment keeps only activation/runtime overrides; remove separate public persona lifecycle |
 | `AgentLibrary` and versions | Evolve into AgentDefinition catalog and immutable versions |
 | `AgentWorkflow` and visual node graph | Retain as optional deterministic runbook/skill composition, not required agent identity |
 | `PersonaTool` workflow wrappers | Replace with SkillBinding and explicit runbook-as-skill adapters |
-| OpenSeal and Cortex skill manifests and skill-node adapters | OpenSeal owns the canonical Skill contract; Atlas registers enterprise bindings/transports and removes legacy global/direct-address paths |
-| trigger manager and K8s informers | Adapt into tenant-owned EventSubscriptions that create/wake Runs |
+| skill manifests and skill-node adapters | Consolidate into the canonical Skill contract and remove legacy global/direct-address paths |
+| trigger manager and Kubernetes informers | Adapt into scoped EventSubscriptions that create or wake Runs |
 | process-local runtime task map | Delete after durable Run checkpoints and status APIs replace it |
 | direct background trigger goroutines | Delete after all trigger paths enqueue durable Runs |
 | agent chat, team chat, builder chat histories | Keep conversational UX; converge execution and activity on shared Run APIs/events |
 | team chat turn/token/cooldown policies | Reuse as scheduler/team policy where generally useful; remove chat-only execution ownership |
 | collaboration teams | Retain roster/context value; separate semantic roles from permissions and build delegation on AgentRequest |
 | approval service | Retain concept; migrate to ApprovalCheckpoint tied to runs/skill calls and policy authority |
-| marketplace agent/team YAML | Evolve schema to definitions, objectives, subscriptions, policies, skill requirements, and evaluations |
-| Studio ReactFlow builder | Keep as optional advanced runbook visualization; remove it as the mandatory agent creation path |
-| Atlas imports of `cortex/pkg/agent/executor` and `resolver` | Replace with `github.com/axiom-studio/openseal/pkg/openseal` and Atlas adapter packages |
+| agent/team manifests | Evolve schema to definitions, objectives, subscriptions, policies, skill requirements, and evaluations |
+| workflow-centric embedded web GUI | Remove as the primary product surface; replace useful coverage with the prompt-first TUI and public API |
 
-No legacy path is deleted before tenant-safe migration, compatibility reads, and
+No legacy path is deleted before scope-safe migration, compatibility reads, and
 rollback are proven. Compatibility adapters may not become new extension
 points.
 
@@ -432,14 +407,14 @@ Expand OpenSeal's public facade and introduce Objective, durable Run
 checkpoints, worker leases, wake conditions, and the canonical activity
 envelope by evolving OpenSeal `pkg/runtime`. Make the standalone daemon use the
 same `Engine`. Add recovery, idempotency, scope isolation, and worker lifecycle
-tests. Atlas then supplies tenant-aware enterprise implementations of the
+tests. Downstream deployments can supply their own implementations of the
 portable store and policy interfaces.
 
 ### Phase 2: execution convergence
 
 Route schedules, Kubernetes events, webhooks, one-off chat work, mandates, and
 handoffs through OpenSeal Run creation. Replace OpenSeal daemon goroutines,
-Atlas trigger goroutines, and process-local task status. Attach skill-call
+direct trigger goroutines, and process-local task status. Attach skill-call
 traces and artifacts directly to runs.
 
 ### Phase 3: capability and policy convergence
@@ -457,16 +432,16 @@ delegation, extensible roles, and shared evaluation.
 ### Phase 5: product surfaces and removal
 
 Ship prompt-first creation and amendment, compact activity projections, and
-unified chat/run streaming. Migrate marketplace definitions. Delete superseded
-routes, tables, services, and Studio components once usage and rollback gates
-are satisfied.
+unified chat/run streaming. Migrate published definitions. Delete superseded
+routes, tables, services, and UI components once usage and rollback gates are
+satisfied.
 
 ## Operational requirements
 
-- Every user-facing row, event, child record, join, callback, and cache is
-  tenant-owned or explicitly documented as platform-internal.
-- Repository and service APIs fail closed without tenant context.
-- RBAC distinguishes reading definitions/activity, changing behavior, managing
+- Every user-facing row, event, child record, join, callback, and cache belongs
+  to an explicit scope or is documented as process-internal.
+- Repository and service APIs fail closed without scope context.
+- Authorization distinguishes reading definitions/activity, changing behavior, managing
   objectives, executing work, approving risk, binding credentials, and
   administering deployments.
 - Every external callback authenticates before resolving its tenant-owned
@@ -496,14 +471,13 @@ models. At minimum, the `Engine` accepts implementations for:
 - `SkillTransport`: local, gRPC, Kubernetes, or enterprise execution transport;
 - `Clock` and ID generation for deterministic recovery tests.
 
-OpenSeal supplies local single-user implementations, including SQLite or other
-portable storage. Atlas supplies tenant-aware Postgres/control-plane adapters,
-Vault resolution, NATS/JetStream publication, kubelink transports, and RBAC
-policy. Scope is intentionally generic in OpenSeal but mandatory on persisted
-records; Atlas maps it to tenant identity and fails closed when missing.
+OpenSeal supplies local implementations, including memory and SQLite storage.
+Embedding applications can supply database, secrets, event bus, remote
+execution, and authorization adapters. Scope remains generic but mandatory on
+persisted user-facing records.
 
 The embedded and daemon modes must pass the same conformance suite. HTTP
-handlers, CLI commands, trigger callbacks, and Atlas dispatchers call the
+handlers, CLI commands, trigger callbacks, and embedding applications call the
 `Engine`; none may execute a pipeline or brain loop directly.
 
 ## Non-goals
