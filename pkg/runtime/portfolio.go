@@ -158,6 +158,7 @@ type AgentRun struct {
 	LeaseExpiresAt    *time.Time             `json:"leaseExpiresAt,omitempty"`
 	LastClaimedAt     *time.Time             `json:"lastClaimedAt,omitempty"`
 	Attempt           int                    `json:"attempt"`
+	LastWakeSignalID  string                 `json:"lastWakeSignalId,omitempty"`
 	Context           map[string]interface{} `json:"context,omitempty"`
 	Plan              map[string]interface{} `json:"plan,omitempty"`
 	Checkpoint        map[string]interface{} `json:"checkpoint,omitempty"`
