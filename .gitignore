@@ -35,6 +35,9 @@ web/node_modules/
 web/dist/
 
 # Local config (root level only)
+/.env
+/.env.*
+!/.env.example
 /daemon.yaml
 /workflow.hcl
 /skills/repos/skills/repos/
