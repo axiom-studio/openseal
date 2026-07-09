@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -24,6 +24,9 @@ func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	}
 	if current.Revision != expectedRevision || run.Revision != expectedRevision+1 {
 		return nil, ErrRevisionConflict
+	}
+	if lease != nil && (current.LeaseOwner != lease.WorkerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(lease.Now)) {
+		return nil, ErrLeaseLost
 	}
 	persisted := cloneActivityEvent(event)
 	persisted.Sequence = int64(len(s.activity[key]) + 1)

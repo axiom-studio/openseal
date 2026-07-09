@@ -189,11 +189,19 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if summary == "" {
 		summary = fmt.Sprintf("Applied bounded agent turn %d", turn.Sequence)
 	}
+	leaseOwner := ""
+	if run.LeaseOwner != "" {
+		if run.LeaseOwner != workerID {
+			return nil, ErrLeaseLost
+		}
+		leaseOwner = workerID
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
 		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID,
+		LeaseOwner: leaseOwner,
 	})
 	if err != nil {
 		return nil, err

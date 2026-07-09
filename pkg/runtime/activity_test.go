@@ -48,7 +48,7 @@ func (s *activityStubStore) GetAgentRun(context.Context, Scope, string) (*AgentR
 func (s *activityStubStore) ListAgentRuns(context.Context, AgentRunFilter) ([]*AgentRun, error) {
 	return nil, nil
 }
-func (s *activityStubStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, expected int64, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *activityStubStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, expected int64, event *ActivityEvent, _ *AgentRunLeaseGuard) (*ActivityEvent, error) {
 	if s.run.Revision != expected {
 		return nil, ErrRevisionConflict
 	}
