@@ -77,6 +77,7 @@ type Action struct {
 	CompensationAction   string                  `json:"compensationAction,omitempty"`
 	EmittedArtifactTypes []string                `json:"emittedArtifactTypes,omitempty"`
 	EmittedEventTypes    []string                `json:"emittedEventTypes,omitempty"`
+	Transport            *TransportReference     `json:"transport,omitempty"`
 }
 
 type TransportReference struct {
@@ -85,12 +86,17 @@ type TransportReference struct {
 }
 
 type Definition struct {
-	ID          string             `json:"id"`
-	Version     string             `json:"version"`
-	Name        string             `json:"name"`
-	Description string             `json:"description,omitempty"`
-	Actions     map[string]Action  `json:"actions"`
-	Transport   TransportReference `json:"transport"`
+	ID           string             `json:"id"`
+	Version      string             `json:"version"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description,omitempty"`
+	Actions      map[string]Action  `json:"actions"`
+	Transport    TransportReference `json:"transport"`
+	Prompt       *PromptModule      `json:"prompt,omitempty"`
+	Requirements Requirements       `json:"requirements,omitempty"`
+	Installers   []Installer        `json:"installers,omitempty"`
+	Resources    []Resource         `json:"resources,omitempty"`
+	Source       *SourceProvenance  `json:"source,omitempty"`
 }
 
 type ArgumentRule struct {
@@ -105,6 +111,7 @@ type Binding struct {
 	SkillID              string                             `json:"skillId"`
 	SkillVersion         string                             `json:"skillVersion"`
 	AllowedActions       []string                           `json:"allowedActions"`
+	EnablePrompt         bool                               `json:"enablePrompt,omitempty"`
 	MaximumRisk          RiskLevel                          `json:"maximumRisk"`
 	ArgumentRestrictions map[string]map[string]ArgumentRule `json:"argumentRestrictions,omitempty"`
 	Credentials          map[string]CredentialReference     `json:"credentials,omitempty"`
@@ -128,6 +135,16 @@ type ModelAction struct {
 	InputSchema map[string]interface{} `json:"inputSchema"`
 	Risk        RiskLevel              `json:"risk"`
 	SideEffect  SideEffect             `json:"sideEffect"`
+}
+
+type ModelPrompt struct {
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	SkillID        string `json:"skillId"`
+	Version        string `json:"version"`
+	AlwaysActive   bool   `json:"alwaysActive,omitempty"`
+	UserInvocable  bool   `json:"userInvocable"`
+	ModelInvocable bool   `json:"modelInvocable"`
 }
 
 type BoundAction struct {
@@ -231,6 +248,50 @@ func (c *Catalog) ListModelActions(_ context.Context, scope ScopeReference, depl
 	return result, nil
 }
 
+func (c *Catalog) ListModelPrompts(_ context.Context, scope ScopeReference, deploymentID string) ([]ModelPrompt, error) {
+	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]ModelPrompt, 0)
+	for _, binding := range c.bindings {
+		if binding.Scope != scope || binding.DeploymentID != deploymentID || !binding.EnablePrompt {
+			continue
+		}
+		definition := c.skills[definitionKey(binding.SkillID, binding.SkillVersion)]
+		if definition == nil || definition.Prompt == nil {
+			continue
+		}
+		result = append(result, ModelPrompt{
+			Name: definition.Name, Description: definition.Description, SkillID: definition.ID, Version: definition.Version,
+			AlwaysActive: definition.Prompt.AlwaysActive, UserInvocable: definition.Prompt.UserInvocable,
+			ModelInvocable: !definition.Prompt.DisableModelInvocation,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
+func (c *Catalog) ResolvePrompt(_ context.Context, scope ScopeReference, deploymentID, skillID, version string) (*PromptModule, error) {
+	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, binding := range c.bindings {
+		if binding.Scope != scope || binding.DeploymentID != deploymentID || binding.SkillID != skillID || binding.SkillVersion != version || !binding.EnablePrompt {
+			continue
+		}
+		definition := c.skills[definitionKey(skillID, version)]
+		if definition != nil && definition.Prompt != nil {
+			copy := cloneDefinition(definition)
+			return copy.Prompt, nil
+		}
+	}
+	return nil, errors.New("bound skill prompt not found")
+}
+
 func (c *Catalog) Resolve(_ context.Context, scope ScopeReference, deploymentID, skillID, version, actionName string) (*BoundAction, error) {
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
 		return nil, err
@@ -306,11 +367,14 @@ func validateDefinition(definition *Definition) error {
 	if definition == nil || strings.TrimSpace(definition.ID) == "" || strings.TrimSpace(definition.Version) == "" || strings.TrimSpace(definition.Name) == "" {
 		return errors.New("skill id, version, and name are required")
 	}
-	if len(definition.Actions) == 0 {
-		return errors.New("skill must declare at least one action")
+	if len(definition.Actions) == 0 && definition.Prompt == nil {
+		return errors.New("skill must declare at least one action or prompt module")
 	}
-	if strings.TrimSpace(definition.Transport.Kind) == "" {
+	if len(definition.Actions) > 0 && strings.TrimSpace(definition.Transport.Kind) == "" {
 		return errors.New("skill transport kind is required")
+	}
+	if definition.Prompt != nil && strings.TrimSpace(definition.Prompt.Instructions) == "" {
+		return errors.New("skill prompt instructions are required")
 	}
 	for name, action := range definition.Actions {
 		if name == "" || action.Name != name || strings.TrimSpace(action.Description) == "" || action.InputSchema == nil {
@@ -351,13 +415,16 @@ func validateBindingShape(binding *Binding) error {
 	if err := validateScopeAndDeployment(binding.Scope, binding.DeploymentID); err != nil {
 		return err
 	}
-	if len(binding.AllowedActions) == 0 || !validRisk(binding.MaximumRisk) {
-		return errors.New("binding must explicitly allow actions and set maximum risk")
+	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt) || !validRisk(binding.MaximumRisk) {
+		return errors.New("binding must enable a prompt or explicitly allow actions and set maximum risk")
 	}
 	return nil
 }
 
 func validateBindingAgainstDefinition(binding *Binding, definition *Definition) error {
+	if binding.EnablePrompt && definition.Prompt == nil {
+		return errors.New("binding enables a prompt that the skill does not define")
+	}
 	for _, name := range binding.AllowedActions {
 		action, ok := definition.Actions[name]
 		if !ok {
