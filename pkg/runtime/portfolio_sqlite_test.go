@@ -35,7 +35,10 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 	run, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "marketing",
 		Goal: "Draft launch content", Source: RunSourceObjective, Priority: 50,
-		Context: map[string]interface{}{"release": "v2"},
+		Context:       map[string]interface{}{"release": "v2"},
+		Plan:          map[string]interface{}{"next": "draft"},
+		Checkpoint:    map[string]interface{}{"turn": float64(3)},
+		WakeCondition: &WakeCondition{Type: "event", Reference: "approval:launch"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +47,9 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.RootRunID != run.ID || loaded.Context["release"] != "v2" {
+	if loaded.RootRunID != run.ID || loaded.Context["release"] != "v2" ||
+		loaded.Plan["next"] != "draft" || loaded.Checkpoint["turn"] != float64(3) ||
+		loaded.WakeCondition == nil || loaded.WakeCondition.Reference != "approval:launch" {
 		t.Fatalf("run did not round-trip: %#v", loaded)
 	}
 	if _, err := service.GetAgentRun(ctx, otherScope, run.ID); !errors.Is(err, ErrRunNotFound) {

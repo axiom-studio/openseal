@@ -265,6 +265,9 @@ type CreateAgentRunRequest struct {
 	Source          RunSource
 	Priority        int
 	Context         map[string]interface{}
+	Plan            map[string]interface{}
+	Checkpoint      map[string]interface{}
+	WakeCondition   *WakeCondition
 	Budget          map[string]interface{}
 	Policy          map[string]interface{}
 }
@@ -390,6 +393,7 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
 		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: req.Source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Context: req.Context,
+		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
 		Budget: req.Budget, Policy: req.Policy, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := run.Validate(); err != nil {
