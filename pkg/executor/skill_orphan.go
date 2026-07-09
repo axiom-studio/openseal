@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/skillmd"
+	"github.com/axiom-studio/openseal/pkg/skill/skillmd"
 	"go.uber.org/zap"
 )
 
