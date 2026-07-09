@@ -11,10 +11,12 @@ import (
 
 // MemoryStore holds execution records in memory with a configurable max size.
 type MemoryStore struct {
-	mu      sync.RWMutex
-	runs    map[int]*RunRecord
-	maxSize int
-	nextID  int
+	mu         sync.RWMutex
+	runs       map[int]*RunRecord
+	objectives map[string]*Objective
+	agentRuns  map[string]*AgentRun
+	maxSize    int
+	nextID     int
 }
 
 // NewMemoryStore creates an in-memory store for execution records.
@@ -23,9 +25,11 @@ func NewMemoryStore(maxSize int) *MemoryStore {
 		maxSize = 100
 	}
 	return &MemoryStore{
-		runs:    make(map[int]*RunRecord),
-		maxSize: maxSize,
-		nextID:  1,
+		runs:       make(map[int]*RunRecord),
+		objectives: make(map[string]*Objective),
+		agentRuns:  make(map[string]*AgentRun),
+		maxSize:    maxSize,
+		nextID:     1,
 	}
 }
 
