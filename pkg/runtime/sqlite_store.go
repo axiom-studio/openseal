@@ -65,7 +65,7 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
-	return nil
+	return migratePortfolio(db)
 }
 
 func addMissingRunColumns(db *sql.DB) error {
