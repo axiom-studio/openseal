@@ -16,6 +16,7 @@ type MemoryStore struct {
 	objectives map[string]*Objective
 	agentRuns  map[string]*AgentRun
 	activity   map[string][]*ActivityEvent
+	turns      map[string]map[string]*AgentTurn
 	maxSize    int
 	nextID     int
 }
@@ -30,6 +31,7 @@ func NewMemoryStore(maxSize int) *MemoryStore {
 		objectives: make(map[string]*Objective),
 		agentRuns:  make(map[string]*AgentRun),
 		activity:   make(map[string][]*ActivityEvent),
+		turns:      make(map[string]map[string]*AgentTurn),
 		maxSize:    maxSize,
 		nextID:     1,
 	}
