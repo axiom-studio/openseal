@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/skillmd"
 	"github.com/axiom-studio/openseal/pkg/config"
+	"github.com/axiom-studio/openseal/pkg/skill/skillmd"
 )
 
 // AIExecutor makes calls to AI/LLM APIs

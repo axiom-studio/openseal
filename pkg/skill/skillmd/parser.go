@@ -1,7 +1,6 @@
 package skillmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,275 +8,314 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-const maxSkillSize = 50 * 1024
+const warningSkillSize = 50 * 1024
 
-// suspiciousPatterns are basic heuristics for detecting potentially malicious content.
 var suspiciousPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\{\{`),        // template injection markers
-	regexp.MustCompile(`(?i)<script`),     // script injection
-	regexp.MustCompile(`(?i)\beval\(`),    // eval calls
-	regexp.MustCompile(`(?i)\bexec\(`),    // exec calls
-	regexp.MustCompile(`(?i)javascript:`), // javascript: URLs
+	regexp.MustCompile(`(?i)\{\{`),
+	regexp.MustCompile(`(?i)<script`),
+	regexp.MustCompile(`(?i)javascript:`),
 }
 
-// ParseResult wraps a parsed skill with optional warnings.
 type ParseResult struct {
 	Skill    *ParsedSkill
 	Warnings []string
 }
 
-// ParseSkillMDWithWarnings parses SKILL.md content and returns the result with any warnings.
-// Warnings include size truncation and suspicious pattern detection.
 func ParseSkillMDWithWarnings(content []byte) (*ParseResult, error) {
-	var warnings []string
-
-	// Size check: truncate to 50KB if larger
-	if len(content) > maxSkillSize {
-		warnings = append(warnings, fmt.Sprintf("SKILL.md truncated from %d bytes to %d bytes (max %dKB)", len(content), maxSkillSize, maxSkillSize/1024))
-		content = content[:maxSkillSize]
-	}
-
-	// Suspicious pattern scan
-	for _, pat := range suspiciousPatterns {
-		if loc := pat.FindIndex(content); loc != nil {
-			// Calculate approximate line number
-			lineNum := 1
-			for _, b := range content[:loc[0]] {
-				if b == '\n' {
-					lineNum++
-				}
-			}
-			warnings = append(warnings, fmt.Sprintf("suspicious pattern %q detected at line %d", pat.String(), lineNum))
-		}
-	}
-
 	skill, err := ParseSkillMD(content)
 	if err != nil {
 		return nil, err
 	}
-	skill.Warnings = warnings
-
-	return &ParseResult{
-		Skill:    skill,
-		Warnings: warnings,
-	}, nil
-}
-
-type frontmatterRaw struct {
-	Name        string      `yaml:"name"`
-	Description string      `yaml:"description"`
-	Version     string      `yaml:"version"`
-	Metadata    interface{} `yaml:"metadata"`
+	warnings := scanWarnings(content)
+	skill.Warnings = append([]string(nil), warnings...)
+	return &ParseResult{Skill: skill, Warnings: warnings}, nil
 }
 
 func ParseSkillMD(content []byte) (*ParsedSkill, error) {
 	if len(content) == 0 {
 		return nil, fmt.Errorf("empty content")
 	}
-
 	fm, body, err := extractFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
-
-	var raw frontmatterRaw
-	if err := yaml.Unmarshal(fm, &raw); err != nil {
+	frontmatter := make(map[string]interface{})
+	if err := yaml.Unmarshal(fm, &frontmatter); err != nil {
 		return nil, fmt.Errorf("invalid YAML frontmatter: %w", err)
 	}
-
-	if raw.Name == "" {
-		return nil, fmt.Errorf("missing required field: name")
+	name := stringValue(frontmatter, "name")
+	description := stringValue(frontmatter, "description")
+	if err := validateIdentity(name, description); err != nil {
+		return nil, err
 	}
-	if raw.Description == "" {
-		return nil, fmt.Errorf("missing required field: description")
-	}
-	if !slugPattern.MatchString(raw.Name) {
-		return nil, fmt.Errorf("invalid name %q: must match pattern ^[a-z0-9][a-z0-9-]*$", raw.Name)
-	}
-
-	meta, err := parseMetadata(raw.Metadata)
+	metadata, err := parseMetadata(frontmatter["metadata"])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
-
+	version := stringValue(frontmatter, "version")
+	if version == "" {
+		version = metadataString(metadata.Raw, "version")
+	}
+	homepage := stringValue(frontmatter, "homepage")
+	if homepage == "" {
+		homepage = metadata.Homepage
+	}
+	dispatch := parseCommandDispatch(frontmatter)
 	return &ParsedSkill{
-		Name:        raw.Name,
-		Description: raw.Description,
-		Version:     raw.Version,
-		Metadata:    meta,
-		Body:        body,
-		RawContent:  content,
-		SizeBytes:   len(content),
+		Name: name, Description: description, License: stringValue(frontmatter, "license"),
+		Compatibility: stringValue(frontmatter, "compatibility"), AllowedTools: strings.Fields(stringValue(frontmatter, "allowed-tools")),
+		Version: version, Homepage: homepage, Metadata: metadata, Frontmatter: cloneMap(frontmatter),
+		Invocation: InvocationPolicy{
+			UserInvocable:          boolValue(frontmatter, "user-invocable", true),
+			DisableModelInvocation: boolValue(frontmatter, "disable-model-invocation", false),
+		},
+		CommandDispatch: dispatch, Body: body, RawContent: append([]byte(nil), content...), SizeBytes: len(content),
 	}, nil
 }
 
 func ValidateSkillMD(parsed *ParsedSkill) []ValidationError {
-	var errors []ValidationError
-
-	if parsed.Name == "" {
-		errors = append(errors, ValidationError{
-			Field:   "name",
-			Message: "name is required",
-		})
-	} else if !slugPattern.MatchString(parsed.Name) {
-		errors = append(errors, ValidationError{
-			Field:   "name",
-			Message: fmt.Sprintf("name %q does not match slug pattern ^[a-z0-9][a-z0-9-]*$", parsed.Name),
-		})
+	if parsed == nil {
+		return []ValidationError{{Field: "skill", Message: "skill is required"}}
 	}
-
-	if parsed.Description == "" {
-		errors = append(errors, ValidationError{
-			Field:   "description",
-			Message: "description is required",
-		})
+	var result []ValidationError
+	if err := validateName(parsed.Name); err != nil {
+		result = append(result, ValidationError{Field: "name", Message: err.Error()})
 	}
-
-	if parsed.SizeBytes > maxSkillSize {
-		errors = append(errors, ValidationError{
-			Field:   "content",
-			Message: fmt.Sprintf("SKILL.md is large (%d bytes, >50KB); consider splitting", parsed.SizeBytes),
-		})
+	if parsed.Description == "" || len(parsed.Description) > 1024 {
+		result = append(result, ValidationError{Field: "description", Message: "description must contain 1 to 1024 characters"})
 	}
-
-	// Scan raw content for suspicious patterns
-	if len(parsed.RawContent) > 0 {
-		for _, pat := range suspiciousPatterns {
-			if loc := pat.FindIndex(parsed.RawContent); loc != nil {
-				lineNum := 1
-				for _, b := range parsed.RawContent[:loc[0]] {
-					if b == '\n' {
-						lineNum++
-					}
-				}
-				errors = append(errors, ValidationError{
-					Field:      "content",
-					Message:    fmt.Sprintf("suspicious pattern detected at line %d", lineNum),
-					LineNumber: lineNum,
-				})
-			}
-		}
+	if parsed.Compatibility != "" && len(parsed.Compatibility) > 500 {
+		result = append(result, ValidationError{Field: "compatibility", Message: "compatibility must not exceed 500 characters"})
 	}
-
-	return errors
+	for _, warning := range scanWarnings(parsed.RawContent) {
+		result = append(result, ValidationError{Field: "content", Message: warning})
+	}
+	return result
 }
 
-func extractFrontmatter(content []byte) (frontmatter []byte, body string, err error) {
-	text := string(content)
-
-	if !strings.HasPrefix(text, "---") {
+func extractFrontmatter(content []byte) ([]byte, string, error) {
+	text := strings.TrimPrefix(string(content), "\ufeff")
+	lines := strings.SplitAfter(text, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return nil, "", fmt.Errorf("missing frontmatter delimiters: content must start with ---")
 	}
-
-	rest := text[3:]
-	endIdx := strings.Index(rest, "\n---")
-	delimLen := 4
-	if endIdx == -1 {
-		endIdx = strings.Index(rest, "---")
-		delimLen = 3
-		if endIdx == -1 {
-			return nil, "", fmt.Errorf("missing closing frontmatter delimiter")
+	offset := len(lines[0])
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			frontmatter := text[offset : offset+sumLengths(lines[1:i])]
+			bodyOffset := offset + sumLengths(lines[1:i+1])
+			return []byte(frontmatter), text[bodyOffset:], nil
 		}
 	}
-
-	fm := rest[:endIdx]
-	bodyStart := endIdx + delimLen
-	if bodyStart < len(rest) && rest[bodyStart] == '\n' {
-		bodyStart++
-	}
-	if bodyStart < len(rest) {
-		body = rest[bodyStart:]
-	}
-
-	return []byte(fm), body, nil
+	return nil, "", fmt.Errorf("missing closing frontmatter delimiter")
 }
 
 func parseMetadata(raw interface{}) (SkillMetadata, error) {
 	if raw == nil {
 		return SkillMetadata{}, nil
 	}
-
-	var jsonStr string
-
-	switch v := raw.(type) {
-	case string:
-		jsonStr = v
-	case map[string]interface{}:
-		if openclaw, ok := v["openclaw"]; ok {
-			return parseOpenClawJSON(openclaw)
+	value := raw
+	if encoded, ok := raw.(string); ok {
+		var decoded map[string]interface{}
+		if err := yaml.Unmarshal([]byte(encoded), &decoded); err != nil {
+			return SkillMetadata{}, fmt.Errorf("metadata is not valid YAML/JSON5-compatible data: %w", err)
 		}
-		data, err := json.Marshal(v)
-		if err != nil {
-			return SkillMetadata{}, fmt.Errorf("failed to marshal metadata: %w", err)
+		value = decoded
+	}
+	root, ok := stringMap(value)
+	if !ok {
+		return SkillMetadata{}, fmt.Errorf("metadata must be an object")
+	}
+	openRaw, exists := root["openclaw"]
+	if !exists {
+		openRaw = root["clawdbot"]
+	}
+	metadata := SkillMetadata{Raw: cloneMap(root)}
+	if openRaw == nil {
+		return metadata, nil
+	}
+	open, ok := stringMap(openRaw)
+	if !ok {
+		return SkillMetadata{}, fmt.Errorf("metadata.openclaw must be an object")
+	}
+	requires, _ := stringMap(open["requires"])
+	metadata.Always = looseBool(open["always"])
+	metadata.SkillKey = firstString(open, "skillKey", "skill_key")
+	metadata.PrimaryEnv = firstString(open, "primaryEnv", "primary_env")
+	metadata.Emoji = firstString(open, "emoji")
+	metadata.Homepage = firstString(open, "homepage")
+	metadata.OS = stringSlice(open["os"])
+	metadata.RequiresEnv = firstSlice(requires, open, "env", "requires_env")
+	metadata.RequiresBins = firstSlice(requires, open, "bins", "requires_bins")
+	metadata.RequiresAnyBin = firstSlice(requires, open, "anyBins", "requires_any_bin")
+	metadata.RequiresConfig = firstSlice(requires, open, "config", "requires_config")
+	metadata.Install = parseInstallSpecs(open["install"])
+	metadata.OpenClaw = &OpenClawMetadata{
+		Always: metadata.Always, SkillKey: metadata.SkillKey, PrimaryEnv: metadata.PrimaryEnv,
+		Emoji: metadata.Emoji, Homepage: metadata.Homepage, OS: append([]string(nil), metadata.OS...),
+		Requires: RequiresConfig{Env: append([]string(nil), metadata.RequiresEnv...), Bins: append([]string(nil), metadata.RequiresBins...), AnyBins: append([]string(nil), metadata.RequiresAnyBin...), Config: append([]string(nil), metadata.RequiresConfig...)},
+		Install:  append([]InstallSpec(nil), metadata.Install...),
+	}
+	return metadata, nil
+}
+
+func parseInstallSpecs(raw interface{}) []InstallSpec {
+	items, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]InstallSpec, 0, len(items))
+	for _, item := range items {
+		value, ok := stringMap(item)
+		if !ok {
+			continue
 		}
-		jsonStr = string(data)
+		spec := InstallSpec{ID: firstString(value, "id"), Kind: firstString(value, "kind"), Formula: firstString(value, "formula", "cask"), Package: firstString(value, "package"), Module: firstString(value, "module"), URL: firstString(value, "url"), Archive: firstString(value, "archive"), TargetDir: firstString(value, "targetDir", "target_dir"), Bins: stringSlice(value["bins"]), Label: firstString(value, "label"), OS: stringSlice(value["os"])}
+		if extract, ok := value["extract"].(bool); ok {
+			spec.Extract = &extract
+		}
+		if strip, ok := intValue(value["stripComponents"]); ok {
+			spec.StripComponents = &strip
+		}
+		result = append(result, spec)
+	}
+	return result
+}
+
+func parseCommandDispatch(frontmatter map[string]interface{}) *CommandDispatch {
+	if firstString(frontmatter, "command-dispatch") != "tool" {
+		return nil
+	}
+	tool := firstString(frontmatter, "command-tool")
+	if tool == "" {
+		return nil
+	}
+	return &CommandDispatch{Kind: "tool", ToolName: tool, ArgMode: "raw"}
+}
+
+func validateIdentity(name, description string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	if description == "" || len(description) > 1024 {
+		return fmt.Errorf("description must contain 1 to 1024 characters")
+	}
+	return nil
+}
+
+func validateName(name string) error {
+	if len(name) < 1 || len(name) > 64 || !slugPattern.MatchString(name) {
+		return fmt.Errorf("name must be 1 to 64 lowercase alphanumeric or single-hyphen characters")
+	}
+	return nil
+}
+
+func scanWarnings(content []byte) []string {
+	var result []string
+	if len(content) > warningSkillSize {
+		result = append(result, fmt.Sprintf("SKILL.md is large (%d bytes); use progressive disclosure for supporting material", len(content)))
+	}
+	for _, pattern := range suspiciousPatterns {
+		if loc := pattern.FindIndex(content); loc != nil {
+			line := 1 + strings.Count(string(content[:loc[0]]), "\n")
+			result = append(result, fmt.Sprintf("suspicious pattern %q detected at line %d", pattern.String(), line))
+		}
+	}
+	return result
+}
+
+func stringMap(value interface{}) (map[string]interface{}, bool) {
+	result, ok := value.(map[string]interface{})
+	return result, ok
+}
+
+func stringValue(values map[string]interface{}, key string) string { return firstString(values, key) }
+
+func firstString(values map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := values[key].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func metadataString(values map[string]interface{}, key string) string {
+	return firstString(values, key)
+}
+
+func stringSlice(value interface{}) []string {
+	items, ok := value.([]interface{})
+	if !ok {
+		if typed, ok := value.([]string); ok {
+			return append([]string(nil), typed...)
+		}
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if value, ok := item.(string); ok && strings.TrimSpace(value) != "" {
+			result = append(result, strings.TrimSpace(value))
+		}
+	}
+	return result
+}
+
+func firstSlice(nested, flat map[string]interface{}, nestedKey, legacyKey string) []string {
+	if values := stringSlice(nested[nestedKey]); len(values) > 0 {
+		return values
+	}
+	return stringSlice(flat[legacyKey])
+}
+
+func boolValue(values map[string]interface{}, key string, fallback bool) bool {
+	value, ok := values[key]
+	if !ok {
+		return fallback
+	}
+	if typed, ok := value.(bool); ok {
+		return typed
+	}
+	if typed, ok := value.(string); ok {
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	}
+	return fallback
+}
+
+func looseBool(value interface{}) bool {
+	typed, _ := value.(bool)
+	return typed
+}
+
+func intValue(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
 	default:
-		data, err := json.Marshal(v)
-		if err != nil {
-			return SkillMetadata{}, fmt.Errorf("failed to marshal metadata: %w", err)
-		}
-		jsonStr = string(data)
+		return 0, false
 	}
-
-	jsonStr = strings.TrimSpace(jsonStr)
-	if jsonStr == "" {
-		return SkillMetadata{}, nil
-	}
-
-	var wrapper map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &wrapper); err != nil {
-		return SkillMetadata{}, fmt.Errorf("metadata is not valid JSON: %w", err)
-	}
-
-	if openclaw, ok := wrapper["openclaw"]; ok {
-		return parseOpenClawJSON(openclaw)
-	}
-
-	return SkillMetadata{}, nil
 }
 
-func parseOpenClawJSON(raw interface{}) (SkillMetadata, error) {
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return SkillMetadata{}, fmt.Errorf("failed to marshal openclaw metadata: %w", err)
+func cloneMap(value map[string]interface{}) map[string]interface{} {
+	if value == nil {
+		return nil
 	}
-	var oc openclawFlat
-	if err := json.Unmarshal(data, &oc); err != nil {
-		return SkillMetadata{}, fmt.Errorf("failed to unmarshal openclaw metadata: %w", err)
-	}
-	return SkillMetadata{
-		RequiresEnv:    oc.RequiresEnv,
-		RequiresBins:   oc.RequiresBins,
-		RequiresConfig: oc.RequiresConfig,
-		RequiresAnyBin: oc.RequiresAnyBin,
-		PrimaryEnv:     oc.PrimaryEnv,
-		Emoji:          oc.Emoji,
-		Homepage:       oc.Homepage,
-		OS:             oc.OS,
-		Always:         oc.Always,
-		Install:        oc.Install,
-		OpenClaw: &OpenClawMetadata{
-			Requires: RequiresConfig{
-				Env:     oc.RequiresEnv,
-				Bins:    oc.RequiresBins,
-				AnyBins: oc.RequiresAnyBin,
-				Config:  oc.RequiresConfig,
-			},
-		},
-	}, nil
+	encoded, _ := yaml.Marshal(value)
+	var result map[string]interface{}
+	_ = yaml.Unmarshal(encoded, &result)
+	return result
 }
 
-type openclawFlat struct {
-	RequiresEnv    []string      `json:"requires_env"`
-	RequiresBins   []string      `json:"requires_bins"`
-	RequiresConfig []string      `json:"requires_config"`
-	RequiresAnyBin []string      `json:"requires_any_bin"`
-	PrimaryEnv     string        `json:"primary_env"`
-	Emoji          string        `json:"emoji"`
-	Homepage       string        `json:"homepage"`
-	OS             []string      `json:"os"`
-	Always         bool          `json:"always"`
-	Install        []InstallSpec `json:"install"`
+func sumLengths(lines []string) int {
+	total := 0
+	for _, line := range lines {
+		total += len(line)
+	}
+	return total
 }
