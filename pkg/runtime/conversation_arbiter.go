@@ -35,17 +35,19 @@ const (
 	ParticipationReasonDuplicate            ParticipationReason = "duplicate"
 	ParticipationReasonBackpressure         ParticipationReason = "backpressure"
 	ParticipationReasonAcknowledgmentOnly   ParticipationReason = "acknowledgment_only"
+	ParticipationReasonNotAddressed         ParticipationReason = "not_addressed"
 )
 
 type ParticipationSignals struct {
-	DirectlyMentioned    bool `json:"directlyMentioned,omitempty"`
-	AnswersOpenQuestion  bool `json:"answersOpenQuestion,omitempty"`
-	HasNewInformation    bool `json:"hasNewInformation,omitempty"`
-	RoleRelevant         bool `json:"roleRelevant,omitempty"`
-	HasEvidence          bool `json:"hasEvidence,omitempty"`
-	ResolvesOpenWork     bool `json:"resolvesOpenWork,omitempty"`
-	CoordinatesWork      bool `json:"coordinatesWork,omitempty"`
-	SubstantiveObjection bool `json:"substantiveObjection,omitempty"`
+	DirectlyMentioned              bool `json:"directlyMentioned,omitempty"`
+	TriggerTargetsOtherParticipant bool `json:"triggerTargetsOtherParticipant,omitempty"`
+	AnswersOpenQuestion            bool `json:"answersOpenQuestion,omitempty"`
+	HasNewInformation              bool `json:"hasNewInformation,omitempty"`
+	RoleRelevant                   bool `json:"roleRelevant,omitempty"`
+	HasEvidence                    bool `json:"hasEvidence,omitempty"`
+	ResolvesOpenWork               bool `json:"resolvesOpenWork,omitempty"`
+	CoordinatesWork                bool `json:"coordinatesWork,omitempty"`
+	SubstantiveObjection           bool `json:"substantiveObjection,omitempty"`
 }
 
 // ParticipationProposal is the bounded, visible output of a participant's
@@ -294,6 +296,12 @@ func scoreParticipationProposal(proposal ParticipationProposal) ParticipationDec
 		decision.Reasons = []ParticipationReason{ParticipationReasonRequestedSilence}
 		return decision
 	}
+	if proposal.Signals.TriggerTargetsOtherParticipant && !proposal.Signals.DirectlyMentioned &&
+		!proposalIsSubstantiveObjection(proposal) && !proposalHasVerifiedEvidence(proposal) && !proposalCoordinatesWork(proposal) {
+		decision.Disposition = ParticipationSilent
+		decision.Reasons = []ParticipationReason{ParticipationReasonNotAddressed}
+		return decision
+	}
 	add := func(enabled bool, points int, reason ParticipationReason) {
 		if enabled {
 			decision.Score += points
@@ -304,17 +312,17 @@ func scoreParticipationProposal(proposal ParticipationProposal) ParticipationDec
 	add(proposal.Signals.AnswersOpenQuestion, 35, ParticipationReasonAnswersQuestion)
 	add(proposal.Signals.HasNewInformation, 25, ParticipationReasonNewInformation)
 	add(proposal.Signals.RoleRelevant, 20, ParticipationReasonRoleRelevant)
-	add(proposal.Signals.HasEvidence, 15, ParticipationReasonEvidenceBacked)
+	add(proposalHasVerifiedEvidence(proposal), 15, ParticipationReasonEvidenceBacked)
 	add(proposal.Signals.ResolvesOpenWork, 20, ParticipationReasonResolvesWork)
-	add(proposal.Signals.CoordinatesWork, 10, ParticipationReasonCoordinatesWork)
-	add(proposal.Signals.SubstantiveObjection, 30, ParticipationReasonSubstantiveObjection)
+	add(proposalCoordinatesWork(proposal), 10, ParticipationReasonCoordinatesWork)
+	add(proposalIsSubstantiveObjection(proposal), 30, ParticipationReasonSubstantiveObjection)
 	decision.Score += proposal.Priority / 5
 	if proposal.Intent == MessageIntentAcknowledgment && !proposal.Signals.DirectlyMentioned {
 		decision.Score -= 45
 		decision.Reasons = append(decision.Reasons, ParticipationReasonAcknowledgmentOnly)
 	}
 	if !proposal.Signals.HasNewInformation && !proposal.Signals.AnswersOpenQuestion && !proposal.Signals.ResolvesOpenWork &&
-		!proposal.Signals.SubstantiveObjection && !proposal.Signals.DirectlyMentioned && !proposal.Signals.CoordinatesWork {
+		!proposalIsSubstantiveObjection(proposal) && !proposal.Signals.DirectlyMentioned && !proposalCoordinatesWork(proposal) {
 		decision.Score -= 25
 		decision.Reasons = append(decision.Reasons, ParticipationReasonNoNewInformation)
 	}
@@ -325,6 +333,26 @@ func scoreParticipationProposal(proposal ParticipationProposal) ParticipationDec
 		decision.Score = 100
 	}
 	return decision
+}
+
+func proposalHasVerifiedEvidence(proposal ParticipationProposal) bool {
+	return proposal.Signals.HasEvidence && len(proposal.References) > 0
+}
+
+func proposalIsSubstantiveObjection(proposal ParticipationProposal) bool {
+	return proposal.Signals.SubstantiveObjection && proposal.Intent == MessageIntentObjection
+}
+
+func proposalCoordinatesWork(proposal ParticipationProposal) bool {
+	if !proposal.Signals.CoordinatesWork {
+		return false
+	}
+	switch proposal.Intent {
+	case MessageIntentUpdate, MessageIntentProposal, MessageIntentDecision, MessageIntentHandoff, MessageIntentApprovalRequest:
+		return true
+	default:
+		return false
+	}
 }
 
 type comparableMessage struct {

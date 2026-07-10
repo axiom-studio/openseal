@@ -284,7 +284,9 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				proposal.Participant = binding.Participant
 				proposal.SemanticRoles = append([]string(nil), binding.SemanticRoles...)
 				proposal.Priority = binding.Priority
-				proposal.Signals.DirectlyMentioned = proposal.Signals.DirectlyMentioned || participantDirectlyMentioned(trigger, binding.Participant)
+				directlyMentioned := participantDirectlyMentioned(trigger, binding.Participant)
+				proposal.Signals.DirectlyMentioned = directlyMentioned
+				proposal.Signals.TriggerTargetsOtherParticipant = triggerTargetsSpecificAgent(trigger) && !directlyMentioned
 				proposal.Signals.RoleRelevant = proposal.Signals.RoleRelevant || participantRoleAddressed(trigger, binding.SemanticRoles)
 				if err := validateGeneratedParticipationProposal(proposal); err != nil {
 					errs[index] = fmt.Errorf("participant %s proposal: %w", binding.Participant.ID, err)
@@ -388,6 +390,25 @@ func participantDirectlyMentioned(trigger *ChannelMessage, participant Conversat
 	if trigger.Audience.Kind == ConversationAudienceParticipants {
 		for _, target := range trigger.Audience.Participants {
 			if target == participant {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func triggerTargetsSpecificAgent(trigger *ChannelMessage) bool {
+	if trigger == nil {
+		return false
+	}
+	for _, mention := range trigger.Mentions {
+		if mention.Type == ConversationParticipantAgent {
+			return true
+		}
+	}
+	if trigger.Audience.Kind == ConversationAudienceParticipants {
+		for _, target := range trigger.Audience.Participants {
+			if target.Type == ConversationParticipantAgent {
 				return true
 			}
 		}
