@@ -65,12 +65,13 @@ type ArtifactRetention struct {
 // lineage that produced it. Empty lineage fields are omitted for imported
 // artifacts, but the producer is always required.
 type ArtifactProvenance struct {
-	Producer    ActivityActor `json:"producer"`
-	RunID       string        `json:"runId,omitempty"`
-	ObjectiveID string        `json:"objectiveId,omitempty"`
-	TurnID      string        `json:"turnId,omitempty"`
-	ActionID    string        `json:"actionId,omitempty"`
-	RequestID   string        `json:"requestId,omitempty"`
+	Producer    ActivityActor   `json:"producer"`
+	Owner       *ObjectiveOwner `json:"owner,omitempty"`
+	RunID       string          `json:"runId,omitempty"`
+	ObjectiveID string          `json:"objectiveId,omitempty"`
+	TurnID      string          `json:"turnId,omitempty"`
+	ActionID    string          `json:"actionId,omitempty"`
+	RequestID   string          `json:"requestId,omitempty"`
 }
 
 // EvidenceLink forms a queryable graph without copying source content into
@@ -140,6 +141,11 @@ func (a *Artifact) Validate() error {
 	if strings.TrimSpace(a.Provenance.Producer.Type) == "" || strings.TrimSpace(a.Provenance.Producer.ID) == "" {
 		return fmt.Errorf("%w: provenance producer is required", ErrInvalidArtifactRecord)
 	}
+	if a.Provenance.Owner != nil {
+		if err := a.Provenance.Owner.Validate(); err != nil {
+			return fmt.Errorf("%w: provenance owner: %v", ErrInvalidArtifactRecord, err)
+		}
+	}
 	if err := validateCredentialFreeContext(a.Metadata); err != nil {
 		return fmt.Errorf("%w: metadata: %v", ErrInvalidArtifactRecord, err)
 	}
@@ -192,6 +198,7 @@ func (l EvidenceLink) Validate() error {
 type ArtifactFilter struct {
 	Scope             Scope
 	ID                string
+	Owner             *ObjectiveOwner
 	Types             []string
 	MediaTypes        []string
 	Classifications   []ArtifactClassification
@@ -295,6 +302,11 @@ func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*A
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
+	if filter.Owner != nil {
+		if err := filter.Owner.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}
@@ -376,6 +388,11 @@ func normalizeArtifact(artifact *Artifact) {
 	artifact.Digest = strings.ToLower(strings.TrimSpace(artifact.Digest))
 	artifact.Provenance.Producer.Type = strings.TrimSpace(artifact.Provenance.Producer.Type)
 	artifact.Provenance.Producer.ID = strings.TrimSpace(artifact.Provenance.Producer.ID)
+	if artifact.Provenance.Owner != nil {
+		owner := *artifact.Provenance.Owner
+		owner.ID = strings.TrimSpace(owner.ID)
+		artifact.Provenance.Owner = &owner
+	}
 	artifact.Provenance.RunID = strings.TrimSpace(artifact.Provenance.RunID)
 	artifact.Provenance.ObjectiveID = strings.TrimSpace(artifact.Provenance.ObjectiveID)
 	artifact.Provenance.TurnID = strings.TrimSpace(artifact.Provenance.TurnID)
@@ -402,6 +419,10 @@ func cloneArtifact(in *Artifact) *Artifact {
 		return nil
 	}
 	out := *in
+	if in.Provenance.Owner != nil {
+		owner := *in.Provenance.Owner
+		out.Provenance.Owner = &owner
+	}
 	out.Metadata = cloneMap(in.Metadata)
 	out.MetadataSchema = cloneMap(in.MetadataSchema)
 	out.Evidence = append([]EvidenceLink(nil), in.Evidence...)
@@ -457,6 +478,9 @@ func matchesArtifactFilter(artifact *Artifact, filter ArtifactFilter) bool {
 		return false
 	}
 	if filter.ID != "" && artifact.ID != filter.ID {
+		return false
+	}
+	if filter.Owner != nil && (artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != *filter.Owner) {
 		return false
 	}
 	if !containsString(filter.Types, artifact.Type) || !containsString(filter.MediaTypes, artifact.MediaType) || !containsClassification(filter.Classifications, artifact.Classification) {

@@ -55,6 +55,10 @@ func (c *KernelHTTPClient) GetArtifact(ctx context.Context, scope runtime.Scope,
 func (c *KernelHTTPClient) ListArtifacts(ctx context.Context, filter runtime.ArtifactFilter) ([]*runtime.Artifact, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "id", filter.ID)
+	if filter.Owner != nil {
+		query.Set("ownerType", string(filter.Owner.Type))
+		query.Set("ownerId", filter.Owner.ID)
+	}
 	for _, value := range filter.Types {
 		query.Add("type", value)
 	}

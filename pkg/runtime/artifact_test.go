@@ -77,7 +77,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 			}
 
 			listed, err := catalog.List(ctx, ArtifactFilter{
-				Scope: artifact.Scope, LatestOnly: true, ProducerRunID: "run-research",
+				Scope: artifact.Scope, Owner: artifact.Provenance.Owner, LatestOnly: true, ProducerRunID: "run-research",
 				EvidenceTarget: "research-report:1",
 			})
 			if err != nil {
@@ -85,6 +85,11 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 			}
 			if len(listed) != 1 || listed[0].Version != 2 {
 				t.Fatalf("listed = %#v", listed)
+			}
+			otherOwner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "another-agent"}
+			listed, err = catalog.List(ctx, ArtifactFilter{Scope: artifact.Scope, Owner: &otherOwner, LatestOnly: true})
+			if err != nil || len(listed) != 0 {
+				t.Fatalf("other owner artifacts = %#v, err = %v", listed, err)
 			}
 
 			otherScope := Scope{Kind: "tenant", ID: "other"}
@@ -200,7 +205,8 @@ func validCatalogArtifact(id string, version int64) *Artifact {
 		},
 		Metadata: map[string]interface{}{"pages": 12},
 		Provenance: ArtifactProvenance{
-			Producer: ActivityActor{Type: "agent", ID: "analyst"}, RunID: "run-research",
+			Producer: ActivityActor{Type: "agent", ID: "analyst"},
+			Owner:    &ObjectiveOwner{Type: OwnerTypeTeam, ID: "market-research"}, RunID: "run-research",
 			ObjectiveID: "objective-research", RequestID: "request-research",
 		},
 		Evidence: []EvidenceLink{{
