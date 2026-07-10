@@ -262,6 +262,58 @@ func (s *MemoryStore) FindParticipationRoundByIdempotencyKey(_ context.Context, 
 	return result, nil
 }
 
+func (s *MemoryStore) GetParticipationRound(_ context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := cloneParticipationRoundResult(s.participationRounds[channelMessageStoreKey(scope, conversationID, roundID)], false)
+	if result != nil {
+		result.Conversation = cloneConversation(s.conversations[conversationStoreKey(scope, conversationID)])
+	}
+	return result, nil
+}
+
+func (s *MemoryStore) ListParticipationRounds(_ context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*ParticipationRoundResult, 0)
+	for _, round := range s.participationRounds {
+		if round.Round.Scope != filter.Scope || round.Round.ConversationID != filter.ConversationID {
+			continue
+		}
+		cloned := cloneParticipationRoundResult(round, false)
+		cloned.Conversation = cloneConversation(s.conversations[conversationStoreKey(filter.Scope, filter.ConversationID)])
+		result = append(result, cloned)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].Round.CommittedAt.Equal(result[j].Round.CommittedAt) {
+			return result[i].Round.CommittedAt.After(result[j].Round.CommittedAt)
+		}
+		return result[i].Round.ID < result[j].Round.ID
+	})
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(result) {
+		return []*ParticipationRoundResult{}, nil
+	}
+	result = result[offset:]
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 func (s *MemoryStore) GetConversationCursor(_ context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err

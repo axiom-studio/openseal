@@ -131,6 +131,14 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	if err != nil || !roundReplay.Replayed || len(roundReplay.Messages) != 1 {
 		t.Fatalf("restored round replay = %#v, err = %v", roundReplay, err)
 	}
+	loadedRound, err := restartedService.GetParticipationRound(ctx, scope, conversation.ID, roundReplay.Round.ID)
+	if err != nil || len(loadedRound.Messages) != 1 || len(loadedRound.Round.Arbitration.Decisions) != 1 {
+		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
+	}
+	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != roundReplay.Round.ID {
+		t.Fatalf("rounds = %#v, err = %v", rounds, err)
+	}
 	if foreign, err := restartedService.GetConversation(ctx, Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
 		t.Fatalf("foreign conversation = %#v, err = %v", foreign, err)
 	}
