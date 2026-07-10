@@ -55,6 +55,10 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	if result.Call.CredentialRefs["token"].ID != "release-secret" {
 		t.Fatalf("opaque credential binding missing: %#v", result.Call.CredentialRefs)
 	}
+	callJSON, _ := json.Marshal(result.Call)
+	if strings.Contains(string(callJSON), "raw-secret") || strings.Contains(string(callJSON), "also-secret") || result.Call.Arguments["apiToken"] != nil || result.Call.Arguments["nested"].(map[string]interface{})["password"] != nil {
+		t.Fatalf("durable action call leaked sensitive arguments: %s", callJSON)
+	}
 	eventJSON, _ := json.Marshal(result.Event)
 	if strings.Contains(string(eventJSON), "raw-secret") || strings.Contains(string(eventJSON), "release-secret") {
 		t.Fatalf("activity leaked secret material or credential references: %s", eventJSON)
