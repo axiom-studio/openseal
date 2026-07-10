@@ -722,8 +722,8 @@ func validateCredentialFreeContext(value interface{}) error {
 		case map[string]interface{}:
 			for key, child := range typed {
 				normalized := strings.NewReplacer("-", "", "_", "", ".", "").Replace(strings.ToLower(key))
-				for _, forbidden := range []string{"credential", "secret", "password", "token", "apikey", "privatekey"} {
-					if strings.Contains(normalized, forbidden) {
+				for _, forbidden := range []string{"credential", "credentials", "secret", "secrets", "password", "passphrase", "apikey", "apitoken", "privatekey", "accesstoken", "authtoken", "refreshtoken", "bearertoken"} {
+					if normalized == forbidden || strings.HasSuffix(normalized, forbidden) {
 						return ErrUnsafeSharedContext
 					}
 				}
@@ -741,6 +741,13 @@ func validateCredentialFreeContext(value interface{}) error {
 		return nil
 	}
 	return walk(value)
+}
+
+// ValidateCredentialFreeContext rejects resolved credentials and secret-shaped
+// values before portable work state can reach persistence or model context.
+// Opaque credential references belong in governed skill bindings instead.
+func ValidateCredentialFreeContext(value interface{}) error {
+	return validateCredentialFreeContext(value)
 }
 
 func validateArtifactRequirements(requirements []ArtifactRequirement) error {

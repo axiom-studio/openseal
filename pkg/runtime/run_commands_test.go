@@ -176,3 +176,21 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 		t.Fatalf("restart activity = %#v", events)
 	}
 }
+
+func TestRunCreationRejectsCredentialStateButAllowsTokenBudgets(t *testing.T) {
+	service := NewRunCommandService(NewMemoryStore(10))
+	base := CreateAgentRunRequest{
+		Scope: Scope{Kind: "tenant", ID: "safe"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		Goal: "Operate safely", Source: RunSourceManual,
+	}
+	unsafe := base
+	unsafe.Context = map[string]interface{}{"api_token": "resolved-secret"}
+	if _, err := service.CreateAgentRun(context.Background(), unsafe); !errors.Is(err, ErrUnsafeSharedContext) || !errors.Is(err, ErrInvalidAgentRun) {
+		t.Fatalf("credential context error = %v", err)
+	}
+	safe := base
+	safe.Context = map[string]interface{}{"tokenBudget": 4096, "budget_tokens": 2048}
+	if _, err := service.CreateAgentRun(context.Background(), safe); err != nil {
+		t.Fatalf("non-secret token budget rejected: %v", err)
+	}
+}
