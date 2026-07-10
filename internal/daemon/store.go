@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
@@ -23,6 +24,18 @@ func OpenKernelStore(config StorageConfig, configDir string) (*runtime.SQLiteSto
 		return nil, "", err
 	}
 	store, err := runtime.NewSQLiteStore(path)
+	if err != nil {
+		return nil, "", err
+	}
+	return store, path, nil
+}
+
+func OpenArtifactContentStore(config StorageConfig, configDir string) (*artifactstore.LocalStore, string, error) {
+	path := filepath.Clean(config.ArtifactsPath)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(configDir, path)
+	}
+	store, err := artifactstore.NewLocalStore(path)
 	if err != nil {
 		return nil, "", err
 	}

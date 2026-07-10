@@ -17,14 +17,16 @@ import (
 // Server exposes the versioned OpenSeal kernel API and temporary workflow
 // compatibility routes. Interactive clients discover its capabilities.
 type Server struct {
-	registry     *executor.Registry
-	scheduler    *runtime.Scheduler
-	store        runtime.KernelStore
-	workflowsDir string
-	workflows    map[string]*WorkflowEntry
-	muWorkflows  sync.RWMutex
-	logger       *zap.SugaredLogger
-	mux          *http.ServeMux
+	registry         *executor.Registry
+	scheduler        *runtime.Scheduler
+	store            runtime.KernelStore
+	artifactContent  runtime.ArtifactContentStore
+	artifactResolver runtime.ArtifactContentResolver
+	workflowsDir     string
+	workflows        map[string]*WorkflowEntry
+	muWorkflows      sync.RWMutex
+	logger           *zap.SugaredLogger
+	mux              *http.ServeMux
 }
 
 // WorkflowEntry holds a loaded workflow with its source info.
@@ -99,6 +101,18 @@ func (s *Server) SetWorkflows(workflows []*internalWorkflow.Workflow) {
 // Handler returns the server's HTTP handler.
 func (s *Server) Handler() http.Handler {
 	return s.mux
+}
+
+// SetArtifactContentStore enables streamed artifact upload/download routes.
+// Configure it before serving requests.
+func (s *Server) SetArtifactContentStore(store runtime.ArtifactContentStore) {
+	s.artifactContent = store
+}
+
+// SetArtifactContentResolver enables ephemeral authorized content resolution.
+// Resolved URLs are returned to the caller and never persisted by Server.
+func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentResolver) {
+	s.artifactResolver = resolver
 }
 
 // ListenAndServe starts the server on the given address.

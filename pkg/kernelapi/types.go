@@ -25,6 +25,9 @@ const (
 	OperationCancel    = "cancel"
 	OperationIntervene = "intervene"
 	OperationRegister  = "register"
+	OperationUpload    = "upload"
+	OperationDownload  = "download"
+	OperationResolve   = "resolve"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -79,11 +82,20 @@ func Capabilities() CapabilityDocument {
 	}
 }
 
-func ArtifactCapability() Capability {
-	return Capability{
+func ArtifactCapability(contentOperations ...string) Capability {
+	capability := Capability{
 		ID: ArtifactsCapabilityID, Version: ArtifactsCapabilityVersion, Available: true,
 		Operations: []string{OperationRegister, OperationGet, OperationList},
 	}
+	for _, operation := range contentOperations {
+		if operation != OperationUpload && operation != OperationDownload && operation != OperationResolve {
+			continue
+		}
+		if !capability.Supports(operation) {
+			capability.Operations = append(capability.Operations, operation)
+		}
+	}
+	return capability
 }
 
 func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
@@ -122,4 +134,10 @@ type AgentRunCommandRequest struct {
 	Summary          string                      `json:"summary,omitempty"`
 	Instruction      string                      `json:"instruction,omitempty"`
 	Visibility       runtime.ActivityVisibility  `json:"visibility,omitempty"`
+}
+
+type ResolveArtifactContentRequest struct {
+	Actor      runtime.ActivityActor `json:"actor"`
+	Purpose    string                `json:"purpose"`
+	TTLSeconds int64                 `json:"ttlSeconds"`
 }
