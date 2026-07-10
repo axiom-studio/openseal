@@ -150,6 +150,13 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 	if err != nil || restored == nil || restored.Source == nil || restored.Source.Digest != definition.Source.Digest {
 		t.Fatalf("restart restore lost installed definition provenance: %#v, %v", restored, err)
 	}
+	restoredPrompts, err := restarted.ListModelSkillPrompts(ctx, scope, "live-e2e")
+	if err != nil || len(restoredPrompts) != 1 || restoredPrompts[0].SkillID != definition.ID {
+		t.Fatalf("restart restore lost the model-visible skill binding: %#v, %v", restoredPrompts, err)
+	}
+	if restoredPrompt, err := restarted.ResolveSkillPrompt(ctx, scope, "live-e2e", definition.ID, definition.Version); err != nil || restoredPrompt.Instructions != resolved.Instructions {
+		t.Fatalf("restart restore changed the bound skill prompt: %#v, %v", restoredPrompt, err)
+	}
 	restoredRun, err := restarted.GetAgentRun(ctx, runScope, run.ID)
 	if err != nil || restoredRun.Status != AgentRunStatusCompleted || restoredRun.Output["skillDigest"] != definition.Source.Digest {
 		t.Fatalf("restart restore lost durable run completion: %#v, %v", restoredRun, err)

@@ -66,7 +66,7 @@ type ActivationSnapshot struct {
 	CreatedAt    time.Time          `json:"createdAt"`
 }
 
-func (c *Catalog) Activate(_ context.Context, scope ScopeReference, deploymentID string, host HostCapabilityState) (*ActivationSnapshot, error) {
+func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deploymentID string, host HostCapabilityState) (*ActivationSnapshot, error) {
 	if c == nil {
 		return nil, errors.New("skill catalog is not configured")
 	}
@@ -74,20 +74,20 @@ func (c *Catalog) Activate(_ context.Context, scope ScopeReference, deploymentID
 		return nil, err
 	}
 
-	c.mu.RLock()
-	bindings := make([]*Binding, 0)
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
 	definitions := make(map[string]*Definition)
-	for _, binding := range c.bindings {
-		if binding.Scope != scope || binding.DeploymentID != deploymentID {
-			continue
+	for _, binding := range bindings {
+		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
+		if err != nil {
+			return nil, err
 		}
-		copy := cloneBinding(binding)
-		bindings = append(bindings, copy)
-		if definition := c.skills[definitionKey(binding.SkillID, binding.SkillVersion)]; definition != nil {
-			definitions[definitionKey(binding.SkillID, binding.SkillVersion)] = cloneDefinition(definition)
+		if definition != nil {
+			definitions[definitionKey(binding.SkillID, binding.SkillVersion)] = definition
 		}
 	}
-	c.mu.RUnlock()
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].ID < bindings[j].ID })
 
 	snapshot := &ActivationSnapshot{

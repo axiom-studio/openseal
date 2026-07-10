@@ -58,6 +58,7 @@ type (
 	ProposeAgentAmendmentRequest          = kernelagent.ProposeAmendmentRequest
 	SubmitAgentAmendmentEvaluationRequest = kernelagent.SubmitAmendmentEvaluationRequest
 	ResolveAgentAmendmentRequest          = kernelagent.ResolveAmendmentRequest
+	AgentRegistryStore                    = kernelagent.Store
 
 	RunRecord                  = runtime.RunRecord
 	RetryPolicy                = runtime.RetryPolicy
@@ -131,6 +132,7 @@ type (
 	ActivatedSkill             = skill.ActivatedSkill
 	UnavailableSkill           = skill.UnavailableSkill
 	SkillActivationSnapshot    = skill.ActivationSnapshot
+	SkillCatalogStore          = skill.CatalogStore
 	ActionStore                = runtime.ActionStore
 	ActionCall                 = runtime.ActionCall
 	ActionCallStatus           = runtime.ActionCallStatus
@@ -188,6 +190,16 @@ type (
 	ClawHubVersionDetail       = clawhub.VersionDetail
 	ClawHubDownloadedArchive   = clawhub.DownloadedArchive
 )
+
+// PersistentKernelStore is the complete durable control-plane contract for an
+// embedded OpenSeal engine. Enterprise adapters implement this interface so
+// runtime state, agent definitions/deployments, and skill bindings share one
+// authoritative persistence boundary.
+type PersistentKernelStore interface {
+	runtime.KernelStore
+	kernelagent.Store
+	skill.CatalogStore
+}
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
 	return runtime.NewToolActionDispatcher(invoker)
@@ -500,8 +512,18 @@ func WithStore(store runtime.KernelStore) Option {
 		if agentStore, ok := store.(kernelagent.Store); ok {
 			e.agents = kernelagent.NewRegistryWithStore(agentStore)
 		}
+		if skillStore, ok := store.(skill.CatalogStore); ok {
+			e.skills = skill.NewCatalogWithStore(skillStore)
+		}
 		return nil
 	}
+}
+
+// WithPersistentStore wires the full durable kernel contract. Use this option
+// for production deployments; WithStore remains available for runtime-only
+// embeddings and tests.
+func WithPersistentStore(store PersistentKernelStore) Option {
+	return WithStore(store)
 }
 
 // WithLogger replaces the default logger.

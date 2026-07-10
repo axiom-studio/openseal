@@ -2,11 +2,49 @@ package openseal
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
+
+func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := runtime.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithPersistentStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := &SkillDefinition{ID: "writer", Version: "1", Name: "Writer", Prompt: &SkillPromptModule{Instructions: "Write concise release notes."}}
+	if err := engine.RegisterSkill(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	if err := engine.BindSkill(context.Background(), &SkillBinding{ID: "writer", Scope: scope, DeploymentID: "marketing", SkillID: "writer", SkillVersion: "1", EnablePrompt: true, MaximumRisk: SkillRiskRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := runtime.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restarted, err := New(WithPersistentStore(reopened))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts, err := restarted.ListModelSkillPrompts(context.Background(), scope, "marketing")
+	if err != nil || len(prompts) != 1 || prompts[0].SkillID != "writer" {
+		t.Fatalf("restored prompts = %#v, %v", prompts, err)
+	}
+}
 
 func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	engine, err := New(WithStore(runtime.NewMemoryStore(100)))
