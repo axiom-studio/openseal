@@ -152,9 +152,21 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	switch decision.Disposition {
 	case ActionDispositionAllow:
 		call.Status = ActionCallStatusReady
+		updatedRun.Status = AgentRunStatusWaitingForDependency
+		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
+		updatedRun.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+		updatedRun.LeaseOwner = ""
+		updatedRun.LeaseExpiresAt = nil
 	case ActionDispositionDeny:
 		call.Status = ActionCallStatusDenied
 		call.Error = decision.Reason
+		updatedRun.Status = AgentRunStatusQueued
+		updatedRun.WakeCondition = nil
+		updatedRun.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+		updatedRun.AvailableAt = now
+		updatedRun.QueueEnteredAt = now
+		updatedRun.LeaseOwner = ""
+		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.denied"
 	case ActionDispositionRequireApproval:
 		approvalID := c.newID()

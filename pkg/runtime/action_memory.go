@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
@@ -164,6 +165,99 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: cloneActivityEvent(event), Resolved: true}, nil
 }
 
+func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*ActionCall, error) {
+	if err := claim.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var selected *ActionCall
+	for _, call := range s.actions {
+		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) {
+			continue
+		}
+		if selected == nil || actionSchedulesBefore(call, selected) {
+			selected = call
+		}
+	}
+	if selected == nil {
+		return nil, nil
+	}
+	updated := cloneActionCall(selected)
+	expires := claim.Now.Add(claim.LeaseDuration)
+	updated.Status = ActionCallStatusRunning
+	updated.LeaseOwner = claim.WorkerID
+	updated.LeaseExpiresAt = &expires
+	updated.Attempt++
+	updated.Revision++
+	updated.UpdatedAt = claim.Now
+	if updated.StartedAt == nil {
+		updated.StartedAt = &claim.Now
+	}
+	s.actions[portfolioKey(updated.Scope, updated.ID)] = cloneActionCall(updated)
+	return updated, nil
+}
+
+func (s *MemoryStore) RenewActionLease(_ context.Context, scope Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(workerID) == "" || now.IsZero() || leaseDuration <= 0 {
+		return nil, errors.New("worker, current time, and lease duration are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.actions[portfolioKey(scope, actionID)]
+	if current == nil {
+		return nil, ErrActionNotFound
+	}
+	if current.Status != ActionCallStatusRunning || current.LeaseOwner != workerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(now) {
+		return nil, ErrLeaseLost
+	}
+	updated := cloneActionCall(current)
+	expires := now.Add(leaseDuration)
+	updated.LeaseExpiresAt = &expires
+	updated.UpdatedAt = now
+	updated.Revision++
+	s.actions[portfolioKey(scope, actionID)] = cloneActionCall(updated)
+	return updated, nil
+}
+
+func (s *MemoryStore) PersistActionExecution(_ context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error) {
+	if err := validateActionExecutionRecord(execution); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	callKey := portfolioKey(execution.Call.Scope, execution.Call.ID)
+	currentCall := s.actions[callKey]
+	if currentCall == nil {
+		return nil, ErrActionNotFound
+	}
+	if currentCall.Revision != execution.ExpectedCallRevision || execution.Call.Revision != execution.ExpectedCallRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	if currentCall.Status != ActionCallStatusRunning || currentCall.LeaseOwner != execution.WorkerID || currentCall.LeaseExpiresAt == nil || !currentCall.LeaseExpiresAt.After(execution.Now) {
+		return nil, ErrLeaseLost
+	}
+	runKey := portfolioKey(execution.Call.Scope, execution.Call.RunID)
+	currentRun := s.agentRuns[runKey]
+	if currentRun == nil {
+		return nil, ErrRunNotFound
+	}
+	if execution.Run != nil && (currentRun.Revision != execution.ExpectedRunRevision || execution.Run.Revision != execution.ExpectedRunRevision+1) {
+		return nil, ErrRevisionConflict
+	}
+	event := cloneActivityEvent(execution.Event)
+	event.Sequence = int64(len(s.activity[runKey]) + 1)
+	s.actions[callKey] = cloneActionCall(execution.Call)
+	if execution.Run != nil {
+		s.agentRuns[runKey] = cloneAgentRun(execution.Run)
+	}
+	s.activity[runKey] = append(s.activity[runKey], event)
+	return &ActionExecutionResult{Call: cloneActionCall(execution.Call), Run: cloneAgentRun(execution.Run), Event: cloneActivityEvent(event)}, nil
+}
+
 func validateActionProposalRecord(proposal ActionProposalRecord) error {
 	if err := proposal.Call.Validate(); err != nil {
 		return err
@@ -212,6 +306,48 @@ func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error
 		return ErrInvalidScope
 	}
 	return nil
+}
+
+func validateActionExecutionRecord(execution ActionExecutionRecord) error {
+	if err := execution.Call.Validate(); err != nil {
+		return err
+	}
+	if err := execution.Event.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(execution.WorkerID) == "" || execution.Now.IsZero() {
+		return errors.New("action execution worker and current time are required")
+	}
+	if execution.Call.Status != ActionCallStatusReady && execution.Call.Status != ActionCallStatusSucceeded && execution.Call.Status != ActionCallStatusFailed && execution.Call.Status != ActionCallStatusCanceled {
+		return errors.New("persisted action execution must retry or finish")
+	}
+	if execution.Call.Scope != execution.Event.Scope || execution.Call.RunID != execution.Event.RunID {
+		return ErrInvalidScope
+	}
+	if execution.Run != nil {
+		if err := execution.Run.Validate(); err != nil {
+			return err
+		}
+		if execution.Run.Scope != execution.Call.Scope || execution.Run.ID != execution.Call.RunID || execution.Call.Status == ActionCallStatusReady {
+			return ErrInvalidScope
+		}
+	}
+	return nil
+}
+
+func actionEligible(call *ActionCall, now time.Time) bool {
+	return (call.Status == ActionCallStatusReady && !call.AvailableAt.After(now)) ||
+		(call.Status == ActionCallStatusRunning && (call.LeaseExpiresAt == nil || !call.LeaseExpiresAt.After(now)))
+}
+
+func actionSchedulesBefore(left, right *ActionCall) bool {
+	if !left.AvailableAt.Equal(right.AvailableAt) {
+		return left.AvailableAt.Before(right.AvailableAt)
+	}
+	if !left.CreatedAt.Equal(right.CreatedAt) {
+		return left.CreatedAt.Before(right.CreatedAt)
+	}
+	return left.ID < right.ID
 }
 
 func actionIdempotencyKey(scope Scope, runID, key string) string {

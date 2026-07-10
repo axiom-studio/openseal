@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sort"
+	"strings"
+	"time"
 )
 
 func migrateActions(db *sql.DB) error {
@@ -384,6 +387,239 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 	}
 	committed = true
 	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: event, Resolved: true}, nil
+}
+
+func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
+	if err := claim.Validate(); err != nil {
+		return nil, err
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	rows, err := conn.QueryContext(ctx, `SELECT payload FROM action_calls
+		WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?)`, claim.Scope.Kind, claim.Scope.ID, ActionCallStatusReady, ActionCallStatusRunning)
+	if err != nil {
+		return nil, err
+	}
+	var selected *ActionCall
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		call, err := decodeActionCall(payload)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if actionEligible(call, claim.Now) && (selected == nil || actionSchedulesBefore(call, selected)) {
+			selected = call
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if selected == nil {
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return nil, err
+		}
+		committed = true
+		return nil, nil
+	}
+	previousRevision := selected.Revision
+	expires := claim.Now.Add(claim.LeaseDuration)
+	selected.Status = ActionCallStatusRunning
+	selected.LeaseOwner = claim.WorkerID
+	selected.LeaseExpiresAt = &expires
+	selected.Attempt++
+	selected.Revision++
+	selected.UpdatedAt = claim.Now
+	if selected.StartedAt == nil {
+		selected.StartedAt = &claim.Now
+	}
+	payload, err := json.Marshal(selected)
+	if err != nil {
+		return nil, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE action_calls SET status = ?, lease_owner = ?, lease_expires_at = ?, revision = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, selected.Status, selected.LeaseOwner,
+		selected.LeaseExpiresAt, selected.Revision, string(payload), selected.Scope.Kind, selected.Scope.ID, selected.ID, previousRevision)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return selected, nil
+}
+
+func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(workerID) == "" || now.IsZero() || leaseDuration <= 0 {
+		return nil, errors.New("worker, current time, and lease duration are required")
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	current, err := getActionCallFrom(ctx, conn, scope, `id = ?`, actionID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Status != ActionCallStatusRunning || current.LeaseOwner != workerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(now) {
+		return nil, ErrLeaseLost
+	}
+	previousRevision := current.Revision
+	expires := now.Add(leaseDuration)
+	current.LeaseExpiresAt = &expires
+	current.UpdatedAt = now
+	current.Revision++
+	payload, err := json.Marshal(current)
+	if err != nil {
+		return nil, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE action_calls SET lease_expires_at = ?, revision = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND lease_owner = ?`,
+		expires, current.Revision, string(payload), scope.Kind, scope.ID, actionID, previousRevision, workerID)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrLeaseLost
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return current, nil
+}
+
+func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error) {
+	if err := validateActionExecutionRecord(execution); err != nil {
+		return nil, err
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	currentCall, err := getActionCallFrom(ctx, conn, execution.Call.Scope, `id = ?`, execution.Call.ID)
+	if err != nil {
+		return nil, err
+	}
+	if currentCall.Revision != execution.ExpectedCallRevision || execution.Call.Revision != execution.ExpectedCallRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	if currentCall.Status != ActionCallStatusRunning || currentCall.LeaseOwner != execution.WorkerID || currentCall.LeaseExpiresAt == nil || !currentCall.LeaseExpiresAt.After(execution.Now) {
+		return nil, ErrLeaseLost
+	}
+	callPayload, err := json.Marshal(execution.Call)
+	if err != nil {
+		return nil, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE action_calls SET status = ?, available_at = ?, lease_owner = ?, lease_expires_at = ?, revision = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND lease_owner = ?`,
+		execution.Call.Status, execution.Call.AvailableAt, execution.Call.LeaseOwner, execution.Call.LeaseExpiresAt,
+		execution.Call.Revision, string(callPayload), execution.Call.Scope.Kind, execution.Call.Scope.ID,
+		execution.Call.ID, execution.ExpectedCallRevision, execution.WorkerID)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrLeaseLost
+	}
+	if execution.Run != nil {
+		var currentRunPayload string
+		err := conn.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			execution.Run.Scope.Kind, execution.Run.Scope.ID, execution.Run.ID).Scan(&currentRunPayload)
+		if err == sql.ErrNoRows {
+			return nil, ErrRunNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		currentRun, err := decodeAgentRun(currentRunPayload)
+		if err != nil {
+			return nil, err
+		}
+		if currentRun.Revision != execution.ExpectedRunRevision || execution.Run.Revision != execution.ExpectedRunRevision+1 {
+			return nil, ErrRevisionConflict
+		}
+		runPayload, err := json.Marshal(execution.Run)
+		if err != nil {
+			return nil, err
+		}
+		result, err = conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
+			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
+			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+			execution.Run.Status, execution.Run.Priority, execution.Run.AssignedAgentID, execution.Run.Revision,
+			execution.Run.Deadline, execution.Run.AvailableAt, execution.Run.QueueEnteredAt, execution.Run.LeaseOwner,
+			execution.Run.LeaseExpiresAt, execution.Run.LastClaimedAt, execution.Run.Attempt, string(runPayload),
+			execution.Run.Scope.Kind, execution.Run.Scope.ID, execution.Run.ID, execution.ExpectedRunRevision)
+		if err != nil {
+			return nil, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return nil, ErrRevisionConflict
+		}
+	}
+	event := cloneActivityEvent(execution.Event)
+	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
+		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&event.Sequence); err != nil {
+		return nil, err
+	}
+	eventPayload, err := json.Marshal(event)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO run_activity
+		(scope_kind, scope_id, run_id, sequence, id, event_type, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, event.Scope.Kind, event.Scope.ID, event.RunID, event.Sequence,
+		event.ID, event.EventType, event.CreatedAt, string(eventPayload)); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return &ActionExecutionResult{Call: cloneActionCall(execution.Call), Run: cloneAgentRun(execution.Run), Event: event}, nil
 }
 
 type queryRower interface {

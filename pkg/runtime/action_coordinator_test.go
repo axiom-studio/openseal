@@ -109,6 +109,10 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	if result.Call.Status != ActionCallStatusReady || result.Approval != nil {
 		t.Fatalf("allowed call mismatch: %#v", result)
 	}
+	persisted, err := store.GetAgentRun(ctx, scope, run.ID)
+	if err != nil || persisted.Status != AgentRunStatusWaitingForDependency || persisted.WakeCondition == nil || persisted.WakeCondition.Reference != result.Call.ID || persisted.LeaseOwner != "" {
+		t.Fatalf("allowed action did not suspend on its dependency: %#v, %v", persisted, err)
+	}
 }
 
 func (d ActionDisposition) String() string { return string(d) }
