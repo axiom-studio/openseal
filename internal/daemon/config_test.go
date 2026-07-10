@@ -12,7 +12,7 @@ func TestLoadDaemonConfigDefaultsToDurableSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Storage.Driver != "sqlite" || cfg.Storage.Path != "data/openseal.db" {
+	if cfg.Storage.Driver != "sqlite" || cfg.Storage.Path != "data/openseal.db" || cfg.Storage.ArtifactsPath != "data/artifacts" {
 		t.Fatalf("storage = %#v", cfg.Storage)
 	}
 	data, err := os.ReadFile(path)

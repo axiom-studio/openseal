@@ -14,8 +14,9 @@ func DefaultDaemonConfig() *DaemonConfig {
 		WorkflowsDir: "workflows",
 		LogLevel:     "info",
 		Storage: StorageConfig{
-			Driver: "sqlite",
-			Path:   "data/openseal.db",
+			Driver:        "sqlite",
+			Path:          "data/openseal.db",
+			ArtifactsPath: "data/artifacts",
 		},
 		Webhook: WebhookConfig{
 			ListenAddr: ":9090",
@@ -52,8 +53,9 @@ type DaemonConfig struct {
 // StorageConfig configures standalone OpenSeal persistence. SQLite is the
 // portable durable store; paths are resolved relative to the daemon config.
 type StorageConfig struct {
-	Driver string `yaml:"driver"`
-	Path   string `yaml:"path"`
+	Driver        string `yaml:"driver"`
+	Path          string `yaml:"path"`
+	ArtifactsPath string `yaml:"artifactsPath"`
 }
 
 // APIConfig configures the HTTP API server used by the TUI and integrations.
@@ -139,6 +141,9 @@ func LoadDaemonConfig(path string) (*DaemonConfig, error) {
 	if cfg.Storage.Path == "" {
 		cfg.Storage.Path = "data/openseal.db"
 	}
+	if cfg.Storage.ArtifactsPath == "" {
+		cfg.Storage.ArtifactsPath = "data/artifacts"
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -169,6 +174,9 @@ func (c *DaemonConfig) Validate() error {
 	}
 	if c.Storage.Path == "" {
 		return fmt.Errorf("storage.path is required")
+	}
+	if c.Storage.ArtifactsPath == "" {
+		return fmt.Errorf("storage.artifactsPath is required")
 	}
 
 	for name, ct := range c.Triggers.Cron {

@@ -112,6 +112,7 @@ type (
 	RegisterArtifactRequest          = runtime.RegisterArtifactRequest
 	ArtifactRegistrationResult       = runtime.ArtifactRegistrationResult
 	ArtifactContentStore             = runtime.ArtifactContentStore
+	ArtifactContentResolver          = runtime.ArtifactContentResolver
 	ArtifactContentWrite             = runtime.ArtifactContentWrite
 	ArtifactStoredContent            = runtime.ArtifactStoredContent
 	ArtifactContentResolutionRequest = runtime.ArtifactContentResolutionRequest

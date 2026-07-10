@@ -328,9 +328,9 @@ type ArtifactContentWrite struct {
 }
 
 type ArtifactStoredContent struct {
-	ContentRef string
-	Digest     string
-	SizeBytes  int64
+	ContentRef string `json:"contentRef"`
+	Digest     string `json:"digest"`
+	SizeBytes  int64  `json:"sizeBytes"`
 }
 
 type ArtifactContentResolutionRequest struct {
@@ -344,8 +344,8 @@ type ArtifactContentResolutionRequest struct {
 // ArtifactContentResolution is an ephemeral delivery result. It is returned
 // to an authorized caller and is never part of catalog persistence.
 type ArtifactContentResolution struct {
-	URL       string
-	ExpiresAt time.Time
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 func replayArtifact(existing *Artifact, fingerprint string) (*ArtifactRegistrationResult, error) {

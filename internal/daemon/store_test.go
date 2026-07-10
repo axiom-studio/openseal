@@ -51,3 +51,14 @@ func TestOpenKernelStorePersistsCanonicalRunsAcrossRestart(t *testing.T) {
 		t.Fatal("durable run API capability missing")
 	}
 }
+
+func TestOpenArtifactContentStoreResolvesRelativeToConfig(t *testing.T) {
+	configDir := t.TempDir()
+	store, resolved, err := OpenArtifactContentStore(StorageConfig{ArtifactsPath: "state/artifacts"}, configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store == nil || resolved != filepath.Join(configDir, "state", "artifacts") {
+		t.Fatalf("store/resolved = %#v / %q", store, resolved)
+	}
+}

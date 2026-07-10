@@ -99,6 +99,12 @@ Options:
 	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServerWithDir(reg, scheduler, store, cfg.WorkflowsDir, sugar)
 	apiServer.SetWorkflows(workflows)
+	contentStore, contentPath, err := daemon.OpenArtifactContentStore(cfg.Storage, filepath.Dir(*configPath))
+	if err != nil {
+		sugar.Fatalf("failed to open artifact content store: %v", err)
+	}
+	apiServer.SetArtifactContentStore(contentStore)
+	sugar.Infow("artifact content store opened", "path", contentPath)
 
 	go func() {
 		if err := apiServer.ListenAndServe(cfg.API.ListenAddr); err != nil && err != http.ErrServerClosed {

@@ -29,6 +29,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/artifacts", s.handleRegisterArtifact)
 	s.mux.HandleFunc("GET /api/v1/artifacts", s.handleListArtifacts)
 	s.mux.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
+	s.mux.HandleFunc("POST /api/v1/artifact-content", s.handleUploadArtifactContent)
+	s.mux.HandleFunc("GET /api/v1/artifacts/{id}/content", s.handleDownloadArtifactContent)
+	s.mux.HandleFunc("POST /api/v1/artifacts/{id}/resolve", s.handleResolveArtifactContent)
 
 	// Serve static frontend files
 	dist, err := fs.Sub(webui.Dist, "dist")
@@ -40,7 +43,14 @@ func (s *Server) registerRoutes() {
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	capabilities := []kernelapi.Capability{kernelapi.AgentRunsCapability()}
 	if _, ok := s.store.(runtime.ArtifactStore); ok {
-		capabilities = append(capabilities, kernelapi.ArtifactCapability())
+		contentOperations := make([]string, 0, 3)
+		if s.artifactContent != nil {
+			contentOperations = append(contentOperations, kernelapi.OperationUpload, kernelapi.OperationDownload)
+		}
+		if s.artifactResolver != nil {
+			contentOperations = append(contentOperations, kernelapi.OperationResolve)
+		}
+		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
 	}
 	s.respondJSON(w, http.StatusOK, kernelapi.NewCapabilityDocument(capabilities...))
 }
