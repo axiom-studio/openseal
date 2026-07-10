@@ -20,6 +20,7 @@ type ActionRetryPolicy = capability.ActionRetryPolicy
 type Duration = capability.Duration
 type Action = capability.Action
 type TransportReference = capability.TransportReference
+type TransportArgument = capability.TransportArgument
 type Definition = capability.Definition
 type ArgumentRule = capability.ArgumentRule
 type Binding = capability.Binding
@@ -266,6 +267,35 @@ func (c *Catalog) ValidateOutput(_ context.Context, bound *BoundAction, output m
 	return nil
 }
 
+// MaterializeTransportArguments applies the canonical deterministic input
+// projection for a bound action. Secret credentials remain a separate worker
+// input and can never be introduced through this mapping.
+func MaterializeTransportArguments(bound *BoundAction, input map[string]interface{}) (map[string]interface{}, error) {
+	if bound == nil || bound.Definition == nil {
+		return nil, errors.New("bound skill action is required")
+	}
+	transport := bound.Definition.Transport
+	if bound.Action.Transport != nil {
+		transport = *bound.Action.Transport
+	}
+	if len(transport.Arguments) == 0 {
+		return cloneMap(input), nil
+	}
+	result := make(map[string]interface{}, len(transport.Arguments))
+	for name, mapping := range transport.Arguments {
+		if mapping.SourceArgument != "" {
+			value, ok := input[mapping.SourceArgument]
+			if !ok {
+				return nil, fmt.Errorf("transport argument %s requires action input %s", name, mapping.SourceArgument)
+			}
+			result[name] = value
+			continue
+		}
+		result[name] = cloneValue(mapping.Literal)
+	}
+	return result, nil
+}
+
 func definitionKey(id, version string) string     { return id + "@" + version }
 func actionKey(id, version, action string) string { return definitionKey(id, version) + ":" + action }
 func bindingKey(scope ScopeReference, deploymentID, bindingID string) string {
@@ -310,6 +340,21 @@ func validateDefinition(definition *Definition) error {
 		if action.CompensationAction != "" {
 			if _, ok := definition.Actions[action.CompensationAction]; !ok {
 				return fmt.Errorf("skill action %s references missing compensation action", name)
+			}
+		}
+		transport := definition.Transport
+		if action.Transport != nil {
+			transport = *action.Transport
+		}
+		properties, _ := action.InputSchema["properties"].(map[string]interface{})
+		for argument, mapping := range transport.Arguments {
+			if strings.TrimSpace(argument) == "" || (mapping.SourceArgument == "" && mapping.Literal == nil) || (mapping.SourceArgument != "" && mapping.Literal != nil) {
+				return fmt.Errorf("skill action %s has invalid transport argument mapping %q", name, argument)
+			}
+			if mapping.SourceArgument != "" {
+				if _, ok := properties[mapping.SourceArgument]; !ok {
+					return fmt.Errorf("skill action %s transport references unknown input %s", name, mapping.SourceArgument)
+				}
 			}
 		}
 	}

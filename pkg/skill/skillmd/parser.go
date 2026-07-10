@@ -62,7 +62,10 @@ func ParseSkillMD(content []byte) (*ParsedSkill, error) {
 	if homepage == "" {
 		homepage = metadata.Homepage
 	}
-	dispatch := parseCommandDispatch(frontmatter)
+	dispatch, err := parseCommandDispatch(frontmatter)
+	if err != nil {
+		return nil, err
+	}
 	return &ParsedSkill{
 		Name: name, Description: description, License: stringValue(frontmatter, "license"),
 		Compatibility: stringValue(frontmatter, "compatibility"), AllowedTools: strings.Fields(stringValue(frontmatter, "allowed-tools")),
@@ -184,15 +187,29 @@ func parseInstallSpecs(raw interface{}) []InstallSpec {
 	return result
 }
 
-func parseCommandDispatch(frontmatter map[string]interface{}) *CommandDispatch {
-	if firstString(frontmatter, "command-dispatch") != "tool" {
-		return nil
-	}
+func parseCommandDispatch(frontmatter map[string]interface{}) (*CommandDispatch, error) {
+	kind := firstString(frontmatter, "command-dispatch")
 	tool := firstString(frontmatter, "command-tool")
-	if tool == "" {
-		return nil
+	argumentMode := firstString(frontmatter, "command-arg-mode")
+	if kind == "" {
+		if tool != "" || argumentMode != "" {
+			return nil, fmt.Errorf("command-tool and command-arg-mode require command-dispatch: tool")
+		}
+		return nil, nil
 	}
-	return &CommandDispatch{Kind: "tool", ToolName: tool, ArgMode: "raw"}
+	if kind != "tool" {
+		return nil, fmt.Errorf("unsupported command-dispatch %q", kind)
+	}
+	if tool == "" {
+		return nil, fmt.Errorf("command-dispatch tool requires command-tool")
+	}
+	if argumentMode == "" {
+		argumentMode = "raw"
+	}
+	if argumentMode != "raw" {
+		return nil, fmt.Errorf("unsupported command-arg-mode %q", argumentMode)
+	}
+	return &CommandDispatch{Kind: kind, ToolName: tool, ArgMode: argumentMode}, nil
 }
 
 func validateIdentity(name, description string) error {

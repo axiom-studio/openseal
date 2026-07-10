@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -19,6 +20,8 @@ command-tool: release_publish
 metadata:
   openclaw:
     primaryEnv: RELEASE_TOKEN
+    skillKey: release-config
+    emoji: "🚀"
     requires:
       bins: [release]
       env: [RELEASE_TOKEN]
@@ -39,9 +42,17 @@ Read references/policy.md before publishing.
 	if definition.Version != "1.4.0" || definition.Prompt == nil || len(definition.Actions) != 1 || len(definition.Resources) != 2 {
 		t.Fatalf("incomplete compilation: %#v", definition)
 	}
+	if definition.ConfigurationKey != "release-config" || definition.Icon != "🚀" {
+		t.Fatalf("configuration/presentation metadata not compiled: %#v", definition)
+	}
 	action := definition.Actions["invoke"]
 	if action.Transport != nil || definition.Transport.Kind != "tool" || definition.Transport.Endpoint != "release_publish" || len(action.Credentials) != 1 {
 		t.Fatalf("command governance not compiled: %#v", action)
+	}
+	if definition.Transport.Arguments["command"].SourceArgument != "command" ||
+		definition.Transport.Arguments["commandName"].Literal != "publish-release" ||
+		definition.Transport.Arguments["skillName"].Literal != "publish-release" {
+		t.Fatalf("OpenClaw raw tool envelope not compiled: %#v", definition.Transport.Arguments)
 	}
 	if definition.Source == nil || definition.Source.Digest == "" || definition.Source.License != "MIT-0" || len(definition.Installers) != 1 {
 		t.Fatalf("source/install provenance not preserved: %#v", definition)
@@ -49,6 +60,32 @@ Read references/policy.md before publishing.
 	catalog := skill.NewCatalog()
 	if err := catalog.Register(context.Background(), definition); err != nil {
 		t.Fatalf("compiled definition is not canonical: %v", err)
+	}
+}
+
+func TestCompilePreservesByteExactExportArtifact(t *testing.T) {
+	skillMD := []byte("---\nname: portable\ndescription: Portable source.\n---\nUse {baseDir}/references/guide.md.\n")
+	resource := []byte("Preserve exact bytes.\n")
+	compilation, err := Compile(Bundle{
+		SkillMD: skillMD,
+		Files:   []File{{Path: "references/guide.md", Content: resource}},
+		Source:  Source{Registry: "https://registry.test", Reference: "publisher/portable", Version: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := ExportBundle(compilation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(exported.SkillMD, skillMD) || len(exported.Files) != 1 || !bytes.Equal(exported.Files[0].Content, resource) || exported.Source.Reference != "publisher/portable" {
+		t.Fatalf("export changed source artifact: %#v", exported)
+	}
+	exported.SkillMD[0] = 'x'
+	exported.Files[0].Content[0] = 'x'
+	again, err := ExportBundle(compilation)
+	if err != nil || !bytes.Equal(again.SkillMD, skillMD) || !bytes.Equal(again.Files[0].Content, resource) {
+		t.Fatalf("export aliases compiler state: %#v, %v", again, err)
 	}
 }
 
