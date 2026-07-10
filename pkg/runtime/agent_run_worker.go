@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ type AgentRunWorkerConfig struct {
 	Scope             Scope
 	Kind              RunKind
 	AssignedAgentID   string
+	WorkerIDPrefix    string
 	Concurrency       int
 	MaxActiveForAgent int
 	MaxTurnsPerClaim  int
@@ -71,6 +73,9 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 	if c.PollInterval <= 0 {
 		c.PollInterval = 500 * time.Millisecond
 	}
+	if strings.TrimSpace(c.WorkerIDPrefix) == "" {
+		c.WorkerIDPrefix = "agent-run-worker"
+	}
 	return nil
 }
 
@@ -105,7 +110,8 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	return &AgentRunWorkerPool{
 		config: config, scheduler: NewAgentRunScheduler(store), coordinator: NewTurnCoordinator(store, store, store),
 		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
-		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), poolID: uuid.NewString(),
+		resolver: resolver, logger: logger, wake: make(chan struct{}, 1),
+		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}, nil
 }
 

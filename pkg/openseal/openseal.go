@@ -206,9 +206,12 @@ type (
 	AgentRunScheduleStore              = runtime.AgentRunScheduleStore
 	AgentRunClaimRequest               = runtime.AgentRunClaimRequest
 	AgentRunWorkerConfig               = runtime.AgentRunWorkerConfig
+	DynamicAgentRunWorkerConfig        = runtime.DynamicAgentRunWorkerConfig
 	TurnRunnerBinding                  = runtime.TurnRunnerBinding
 	TurnRunnerResolver                 = runtime.TurnRunnerResolver
 	TurnRunnerResolverFunc             = runtime.TurnRunnerResolverFunc
+	WorkerScopeSource                  = runtime.WorkerScopeSource
+	WorkerScopeSourceFunc              = runtime.WorkerScopeSourceFunc
 	WakeSignal                         = runtime.WakeSignal
 	WokenRun                           = runtime.WokenRun
 	WakeResult                         = runtime.WakeResult
@@ -257,8 +260,6 @@ type (
 	ApprovalResolutionResult           = runtime.ApprovalResolutionResult
 	ActionWorkerConfig                 = runtime.ActionWorkerConfig
 	DynamicActionWorkerConfig          = runtime.DynamicActionWorkerConfig
-	ActionWorkerScopeSource            = runtime.ActionWorkerScopeSource
-	ActionWorkerScopeSourceFunc        = runtime.ActionWorkerScopeSourceFunc
 	CredentialResolver                 = runtime.CredentialResolver
 	CredentialResolverFunc             = runtime.CredentialResolverFunc
 	CredentialResolutionRequest        = runtime.CredentialResolutionRequest
@@ -654,6 +655,8 @@ type Engine struct {
 	clawHubRegistry               clawhub.Registry
 	agentPoolSpecs                []agentRunWorkerSpec
 	agentPools                    []*runtime.AgentRunWorkerPool
+	agentSupervisorSpecs          []agentRunWorkerSupervisorSpec
+	agentSupervisors              []*runtime.AgentRunWorkerSupervisor
 	actionPoolSpecs               []actionWorkerSpec
 	actionPools                   []*runtime.ActionWorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
@@ -668,6 +671,12 @@ type agentRunWorkerSpec struct {
 	resolver runtime.TurnRunnerResolver
 }
 
+type agentRunWorkerSupervisorSpec struct {
+	config   runtime.DynamicAgentRunWorkerConfig
+	source   runtime.WorkerScopeSource
+	resolver runtime.TurnRunnerResolver
+}
+
 type actionWorkerSpec struct {
 	config      runtime.ActionWorkerConfig
 	credentials runtime.CredentialResolver
@@ -676,7 +685,7 @@ type actionWorkerSpec struct {
 
 type actionWorkerSupervisorSpec struct {
 	config      runtime.DynamicActionWorkerConfig
-	source      runtime.ActionWorkerScopeSource
+	source      runtime.WorkerScopeSource
 	credentials runtime.CredentialResolver
 	dispatcher  runtime.ActionDispatcher
 }
@@ -743,6 +752,9 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.rebuildAgentWorkerPools(); err != nil {
 		return nil, fmt.Errorf("agent worker configuration: %w", err)
 	}
+	if err := e.rebuildAgentWorkerSupervisors(); err != nil {
+		return nil, fmt.Errorf("dynamic agent worker configuration: %w", err)
+	}
 
 	return e, nil
 }
@@ -752,6 +764,9 @@ func (e *Engine) Start(ctx context.Context) {
 	e.pool.Start(ctx)
 	for _, pool := range e.agentPools {
 		pool.Start(ctx)
+	}
+	for _, supervisor := range e.agentSupervisors {
+		supervisor.Start(ctx)
 	}
 	for _, pool := range e.actionPools {
 		pool.Start(ctx)
@@ -763,6 +778,9 @@ func (e *Engine) Start(ctx context.Context) {
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	for _, supervisor := range e.agentSupervisors {
+		supervisor.Stop()
+	}
 	for _, supervisor := range e.actionSupervisors {
 		supervisor.Stop()
 	}
@@ -944,6 +962,25 @@ func WithAgentRunWorkers(config runtime.AgentRunWorkerConfig, resolver runtime.T
 	}
 }
 
+// WithDynamicAgentRunWorkers reconciles one kind-filtered autonomous Run pool
+// per active host scope. The option may be repeated for independent execution
+// kinds or scope sources.
+func WithDynamicAgentRunWorkers(
+	config runtime.DynamicAgentRunWorkerConfig,
+	source runtime.WorkerScopeSource,
+	resolver runtime.TurnRunnerResolver,
+) Option {
+	return func(e *Engine) error {
+		if source == nil || resolver == nil {
+			return fmt.Errorf("worker scope source and turn runner resolver are required")
+		}
+		e.agentSupervisorSpecs = append(e.agentSupervisorSpecs, agentRunWorkerSupervisorSpec{
+			config: config, source: source, resolver: resolver,
+		})
+		return nil
+	}
+}
+
 func WithSkillCatalog(catalog *skill.Catalog) Option {
 	return func(e *Engine) error {
 		if catalog == nil {
@@ -977,7 +1014,7 @@ func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.Cr
 // WithDynamicActionWorkers reconciles one isolated worker pool per active
 // scope supplied by the embedding control plane. The option may be repeated
 // for independent scope sources or transport hosts.
-func WithDynamicActionWorkers(config runtime.DynamicActionWorkerConfig, source runtime.ActionWorkerScopeSource, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
+func WithDynamicActionWorkers(config runtime.DynamicActionWorkerConfig, source runtime.WorkerScopeSource, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if source == nil {
 			return fmt.Errorf("action worker scope source is required")
@@ -1111,9 +1148,24 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 	return nil
 }
 
+func (e *Engine) rebuildAgentWorkerSupervisors() error {
+	e.agentSupervisors = make([]*runtime.AgentRunWorkerSupervisor, 0, len(e.agentSupervisorSpecs))
+	for _, spec := range e.agentSupervisorSpecs {
+		supervisor, err := runtime.NewAgentRunWorkerSupervisor(e.store, spec.resolver, spec.source, e.logger, spec.config)
+		if err != nil {
+			return err
+		}
+		e.agentSupervisors = append(e.agentSupervisors, supervisor)
+	}
+	return nil
+}
+
 func (e *Engine) WakeAgentWorkers() {
 	for _, pool := range e.agentPools {
 		pool.Wake()
+	}
+	for _, supervisor := range e.agentSupervisors {
+		supervisor.Wake()
 	}
 }
 

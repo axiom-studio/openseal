@@ -17,7 +17,7 @@ type mutableActionWorkerScopeSource struct {
 	err    error
 }
 
-func (s *mutableActionWorkerScopeSource) ListActionWorkerScopes(context.Context) ([]Scope, error) {
+func (s *mutableActionWorkerScopeSource) ListWorkerScopes(context.Context) ([]Scope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]Scope(nil), s.scopes...), s.err
@@ -68,7 +68,7 @@ func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
 	supervisor, err := NewActionWorkerSupervisor(
 		NewMemoryStore(10), skill.NewCatalog(), nil,
 		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
-		ActionWorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
+		WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},
 	)
 	if err != nil {

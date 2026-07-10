@@ -213,3 +213,62 @@ func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
 	}
 	t.Fatal("autonomous Engine worker did not complete the run")
 }
+
+func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
+	store := runtime.NewMemoryStore(20)
+	scope := Scope{Kind: "tenant", ID: "dynamic"}
+	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		if run.Kind != RunKindConversation {
+			t.Fatalf("dynamic resolver received run kind %q", run.Kind)
+		}
+		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Conversation complete"}, nil
+		})}, nil
+	})
+	engine, err := New(
+		WithStore(store),
+		WithDynamicAgentRunWorkers(DynamicAgentRunWorkerConfig{
+			Kind: RunKindConversation, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
+			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+		}, WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{scope}, nil }), resolver),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conversationRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
+		Goal: "Coordinate channel", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Unrelated work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Start(ctx)
+	defer engine.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		current, getErr := engine.GetAgentRun(ctx, scope, conversationRun.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if current.Status == AgentRunStatusCompleted {
+			unrelated, getErr := engine.GetAgentRun(ctx, scope, agentRun.ID)
+			if getErr != nil {
+				t.Fatal(getErr)
+			}
+			if unrelated.Status != AgentRunStatusQueued {
+				t.Fatalf("dynamic conversation worker claimed agent work: %#v", unrelated)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("dynamic Engine worker did not complete the conversation run")
+}
