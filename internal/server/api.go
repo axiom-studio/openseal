@@ -32,6 +32,20 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/artifact-content", s.handleUploadArtifactContent)
 	s.mux.HandleFunc("GET /api/v1/artifacts/{id}/content", s.handleDownloadArtifactContent)
 	s.mux.HandleFunc("POST /api/v1/artifacts/{id}/resolve", s.handleResolveArtifactContent)
+	s.mux.HandleFunc("POST /api/v1/conversations", s.handleCreateConversation)
+	s.mux.HandleFunc("GET /api/v1/conversations", s.handleListConversations)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}", s.handleGetConversation)
+	s.mux.HandleFunc("POST /api/v1/conversations/{id}/messages", s.handlePostChannelMessage)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/messages", s.handleListChannelMessages)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/messages/{messageId}", s.handleGetChannelMessage)
+	s.mux.HandleFunc("POST /api/v1/conversations/{id}/participation-rounds", s.handleCoordinateParticipation)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/participation-rounds", s.handleListParticipationRounds)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/participation-rounds/{roundId}", s.handleGetParticipationRound)
+	s.mux.HandleFunc("PUT /api/v1/conversations/{id}/cursor", s.handleAdvanceConversationCursor)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/cursor", s.handleGetConversationCursor)
+	s.mux.HandleFunc("PUT /api/v1/conversations/{id}/presence", s.handleSetConversationPresence)
+	s.mux.HandleFunc("DELETE /api/v1/conversations/{id}/presence", s.handleReleaseConversationPresence)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/presence", s.handleListConversationPresence)
 
 	// Serve static frontend files
 	dist, err := fs.Sub(webui.Dist, "dist")
@@ -51,6 +65,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 			contentOperations = append(contentOperations, kernelapi.OperationResolve)
 		}
 		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
+	}
+	if _, ok := s.store.(runtime.ConversationStore); ok {
+		capabilities = append(capabilities, kernelapi.TeamChannelsCapability())
 	}
 	s.respondJSON(w, http.StatusOK, kernelapi.NewCapabilityDocument(capabilities...))
 }
