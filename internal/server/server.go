@@ -18,7 +18,7 @@ import (
 type Server struct {
 	registry     *executor.Registry
 	scheduler    *runtime.Scheduler
-	store        runtime.ExecutionStore
+	store        runtime.KernelStore
 	workflowsDir string
 	workflows    map[string]*WorkflowEntry
 	muWorkflows  sync.RWMutex
@@ -50,12 +50,12 @@ type WorkflowEdge struct {
 }
 
 // NewServer creates a new API server.
-func NewServer(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.ExecutionStore, logger *zap.SugaredLogger) *Server {
+func NewServer(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
 	return NewServerWithDir(registry, scheduler, store, "", logger)
 }
 
 // NewServerWithDir creates a new API server with a workflows directory for persistence.
-func NewServerWithDir(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.ExecutionStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
+func NewServerWithDir(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.KernelStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
 	s := &Server{
 		registry:     registry,
 		scheduler:    scheduler,

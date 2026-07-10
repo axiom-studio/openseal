@@ -19,12 +19,29 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/workflows/{id}/run", s.handleRunWorkflow)
 	s.mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
 	s.mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
+	s.mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
+	s.mux.HandleFunc("POST /api/v1/agent-runs", s.handleCreateAgentRun)
+	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
+	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}", s.handleGetAgentRun)
+	s.mux.HandleFunc("POST /api/v1/agent-runs/{id}/commands", s.handleCommandAgentRun)
 
 	// Serve static frontend files
 	dist, err := fs.Sub(webui.Dist, "dist")
 	if err == nil {
 		s.mux.Handle("/", http.FileServer(http.FS(dist)))
 	}
+}
+
+func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
+	s.respondJSON(w, http.StatusOK, map[string]interface{}{
+		"version": "1",
+		"capabilities": []map[string]interface{}{
+			{
+				"id": "agent-runs", "version": "1", "available": true,
+				"operations": []string{"create", "get", "list", "pause", "resume", "cancel", "intervene"},
+			},
+		},
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

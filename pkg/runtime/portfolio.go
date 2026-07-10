@@ -224,6 +224,7 @@ type ObjectiveFilter struct {
 
 type AgentRunFilter struct {
 	Scope           Scope
+	Owner           *ObjectiveOwner
 	ObjectiveID     string
 	ParentRunID     string
 	RootRunID       string
@@ -476,6 +477,11 @@ func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFil
 	}
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
+	}
+	if filter.Owner != nil {
+		if err := filter.Owner.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	return s.store.ListAgentRuns(ctx, filter)
 }

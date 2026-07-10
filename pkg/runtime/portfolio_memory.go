@@ -128,6 +128,9 @@ func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 }
 
 func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
+	if filter.Owner != nil && run.Owner != *filter.Owner {
+		return false
+	}
 	if filter.ObjectiveID != "" && run.ObjectiveID != filter.ObjectiveID {
 		return false
 	}
