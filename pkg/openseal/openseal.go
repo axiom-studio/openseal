@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
+	skillsource "github.com/axiom-studio/openseal/pkg/skill/source"
 	"github.com/axiom-studio/openseal/pkg/types"
 	"go.uber.org/zap"
 )
@@ -139,6 +140,15 @@ type (
 	OpenClawSkillBundle        = skillopenclaw.Bundle
 	OpenClawSkillDiagnostic    = skillopenclaw.Diagnostic
 	OpenClawSkillCompilation   = skillopenclaw.Compilation
+	SkillSourceRootKind        = skillsource.RootKind
+	SkillSourceRoot            = skillsource.Root
+	SkillSourceCandidate       = skillsource.Candidate
+	SkillSourceShadowed        = skillsource.ShadowedCandidate
+	SkillSourceDiagnostic      = skillsource.Diagnostic
+	SkillSourceSnapshot        = skillsource.Snapshot
+	SkillSourceCatalog         = skillsource.Catalog
+	SkillSourceChange          = skillsource.Change
+	SkillSourceWatcher         = skillsource.Watcher
 	ClawHubRegistry            = clawhub.Registry
 	ClawHubClient              = clawhub.ClawHubClient
 	ClawHubSkillReference      = clawhub.SkillReference
@@ -165,6 +175,14 @@ func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilati
 
 func ExportOpenClawSkill(compilation *skillopenclaw.Compilation) (skillopenclaw.Bundle, error) {
 	return skillopenclaw.ExportBundle(compilation)
+}
+
+func NewSkillSourceCatalog() *skillsource.Catalog {
+	return skillsource.NewCatalog()
+}
+
+func NewSkillSourceWatcher(catalog *skillsource.Catalog, roots []skillsource.Root, interval time.Duration) (*skillsource.Watcher, error) {
+	return skillsource.NewWatcher(catalog, roots, interval)
 }
 
 const (
@@ -243,6 +261,14 @@ const (
 	ApprovalStatusApproved = runtime.ApprovalStatusApproved
 	ApprovalStatusRejected = runtime.ApprovalStatusRejected
 	ApprovalStatusExpired  = runtime.ApprovalStatusExpired
+
+	SkillSourceWorkspace    = skillsource.RootWorkspace
+	SkillSourceProjectAgent = skillsource.RootProjectAgent
+	SkillSourcePersonal     = skillsource.RootPersonal
+	SkillSourceManaged      = skillsource.RootManaged
+	SkillSourceBundled      = skillsource.RootBundled
+	SkillSourcePlugin       = skillsource.RootPlugin
+	SkillSourceExtra        = skillsource.RootExtra
 )
 
 // Engine is the primary entry point for OpenSeal.
