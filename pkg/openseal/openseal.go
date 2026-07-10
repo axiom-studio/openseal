@@ -132,6 +132,15 @@ type (
 	ConversationArbitration            = runtime.ConversationArbitration
 	ParticipationRoundStatus           = runtime.ParticipationRoundStatus
 	ParticipationRound                 = runtime.ParticipationRound
+	ConversationParticipantBinding     = runtime.ConversationParticipantBinding
+	ConversationParticipantQuery       = runtime.ConversationParticipantQuery
+	ConversationParticipantSource      = runtime.ConversationParticipantSource
+	ConversationParticipantSourceFunc  = runtime.ConversationParticipantSourceFunc
+	ParticipationProposalContext       = runtime.ParticipationProposalContext
+	ParticipationProposalProvider      = runtime.ParticipationProposalProvider
+	ParticipationProposalProviderFunc  = runtime.ParticipationProposalProviderFunc
+	ConversationCoordinationRequest    = runtime.ConversationCoordinationRequest
+	ConversationCoordinatorConfig      = runtime.ConversationCoordinatorConfig
 	CreateConversationRequest          = runtime.CreateConversationRequest
 	ConversationFilter                 = runtime.ConversationFilter
 	PostChannelMessageRequest          = runtime.PostChannelMessageRequest
@@ -306,36 +315,38 @@ type PersistentKernelStore interface {
 var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
 
 var (
-	ErrRunNotFound                  = runtime.ErrRunNotFound
-	ErrRevisionConflict             = runtime.ErrRevisionConflict
-	ErrInvalidRunTransition         = runtime.ErrInvalidRunTransition
-	ErrRunIdempotency               = runtime.ErrRunIdempotency
-	ErrInvalidAgentRun              = runtime.ErrInvalidAgentRun
-	ErrInvalidRunCommand            = runtime.ErrInvalidRunCommand
-	ErrInvalidScope                 = runtime.ErrInvalidScope
-	ErrInvalidOwner                 = runtime.ErrInvalidOwner
-	ErrObjectiveNotFound            = runtime.ErrObjectiveNotFound
-	ErrAgentRequestNotFound         = runtime.ErrAgentRequestNotFound
-	ErrInvalidAgentRequestState     = runtime.ErrInvalidAgentRequestState
-	ErrAgentRequestUnauthorized     = runtime.ErrAgentRequestUnauthorized
-	ErrAgentRequestIdempotency      = runtime.ErrAgentRequestIdempotency
-	ErrUnsafeSharedContext          = runtime.ErrUnsafeSharedContext
-	ErrInvalidArtifact              = runtime.ErrInvalidArtifact
-	ErrArtifactNotFound             = runtime.ErrArtifactNotFound
-	ErrArtifactImmutable            = runtime.ErrArtifactImmutable
-	ErrArtifactVersionConflict      = runtime.ErrArtifactVersionConflict
-	ErrInvalidArtifactRecord        = runtime.ErrInvalidArtifactRecord
-	ErrRunDependencyNotFound        = runtime.ErrRunDependencyNotFound
-	ErrDependencyGroupNotFound      = runtime.ErrDependencyGroupNotFound
-	ErrInvalidRunDependency         = runtime.ErrInvalidRunDependency
-	ErrDependencyConflict           = runtime.ErrDependencyConflict
-	ErrConversationNotFound         = runtime.ErrConversationNotFound
-	ErrChannelMessageNotFound       = runtime.ErrChannelMessageNotFound
-	ErrParticipationRoundNotFound   = runtime.ErrParticipationRoundNotFound
-	ErrInvalidConversation          = runtime.ErrInvalidConversation
-	ErrMessageConflict              = runtime.ErrMessageConflict
-	ErrConversationCursorConflict   = runtime.ErrConversationCursorConflict
-	ErrConversationPresenceConflict = runtime.ErrConversationPresenceConflict
+	ErrRunNotFound                         = runtime.ErrRunNotFound
+	ErrRevisionConflict                    = runtime.ErrRevisionConflict
+	ErrInvalidRunTransition                = runtime.ErrInvalidRunTransition
+	ErrRunIdempotency                      = runtime.ErrRunIdempotency
+	ErrInvalidAgentRun                     = runtime.ErrInvalidAgentRun
+	ErrInvalidRunCommand                   = runtime.ErrInvalidRunCommand
+	ErrInvalidScope                        = runtime.ErrInvalidScope
+	ErrInvalidOwner                        = runtime.ErrInvalidOwner
+	ErrObjectiveNotFound                   = runtime.ErrObjectiveNotFound
+	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
+	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
+	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
+	ErrAgentRequestIdempotency             = runtime.ErrAgentRequestIdempotency
+	ErrUnsafeSharedContext                 = runtime.ErrUnsafeSharedContext
+	ErrInvalidArtifact                     = runtime.ErrInvalidArtifact
+	ErrArtifactNotFound                    = runtime.ErrArtifactNotFound
+	ErrArtifactImmutable                   = runtime.ErrArtifactImmutable
+	ErrArtifactVersionConflict             = runtime.ErrArtifactVersionConflict
+	ErrInvalidArtifactRecord               = runtime.ErrInvalidArtifactRecord
+	ErrRunDependencyNotFound               = runtime.ErrRunDependencyNotFound
+	ErrDependencyGroupNotFound             = runtime.ErrDependencyGroupNotFound
+	ErrInvalidRunDependency                = runtime.ErrInvalidRunDependency
+	ErrDependencyConflict                  = runtime.ErrDependencyConflict
+	ErrConversationNotFound                = runtime.ErrConversationNotFound
+	ErrChannelMessageNotFound              = runtime.ErrChannelMessageNotFound
+	ErrParticipationRoundNotFound          = runtime.ErrParticipationRoundNotFound
+	ErrInvalidConversation                 = runtime.ErrInvalidConversation
+	ErrMessageConflict                     = runtime.ErrMessageConflict
+	ErrConversationCursorConflict          = runtime.ErrConversationCursorConflict
+	ErrConversationPresenceConflict        = runtime.ErrConversationPresenceConflict
+	ErrConversationCoordinationUnavailable = runtime.ErrConversationCoordinationUnavailable
+	ErrNoConversationParticipants          = runtime.ErrNoConversationParticipants
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -348,6 +359,10 @@ func ValidateCredentialFreeContext(value interface{}) error {
 
 func DefaultConversationArbitrationPolicy() runtime.ConversationArbitrationPolicy {
 	return runtime.DefaultConversationArbitrationPolicy()
+}
+
+func DefaultConversationCoordinatorConfig() runtime.ConversationCoordinatorConfig {
+	return runtime.DefaultConversationCoordinatorConfig()
 }
 
 func ArbitrateParticipation(roundID string, proposals []runtime.ParticipationProposal, recent []*runtime.ChannelMessage, policy runtime.ConversationArbitrationPolicy) (*runtime.ConversationArbitration, error) {
@@ -609,35 +624,39 @@ const (
 // Engine is the primary entry point for OpenSeal.
 // It wires together the registry, execution store, worker pool, and scheduler.
 type Engine struct {
-	registry              *executor.Registry
-	store                 runtime.KernelStore
-	pool                  *runtime.WorkerPool
-	scheduler             *runtime.Scheduler
-	portfolio             *runtime.PortfolioService
-	activity              *runtime.RunActivityService
-	dependencies          *runtime.DependencyCoordinator
-	conversations         *runtime.ConversationService
-	collaboration         *runtime.CollaborationService
-	turns                 *runtime.AgentTurnService
-	turnsRun              *runtime.TurnCoordinator
-	runQueue              *runtime.AgentRunScheduler
-	wake                  *runtime.AgentRunWakeService
-	actions               *runtime.ActionCoordinator
-	approvals             *runtime.ApprovalCoordinator
-	artifacts             *runtime.ArtifactCatalog
-	actionPolicy          runtime.ActionPolicyEvaluator
-	approvalAuth          runtime.ApprovalAuthorizer
-	clawHub               *clawhub.InstallManager
-	clawHubRegistry       clawhub.Registry
-	agentPoolSpecs        []agentRunWorkerSpec
-	agentPools            []*runtime.AgentRunWorkerPool
-	actionPoolSpecs       []actionWorkerSpec
-	actionPools           []*runtime.ActionWorkerPool
-	actionSupervisorSpecs []actionWorkerSupervisorSpec
-	actionSupervisors     []*runtime.ActionWorkerSupervisor
-	skills                *skill.Catalog
-	agents                *kernelagent.Registry
-	logger                *zap.SugaredLogger
+	registry                      *executor.Registry
+	store                         runtime.KernelStore
+	pool                          *runtime.WorkerPool
+	scheduler                     *runtime.Scheduler
+	portfolio                     *runtime.PortfolioService
+	activity                      *runtime.RunActivityService
+	dependencies                  *runtime.DependencyCoordinator
+	conversations                 *runtime.ConversationService
+	conversationCoordinator       *runtime.ConversationCoordinator
+	conversationParticipants      runtime.ConversationParticipantSource
+	participationProposals        runtime.ParticipationProposalProvider
+	conversationCoordinatorConfig runtime.ConversationCoordinatorConfig
+	collaboration                 *runtime.CollaborationService
+	turns                         *runtime.AgentTurnService
+	turnsRun                      *runtime.TurnCoordinator
+	runQueue                      *runtime.AgentRunScheduler
+	wake                          *runtime.AgentRunWakeService
+	actions                       *runtime.ActionCoordinator
+	approvals                     *runtime.ApprovalCoordinator
+	artifacts                     *runtime.ArtifactCatalog
+	actionPolicy                  runtime.ActionPolicyEvaluator
+	approvalAuth                  runtime.ApprovalAuthorizer
+	clawHub                       *clawhub.InstallManager
+	clawHubRegistry               clawhub.Registry
+	agentPoolSpecs                []agentRunWorkerSpec
+	agentPools                    []*runtime.AgentRunWorkerPool
+	actionPoolSpecs               []actionWorkerSpec
+	actionPools                   []*runtime.ActionWorkerPool
+	actionSupervisorSpecs         []actionWorkerSupervisorSpec
+	actionSupervisors             []*runtime.ActionWorkerSupervisor
+	skills                        *skill.Catalog
+	agents                        *kernelagent.Registry
+	logger                        *zap.SugaredLogger
 }
 
 type agentRunWorkerSpec struct {
@@ -703,6 +722,9 @@ func New(opts ...Option) (*Engine, error) {
 		if err := opt(e); err != nil {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
+	}
+	if err := e.rebuildConversationCoordinator(); err != nil {
+		return nil, fmt.Errorf("conversation coordinator configuration: %w", err)
 	}
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
@@ -855,6 +877,37 @@ func WithStore(store runtime.KernelStore) Option {
 // embeddings and tests.
 func WithPersistentStore(store PersistentKernelStore) Option {
 	return WithStore(store)
+}
+
+// WithConversationCoordinator connects portable channel arbitration to a
+// host's authorized Agent roster and proposal runtime. The host keeps tenant,
+// credential, model, and deployment concerns behind these interfaces.
+func WithConversationCoordinator(
+	participants runtime.ConversationParticipantSource,
+	proposals runtime.ParticipationProposalProvider,
+	config runtime.ConversationCoordinatorConfig,
+) Option {
+	return func(e *Engine) error {
+		e.conversationParticipants = participants
+		e.participationProposals = proposals
+		e.conversationCoordinatorConfig = config
+		return nil
+	}
+}
+
+func (e *Engine) rebuildConversationCoordinator() error {
+	e.conversationCoordinator = nil
+	if e.conversationParticipants == nil && e.participationProposals == nil {
+		return nil
+	}
+	coordinator, err := runtime.NewConversationCoordinator(
+		e.conversations, e.conversationParticipants, e.participationProposals, e.conversationCoordinatorConfig,
+	)
+	if err != nil {
+		return err
+	}
+	e.conversationCoordinator = coordinator
+	return nil
 }
 
 // WithLogger replaces the default logger.
@@ -1200,6 +1253,21 @@ func (e *Engine) CoordinateParticipation(ctx context.Context, request runtime.Co
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.CoordinateParticipation(ctx, request)
+}
+
+// CoordinateConversation asks every eligible Agent for a bounded proposal,
+// persists truthful working/read state, and atomically commits deterministic
+// arbitration. It is available only when the embedding host configured the
+// participant and proposal boundaries.
+func (e *Engine) CoordinateConversation(ctx context.Context, request runtime.ConversationCoordinationRequest) (*runtime.ParticipationRoundResult, error) {
+	if e.conversationCoordinator == nil {
+		return nil, runtime.ErrConversationCoordinationUnavailable
+	}
+	return e.conversationCoordinator.Coordinate(ctx, request)
+}
+
+func (e *Engine) ConversationCoordinationAvailable() bool {
+	return e != nil && e.conversationCoordinator != nil
 }
 
 func (e *Engine) GetParticipationRound(ctx context.Context, scope runtime.Scope, conversationID, roundID string) (*runtime.ParticipationRoundResult, error) {
