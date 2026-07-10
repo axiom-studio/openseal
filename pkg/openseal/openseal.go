@@ -117,6 +117,12 @@ type (
 	ApprovalAuthorizerFunc     = runtime.ApprovalAuthorizerFunc
 	ResolveApprovalRequest     = runtime.ResolveApprovalRequest
 	ApprovalResolutionResult   = runtime.ApprovalResolutionResult
+	ActionWorkerConfig         = runtime.ActionWorkerConfig
+	CredentialResolver         = runtime.CredentialResolver
+	CredentialResolverFunc     = runtime.CredentialResolverFunc
+	ActionDispatchInput        = runtime.ActionDispatchInput
+	ActionDispatcher           = runtime.ActionDispatcher
+	ActionDispatcherFunc       = runtime.ActionDispatcherFunc
 )
 
 const (
@@ -200,29 +206,37 @@ const (
 // Engine is the primary entry point for OpenSeal.
 // It wires together the registry, execution store, worker pool, and scheduler.
 type Engine struct {
-	registry       *executor.Registry
-	store          runtime.KernelStore
-	pool           *runtime.WorkerPool
-	scheduler      *runtime.Scheduler
-	portfolio      *runtime.PortfolioService
-	activity       *runtime.RunActivityService
-	turns          *runtime.AgentTurnService
-	turnsRun       *runtime.TurnCoordinator
-	runQueue       *runtime.AgentRunScheduler
-	wake           *runtime.AgentRunWakeService
-	actions        *runtime.ActionCoordinator
-	approvals      *runtime.ApprovalCoordinator
-	actionPolicy   runtime.ActionPolicyEvaluator
-	approvalAuth   runtime.ApprovalAuthorizer
-	agentPoolSpecs []agentRunWorkerSpec
-	agentPools     []*runtime.AgentRunWorkerPool
-	skills         *skill.Catalog
-	logger         *zap.SugaredLogger
+	registry        *executor.Registry
+	store           runtime.KernelStore
+	pool            *runtime.WorkerPool
+	scheduler       *runtime.Scheduler
+	portfolio       *runtime.PortfolioService
+	activity        *runtime.RunActivityService
+	turns           *runtime.AgentTurnService
+	turnsRun        *runtime.TurnCoordinator
+	runQueue        *runtime.AgentRunScheduler
+	wake            *runtime.AgentRunWakeService
+	actions         *runtime.ActionCoordinator
+	approvals       *runtime.ApprovalCoordinator
+	actionPolicy    runtime.ActionPolicyEvaluator
+	approvalAuth    runtime.ApprovalAuthorizer
+	agentPoolSpecs  []agentRunWorkerSpec
+	agentPools      []*runtime.AgentRunWorkerPool
+	actionPoolSpecs []actionWorkerSpec
+	actionPools     []*runtime.ActionWorkerPool
+	skills          *skill.Catalog
+	logger          *zap.SugaredLogger
 }
 
 type agentRunWorkerSpec struct {
 	config   runtime.AgentRunWorkerConfig
 	resolver runtime.TurnRunnerResolver
+}
+
+type actionWorkerSpec struct {
+	config      runtime.ActionWorkerConfig
+	credentials runtime.CredentialResolver
+	dispatcher  runtime.ActionDispatcher
 }
 
 // Option configures an Engine.
@@ -267,6 +281,9 @@ func New(opts ...Option) (*Engine, error) {
 		}
 	}
 	e.rebuildGovernance()
+	if err := e.rebuildActionWorkerPools(); err != nil {
+		return nil, fmt.Errorf("action worker configuration: %w", err)
+	}
 	if err := e.rebuildAgentWorkerPools(); err != nil {
 		return nil, fmt.Errorf("agent worker configuration: %w", err)
 	}
@@ -280,10 +297,16 @@ func (e *Engine) Start(ctx context.Context) {
 	for _, pool := range e.agentPools {
 		pool.Start(ctx)
 	}
+	for _, pool := range e.actionPools {
+		pool.Start(ctx)
+	}
 }
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	for _, pool := range e.actionPools {
+		pool.Stop()
+	}
 	for _, pool := range e.agentPools {
 		pool.Stop()
 	}
@@ -415,6 +438,16 @@ func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
 	}
 }
 
+func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
+	return func(e *Engine) error {
+		if dispatcher == nil {
+			return fmt.Errorf("action dispatcher is required")
+		}
+		e.actionPoolSpecs = append(e.actionPoolSpecs, actionWorkerSpec{config: config, credentials: credentials, dispatcher: dispatcher})
+		return nil
+	}
+}
+
 func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 	return func(e *Engine) error {
 		if authorizer == nil {
@@ -428,6 +461,18 @@ func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 func (e *Engine) rebuildGovernance() {
 	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy)
 	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
+}
+
+func (e *Engine) rebuildActionWorkerPools() error {
+	e.actionPools = make([]*runtime.ActionWorkerPool, 0, len(e.actionPoolSpecs))
+	for _, spec := range e.actionPoolSpecs {
+		pool, err := runtime.NewActionWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
+		if err != nil {
+			return err
+		}
+		e.actionPools = append(e.actionPools, pool)
+	}
+	return nil
 }
 
 func (e *Engine) rebuildAgentWorkerPools() error {
@@ -444,6 +489,12 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 
 func (e *Engine) WakeAgentWorkers() {
 	for _, pool := range e.agentPools {
+		pool.Wake()
+	}
+}
+
+func (e *Engine) WakeActionWorkers() {
+	for _, pool := range e.actionPools {
 		pool.Wake()
 	}
 }
