@@ -126,6 +126,7 @@ const (
 	RunSourceSchedule  RunSource = "schedule"
 	RunSourceEvent     RunSource = "event"
 	RunSourceWebhook   RunSource = "webhook"
+	RunSourceRequest   RunSource = "agent_request"
 	RunSourceHandoff   RunSource = "handoff"
 	RunSourceObjective RunSource = "objective"
 )

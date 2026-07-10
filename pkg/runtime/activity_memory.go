@@ -28,10 +28,8 @@ func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if lease != nil && (current.LeaseOwner != lease.WorkerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(lease.Now)) {
 		return nil, ErrLeaseLost
 	}
-	persisted := cloneActivityEvent(event)
-	persisted.Sequence = int64(len(s.activity[key]) + 1)
+	persisted := appendMemoryActivityLocked(s, event)
 	s.agentRuns[key] = cloneAgentRun(run)
-	s.activity[key] = append(s.activity[key], persisted)
 	return cloneActivityEvent(persisted), nil
 }
 
@@ -45,9 +43,7 @@ func (s *MemoryStore) AppendActivity(_ context.Context, event *ActivityEvent) (*
 	if s.agentRuns[key] == nil {
 		return nil, ErrRunNotFound
 	}
-	persisted := cloneActivityEvent(event)
-	persisted.Sequence = int64(len(s.activity[key]) + 1)
-	s.activity[key] = append(s.activity[key], persisted)
+	persisted := appendMemoryActivityLocked(s, event)
 	return cloneActivityEvent(persisted), nil
 }
 
