@@ -7,151 +7,44 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
-type RiskLevel string
+type RiskLevel = capability.RiskLevel
+type SideEffect = capability.SideEffect
+type IdempotencyMode = capability.IdempotencyMode
+type CredentialRequirement = capability.CredentialRequirement
+type CredentialReference = capability.CredentialReference
+type ActionRetryPolicy = capability.ActionRetryPolicy
+type Duration = capability.Duration
+type Action = capability.Action
+type TransportReference = capability.TransportReference
+type Definition = capability.Definition
+type ArgumentRule = capability.ArgumentRule
+type Binding = capability.Binding
+type ScopeReference = capability.ScopeReference
+type ModelAction = capability.ModelAction
+type ModelPrompt = capability.ModelPrompt
+type BoundAction = capability.BoundAction
 
 const (
-	RiskLevelRead        RiskLevel = "read"
-	RiskLevelWrite       RiskLevel = "write"
-	RiskLevelExternal    RiskLevel = "external"
-	RiskLevelProduction  RiskLevel = "production"
-	RiskLevelDestructive RiskLevel = "destructive"
+	RiskLevelRead        = capability.RiskLevelRead
+	RiskLevelWrite       = capability.RiskLevelWrite
+	RiskLevelExternal    = capability.RiskLevelExternal
+	RiskLevelProduction  = capability.RiskLevelProduction
+	RiskLevelDestructive = capability.RiskLevelDestructive
+
+	SideEffectNone        = capability.SideEffectNone
+	SideEffectRead        = capability.SideEffectRead
+	SideEffectWrite       = capability.SideEffectWrite
+	SideEffectExternal    = capability.SideEffectExternal
+	SideEffectDestructive = capability.SideEffectDestructive
+
+	IdempotencyNone      = capability.IdempotencyNone
+	IdempotencySupported = capability.IdempotencySupported
+	IdempotencyRequired  = capability.IdempotencyRequired
 )
-
-type SideEffect string
-
-const (
-	SideEffectNone        SideEffect = "none"
-	SideEffectRead        SideEffect = "read"
-	SideEffectWrite       SideEffect = "write"
-	SideEffectExternal    SideEffect = "external"
-	SideEffectDestructive SideEffect = "destructive"
-)
-
-type IdempotencyMode string
-
-const (
-	IdempotencyNone      IdempotencyMode = "none"
-	IdempotencySupported IdempotencyMode = "supported"
-	IdempotencyRequired  IdempotencyMode = "required"
-)
-
-type CredentialRequirement struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Optional bool   `json:"optional,omitempty"`
-}
-
-// CredentialReference is an opaque binding identifier. Resolved values must
-// never be placed in definitions, model catalogs, prompts, or activity events.
-type CredentialReference struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
-
-type ActionRetryPolicy struct {
-	MaxAttempts    int      `json:"maxAttempts"`
-	InitialBackoff Duration `json:"initialBackoff,omitempty"`
-	MaxBackoff     Duration `json:"maxBackoff,omitempty"`
-}
-
-type Duration time.Duration
-
-func (d Duration) Duration() time.Duration { return time.Duration(d) }
-
-type Action struct {
-	Name                 string                  `json:"name"`
-	Description          string                  `json:"description"`
-	InputSchema          map[string]interface{}  `json:"inputSchema"`
-	OutputSchema         map[string]interface{}  `json:"outputSchema,omitempty"`
-	SideEffect           SideEffect              `json:"sideEffect"`
-	Risk                 RiskLevel               `json:"risk"`
-	Permissions          []string                `json:"permissions,omitempty"`
-	Credentials          []CredentialRequirement `json:"credentials,omitempty"`
-	Timeout              Duration                `json:"timeout,omitempty"`
-	Retry                ActionRetryPolicy       `json:"retry"`
-	Idempotency          IdempotencyMode         `json:"idempotency"`
-	DryRunAction         string                  `json:"dryRunAction,omitempty"`
-	CompensationAction   string                  `json:"compensationAction,omitempty"`
-	EmittedArtifactTypes []string                `json:"emittedArtifactTypes,omitempty"`
-	EmittedEventTypes    []string                `json:"emittedEventTypes,omitempty"`
-	Transport            *TransportReference     `json:"transport,omitempty"`
-}
-
-type TransportReference struct {
-	Kind     string `json:"kind"`
-	Endpoint string `json:"endpoint,omitempty"`
-}
-
-type Definition struct {
-	ID           string             `json:"id"`
-	Version      string             `json:"version"`
-	Name         string             `json:"name"`
-	Description  string             `json:"description,omitempty"`
-	Actions      map[string]Action  `json:"actions"`
-	Transport    TransportReference `json:"transport"`
-	Prompt       *PromptModule      `json:"prompt,omitempty"`
-	Requirements Requirements       `json:"requirements,omitempty"`
-	Installers   []Installer        `json:"installers,omitempty"`
-	Resources    []Resource         `json:"resources,omitempty"`
-	Source       *SourceProvenance  `json:"source,omitempty"`
-}
-
-type ArgumentRule struct {
-	Const interface{}   `json:"const,omitempty"`
-	Enum  []interface{} `json:"enum,omitempty"`
-}
-
-type Binding struct {
-	ID                   string                             `json:"id"`
-	Scope                ScopeReference                     `json:"scope"`
-	DeploymentID         string                             `json:"deploymentId"`
-	SkillID              string                             `json:"skillId"`
-	SkillVersion         string                             `json:"skillVersion"`
-	AllowedActions       []string                           `json:"allowedActions"`
-	EnablePrompt         bool                               `json:"enablePrompt,omitempty"`
-	MaximumRisk          RiskLevel                          `json:"maximumRisk"`
-	ArgumentRestrictions map[string]map[string]ArgumentRule `json:"argumentRestrictions,omitempty"`
-	Credentials          map[string]CredentialReference     `json:"credentials,omitempty"`
-	Config               map[string]interface{}             `json:"config,omitempty"`
-	Revision             int64                              `json:"revision"`
-}
-
-// ScopeReference mirrors the portable kernel scope without coupling skill
-// contracts to runtime persistence implementation details.
-type ScopeReference struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
-
-type ModelAction struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	SkillID     string                 `json:"skillId"`
-	Version     string                 `json:"version"`
-	Action      string                 `json:"action"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
-	Risk        RiskLevel              `json:"risk"`
-	SideEffect  SideEffect             `json:"sideEffect"`
-}
-
-type ModelPrompt struct {
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	SkillID        string `json:"skillId"`
-	Version        string `json:"version"`
-	AlwaysActive   bool   `json:"alwaysActive,omitempty"`
-	UserInvocable  bool   `json:"userInvocable"`
-	ModelInvocable bool   `json:"modelInvocable"`
-}
-
-type BoundAction struct {
-	Definition *Definition
-	Action     Action
-	Binding    *Binding
-}
 
 type Catalog struct {
 	mu       sync.RWMutex
