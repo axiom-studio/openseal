@@ -61,11 +61,10 @@ type EvaluationCriterion struct {
 }
 
 type AmendmentPolicy struct {
-	AgentMayPropose   bool                 `json:"agentMayPropose,omitempty"`
-	AllowedFields     []string             `json:"allowedFields,omitempty"`
-	RequiresApproval  bool                 `json:"requiresApproval,omitempty"`
-	AutoActivateSafe  bool                 `json:"autoActivateSafe,omitempty"`
-	MaximumRiskChange capability.RiskLevel `json:"maximumRiskChange,omitempty"`
+	AgentMayPropose    bool     `json:"agentMayPropose,omitempty"`
+	AllowedFields      []string `json:"allowedFields,omitempty"`
+	RequiresApproval   bool     `json:"requiresApproval,omitempty"`
+	ApproverPrincipals []string `json:"approverPrincipals,omitempty"`
 }
 
 type DefinitionProvenance struct {
@@ -113,6 +112,9 @@ func (d *AgentDefinition) Validate() error {
 	}
 	if d.Memory.Retention < 0 || d.Memory.MaximumBytes < 0 || d.Escalation.AfterFailures < 0 || d.Escalation.AfterDuration < 0 {
 		return errors.New("agent definition memory and escalation limits cannot be negative")
+	}
+	if d.Amendments.RequiresApproval && len(d.Amendments.ApproverPrincipals) == 0 {
+		return errors.New("agent definition amendment approval requires eligible principals")
 	}
 	if err := validateNoSecrets(d.DomainContext, "domainContext"); err != nil {
 		return err

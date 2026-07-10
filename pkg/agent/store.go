@@ -17,6 +17,10 @@ type Store interface {
 	GetDeployment(context.Context, capability.ScopeReference, string) (*AgentDeployment, error)
 	UpdateDeployment(context.Context, *AgentDeployment, int64, DefinitionActivation) error
 	ListActivations(context.Context, capability.ScopeReference, string) ([]DefinitionActivation, error)
+	CreateAmendment(context.Context, *DefinitionAmendment) error
+	GetAmendment(context.Context, capability.ScopeReference, string) (*DefinitionAmendment, error)
+	UpdateAmendment(context.Context, *DefinitionAmendment, int64) error
+	ActivateAmendment(context.Context, *DefinitionAmendment, int64, *AgentDefinition, *AgentDeployment, int64, DefinitionActivation) error
 }
 
 type MemoryStore struct {
@@ -24,10 +28,71 @@ type MemoryStore struct {
 	definitions map[string]*AgentDefinition
 	deployments map[string]*AgentDeployment
 	activations map[string][]DefinitionActivation
+	amendments  map[string]*DefinitionAmendment
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{definitions: make(map[string]*AgentDefinition), deployments: make(map[string]*AgentDeployment), activations: make(map[string][]DefinitionActivation)}
+	return &MemoryStore{definitions: make(map[string]*AgentDefinition), deployments: make(map[string]*AgentDeployment), activations: make(map[string][]DefinitionActivation), amendments: make(map[string]*DefinitionAmendment)}
+}
+
+func (s *MemoryStore) CreateAmendment(_ context.Context, amendment *DefinitionAmendment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := amendmentKey(amendment.Scope, amendment.ID)
+	if s.amendments[key] != nil {
+		return errors.New("agent definition amendment already exists")
+	}
+	s.amendments[key] = cloneAmendment(amendment)
+	return nil
+}
+
+func (s *MemoryStore) GetAmendment(_ context.Context, scope capability.ScopeReference, id string) (*DefinitionAmendment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value := s.amendments[amendmentKey(scope, id)]
+	if value == nil {
+		return nil, ErrAmendmentNotFound
+	}
+	return cloneAmendment(value), nil
+}
+
+func (s *MemoryStore) UpdateAmendment(_ context.Context, amendment *DefinitionAmendment, expectedRevision int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := amendmentKey(amendment.Scope, amendment.ID)
+	current := s.amendments[key]
+	if current == nil {
+		return ErrAmendmentNotFound
+	}
+	if current.Revision != expectedRevision {
+		return ErrRevisionConflict
+	}
+	s.amendments[key] = cloneAmendment(amendment)
+	return nil
+}
+
+func (s *MemoryStore) ActivateAmendment(_ context.Context, amendment *DefinitionAmendment, expectedAmendmentRevision int64, definition *AgentDefinition, deployment *AgentDeployment, expectedDeploymentRevision int64, activation DefinitionActivation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	amendmentStorageKey := amendmentKey(amendment.Scope, amendment.ID)
+	currentAmendment := s.amendments[amendmentStorageKey]
+	deploymentStorageKey := deploymentKey(deployment.Scope, deployment.ID)
+	currentDeployment := s.deployments[deploymentStorageKey]
+	if currentAmendment == nil || currentDeployment == nil {
+		return errors.New("amendment or deployment not found")
+	}
+	if currentAmendment.Revision != expectedAmendmentRevision || currentDeployment.Revision != expectedDeploymentRevision {
+		return ErrRevisionConflict
+	}
+	definitionStorageKey := definitionKey(definition.ID, definition.Version)
+	if s.definitions[definitionStorageKey] != nil {
+		return errors.New("agent definition versions are immutable")
+	}
+	s.definitions[definitionStorageKey] = cloneDefinition(definition)
+	s.deployments[deploymentStorageKey] = cloneDeployment(deployment)
+	s.activations[deploymentStorageKey] = append(s.activations[deploymentStorageKey], activation)
+	s.amendments[amendmentStorageKey] = cloneAmendment(amendment)
+	return nil
 }
 
 func (s *MemoryStore) CreateDefinition(_ context.Context, definition *AgentDefinition) error {
