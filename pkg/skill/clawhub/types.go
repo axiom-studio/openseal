@@ -12,6 +12,7 @@ type SkillSummary struct {
 	Slug        string    `json:"slug"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	Version     string    `json:"version,omitempty"`
 	Icon        string    `json:"icon,omitempty"`
 	Tags        []string  `json:"tags,omitempty"`
 	Downloads   int       `json:"downloads"`
@@ -28,13 +29,19 @@ func (s *SkillSummary) UnmarshalJSON(data []byte) error {
 	s.Slug = textField(raw, "slug")
 	s.Name = firstTextField(raw, "name", "displayName")
 	s.Description = firstTextField(raw, "description", "summary")
+	s.Version = textField(raw, "version")
 	s.Icon = textField(raw, "icon")
 	s.Tags = stringFields(raw["tags"])
 	s.Downloads = intField(raw, "downloads")
 	s.Stars = intField(raw, "stars")
 	s.UpdatedAt = timeField(raw, "updatedAt")
-	if latest, ok := raw["latestVersion"].(map[string]interface{}); ok && s.Name == "" {
-		s.Name = textField(latest, "displayName")
+	if latest, ok := raw["latestVersion"].(map[string]interface{}); ok {
+		if s.Name == "" {
+			s.Name = textField(latest, "displayName")
+		}
+		if s.Version == "" {
+			s.Version = textField(latest, "version")
+		}
 	}
 	if stats, ok := raw["stats"].(map[string]interface{}); ok {
 		if s.Downloads == 0 {
