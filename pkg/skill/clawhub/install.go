@@ -84,6 +84,8 @@ type InstallManager struct {
 	mu         sync.Mutex
 }
 
+type CompilationValidator func(*opensealclaw.Compilation) error
+
 func NewInstallManager(registryID string, registry Registry, workspace string) (*InstallManager, error) {
 	if registry == nil || strings.TrimSpace(registryID) == "" || strings.TrimSpace(workspace) == "" {
 		return nil, errors.New("registry id, registry, and workspace are required")
@@ -96,6 +98,14 @@ func NewInstallManager(registryID string, registry Registry, workspace string) (
 }
 
 func (m *InstallManager) Install(ctx context.Context, req InstallRequest) (*InstalledSkill, error) {
+	return m.install(ctx, req, nil)
+}
+
+func (m *InstallManager) InstallValidated(ctx context.Context, req InstallRequest, validate CompilationValidator) (*InstalledSkill, error) {
+	return m.install(ctx, req, validate)
+}
+
+func (m *InstallManager) install(ctx context.Context, req InstallRequest, validate CompilationValidator) (*InstalledSkill, error) {
 	if strings.TrimSpace(req.Reference.Slug) == "" || req.Version != "" && req.Tag != "" {
 		return nil, errors.New("skill reference is required and version and tag are mutually exclusive")
 	}
@@ -149,6 +159,11 @@ func (m *InstallManager) Install(ctx context.Context, req InstallRequest) (*Inst
 		return nil, err
 	}
 	defer os.RemoveAll(stage)
+	if validate != nil {
+		if err := validate(bundle); err != nil {
+			return nil, fmt.Errorf("validate compiled skill: %w", err)
+		}
+	}
 	target := filepath.Join(m.skillsDir, req.Reference.Slug)
 	if installed {
 		modified, err := m.isLocallyModified(target)
@@ -207,6 +222,14 @@ func (m *InstallManager) Install(ctx context.Context, req InstallRequest) (*Inst
 }
 
 func (m *InstallManager) Update(ctx context.Context, slug string) (*InstalledSkill, error) {
+	return m.update(ctx, slug, nil)
+}
+
+func (m *InstallManager) UpdateValidated(ctx context.Context, slug string, validate CompilationValidator) (*InstalledSkill, error) {
+	return m.update(ctx, slug, validate)
+}
+
+func (m *InstallManager) update(ctx context.Context, slug string, validate CompilationValidator) (*InstalledSkill, error) {
 	lock, err := m.List()
 	if err != nil {
 		return nil, err
@@ -215,7 +238,7 @@ func (m *InstallManager) Update(ctx context.Context, slug string) (*InstalledSki
 	if !ok {
 		return nil, ErrNotFound
 	}
-	return m.Install(ctx, InstallRequest{Reference: SkillReference{Owner: entry.OwnerHandle, Slug: slug}})
+	return m.install(ctx, InstallRequest{Reference: SkillReference{Owner: entry.OwnerHandle, Slug: slug}}, validate)
 }
 
 func (m *InstallManager) UpdateAll(ctx context.Context) UpdateReport {
