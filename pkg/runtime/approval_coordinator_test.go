@@ -44,7 +44,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.Resolved || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady || result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil {
+			if !result.Resolved || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady || result.Run.Status != AgentRunStatusWaitingForDependency || result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != result.Call.ID {
 				t.Fatalf("resolution mismatch: %#v", result)
 			}
 			retry, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
@@ -69,8 +69,8 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 				t.Fatalf("approval activity mismatch: %#v", events)
 			}
 			claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: proposal.Approval.Scope, WorkerID: "next-worker", Now: now.Add(3 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-			if err != nil || claimed == nil || claimed.ID != proposal.Approval.RunID {
-				t.Fatalf("resolved run was not wake-claimable: %#v, %v", claimed, err)
+			if err != nil || claimed != nil {
+				t.Fatalf("run resumed before its approved action completed: %#v, %v", claimed, err)
 			}
 		})
 	}

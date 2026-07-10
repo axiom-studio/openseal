@@ -214,6 +214,39 @@ type ApprovalFilter struct {
 	Offset int
 }
 
+type ActionClaim struct {
+	Scope         Scope
+	WorkerID      string
+	Now           time.Time
+	LeaseDuration time.Duration
+}
+
+func (c ActionClaim) Validate() error {
+	if err := c.Scope.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.WorkerID) == "" || c.Now.IsZero() || c.LeaseDuration <= 0 {
+		return errors.New("action worker, current time, and lease duration are required")
+	}
+	return nil
+}
+
+type ActionExecutionRecord struct {
+	Call                 *ActionCall
+	ExpectedCallRevision int64
+	Run                  *AgentRun
+	ExpectedRunRevision  int64
+	WorkerID             string
+	Now                  time.Time
+	Event                *ActivityEvent
+}
+
+type ActionExecutionResult struct {
+	Call  *ActionCall
+	Run   *AgentRun
+	Event *ActivityEvent
+}
+
 type ActionStore interface {
 	CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error)
 	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
@@ -221,6 +254,9 @@ type ActionStore interface {
 	GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error)
 	ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error)
 	ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error)
+	ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error)
+	RenewActionLease(ctx context.Context, scope Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*ActionCall, error)
+	PersistActionExecution(ctx context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error)
 }
 
 func validActionCallStatus(status ActionCallStatus) bool {

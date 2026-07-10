@@ -120,10 +120,15 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 		}
 	}
 	updatedRun := cloneAgentRun(run)
-	updatedRun.Status = AgentRunStatusQueued
-	updatedRun.WakeCondition = nil
-	updatedRun.AvailableAt = now
-	updatedRun.QueueEnteredAt = now
+	if callStatus == ActionCallStatusReady {
+		updatedRun.Status = AgentRunStatusWaitingForDependency
+		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
+	} else {
+		updatedRun.Status = AgentRunStatusQueued
+		updatedRun.WakeCondition = nil
+		updatedRun.AvailableAt = now
+		updatedRun.QueueEnteredAt = now
+	}
 	updatedRun.LeaseOwner = ""
 	updatedRun.LeaseExpiresAt = nil
 	updatedRun.LastWakeSignalID = req.DecisionID
