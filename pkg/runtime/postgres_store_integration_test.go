@@ -538,3 +538,120 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }
+
+func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := "openseal_commands_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+	scope := Scope{Kind: "tenant", ID: "acme"}
+	request := CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
+		Goal: "Inspect production health", Source: RunSourceManual, IdempotencyKey: "health-run",
+		Actor: ActivityActor{Type: "user", ID: "7"},
+	}
+	services := []*RunCommandService{NewRunCommandService(primary), NewRunCommandService(replica)}
+	results := make(chan *AgentRunCommandResult, len(services))
+	errorsFound := make(chan error, len(services))
+	var group sync.WaitGroup
+	for _, service := range services {
+		group.Add(1)
+		go func(service *RunCommandService) {
+			defer group.Done()
+			result, createErr := service.CreateAgentRun(ctx, request)
+			if createErr != nil {
+				errorsFound <- createErr
+				return
+			}
+			results <- result
+		}(service)
+	}
+	group.Wait()
+	close(results)
+	close(errorsFound)
+	for createErr := range errorsFound {
+		t.Fatal(createErr)
+	}
+	var run *AgentRun
+	creationEvents := 0
+	resultCount := 0
+	for result := range results {
+		resultCount++
+		if run == nil {
+			run = result.Run
+		} else if result.Run.ID != run.ID {
+			t.Fatalf("idempotent run ids differ: %s and %s", run.ID, result.Run.ID)
+		}
+		if result.Event != nil {
+			creationEvents++
+		}
+	}
+	if resultCount != 2 || creationEvents != 1 || run == nil {
+		t.Fatalf("create results = %d, creation events = %d, run = %#v", resultCount, creationEvents, run)
+	}
+	conflict := request
+	conflict.Goal = "Do different work"
+	if _, err := services[0].CreateAgentRun(ctx, conflict); !errors.Is(err, ErrRunIdempotency) {
+		t.Fatalf("conflicting replay error = %v", err)
+	}
+	events, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})
+	if err != nil || len(events) != 1 || events[0].EventType != "run.created" {
+		t.Fatalf("creation activity = %#v, %v", events, err)
+	}
+
+	paused, err := services[1].CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: AgentRunCommandPause,
+		Actor: ActivityActor{Type: "user", ID: "7"},
+	})
+	if err != nil || paused.Run.Status != AgentRunStatusPaused {
+		t.Fatalf("paused = %#v, %v", paused, err)
+	}
+	intervened, err := services[0].CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: paused.Run.Revision, Kind: AgentRunCommandIntervene,
+		Actor: ActivityActor{Type: "user", ID: "7"}, Instruction: "Check database saturation first",
+	})
+	if err != nil || len(intervened.Run.PendingInterventions) != 1 {
+		t.Fatalf("intervened = %#v, %v", intervened, err)
+	}
+	resumed, err := services[1].CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: intervened.Run.Revision, Kind: AgentRunCommandResume,
+		Actor: ActivityActor{Type: "user", ID: "7"},
+	})
+	if err != nil || resumed.Run.Status != AgentRunStatusQueued {
+		t.Fatalf("resumed = %#v, %v", resumed, err)
+	}
+	canceled, err := services[0].CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: resumed.Run.Revision, Kind: AgentRunCommandCancel,
+		Actor: ActivityActor{Type: "user", ID: "7"},
+	})
+	if err != nil || canceled.Run.Status != AgentRunStatusCanceled || canceled.Run.CompletedAt == nil {
+		t.Fatalf("canceled = %#v, %v", canceled, err)
+	}
+	restored, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
+	if err != nil || restored.Status != AgentRunStatusCanceled || len(restored.PendingInterventions) != 1 {
+		t.Fatalf("restored = %#v, %v", restored, err)
+	}
+	if _, err := NewPortfolioService(primary).GetAgentRun(ctx, Scope{Kind: "tenant", ID: "other"}, run.ID); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("cross-scope get error = %v", err)
+	}
+	events, err = primary.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})
+	if err != nil || len(events) != 5 || events[4].EventType != "run.canceled" {
+		t.Fatalf("command activity = %#v, %v", events, err)
+	}
+}
