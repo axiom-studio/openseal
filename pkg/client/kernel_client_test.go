@@ -36,7 +36,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID,
+		Scope: scope, Kind: runtime.RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Monitor product feedback", Source: runtime.RunSourceManual,
 	}, "stable-request")
 	if err != nil {
@@ -47,7 +47,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 
 	replayed, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID,
+		Scope: scope, Kind: runtime.RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Monitor product feedback", Source: runtime.RunSourceManual,
 	}, "stable-request")
 	if err != nil {
@@ -57,11 +57,11 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatalf("idempotent replay = %#v", replayed)
 	}
 
-	runs, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, Owner: &owner, Limit: 20})
+	runs, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: &owner, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 1 || runs[0].ID != created.Run.ID {
+	if len(runs) != 1 || runs[0].ID != created.Run.ID || runs[0].Kind != runtime.RunKindAgentWork {
 		t.Fatalf("runs = %#v", runs)
 	}
 

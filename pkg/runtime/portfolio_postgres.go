@@ -253,6 +253,7 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 	err = tx.QueryRowContext(ctx, `SELECT candidate.payload FROM `+s.table("agent_runs")+` AS candidate
 		WHERE candidate.scope_kind = $1 AND candidate.scope_id = $2
 		AND ($3 = '' OR candidate.assigned_agent_id = $3)
+		AND ($9 = '' OR COALESCE(candidate.payload->>'kind', 'agent_work') = $9)
 		AND ((candidate.status = $4 AND candidate.available_at <= $6 AND (candidate.lease_expires_at IS NULL OR candidate.lease_expires_at <= $6))
 		  OR (candidate.status = $5 AND (candidate.lease_expires_at IS NULL OR candidate.lease_expires_at <= $6)))
 		AND ($7 = 0 OR candidate.assigned_agent_id = '' OR (
@@ -265,7 +266,7 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 			candidate.deadline ASC NULLS LAST, candidate.queue_entered_at ASC, candidate.id ASC
 		FOR UPDATE OF candidate SKIP LOCKED LIMIT 1`,
 		claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning,
-		claim.Now, claim.MaxActiveForAgent, agingSeconds).Scan(&payload)
+		claim.Now, claim.MaxActiveForAgent, agingSeconds, claim.Kind).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, err

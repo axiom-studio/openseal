@@ -135,6 +135,16 @@ const (
 	RunSourceObjective RunSource = "objective"
 )
 
+// RunKind identifies the execution contract a durable Run requires. Ownership
+// remains independent: both Agents and Teams can own agent work, while system
+// workers can claim only the explicit kernel work they implement.
+type RunKind string
+
+const (
+	RunKindAgentWork    RunKind = "agent_work"
+	RunKindConversation RunKind = "conversation"
+)
+
 type WakeCondition struct {
 	Type      string                 `json:"type"`
 	WakeAt    *time.Time             `json:"wakeAt,omitempty"`
@@ -156,6 +166,7 @@ type AgentRunIntervention struct {
 // subordinate execution details and must not be used as agent-run identity.
 type AgentRun struct {
 	ID                   string                 `json:"id"`
+	Kind                 RunKind                `json:"kind"`
 	Scope                Scope                  `json:"scope"`
 	ObjectiveID          string                 `json:"objectiveId,omitempty"`
 	ParentRunID          string                 `json:"parentRunId,omitempty"`
@@ -209,6 +220,9 @@ func (r *AgentRun) Validate() error {
 	if strings.TrimSpace(r.Goal) == "" {
 		return errors.New("run goal is required")
 	}
+	if r.Kind != "" && !validRunKind(r.Kind) {
+		return fmt.Errorf("unsupported run kind %q", r.Kind)
+	}
 	if r.Priority < 0 {
 		return errors.New("run priority cannot be negative")
 	}
@@ -226,6 +240,7 @@ type ObjectiveFilter struct {
 
 type AgentRunFilter struct {
 	Scope           Scope
+	Kind            RunKind
 	Owner           *ObjectiveOwner
 	ObjectiveID     string
 	ParentRunID     string
@@ -292,6 +307,7 @@ type UpdateObjectiveRequest struct {
 
 type CreateAgentRunRequest struct {
 	Scope           Scope
+	Kind            RunKind
 	ObjectiveID     string
 	ParentRunID     string
 	Owner           ObjectiveOwner
@@ -461,8 +477,12 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 	default:
 		return nil, fmt.Errorf("%w: unsupported run source %q", ErrInvalidAgentRun, source)
 	}
+	kind := normalizeRunKind(req.Kind)
+	if !validRunKind(kind) {
+		return nil, fmt.Errorf("%w: unsupported run kind %q", ErrInvalidAgentRun, req.Kind)
+	}
 	run := &AgentRun{
-		ID: runID, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
+		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
 		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
@@ -474,6 +494,22 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
 	}
 	return run, nil
+}
+
+func normalizeRunKind(kind RunKind) RunKind {
+	if kind == "" {
+		return RunKindAgentWork
+	}
+	return kind
+}
+
+func validRunKind(kind RunKind) bool {
+	switch kind {
+	case RunKindAgentWork, RunKindConversation:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *PortfolioService) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
@@ -499,6 +535,9 @@ func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFil
 	}
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
+	}
+	if filter.Kind != "" && !validRunKind(filter.Kind) {
+		return nil, fmt.Errorf("%w: unsupported run kind %q", ErrInvalidAgentRun, filter.Kind)
 	}
 	if filter.Owner != nil {
 		if err := filter.Owner.Validate(); err != nil {

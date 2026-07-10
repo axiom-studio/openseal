@@ -77,6 +77,7 @@ func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi
 
 func (c *KernelHTTPClient) ListAgentRuns(ctx context.Context, filter runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
 	query := scopeQuery(filter.Scope)
+	setIfPresent(query, "kind", string(filter.Kind))
 	setIfPresent(query, "objectiveId", filter.ObjectiveID)
 	setIfPresent(query, "parentRunId", filter.ParentRunID)
 	setIfPresent(query, "rootRunId", filter.RootRunID)

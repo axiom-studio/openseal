@@ -840,7 +840,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		sourceKind = RunSourceHandoff
 	}
 	return &AgentRun{
-		ID: id, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
+		ID: id, Kind: normalizeRunKind(source.Kind), Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
 		Owner: owner, AssignedAgentID: assignedAgent, Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
 		Budget: cloneMap(source.Budget), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,

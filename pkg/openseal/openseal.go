@@ -77,6 +77,7 @@ type (
 	AgentRunStatus                     = runtime.AgentRunStatus
 	AgentRunFilter                     = runtime.AgentRunFilter
 	RunSource                          = runtime.RunSource
+	RunKind                            = runtime.RunKind
 	WakeCondition                      = runtime.WakeCondition
 	CreateObjectiveRequest             = runtime.CreateObjectiveRequest
 	UpdateObjectiveRequest             = runtime.UpdateObjectiveRequest
@@ -418,6 +419,9 @@ const (
 	RunSourceRequest   = runtime.RunSourceRequest
 	RunSourceHandoff   = runtime.RunSourceHandoff
 	RunSourceObjective = runtime.RunSourceObjective
+
+	RunKindAgentWork    = runtime.RunKindAgentWork
+	RunKindConversation = runtime.RunKindConversation
 
 	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
 	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning

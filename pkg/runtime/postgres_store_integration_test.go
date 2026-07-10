@@ -130,6 +130,19 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	if _, err := portfolio.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: objective.Revision, ProgressSummary: &summary}); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("stale objective update = %v", err)
 	}
+	conversationRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: owner, Goal: "Coordinate channel participation", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimedConversation, err := primary.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: "conversation-worker", Now: now,
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimedConversation == nil || claimedConversation.ID != conversationRun.ID {
+		t.Fatalf("postgres conversation claim = %#v, %v", claimedConversation, err)
+	}
 
 	const agentRunCount = 16
 	agentRunIDs := make(map[string]bool, agentRunCount)
