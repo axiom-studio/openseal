@@ -120,6 +120,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (1, 'workflow execution') ON CONFLICT (version) DO NOTHING`); err != nil {
 		return err
 	}
+	if err := s.migratePortfolio(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
