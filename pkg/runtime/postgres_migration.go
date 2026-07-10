@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 9
+const currentPostgresSchemaVersion int64 = 10
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,14 +39,15 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
-		9: {"run_dependencies", "run_dependency_groups"},
-		8: {"artifacts"},
-		7: {"agent_requests"},
-		5: {"approval_checkpoints", "action_calls"},
-		4: {"skill_bindings", "skill_definitions", "agent_definition_amendments", "agent_definition_activations", "agent_deployments", "agent_definitions"},
-		3: {"agent_turns", "run_activity"},
-		2: {"agent_runs", "objectives"},
-		1: {"runs"},
+		10: {"conversation_presence", "conversation_cursors", "participation_rounds", "channel_messages", "conversations"},
+		9:  {"run_dependencies", "run_dependency_groups"},
+		8:  {"artifacts"},
+		7:  {"agent_requests"},
+		5:  {"approval_checkpoints", "action_calls"},
+		4:  {"skill_bindings", "skill_definitions", "agent_definition_amendments", "agent_definition_activations", "agent_deployments", "agent_definitions"},
+		3:  {"agent_turns", "run_activity"},
+		2:  {"agent_runs", "objectives"},
+		1:  {"runs"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
 		if version == 6 {
