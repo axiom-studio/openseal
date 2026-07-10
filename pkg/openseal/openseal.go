@@ -481,6 +481,9 @@ func WithStore(store runtime.KernelStore) Option {
 		e.turnsRun = runtime.NewTurnCoordinator(store, store, store)
 		e.runQueue = runtime.NewAgentRunScheduler(store)
 		e.wake = runtime.NewAgentRunWakeService(store, store)
+		if agentStore, ok := store.(kernelagent.Store); ok {
+			e.agents = kernelagent.NewRegistryWithStore(agentStore)
+		}
 		return nil
 	}
 }

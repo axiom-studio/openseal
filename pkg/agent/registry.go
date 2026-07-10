@@ -8,7 +8,6 @@ import (
 	"errors"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -22,22 +21,20 @@ var (
 )
 
 type Registry struct {
-	mu          sync.RWMutex
-	definitions map[string]*AgentDefinition
-	deployments map[string]*AgentDeployment
-	activations map[string][]DefinitionActivation
-	now         func() time.Time
-	newID       func() string
+	store Store
+	now   func() time.Time
+	newID func() string
 }
 
 func NewRegistry() *Registry {
-	return &Registry{
-		definitions: make(map[string]*AgentDefinition), deployments: make(map[string]*AgentDeployment),
-		activations: make(map[string][]DefinitionActivation), now: time.Now, newID: uuid.NewString,
-	}
+	return NewRegistryWithStore(NewMemoryStore())
 }
 
-func (r *Registry) RegisterDefinition(_ context.Context, definition *AgentDefinition) (*AgentDefinition, error) {
+func NewRegistryWithStore(store Store) *Registry {
+	return &Registry{store: store, now: time.Now, newID: uuid.NewString}
+}
+
+func (r *Registry) RegisterDefinition(ctx context.Context, definition *AgentDefinition) (*AgentDefinition, error) {
 	if r == nil {
 		return nil, errors.New("agent registry is not configured")
 	}
@@ -56,40 +53,21 @@ func (r *Registry) RegisterDefinition(_ context.Context, definition *AgentDefini
 	if err := candidate.Validate(); err != nil {
 		return nil, err
 	}
-	key := definitionKey(candidate.ID, candidate.Version)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.definitions[key] != nil {
-		return nil, errors.New("agent definition versions are immutable")
+	if err := r.store.CreateDefinition(ctx, candidate); err != nil {
+		return nil, err
 	}
-	r.definitions[key] = cloneDefinition(candidate)
 	return cloneDefinition(candidate), nil
 }
 
-func (r *Registry) GetDefinition(_ context.Context, id, version string) (*AgentDefinition, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	value := r.definitions[definitionKey(id, version)]
-	if value == nil {
-		return nil, ErrDefinitionNotFound
-	}
-	return cloneDefinition(value), nil
+func (r *Registry) GetDefinition(ctx context.Context, id, version string) (*AgentDefinition, error) {
+	return r.store.GetDefinition(ctx, id, version)
 }
 
-func (r *Registry) ListDefinitionVersions(_ context.Context, id string) ([]*AgentDefinition, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	result := make([]*AgentDefinition, 0)
-	for _, definition := range r.definitions {
-		if definition.ID == id {
-			result = append(result, cloneDefinition(definition))
-		}
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Version < result[j].Version })
-	return result, nil
+func (r *Registry) ListDefinitionVersions(ctx context.Context, id string) ([]*AgentDefinition, error) {
+	return r.store.ListDefinitionVersions(ctx, id)
 }
 
-func (r *Registry) CreateDeployment(_ context.Context, deployment *AgentDeployment, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
+func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeployment, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
 	if r == nil {
 		return nil, nil, errors.New("agent registry is not configured")
 	}
@@ -108,50 +86,36 @@ func (r *Registry) CreateDeployment(_ context.Context, deployment *AgentDeployme
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
 		return nil, nil, errors.New("deployment activation actor is required")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	definition := r.definitions[definitionKey(candidate.DefinitionID, candidate.ActiveVersion)]
-	if definition == nil {
-		return nil, nil, ErrDefinitionNotFound
+	definition, err := r.store.GetDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
+	if err != nil {
+		return nil, nil, err
 	}
 	if err := validateNarrowing(definition, candidate); err != nil {
 		return nil, nil, err
-	}
-	key := deploymentKey(candidate.Scope, candidate.ID)
-	if r.deployments[key] != nil {
-		return nil, nil, errors.New("agent deployment already exists")
 	}
 	activation := DefinitionActivation{
 		ID: r.newID(), Scope: candidate.Scope, DeploymentID: candidate.ID, DefinitionID: candidate.DefinitionID,
 		ToVersion: candidate.ActiveVersion, DeploymentRevision: candidate.Revision, Reason: strings.TrimSpace(reason),
 		ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: candidate.CreatedAt,
 	}
-	r.deployments[key] = cloneDeployment(candidate)
-	r.activations[key] = append(r.activations[key], activation)
+	if err := r.store.CreateDeployment(ctx, candidate, activation); err != nil {
+		return nil, nil, err
+	}
 	copyActivation := activation
 	return cloneDeployment(candidate), &copyActivation, nil
 }
 
-func (r *Registry) GetDeployment(_ context.Context, scope capability.ScopeReference, id string) (*AgentDeployment, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	value := r.deployments[deploymentKey(scope, id)]
-	if value == nil {
-		return nil, ErrDeploymentNotFound
-	}
-	return cloneDeployment(value), nil
+func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*AgentDeployment, error) {
+	return r.store.GetDeployment(ctx, scope, id)
 }
 
-func (r *Registry) ActivateDefinition(_ context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
+func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
 		return nil, nil, errors.New("deployment activation actor is required")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := deploymentKey(scope, deploymentID)
-	current := r.deployments[key]
-	if current == nil {
-		return nil, nil, ErrDeploymentNotFound
+	current, err := r.store.GetDeployment(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, nil, err
 	}
 	if current.Revision != expectedRevision {
 		return nil, nil, ErrRevisionConflict
@@ -159,9 +123,9 @@ func (r *Registry) ActivateDefinition(_ context.Context, scope capability.ScopeR
 	if current.ActiveVersion == version {
 		return nil, nil, errors.New("agent deployment already uses the requested definition version")
 	}
-	definition := r.definitions[definitionKey(current.DefinitionID, version)]
-	if definition == nil {
-		return nil, nil, ErrDefinitionNotFound
+	definition, err := r.store.GetDefinition(ctx, current.DefinitionID, version)
+	if err != nil {
+		return nil, nil, err
 	}
 	updated := cloneDeployment(current)
 	updated.PreviousVersion = current.ActiveVersion
@@ -177,8 +141,9 @@ func (r *Registry) ActivateDefinition(_ context.Context, scope capability.ScopeR
 		FromVersion: current.ActiveVersion, ToVersion: version, DeploymentRevision: updated.Revision,
 		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updated.UpdatedAt,
 	}
-	r.deployments[key] = cloneDeployment(updated)
-	r.activations[key] = append(r.activations[key], activation)
+	if err := r.store.UpdateDeployment(ctx, updated, expectedRevision, activation); err != nil {
+		return nil, nil, err
+	}
 	copyActivation := activation
 	return cloneDeployment(updated), &copyActivation, nil
 }
@@ -194,13 +159,8 @@ func (r *Registry) RollbackDefinition(ctx context.Context, scope capability.Scop
 	return r.ActivateDefinition(ctx, scope, deploymentID, current.PreviousVersion, expectedRevision, actorType, actorID, reason)
 }
 
-func (r *Registry) ListActivations(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]DefinitionActivation, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	values := r.activations[deploymentKey(scope, deploymentID)]
-	result := make([]DefinitionActivation, len(values))
-	copy(result, values)
-	return result, nil
+func (r *Registry) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]DefinitionActivation, error) {
+	return r.store.ListActivations(ctx, scope, deploymentID)
 }
 
 func canonicalizeDefinition(value *AgentDefinition) {
