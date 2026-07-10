@@ -238,6 +238,54 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 	return events, nil
 }
 
+func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequestCompletionRecord) ([]*ActivityEvent, error) {
+	if err := validateAgentRequestCompletionRecord(record); err != nil {
+		return nil, err
+	}
+	requestPayload, err := json.Marshal(record.Request)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := beginImmediateSQLite(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer rollbackSQLiteConn(conn, &committed)
+	if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
+		return nil, err
+	}
+	if err := updateSQLiteAgentRunConn(ctx, conn, record.ChildRun, record.ExpectedChildRevision); err != nil {
+		return nil, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE agent_requests SET status = ?, revision = ?, updated_at = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, record.Request.Status, record.Request.Revision,
+		record.Request.UpdatedAt, string(requestPayload), record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.ID,
+		record.ExpectedRequestRevision)
+	if err != nil {
+		return nil, err
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
+		if rowsErr != nil {
+			return nil, rowsErr
+		}
+		return nil, ErrRevisionConflict
+	}
+	events := make([]*ActivityEvent, 0, 2)
+	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+		persisted, insertErr := insertSQLiteActivityConn(ctx, conn, event)
+		if insertErr != nil {
+			return nil, insertErr
+		}
+		events = append(events, persisted)
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return events, nil
+}
+
 func beginImmediateSQLite(ctx context.Context, db *sql.DB) (*sql.Conn, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {

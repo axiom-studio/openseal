@@ -39,10 +39,18 @@ func TestPublicAgentRequestFacadeCreatesTraceableChildRun(t *testing.T) {
 	if accepted.Child == nil || accepted.Child.ParentRunID != source.ID || accepted.Child.AssignedAgentID != "marketing" {
 		t.Fatalf("accepted request = %#v", accepted)
 	}
+	completed, err := engine.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: accepted.Child.Revision, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Summary: "Launch plan delivered", CompletionKey: "launch-plan-v1",
+	})
+	if err != nil || completed.Request.Status != AgentRequestStatusCompleted || completed.Source.Status != AgentRunStatusQueued || completed.Child.Status != AgentRunStatusCompleted {
+		t.Fatalf("completed request = %#v, %v", completed, err)
+	}
 	requests, err := engine.ListAgentRequests(ctx, AgentRequestFilter{
 		Scope: scope, Recipient: &CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
 	})
-	if err != nil || len(requests) != 1 || requests[0].Status != AgentRequestStatusAccepted {
+	if err != nil || len(requests) != 1 || requests[0].Status != AgentRequestStatusCompleted {
 		t.Fatalf("requests = %#v, %v", requests, err)
 	}
 }

@@ -94,6 +94,7 @@ type (
 	CollaborationKernelStore    = runtime.CollaborationKernelStore
 	CollaborationParty          = runtime.CollaborationParty
 	ArtifactRequirement         = runtime.ArtifactRequirement
+	ArtifactReference           = runtime.ArtifactReference
 	AgentRequest                = runtime.AgentRequest
 	AgentRequestKind            = runtime.AgentRequestKind
 	AgentRequestStatus          = runtime.AgentRequestStatus
@@ -101,6 +102,7 @@ type (
 	AgentRequestFilter          = runtime.AgentRequestFilter
 	CreateAgentRequestRequest   = runtime.CreateAgentRequestRequest
 	RespondAgentRequestRequest  = runtime.RespondAgentRequestRequest
+	CompleteAgentRequestRequest = runtime.CompleteAgentRequestRequest
 	AgentRequestResult          = runtime.AgentRequestResult
 	AgentTurnStore              = runtime.AgentTurnStore
 	AgentTurn                   = runtime.AgentTurn
@@ -313,6 +315,7 @@ const (
 	AgentRequestStatusPending                = runtime.AgentRequestStatusPending
 	AgentRequestStatusClarificationRequested = runtime.AgentRequestStatusClarificationRequested
 	AgentRequestStatusAccepted               = runtime.AgentRequestStatusAccepted
+	AgentRequestStatusCompleted              = runtime.AgentRequestStatusCompleted
 	AgentRequestStatusRejected               = runtime.AgentRequestStatusRejected
 	AgentRequestStatusCanceled               = runtime.AgentRequestStatusCanceled
 
@@ -884,6 +887,13 @@ func (e *Engine) RespondAgentRequest(ctx context.Context, request runtime.Respon
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
 	return e.collaboration.RespondAgentRequest(ctx, request)
+}
+
+func (e *Engine) CompleteAgentRequest(ctx context.Context, request runtime.CompleteAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.CompleteAgentRequest(ctx, request)
 }
 
 func (e *Engine) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {

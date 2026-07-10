@@ -518,8 +518,20 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || child.ParentRunID != source.ID || child.AssignedAgentID != "marketing" {
 		t.Fatalf("restored child = %#v, %v", child, err)
 	}
+	completed, err := NewCollaborationService(replica).CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: child.Revision, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Summary: "Launch completed", CompletionKey: "postgres-launch-complete",
+	})
+	if err != nil || completed.Request.Status != AgentRequestStatusCompleted || completed.Source.Status != AgentRunStatusQueued || completed.Child.Status != AgentRunStatusCompleted {
+		t.Fatalf("complete request = %#v, %v", completed, err)
+	}
+	restored, err = NewCollaborationService(primary).GetAgentRequest(ctx, scope, created.Request.ID)
+	if err != nil || restored.Status != AgentRequestStatusCompleted || restored.CompletionKey != "postgres-launch-complete" {
+		t.Fatalf("restored completion = %#v, %v", restored, err)
+	}
 	activity, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 10})
-	if err != nil || len(activity) != 3 {
+	if err != nil || len(activity) != 5 || activity[0].EventType != "collaboration.completed" {
 		t.Fatalf("team activity = %#v, %v", activity, err)
 	}
 	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != 7 {
