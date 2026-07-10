@@ -35,6 +35,7 @@ const (
 	OperationRead       = "read"
 	OperationPresence   = "presence"
 	OperationAudit      = "audit"
+	OperationChanges    = "changes"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -108,7 +109,7 @@ func ArtifactCapability(contentOperations ...string) Capability {
 func TeamChannelsCapability() Capability {
 	return Capability{
 		ID: TeamChannelsCapabilityID, Version: TeamChannelsCapabilityVersion, Available: true,
-		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationCoordinate, OperationRead, OperationPresence, OperationAudit},
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationCoordinate, OperationRead, OperationPresence, OperationAudit, OperationChanges},
 	}
 }
 

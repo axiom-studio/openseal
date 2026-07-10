@@ -398,6 +398,7 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 	updated.LastSequence = sequence
 	updated.Revision++
 	updated.UpdatedAt = now
+	round.ConversationRevision = updated.Revision
 	return s.store.CommitParticipationRound(ctx, ParticipationRoundCommitRecord{
 		Conversation: updated, ExpectedRevision: conversation.Revision, Round: round, Messages: messages,
 	})

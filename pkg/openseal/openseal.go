@@ -147,6 +147,8 @@ type (
 	ConversationRunTurnRunnerConfig    = runtime.ConversationRunTurnRunnerConfig
 	ConversationRunReconcilerConfig    = runtime.ConversationRunReconcilerConfig
 	ConversationRunReconcileResult     = runtime.ConversationRunReconcileResult
+	ConversationChangeRequest          = runtime.ConversationChangeRequest
+	ConversationChangeSet              = runtime.ConversationChangeSet
 	CreateConversationRequest          = runtime.CreateConversationRequest
 	ConversationFilter                 = runtime.ConversationFilter
 	PostChannelMessageRequest          = runtime.PostChannelMessageRequest
@@ -650,6 +652,7 @@ type Engine struct {
 	conversationRunReconciler     *runtime.ConversationRunReconciler
 	conversationRunConfig         *ConversationRunConfig
 	conversationRunScopes         runtime.WorkerScopeSource
+	conversationChanges           *runtime.ConversationChangeService
 	collaboration                 *runtime.CollaborationService
 	turns                         *runtime.AgentTurnService
 	turnsRun                      *runtime.TurnCoordinator
@@ -727,27 +730,29 @@ func New(opts ...Option) (*Engine, error) {
 		4,
 		runtime.DefaultRetryPolicy(),
 	)
+	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
 	e := &Engine{
-		registry:      reg,
-		store:         store,
-		pool:          pool,
-		scheduler:     runtime.NewScheduler(pool, store),
-		portfolio:     runtime.NewPortfolioService(store),
-		activity:      runtime.NewRunActivityService(store, store),
-		dependencies:  runtime.NewDependencyCoordinator(store),
-		conversations: runtime.NewConversationService(store),
-		collaboration: runtime.NewCollaborationService(store),
-		turns:         runtime.NewAgentTurnService(store, store),
-		turnsRun:      runtime.NewTurnCoordinator(store, store, store),
-		runQueue:      runtime.NewAgentRunScheduler(store),
-		wake:          runtime.NewAgentRunWakeService(store, store),
-		artifacts:     runtime.NewArtifactCatalog(store),
-		skills:        skill.NewCatalog(),
-		agents:        kernelagent.NewRegistry(),
-		actionPolicy:  runtime.NewDefaultActionPolicy(),
-		approvalAuth:  runtime.EligibleApprovalAuthorizer{},
-		logger:        sugar,
+		registry:            reg,
+		store:               store,
+		pool:                pool,
+		scheduler:           runtime.NewScheduler(pool, store),
+		portfolio:           runtime.NewPortfolioService(store),
+		activity:            runtime.NewRunActivityService(store, store),
+		dependencies:        runtime.NewDependencyCoordinator(store),
+		conversations:       runtime.NewConversationService(store),
+		conversationChanges: conversationChanges,
+		collaboration:       runtime.NewCollaborationService(store),
+		turns:               runtime.NewAgentTurnService(store, store),
+		turnsRun:            runtime.NewTurnCoordinator(store, store, store),
+		runQueue:            runtime.NewAgentRunScheduler(store),
+		wake:                runtime.NewAgentRunWakeService(store, store),
+		artifacts:           runtime.NewArtifactCatalog(store),
+		skills:              skill.NewCatalog(),
+		agents:              kernelagent.NewRegistry(),
+		actionPolicy:        runtime.NewDefaultActionPolicy(),
+		approvalAuth:        runtime.EligibleApprovalAuthorizer{},
+		logger:              sugar,
 	}
 
 	for _, opt := range opts {
@@ -895,8 +900,10 @@ func WithStore(store runtime.KernelStore) Option {
 		}
 		if conversationStore, ok := store.(runtime.ConversationStore); ok {
 			e.conversations = runtime.NewConversationService(conversationStore)
+			e.conversationChanges, _ = runtime.NewConversationChangeService(conversationStore, store)
 		} else {
 			e.conversations = nil
+			e.conversationChanges = nil
 		}
 		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
 			e.collaboration = runtime.NewCollaborationService(collaborationStore)
@@ -1408,6 +1415,13 @@ func (e *Engine) ListChannelMessages(ctx context.Context, filter runtime.Channel
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListChannelMessages(ctx, filter)
+}
+
+func (e *Engine) ListConversationChanges(ctx context.Context, request runtime.ConversationChangeRequest) (*runtime.ConversationChangeSet, error) {
+	if e.conversationChanges == nil {
+		return nil, fmt.Errorf("conversation change service is not configured")
+	}
+	return e.conversationChanges.ListChanges(ctx, request)
 }
 
 func (e *Engine) CoordinateParticipation(ctx context.Context, request runtime.CoordinateParticipationRequest) (*runtime.ParticipationRoundResult, error) {
