@@ -60,199 +60,233 @@ type (
 	ResolveAgentAmendmentRequest          = kernelagent.ResolveAmendmentRequest
 	AgentRegistryStore                    = kernelagent.Store
 
-	RunRecord                        = runtime.RunRecord
-	RetryPolicy                      = runtime.RetryPolicy
-	ExecutionStore                   = runtime.ExecutionStore
-	PortfolioStore                   = runtime.PortfolioStore
-	KernelStore                      = runtime.KernelStore
-	PostgresStore                    = runtime.PostgresStore
-	PostgresStoreOption              = runtime.PostgresStoreOption
-	Scope                            = runtime.Scope
-	ObjectiveOwner                   = runtime.ObjectiveOwner
-	Objective                        = runtime.Objective
-	ObjectiveStatus                  = runtime.ObjectiveStatus
-	ObjectiveFilter                  = runtime.ObjectiveFilter
-	AgentRun                         = runtime.AgentRun
-	AgentRunIntervention             = runtime.AgentRunIntervention
-	AgentRunStatus                   = runtime.AgentRunStatus
-	AgentRunFilter                   = runtime.AgentRunFilter
-	RunSource                        = runtime.RunSource
-	WakeCondition                    = runtime.WakeCondition
-	CreateObjectiveRequest           = runtime.CreateObjectiveRequest
-	UpdateObjectiveRequest           = runtime.UpdateObjectiveRequest
-	CreateAgentRunRequest            = runtime.CreateAgentRunRequest
-	AgentRunCommandKind              = runtime.AgentRunCommandKind
-	AgentRunCommandRequest           = runtime.AgentRunCommandRequest
-	AgentRunCommandResult            = runtime.AgentRunCommandResult
-	RunActivityStore                 = runtime.RunActivityStore
-	ActivityEvent                    = runtime.ActivityEvent
-	ActivityActor                    = runtime.ActivityActor
-	ActivityFilter                   = runtime.ActivityFilter
-	ActivityFeedRequest              = runtime.ActivityFeedRequest
-	ActivityProjection               = runtime.ActivityProjection
-	ActivityFeedPage                 = runtime.ActivityFeedPage
-	ActivitySeverity                 = runtime.ActivitySeverity
-	ActivityVisibility               = runtime.ActivityVisibility
-	RunTransitionRequest             = runtime.RunTransitionRequest
-	RunDependencyStore               = runtime.RunDependencyStore
-	DependencyKernelStore            = runtime.DependencyKernelStore
-	RunDependencyKind                = runtime.RunDependencyKind
-	RunDependencyState               = runtime.RunDependencyState
-	FanInMode                        = runtime.FanInMode
-	DependencyFailureMode            = runtime.DependencyFailureMode
-	RunDependencyGroupStatus         = runtime.RunDependencyGroupStatus
-	RunDependencyPolicy              = runtime.RunDependencyPolicy
-	RunDependencyGroup               = runtime.RunDependencyGroup
-	RunDependency                    = runtime.RunDependency
-	RunDependencySpec                = runtime.RunDependencySpec
-	RunDependencyEvaluation          = runtime.RunDependencyEvaluation
-	CreateRunDependencyGroupRequest  = runtime.CreateRunDependencyGroupRequest
-	ResolveRunDependencyRequest      = runtime.ResolveRunDependencyRequest
-	RunDependencyResult              = runtime.RunDependencyResult
-	CollaborationStore               = runtime.CollaborationStore
-	CollaborationKernelStore         = runtime.CollaborationKernelStore
-	CollaborationParty               = runtime.CollaborationParty
-	ArtifactRequirement              = runtime.ArtifactRequirement
-	ArtifactReference                = runtime.ArtifactReference
-	Artifact                         = runtime.Artifact
-	ArtifactClassification           = runtime.ArtifactClassification
-	ArtifactRetention                = runtime.ArtifactRetention
-	ArtifactProvenance               = runtime.ArtifactProvenance
-	ArtifactEvidenceLink             = runtime.EvidenceLink
-	ArtifactEvidenceRelation         = runtime.EvidenceRelation
-	ArtifactEvidenceTargetKind       = runtime.EvidenceTargetKind
-	ArtifactFilter                   = runtime.ArtifactFilter
-	ArtifactStore                    = runtime.ArtifactStore
-	ArtifactCatalog                  = runtime.ArtifactCatalog
-	RegisterArtifactRequest          = runtime.RegisterArtifactRequest
-	ArtifactRegistrationResult       = runtime.ArtifactRegistrationResult
-	ArtifactContentStore             = runtime.ArtifactContentStore
-	ArtifactContentResolver          = runtime.ArtifactContentResolver
-	ArtifactContentWrite             = runtime.ArtifactContentWrite
-	ArtifactStoredContent            = runtime.ArtifactStoredContent
-	ArtifactContentResolutionRequest = runtime.ArtifactContentResolutionRequest
-	ArtifactContentResolution        = runtime.ArtifactContentResolution
-	AgentRequest                     = runtime.AgentRequest
-	AgentRequestKind                 = runtime.AgentRequestKind
-	AgentRequestStatus               = runtime.AgentRequestStatus
-	AgentRequestDecision             = runtime.AgentRequestDecision
-	AgentRequestFilter               = runtime.AgentRequestFilter
-	CreateAgentRequestRequest        = runtime.CreateAgentRequestRequest
-	AgentRequestGroupSpec            = runtime.AgentRequestGroupSpec
-	CreateAgentRequestGroupRequest   = runtime.CreateAgentRequestGroupRequest
-	AgentRequestGroupResult          = runtime.AgentRequestGroupResult
-	RespondAgentRequestRequest       = runtime.RespondAgentRequestRequest
-	CompleteAgentRequestRequest      = runtime.CompleteAgentRequestRequest
-	AgentRequestResult               = runtime.AgentRequestResult
-	AgentTurnStore                   = runtime.AgentTurnStore
-	AgentTurn                        = runtime.AgentTurn
-	AgentTurnStatus                  = runtime.AgentTurnStatus
-	AgentTurnFilter                  = runtime.AgentTurnFilter
-	TurnDecision                     = runtime.TurnDecision
-	TurnAction                       = runtime.TurnAction
-	TurnUsage                        = runtime.TurnUsage
-	BeginAgentTurnRequest            = runtime.BeginAgentTurnRequest
-	FinishAgentTurnRequest           = runtime.FinishAgentTurnRequest
-	TurnExecutionContext             = runtime.TurnExecutionContext
-	TurnRunner                       = runtime.TurnRunner
-	TurnRunnerFunc                   = runtime.TurnRunnerFunc
-	TurnOutcome                      = runtime.TurnOutcome
-	AdvanceAgentRunRequest           = runtime.AdvanceAgentRunRequest
-	AdvanceAgentRunResult            = runtime.AdvanceAgentRunResult
-	AgentRunScheduleStore            = runtime.AgentRunScheduleStore
-	AgentRunClaimRequest             = runtime.AgentRunClaimRequest
-	AgentRunWorkerConfig             = runtime.AgentRunWorkerConfig
-	TurnRunnerBinding                = runtime.TurnRunnerBinding
-	TurnRunnerResolver               = runtime.TurnRunnerResolver
-	TurnRunnerResolverFunc           = runtime.TurnRunnerResolverFunc
-	WakeSignal                       = runtime.WakeSignal
-	WokenRun                         = runtime.WokenRun
-	WakeResult                       = runtime.WakeResult
-	SkillCatalog                     = skill.Catalog
-	SkillDefinition                  = skill.Definition
-	SkillAction                      = skill.Action
-	SkillBinding                     = skill.Binding
-	SkillScope                       = skill.ScopeReference
-	SkillRiskLevel                   = skill.RiskLevel
-	SkillSideEffect                  = skill.SideEffect
-	SkillIdempotencyMode             = skill.IdempotencyMode
-	SkillCredentialRequirement       = skill.CredentialRequirement
-	SkillCredentialReference         = skill.CredentialReference
-	SkillTransportReference          = skill.TransportReference
-	SkillTransportArgument           = skill.TransportArgument
-	SkillArgumentRule                = skill.ArgumentRule
-	SkillActionRetryPolicy           = skill.ActionRetryPolicy
-	ModelSkillAction                 = skill.ModelAction
-	ModelSkillPrompt                 = skill.ModelPrompt
-	BoundSkillAction                 = skill.BoundAction
-	SkillPromptModule                = skill.PromptModule
-	SkillHostCapabilityState         = skill.HostCapabilityState
-	SkillAvailabilityReason          = skill.AvailabilityReason
-	ActivatedSkill                   = skill.ActivatedSkill
-	UnavailableSkill                 = skill.UnavailableSkill
-	SkillActivationSnapshot          = skill.ActivationSnapshot
-	SkillCatalogStore                = skill.CatalogStore
-	ActionStore                      = runtime.ActionStore
-	ActionCall                       = runtime.ActionCall
-	ActionCallStatus                 = runtime.ActionCallStatus
-	ActionFilter                     = runtime.ActionFilter
-	ActionDisposition                = runtime.ActionDisposition
-	ActionPolicyInput                = runtime.ActionPolicyInput
-	ActionPolicyDecision             = runtime.ActionPolicyDecision
-	ActionPolicyEvaluator            = runtime.ActionPolicyEvaluator
-	ActionPolicyEvaluatorFunc        = runtime.ActionPolicyEvaluatorFunc
-	ProposeActionRequest             = runtime.ProposeActionRequest
-	ActionProposalResult             = runtime.ActionProposalResult
-	ApprovalCheckpoint               = runtime.ApprovalCheckpoint
-	ApprovalStatus                   = runtime.ApprovalStatus
-	ApprovalPrincipal                = runtime.ApprovalPrincipal
-	ApprovalFilter                   = runtime.ApprovalFilter
-	ApprovalAuthorizer               = runtime.ApprovalAuthorizer
-	ApprovalAuthorizerFunc           = runtime.ApprovalAuthorizerFunc
-	ResolveApprovalRequest           = runtime.ResolveApprovalRequest
-	ApprovalResolutionResult         = runtime.ApprovalResolutionResult
-	ActionWorkerConfig               = runtime.ActionWorkerConfig
-	DynamicActionWorkerConfig        = runtime.DynamicActionWorkerConfig
-	ActionWorkerScopeSource          = runtime.ActionWorkerScopeSource
-	ActionWorkerScopeSourceFunc      = runtime.ActionWorkerScopeSourceFunc
-	CredentialResolver               = runtime.CredentialResolver
-	CredentialResolverFunc           = runtime.CredentialResolverFunc
-	CredentialResolutionRequest      = runtime.CredentialResolutionRequest
-	ActionDispatchInput              = runtime.ActionDispatchInput
-	ActionDispatcher                 = runtime.ActionDispatcher
-	ActionDispatcherFunc             = runtime.ActionDispatcherFunc
-	ToolInvoker                      = runtime.ToolInvoker
-	ToolInvokerFunc                  = runtime.ToolInvokerFunc
-	ToolInvocation                   = runtime.ToolInvocation
-	ToolActionDispatcher             = runtime.ToolActionDispatcher
-	OpenClawSkillSource              = skillopenclaw.Source
-	OpenClawSkillFile                = skillopenclaw.File
-	OpenClawSkillBundle              = skillopenclaw.Bundle
-	OpenClawSkillDiagnostic          = skillopenclaw.Diagnostic
-	OpenClawSkillCompilation         = skillopenclaw.Compilation
-	SkillSourceRootKind              = skillsource.RootKind
-	SkillSourceRoot                  = skillsource.Root
-	SkillSourceCandidate             = skillsource.Candidate
-	SkillSourceShadowed              = skillsource.ShadowedCandidate
-	SkillSourceDiagnostic            = skillsource.Diagnostic
-	SkillSourceSnapshot              = skillsource.Snapshot
-	SkillSourceCatalog               = skillsource.Catalog
-	SkillSourceChange                = skillsource.Change
-	SkillSourceWatcher               = skillsource.Watcher
-	ClawHubRegistry                  = clawhub.Registry
-	ClawHubClient                    = clawhub.ClawHubClient
-	ClawHubSkillReference            = clawhub.SkillReference
-	ClawHubSearchRequest             = clawhub.SearchRequest
-	ClawHubExploreRequest            = clawhub.ExploreRequest
-	ClawHubSkillPage                 = clawhub.SkillPage
-	ClawHubSkillSummary              = clawhub.SkillSummary
-	ClawHubSkillDetail               = clawhub.SkillDetail
-	ClawHubInstallRequest            = clawhub.InstallRequest
-	ClawHubInstalledSkill            = clawhub.InstalledSkill
-	ClawHubVerification              = clawhub.Verification
-	ClawHubVersionPage               = clawhub.VersionPage
-	ClawHubVersionDetail             = clawhub.VersionDetail
-	ClawHubDownloadedArchive         = clawhub.DownloadedArchive
+	RunRecord                          = runtime.RunRecord
+	RetryPolicy                        = runtime.RetryPolicy
+	ExecutionStore                     = runtime.ExecutionStore
+	PortfolioStore                     = runtime.PortfolioStore
+	KernelStore                        = runtime.KernelStore
+	PostgresStore                      = runtime.PostgresStore
+	PostgresStoreOption                = runtime.PostgresStoreOption
+	Scope                              = runtime.Scope
+	ObjectiveOwner                     = runtime.ObjectiveOwner
+	Objective                          = runtime.Objective
+	ObjectiveStatus                    = runtime.ObjectiveStatus
+	ObjectiveFilter                    = runtime.ObjectiveFilter
+	AgentRun                           = runtime.AgentRun
+	AgentRunIntervention               = runtime.AgentRunIntervention
+	AgentRunStatus                     = runtime.AgentRunStatus
+	AgentRunFilter                     = runtime.AgentRunFilter
+	RunSource                          = runtime.RunSource
+	WakeCondition                      = runtime.WakeCondition
+	CreateObjectiveRequest             = runtime.CreateObjectiveRequest
+	UpdateObjectiveRequest             = runtime.UpdateObjectiveRequest
+	CreateAgentRunRequest              = runtime.CreateAgentRunRequest
+	AgentRunCommandKind                = runtime.AgentRunCommandKind
+	AgentRunCommandRequest             = runtime.AgentRunCommandRequest
+	AgentRunCommandResult              = runtime.AgentRunCommandResult
+	RunActivityStore                   = runtime.RunActivityStore
+	ActivityEvent                      = runtime.ActivityEvent
+	ActivityActor                      = runtime.ActivityActor
+	ActivityFilter                     = runtime.ActivityFilter
+	ActivityFeedRequest                = runtime.ActivityFeedRequest
+	ActivityProjection                 = runtime.ActivityProjection
+	ActivityFeedPage                   = runtime.ActivityFeedPage
+	ActivitySeverity                   = runtime.ActivitySeverity
+	ActivityVisibility                 = runtime.ActivityVisibility
+	RunTransitionRequest               = runtime.RunTransitionRequest
+	RunDependencyStore                 = runtime.RunDependencyStore
+	DependencyKernelStore              = runtime.DependencyKernelStore
+	RunDependencyKind                  = runtime.RunDependencyKind
+	RunDependencyState                 = runtime.RunDependencyState
+	FanInMode                          = runtime.FanInMode
+	DependencyFailureMode              = runtime.DependencyFailureMode
+	RunDependencyGroupStatus           = runtime.RunDependencyGroupStatus
+	RunDependencyPolicy                = runtime.RunDependencyPolicy
+	RunDependencyGroup                 = runtime.RunDependencyGroup
+	RunDependency                      = runtime.RunDependency
+	RunDependencySpec                  = runtime.RunDependencySpec
+	RunDependencyEvaluation            = runtime.RunDependencyEvaluation
+	CreateRunDependencyGroupRequest    = runtime.CreateRunDependencyGroupRequest
+	ResolveRunDependencyRequest        = runtime.ResolveRunDependencyRequest
+	RunDependencyResult                = runtime.RunDependencyResult
+	ConversationStore                  = runtime.ConversationStore
+	Conversation                       = runtime.Conversation
+	ConversationStatus                 = runtime.ConversationStatus
+	ConversationParticipantType        = runtime.ConversationParticipantType
+	ConversationParticipant            = runtime.ConversationParticipant
+	ConversationMessageIntent          = runtime.ConversationMessageIntent
+	ConversationAudienceKind           = runtime.ConversationAudienceKind
+	ConversationAudience               = runtime.ConversationAudience
+	ConversationReferenceKind          = runtime.ConversationReferenceKind
+	ConversationReference              = runtime.ConversationReference
+	ChannelMessage                     = runtime.ChannelMessage
+	ConversationCursor                 = runtime.ConversationCursor
+	ConversationPresenceState          = runtime.ConversationPresenceState
+	ConversationPresence               = runtime.ConversationPresence
+	ParticipationSignals               = runtime.ParticipationSignals
+	ParticipationProposal              = runtime.ParticipationProposal
+	ParticipationDisposition           = runtime.ParticipationDisposition
+	ParticipationReason                = runtime.ParticipationReason
+	ParticipationDecision              = runtime.ParticipationDecision
+	ConversationArbitrationPolicy      = runtime.ConversationArbitrationPolicy
+	ConversationArbitration            = runtime.ConversationArbitration
+	ParticipationRoundStatus           = runtime.ParticipationRoundStatus
+	ParticipationRound                 = runtime.ParticipationRound
+	CreateConversationRequest          = runtime.CreateConversationRequest
+	ConversationFilter                 = runtime.ConversationFilter
+	PostChannelMessageRequest          = runtime.PostChannelMessageRequest
+	ChannelMessageFilter               = runtime.ChannelMessageFilter
+	CoordinateParticipationRequest     = runtime.CoordinateParticipationRequest
+	ParticipationRoundFilter           = runtime.ParticipationRoundFilter
+	AdvanceConversationCursorRequest   = runtime.AdvanceConversationCursorRequest
+	SetConversationPresenceRequest     = runtime.SetConversationPresenceRequest
+	ReleaseConversationPresenceRequest = runtime.ReleaseConversationPresenceRequest
+	ChannelMessageCommitResult         = runtime.ChannelMessageCommitResult
+	ParticipationRoundResult           = runtime.ParticipationRoundResult
+	CollaborationStore                 = runtime.CollaborationStore
+	CollaborationKernelStore           = runtime.CollaborationKernelStore
+	CollaborationParty                 = runtime.CollaborationParty
+	ArtifactRequirement                = runtime.ArtifactRequirement
+	ArtifactReference                  = runtime.ArtifactReference
+	Artifact                           = runtime.Artifact
+	ArtifactClassification             = runtime.ArtifactClassification
+	ArtifactRetention                  = runtime.ArtifactRetention
+	ArtifactProvenance                 = runtime.ArtifactProvenance
+	ArtifactEvidenceLink               = runtime.EvidenceLink
+	ArtifactEvidenceRelation           = runtime.EvidenceRelation
+	ArtifactEvidenceTargetKind         = runtime.EvidenceTargetKind
+	ArtifactFilter                     = runtime.ArtifactFilter
+	ArtifactStore                      = runtime.ArtifactStore
+	ArtifactCatalog                    = runtime.ArtifactCatalog
+	RegisterArtifactRequest            = runtime.RegisterArtifactRequest
+	ArtifactRegistrationResult         = runtime.ArtifactRegistrationResult
+	ArtifactContentStore               = runtime.ArtifactContentStore
+	ArtifactContentResolver            = runtime.ArtifactContentResolver
+	ArtifactContentWrite               = runtime.ArtifactContentWrite
+	ArtifactStoredContent              = runtime.ArtifactStoredContent
+	ArtifactContentResolutionRequest   = runtime.ArtifactContentResolutionRequest
+	ArtifactContentResolution          = runtime.ArtifactContentResolution
+	AgentRequest                       = runtime.AgentRequest
+	AgentRequestKind                   = runtime.AgentRequestKind
+	AgentRequestStatus                 = runtime.AgentRequestStatus
+	AgentRequestDecision               = runtime.AgentRequestDecision
+	AgentRequestFilter                 = runtime.AgentRequestFilter
+	CreateAgentRequestRequest          = runtime.CreateAgentRequestRequest
+	AgentRequestGroupSpec              = runtime.AgentRequestGroupSpec
+	CreateAgentRequestGroupRequest     = runtime.CreateAgentRequestGroupRequest
+	AgentRequestGroupResult            = runtime.AgentRequestGroupResult
+	RespondAgentRequestRequest         = runtime.RespondAgentRequestRequest
+	CompleteAgentRequestRequest        = runtime.CompleteAgentRequestRequest
+	AgentRequestResult                 = runtime.AgentRequestResult
+	AgentTurnStore                     = runtime.AgentTurnStore
+	AgentTurn                          = runtime.AgentTurn
+	AgentTurnStatus                    = runtime.AgentTurnStatus
+	AgentTurnFilter                    = runtime.AgentTurnFilter
+	TurnDecision                       = runtime.TurnDecision
+	TurnAction                         = runtime.TurnAction
+	TurnUsage                          = runtime.TurnUsage
+	BeginAgentTurnRequest              = runtime.BeginAgentTurnRequest
+	FinishAgentTurnRequest             = runtime.FinishAgentTurnRequest
+	TurnExecutionContext               = runtime.TurnExecutionContext
+	TurnRunner                         = runtime.TurnRunner
+	TurnRunnerFunc                     = runtime.TurnRunnerFunc
+	TurnOutcome                        = runtime.TurnOutcome
+	AdvanceAgentRunRequest             = runtime.AdvanceAgentRunRequest
+	AdvanceAgentRunResult              = runtime.AdvanceAgentRunResult
+	AgentRunScheduleStore              = runtime.AgentRunScheduleStore
+	AgentRunClaimRequest               = runtime.AgentRunClaimRequest
+	AgentRunWorkerConfig               = runtime.AgentRunWorkerConfig
+	TurnRunnerBinding                  = runtime.TurnRunnerBinding
+	TurnRunnerResolver                 = runtime.TurnRunnerResolver
+	TurnRunnerResolverFunc             = runtime.TurnRunnerResolverFunc
+	WakeSignal                         = runtime.WakeSignal
+	WokenRun                           = runtime.WokenRun
+	WakeResult                         = runtime.WakeResult
+	SkillCatalog                       = skill.Catalog
+	SkillDefinition                    = skill.Definition
+	SkillAction                        = skill.Action
+	SkillBinding                       = skill.Binding
+	SkillScope                         = skill.ScopeReference
+	SkillRiskLevel                     = skill.RiskLevel
+	SkillSideEffect                    = skill.SideEffect
+	SkillIdempotencyMode               = skill.IdempotencyMode
+	SkillCredentialRequirement         = skill.CredentialRequirement
+	SkillCredentialReference           = skill.CredentialReference
+	SkillTransportReference            = skill.TransportReference
+	SkillTransportArgument             = skill.TransportArgument
+	SkillArgumentRule                  = skill.ArgumentRule
+	SkillActionRetryPolicy             = skill.ActionRetryPolicy
+	ModelSkillAction                   = skill.ModelAction
+	ModelSkillPrompt                   = skill.ModelPrompt
+	BoundSkillAction                   = skill.BoundAction
+	SkillPromptModule                  = skill.PromptModule
+	SkillHostCapabilityState           = skill.HostCapabilityState
+	SkillAvailabilityReason            = skill.AvailabilityReason
+	ActivatedSkill                     = skill.ActivatedSkill
+	UnavailableSkill                   = skill.UnavailableSkill
+	SkillActivationSnapshot            = skill.ActivationSnapshot
+	SkillCatalogStore                  = skill.CatalogStore
+	ActionStore                        = runtime.ActionStore
+	ActionCall                         = runtime.ActionCall
+	ActionCallStatus                   = runtime.ActionCallStatus
+	ActionFilter                       = runtime.ActionFilter
+	ActionDisposition                  = runtime.ActionDisposition
+	ActionPolicyInput                  = runtime.ActionPolicyInput
+	ActionPolicyDecision               = runtime.ActionPolicyDecision
+	ActionPolicyEvaluator              = runtime.ActionPolicyEvaluator
+	ActionPolicyEvaluatorFunc          = runtime.ActionPolicyEvaluatorFunc
+	ProposeActionRequest               = runtime.ProposeActionRequest
+	ActionProposalResult               = runtime.ActionProposalResult
+	ApprovalCheckpoint                 = runtime.ApprovalCheckpoint
+	ApprovalStatus                     = runtime.ApprovalStatus
+	ApprovalPrincipal                  = runtime.ApprovalPrincipal
+	ApprovalFilter                     = runtime.ApprovalFilter
+	ApprovalAuthorizer                 = runtime.ApprovalAuthorizer
+	ApprovalAuthorizerFunc             = runtime.ApprovalAuthorizerFunc
+	ResolveApprovalRequest             = runtime.ResolveApprovalRequest
+	ApprovalResolutionResult           = runtime.ApprovalResolutionResult
+	ActionWorkerConfig                 = runtime.ActionWorkerConfig
+	DynamicActionWorkerConfig          = runtime.DynamicActionWorkerConfig
+	ActionWorkerScopeSource            = runtime.ActionWorkerScopeSource
+	ActionWorkerScopeSourceFunc        = runtime.ActionWorkerScopeSourceFunc
+	CredentialResolver                 = runtime.CredentialResolver
+	CredentialResolverFunc             = runtime.CredentialResolverFunc
+	CredentialResolutionRequest        = runtime.CredentialResolutionRequest
+	ActionDispatchInput                = runtime.ActionDispatchInput
+	ActionDispatcher                   = runtime.ActionDispatcher
+	ActionDispatcherFunc               = runtime.ActionDispatcherFunc
+	ToolInvoker                        = runtime.ToolInvoker
+	ToolInvokerFunc                    = runtime.ToolInvokerFunc
+	ToolInvocation                     = runtime.ToolInvocation
+	ToolActionDispatcher               = runtime.ToolActionDispatcher
+	OpenClawSkillSource                = skillopenclaw.Source
+	OpenClawSkillFile                  = skillopenclaw.File
+	OpenClawSkillBundle                = skillopenclaw.Bundle
+	OpenClawSkillDiagnostic            = skillopenclaw.Diagnostic
+	OpenClawSkillCompilation           = skillopenclaw.Compilation
+	SkillSourceRootKind                = skillsource.RootKind
+	SkillSourceRoot                    = skillsource.Root
+	SkillSourceCandidate               = skillsource.Candidate
+	SkillSourceShadowed                = skillsource.ShadowedCandidate
+	SkillSourceDiagnostic              = skillsource.Diagnostic
+	SkillSourceSnapshot                = skillsource.Snapshot
+	SkillSourceCatalog                 = skillsource.Catalog
+	SkillSourceChange                  = skillsource.Change
+	SkillSourceWatcher                 = skillsource.Watcher
+	ClawHubRegistry                    = clawhub.Registry
+	ClawHubClient                      = clawhub.ClawHubClient
+	ClawHubSkillReference              = clawhub.SkillReference
+	ClawHubSearchRequest               = clawhub.SearchRequest
+	ClawHubExploreRequest              = clawhub.ExploreRequest
+	ClawHubSkillPage                   = clawhub.SkillPage
+	ClawHubSkillSummary                = clawhub.SkillSummary
+	ClawHubSkillDetail                 = clawhub.SkillDetail
+	ClawHubInstallRequest              = clawhub.InstallRequest
+	ClawHubInstalledSkill              = clawhub.InstalledSkill
+	ClawHubVerification                = clawhub.Verification
+	ClawHubVersionPage                 = clawhub.VersionPage
+	ClawHubVersionDetail               = clawhub.VersionDetail
+	ClawHubDownloadedArchive           = clawhub.DownloadedArchive
 )
 
 // PersistentKernelStore is the complete durable control-plane contract for an
@@ -263,6 +297,7 @@ type PersistentKernelStore interface {
 	runtime.KernelStore
 	runtime.CollaborationStore
 	runtime.RunDependencyStore
+	runtime.ConversationStore
 	runtime.ArtifactStore
 	kernelagent.Store
 	skill.CatalogStore
@@ -271,29 +306,34 @@ type PersistentKernelStore interface {
 var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
 
 var (
-	ErrRunNotFound              = runtime.ErrRunNotFound
-	ErrRevisionConflict         = runtime.ErrRevisionConflict
-	ErrInvalidRunTransition     = runtime.ErrInvalidRunTransition
-	ErrRunIdempotency           = runtime.ErrRunIdempotency
-	ErrInvalidAgentRun          = runtime.ErrInvalidAgentRun
-	ErrInvalidRunCommand        = runtime.ErrInvalidRunCommand
-	ErrInvalidScope             = runtime.ErrInvalidScope
-	ErrInvalidOwner             = runtime.ErrInvalidOwner
-	ErrObjectiveNotFound        = runtime.ErrObjectiveNotFound
-	ErrAgentRequestNotFound     = runtime.ErrAgentRequestNotFound
-	ErrInvalidAgentRequestState = runtime.ErrInvalidAgentRequestState
-	ErrAgentRequestUnauthorized = runtime.ErrAgentRequestUnauthorized
-	ErrAgentRequestIdempotency  = runtime.ErrAgentRequestIdempotency
-	ErrUnsafeSharedContext      = runtime.ErrUnsafeSharedContext
-	ErrInvalidArtifact          = runtime.ErrInvalidArtifact
-	ErrArtifactNotFound         = runtime.ErrArtifactNotFound
-	ErrArtifactImmutable        = runtime.ErrArtifactImmutable
-	ErrArtifactVersionConflict  = runtime.ErrArtifactVersionConflict
-	ErrInvalidArtifactRecord    = runtime.ErrInvalidArtifactRecord
-	ErrRunDependencyNotFound    = runtime.ErrRunDependencyNotFound
-	ErrDependencyGroupNotFound  = runtime.ErrDependencyGroupNotFound
-	ErrInvalidRunDependency     = runtime.ErrInvalidRunDependency
-	ErrDependencyConflict       = runtime.ErrDependencyConflict
+	ErrRunNotFound                  = runtime.ErrRunNotFound
+	ErrRevisionConflict             = runtime.ErrRevisionConflict
+	ErrInvalidRunTransition         = runtime.ErrInvalidRunTransition
+	ErrRunIdempotency               = runtime.ErrRunIdempotency
+	ErrInvalidAgentRun              = runtime.ErrInvalidAgentRun
+	ErrInvalidRunCommand            = runtime.ErrInvalidRunCommand
+	ErrInvalidScope                 = runtime.ErrInvalidScope
+	ErrInvalidOwner                 = runtime.ErrInvalidOwner
+	ErrObjectiveNotFound            = runtime.ErrObjectiveNotFound
+	ErrAgentRequestNotFound         = runtime.ErrAgentRequestNotFound
+	ErrInvalidAgentRequestState     = runtime.ErrInvalidAgentRequestState
+	ErrAgentRequestUnauthorized     = runtime.ErrAgentRequestUnauthorized
+	ErrAgentRequestIdempotency      = runtime.ErrAgentRequestIdempotency
+	ErrUnsafeSharedContext          = runtime.ErrUnsafeSharedContext
+	ErrInvalidArtifact              = runtime.ErrInvalidArtifact
+	ErrArtifactNotFound             = runtime.ErrArtifactNotFound
+	ErrArtifactImmutable            = runtime.ErrArtifactImmutable
+	ErrArtifactVersionConflict      = runtime.ErrArtifactVersionConflict
+	ErrInvalidArtifactRecord        = runtime.ErrInvalidArtifactRecord
+	ErrRunDependencyNotFound        = runtime.ErrRunDependencyNotFound
+	ErrDependencyGroupNotFound      = runtime.ErrDependencyGroupNotFound
+	ErrInvalidRunDependency         = runtime.ErrInvalidRunDependency
+	ErrDependencyConflict           = runtime.ErrDependencyConflict
+	ErrConversationNotFound         = runtime.ErrConversationNotFound
+	ErrInvalidConversation          = runtime.ErrInvalidConversation
+	ErrMessageConflict              = runtime.ErrMessageConflict
+	ErrConversationCursorConflict   = runtime.ErrConversationCursorConflict
+	ErrConversationPresenceConflict = runtime.ErrConversationPresenceConflict
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -302,6 +342,18 @@ func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDi
 
 func ValidateCredentialFreeContext(value interface{}) error {
 	return runtime.ValidateCredentialFreeContext(value)
+}
+
+func DefaultConversationArbitrationPolicy() runtime.ConversationArbitrationPolicy {
+	return runtime.DefaultConversationArbitrationPolicy()
+}
+
+func ArbitrateParticipation(roundID string, proposals []runtime.ParticipationProposal, recent []*runtime.ChannelMessage, policy runtime.ConversationArbitrationPolicy) (*runtime.ConversationArbitration, error) {
+	return runtime.ArbitrateParticipation(roundID, proposals, recent, policy)
+}
+
+func ConversationMessageFingerprint(content string) string {
+	return runtime.ConversationMessageFingerprint(content)
 }
 
 // NewPostgresStore opens the production-grade shared persistence adapter and
@@ -391,6 +443,60 @@ const (
 	AgentRequestDecisionReject               = runtime.AgentRequestDecisionReject
 	AgentRequestDecisionRequestClarification = runtime.AgentRequestDecisionRequestClarification
 	AgentRequestDecisionProvideClarification = runtime.AgentRequestDecisionProvideClarification
+
+	ConversationStatusActive   = runtime.ConversationStatusActive
+	ConversationStatusArchived = runtime.ConversationStatusArchived
+
+	ConversationParticipantUser    = runtime.ConversationParticipantUser
+	ConversationParticipantAgent   = runtime.ConversationParticipantAgent
+	ConversationParticipantTeam    = runtime.ConversationParticipantTeam
+	ConversationParticipantService = runtime.ConversationParticipantService
+
+	MessageIntentQuestion        = runtime.MessageIntentQuestion
+	MessageIntentAnswer          = runtime.MessageIntentAnswer
+	MessageIntentUpdate          = runtime.MessageIntentUpdate
+	MessageIntentProposal        = runtime.MessageIntentProposal
+	MessageIntentDecision        = runtime.MessageIntentDecision
+	MessageIntentObjection       = runtime.MessageIntentObjection
+	MessageIntentHandoff         = runtime.MessageIntentHandoff
+	MessageIntentApprovalRequest = runtime.MessageIntentApprovalRequest
+	MessageIntentAcknowledgment  = runtime.MessageIntentAcknowledgment
+	MessageIntentSystem          = runtime.MessageIntentSystem
+
+	ConversationAudienceChannel      = runtime.ConversationAudienceChannel
+	ConversationAudienceParticipants = runtime.ConversationAudienceParticipants
+	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
+
+	ConversationReferenceObjective = runtime.ConversationReferenceObjective
+	ConversationReferenceRun       = runtime.ConversationReferenceRun
+	ConversationReferenceRequest   = runtime.ConversationReferenceRequest
+	ConversationReferenceApproval  = runtime.ConversationReferenceApproval
+	ConversationReferenceArtifact  = runtime.ConversationReferenceArtifact
+	ConversationReferenceActivity  = runtime.ConversationReferenceActivity
+
+	ConversationPresenceTyping  = runtime.ConversationPresenceTyping
+	ConversationPresenceWorking = runtime.ConversationPresenceWorking
+
+	ParticipationSpeak    = runtime.ParticipationSpeak
+	ParticipationSilent   = runtime.ParticipationSilent
+	ParticipationDeferred = runtime.ParticipationDeferred
+
+	ParticipationReasonDirectMention        = runtime.ParticipationReasonDirectMention
+	ParticipationReasonAnswersQuestion      = runtime.ParticipationReasonAnswersQuestion
+	ParticipationReasonNewInformation       = runtime.ParticipationReasonNewInformation
+	ParticipationReasonRoleRelevant         = runtime.ParticipationReasonRoleRelevant
+	ParticipationReasonEvidenceBacked       = runtime.ParticipationReasonEvidenceBacked
+	ParticipationReasonResolvesWork         = runtime.ParticipationReasonResolvesWork
+	ParticipationReasonCoordinatesWork      = runtime.ParticipationReasonCoordinatesWork
+	ParticipationReasonSubstantiveObjection = runtime.ParticipationReasonSubstantiveObjection
+	ParticipationReasonRequestedSilence     = runtime.ParticipationReasonRequestedSilence
+	ParticipationReasonNoNewInformation     = runtime.ParticipationReasonNoNewInformation
+	ParticipationReasonLowRelevance         = runtime.ParticipationReasonLowRelevance
+	ParticipationReasonDuplicate            = runtime.ParticipationReasonDuplicate
+	ParticipationReasonBackpressure         = runtime.ParticipationReasonBackpressure
+	ParticipationReasonAcknowledgmentOnly   = runtime.ParticipationReasonAcknowledgmentOnly
+
+	ParticipationRoundCommitted = runtime.ParticipationRoundCommitted
 
 	RunDependencyKindRun          = runtime.RunDependencyKindRun
 	RunDependencyKindAgentRequest = runtime.RunDependencyKindAgentRequest
@@ -508,6 +614,7 @@ type Engine struct {
 	portfolio             *runtime.PortfolioService
 	activity              *runtime.RunActivityService
 	dependencies          *runtime.DependencyCoordinator
+	conversations         *runtime.ConversationService
 	collaboration         *runtime.CollaborationService
 	turns                 *runtime.AgentTurnService
 	turnsRun              *runtime.TurnCoordinator
@@ -576,6 +683,7 @@ func New(opts ...Option) (*Engine, error) {
 		portfolio:     runtime.NewPortfolioService(store),
 		activity:      runtime.NewRunActivityService(store, store),
 		dependencies:  runtime.NewDependencyCoordinator(store),
+		conversations: runtime.NewConversationService(store),
 		collaboration: runtime.NewCollaborationService(store),
 		turns:         runtime.NewAgentTurnService(store, store),
 		turnsRun:      runtime.NewTurnCoordinator(store, store, store),
@@ -710,6 +818,11 @@ func WithStore(store runtime.KernelStore) Option {
 			e.dependencies = runtime.NewDependencyCoordinator(dependencyStore)
 		} else {
 			e.dependencies = nil
+		}
+		if conversationStore, ok := store.(runtime.ConversationStore); ok {
+			e.conversations = runtime.NewConversationService(conversationStore)
+		} else {
+			e.conversations = nil
 		}
 		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
 			e.collaboration = runtime.NewCollaborationService(collaborationStore)
@@ -1036,6 +1149,104 @@ func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter
 
 func (e *Engine) ListActivityFeed(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	return e.activity.ListActivityFeed(ctx, request)
+}
+
+func (e *Engine) CreateConversation(ctx context.Context, request runtime.CreateConversationRequest) (*runtime.Conversation, bool, error) {
+	if e.conversations == nil {
+		return nil, false, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.CreateConversation(ctx, request)
+}
+
+func (e *Engine) GetConversation(ctx context.Context, scope runtime.Scope, conversationID string) (*runtime.Conversation, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.GetConversation(ctx, scope, conversationID)
+}
+
+func (e *Engine) ListConversations(ctx context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.ListConversations(ctx, filter)
+}
+
+func (e *Engine) PostChannelMessage(ctx context.Context, request runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.PostChannelMessage(ctx, request)
+}
+
+func (e *Engine) GetChannelMessage(ctx context.Context, scope runtime.Scope, conversationID, messageID string) (*runtime.ChannelMessage, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.GetChannelMessage(ctx, scope, conversationID, messageID)
+}
+
+func (e *Engine) ListChannelMessages(ctx context.Context, filter runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.ListChannelMessages(ctx, filter)
+}
+
+func (e *Engine) CoordinateParticipation(ctx context.Context, request runtime.CoordinateParticipationRequest) (*runtime.ParticipationRoundResult, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.CoordinateParticipation(ctx, request)
+}
+
+func (e *Engine) GetParticipationRound(ctx context.Context, scope runtime.Scope, conversationID, roundID string) (*runtime.ParticipationRoundResult, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.GetParticipationRound(ctx, scope, conversationID, roundID)
+}
+
+func (e *Engine) ListParticipationRounds(ctx context.Context, filter runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.ListParticipationRounds(ctx, filter)
+}
+
+func (e *Engine) AdvanceConversationCursor(ctx context.Context, request runtime.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error) {
+	if e.conversations == nil {
+		return nil, false, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.AdvanceCursor(ctx, request)
+}
+
+func (e *Engine) GetConversationCursor(ctx context.Context, scope runtime.Scope, conversationID string, participant runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.GetCursor(ctx, scope, conversationID, participant)
+}
+
+func (e *Engine) SetConversationPresence(ctx context.Context, request runtime.SetConversationPresenceRequest) (*runtime.ConversationPresence, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.SetPresence(ctx, request)
+}
+
+func (e *Engine) ReleaseConversationPresence(ctx context.Context, request runtime.ReleaseConversationPresenceRequest) error {
+	if e.conversations == nil {
+		return fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.ReleasePresence(ctx, request)
+}
+
+func (e *Engine) ListConversationPresence(ctx context.Context, scope runtime.Scope, conversationID string) ([]*runtime.ConversationPresence, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.ListPresence(ctx, scope, conversationID)
 }
 
 func (e *Engine) CreateRunDependencyGroup(ctx context.Context, request runtime.CreateRunDependencyGroupRequest) (*runtime.RunDependencyResult, error) {
