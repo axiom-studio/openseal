@@ -52,6 +52,7 @@ type Catalog struct {
 	skills   map[string]*Definition
 	bindings map[string]*Binding
 	schemas  map[string]*compiledActionSchemas
+	store    CatalogStore
 }
 
 func NewCatalog() *Catalog {
@@ -61,27 +62,37 @@ func NewCatalog() *Catalog {
 	}
 }
 
-func (c *Catalog) Register(_ context.Context, definition *Definition) error {
+// NewCatalogWithStore creates a catalog backed by durable control-plane
+// storage. Definitions and bindings are loaded on demand rather than globally
+// hydrated, preserving tenant isolation and bounded startup cost.
+func NewCatalogWithStore(store CatalogStore) *Catalog {
+	catalog := NewCatalog()
+	catalog.store = store
+	return catalog
+}
+
+func (c *Catalog) Register(ctx context.Context, definition *Definition) error {
 	if c == nil {
 		return errors.New("skill catalog is not configured")
 	}
 	if err := validateDefinition(definition); err != nil {
 		return err
 	}
-	compiled := make(map[string]*compiledActionSchemas, len(definition.Actions))
-	for name, action := range definition.Actions {
-		schemas, err := compileActionSchemas(definition.ID, definition.Version, action)
-		if err != nil {
-			return fmt.Errorf("compile %s.%s schemas: %w", definition.ID, name, err)
-		}
-		compiled[name] = schemas
+	compiled, err := compileDefinitionSchemas(definition)
+	if err != nil {
+		return err
 	}
 	copy := cloneDefinition(definition)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	key := definitionKey(definition.ID, definition.Version)
 	if c.skills[key] != nil {
-		return errors.New("skill definition versions are immutable")
+		return ErrDefinitionImmutable
+	}
+	if c.store != nil {
+		if err := c.store.CreateSkillDefinition(ctx, copy); err != nil {
+			return err
+		}
 	}
 	c.skills[key] = copy
 	for name, schemas := range compiled {
@@ -90,58 +101,72 @@ func (c *Catalog) Register(_ context.Context, definition *Definition) error {
 	return nil
 }
 
-func (c *Catalog) GetDefinition(_ context.Context, id, version string) (*Definition, error) {
+func (c *Catalog) GetDefinition(ctx context.Context, id, version string) (*Definition, error) {
 	if c == nil {
 		return nil, errors.New("skill catalog is not configured")
 	}
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(version) == "" {
 		return nil, errors.New("skill id and version are required")
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	definition := c.skills[definitionKey(id, version)]
+	definition, err := c.definitionFor(ctx, id, version)
+	if err != nil {
+		return nil, err
+	}
 	if definition == nil {
 		return nil, nil
 	}
 	return cloneDefinition(definition), nil
 }
 
-func (c *Catalog) Bind(_ context.Context, binding *Binding) error {
+func (c *Catalog) Bind(ctx context.Context, binding *Binding) error {
 	if c == nil {
 		return errors.New("skill catalog is not configured")
 	}
 	if err := validateBindingShape(binding); err != nil {
 		return err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	definition := c.skills[definitionKey(binding.SkillID, binding.SkillVersion)]
+	definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
+	if err != nil {
+		return err
+	}
 	if definition == nil {
 		return errors.New("skill definition is not registered")
 	}
 	if err := validateBindingAgainstDefinition(binding, definition); err != nil {
 		return err
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	key := bindingKey(binding.Scope, binding.DeploymentID, binding.ID)
-	if current := c.bindings[key]; current != nil && binding.Revision != current.Revision+1 {
-		return errors.New("skill binding revision conflict")
+	current := c.bindings[key]
+	if c.store == nil {
+		if (current == nil && binding.Revision != 1) || (current != nil && binding.Revision != current.Revision+1) {
+			return ErrBindingRevisionConflict
+		}
+	} else {
+		expectedRevision := binding.Revision - 1
+		if err := c.store.SaveSkillBinding(ctx, cloneBinding(binding), expectedRevision); err != nil {
+			return err
+		}
 	}
 	c.bindings[key] = cloneBinding(binding)
 	return nil
 }
 
-func (c *Catalog) ListModelActions(_ context.Context, scope ScopeReference, deploymentID string) ([]ModelAction, error) {
+func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, deploymentID string) ([]ModelAction, error) {
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
 		return nil, err
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]ModelAction, 0)
-	for _, binding := range c.bindings {
-		if binding.Scope != scope || binding.DeploymentID != deploymentID {
-			continue
+	for _, binding := range bindings {
+		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
+		if err != nil {
+			return nil, err
 		}
-		definition := c.skills[definitionKey(binding.SkillID, binding.SkillVersion)]
 		if definition == nil {
 			continue
 		}
@@ -158,18 +183,23 @@ func (c *Catalog) ListModelActions(_ context.Context, scope ScopeReference, depl
 	return result, nil
 }
 
-func (c *Catalog) ListModelPrompts(_ context.Context, scope ScopeReference, deploymentID string) ([]ModelPrompt, error) {
+func (c *Catalog) ListModelPrompts(ctx context.Context, scope ScopeReference, deploymentID string) ([]ModelPrompt, error) {
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
 		return nil, err
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]ModelPrompt, 0)
-	for _, binding := range c.bindings {
-		if binding.Scope != scope || binding.DeploymentID != deploymentID || !binding.EnablePrompt {
+	for _, binding := range bindings {
+		if !binding.EnablePrompt {
 			continue
 		}
-		definition := c.skills[definitionKey(binding.SkillID, binding.SkillVersion)]
+		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
+		if err != nil {
+			return nil, err
+		}
 		if definition == nil || definition.Prompt == nil {
 			continue
 		}
@@ -183,17 +213,22 @@ func (c *Catalog) ListModelPrompts(_ context.Context, scope ScopeReference, depl
 	return result, nil
 }
 
-func (c *Catalog) ResolvePrompt(_ context.Context, scope ScopeReference, deploymentID, skillID, version string) (*PromptModule, error) {
+func (c *Catalog) ResolvePrompt(ctx context.Context, scope ScopeReference, deploymentID, skillID, version string) (*PromptModule, error) {
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
 		return nil, err
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	for _, binding := range c.bindings {
-		if binding.Scope != scope || binding.DeploymentID != deploymentID || binding.SkillID != skillID || binding.SkillVersion != version || !binding.EnablePrompt {
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if binding.SkillID != skillID || binding.SkillVersion != version || !binding.EnablePrompt {
 			continue
 		}
-		definition := c.skills[definitionKey(skillID, version)]
+		definition, err := c.definitionFor(ctx, skillID, version)
+		if err != nil {
+			return nil, err
+		}
 		if definition != nil && definition.Prompt != nil {
 			copy := cloneDefinition(definition)
 			return copy.Prompt, nil
@@ -202,18 +237,23 @@ func (c *Catalog) ResolvePrompt(_ context.Context, scope ScopeReference, deploym
 	return nil, errors.New("bound skill prompt not found")
 }
 
-func (c *Catalog) Resolve(_ context.Context, scope ScopeReference, deploymentID, skillID, version, actionName string) (*BoundAction, error) {
+func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentID, skillID, version, actionName string) (*BoundAction, error) {
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
 		return nil, err
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	for _, binding := range c.bindings {
-		if binding.Scope != scope || binding.DeploymentID != deploymentID || binding.SkillID != skillID || binding.SkillVersion != version ||
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if binding.SkillID != skillID || binding.SkillVersion != version ||
 			!containsString(binding.AllowedActions, actionName) {
 			continue
 		}
-		definition := c.skills[definitionKey(skillID, version)]
+		definition, err := c.definitionFor(ctx, skillID, version)
+		if err != nil {
+			return nil, err
+		}
 		if definition == nil {
 			break
 		}
@@ -221,6 +261,89 @@ func (c *Catalog) Resolve(_ context.Context, scope ScopeReference, deploymentID,
 		return &BoundAction{Definition: copy, Action: copy.Actions[actionName], Binding: cloneBinding(binding)}, nil
 	}
 	return nil, errors.New("bound skill action not found")
+}
+
+func (c *Catalog) definitionFor(ctx context.Context, id, version string) (*Definition, error) {
+	key := definitionKey(id, version)
+	c.mu.RLock()
+	cached := c.skills[key]
+	c.mu.RUnlock()
+	if cached != nil {
+		return cloneDefinition(cached), nil
+	}
+	if c.store == nil {
+		return nil, nil
+	}
+	definition, err := c.store.GetSkillDefinition(ctx, id, version)
+	if err != nil || definition == nil {
+		return definition, err
+	}
+	if err := validateDefinition(definition); err != nil {
+		return nil, fmt.Errorf("stored skill definition %s@%s is invalid: %w", id, version, err)
+	}
+	compiled, err := compileDefinitionSchemas(definition)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	if c.skills[key] == nil {
+		c.skills[key] = cloneDefinition(definition)
+		for name, schemas := range compiled {
+			c.schemas[actionKey(id, version, name)] = schemas
+		}
+	}
+	result := cloneDefinition(c.skills[key])
+	c.mu.Unlock()
+	return result, nil
+}
+
+func (c *Catalog) bindingsFor(ctx context.Context, scope ScopeReference, deploymentID string) ([]*Binding, error) {
+	if c.store == nil {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		result := make([]*Binding, 0)
+		for _, binding := range c.bindings {
+			if binding.Scope == scope && binding.DeploymentID == deploymentID {
+				result = append(result, cloneBinding(binding))
+			}
+		}
+		return result, nil
+	}
+	bindings, err := c.store.ListSkillBindings(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if err := validateBindingShape(binding); err != nil {
+			return nil, fmt.Errorf("stored skill binding is invalid: %w", err)
+		}
+		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
+		if err != nil {
+			return nil, err
+		}
+		if definition == nil {
+			return nil, fmt.Errorf("stored skill binding %s references a missing definition", binding.ID)
+		}
+		if err := validateBindingAgainstDefinition(binding, definition); err != nil {
+			return nil, fmt.Errorf("stored skill binding %s is invalid: %w", binding.ID, err)
+		}
+		c.mu.Lock()
+		c.bindings[bindingKey(binding.Scope, binding.DeploymentID, binding.ID)] = cloneBinding(binding)
+		c.mu.Unlock()
+	}
+	return bindings, nil
+}
+
+func compileDefinitionSchemas(definition *Definition) (map[string]*compiledActionSchemas, error) {
+	compiled := make(map[string]*compiledActionSchemas, len(definition.Actions))
+	for name, action := range definition.Actions {
+		schemas, err := compileActionSchemas(definition.ID, definition.Version, action)
+		if err != nil {
+			return nil, fmt.Errorf("compile %s.%s schemas: %w", definition.ID, name, err)
+		}
+		compiled[name] = schemas
+	}
+	return compiled, nil
 }
 
 func (c *Catalog) ValidateInput(_ context.Context, bound *BoundAction, input map[string]interface{}) error {
