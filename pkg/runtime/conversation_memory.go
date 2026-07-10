@@ -203,7 +203,9 @@ func (s *MemoryStore) CommitParticipationRound(_ context.Context, record Partici
 		if existing == nil || !sameParticipationRound(existing.Round, record.Round) {
 			return nil, ErrMessageConflict
 		}
-		return cloneParticipationRoundResult(existing, true), nil
+		replayed := cloneParticipationRoundResult(existing, true)
+		replayed.Conversation = cloneConversation(current)
+		return replayed, nil
 	}
 	if current.Revision != record.ExpectedRevision || record.Conversation.Revision != current.Revision+1 {
 		return nil, ErrRevisionConflict
@@ -253,7 +255,11 @@ func (s *MemoryStore) FindParticipationRoundByIdempotencyKey(_ context.Context, 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	id := s.participationKeys[channelMessageIdempotencyKey(scope, conversationID, strings.TrimSpace(key))]
-	return cloneParticipationRoundResult(s.participationRounds[channelMessageStoreKey(scope, conversationID, id)], true), nil
+	result := cloneParticipationRoundResult(s.participationRounds[channelMessageStoreKey(scope, conversationID, id)], true)
+	if result != nil {
+		result.Conversation = cloneConversation(s.conversations[conversationStoreKey(scope, conversationID)])
+	}
+	return result, nil
 }
 
 func (s *MemoryStore) GetConversationCursor(_ context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
@@ -277,6 +283,13 @@ func (s *MemoryStore) PutConversationCursor(_ context.Context, record Conversati
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	conversation := s.conversations[conversationStoreKey(record.Cursor.Scope, record.Cursor.ConversationID)]
+	if conversation == nil {
+		return nil, false, ErrConversationNotFound
+	}
+	if record.Cursor.DeliveredSequence > conversation.LastSequence {
+		return nil, false, ErrConversationCursorConflict
+	}
 	key := conversationParticipantStoreKey(record.Cursor.Scope, record.Cursor.ConversationID, record.Cursor.Participant)
 	current := s.conversationCursors[key]
 	if current != nil && current.DeliveredSequence == record.Cursor.DeliveredSequence && current.ReadSequence == record.Cursor.ReadSequence {
@@ -310,6 +323,9 @@ func (s *MemoryStore) PutConversationPresence(_ context.Context, record Conversa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.conversations[conversationStoreKey(record.Presence.Scope, record.Presence.ConversationID)] == nil {
+		return nil, ErrConversationNotFound
+	}
 	key := conversationParticipantStoreKey(record.Presence.Scope, record.Presence.ConversationID, record.Presence.Participant)
 	current := s.conversationPresence[key]
 	if current != nil && current.ExpiresAt.After(record.Presence.UpdatedAt) {
@@ -418,10 +434,9 @@ func sameParticipationRound(left, right *ParticipationRound) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	leftCopy, rightCopy := *left, *right
-	leftCopy.CreatedAt, rightCopy.CreatedAt = time.Time{}, time.Time{}
-	leftCopy.CommittedAt, rightCopy.CommittedAt = time.Time{}, time.Time{}
-	return reflect.DeepEqual(leftCopy, rightCopy)
+	return left.ID == right.ID && left.Scope == right.Scope && left.ConversationID == right.ConversationID &&
+		left.TriggerMessageID == right.TriggerMessageID && left.Policy == right.Policy && left.IdempotencyKey == right.IdempotencyKey &&
+		reflect.DeepEqual(left.Proposals, right.Proposals)
 }
 
 func cloneParticipationRoundResult(in *ParticipationRoundResult, replayed bool) *ParticipationRoundResult {
