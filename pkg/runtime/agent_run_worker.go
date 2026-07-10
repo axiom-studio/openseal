@@ -163,7 +163,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 
 func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, run *AgentRun) {
 	_, _ = p.activity.AppendActivity(ctx, &ActivityEvent{
-		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID,
+		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
 	})

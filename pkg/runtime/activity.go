@@ -34,6 +34,13 @@ type ActivityActor struct {
 	ID   string `json:"id"`
 }
 
+func teamIDForRun(run *AgentRun) string {
+	if run != nil && run.Owner.Type == OwnerTypeTeam {
+		return run.Owner.ID
+	}
+	return ""
+}
+
 // ActivityEvent is the append-only operator-facing record of meaningful work.
 // It stores concise rationale and evidence references, never private model
 // chain-of-thought or resolved secret values.
@@ -220,7 +227,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	}
 	event := &ActivityEvent{
 		ID: uuid.NewString(), Scope: scope, EventType: eventType, Severity: severity,
-		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TeamID: teamIDForRun(run),
 		ParentRunID: run.ParentRunID, Actor: req.Actor, Summary: req.Summary,
 		Payload: req.Payload, Visibility: visibility, CorrelationID: req.CorrelationID,
 		CausationID: req.CausationID, CreatedAt: now,
