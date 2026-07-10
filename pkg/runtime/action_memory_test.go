@@ -48,6 +48,7 @@ func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
 				SideEffect: skill.SideEffectExternal, IdempotencyKey: "deploy-production", ApprovalID: approval.ID,
 				MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
+			call.InvocationDigest = ComputeActionInvocationDigest(call)
 			result, proposalErr := store.CreateActionProposal(ctx, ActionProposalRecord{
 				Call: call, Approval: approval, Run: proposalRun, ExpectedRunRevision: run.Revision,
 				Event: &ActivityEvent{ID: "event-" + callID, Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
