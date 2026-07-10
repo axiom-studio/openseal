@@ -9,16 +9,31 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// ToolInvoker is the product-neutral boundary for a registered typed tool.
-// Resolved credentials are separate from the model-visible argument envelope.
-type ToolInvoker interface {
-	InvokeTool(context.Context, string, map[string]interface{}, map[string]string) (map[string]interface{}, error)
+// ToolInvocation is the complete, tenant-scoped transport envelope. Resolved
+// credentials are deliberately separate from model-visible arguments and must
+// never be persisted or logged by an invoker.
+type ToolInvocation struct {
+	Name         string
+	Scope        skill.ScopeReference
+	DeploymentID string
+	SkillID      string
+	SkillVersion string
+	Action       string
+	ActionCallID string
+	RunID        string
+	Arguments    map[string]interface{}
+	Credentials  map[string]string
 }
 
-type ToolInvokerFunc func(context.Context, string, map[string]interface{}, map[string]string) (map[string]interface{}, error)
+// ToolInvoker is the product-neutral boundary for a registered typed tool.
+type ToolInvoker interface {
+	InvokeTool(context.Context, ToolInvocation) (map[string]interface{}, error)
+}
 
-func (f ToolInvokerFunc) InvokeTool(ctx context.Context, name string, arguments map[string]interface{}, credentials map[string]string) (map[string]interface{}, error) {
-	return f(ctx, name, arguments, credentials)
+type ToolInvokerFunc func(context.Context, ToolInvocation) (map[string]interface{}, error)
+
+func (f ToolInvokerFunc) InvokeTool(ctx context.Context, invocation ToolInvocation) (map[string]interface{}, error) {
+	return f(ctx, invocation)
 }
 
 // ToolActionDispatcher executes canonical tool transports, including compiled
@@ -49,5 +64,14 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	if err != nil {
 		return nil, err
 	}
-	return d.invoker.InvokeTool(ctx, transport.Endpoint, arguments, input.Credentials)
+	invocation := ToolInvocation{
+		Name: transport.Endpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
+		SkillID: input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
+		Action: input.Bound.Action.Name, Arguments: arguments, Credentials: input.Credentials,
+	}
+	if input.Call != nil {
+		invocation.ActionCallID = input.Call.ID
+		invocation.RunID = input.Call.RunID
+	}
+	return d.invoker.InvokeTool(ctx, invocation)
 }

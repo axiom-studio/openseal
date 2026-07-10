@@ -29,8 +29,10 @@ Publish the requested release.
 	var invokedName string
 	var invokedArguments map[string]interface{}
 	var invokedCredentials map[string]string
-	dispatcher, err := NewToolActionDispatcher(ToolInvokerFunc(func(_ context.Context, name string, arguments map[string]interface{}, credentials map[string]string) (map[string]interface{}, error) {
-		invokedName, invokedArguments, invokedCredentials = name, arguments, credentials
+	var invocation ToolInvocation
+	dispatcher, err := NewToolActionDispatcher(ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+		invocation = value
+		invokedName, invokedArguments, invokedCredentials = value.Name, value.Arguments, value.Credentials
 		return map[string]interface{}{"published": true}, nil
 	}))
 	if err != nil {
@@ -47,5 +49,8 @@ Publish the requested release.
 	}
 	if invokedCredentials["token"] != "resolved-secret" || output["published"] != true {
 		t.Fatalf("credentials/output = %#v %#v", invokedCredentials, output)
+	}
+	if invocation.Scope != bound.Binding.Scope || invocation.DeploymentID != "agent" || invocation.SkillID != "publisher" || invocation.SkillVersion != definition.Version || invocation.Action != "invoke" {
+		t.Fatalf("tool routing metadata = %#v", invocation)
 	}
 }
