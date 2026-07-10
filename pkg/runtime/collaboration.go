@@ -100,6 +100,8 @@ type AgentRequest struct {
 	Recipient            CollaborationParty     `json:"recipient"`
 	SourceRunID          string                 `json:"sourceRunId"`
 	ChildRunID           string                 `json:"childRunId,omitempty"`
+	DependencyGroupID    string                 `json:"dependencyGroupId,omitempty"`
+	DependencyID         string                 `json:"dependencyId,omitempty"`
 	ObjectiveID          string                 `json:"objectiveId,omitempty"`
 	Goal                 string                 `json:"goal"`
 	Instructions         string                 `json:"instructions,omitempty"`
@@ -145,6 +147,12 @@ func (r *AgentRequest) Validate() error {
 	if !validAgentRequestStatus(r.Status) || r.Revision <= 0 {
 		return errors.New("agent request status and positive revision are required")
 	}
+	if (r.DependencyGroupID == "") != (r.DependencyID == "") {
+		return errors.New("agent request dependency group and edge must be set together")
+	}
+	if r.DependencyGroupID != "" && (!validOpaqueIdentifier(r.DependencyGroupID, 128) || !validOpaqueIdentifier(r.DependencyID, 128)) {
+		return errors.New("agent request dependency identifiers must be portable opaque identifiers")
+	}
 	if err := validateCredentialFreeContext(r.SharedContext); err != nil {
 		return err
 	}
@@ -176,6 +184,7 @@ type AgentRequestFilter struct {
 }
 
 type CreateAgentRequestRequest struct {
+	ID                   string
 	Scope                Scope
 	Kind                 AgentRequestKind
 	Requester            CollaborationParty
@@ -189,6 +198,42 @@ type CreateAgentRequestRequest struct {
 	SharedContext        map[string]interface{}
 	ConversationRefs     []string
 	IdempotencyKey       string
+	DependencyGroupID    string
+	DependencyID         string
+}
+
+type AgentRequestGroupSpec struct {
+	ID                   string
+	DependencyID         string
+	Kind                 AgentRequestKind
+	Recipient            CollaborationParty
+	Goal                 string
+	Instructions         string
+	SemanticRole         string
+	AcceptanceCriteria   map[string]interface{}
+	ArtifactRequirements []ArtifactRequirement
+	SharedContext        map[string]interface{}
+	ConversationRefs     []string
+	Required             *bool
+}
+
+type CreateAgentRequestGroupRequest struct {
+	ID                     string
+	Scope                  Scope
+	SourceRunID            string
+	ExpectedSourceRevision int64
+	Requester              CollaborationParty
+	Policy                 RunDependencyPolicy
+	Requests               []AgentRequestGroupSpec
+	IdempotencyKey         string
+	Actor                  ActivityActor
+	Visibility             ActivityVisibility
+}
+
+type AgentRequestGroupResult struct {
+	Group    *RunDependencyResult `json:"dependencyGroup"`
+	Requests []*AgentRequest      `json:"requests"`
+	Events   []*ActivityEvent     `json:"events,omitempty"`
 }
 
 type RespondAgentRequestRequest struct {
@@ -233,6 +278,7 @@ type AgentRequestResponseRecord struct {
 	ChildRun                *AgentRun
 	SourceEvent             *ActivityEvent
 	ChildEvent              *ActivityEvent
+	DependencyResolution    *RunDependencyResolutionRecord
 }
 
 type AgentRequestCompletionRecord struct {
@@ -244,6 +290,7 @@ type AgentRequestCompletionRecord struct {
 	ExpectedChildRevision   int64
 	SourceEvent             *ActivityEvent
 	ChildEvent              *ActivityEvent
+	DependencyResolution    *RunDependencyResolutionRecord
 }
 
 type CollaborationStore interface {
@@ -260,18 +307,20 @@ type CollaborationKernelStore interface {
 	RunActivityStore
 	CollaborationStore
 	ArtifactStore
+	RunDependencyStore
 }
 
 type CollaborationService struct {
-	store     CollaborationStore
-	runs      PortfolioStore
-	artifacts ArtifactStore
-	now       func() time.Time
-	newID     func() string
+	store        CollaborationStore
+	runs         PortfolioStore
+	artifacts    ArtifactStore
+	dependencies *DependencyCoordinator
+	now          func() time.Time
+	newID        func() string
 }
 
 func NewCollaborationService(store CollaborationKernelStore) *CollaborationService {
-	return &CollaborationService{store: store, runs: store, artifacts: store, now: time.Now, newID: uuid.NewString}
+	return &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store), now: time.Now, newID: uuid.NewString}
 }
 
 func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
@@ -322,9 +371,14 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		return nil, ErrAgentRequestUnauthorized
 	}
 	now := s.now()
+	requestID := strings.TrimSpace(req.ID)
+	if requestID == "" {
+		requestID = s.newID()
+	}
 	request := &AgentRequest{
-		ID: s.newID(), Scope: req.Scope, Kind: req.Kind, Status: AgentRequestStatusPending,
+		ID: requestID, Scope: req.Scope, Kind: req.Kind, Status: AgentRequestStatusPending,
 		Requester: req.Requester, Recipient: req.Recipient, SourceRunID: source.ID, ObjectiveID: source.ObjectiveID,
+		DependencyGroupID: strings.TrimSpace(req.DependencyGroupID), DependencyID: strings.TrimSpace(req.DependencyID),
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
 		AcceptanceCriteria: cloneMap(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
 		SharedContext: cloneMap(req.SharedContext), ConversationRefs: append([]string(nil), req.ConversationRefs...),
@@ -332,6 +386,11 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	}
 	if err := request.Validate(); err != nil {
 		return nil, err
+	}
+	if request.DependencyGroupID != "" {
+		if _, err := s.groupedRequestDependency(ctx, request, source, false); err != nil {
+			return nil, err
+		}
 	}
 	eventType := "collaboration.requested"
 	summary := fmt.Sprintf("Requested work from %s %s", request.Recipient.Type, request.Recipient.ID)
@@ -345,6 +404,107 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		return nil, err
 	}
 	return &AgentRequestResult{Request: cloneAgentRequest(request), Events: []*ActivityEvent{persisted}}, nil
+}
+
+// CreateAgentRequestGroup durably seals a complete fan-out before exposing its
+// collaboration requests. A stable idempotency key makes partial creation
+// recoverable after process or storage interruptions.
+func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req CreateAgentRequestGroupRequest) (*AgentRequestGroupResult, error) {
+	if s == nil || s.dependencies == nil {
+		return nil, errors.New("collaboration dependency store is not configured")
+	}
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if err := req.Requester.Validate(); err != nil {
+		return nil, fmt.Errorf("requester: %w", err)
+	}
+	key := strings.TrimSpace(req.IdempotencyKey)
+	if key == "" || len(req.Requests) == 0 {
+		return nil, errors.New("agent request group requires an idempotency key and at least one request")
+	}
+	source, err := s.runs.GetAgentRun(ctx, req.Scope, strings.TrimSpace(req.SourceRunID))
+	if err != nil {
+		return nil, err
+	}
+	if source == nil {
+		return nil, ErrRunNotFound
+	}
+	if source.Revision != req.ExpectedSourceRevision {
+		if existing, findErr := s.dependencies.FindRunDependencyGroupByIdempotencyKey(ctx, req.Scope, key); findErr != nil || existing == nil {
+			if findErr != nil {
+				return nil, findErr
+			}
+			return nil, ErrRevisionConflict
+		}
+	}
+	if !requesterControlsRun(req.Requester, source) {
+		return nil, ErrAgentRequestUnauthorized
+	}
+	groupID := strings.TrimSpace(req.ID)
+	if groupID == "" {
+		groupID = stableCollaborationID(req.Scope, key, "group")
+	}
+	dependencySpecs := make([]RunDependencySpec, 0, len(req.Requests))
+	requestInputs := make([]CreateAgentRequestRequest, 0, len(req.Requests))
+	seenDependencies := make(map[string]struct{}, len(req.Requests))
+	for index, spec := range req.Requests {
+		if spec.Kind != AgentRequestKindRequest {
+			return nil, errors.New("grouped collaboration currently supports request fan-out; handoff transfers must remain singular")
+		}
+		if err := spec.Recipient.Validate(); err != nil {
+			return nil, fmt.Errorf("request %d recipient: %w", index+1, err)
+		}
+		if strings.TrimSpace(spec.Goal) == "" {
+			return nil, fmt.Errorf("request %d goal is required", index+1)
+		}
+		if err := validateCredentialFreeContext(spec.SharedContext); err != nil {
+			return nil, err
+		}
+		if err := validateArtifactRequirements(spec.ArtifactRequirements); err != nil {
+			return nil, fmt.Errorf("%w: request %d: %w", ErrInvalidArtifact, index+1, err)
+		}
+		dependencyID := strings.TrimSpace(spec.DependencyID)
+		if dependencyID == "" {
+			dependencyID = fmt.Sprintf("request-%d", index+1)
+		}
+		if _, exists := seenDependencies[dependencyID]; exists {
+			return nil, fmt.Errorf("duplicate dependency id %q", dependencyID)
+		}
+		seenDependencies[dependencyID] = struct{}{}
+		requestID := strings.TrimSpace(spec.ID)
+		if requestID == "" {
+			requestID = stableCollaborationID(req.Scope, key, dependencyID)
+		}
+		dependencySpecs = append(dependencySpecs, RunDependencySpec{
+			ID: dependencyID, RequestID: requestID, Kind: RunDependencyKindAgentRequest, Required: spec.Required,
+		})
+		requestInputs = append(requestInputs, CreateAgentRequestRequest{
+			ID: requestID, Scope: req.Scope, Kind: spec.Kind, Requester: req.Requester, Recipient: spec.Recipient,
+			SourceRunID: req.SourceRunID, Goal: spec.Goal, Instructions: spec.Instructions, SemanticRole: spec.SemanticRole,
+			AcceptanceCriteria: spec.AcceptanceCriteria, ArtifactRequirements: spec.ArtifactRequirements,
+			SharedContext: spec.SharedContext, ConversationRefs: spec.ConversationRefs,
+			IdempotencyKey: key + ":request:" + dependencyID, DependencyGroupID: groupID, DependencyID: dependencyID,
+		})
+	}
+	group, err := s.dependencies.CreateRunDependencyGroup(ctx, CreateRunDependencyGroupRequest{
+		ID: groupID, Scope: req.Scope, SourceRunID: req.SourceRunID, ExpectedSourceRevision: req.ExpectedSourceRevision,
+		Policy: req.Policy, Dependencies: dependencySpecs, IdempotencyKey: key, Actor: req.Actor, Visibility: req.Visibility,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := &AgentRequestGroupResult{Group: group, Requests: make([]*AgentRequest, 0, len(requestInputs))}
+	result.Events = append(result.Events, group.Events...)
+	for _, input := range requestInputs {
+		created, err := s.CreateAgentRequest(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("create grouped agent request %s: %w", input.DependencyID, err)
+		}
+		result.Requests = append(result.Requests, created.Request)
+		result.Events = append(result.Events, created.Events...)
+	}
+	return result, nil
 }
 
 func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req RespondAgentRequestRequest) (*AgentRequestResult, error) {
@@ -378,6 +538,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 	if source == nil {
 		return nil, ErrRunNotFound
 	}
+	var groupedDependency *RunDependency
+	if request.DependencyGroupID != "" {
+		groupedDependency, err = s.groupedRequestDependency(ctx, request, source, false)
+		if err != nil {
+			return nil, err
+		}
+	}
 	now := s.now()
 	updated := cloneAgentRequest(request)
 	updated.Revision++
@@ -410,6 +577,17 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		updated.ResolvedAt = &now
 		eventType = "collaboration.rejected"
 		summary = fmt.Sprintf("%s %s rejected the request", req.Principal.Type, req.Principal.ID)
+		if groupedDependency != nil {
+			reason := strings.TrimSpace(req.Message)
+			if reason == "" {
+				reason = "recipient rejected the request"
+			}
+			record.DependencyResolution = &RunDependencyResolutionRecord{
+				Scope: updated.Scope, GroupID: updated.DependencyGroupID, DependencyID: updated.DependencyID,
+				ExpectedDependencyRevision: groupedDependency.Revision, State: RunDependencyStateFailed, Error: reason,
+				Actor: ActivityActor{Type: string(req.Principal.Type), ID: req.Principal.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+			}
+		}
 	case AgentRequestDecisionAccept:
 		updated.Status = AgentRequestStatusAccepted
 		updated.AcceptedAt = &now
@@ -419,8 +597,10 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 		updated.ChildRunID = child.ID
 		record.ChildRun = child
-		record.SourceRun = acceptedSourceRun(source, updated, now)
-		record.ExpectedSourceRevision = source.Revision
+		if groupedDependency == nil {
+			record.SourceRun = acceptedSourceRun(source, updated, now)
+			record.ExpectedSourceRevision = source.Revision
+		}
 		eventType = "collaboration.accepted"
 		if updated.Kind == AgentRequestKindHandoff {
 			eventType = "handoff.accepted"
@@ -435,7 +615,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRequestResult{Request: cloneAgentRequest(updated), Child: cloneAgentRun(record.ChildRun), Events: events}, nil
+	if record.DependencyResolution != nil {
+		source, err = s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &AgentRequestResult{Request: cloneAgentRequest(updated), Source: cloneAgentRun(source), Child: cloneAgentRun(record.ChildRun), Events: events}, nil
 }
 
 // CompleteAgentRequest atomically records the recipient's result, completes
@@ -532,9 +718,28 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	updatedRequest.ResolvedAt = &now
 
 	updatedChild := completedCollaborationChildRun(child, updatedRequest, now)
-	updatedSource, err := completedCollaborationSourceRun(source, updatedRequest, now)
-	if err != nil {
-		return nil, err
+	var updatedSource *AgentRun
+	var dependencyResolution *RunDependencyResolutionRecord
+	if updatedRequest.DependencyGroupID != "" {
+		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
+		if edgeErr != nil {
+			return nil, edgeErr
+		}
+		dependencyResolution = &RunDependencyResolutionRecord{
+			Scope: updatedRequest.Scope, GroupID: updatedRequest.DependencyGroupID, DependencyID: updatedRequest.DependencyID,
+			ExpectedDependencyRevision: edge.Revision, State: RunDependencyStateSatisfied,
+			Result: map[string]interface{}{
+				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
+				"summary": updatedRequest.CompletionSummary, "acceptanceEvidence": cloneMap(updatedRequest.AcceptanceEvidence),
+			},
+			Artifacts: updatedRequest.Artifacts, Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID},
+			Visibility: ActivityVisibilityTeam, OccurredAt: now,
+		}
+	} else {
+		updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, now)
+		if err != nil {
+			return nil, err
+		}
 	}
 	eventType := "collaboration.completed"
 	if request.Kind == AgentRequestKindHandoff {
@@ -543,7 +748,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	summary := fmt.Sprintf("%s %s completed the work", actor.Type, actor.ID)
 	record := AgentRequestCompletionRecord{
 		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
-		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision,
+		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
 		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
 		SourceEvent: collaborationCompletionEvent(source, updatedRequest, eventType, summary, actor, now),
 		ChildEvent:  collaborationCompletionEvent(child, updatedRequest, eventType, summary, actor, now),
@@ -552,9 +757,41 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if err != nil {
 		return nil, err
 	}
+	if dependencyResolution != nil {
+		updatedSource, err = s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &AgentRequestResult{
 		Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(updatedSource), Child: cloneAgentRun(updatedChild), Events: events,
 	}, nil
+}
+
+func (s *CollaborationService) groupedRequestDependency(ctx context.Context, request *AgentRequest, source *AgentRun, allowTerminalGroup bool) (*RunDependency, error) {
+	if request == nil || source == nil || request.DependencyGroupID == "" || request.DependencyID == "" {
+		return nil, ErrInvalidAgentRequestState
+	}
+	group, err := s.dependencies.GetRunDependencyGroup(ctx, request.Scope, request.DependencyGroupID)
+	if err != nil {
+		return nil, err
+	}
+	waiting := source.Status == AgentRunStatusWaitingForDependency && source.WakeCondition != nil &&
+		source.WakeCondition.Type == "run_dependencies" && source.WakeCondition.Reference == group.ID
+	terminal := group.Status == RunDependencyGroupSatisfied || group.Status == RunDependencyGroupFailed || group.Status == RunDependencyGroupCanceled
+	if group.SourceRunID != request.SourceRunID || (!waiting && !(allowTerminalGroup && terminal)) {
+		return nil, fmt.Errorf("%w: source run is not waiting on dependency group %s", ErrInvalidAgentRequestState, group.ID)
+	}
+	edges, err := s.dependencies.ListRunDependencies(ctx, request.Scope, group.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, edge := range edges {
+		if edge.ID == request.DependencyID && edge.RequestID == request.ID && edge.Kind == RunDependencyKindAgentRequest {
+			return edge, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: request %s is not linked to dependency %s", ErrInvalidAgentRequestState, request.ID, request.DependencyID)
 }
 
 func (s *CollaborationService) GetAgentRequest(ctx context.Context, scope Scope, requestID string) (*AgentRequest, error) {
@@ -988,7 +1225,13 @@ func validateLocalSchemaReferences(value interface{}) error {
 
 func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestRequest) bool {
 	return existing.Kind == req.Kind && existing.Requester == req.Requester && existing.Recipient == req.Recipient &&
-		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal)
+		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal) &&
+		existing.DependencyGroupID == strings.TrimSpace(req.DependencyGroupID) && existing.DependencyID == strings.TrimSpace(req.DependencyID)
+}
+
+func stableCollaborationID(scope Scope, key, suffix string) string {
+	seed := strings.Join([]string{"openseal", "collaboration", scope.key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }
 
 func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequestRequest, artifacts []ArtifactReference) bool {

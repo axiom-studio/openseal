@@ -203,9 +203,22 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
 		}
+	}
+	if record.ChildRun != nil {
 		if err := insertSQLiteAgentRunConn(ctx, conn, record.ChildRun); err != nil {
 			return nil, err
 		}
+	}
+	var dependencyEvents []*ActivityEvent
+	if record.DependencyResolution != nil {
+		dependencyResult, err := s.resolveSQLiteDependencyConn(ctx, conn, *record.DependencyResolution)
+		if err != nil {
+			return nil, err
+		}
+		if dependencyResult.Replayed {
+			return nil, ErrInvalidAgentRequestState
+		}
+		dependencyEvents = dependencyResult.Events
 	}
 	result, err := conn.ExecContext(ctx, `UPDATE agent_requests SET status = ?, child_run_id = ?, revision = ?, updated_at = ?, payload = ?
 		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, record.Request.Status, record.Request.ChildRunID,
@@ -220,7 +233,7 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 		}
 		return nil, ErrRevisionConflict
 	}
-	events := make([]*ActivityEvent, 0, 2)
+	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		if event == nil {
 			continue
@@ -231,6 +244,7 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record AgentReque
 		}
 		events = append(events, persisted)
 	}
+	events = append(events, dependencyEvents...)
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
 	}
@@ -252,8 +266,20 @@ func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequ
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
-	if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
-		return nil, err
+	var dependencyEvents []*ActivityEvent
+	if record.DependencyResolution != nil {
+		dependencyResult, err := s.resolveSQLiteDependencyConn(ctx, conn, *record.DependencyResolution)
+		if err != nil {
+			return nil, err
+		}
+		if dependencyResult.Replayed {
+			return nil, ErrInvalidAgentRequestState
+		}
+		dependencyEvents = dependencyResult.Events
+	} else {
+		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
+			return nil, err
+		}
 	}
 	if err := updateSQLiteAgentRunConn(ctx, conn, record.ChildRun, record.ExpectedChildRevision); err != nil {
 		return nil, err
@@ -271,7 +297,7 @@ func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequ
 		}
 		return nil, ErrRevisionConflict
 	}
-	events := make([]*ActivityEvent, 0, 2)
+	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		persisted, insertErr := insertSQLiteActivityConn(ctx, conn, event)
 		if insertErr != nil {
@@ -279,6 +305,7 @@ func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequ
 		}
 		events = append(events, persisted)
 	}
+	events = append(events, dependencyEvents...)
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
 	}
