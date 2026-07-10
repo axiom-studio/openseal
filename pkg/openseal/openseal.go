@@ -93,8 +93,30 @@ type (
 	SkillCredentialReference   = skill.CredentialReference
 	SkillTransportReference    = skill.TransportReference
 	SkillArgumentRule          = skill.ArgumentRule
+	SkillActionRetryPolicy     = skill.ActionRetryPolicy
 	ModelSkillAction           = skill.ModelAction
+	ModelSkillPrompt           = skill.ModelPrompt
 	BoundSkillAction           = skill.BoundAction
+	SkillPromptModule          = skill.PromptModule
+	ActionStore                = runtime.ActionStore
+	ActionCall                 = runtime.ActionCall
+	ActionCallStatus           = runtime.ActionCallStatus
+	ActionFilter               = runtime.ActionFilter
+	ActionDisposition          = runtime.ActionDisposition
+	ActionPolicyInput          = runtime.ActionPolicyInput
+	ActionPolicyDecision       = runtime.ActionPolicyDecision
+	ActionPolicyEvaluator      = runtime.ActionPolicyEvaluator
+	ActionPolicyEvaluatorFunc  = runtime.ActionPolicyEvaluatorFunc
+	ProposeActionRequest       = runtime.ProposeActionRequest
+	ActionProposalResult       = runtime.ActionProposalResult
+	ApprovalCheckpoint         = runtime.ApprovalCheckpoint
+	ApprovalStatus             = runtime.ApprovalStatus
+	ApprovalPrincipal          = runtime.ApprovalPrincipal
+	ApprovalFilter             = runtime.ApprovalFilter
+	ApprovalAuthorizer         = runtime.ApprovalAuthorizer
+	ApprovalAuthorizerFunc     = runtime.ApprovalAuthorizerFunc
+	ResolveApprovalRequest     = runtime.ResolveApprovalRequest
+	ApprovalResolutionResult   = runtime.ApprovalResolutionResult
 )
 
 const (
@@ -157,6 +179,22 @@ const (
 	SkillIdempotencyNone      = skill.IdempotencyNone
 	SkillIdempotencySupported = skill.IdempotencySupported
 	SkillIdempotencyRequired  = skill.IdempotencyRequired
+
+	ActionDispositionAllow           = runtime.ActionDispositionAllow
+	ActionDispositionDeny            = runtime.ActionDispositionDeny
+	ActionDispositionRequireApproval = runtime.ActionDispositionRequireApproval
+
+	ActionCallStatusReady           = runtime.ActionCallStatusReady
+	ActionCallStatusWaitingApproval = runtime.ActionCallStatusWaitingApproval
+	ActionCallStatusDenied          = runtime.ActionCallStatusDenied
+	ActionCallStatusRunning         = runtime.ActionCallStatusRunning
+	ActionCallStatusSucceeded       = runtime.ActionCallStatusSucceeded
+	ActionCallStatusFailed          = runtime.ActionCallStatusFailed
+
+	ApprovalStatusPending  = runtime.ApprovalStatusPending
+	ApprovalStatusApproved = runtime.ApprovalStatusApproved
+	ApprovalStatusRejected = runtime.ApprovalStatusRejected
+	ApprovalStatusExpired  = runtime.ApprovalStatusExpired
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -172,6 +210,10 @@ type Engine struct {
 	turnsRun       *runtime.TurnCoordinator
 	runQueue       *runtime.AgentRunScheduler
 	wake           *runtime.AgentRunWakeService
+	actions        *runtime.ActionCoordinator
+	approvals      *runtime.ApprovalCoordinator
+	actionPolicy   runtime.ActionPolicyEvaluator
+	approvalAuth   runtime.ApprovalAuthorizer
 	agentPoolSpecs []agentRunWorkerSpec
 	agentPools     []*runtime.AgentRunWorkerPool
 	skills         *skill.Catalog
@@ -203,18 +245,20 @@ func New(opts ...Option) (*Engine, error) {
 	)
 
 	e := &Engine{
-		registry:  reg,
-		store:     store,
-		pool:      pool,
-		scheduler: runtime.NewScheduler(pool, store),
-		portfolio: runtime.NewPortfolioService(store),
-		activity:  runtime.NewRunActivityService(store, store),
-		turns:     runtime.NewAgentTurnService(store, store),
-		turnsRun:  runtime.NewTurnCoordinator(store, store, store),
-		runQueue:  runtime.NewAgentRunScheduler(store),
-		wake:      runtime.NewAgentRunWakeService(store, store),
-		skills:    skill.NewCatalog(),
-		logger:    sugar,
+		registry:     reg,
+		store:        store,
+		pool:         pool,
+		scheduler:    runtime.NewScheduler(pool, store),
+		portfolio:    runtime.NewPortfolioService(store),
+		activity:     runtime.NewRunActivityService(store, store),
+		turns:        runtime.NewAgentTurnService(store, store),
+		turnsRun:     runtime.NewTurnCoordinator(store, store, store),
+		runQueue:     runtime.NewAgentRunScheduler(store),
+		wake:         runtime.NewAgentRunWakeService(store, store),
+		skills:       skill.NewCatalog(),
+		actionPolicy: runtime.NewDefaultActionPolicy(),
+		approvalAuth: runtime.EligibleApprovalAuthorizer{},
+		logger:       sugar,
 	}
 
 	for _, opt := range opts {
@@ -222,6 +266,7 @@ func New(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
 	}
+	e.rebuildGovernance()
 	if err := e.rebuildAgentWorkerPools(); err != nil {
 		return nil, fmt.Errorf("agent worker configuration: %w", err)
 	}
@@ -360,6 +405,31 @@ func WithSkillCatalog(catalog *skill.Catalog) Option {
 	}
 }
 
+func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
+	return func(e *Engine) error {
+		if policy == nil {
+			return fmt.Errorf("action policy is required")
+		}
+		e.actionPolicy = policy
+		return nil
+	}
+}
+
+func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
+	return func(e *Engine) error {
+		if authorizer == nil {
+			return fmt.Errorf("approval authorizer is required")
+		}
+		e.approvalAuth = authorizer
+		return nil
+	}
+}
+
+func (e *Engine) rebuildGovernance() {
+	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy)
+	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
+}
+
 func (e *Engine) rebuildAgentWorkerPools() error {
 	e.agentPools = make([]*runtime.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
 	for _, spec := range e.agentPoolSpecs {
@@ -473,6 +543,14 @@ func (e *Engine) ListModelSkillActions(ctx context.Context, scope skill.ScopeRef
 	return e.skills.ListModelActions(ctx, scope, deploymentID)
 }
 
+func (e *Engine) ListModelSkillPrompts(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.ModelPrompt, error) {
+	return e.skills.ListModelPrompts(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ResolveSkillPrompt(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version string) (*skill.PromptModule, error) {
+	return e.skills.ResolvePrompt(ctx, scope, deploymentID, skillID, version)
+}
+
 func (e *Engine) ResolveSkillAction(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string) (*skill.BoundAction, error) {
 	return e.skills.Resolve(ctx, scope, deploymentID, skillID, version, action)
 }
@@ -483,4 +561,28 @@ func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundActi
 
 func (e *Engine) ValidateSkillOutput(ctx context.Context, action *skill.BoundAction, output map[string]interface{}) error {
 	return e.skills.ValidateOutput(ctx, action, output)
+}
+
+func (e *Engine) ProposeAction(ctx context.Context, req runtime.ProposeActionRequest) (*runtime.ActionProposalResult, error) {
+	return e.actions.Propose(ctx, req)
+}
+
+func (e *Engine) ResolveApproval(ctx context.Context, req runtime.ResolveApprovalRequest) (*runtime.ApprovalResolutionResult, error) {
+	return e.approvals.Resolve(ctx, req)
+}
+
+func (e *Engine) GetActionCall(ctx context.Context, scope runtime.Scope, actionID string) (*runtime.ActionCall, error) {
+	return e.store.GetActionCall(ctx, scope, actionID)
+}
+
+func (e *Engine) ListActionCalls(ctx context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+	return e.store.ListActionCalls(ctx, filter)
+}
+
+func (e *Engine) GetApproval(ctx context.Context, scope runtime.Scope, approvalID string) (*runtime.ApprovalCheckpoint, error) {
+	return e.store.GetApproval(ctx, scope, approvalID)
+}
+
+func (e *Engine) ListApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+	return e.store.ListApprovals(ctx, filter)
 }
