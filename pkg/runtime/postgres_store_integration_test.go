@@ -210,4 +210,86 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	if limitedClaims != 1 {
 		t.Fatalf("capacity-limited claims = %d, want 1", limitedClaims)
 	}
+
+	auditRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "auditor"}, AssignedAgentID: "auditor", Goal: "Audit activity", Source: RunSourceObjective})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimedAuditRun, err := primary.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "audit-worker", AssignedAgentID: "auditor", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimedAuditRun == nil || claimedAuditRun.ID != auditRun.ID {
+		t.Fatalf("claimed audit run = %#v, %v", claimedAuditRun, err)
+	}
+	const activityCount = 12
+	activityErrors := make(chan error, activityCount)
+	wait = sync.WaitGroup{}
+	for index := 0; index < activityCount; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			service := NewRunActivityService(stores[index%len(stores)], stores[index%len(stores)])
+			_, appendErr := service.AppendActivity(ctx, &ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: auditRun.ID, EventType: "audit.observed", Summary: "Observation", Actor: ActivityActor{Type: "agent", ID: "auditor"}, Visibility: ActivityVisibilityTeam, CreatedAt: now})
+			activityErrors <- appendErr
+		}(index)
+	}
+	wait.Wait()
+	close(activityErrors)
+	for appendErr := range activityErrors {
+		if appendErr != nil {
+			t.Fatal(appendErr)
+		}
+	}
+	activity, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: auditRun.ID, Limit: 100})
+	if err != nil || len(activity) != activityCount {
+		t.Fatalf("activity count = %d, %v", len(activity), err)
+	}
+	for index, event := range activity {
+		if event.Sequence != int64(index+1) {
+			t.Fatalf("activity sequence[%d] = %d", index, event.Sequence)
+		}
+	}
+
+	turnServices := []*AgentTurnService{NewAgentTurnService(primary, primary), NewAgentTurnService(replica, replica)}
+	for _, service := range turnServices {
+		service.now = func() time.Time { return now }
+	}
+	turns := make(chan *AgentTurn, 2)
+	turnErrors := make(chan error, 2)
+	wait = sync.WaitGroup{}
+	for index := 0; index < 2; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			turn, beginErr := turnServices[index].BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: auditRun.ID, WorkerID: "turn-worker-" + string(rune('a'+index)), LeaseDuration: time.Minute})
+			turns <- turn
+			turnErrors <- beginErr
+		}(index)
+	}
+	wait.Wait()
+	close(turns)
+	close(turnErrors)
+	createdTurns, activeConflicts := 0, 0
+	var activeTurn *AgentTurn
+	for turn := range turns {
+		if turn != nil {
+			createdTurns++
+			activeTurn = turn
+		}
+	}
+	for beginErr := range turnErrors {
+		if errors.Is(beginErr, ErrActiveTurnExists) {
+			activeConflicts++
+		} else if beginErr != nil {
+			t.Fatal(beginErr)
+		}
+	}
+	if createdTurns != 1 || activeConflicts != 1 {
+		t.Fatalf("turn race created=%d conflicts=%d", createdTurns, activeConflicts)
+	}
+	finished, err := turnServices[0].FinishTurn(ctx, scope, activeTurn.ID, FinishAgentTurnRequest{ExpectedRevision: activeTurn.Revision, Status: AgentTurnStatusCompleted, WorkerID: activeTurn.LeaseOwner, OutputSummary: "Audit complete"})
+	if err != nil || finished.Status != AgentTurnStatusCompleted {
+		t.Fatalf("finished turn = %#v, %v", finished, err)
+	}
+	if crossScopeTurn, err := replica.GetAgentTurn(ctx, otherScope, activeTurn.ID); err != nil || crossScopeTurn != nil {
+		t.Fatalf("cross-scope turn = %#v, %v", crossScopeTurn, err)
+	}
 }
