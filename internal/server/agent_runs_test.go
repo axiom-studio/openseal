@@ -19,6 +19,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 		"scope":{"kind":"tenant","id":"one"},
 		"kind":"conversation",
 		"owner":{"type":"team","id":"team-1"},
+		"concurrencyKey":"channel:engineering",
 		"goal":"Operate the service",
 		"source":"manual",
 		"actor":{"type":"user","id":"7"}
@@ -31,7 +32,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if err := json.NewDecoder(created.Body).Decode(&createResult); err != nil {
 		t.Fatal(err)
 	}
-	if createResult.Run == nil || createResult.Run.Kind != runtime.RunKindConversation || createResult.Event == nil || createResult.Event.EventType != "run.created" {
+	if createResult.Run == nil || createResult.Run.Kind != runtime.RunKindConversation || createResult.Run.ConcurrencyKey != "channel:engineering" || createResult.Event == nil || createResult.Event.EventType != "run.created" {
 		t.Fatalf("create result = %#v", createResult)
 	}
 

@@ -33,6 +33,7 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 	}
 	candidates := make([]*AgentRun, 0)
 	activeByAgent := make(map[string]int)
+	activeByConcurrencyKey := make(map[string]int)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
@@ -45,9 +46,13 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 			return nil, err
 		}
 		candidates = append(candidates, run)
-		if claim.MaxActiveForAgent > 0 && run.Status == AgentRunStatusRunning && run.AssignedAgentID != "" &&
-			run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(claim.Now) {
-			activeByAgent[run.AssignedAgentID]++
+		if run.Status == AgentRunStatusRunning && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(claim.Now) {
+			if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
+				activeByAgent[run.AssignedAgentID]++
+			}
+			if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
+				activeByConcurrencyKey[run.ConcurrencyKey]++
+			}
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -59,6 +64,9 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 			continue
 		}
 		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
+			continue
+		}
+		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
 			continue
 		}
 		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {

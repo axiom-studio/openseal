@@ -9,14 +9,15 @@ import (
 )
 
 type AgentRunClaim struct {
-	Scope             Scope
-	Kind              RunKind
-	WorkerID          string
-	AssignedAgentID   string
-	Now               time.Time
-	LeaseDuration     time.Duration
-	AgingInterval     time.Duration
-	MaxActiveForAgent int
+	Scope                      Scope
+	Kind                       RunKind
+	WorkerID                   string
+	AssignedAgentID            string
+	Now                        time.Time
+	LeaseDuration              time.Duration
+	AgingInterval              time.Duration
+	MaxActiveForAgent          int
+	MaxActiveForConcurrencyKey int
 }
 
 func (c AgentRunClaim) Validate() error {
@@ -32,17 +33,21 @@ func (c AgentRunClaim) Validate() error {
 	if c.MaxActiveForAgent < 0 {
 		return errors.New("max active runs cannot be negative")
 	}
+	if c.MaxActiveForConcurrencyKey < 0 {
+		return errors.New("max active runs per concurrency key cannot be negative")
+	}
 	return nil
 }
 
 type AgentRunClaimRequest struct {
-	Scope             Scope
-	Kind              RunKind
-	WorkerID          string
-	AssignedAgentID   string
-	LeaseDuration     time.Duration
-	AgingInterval     time.Duration
-	MaxActiveForAgent int
+	Scope                      Scope
+	Kind                       RunKind
+	WorkerID                   string
+	AssignedAgentID            string
+	LeaseDuration              time.Duration
+	AgingInterval              time.Duration
+	MaxActiveForAgent          int
+	MaxActiveForConcurrencyKey int
 }
 
 type AgentRunScheduleStore interface {
@@ -78,7 +83,7 @@ func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequ
 	return s.store.ClaimNextAgentRun(ctx, AgentRunClaim{
 		Scope: req.Scope, Kind: req.Kind, WorkerID: req.WorkerID, AssignedAgentID: req.AssignedAgentID,
 		Now: s.now(), LeaseDuration: req.LeaseDuration, AgingInterval: req.AgingInterval,
-		MaxActiveForAgent: req.MaxActiveForAgent,
+		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
 	})
 }
 

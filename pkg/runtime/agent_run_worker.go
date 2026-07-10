@@ -32,17 +32,18 @@ func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *Agen
 }
 
 type AgentRunWorkerConfig struct {
-	Scope             Scope
-	Kind              RunKind
-	AssignedAgentID   string
-	WorkerIDPrefix    string
-	Concurrency       int
-	MaxActiveForAgent int
-	MaxTurnsPerClaim  int
-	LeaseDuration     time.Duration
-	TurnLeaseDuration time.Duration
-	AgingInterval     time.Duration
-	PollInterval      time.Duration
+	Scope                      Scope
+	Kind                       RunKind
+	AssignedAgentID            string
+	WorkerIDPrefix             string
+	Concurrency                int
+	MaxActiveForAgent          int
+	MaxActiveForConcurrencyKey int
+	MaxTurnsPerClaim           int
+	LeaseDuration              time.Duration
+	TurnLeaseDuration          time.Duration
+	AgingInterval              time.Duration
+	PollInterval               time.Duration
 }
 
 func (c *AgentRunWorkerConfig) applyDefaults() error {
@@ -153,7 +154,8 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
 			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
-			MaxActiveForAgent: p.config.MaxActiveForAgent,
+			MaxActiveForAgent:          p.config.MaxActiveForAgent,
+			MaxActiveForConcurrencyKey: p.config.MaxActiveForConcurrencyKey,
 		})
 		if err != nil && ctx.Err() == nil {
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
