@@ -305,6 +305,9 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !engine.ConversationRunsAvailable() {
+		t.Fatal("durable conversation runtime was not advertised")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	immediate, _, err := engine.CreateConversation(ctx, CreateConversationRequest{
