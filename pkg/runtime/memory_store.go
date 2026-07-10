@@ -11,23 +11,32 @@ import (
 
 // MemoryStore holds execution records in memory with a configurable max size.
 type MemoryStore struct {
-	mu                  sync.RWMutex
-	runs                map[int]*RunRecord
-	objectives          map[string]*Objective
-	agentRuns           map[string]*AgentRun
-	activity            map[string][]*ActivityEvent
-	turns               map[string]map[string]*AgentTurn
-	actions             map[string]*ActionCall
-	approvals           map[string]*ApprovalCheckpoint
-	actionKeys          map[string]string
-	requests            map[string]*AgentRequest
-	requestKeys         map[string]string
-	dependencyGroups    map[string]*RunDependencyGroup
-	dependencyGroupKeys map[string]string
-	dependencies        map[string]map[string]*RunDependency
-	artifacts           map[string]map[int64]*Artifact
-	maxSize             int
-	nextID              int
+	mu                   sync.RWMutex
+	runs                 map[int]*RunRecord
+	objectives           map[string]*Objective
+	agentRuns            map[string]*AgentRun
+	activity             map[string][]*ActivityEvent
+	turns                map[string]map[string]*AgentTurn
+	actions              map[string]*ActionCall
+	approvals            map[string]*ApprovalCheckpoint
+	actionKeys           map[string]string
+	requests             map[string]*AgentRequest
+	requestKeys          map[string]string
+	dependencyGroups     map[string]*RunDependencyGroup
+	dependencyGroupKeys  map[string]string
+	dependencies         map[string]map[string]*RunDependency
+	artifacts            map[string]map[int64]*Artifact
+	conversations        map[string]*Conversation
+	conversationKeys     map[string]string
+	channelMessages      map[string][]*ChannelMessage
+	channelMessageIDs    map[string]*ChannelMessage
+	channelMessageKeys   map[string]string
+	participationRounds  map[string]*ParticipationRoundResult
+	participationKeys    map[string]string
+	conversationCursors  map[string]*ConversationCursor
+	conversationPresence map[string]*ConversationPresence
+	maxSize              int
+	nextID               int
 }
 
 // NewMemoryStore creates an in-memory store for execution records.
@@ -36,22 +45,31 @@ func NewMemoryStore(maxSize int) *MemoryStore {
 		maxSize = 100
 	}
 	return &MemoryStore{
-		runs:                make(map[int]*RunRecord),
-		objectives:          make(map[string]*Objective),
-		agentRuns:           make(map[string]*AgentRun),
-		activity:            make(map[string][]*ActivityEvent),
-		turns:               make(map[string]map[string]*AgentTurn),
-		actions:             make(map[string]*ActionCall),
-		approvals:           make(map[string]*ApprovalCheckpoint),
-		actionKeys:          make(map[string]string),
-		requests:            make(map[string]*AgentRequest),
-		requestKeys:         make(map[string]string),
-		dependencyGroups:    make(map[string]*RunDependencyGroup),
-		dependencyGroupKeys: make(map[string]string),
-		dependencies:        make(map[string]map[string]*RunDependency),
-		artifacts:           make(map[string]map[int64]*Artifact),
-		maxSize:             maxSize,
-		nextID:              1,
+		runs:                 make(map[int]*RunRecord),
+		objectives:           make(map[string]*Objective),
+		agentRuns:            make(map[string]*AgentRun),
+		activity:             make(map[string][]*ActivityEvent),
+		turns:                make(map[string]map[string]*AgentTurn),
+		actions:              make(map[string]*ActionCall),
+		approvals:            make(map[string]*ApprovalCheckpoint),
+		actionKeys:           make(map[string]string),
+		requests:             make(map[string]*AgentRequest),
+		requestKeys:          make(map[string]string),
+		dependencyGroups:     make(map[string]*RunDependencyGroup),
+		dependencyGroupKeys:  make(map[string]string),
+		dependencies:         make(map[string]map[string]*RunDependency),
+		artifacts:            make(map[string]map[int64]*Artifact),
+		conversations:        make(map[string]*Conversation),
+		conversationKeys:     make(map[string]string),
+		channelMessages:      make(map[string][]*ChannelMessage),
+		channelMessageIDs:    make(map[string]*ChannelMessage),
+		channelMessageKeys:   make(map[string]string),
+		participationRounds:  make(map[string]*ParticipationRoundResult),
+		participationKeys:    make(map[string]string),
+		conversationCursors:  make(map[string]*ConversationCursor),
+		conversationPresence: make(map[string]*ConversationPresence),
+		maxSize:              maxSize,
+		nextID:               1,
 	}
 }
 
