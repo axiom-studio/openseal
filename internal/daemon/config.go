@@ -13,6 +13,10 @@ func DefaultDaemonConfig() *DaemonConfig {
 	return &DaemonConfig{
 		WorkflowsDir: "workflows",
 		LogLevel:     "info",
+		Storage: StorageConfig{
+			Driver: "sqlite",
+			Path:   "data/openseal.db",
+		},
 		Webhook: WebhookConfig{
 			ListenAddr: ":9090",
 			BaseURL:    "http://localhost:9090",
@@ -35,14 +39,24 @@ type DaemonConfig struct {
 	// Webhook server settings (used when a webhook trigger is present).
 	Webhook WebhookConfig `yaml:"webhook"`
 
-	// API server settings for the web GUI.
+	// API server settings for kernel clients and compatibility routes.
 	API APIConfig `yaml:"api"`
 
 	// LogLevel controls verbosity: "debug", "info", "warn", "error".
 	LogLevel string `yaml:"logLevel"`
+
+	// Storage configures the durable canonical kernel store.
+	Storage StorageConfig `yaml:"storage"`
 }
 
-// APIConfig configures the HTTP API server for the web GUI.
+// StorageConfig configures standalone OpenSeal persistence. SQLite is the
+// portable durable store; paths are resolved relative to the daemon config.
+type StorageConfig struct {
+	Driver string `yaml:"driver"`
+	Path   string `yaml:"path"`
+}
+
+// APIConfig configures the HTTP API server used by the TUI and integrations.
 type APIConfig struct {
 	// ListenAddr is the host:port the API server binds to.
 	ListenAddr string `yaml:"listenAddr"`
@@ -119,6 +133,12 @@ func LoadDaemonConfig(path string) (*DaemonConfig, error) {
 	if cfg.API.ListenAddr == "" {
 		cfg.API.ListenAddr = ":8080"
 	}
+	if cfg.Storage.Driver == "" {
+		cfg.Storage.Driver = "sqlite"
+	}
+	if cfg.Storage.Path == "" {
+		cfg.Storage.Path = "data/openseal.db"
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -143,6 +163,12 @@ func WriteDaemonConfig(path string, cfg *DaemonConfig) error {
 func (c *DaemonConfig) Validate() error {
 	if c.WorkflowsDir == "" {
 		return fmt.Errorf("workflowsDir is required")
+	}
+	if c.Storage.Driver != "sqlite" {
+		return fmt.Errorf("storage.driver must be sqlite")
+	}
+	if c.Storage.Path == "" {
+		return fmt.Errorf("storage.path is required")
 	}
 
 	for name, ct := range c.Triggers.Cron {

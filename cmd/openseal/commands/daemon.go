@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/axiom-studio/openseal/internal/daemon"
@@ -77,8 +78,14 @@ Options:
 	reg := executor.NewRegistry(nil)
 	pe := executor.NewPipelineExecutor(reg, sugar)
 
-	// Execution store
-	store := runtime.NewMemoryStore(100)
+	// One durable store backs legacy deterministic workflows and the canonical
+	// Agent/Team run kernel. Interactive clients never own authoritative state.
+	store, storagePath, err := daemon.OpenKernelStore(cfg.Storage, filepath.Dir(*configPath))
+	if err != nil {
+		sugar.Fatalf("failed to open kernel store: %v", err)
+	}
+	defer store.Close()
+	sugar.Infow("durable kernel store opened", "driver", cfg.Storage.Driver, "path", storagePath)
 
 	// Worker pool for async execution
 	pool := runtime.NewWorkerPool(pe, store, sugar, 4, nil)
@@ -89,7 +96,7 @@ Options:
 
 	pool.Start(ctx)
 
-	// API server for web GUI
+	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServerWithDir(reg, scheduler, store, cfg.WorkflowsDir, sugar)
 	apiServer.SetWorkflows(workflows)
 
