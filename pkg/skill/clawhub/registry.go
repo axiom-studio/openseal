@@ -2,6 +2,8 @@ package clawhub
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type SkillReference struct {
@@ -116,6 +119,11 @@ type Verification struct {
 	Signature            map[string]interface{} `json:"signature,omitempty"`
 }
 
+type DownloadedArchive struct {
+	Bytes  []byte `json:"-"`
+	SHA256 string `json:"sha256"`
+}
+
 type Registry interface {
 	SearchSkills(context.Context, SearchRequest) (*SkillPage, error)
 	ExploreSkills(context.Context, ExploreRequest) (*SkillPage, error)
@@ -124,6 +132,7 @@ type Registry interface {
 	GetVersion(context.Context, SkillReference, string) (*VersionDetail, error)
 	GetFile(context.Context, SkillReference, string, string, string) ([]byte, error)
 	VerifySkill(context.Context, SkillReference, string, string) (*Verification, error)
+	DownloadArchive(context.Context, SkillReference, string, string) (*DownloadedArchive, error)
 }
 
 func (c *ClawHubClient) SearchSkills(ctx context.Context, request SearchRequest) (*SkillPage, error) {
@@ -222,6 +231,26 @@ func (c *ClawHubClient) VerifySkill(ctx context.Context, ref SkillReference, ver
 	return &result, nil
 }
 
+func (c *ClawHubClient) DownloadArchive(ctx context.Context, ref SkillReference, version, tag string) (*DownloadedArchive, error) {
+	if version != "" && tag != "" {
+		return nil, fmt.Errorf("version and tag are mutually exclusive")
+	}
+	query := ownerQuery(ref)
+	query.Set("slug", ref.Slug)
+	if version != "" {
+		query.Set("version", version)
+	}
+	if tag != "" {
+		query.Set("tag", tag)
+	}
+	archive, err := c.getBytes(ctx, "/download", query, 100*1024*1024)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(archive)
+	return &DownloadedArchive{Bytes: archive, SHA256: hex.EncodeToString(digest[:])}, nil
+}
+
 func (c *ClawHubClient) getJSON(ctx context.Context, path string, query url.Values, target interface{}) error {
 	body, err := c.getBytes(ctx, path, query, 4*1024*1024)
 	if err != nil {
@@ -238,28 +267,63 @@ func (c *ClawHubClient) getBytes(ctx context.Context, path string, query url.Val
 	if len(query) > 0 {
 		requestURL += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt < maxRetries && waitForRetry(ctx, attempt) == nil {
+				continue
+			}
+			return nil, err
+		}
+		if resp.StatusCode < 400 {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+			resp.Body.Close()
+			if readErr != nil {
+				return nil, readErr
+			}
+			if int64(len(body)) > limit {
+				return nil, fmt.Errorf("ClawHub response exceeds %d bytes", limit)
+			}
+			return body, nil
+		}
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &ClawHubError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(message))}
+		resp.Body.Close()
+		registryErr := &ClawHubError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(message))}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if seconds, parseErr := strconv.Atoi(resp.Header.Get("Retry-After")); parseErr == nil {
+				registryErr.RetryAfter = seconds
+			}
+			return nil, registryErr
+		}
+		lastErr = registryErr
+		if resp.StatusCode >= 500 && attempt < maxRetries {
+			if err := waitForRetry(ctx, attempt); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		return nil, registryErr
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if err != nil {
-		return nil, err
+	return nil, lastErr
+}
+
+func waitForRetry(ctx context.Context, attempt int) error {
+	delay := 500 * time.Millisecond * time.Duration(1<<attempt)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-	if int64(len(body)) > limit {
-		return nil, fmt.Errorf("ClawHub response exceeds %d bytes", limit)
-	}
-	return body, nil
 }
 
 func decodeSkillPage(raw json.RawMessage) (*SkillPage, error) {

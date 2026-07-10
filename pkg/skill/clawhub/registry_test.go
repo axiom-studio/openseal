@@ -2,10 +2,14 @@ package clawhub
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestRegistrySupportsOwnerQualifiedLifecycle(t *testing.T) {
@@ -80,5 +84,50 @@ func TestRegistryDiscoveryAndVerificationAreStrict(t *testing.T) {
 	}
 	if _, err := client.VerifySkill(context.Background(), SkillReference{Slug: "bad"}, "", ""); err == nil {
 		t.Fatal("unknown verification envelopes must fail closed")
+	}
+}
+
+func TestRegistryDownloadsExactOwnerQualifiedVersion(t *testing.T) {
+	payload := []byte("zip-bytes")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/download" || r.URL.Query().Get("slug") != "research" || r.URL.Query().Get("ownerHandle") != "acme" || r.URL.Query().Get("version") != "1.2.3" {
+			http.Error(w, "bad download identity", http.StatusBadRequest)
+			return
+		}
+		w.Write(payload)
+	}))
+	defer server.Close()
+	archive, err := NewClawHubClient(server.URL).DownloadArchive(context.Background(), SkillReference{Owner: "acme", Slug: "research"}, "1.2.3", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	if string(archive.Bytes) != string(payload) || archive.SHA256 != hex.EncodeToString(digest[:]) {
+		t.Fatalf("archive = %#v", archive)
+	}
+}
+
+func TestRegistryRateLimitAndRetryAreContextAware(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("q") == "limited" {
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, "temporary", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client := NewClawHubClient(server.URL)
+	_, err := client.SearchSkills(context.Background(), SearchRequest{Query: "limited"})
+	var registryErr *ClawHubError
+	if !errors.As(err, &registryErr) || registryErr.StatusCode != http.StatusTooManyRequests || registryErr.RetryAfter != 30 {
+		t.Fatalf("rate limit error = %#v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = client.SearchSkills(ctx, SearchRequest{Query: "retry"})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 250*time.Millisecond {
+		t.Fatalf("context-aware retry = %v after %s", err, time.Since(started))
 	}
 }
