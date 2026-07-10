@@ -866,11 +866,17 @@ func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objec
 }
 
 func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
-	result, err := runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
+	result, err := e.CreateAgentRunCommand(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	return result.Run, nil
+}
+
+// CreateAgentRunCommand returns both the durable run and its creation event.
+// Idempotent replays return the existing run with a nil event.
+func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
+	return runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
 }
 
 func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
