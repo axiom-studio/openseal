@@ -227,6 +227,8 @@ type PersistentKernelStore interface {
 var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
 
 var (
+	ErrRunNotFound              = runtime.ErrRunNotFound
+	ErrRevisionConflict         = runtime.ErrRevisionConflict
 	ErrAgentRequestNotFound     = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized = runtime.ErrAgentRequestUnauthorized
