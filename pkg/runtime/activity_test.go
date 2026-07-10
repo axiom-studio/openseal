@@ -32,6 +32,13 @@ type activityStubStore struct {
 	events []*ActivityEvent
 }
 
+func (s *activityStubStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
+	s.run = cloneAgentRun(run)
+	event.Sequence = int64(len(s.events) + 1)
+	s.events = append(s.events, event)
+	return event, nil
+}
+
 func newActivityStubStore() *activityStubStore                                 { return &activityStubStore{} }
 func (s *activityStubStore) CreateObjective(context.Context, *Objective) error { return nil }
 func (s *activityStubStore) GetObjective(context.Context, Scope, string) (*Objective, error) {

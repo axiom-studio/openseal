@@ -16,6 +16,7 @@ var (
 	ErrObjectiveNotFound = errors.New("objective not found")
 	ErrRunNotFound       = errors.New("run not found")
 	ErrRevisionConflict  = errors.New("objective revision conflict")
+	ErrRunIdempotency    = errors.New("run idempotency key was already used with different input")
 )
 
 // Scope is the portable ownership boundary for every kernel resource. Embedding
@@ -108,6 +109,7 @@ const (
 	AgentRunStatusQueued               AgentRunStatus = "queued"
 	AgentRunStatusPlanning             AgentRunStatus = "planning"
 	AgentRunStatusRunning              AgentRunStatus = "running"
+	AgentRunStatusPaused               AgentRunStatus = "paused"
 	AgentRunStatusSleeping             AgentRunStatus = "sleeping"
 	AgentRunStatusWaitingForDependency AgentRunStatus = "waiting_for_dependency"
 	AgentRunStatusWaitingForAgent      AgentRunStatus = "waiting_for_agent"
@@ -138,43 +140,58 @@ type WakeCondition struct {
 	Predicate map[string]interface{} `json:"predicate,omitempty"`
 }
 
+// AgentRunIntervention is durable operator steering. It records an explicit
+// instruction without exposing private model reasoning or mutating the
+// agent's definition.
+type AgentRunIntervention struct {
+	ID          string        `json:"id"`
+	Actor       ActivityActor `json:"actor"`
+	Instruction string        `json:"instruction"`
+	CreatedAt   time.Time     `json:"createdAt"`
+}
+
 // AgentRun is the canonical durable workstream. Workflow execution records are
 // subordinate execution details and must not be used as agent-run identity.
 type AgentRun struct {
-	ID                string                 `json:"id"`
-	Scope             Scope                  `json:"scope"`
-	ObjectiveID       string                 `json:"objectiveId,omitempty"`
-	ParentRunID       string                 `json:"parentRunId,omitempty"`
-	RootRunID         string                 `json:"rootRunId"`
-	Owner             ObjectiveOwner         `json:"owner"`
-	AssignedAgentID   string                 `json:"assignedAgentId,omitempty"`
-	Goal              string                 `json:"goal"`
-	Source            RunSource              `json:"source"`
-	Status            AgentRunStatus         `json:"status"`
-	Priority          int                    `json:"priority"`
-	Deadline          *time.Time             `json:"deadline,omitempty"`
-	AvailableAt       time.Time              `json:"availableAt"`
-	QueueEnteredAt    time.Time              `json:"queueEnteredAt"`
-	LeaseOwner        string                 `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt    *time.Time             `json:"leaseExpiresAt,omitempty"`
-	LastClaimedAt     *time.Time             `json:"lastClaimedAt,omitempty"`
-	Attempt           int                    `json:"attempt"`
-	LastWakeSignalID  string                 `json:"lastWakeSignalId,omitempty"`
-	Context           map[string]interface{} `json:"context,omitempty"`
-	Plan              map[string]interface{} `json:"plan,omitempty"`
-	Checkpoint        map[string]interface{} `json:"checkpoint,omitempty"`
-	WakeCondition     *WakeCondition         `json:"wakeCondition,omitempty"`
-	Budget            map[string]interface{} `json:"budget,omitempty"`
-	Policy            map[string]interface{} `json:"policy,omitempty"`
-	Output            map[string]interface{} `json:"output,omitempty"`
-	Error             string                 `json:"error,omitempty"`
-	WorkflowExecution *int                   `json:"workflowExecutionId,omitempty"`
-	LastAppliedTurn   int64                  `json:"lastAppliedTurn"`
-	Revision          int64                  `json:"revision"`
-	CreatedAt         time.Time              `json:"createdAt"`
-	UpdatedAt         time.Time              `json:"updatedAt"`
-	StartedAt         *time.Time             `json:"startedAt,omitempty"`
-	CompletedAt       *time.Time             `json:"completedAt,omitempty"`
+	ID                   string                 `json:"id"`
+	Scope                Scope                  `json:"scope"`
+	ObjectiveID          string                 `json:"objectiveId,omitempty"`
+	ParentRunID          string                 `json:"parentRunId,omitempty"`
+	RootRunID            string                 `json:"rootRunId"`
+	Owner                ObjectiveOwner         `json:"owner"`
+	AssignedAgentID      string                 `json:"assignedAgentId,omitempty"`
+	Goal                 string                 `json:"goal"`
+	Source               RunSource              `json:"source"`
+	Status               AgentRunStatus         `json:"status"`
+	Priority             int                    `json:"priority"`
+	Deadline             *time.Time             `json:"deadline,omitempty"`
+	AvailableAt          time.Time              `json:"availableAt"`
+	QueueEnteredAt       time.Time              `json:"queueEnteredAt"`
+	LeaseOwner           string                 `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt       *time.Time             `json:"leaseExpiresAt,omitempty"`
+	LastClaimedAt        *time.Time             `json:"lastClaimedAt,omitempty"`
+	Attempt              int                    `json:"attempt"`
+	LastWakeSignalID     string                 `json:"lastWakeSignalId,omitempty"`
+	Context              map[string]interface{} `json:"context,omitempty"`
+	Plan                 map[string]interface{} `json:"plan,omitempty"`
+	Checkpoint           map[string]interface{} `json:"checkpoint,omitempty"`
+	WakeCondition        *WakeCondition         `json:"wakeCondition,omitempty"`
+	PausedFrom           AgentRunStatus         `json:"pausedFrom,omitempty"`
+	PausedWakeCondition  *WakeCondition         `json:"pausedWakeCondition,omitempty"`
+	PendingInterventions []AgentRunIntervention `json:"pendingInterventions,omitempty"`
+	Budget               map[string]interface{} `json:"budget,omitempty"`
+	Policy               map[string]interface{} `json:"policy,omitempty"`
+	Output               map[string]interface{} `json:"output,omitempty"`
+	Error                string                 `json:"error,omitempty"`
+	WorkflowExecution    *int                   `json:"workflowExecutionId,omitempty"`
+	LastAppliedTurn      int64                  `json:"lastAppliedTurn"`
+	Revision             int64                  `json:"revision"`
+	CreatedAt            time.Time              `json:"createdAt"`
+	UpdatedAt            time.Time              `json:"updatedAt"`
+	StartedAt            *time.Time             `json:"startedAt,omitempty"`
+	CompletedAt          *time.Time             `json:"completedAt,omitempty"`
+	IdempotencyKeyHash   string                 `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint  string                 `json:"creationFingerprint,omitempty"`
 }
 
 func (r *AgentRun) Validate() error {
@@ -287,6 +304,9 @@ type CreateAgentRunRequest struct {
 	WakeCondition   *WakeCondition
 	Budget          map[string]interface{}
 	Policy          map[string]interface{}
+	IdempotencyKey  string
+	Actor           ActivityActor
+	Visibility      ActivityVisibility
 }
 
 type PortfolioService struct {
@@ -383,8 +403,19 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
+	run, err := buildAgentRun(ctx, s.store, req, uuid.NewString(), s.now())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.CreateAgentRun(ctx, run); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRunRequest, runID string, now time.Time) (*AgentRun, error) {
 	if req.ObjectiveID != "" {
-		objective, err := s.store.GetObjective(ctx, req.Scope, req.ObjectiveID)
+		objective, err := store.GetObjective(ctx, req.Scope, req.ObjectiveID)
 		if err != nil {
 			return nil, err
 		}
@@ -392,15 +423,13 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 			return nil, ErrObjectiveNotFound
 		}
 	}
-	now := s.now()
 	availableAt := now
 	if req.AvailableAt != nil {
 		availableAt = *req.AvailableAt
 	}
-	runID := uuid.NewString()
 	rootID := runID
 	if req.ParentRunID != "" {
-		parent, err := s.store.GetAgentRun(ctx, req.Scope, req.ParentRunID)
+		parent, err := store.GetAgentRun(ctx, req.Scope, req.ParentRunID)
 		if err != nil {
 			return nil, err
 		}
@@ -419,9 +448,6 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 		Budget: req.Budget, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := run.Validate(); err != nil {
-		return nil, err
-	}
-	if err := s.store.CreateAgentRun(ctx, run); err != nil {
 		return nil, err
 	}
 	return run, nil

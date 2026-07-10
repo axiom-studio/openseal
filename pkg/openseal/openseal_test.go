@@ -83,7 +83,7 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != AgentRunStatusRunning || event.Sequence != 1 {
+	if run.Status != AgentRunStatusRunning || event.Sequence != 2 {
 		t.Fatalf("unexpected transition: run=%#v event=%#v", run, event)
 	}
 	turn, err := engine.BeginAgentTurn(ctx, BeginAgentTurnRequest{
@@ -118,7 +118,7 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 || events[1].Sequence != 2 || events[1].Visibility != ActivityVisibilityTeam {
+	if len(events) != 3 || events[2].Sequence != 3 || events[2].Visibility != ActivityVisibilityTeam {
 		t.Fatalf("unexpected activity: %#v", events)
 	}
 	waiting, _, err := engine.TransitionAgentRun(ctx, scope, run.ID, RunTransitionRequest{
