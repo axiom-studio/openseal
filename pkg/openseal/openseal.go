@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -28,12 +29,27 @@ type (
 	StepExecutor         = executor.StepExecutor
 	ExecutionGraph       = executor.ExecutionGraph
 
-	AgentNodeDefinition = types.AgentNodeDefinition
-	AgentConnection     = types.AgentConnection
-	AgentLibraryBean    = types.AgentLibraryBean
-	AgentInstanceBean   = types.AgentInstanceBean
-	AgentWorkflow       = types.AgentWorkflow
-	AgentWorkflowBean   = types.AgentWorkflowBean
+	AgentNodeDefinition         = types.AgentNodeDefinition
+	AgentConnection             = types.AgentConnection
+	AgentLibraryBean            = types.AgentLibraryBean
+	AgentInstanceBean           = types.AgentInstanceBean
+	AgentWorkflow               = types.AgentWorkflow
+	AgentWorkflowBean           = types.AgentWorkflowBean
+	AgentDefinition             = kernelagent.AgentDefinition
+	AgentSkillRequirement       = kernelagent.SkillRequirement
+	AgentAuthorityPolicy        = kernelagent.AuthorityPolicy
+	AgentMemoryPolicy           = kernelagent.MemoryPolicy
+	AgentEscalationPolicy       = kernelagent.EscalationPolicy
+	AgentObjectiveTemplate      = kernelagent.ObjectiveTemplate
+	AgentEvaluationCriterion    = kernelagent.EvaluationCriterion
+	AgentAmendmentPolicy        = kernelagent.AmendmentPolicy
+	AgentDefinitionProvenance   = kernelagent.DefinitionProvenance
+	AgentDeployment             = kernelagent.AgentDeployment
+	AgentDeploymentRestrictions = kernelagent.DeploymentRestrictions
+	AgentDeploymentCapacity     = kernelagent.DeploymentCapacity
+	AgentDeploymentHealth       = kernelagent.DeploymentHealth
+	AgentDefinitionActivation   = kernelagent.DefinitionActivation
+	AgentRolloutStatus          = kernelagent.RolloutStatus
 
 	RunRecord                  = runtime.RunRecord
 	RetryPolicy                = runtime.RetryPolicy
@@ -269,6 +285,12 @@ const (
 	SkillSourceBundled      = skillsource.RootBundled
 	SkillSourcePlugin       = skillsource.RootPlugin
 	SkillSourceExtra        = skillsource.RootExtra
+
+	AgentRolloutPending  = kernelagent.RolloutPending
+	AgentRolloutActive   = kernelagent.RolloutActive
+	AgentRolloutDegraded = kernelagent.RolloutDegraded
+	AgentRolloutPaused   = kernelagent.RolloutPaused
+	AgentRolloutRetired  = kernelagent.RolloutRetired
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -295,6 +317,7 @@ type Engine struct {
 	actionPoolSpecs []actionWorkerSpec
 	actionPools     []*runtime.ActionWorkerPool
 	skills          *skill.Catalog
+	agents          *kernelagent.Registry
 	logger          *zap.SugaredLogger
 }
 
@@ -340,6 +363,7 @@ func New(opts ...Option) (*Engine, error) {
 		runQueue:     runtime.NewAgentRunScheduler(store),
 		wake:         runtime.NewAgentRunWakeService(store, store),
 		skills:       skill.NewCatalog(),
+		agents:       kernelagent.NewRegistry(),
 		actionPolicy: runtime.NewDefaultActionPolicy(),
 		approvalAuth: runtime.EligibleApprovalAuthorizer{},
 		logger:       sugar,
@@ -753,6 +777,38 @@ func (e *Engine) ResolveSkillAction(ctx context.Context, scope skill.ScopeRefere
 
 func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	return e.skills.Activate(ctx, scope, deploymentID, host)
+}
+
+func (e *Engine) RegisterAgentDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) (*kernelagent.AgentDefinition, error) {
+	return e.agents.RegisterDefinition(ctx, definition)
+}
+
+func (e *Engine) GetAgentDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
+	return e.agents.GetDefinition(ctx, id, version)
+}
+
+func (e *Engine) ListAgentDefinitionVersions(ctx context.Context, id string) ([]*kernelagent.AgentDefinition, error) {
+	return e.agents.ListDefinitionVersions(ctx, id)
+}
+
+func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return e.agents.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+}
+
+func (e *Engine) GetAgentDeployment(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*kernelagent.AgentDeployment, error) {
+	return e.agents.GetDeployment(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ActivateAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return e.agents.ActivateDefinition(ctx, scope, deploymentID, version, expectedRevision, actorType, actorID, reason)
+}
+
+func (e *Engine) RollbackAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return e.agents.RollbackDefinition(ctx, scope, deploymentID, expectedRevision, actorType, actorID, reason)
+}
+
+func (e *Engine) ListAgentDefinitionActivations(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
+	return e.agents.ListActivations(ctx, scope, deploymentID)
 }
 
 func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {
