@@ -60,138 +60,141 @@ type (
 	ResolveAgentAmendmentRequest          = kernelagent.ResolveAmendmentRequest
 	AgentRegistryStore                    = kernelagent.Store
 
-	RunRecord                  = runtime.RunRecord
-	RetryPolicy                = runtime.RetryPolicy
-	ExecutionStore             = runtime.ExecutionStore
-	PortfolioStore             = runtime.PortfolioStore
-	KernelStore                = runtime.KernelStore
-	PostgresStore              = runtime.PostgresStore
-	PostgresStoreOption        = runtime.PostgresStoreOption
-	Scope                      = runtime.Scope
-	ObjectiveOwner             = runtime.ObjectiveOwner
-	Objective                  = runtime.Objective
-	ObjectiveStatus            = runtime.ObjectiveStatus
-	ObjectiveFilter            = runtime.ObjectiveFilter
-	AgentRun                   = runtime.AgentRun
-	AgentRunStatus             = runtime.AgentRunStatus
-	AgentRunFilter             = runtime.AgentRunFilter
-	RunSource                  = runtime.RunSource
-	WakeCondition              = runtime.WakeCondition
-	CreateObjectiveRequest     = runtime.CreateObjectiveRequest
-	UpdateObjectiveRequest     = runtime.UpdateObjectiveRequest
-	CreateAgentRunRequest      = runtime.CreateAgentRunRequest
-	RunActivityStore           = runtime.RunActivityStore
-	ActivityEvent              = runtime.ActivityEvent
-	ActivityActor              = runtime.ActivityActor
-	ActivityFilter             = runtime.ActivityFilter
-	ActivitySeverity           = runtime.ActivitySeverity
-	ActivityVisibility         = runtime.ActivityVisibility
-	RunTransitionRequest       = runtime.RunTransitionRequest
-	AgentTurnStore             = runtime.AgentTurnStore
-	AgentTurn                  = runtime.AgentTurn
-	AgentTurnStatus            = runtime.AgentTurnStatus
-	AgentTurnFilter            = runtime.AgentTurnFilter
-	TurnDecision               = runtime.TurnDecision
-	TurnAction                 = runtime.TurnAction
-	TurnUsage                  = runtime.TurnUsage
-	BeginAgentTurnRequest      = runtime.BeginAgentTurnRequest
-	FinishAgentTurnRequest     = runtime.FinishAgentTurnRequest
-	TurnExecutionContext       = runtime.TurnExecutionContext
-	TurnRunner                 = runtime.TurnRunner
-	TurnRunnerFunc             = runtime.TurnRunnerFunc
-	TurnOutcome                = runtime.TurnOutcome
-	AdvanceAgentRunRequest     = runtime.AdvanceAgentRunRequest
-	AdvanceAgentRunResult      = runtime.AdvanceAgentRunResult
-	AgentRunScheduleStore      = runtime.AgentRunScheduleStore
-	AgentRunClaimRequest       = runtime.AgentRunClaimRequest
-	AgentRunWorkerConfig       = runtime.AgentRunWorkerConfig
-	TurnRunnerBinding          = runtime.TurnRunnerBinding
-	TurnRunnerResolver         = runtime.TurnRunnerResolver
-	TurnRunnerResolverFunc     = runtime.TurnRunnerResolverFunc
-	WakeSignal                 = runtime.WakeSignal
-	WokenRun                   = runtime.WokenRun
-	WakeResult                 = runtime.WakeResult
-	SkillCatalog               = skill.Catalog
-	SkillDefinition            = skill.Definition
-	SkillAction                = skill.Action
-	SkillBinding               = skill.Binding
-	SkillScope                 = skill.ScopeReference
-	SkillRiskLevel             = skill.RiskLevel
-	SkillSideEffect            = skill.SideEffect
-	SkillIdempotencyMode       = skill.IdempotencyMode
-	SkillCredentialRequirement = skill.CredentialRequirement
-	SkillCredentialReference   = skill.CredentialReference
-	SkillTransportReference    = skill.TransportReference
-	SkillTransportArgument     = skill.TransportArgument
-	SkillArgumentRule          = skill.ArgumentRule
-	SkillActionRetryPolicy     = skill.ActionRetryPolicy
-	ModelSkillAction           = skill.ModelAction
-	ModelSkillPrompt           = skill.ModelPrompt
-	BoundSkillAction           = skill.BoundAction
-	SkillPromptModule          = skill.PromptModule
-	SkillHostCapabilityState   = skill.HostCapabilityState
-	SkillAvailabilityReason    = skill.AvailabilityReason
-	ActivatedSkill             = skill.ActivatedSkill
-	UnavailableSkill           = skill.UnavailableSkill
-	SkillActivationSnapshot    = skill.ActivationSnapshot
-	SkillCatalogStore          = skill.CatalogStore
-	ActionStore                = runtime.ActionStore
-	ActionCall                 = runtime.ActionCall
-	ActionCallStatus           = runtime.ActionCallStatus
-	ActionFilter               = runtime.ActionFilter
-	ActionDisposition          = runtime.ActionDisposition
-	ActionPolicyInput          = runtime.ActionPolicyInput
-	ActionPolicyDecision       = runtime.ActionPolicyDecision
-	ActionPolicyEvaluator      = runtime.ActionPolicyEvaluator
-	ActionPolicyEvaluatorFunc  = runtime.ActionPolicyEvaluatorFunc
-	ProposeActionRequest       = runtime.ProposeActionRequest
-	ActionProposalResult       = runtime.ActionProposalResult
-	ApprovalCheckpoint         = runtime.ApprovalCheckpoint
-	ApprovalStatus             = runtime.ApprovalStatus
-	ApprovalPrincipal          = runtime.ApprovalPrincipal
-	ApprovalFilter             = runtime.ApprovalFilter
-	ApprovalAuthorizer         = runtime.ApprovalAuthorizer
-	ApprovalAuthorizerFunc     = runtime.ApprovalAuthorizerFunc
-	ResolveApprovalRequest     = runtime.ResolveApprovalRequest
-	ApprovalResolutionResult   = runtime.ApprovalResolutionResult
-	ActionWorkerConfig         = runtime.ActionWorkerConfig
-	CredentialResolver         = runtime.CredentialResolver
-	CredentialResolverFunc     = runtime.CredentialResolverFunc
-	ActionDispatchInput        = runtime.ActionDispatchInput
-	ActionDispatcher           = runtime.ActionDispatcher
-	ActionDispatcherFunc       = runtime.ActionDispatcherFunc
-	ToolInvoker                = runtime.ToolInvoker
-	ToolInvokerFunc            = runtime.ToolInvokerFunc
-	ToolInvocation             = runtime.ToolInvocation
-	ToolActionDispatcher       = runtime.ToolActionDispatcher
-	OpenClawSkillSource        = skillopenclaw.Source
-	OpenClawSkillFile          = skillopenclaw.File
-	OpenClawSkillBundle        = skillopenclaw.Bundle
-	OpenClawSkillDiagnostic    = skillopenclaw.Diagnostic
-	OpenClawSkillCompilation   = skillopenclaw.Compilation
-	SkillSourceRootKind        = skillsource.RootKind
-	SkillSourceRoot            = skillsource.Root
-	SkillSourceCandidate       = skillsource.Candidate
-	SkillSourceShadowed        = skillsource.ShadowedCandidate
-	SkillSourceDiagnostic      = skillsource.Diagnostic
-	SkillSourceSnapshot        = skillsource.Snapshot
-	SkillSourceCatalog         = skillsource.Catalog
-	SkillSourceChange          = skillsource.Change
-	SkillSourceWatcher         = skillsource.Watcher
-	ClawHubRegistry            = clawhub.Registry
-	ClawHubClient              = clawhub.ClawHubClient
-	ClawHubSkillReference      = clawhub.SkillReference
-	ClawHubSearchRequest       = clawhub.SearchRequest
-	ClawHubExploreRequest      = clawhub.ExploreRequest
-	ClawHubSkillPage           = clawhub.SkillPage
-	ClawHubSkillSummary        = clawhub.SkillSummary
-	ClawHubSkillDetail         = clawhub.SkillDetail
-	ClawHubInstallRequest      = clawhub.InstallRequest
-	ClawHubInstalledSkill      = clawhub.InstalledSkill
-	ClawHubVerification        = clawhub.Verification
-	ClawHubVersionPage         = clawhub.VersionPage
-	ClawHubVersionDetail       = clawhub.VersionDetail
-	ClawHubDownloadedArchive   = clawhub.DownloadedArchive
+	RunRecord                   = runtime.RunRecord
+	RetryPolicy                 = runtime.RetryPolicy
+	ExecutionStore              = runtime.ExecutionStore
+	PortfolioStore              = runtime.PortfolioStore
+	KernelStore                 = runtime.KernelStore
+	PostgresStore               = runtime.PostgresStore
+	PostgresStoreOption         = runtime.PostgresStoreOption
+	Scope                       = runtime.Scope
+	ObjectiveOwner              = runtime.ObjectiveOwner
+	Objective                   = runtime.Objective
+	ObjectiveStatus             = runtime.ObjectiveStatus
+	ObjectiveFilter             = runtime.ObjectiveFilter
+	AgentRun                    = runtime.AgentRun
+	AgentRunStatus              = runtime.AgentRunStatus
+	AgentRunFilter              = runtime.AgentRunFilter
+	RunSource                   = runtime.RunSource
+	WakeCondition               = runtime.WakeCondition
+	CreateObjectiveRequest      = runtime.CreateObjectiveRequest
+	UpdateObjectiveRequest      = runtime.UpdateObjectiveRequest
+	CreateAgentRunRequest       = runtime.CreateAgentRunRequest
+	RunActivityStore            = runtime.RunActivityStore
+	ActivityEvent               = runtime.ActivityEvent
+	ActivityActor               = runtime.ActivityActor
+	ActivityFilter              = runtime.ActivityFilter
+	ActivitySeverity            = runtime.ActivitySeverity
+	ActivityVisibility          = runtime.ActivityVisibility
+	RunTransitionRequest        = runtime.RunTransitionRequest
+	AgentTurnStore              = runtime.AgentTurnStore
+	AgentTurn                   = runtime.AgentTurn
+	AgentTurnStatus             = runtime.AgentTurnStatus
+	AgentTurnFilter             = runtime.AgentTurnFilter
+	TurnDecision                = runtime.TurnDecision
+	TurnAction                  = runtime.TurnAction
+	TurnUsage                   = runtime.TurnUsage
+	BeginAgentTurnRequest       = runtime.BeginAgentTurnRequest
+	FinishAgentTurnRequest      = runtime.FinishAgentTurnRequest
+	TurnExecutionContext        = runtime.TurnExecutionContext
+	TurnRunner                  = runtime.TurnRunner
+	TurnRunnerFunc              = runtime.TurnRunnerFunc
+	TurnOutcome                 = runtime.TurnOutcome
+	AdvanceAgentRunRequest      = runtime.AdvanceAgentRunRequest
+	AdvanceAgentRunResult       = runtime.AdvanceAgentRunResult
+	AgentRunScheduleStore       = runtime.AgentRunScheduleStore
+	AgentRunClaimRequest        = runtime.AgentRunClaimRequest
+	AgentRunWorkerConfig        = runtime.AgentRunWorkerConfig
+	TurnRunnerBinding           = runtime.TurnRunnerBinding
+	TurnRunnerResolver          = runtime.TurnRunnerResolver
+	TurnRunnerResolverFunc      = runtime.TurnRunnerResolverFunc
+	WakeSignal                  = runtime.WakeSignal
+	WokenRun                    = runtime.WokenRun
+	WakeResult                  = runtime.WakeResult
+	SkillCatalog                = skill.Catalog
+	SkillDefinition             = skill.Definition
+	SkillAction                 = skill.Action
+	SkillBinding                = skill.Binding
+	SkillScope                  = skill.ScopeReference
+	SkillRiskLevel              = skill.RiskLevel
+	SkillSideEffect             = skill.SideEffect
+	SkillIdempotencyMode        = skill.IdempotencyMode
+	SkillCredentialRequirement  = skill.CredentialRequirement
+	SkillCredentialReference    = skill.CredentialReference
+	SkillTransportReference     = skill.TransportReference
+	SkillTransportArgument      = skill.TransportArgument
+	SkillArgumentRule           = skill.ArgumentRule
+	SkillActionRetryPolicy      = skill.ActionRetryPolicy
+	ModelSkillAction            = skill.ModelAction
+	ModelSkillPrompt            = skill.ModelPrompt
+	BoundSkillAction            = skill.BoundAction
+	SkillPromptModule           = skill.PromptModule
+	SkillHostCapabilityState    = skill.HostCapabilityState
+	SkillAvailabilityReason     = skill.AvailabilityReason
+	ActivatedSkill              = skill.ActivatedSkill
+	UnavailableSkill            = skill.UnavailableSkill
+	SkillActivationSnapshot     = skill.ActivationSnapshot
+	SkillCatalogStore           = skill.CatalogStore
+	ActionStore                 = runtime.ActionStore
+	ActionCall                  = runtime.ActionCall
+	ActionCallStatus            = runtime.ActionCallStatus
+	ActionFilter                = runtime.ActionFilter
+	ActionDisposition           = runtime.ActionDisposition
+	ActionPolicyInput           = runtime.ActionPolicyInput
+	ActionPolicyDecision        = runtime.ActionPolicyDecision
+	ActionPolicyEvaluator       = runtime.ActionPolicyEvaluator
+	ActionPolicyEvaluatorFunc   = runtime.ActionPolicyEvaluatorFunc
+	ProposeActionRequest        = runtime.ProposeActionRequest
+	ActionProposalResult        = runtime.ActionProposalResult
+	ApprovalCheckpoint          = runtime.ApprovalCheckpoint
+	ApprovalStatus              = runtime.ApprovalStatus
+	ApprovalPrincipal           = runtime.ApprovalPrincipal
+	ApprovalFilter              = runtime.ApprovalFilter
+	ApprovalAuthorizer          = runtime.ApprovalAuthorizer
+	ApprovalAuthorizerFunc      = runtime.ApprovalAuthorizerFunc
+	ResolveApprovalRequest      = runtime.ResolveApprovalRequest
+	ApprovalResolutionResult    = runtime.ApprovalResolutionResult
+	ActionWorkerConfig          = runtime.ActionWorkerConfig
+	DynamicActionWorkerConfig   = runtime.DynamicActionWorkerConfig
+	ActionWorkerScopeSource     = runtime.ActionWorkerScopeSource
+	ActionWorkerScopeSourceFunc = runtime.ActionWorkerScopeSourceFunc
+	CredentialResolver          = runtime.CredentialResolver
+	CredentialResolverFunc      = runtime.CredentialResolverFunc
+	ActionDispatchInput         = runtime.ActionDispatchInput
+	ActionDispatcher            = runtime.ActionDispatcher
+	ActionDispatcherFunc        = runtime.ActionDispatcherFunc
+	ToolInvoker                 = runtime.ToolInvoker
+	ToolInvokerFunc             = runtime.ToolInvokerFunc
+	ToolInvocation              = runtime.ToolInvocation
+	ToolActionDispatcher        = runtime.ToolActionDispatcher
+	OpenClawSkillSource         = skillopenclaw.Source
+	OpenClawSkillFile           = skillopenclaw.File
+	OpenClawSkillBundle         = skillopenclaw.Bundle
+	OpenClawSkillDiagnostic     = skillopenclaw.Diagnostic
+	OpenClawSkillCompilation    = skillopenclaw.Compilation
+	SkillSourceRootKind         = skillsource.RootKind
+	SkillSourceRoot             = skillsource.Root
+	SkillSourceCandidate        = skillsource.Candidate
+	SkillSourceShadowed         = skillsource.ShadowedCandidate
+	SkillSourceDiagnostic       = skillsource.Diagnostic
+	SkillSourceSnapshot         = skillsource.Snapshot
+	SkillSourceCatalog          = skillsource.Catalog
+	SkillSourceChange           = skillsource.Change
+	SkillSourceWatcher          = skillsource.Watcher
+	ClawHubRegistry             = clawhub.Registry
+	ClawHubClient               = clawhub.ClawHubClient
+	ClawHubSkillReference       = clawhub.SkillReference
+	ClawHubSearchRequest        = clawhub.SearchRequest
+	ClawHubExploreRequest       = clawhub.ExploreRequest
+	ClawHubSkillPage            = clawhub.SkillPage
+	ClawHubSkillSummary         = clawhub.SkillSummary
+	ClawHubSkillDetail          = clawhub.SkillDetail
+	ClawHubInstallRequest       = clawhub.InstallRequest
+	ClawHubInstalledSkill       = clawhub.InstalledSkill
+	ClawHubVerification         = clawhub.Verification
+	ClawHubVersionPage          = clawhub.VersionPage
+	ClawHubVersionDetail        = clawhub.VersionDetail
+	ClawHubDownloadedArchive    = clawhub.DownloadedArchive
 )
 
 // PersistentKernelStore is the complete durable control-plane contract for an
@@ -339,29 +342,31 @@ const (
 // Engine is the primary entry point for OpenSeal.
 // It wires together the registry, execution store, worker pool, and scheduler.
 type Engine struct {
-	registry        *executor.Registry
-	store           runtime.KernelStore
-	pool            *runtime.WorkerPool
-	scheduler       *runtime.Scheduler
-	portfolio       *runtime.PortfolioService
-	activity        *runtime.RunActivityService
-	turns           *runtime.AgentTurnService
-	turnsRun        *runtime.TurnCoordinator
-	runQueue        *runtime.AgentRunScheduler
-	wake            *runtime.AgentRunWakeService
-	actions         *runtime.ActionCoordinator
-	approvals       *runtime.ApprovalCoordinator
-	actionPolicy    runtime.ActionPolicyEvaluator
-	approvalAuth    runtime.ApprovalAuthorizer
-	clawHub         *clawhub.InstallManager
-	clawHubRegistry clawhub.Registry
-	agentPoolSpecs  []agentRunWorkerSpec
-	agentPools      []*runtime.AgentRunWorkerPool
-	actionPoolSpecs []actionWorkerSpec
-	actionPools     []*runtime.ActionWorkerPool
-	skills          *skill.Catalog
-	agents          *kernelagent.Registry
-	logger          *zap.SugaredLogger
+	registry              *executor.Registry
+	store                 runtime.KernelStore
+	pool                  *runtime.WorkerPool
+	scheduler             *runtime.Scheduler
+	portfolio             *runtime.PortfolioService
+	activity              *runtime.RunActivityService
+	turns                 *runtime.AgentTurnService
+	turnsRun              *runtime.TurnCoordinator
+	runQueue              *runtime.AgentRunScheduler
+	wake                  *runtime.AgentRunWakeService
+	actions               *runtime.ActionCoordinator
+	approvals             *runtime.ApprovalCoordinator
+	actionPolicy          runtime.ActionPolicyEvaluator
+	approvalAuth          runtime.ApprovalAuthorizer
+	clawHub               *clawhub.InstallManager
+	clawHubRegistry       clawhub.Registry
+	agentPoolSpecs        []agentRunWorkerSpec
+	agentPools            []*runtime.AgentRunWorkerPool
+	actionPoolSpecs       []actionWorkerSpec
+	actionPools           []*runtime.ActionWorkerPool
+	actionSupervisorSpecs []actionWorkerSupervisorSpec
+	actionSupervisors     []*runtime.ActionWorkerSupervisor
+	skills                *skill.Catalog
+	agents                *kernelagent.Registry
+	logger                *zap.SugaredLogger
 }
 
 type agentRunWorkerSpec struct {
@@ -371,6 +376,13 @@ type agentRunWorkerSpec struct {
 
 type actionWorkerSpec struct {
 	config      runtime.ActionWorkerConfig
+	credentials runtime.CredentialResolver
+	dispatcher  runtime.ActionDispatcher
+}
+
+type actionWorkerSupervisorSpec struct {
+	config      runtime.DynamicActionWorkerConfig
+	source      runtime.ActionWorkerScopeSource
 	credentials runtime.CredentialResolver
 	dispatcher  runtime.ActionDispatcher
 }
@@ -424,6 +436,9 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.rebuildActionWorkerPools(); err != nil {
 		return nil, fmt.Errorf("action worker configuration: %w", err)
 	}
+	if err := e.rebuildActionWorkerSupervisors(); err != nil {
+		return nil, fmt.Errorf("dynamic action worker configuration: %w", err)
+	}
 	if err := e.rebuildAgentWorkerPools(); err != nil {
 		return nil, fmt.Errorf("agent worker configuration: %w", err)
 	}
@@ -440,10 +455,16 @@ func (e *Engine) Start(ctx context.Context) {
 	for _, pool := range e.actionPools {
 		pool.Start(ctx)
 	}
+	for _, supervisor := range e.actionSupervisors {
+		supervisor.Start(ctx)
+	}
 }
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	for _, supervisor := range e.actionSupervisors {
+		supervisor.Stop()
+	}
 	for _, pool := range e.actionPools {
 		pool.Stop()
 	}
@@ -601,6 +622,24 @@ func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.Cr
 	}
 }
 
+// WithDynamicActionWorkers reconciles one isolated worker pool per active
+// scope supplied by the embedding control plane. The option may be repeated
+// for independent scope sources or transport hosts.
+func WithDynamicActionWorkers(config runtime.DynamicActionWorkerConfig, source runtime.ActionWorkerScopeSource, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
+	return func(e *Engine) error {
+		if source == nil {
+			return fmt.Errorf("action worker scope source is required")
+		}
+		if dispatcher == nil {
+			return fmt.Errorf("action dispatcher is required")
+		}
+		e.actionSupervisorSpecs = append(e.actionSupervisorSpecs, actionWorkerSupervisorSpec{
+			config: config, source: source, credentials: credentials, dispatcher: dispatcher,
+		})
+		return nil
+	}
+}
+
 func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace string) Option {
 	return func(e *Engine) error {
 		manager, err := clawhub.NewInstallManager(registryID, registry, workspace)
@@ -696,6 +735,18 @@ func (e *Engine) rebuildActionWorkerPools() error {
 	return nil
 }
 
+func (e *Engine) rebuildActionWorkerSupervisors() error {
+	e.actionSupervisors = make([]*runtime.ActionWorkerSupervisor, 0, len(e.actionSupervisorSpecs))
+	for _, spec := range e.actionSupervisorSpecs {
+		supervisor, err := runtime.NewActionWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
+		if err != nil {
+			return err
+		}
+		e.actionSupervisors = append(e.actionSupervisors, supervisor)
+	}
+	return nil
+}
+
 func (e *Engine) rebuildAgentWorkerPools() error {
 	e.agentPools = make([]*runtime.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
 	for _, spec := range e.agentPoolSpecs {
@@ -717,6 +768,9 @@ func (e *Engine) WakeAgentWorkers() {
 func (e *Engine) WakeActionWorkers() {
 	for _, pool := range e.actionPools {
 		pool.Wake()
+	}
+	for _, supervisor := range e.actionSupervisors {
+		supervisor.Wake()
 	}
 }
 
