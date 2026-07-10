@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
@@ -291,5 +294,40 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	}
 	if crossScopeTurn, err := replica.GetAgentTurn(ctx, otherScope, activeTurn.ID); err != nil || crossScopeTurn != nil {
 		t.Fatalf("cross-scope turn = %#v, %v", crossScopeTurn, err)
+	}
+
+	agentRegistry := kernelagent.NewRegistryWithStore(primary)
+	for _, version := range []string{"1", "2"} {
+		if _, err := agentRegistry.RegisterDefinition(ctx, sqliteAgentDefinition(version)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agentScope := capability.ScopeReference{Kind: "tenant", ID: "postgres-e2e"}
+	deployment, _, err := agentRegistry.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: "operator", Scope: agentScope, DefinitionID: "operator", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Environment: "production", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "admin", "initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicaRegistry := kernelagent.NewRegistryWithStore(replica)
+	activated, _, err := replicaRegistry.ActivateDefinition(ctx, agentScope, deployment.ID, "2", deployment.Revision, "user", "admin", "roll forward")
+	if err != nil || activated.ActiveVersion != "2" {
+		t.Fatalf("replica definition activation = %#v, %v", activated, err)
+	}
+	if restoredDeployment, err := agentRegistry.GetDeployment(ctx, agentScope, deployment.ID); err != nil || restoredDeployment.ActiveVersion != "2" {
+		t.Fatalf("restored deployment = %#v, %v", restoredDeployment, err)
+	}
+
+	skillCatalog := skill.NewCatalogWithStore(primary)
+	skillDefinition := &skill.Definition{ID: "research", Version: "1", Name: "Research", Prompt: &skill.PromptModule{Instructions: "Research with cited evidence."}}
+	if err := skillCatalog.Register(ctx, skillDefinition); err != nil {
+		t.Fatal(err)
+	}
+	skillScope := skill.ScopeReference{Kind: "tenant", ID: "postgres-e2e"}
+	if err := skillCatalog.Bind(ctx, &skill.Binding{ID: "research", Scope: skillScope, DeploymentID: deployment.ID, SkillID: skillDefinition.ID, SkillVersion: skillDefinition.Version, EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	replicaCatalog := skill.NewCatalogWithStore(replica)
+	prompts, err := replicaCatalog.ListModelPrompts(ctx, skillScope, deployment.ID)
+	if err != nil || len(prompts) != 1 || prompts[0].SkillID != skillDefinition.ID {
+		t.Fatalf("replica skill prompts = %#v, %v", prompts, err)
 	}
 }
