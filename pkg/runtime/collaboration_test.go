@@ -116,6 +116,17 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil || child.AssignedAgentID != "marketing" {
 				t.Fatalf("persisted child = %#v, %v", child, err)
 			}
+			_, err = NewArtifactCatalog(store).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+				ID: "artifact-launch-brief", Version: 1, Scope: scope, Name: "launch-brief.md",
+				Type: "document", MediaType: "text/markdown", ContentRef: "artifact-store:launch-brief-v1",
+				Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SizeBytes: 2048,
+				Classification: ArtifactClassificationInternal, Metadata: map[string]interface{}{"wordCount": 420},
+				Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing"}, RunID: child.ID, RequestID: created.Request.ID},
+				Evidence:   []EvidenceLink{{Relation: EvidenceRelationSupports, TargetKind: EvidenceTargetClaim, TargetRef: "review:editorial-7"}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
 			completion := CompleteAgentRequestRequest{
 				Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
 				ExpectedChildRevision: child.Revision, Principal: create.Recipient,
@@ -123,10 +134,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 				Summary:            "Delivered the launch brief with audience-specific messaging.",
 				AcceptanceEvidence: map[string]interface{}{"format": "markdown", "review": "passed"},
 				Artifacts: []ArtifactReference{{
-					ID: "artifact-launch-brief", RequirementName: "launch-brief", Name: "launch-brief.md",
-					Type: "document", MediaType: "text/markdown", ContentRef: "artifact-store:launch-brief-v1",
-					Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SizeBytes: 2048,
-					Metadata: map[string]interface{}{"wordCount": 420}, EvidenceRefs: []string{"review:editorial-7"},
+					ID: "artifact-launch-brief", Version: 1, RequirementName: "launch-brief",
 				}},
 				CompletionKey: "complete-launch-brief-v1",
 			}
@@ -264,14 +272,31 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, artifact := range []*Artifact{
+		{
+			ID: "brief-1", Version: 1, Scope: scope, Name: "brief.md", Type: "document",
+			ContentRef: "artifact-store:brief-1", Digest: digestFor("brief-1"), Classification: ArtifactClassificationInternal,
+			Metadata:   map[string]interface{}{"reviewed": true},
+			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
+		},
+		{
+			ID: "brief-bad-schema", Version: 1, Scope: scope, Name: "brief.md", Type: "document",
+			ContentRef: "artifact-store:brief-bad-schema", Digest: digestFor("brief-bad-schema"), Classification: ArtifactClassificationInternal,
+			Metadata:   map[string]interface{}{"reviewed": false},
+			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
+		},
+	} {
+		if _, err := NewArtifactCatalog(store).Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	base := CompleteAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: accepted.Child.Revision, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"},
 		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing-editor"}, Summary: "Brief ready",
 		AcceptanceEvidence: map[string]interface{}{"reviewed": true}, CompletionKey: "brief-v1",
 		Artifacts: []ArtifactReference{{
-			ID: "brief-1", RequirementName: "brief", Name: "brief.md", Type: "document",
-			ContentRef: "artifact-store:brief-1", Metadata: map[string]interface{}{"reviewed": true},
+			ID: "brief-1", Version: 1, RequirementName: "brief",
 		}},
 	}
 	unauthorized := base
@@ -287,20 +312,25 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	unsafeURL := base
 	unsafeURL.Artifacts = cloneArtifactReferences(base.Artifacts)
 	unsafeURL.Artifacts[0].ContentRef = "https://store.test/brief?token=secret"
-	if _, err := service.CompleteAgentRequest(ctx, unsafeURL); err == nil || !strings.Contains(err.Error(), "opaque reference") {
+	if _, err := service.CompleteAgentRequest(ctx, unsafeURL); err == nil || !strings.Contains(err.Error(), "only id, version") {
 		t.Fatalf("unsafe artifact reference error = %v", err)
 	}
 	badSchema := base
 	badSchema.Artifacts = cloneArtifactReferences(base.Artifacts)
-	badSchema.Artifacts[0].Metadata = map[string]interface{}{"reviewed": false}
+	badSchema.Artifacts[0].ID = "brief-bad-schema"
 	if _, err := service.CompleteAgentRequest(ctx, badSchema); err == nil || !strings.Contains(err.Error(), "JSON schema") {
 		t.Fatalf("artifact schema error = %v", err)
 	}
-	unsafeMetadata := base
-	unsafeMetadata.Artifacts = cloneArtifactReferences(base.Artifacts)
-	unsafeMetadata.Artifacts[0].Metadata = map[string]interface{}{"apiToken": "secret"}
-	if _, err := service.CompleteAgentRequest(ctx, unsafeMetadata); !errors.Is(err, ErrUnsafeSharedContext) {
-		t.Fatalf("unsafe artifact metadata error = %v", err)
+	tamperedMetadata := base
+	tamperedMetadata.Artifacts = cloneArtifactReferences(base.Artifacts)
+	tamperedMetadata.Artifacts[0].Metadata = map[string]interface{}{"reviewed": true}
+	if _, err := service.CompleteAgentRequest(ctx, tamperedMetadata); err == nil || !strings.Contains(err.Error(), "only id, version") {
+		t.Fatalf("tampered artifact metadata error = %v", err)
+	}
+	unregistered := base
+	unregistered.Artifacts = []ArtifactReference{{ID: "missing", Version: 1, RequirementName: "brief"}}
+	if _, err := service.CompleteAgentRequest(ctx, unregistered); !errors.Is(err, ErrArtifactNotFound) {
+		t.Fatalf("unregistered artifact error = %v", err)
 	}
 	completed, err := service.CompleteAgentRequest(ctx, base)
 	if err != nil || completed.Request.Status != AgentRequestStatusCompleted || completed.Request.Artifacts[0].ID != "brief-1" {
