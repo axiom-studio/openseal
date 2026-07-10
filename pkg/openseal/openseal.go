@@ -1432,6 +1432,12 @@ func (e *Engine) ConversationCoordinationAvailable() bool {
 	return e != nil && e.conversationCoordinator != nil
 }
 
+// ConversationRunsAvailable reports whether committed Team messages are
+// automatically projected into durable, recoverable conversation Runs.
+func (e *Engine) ConversationRunsAvailable() bool {
+	return e != nil && e.conversationRunScheduler != nil && e.conversationRunReconciler != nil
+}
+
 func (e *Engine) GetParticipationRound(ctx context.Context, scope runtime.Scope, conversationID, roundID string) (*runtime.ParticipationRoundResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
