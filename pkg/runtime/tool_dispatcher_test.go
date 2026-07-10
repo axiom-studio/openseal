@@ -24,7 +24,10 @@ Publish the requested release.
 	definition := compilation.Definition
 	bound := &skill.BoundAction{
 		Definition: definition, Action: definition.Actions["invoke"],
-		Binding: &skill.Binding{ID: "publisher", Scope: skill.ScopeReference{Kind: "test", ID: "one"}, DeploymentID: "agent"},
+		Binding: &skill.Binding{
+			ID: "publisher", Scope: skill.ScopeReference{Kind: "test", ID: "one"}, DeploymentID: "agent",
+			Config: map[string]interface{}{"provider": "openai-compatible", "base_url": "https://llm.example/v1", "model": "reasoner"},
+		},
 	}
 	var invokedName string
 	var invokedArguments map[string]interface{}
@@ -44,7 +47,8 @@ Publish the requested release.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invokedName != "release_publish" || invokedArguments["command"] != "release 1.2.3" || invokedArguments["commandName"] != "publisher" || invokedArguments["skillName"] != "publisher" || len(invokedArguments) != 3 {
+	if invokedName != "release_publish" || invokedArguments["command"] != "release 1.2.3" || invokedArguments["commandName"] != "publisher" || invokedArguments["skillName"] != "publisher" ||
+		invokedArguments["provider"] != "openai-compatible" || invokedArguments["base_url"] != "https://llm.example/v1" || invokedArguments["model"] != "reasoner" || len(invokedArguments) != 6 {
 		t.Fatalf("tool invocation = name %q args %#v", invokedName, invokedArguments)
 	}
 	if invokedCredentials["token"] != "resolved-secret" || output["published"] != true {
@@ -52,5 +56,26 @@ Publish the requested release.
 	}
 	if invocation.Scope != bound.Binding.Scope || invocation.DeploymentID != "agent" || invocation.SkillID != "publisher" || invocation.SkillVersion != definition.Version || invocation.Action != "invoke" {
 		t.Fatalf("tool routing metadata = %#v", invocation)
+	}
+}
+
+func TestToolActionDispatcherRejectsBindingConfigCollision(t *testing.T) {
+	definition := &skill.Definition{
+		ID: "fetch", Version: "1", Name: "Fetch", Transport: skill.TransportReference{Kind: "tool", Endpoint: "fetch"},
+		Actions: map[string]skill.Action{"run": {Name: "run", Description: "Fetch", InputSchema: map[string]interface{}{"type": "object"}, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported}},
+	}
+	dispatcher, err := NewToolActionDispatcher(ToolInvokerFunc(func(context.Context, ToolInvocation) (map[string]interface{}, error) {
+		t.Fatal("colliding invocation reached tool host")
+		return nil, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+		Bound:     &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: &skill.Binding{Config: map[string]interface{}{"url": "fixed"}}},
+		Arguments: map[string]interface{}{"url": "model-controlled"},
+	})
+	if err == nil {
+		t.Fatal("binding config collision was accepted")
 	}
 }

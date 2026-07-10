@@ -400,15 +400,29 @@ func MaterializeTransportArguments(bound *BoundAction, input map[string]interfac
 	if bound == nil || bound.Definition == nil {
 		return nil, errors.New("bound skill action is required")
 	}
+	result := make(map[string]interface{})
+	if bound.Binding != nil {
+		for name, value := range bound.Binding.Config {
+			result[name] = cloneValue(value)
+		}
+	}
 	transport := bound.Definition.Transport
 	if bound.Action.Transport != nil {
 		transport = *bound.Action.Transport
 	}
 	if len(transport.Arguments) == 0 {
-		return cloneMap(input), nil
+		for name, value := range input {
+			if _, exists := result[name]; exists {
+				return nil, fmt.Errorf("binding config collides with transport argument %s", name)
+			}
+			result[name] = cloneValue(value)
+		}
+		return result, nil
 	}
-	result := make(map[string]interface{}, len(transport.Arguments))
 	for name, mapping := range transport.Arguments {
+		if _, exists := result[name]; exists {
+			return nil, fmt.Errorf("binding config collides with transport argument %s", name)
+		}
 		if mapping.SourceArgument != "" {
 			value, ok := input[mapping.SourceArgument]
 			if !ok {
