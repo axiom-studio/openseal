@@ -226,6 +226,14 @@ type PersistentKernelStore interface {
 
 var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
 
+var (
+	ErrAgentRequestNotFound     = runtime.ErrAgentRequestNotFound
+	ErrInvalidAgentRequestState = runtime.ErrInvalidAgentRequestState
+	ErrAgentRequestUnauthorized = runtime.ErrAgentRequestUnauthorized
+	ErrAgentRequestIdempotency  = runtime.ErrAgentRequestIdempotency
+	ErrUnsafeSharedContext      = runtime.ErrUnsafeSharedContext
+)
+
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
 	return runtime.NewToolActionDispatcher(invoker)
 }
