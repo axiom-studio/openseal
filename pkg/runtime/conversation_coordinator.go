@@ -92,12 +92,13 @@ func (f ParticipationProposalProviderFunc) ProposeParticipation(ctx context.Cont
 }
 
 type ConversationCoordinationRequest struct {
-	Scope            Scope
-	ConversationID   string
-	ExpectedRevision int64
-	TriggerMessageID string
-	Policy           ConversationArbitrationPolicy
-	IdempotencyKey   string
+	Scope              Scope
+	ConversationID     string
+	ExpectedRevision   int64
+	TriggerMessageID   string
+	Policy             ConversationArbitrationPolicy
+	MaximumConcurrency int
+	IdempotencyKey     string
 }
 
 type ConversationCoordinatorConfig struct {
@@ -164,6 +165,9 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if key == "" || req.ExpectedRevision <= 0 || !validOpaqueIdentifier(strings.TrimSpace(req.ConversationID), 128) {
 		return nil, fmt.Errorf("%w: conversation, positive revision, and idempotency key are required", ErrInvalidConversation)
+	}
+	if req.MaximumConcurrency < 0 || req.MaximumConcurrency > c.config.MaximumConcurrency {
+		return nil, fmt.Errorf("%w: round concurrency exceeds the configured coordinator maximum", ErrInvalidConversation)
 	}
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
@@ -242,7 +246,11 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var workers sync.WaitGroup
-	workerCount := min(c.config.MaximumConcurrency, len(bindings))
+	maximumConcurrency := c.config.MaximumConcurrency
+	if req.MaximumConcurrency > 0 {
+		maximumConcurrency = req.MaximumConcurrency
+	}
+	workerCount := min(maximumConcurrency, len(bindings))
 	workers.Add(workerCount)
 	for range workerCount {
 		go func() {
