@@ -80,8 +80,12 @@ func TestCompilePromptOnlySkillAndRejectsSemanticLoss(t *testing.T) {
 	if err == nil {
 		t.Fatal("unsupported dispatch should fail explicitly")
 	}
-	_, err = Compile(Bundle{SkillMD: []byte("---\nname: actual\ndescription: mismatch\n---\nbody"), Source: Source{Reference: "owner/other"}})
+	_, err = Compile(Bundle{SkillMD: []byte("---\nname: actual\ndescription: mismatch\n---\nbody"), Source: Source{Reference: "owner/registry-slug", ExpectedName: "other"}})
 	if err == nil {
-		t.Fatal("source identity mismatch should fail")
+		t.Fatal("explicit source identity mismatch should fail")
+	}
+	aliased, err := Compile(Bundle{SkillMD: []byte("---\nname: actual\ndescription: registry alias\n---\nbody"), Source: Source{Reference: "owner/globally-unique-registry-slug"}})
+	if err != nil || aliased.Definition.Source.Reference != "owner/globally-unique-registry-slug" {
+		t.Fatalf("registry reference alias should remain provenance, got %#v, %v", aliased, err)
 	}
 }

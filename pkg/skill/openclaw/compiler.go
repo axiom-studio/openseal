@@ -14,11 +14,12 @@ import (
 )
 
 type Source struct {
-	Registry  string
-	Publisher string
-	Reference string
-	Version   string
-	Trust     map[string]interface{}
+	Registry     string
+	Publisher    string
+	Reference    string
+	ExpectedName string
+	Version      string
+	Trust        map[string]interface{}
 }
 
 type File struct {
@@ -57,10 +58,9 @@ func Compile(bundle Bundle) (*Compilation, error) {
 	for _, warning := range parsedResult.Warnings {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "warning", Code: "source.warning", Path: "SKILL.md", Message: warning})
 	}
-	if declared := strings.TrimSpace(bundle.Source.Reference); declared != "" {
-		slug := declared[strings.LastIndex(declared, "/")+1:]
-		if slug != parsed.Name {
-			return nil, fmt.Errorf("source reference %q does not match SKILL.md name %q", declared, parsed.Name)
+	if expected := strings.TrimSpace(bundle.Source.ExpectedName); expected != "" {
+		if expected != parsed.Name {
+			return nil, fmt.Errorf("expected skill name %q does not match SKILL.md name %q", expected, parsed.Name)
 		}
 	}
 
