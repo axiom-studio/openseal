@@ -71,7 +71,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 	keyHash := ""
 	if key != "" {
 		keyHash = hashString(key)
-		runID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+keyHash)).String()
+		runID = runIDForIdempotencyKey(req.Scope, key)
 		current, err := s.store.GetAgentRun(ctx, req.Scope, runID)
 		if err != nil {
 			return nil, err
@@ -113,6 +113,10 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 		return nil, err
 	}
 	return &AgentRunCommandResult{Run: run, Event: persisted}, nil
+}
+
+func runIDForIdempotencyKey(scope Scope, key string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(scope.Kind+"\x00"+scope.ID+"\x00"+hashString(strings.TrimSpace(key)))).String()
 }
 
 func replayedRun(current *AgentRun, fingerprint string) (*AgentRunCommandResult, error) {

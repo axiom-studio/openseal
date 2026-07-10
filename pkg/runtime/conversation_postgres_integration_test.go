@@ -151,6 +151,53 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != replay.Round.ID {
 		t.Fatalf("rounds = %#v, err = %v", rounds, err)
 	}
+
+	recoveryConversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Recovery channel", IdempotencyKey: "recovery-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryMessage, err := primaryService.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: recoveryConversation.ID, ExpectedRevision: recoveryConversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
+		Content: "Which replica owns this wake?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		RequiresResponse: true, IdempotencyKey: "recovery-question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryScheduler, err := NewConversationRunScheduler(primary, primary, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicaScheduler, err := NewConversationRunScheduler(replica, replica, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedulers := []*ConversationRunScheduler{primaryScheduler, replicaScheduler}
+	reconcileErrors := make(chan error, len(schedulers))
+	wait = sync.WaitGroup{}
+	for index := range schedulers {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			_, reconcileErr := schedulers[index].ReconcileScope(ctx, scope)
+			reconcileErrors <- reconcileErr
+		}(index)
+	}
+	wait.Wait()
+	close(reconcileErrors)
+	for reconcileErr := range reconcileErrors {
+		if reconcileErr != nil {
+			t.Fatal(reconcileErr)
+		}
+	}
+	conversationRuns, err := restarted.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+	if err != nil || len(conversationRuns) != 1 || conversationRuns[0].ConcurrencyKey != recoveryConversation.ID ||
+		conversationRuns[0].Context[conversationRunContextTriggerID] != recoveryMessage.Message.ID {
+		t.Fatalf("cross-replica reconciled Runs = %#v, err = %v", conversationRuns, err)
+	}
 	if foreign, err := restartedService.GetConversation(ctx, Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
 		t.Fatalf("foreign conversation = %#v, err = %v", foreign, err)
 	}
