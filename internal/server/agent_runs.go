@@ -226,7 +226,10 @@ func (s *Server) respondAgentRunError(w http.ResponseWriter, err error) {
 		s.respondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, runtime.ErrInvalidScope), errors.Is(err, runtime.ErrInvalidOwner), errors.Is(err, runtime.ErrObjectiveNotFound):
 		s.respondError(w, http.StatusBadRequest, err.Error())
-	default:
+	case errors.Is(err, runtime.ErrInvalidAgentRun), errors.Is(err, runtime.ErrInvalidRunCommand):
 		s.respondError(w, http.StatusBadRequest, err.Error())
+	default:
+		s.logger.Errorw("agent run API failed", "error", err)
+		s.respondError(w, http.StatusInternalServerError, "agent run operation failed")
 	}
 }

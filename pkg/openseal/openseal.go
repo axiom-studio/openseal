@@ -237,6 +237,11 @@ var (
 	ErrRevisionConflict         = runtime.ErrRevisionConflict
 	ErrInvalidRunTransition     = runtime.ErrInvalidRunTransition
 	ErrRunIdempotency           = runtime.ErrRunIdempotency
+	ErrInvalidAgentRun          = runtime.ErrInvalidAgentRun
+	ErrInvalidRunCommand        = runtime.ErrInvalidRunCommand
+	ErrInvalidScope             = runtime.ErrInvalidScope
+	ErrInvalidOwner             = runtime.ErrInvalidOwner
+	ErrObjectiveNotFound        = runtime.ErrObjectiveNotFound
 	ErrAgentRequestNotFound     = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized = runtime.ErrAgentRequestUnauthorized

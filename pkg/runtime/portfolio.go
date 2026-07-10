@@ -17,6 +17,8 @@ var (
 	ErrRunNotFound       = errors.New("run not found")
 	ErrRevisionConflict  = errors.New("objective revision conflict")
 	ErrRunIdempotency    = errors.New("run idempotency key was already used with different input")
+	ErrInvalidAgentRun   = errors.New("invalid agent run")
+	ErrInvalidRunCommand = errors.New("invalid run command")
 )
 
 // Scope is the portable ownership boundary for every kernel resource. Embedding
@@ -415,6 +417,12 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 }
 
 func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRunRequest, runID string, now time.Time) (*AgentRun, error) {
+	if err := req.Scope.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+	}
+	if err := req.Owner.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+	}
 	if req.ObjectiveID != "" {
 		objective, err := store.GetObjective(ctx, req.Scope, req.ObjectiveID)
 		if err != nil {
@@ -439,17 +447,26 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		}
 		rootID = parent.RootRunID
 	}
+	source := req.Source
+	if source == "" {
+		source = RunSourceManual
+	}
+	switch source {
+	case RunSourceManual, RunSourceChat, RunSourceSchedule, RunSourceEvent, RunSourceWebhook, RunSourceRequest, RunSourceHandoff, RunSourceObjective:
+	default:
+		return nil, fmt.Errorf("%w: unsupported run source %q", ErrInvalidAgentRun, source)
+	}
 	run := &AgentRun{
 		ID: runID, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
-		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: req.Source,
+		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
 		Budget: req.Budget, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := run.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
 	}
 	return run, nil
 }
