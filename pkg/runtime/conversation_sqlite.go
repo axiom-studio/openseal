@@ -382,6 +382,61 @@ func (s *SQLiteStore) FindParticipationRoundByIdempotencyKey(ctx context.Context
 	return result, err
 }
 
+func (s *SQLiteStore) GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	round, err := getSQLiteParticipationRound(ctx, s.db, scope, conversationID, roundID)
+	if err != nil || round == nil {
+		return nil, err
+	}
+	return loadSQLiteParticipationRoundResult(ctx, s.db, round)
+}
+
+func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ?
+		ORDER BY committed_at DESC, id ASC LIMIT ? OFFSET ?`, filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	rounds := make([]*ParticipationRound, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		round, err := decodeParticipationRound(payload)
+		if err != nil {
+			return nil, err
+		}
+		rounds = append(rounds, round)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]*ParticipationRoundResult, 0, len(rounds))
+	for _, round := range rounds {
+		loaded, err := loadSQLiteParticipationRoundResult(ctx, s.db, round)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, loaded)
+	}
+	return result, nil
+}
+
 func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
@@ -702,6 +757,19 @@ func getSQLiteParticipationRoundByKey(ctx context.Context, queryer sqliteConvers
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND idempotency_key = ?`,
 		scope.Kind, scope.ID, conversationID, key).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeParticipationRound(payload)
+}
+
+func getSQLiteParticipationRound(ctx context.Context, queryer sqliteConversationQueryer, scope Scope, conversationID, id string) (*ParticipationRound, error) {
+	var payload string
+	err := queryer.QueryRowContext(ctx, `SELECT payload FROM participation_rounds WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
+		scope.Kind, scope.ID, conversationID, id).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

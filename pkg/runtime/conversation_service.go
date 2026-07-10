@@ -66,6 +66,13 @@ type CoordinateParticipationRequest struct {
 	IdempotencyKey   string
 }
 
+type ParticipationRoundFilter struct {
+	Scope          Scope
+	ConversationID string
+	Limit          int
+	Offset         int
+}
+
 type AdvanceConversationCursorRequest struct {
 	Scope             Scope
 	ConversationID    string
@@ -140,7 +147,9 @@ type ConversationStore interface {
 	FindChannelMessageByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ChannelMessage, error)
 	ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error)
 	CommitParticipationRound(ctx context.Context, record ParticipationRoundCommitRecord) (*ParticipationRoundResult, error)
+	GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error)
 	FindParticipationRoundByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRoundResult, error)
+	ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error)
 	GetConversationCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error)
 	PutConversationCursor(ctx context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error)
 	GetConversationPresence(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationPresence, error)
@@ -395,6 +404,36 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 
 func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
 	return s.store.ListChannelMessages(ctx, filter)
+}
+
+func (s *ConversationService) GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error) {
+	message, err := s.store.GetChannelMessage(ctx, scope, conversationID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if message == nil {
+		return nil, ErrMessageConflict
+	}
+	return message, nil
+}
+
+func (s *ConversationService) GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
+	result, err := s.store.GetParticipationRound(ctx, scope, conversationID, roundID)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, ErrMessageConflict
+	}
+	return result, nil
+}
+
+func (s *ConversationService) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+	return s.store.ListParticipationRounds(ctx, filter)
+}
+
+func (s *ConversationService) GetCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
+	return s.store.GetConversationCursor(ctx, scope, conversationID, participant)
 }
 
 func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConversationCursorRequest) (*ConversationCursor, bool, error) {

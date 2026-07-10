@@ -379,6 +379,61 @@ func (s *PostgresStore) FindParticipationRoundByIdempotencyKey(ctx context.Conte
 	return result, err
 }
 
+func (s *PostgresStore) GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	round, err := s.getPostgresParticipationRound(ctx, s.db, scope, conversationID, roundID, false)
+	if err != nil || round == nil {
+		return nil, err
+	}
+	return s.loadPostgresParticipationRoundResult(ctx, s.db, round, false)
+}
+
+func (s *PostgresStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("participation_rounds")+` WHERE scope_kind=$1 AND scope_id=$2
+		AND conversation_id=$3 ORDER BY committed_at DESC, id ASC LIMIT $4 OFFSET $5`, filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	rounds := make([]*ParticipationRound, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		round, err := decodeParticipationRound(payload)
+		if err != nil {
+			return nil, err
+		}
+		rounds = append(rounds, round)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]*ParticipationRoundResult, 0, len(rounds))
+	for _, round := range rounds {
+		loaded, err := s.loadPostgresParticipationRoundResult(ctx, s.db, round, false)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, loaded)
+	}
+	return result, nil
+}
+
 func (s *PostgresStore) GetConversationCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
@@ -723,6 +778,22 @@ func (s *PostgresStore) getPostgresParticipationRoundByKey(ctx context.Context, 
 	}
 	var payload string
 	err := queryer.QueryRowContext(ctx, query, scope.Kind, scope.ID, conversationID, key).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeParticipationRound(payload)
+}
+
+func (s *PostgresStore) getPostgresParticipationRound(ctx context.Context, queryer postgresConversationQueryer, scope Scope, conversationID, id string, lock bool) (*ParticipationRound, error) {
+	query := `SELECT payload FROM ` + s.table("participation_rounds") + ` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3 AND id=$4`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	var payload string
+	err := queryer.QueryRowContext(ctx, query, scope.Kind, scope.ID, conversationID, id).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
