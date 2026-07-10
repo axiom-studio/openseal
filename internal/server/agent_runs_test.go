@@ -17,8 +17,8 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
-		"owner":{"type":"agent","id":"agent-1"},
-		"assignedAgentId":"agent-1",
+		"kind":"conversation",
+		"owner":{"type":"team","id":"team-1"},
 		"goal":"Operate the service",
 		"source":"manual",
 		"actor":{"type":"user","id":"7"}
@@ -31,7 +31,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if err := json.NewDecoder(created.Body).Decode(&createResult); err != nil {
 		t.Fatal(err)
 	}
-	if createResult.Run == nil || createResult.Event == nil || createResult.Event.EventType != "run.created" {
+	if createResult.Run == nil || createResult.Run.Kind != runtime.RunKindConversation || createResult.Event == nil || createResult.Event.EventType != "run.created" {
 		t.Fatalf("create result = %#v", createResult)
 	}
 
@@ -53,7 +53,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 		t.Fatalf("conflict status = %d, body = %s", conflict.Code, conflict.Body.String())
 	}
 
-	list := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/agent-runs?scopeKind=tenant&scopeId=one&ownerType=agent&ownerId=agent-1", "", "")
+	list := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/agent-runs?scopeKind=tenant&scopeId=one&kind=conversation&ownerType=team&ownerId=team-1", "", "")
 	if list.Code != http.StatusOK {
 		t.Fatalf("list status = %d, body = %s", list.Code, list.Body.String())
 	}

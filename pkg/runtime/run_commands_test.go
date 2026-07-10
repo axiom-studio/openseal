@@ -38,6 +38,9 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if created.Event == nil || created.Event.EventType != "run.created" || created.Event.Sequence != 1 {
 				t.Fatalf("creation event = %#v", created.Event)
 			}
+			if created.Run.Kind != RunKindAgentWork {
+				t.Fatalf("default run kind = %q", created.Run.Kind)
+			}
 			replayed, err := service.CreateAgentRun(ctx, create)
 			if err != nil {
 				t.Fatal(err)
@@ -49,6 +52,11 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			changed.Goal = "Do different work"
 			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
 				t.Fatalf("conflicting replay error = %v", err)
+			}
+			changed = create
+			changed.Kind = RunKindConversation
+			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+				t.Fatalf("run kind replay conflict = %v", err)
 			}
 
 			paused, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{

@@ -145,3 +145,51 @@ func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 		t.Fatalf("scope-isolated claim failed: %#v", otherClaim)
 	}
 }
+
+func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-kinds.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "kinds"}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	agentRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversationRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
+		Goal: "coordinate a channel", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	claimedConversation, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: "conversation-worker", Now: now,
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimedConversation == nil || claimedConversation.ID != conversationRun.ID {
+		t.Fatalf("conversation claim = %#v, %v", claimedConversation, err)
+	}
+	claimedAgent, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindAgentWork, WorkerID: "agent-worker", Now: now,
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimedAgent == nil || claimedAgent.ID != agentRun.ID || claimedAgent.Kind != RunKindAgentWork {
+		t.Fatalf("agent claim = %#v, %v", claimedAgent, err)
+	}
+}

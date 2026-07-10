@@ -32,6 +32,7 @@ func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *Agen
 
 type AgentRunWorkerConfig struct {
 	Scope             Scope
+	Kind              RunKind
 	AssignedAgentID   string
 	Concurrency       int
 	MaxActiveForAgent int
@@ -45,6 +46,9 @@ type AgentRunWorkerConfig struct {
 func (c *AgentRunWorkerConfig) applyDefaults() error {
 	if err := c.Scope.Validate(); err != nil {
 		return err
+	}
+	if c.Kind != "" && !validRunKind(c.Kind) {
+		return fmt.Errorf("unsupported run kind %q", c.Kind)
 	}
 	if c.Concurrency <= 0 {
 		c.Concurrency = 1
@@ -141,7 +145,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 	defer ticker.Stop()
 	for {
 		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
-			Scope: p.config.Scope, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
+			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
 			MaxActiveForAgent: p.config.MaxActiveForAgent,
 		})

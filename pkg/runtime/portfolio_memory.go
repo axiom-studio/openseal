@@ -128,6 +128,9 @@ func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 }
 
 func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
+	if filter.Kind != "" && normalizeRunKind(run.Kind) != filter.Kind {
+		return false
+	}
 	if filter.Owner != nil && run.Owner != *filter.Owner {
 		return false
 	}
@@ -212,5 +215,6 @@ func cloneAgentRun(in *AgentRun) *AgentRun {
 	var out AgentRun
 	data, _ := json.Marshal(in)
 	_ = json.Unmarshal(data, &out)
+	out.Kind = normalizeRunKind(out.Kind)
 	return &out
 }

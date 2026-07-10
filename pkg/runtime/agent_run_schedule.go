@@ -3,12 +3,14 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
 
 type AgentRunClaim struct {
 	Scope             Scope
+	Kind              RunKind
 	WorkerID          string
 	AssignedAgentID   string
 	Now               time.Time
@@ -21,6 +23,9 @@ func (c AgentRunClaim) Validate() error {
 	if err := c.Scope.Validate(); err != nil {
 		return err
 	}
+	if c.Kind != "" && !validRunKind(c.Kind) {
+		return fmt.Errorf("unsupported run kind %q", c.Kind)
+	}
 	if strings.TrimSpace(c.WorkerID) == "" || c.Now.IsZero() || c.LeaseDuration <= 0 || c.AgingInterval <= 0 {
 		return errors.New("worker id, current time, lease duration, and aging interval are required")
 	}
@@ -32,6 +37,7 @@ func (c AgentRunClaim) Validate() error {
 
 type AgentRunClaimRequest struct {
 	Scope             Scope
+	Kind              RunKind
 	WorkerID          string
 	AssignedAgentID   string
 	LeaseDuration     time.Duration
@@ -70,7 +76,7 @@ func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequ
 		req.AgingInterval = time.Minute
 	}
 	return s.store.ClaimNextAgentRun(ctx, AgentRunClaim{
-		Scope: req.Scope, WorkerID: req.WorkerID, AssignedAgentID: req.AssignedAgentID,
+		Scope: req.Scope, Kind: req.Kind, WorkerID: req.WorkerID, AssignedAgentID: req.AssignedAgentID,
 		Now: s.now(), LeaseDuration: req.LeaseDuration, AgingInterval: req.AgingInterval,
 		MaxActiveForAgent: req.MaxActiveForAgent,
 	})
@@ -93,7 +99,8 @@ func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope Scope, runID, 
 }
 
 func agentRunEligible(run *AgentRun, claim AgentRunClaim) bool {
-	if run.Scope != claim.Scope || claim.AssignedAgentID != "" && run.AssignedAgentID != claim.AssignedAgentID {
+	if run.Scope != claim.Scope || claim.Kind != "" && normalizeRunKind(run.Kind) != claim.Kind ||
+		claim.AssignedAgentID != "" && run.AssignedAgentID != claim.AssignedAgentID {
 		return false
 	}
 	switch run.Status {

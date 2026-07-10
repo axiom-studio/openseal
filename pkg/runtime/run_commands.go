@@ -228,6 +228,7 @@ func resumedRunStatus(previous AgentRunStatus) AgentRunStatus {
 func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 	payload := struct {
 		Scope           Scope                  `json:"scope"`
+		Kind            RunKind                `json:"kind"`
 		ObjectiveID     string                 `json:"objectiveId,omitempty"`
 		ParentRunID     string                 `json:"parentRunId,omitempty"`
 		Owner           ObjectiveOwner         `json:"owner"`
@@ -243,8 +244,13 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		WakeCondition   *WakeCondition         `json:"wakeCondition,omitempty"`
 		Budget          map[string]interface{} `json:"budget,omitempty"`
 		Policy          map[string]interface{} `json:"policy,omitempty"`
-	}{req.Scope, req.ObjectiveID, req.ParentRunID, req.Owner, req.AssignedAgentID, req.Goal, req.Source, req.Priority,
-		req.Deadline, req.AvailableAt, req.Context, req.Plan, req.Checkpoint, req.WakeCondition, req.Budget, req.Policy}
+	}{
+		Scope: req.Scope, Kind: normalizeRunKind(req.Kind), ObjectiveID: req.ObjectiveID,
+		ParentRunID: req.ParentRunID, Owner: req.Owner, AssignedAgentID: req.AssignedAgentID,
+		Goal: req.Goal, Source: req.Source, Priority: req.Priority, Deadline: req.Deadline,
+		AvailableAt: req.AvailableAt, Context: req.Context, Plan: req.Plan, Checkpoint: req.Checkpoint,
+		WakeCondition: req.WakeCondition, Budget: req.Budget, Policy: req.Policy,
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode run creation fingerprint: %w", err)

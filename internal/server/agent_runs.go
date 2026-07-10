@@ -24,7 +24,7 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		idempotencyKey = strings.TrimSpace(payload.IdempotencyKey)
 	}
 	result, err := runtime.NewRunCommandService(s.store).CreateAgentRun(r.Context(), runtime.CreateAgentRunRequest{
-		Scope: payload.Scope, ObjectiveID: strings.TrimSpace(payload.ObjectiveID), ParentRunID: strings.TrimSpace(payload.ParentRunID),
+		Scope: payload.Scope, Kind: payload.Kind, ObjectiveID: strings.TrimSpace(payload.ObjectiveID), ParentRunID: strings.TrimSpace(payload.ParentRunID),
 		Owner: payload.Owner, AssignedAgentID: strings.TrimSpace(payload.AssignedAgentID), Goal: strings.TrimSpace(payload.Goal),
 		Source: payload.Source, Priority: payload.Priority, Deadline: payload.Deadline, AvailableAt: payload.AvailableAt,
 		Context: payload.Context, Plan: payload.Plan, Checkpoint: payload.Checkpoint, WakeCondition: payload.WakeCondition,
@@ -105,9 +105,12 @@ func agentRunFilterFromQuery(r *http.Request) (runtime.AgentRunFilter, error) {
 		return runtime.AgentRunFilter{}, err
 	}
 	filter := runtime.AgentRunFilter{
-		Scope: scope, ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), ParentRunID: strings.TrimSpace(r.URL.Query().Get("parentRunId")),
+		Scope: scope, Kind: runtime.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))), ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), ParentRunID: strings.TrimSpace(r.URL.Query().Get("parentRunId")),
 		RootRunID: strings.TrimSpace(r.URL.Query().Get("rootRunId")), AssignedAgentID: strings.TrimSpace(r.URL.Query().Get("assignedAgentId")),
 		Limit: limit, Offset: offset,
+	}
+	if filter.Kind != "" && filter.Kind != runtime.RunKindAgentWork && filter.Kind != runtime.RunKindConversation {
+		return runtime.AgentRunFilter{}, fmt.Errorf("invalid run kind %q", filter.Kind)
 	}
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {

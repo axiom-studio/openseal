@@ -321,5 +321,6 @@ func decodeAgentRun(payload string) (*AgentRun, error) {
 	if run.QueueEnteredAt.IsZero() {
 		run.QueueEnteredAt = run.CreatedAt
 	}
+	run.Kind = normalizeRunKind(run.Kind)
 	return &run, nil
 }

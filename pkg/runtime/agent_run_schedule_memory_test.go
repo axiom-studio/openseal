@@ -128,3 +128,39 @@ func TestMemoryAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
 		t.Fatalf("scope-isolated run was not independently claimable: %#v", otherClaim)
 	}
 }
+
+func TestMemoryAgentRunClaimIsolatesRunKinds(t *testing.T) {
+	store := NewMemoryStore(10)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "kinds"}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	agentRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversationRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
+		Goal: "coordinate a channel", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimedConversation, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: "conversation-worker", Now: now,
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimedConversation == nil || claimedConversation.ID != conversationRun.ID {
+		t.Fatalf("conversation claim = %#v, %v", claimedConversation, err)
+	}
+	claimedAgent, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindAgentWork, WorkerID: "agent-worker", Now: now,
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimedAgent == nil || claimedAgent.ID != agentRun.ID || claimedAgent.Kind != RunKindAgentWork {
+		t.Fatalf("agent claim = %#v, %v", claimedAgent, err)
+	}
+}

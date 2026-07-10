@@ -121,6 +121,7 @@ func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
 // workspace even though the TUI defaults to local/default.
 type CreateAgentRunRequest struct {
 	Scope           runtime.Scope              `json:"scope"`
+	Kind            runtime.RunKind            `json:"kind,omitempty"`
 	ObjectiveID     string                     `json:"objectiveId,omitempty"`
 	ParentRunID     string                     `json:"parentRunId,omitempty"`
 	Owner           runtime.ObjectiveOwner     `json:"owner"`
