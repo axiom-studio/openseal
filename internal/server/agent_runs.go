@@ -8,44 +8,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
-type createAgentRunPayload struct {
-	Scope           runtime.Scope              `json:"scope"`
-	ObjectiveID     string                     `json:"objectiveId,omitempty"`
-	ParentRunID     string                     `json:"parentRunId,omitempty"`
-	Owner           runtime.ObjectiveOwner     `json:"owner"`
-	AssignedAgentID string                     `json:"assignedAgentId,omitempty"`
-	Goal            string                     `json:"goal"`
-	Source          runtime.RunSource          `json:"source"`
-	Priority        int                        `json:"priority,omitempty"`
-	Deadline        *time.Time                 `json:"deadline,omitempty"`
-	AvailableAt     *time.Time                 `json:"availableAt,omitempty"`
-	Context         map[string]interface{}     `json:"context,omitempty"`
-	Plan            map[string]interface{}     `json:"plan,omitempty"`
-	Checkpoint      map[string]interface{}     `json:"checkpoint,omitempty"`
-	WakeCondition   *runtime.WakeCondition     `json:"wakeCondition,omitempty"`
-	Budget          map[string]interface{}     `json:"budget,omitempty"`
-	Policy          map[string]interface{}     `json:"policy,omitempty"`
-	IdempotencyKey  string                     `json:"idempotencyKey,omitempty"`
-	Actor           runtime.ActivityActor      `json:"actor,omitempty"`
-	Visibility      runtime.ActivityVisibility `json:"visibility,omitempty"`
-}
-
-type agentRunCommandPayload struct {
-	ExpectedRevision int64                       `json:"expectedRevision"`
-	Kind             runtime.AgentRunCommandKind `json:"kind"`
-	Actor            runtime.ActivityActor       `json:"actor,omitempty"`
-	Summary          string                      `json:"summary,omitempty"`
-	Instruction      string                      `json:"instruction,omitempty"`
-	Visibility       runtime.ActivityVisibility  `json:"visibility,omitempty"`
-}
-
 func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
-	var payload createAgentRunPayload
+	var payload kernelapi.CreateAgentRunRequest
 	if err := decodeStrictJSON(r, &payload); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -106,7 +75,7 @@ func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var payload agentRunCommandPayload
+	var payload kernelapi.AgentRunCommandRequest
 	if err := decodeStrictJSON(r, &payload); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
