@@ -265,6 +265,127 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 	return pageApprovals(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error) {
+	if err := validateApprovalResolutionRecord(resolution); err != nil {
+		return nil, err
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	currentApproval, err := getApprovalFrom(ctx, conn, resolution.Approval.Scope, `id = ?`, resolution.Approval.ID)
+	if err != nil {
+		return nil, err
+	}
+	currentCall, err := getActionCallFrom(ctx, conn, resolution.Call.Scope, `id = ?`, resolution.Call.ID)
+	if err != nil {
+		return nil, err
+	}
+	var runPayload string
+	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+		resolution.Run.Scope.Kind, resolution.Run.Scope.ID, resolution.Run.ID).Scan(&runPayload)
+	if err == sql.ErrNoRows {
+		return nil, ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	currentRun, err := decodeAgentRun(runPayload)
+	if err != nil {
+		return nil, err
+	}
+	if currentApproval.Status != ApprovalStatusPending {
+		if currentApproval.DecisionID != "" && currentApproval.DecisionID == resolution.Approval.DecisionID {
+			if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+				return nil, err
+			}
+			committed = true
+			return &ApprovalResolutionResult{Approval: currentApproval, Call: currentCall, Run: currentRun, Resolved: false}, nil
+		}
+		return nil, ErrApprovalResolved
+	}
+	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision || currentRun.Revision != resolution.ExpectedRunRevision ||
+		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 || resolution.Run.Revision != resolution.ExpectedRunRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	approvalPayload, err := json.Marshal(resolution.Approval)
+	if err != nil {
+		return nil, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE approval_checkpoints SET status = ?, expires_at = ?, revision = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND status = ?`,
+		resolution.Approval.Status, resolution.Approval.ExpiresAt, resolution.Approval.Revision, string(approvalPayload),
+		resolution.Approval.Scope.Kind, resolution.Approval.Scope.ID, resolution.Approval.ID, resolution.ExpectedApprovalRevision, ApprovalStatusPending)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	callPayload, err := json.Marshal(resolution.Call)
+	if err != nil {
+		return nil, err
+	}
+	result, err = conn.ExecContext(ctx, `UPDATE action_calls SET status = ?, available_at = ?, lease_owner = ?, lease_expires_at = ?, revision = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+		resolution.Call.Status, resolution.Call.AvailableAt, resolution.Call.LeaseOwner, resolution.Call.LeaseExpiresAt,
+		resolution.Call.Revision, string(callPayload), resolution.Call.Scope.Kind, resolution.Call.Scope.ID,
+		resolution.Call.ID, resolution.ExpectedCallRevision)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	updatedRunPayload, err := json.Marshal(resolution.Run)
+	if err != nil {
+		return nil, err
+	}
+	result, err = conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
+		deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+		resolution.Run.Status, resolution.Run.Priority, resolution.Run.AssignedAgentID, resolution.Run.Revision,
+		resolution.Run.Deadline, resolution.Run.AvailableAt, resolution.Run.QueueEnteredAt, resolution.Run.LeaseOwner,
+		resolution.Run.LeaseExpiresAt, resolution.Run.LastClaimedAt, resolution.Run.Attempt, string(updatedRunPayload),
+		resolution.Run.Scope.Kind, resolution.Run.Scope.ID, resolution.Run.ID, resolution.ExpectedRunRevision)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	event := cloneActivityEvent(resolution.Event)
+	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
+		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&event.Sequence); err != nil {
+		return nil, err
+	}
+	eventPayload, err := json.Marshal(event)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO run_activity
+		(scope_kind, scope_id, run_id, sequence, id, event_type, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, event.Scope.Kind, event.Scope.ID, event.RunID, event.Sequence,
+		event.ID, event.EventType, event.CreatedAt, string(eventPayload)); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: event, Resolved: true}, nil
+}
+
 type queryRower interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }

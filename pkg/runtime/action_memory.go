@@ -3,7 +3,9 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
+	"strings"
 )
 
 func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
@@ -122,6 +124,46 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 	return pageApprovals(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error) {
+	if err := validateApprovalResolutionRecord(resolution); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	approvalKey := portfolioKey(resolution.Approval.Scope, resolution.Approval.ID)
+	currentApproval := s.approvals[approvalKey]
+	if currentApproval == nil {
+		return nil, ErrApprovalNotFound
+	}
+	callKey := portfolioKey(resolution.Call.Scope, resolution.Call.ID)
+	runKey := portfolioKey(resolution.Run.Scope, resolution.Run.ID)
+	currentCall := s.actions[callKey]
+	currentRun := s.agentRuns[runKey]
+	if currentCall == nil {
+		return nil, ErrActionNotFound
+	}
+	if currentRun == nil {
+		return nil, ErrRunNotFound
+	}
+	if currentApproval.Status != ApprovalStatusPending {
+		if currentApproval.DecisionID != "" && currentApproval.DecisionID == resolution.Approval.DecisionID {
+			return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(currentApproval), Call: cloneActionCall(currentCall), Run: cloneAgentRun(currentRun), Resolved: false}, nil
+		}
+		return nil, ErrApprovalResolved
+	}
+	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision || currentRun.Revision != resolution.ExpectedRunRevision ||
+		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 || resolution.Run.Revision != resolution.ExpectedRunRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	event := cloneActivityEvent(resolution.Event)
+	event.Sequence = int64(len(s.activity[runKey]) + 1)
+	s.approvals[approvalKey] = cloneApprovalCheckpoint(resolution.Approval)
+	s.actions[callKey] = cloneActionCall(resolution.Call)
+	s.agentRuns[runKey] = cloneAgentRun(resolution.Run)
+	s.activity[runKey] = append(s.activity[runKey], event)
+	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: cloneActivityEvent(event), Resolved: true}, nil
+}
+
 func validateActionProposalRecord(proposal ActionProposalRecord) error {
 	if err := proposal.Call.Validate(); err != nil {
 		return err
@@ -144,6 +186,30 @@ func validateActionProposalRecord(proposal ActionProposalRecord) error {
 			proposal.Approval.ActionCallID != proposal.Call.ID || proposal.Call.ApprovalID != proposal.Approval.ID {
 			return ErrInvalidScope
 		}
+	}
+	return nil
+}
+
+func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error {
+	if err := resolution.Approval.Validate(); err != nil {
+		return err
+	}
+	if err := resolution.Call.Validate(); err != nil {
+		return err
+	}
+	if err := resolution.Run.Validate(); err != nil {
+		return err
+	}
+	if err := resolution.Event.Validate(); err != nil {
+		return err
+	}
+	if resolution.Approval.Status == ApprovalStatusPending || strings.TrimSpace(resolution.Approval.DecisionID) == "" || resolution.Approval.DecisionBy == nil || resolution.Approval.DecidedAt == nil {
+		return errors.New("approval resolution requires a terminal decision, id, principal, and decision time")
+	}
+	if resolution.Approval.Scope != resolution.Call.Scope || resolution.Approval.Scope != resolution.Run.Scope || resolution.Approval.Scope != resolution.Event.Scope ||
+		resolution.Approval.RunID != resolution.Run.ID || resolution.Approval.RunID != resolution.Call.RunID || resolution.Approval.RunID != resolution.Event.RunID ||
+		resolution.Approval.ActionCallID != resolution.Call.ID || resolution.Call.ApprovalID != resolution.Approval.ID {
+		return ErrInvalidScope
 	}
 	return nil
 }
