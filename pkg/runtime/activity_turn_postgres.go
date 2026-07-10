@@ -165,6 +165,17 @@ func (s *PostgresStore) withActivity(ctx context.Context, event *ActivityEvent, 
 	if err := beforeInsert(tx); err != nil {
 		return nil, err
 	}
+	persisted, err := s.insertPostgresActivityTx(ctx, tx, event)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return cloneActivityEvent(persisted), nil
+}
+
+func (s *PostgresStore) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx, event *ActivityEvent) (*ActivityEvent, error) {
 	persisted := cloneActivityEvent(event)
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM `+s.table("run_activity")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&persisted.Sequence); err != nil {
@@ -179,9 +190,6 @@ func (s *PostgresStore) withActivity(ctx context.Context, event *ActivityEvent, 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`, persisted.Scope.Kind, persisted.Scope.ID,
 		persisted.RunID, persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return cloneActivityEvent(persisted), nil

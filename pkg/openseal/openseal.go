@@ -90,6 +90,18 @@ type (
 	ActivitySeverity            = runtime.ActivitySeverity
 	ActivityVisibility          = runtime.ActivityVisibility
 	RunTransitionRequest        = runtime.RunTransitionRequest
+	CollaborationStore          = runtime.CollaborationStore
+	CollaborationKernelStore    = runtime.CollaborationKernelStore
+	CollaborationParty          = runtime.CollaborationParty
+	ArtifactRequirement         = runtime.ArtifactRequirement
+	AgentRequest                = runtime.AgentRequest
+	AgentRequestKind            = runtime.AgentRequestKind
+	AgentRequestStatus          = runtime.AgentRequestStatus
+	AgentRequestDecision        = runtime.AgentRequestDecision
+	AgentRequestFilter          = runtime.AgentRequestFilter
+	CreateAgentRequestRequest   = runtime.CreateAgentRequestRequest
+	RespondAgentRequestRequest  = runtime.RespondAgentRequestRequest
+	AgentRequestResult          = runtime.AgentRequestResult
 	AgentTurnStore              = runtime.AgentTurnStore
 	AgentTurn                   = runtime.AgentTurn
 	AgentTurnStatus             = runtime.AgentTurnStatus
@@ -207,6 +219,7 @@ type (
 // authoritative persistence boundary.
 type PersistentKernelStore interface {
 	runtime.KernelStore
+	runtime.CollaborationStore
 	kernelagent.Store
 	skill.CatalogStore
 }
@@ -259,6 +272,7 @@ const (
 	RunSourceSchedule  = runtime.RunSourceSchedule
 	RunSourceEvent     = runtime.RunSourceEvent
 	RunSourceWebhook   = runtime.RunSourceWebhook
+	RunSourceRequest   = runtime.RunSourceRequest
 	RunSourceHandoff   = runtime.RunSourceHandoff
 	RunSourceObjective = runtime.RunSourceObjective
 
@@ -282,6 +296,20 @@ const (
 	ActivityVisibilityPrivate = runtime.ActivityVisibilityPrivate
 	ActivityVisibilityTeam    = runtime.ActivityVisibilityTeam
 	ActivityVisibilityScope   = runtime.ActivityVisibilityScope
+
+	AgentRequestKindRequest = runtime.AgentRequestKindRequest
+	AgentRequestKindHandoff = runtime.AgentRequestKindHandoff
+
+	AgentRequestStatusPending                = runtime.AgentRequestStatusPending
+	AgentRequestStatusClarificationRequested = runtime.AgentRequestStatusClarificationRequested
+	AgentRequestStatusAccepted               = runtime.AgentRequestStatusAccepted
+	AgentRequestStatusRejected               = runtime.AgentRequestStatusRejected
+	AgentRequestStatusCanceled               = runtime.AgentRequestStatusCanceled
+
+	AgentRequestDecisionAccept               = runtime.AgentRequestDecisionAccept
+	AgentRequestDecisionReject               = runtime.AgentRequestDecisionReject
+	AgentRequestDecisionRequestClarification = runtime.AgentRequestDecisionRequestClarification
+	AgentRequestDecisionProvideClarification = runtime.AgentRequestDecisionProvideClarification
 
 	AgentTurnStatusRunning   = runtime.AgentTurnStatusRunning
 	AgentTurnStatusCompleted = runtime.AgentTurnStatusCompleted
@@ -352,6 +380,7 @@ type Engine struct {
 	scheduler             *runtime.Scheduler
 	portfolio             *runtime.PortfolioService
 	activity              *runtime.RunActivityService
+	collaboration         *runtime.CollaborationService
 	turns                 *runtime.AgentTurnService
 	turnsRun              *runtime.TurnCoordinator
 	runQueue              *runtime.AgentRunScheduler
@@ -411,21 +440,22 @@ func New(opts ...Option) (*Engine, error) {
 	)
 
 	e := &Engine{
-		registry:     reg,
-		store:        store,
-		pool:         pool,
-		scheduler:    runtime.NewScheduler(pool, store),
-		portfolio:    runtime.NewPortfolioService(store),
-		activity:     runtime.NewRunActivityService(store, store),
-		turns:        runtime.NewAgentTurnService(store, store),
-		turnsRun:     runtime.NewTurnCoordinator(store, store, store),
-		runQueue:     runtime.NewAgentRunScheduler(store),
-		wake:         runtime.NewAgentRunWakeService(store, store),
-		skills:       skill.NewCatalog(),
-		agents:       kernelagent.NewRegistry(),
-		actionPolicy: runtime.NewDefaultActionPolicy(),
-		approvalAuth: runtime.EligibleApprovalAuthorizer{},
-		logger:       sugar,
+		registry:      reg,
+		store:         store,
+		pool:          pool,
+		scheduler:     runtime.NewScheduler(pool, store),
+		portfolio:     runtime.NewPortfolioService(store),
+		activity:      runtime.NewRunActivityService(store, store),
+		collaboration: runtime.NewCollaborationService(store),
+		turns:         runtime.NewAgentTurnService(store, store),
+		turnsRun:      runtime.NewTurnCoordinator(store, store, store),
+		runQueue:      runtime.NewAgentRunScheduler(store),
+		wake:          runtime.NewAgentRunWakeService(store, store),
+		skills:        skill.NewCatalog(),
+		agents:        kernelagent.NewRegistry(),
+		actionPolicy:  runtime.NewDefaultActionPolicy(),
+		approvalAuth:  runtime.EligibleApprovalAuthorizer{},
+		logger:        sugar,
 	}
 
 	for _, opt := range opts {
@@ -545,6 +575,11 @@ func WithStore(store runtime.KernelStore) Option {
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.activity = runtime.NewRunActivityService(store, store)
+		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
+			e.collaboration = runtime.NewCollaborationService(collaborationStore)
+		} else {
+			e.collaboration = nil
+		}
 		e.turns = runtime.NewAgentTurnService(store, store)
 		e.turnsRun = runtime.NewTurnCoordinator(store, store, store)
 		e.runQueue = runtime.NewAgentRunScheduler(store)
@@ -825,6 +860,34 @@ func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter
 
 func (e *Engine) ListActivityFeed(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	return e.activity.ListActivityFeed(ctx, request)
+}
+
+func (e *Engine) CreateAgentRequest(ctx context.Context, request runtime.CreateAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.CreateAgentRequest(ctx, request)
+}
+
+func (e *Engine) RespondAgentRequest(ctx context.Context, request runtime.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.RespondAgentRequest(ctx, request)
+}
+
+func (e *Engine) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.GetAgentRequest(ctx, scope, requestID)
+}
+
+func (e *Engine) ListAgentRequests(ctx context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.ListAgentRequests(ctx, filter)
 }
 
 func (e *Engine) BeginAgentTurn(ctx context.Context, req runtime.BeginAgentTurnRequest) (*runtime.AgentTurn, error) {
