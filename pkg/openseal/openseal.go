@@ -236,6 +236,7 @@ var (
 	ErrAgentRequestUnauthorized = runtime.ErrAgentRequestUnauthorized
 	ErrAgentRequestIdempotency  = runtime.ErrAgentRequestIdempotency
 	ErrUnsafeSharedContext      = runtime.ErrUnsafeSharedContext
+	ErrInvalidArtifact          = runtime.ErrInvalidArtifact
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {

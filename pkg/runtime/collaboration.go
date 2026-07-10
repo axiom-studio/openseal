@@ -21,6 +21,7 @@ var (
 	ErrAgentRequestUnauthorized = errors.New("agent request principal is not authorized")
 	ErrAgentRequestIdempotency  = errors.New("agent request idempotency conflict")
 	ErrUnsafeSharedContext      = errors.New("shared context cannot contain credentials or secrets")
+	ErrInvalidArtifact          = errors.New("invalid artifact contract")
 )
 
 type AgentRequestKind string
@@ -147,11 +148,11 @@ func (r *AgentRequest) Validate() error {
 		return err
 	}
 	if err := validateArtifactRequirements(r.ArtifactRequirements); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
 	if r.Status == AgentRequestStatusCompleted {
 		if err := validateArtifactReferences(r.ArtifactRequirements, r.Artifacts); err != nil {
-			return err
+			return fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 		}
 	} else if len(r.Artifacts) > 0 || len(r.AcceptanceEvidence) > 0 || strings.TrimSpace(r.CompletionSummary) != "" {
 		return errors.New("completion output is only valid for a completed agent request")
@@ -293,7 +294,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		return nil, err
 	}
 	if err := validateArtifactRequirements(req.ArtifactRequirements); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
 	if key := strings.TrimSpace(req.IdempotencyKey); key != "" {
 		existing, err := s.store.FindAgentRequestByIdempotencyKey(ctx, req.Scope, key)
@@ -495,7 +496,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		return nil, err
 	}
 	if err := validateArtifactReferences(request.ArtifactRequirements, req.Artifacts); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
 	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
 	if err != nil {
