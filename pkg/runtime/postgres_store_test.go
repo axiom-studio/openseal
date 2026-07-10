@@ -11,3 +11,10 @@ func TestPostgresStoreRejectsUnsafeSchemaBeforeConnecting(t *testing.T) {
 		t.Fatal("unsafe PostgreSQL schema was accepted")
 	}
 }
+
+func TestPostgresMigrationRollbackRejectsInvalidTarget(t *testing.T) {
+	store := &PostgresStore{}
+	if err := store.RollbackPostgresMigrations(context.Background(), currentPostgresSchemaVersion+1); err == nil {
+		t.Fatal("invalid migration target was accepted")
+	}
+}

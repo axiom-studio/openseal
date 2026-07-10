@@ -65,6 +65,8 @@ type (
 	ExecutionStore             = runtime.ExecutionStore
 	PortfolioStore             = runtime.PortfolioStore
 	KernelStore                = runtime.KernelStore
+	PostgresStore              = runtime.PostgresStore
+	PostgresStoreOption        = runtime.PostgresStoreOption
 	Scope                      = runtime.Scope
 	ObjectiveOwner             = runtime.ObjectiveOwner
 	Objective                  = runtime.Objective
@@ -201,8 +203,20 @@ type PersistentKernelStore interface {
 	skill.CatalogStore
 }
 
+var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
+
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
 	return runtime.NewToolActionDispatcher(invoker)
+}
+
+// NewPostgresStore opens the production-grade shared persistence adapter and
+// applies OpenSeal's versioned schema migrations.
+func NewPostgresStore(ctx context.Context, dsn string, options ...runtime.PostgresStoreOption) (*runtime.PostgresStore, error) {
+	return runtime.NewPostgresStore(ctx, dsn, options...)
+}
+
+func WithPostgresSchema(schema string) runtime.PostgresStoreOption {
+	return runtime.WithPostgresSchema(schema)
 }
 
 func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilation, error) {

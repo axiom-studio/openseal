@@ -330,4 +330,135 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	if err != nil || len(prompts) != 1 || prompts[0].SkillID != skillDefinition.ID {
 		t.Fatalf("replica skill prompts = %#v, %v", prompts, err)
 	}
+
+	actionRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release"}, Goal: "Deploy safely", Source: RunSourceManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const proposalContenders = 20
+	proposalResults := make(chan *ActionProposalResult, proposalContenders)
+	proposalErrors := make(chan error, proposalContenders)
+	wait = sync.WaitGroup{}
+	for index := 0; index < proposalContenders; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			record := sqliteApprovalProposal(actionRun, "postgres-call-"+string(rune('a'+index)), "postgres-idempotency", "postgres-proposal-"+string(rune('a'+index)))
+			record.Run.WakeCondition.Reference = record.Approval.ID
+			result, proposalErr := stores[index%len(stores)].CreateActionProposal(ctx, record)
+			proposalResults <- result
+			proposalErrors <- proposalErr
+		}(index)
+	}
+	wait.Wait()
+	close(proposalResults)
+	close(proposalErrors)
+	for proposalErr := range proposalErrors {
+		if proposalErr != nil {
+			t.Fatal(proposalErr)
+		}
+	}
+	createdProposals := 0
+	var proposal *ActionProposalResult
+	for result := range proposalResults {
+		if result.Created {
+			createdProposals++
+			proposal = result
+		}
+	}
+	if createdProposals != 1 || proposal == nil || proposal.Approval == nil {
+		t.Fatalf("created proposals = %d, proposal=%#v", createdProposals, proposal)
+	}
+	approvals := NewApprovalCoordinator(replica, replica, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
+	approvalNow := proposal.Approval.CreatedAt.Add(time.Second)
+	approvals.now = func() time.Time { return approvalNow }
+	resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	if err != nil || !resolved.Resolved || resolved.Call.Status != ActionCallStatusReady || resolved.Run.Status != AgentRunStatusWaitingForDependency {
+		t.Fatalf("resolved approval = %#v, %v", resolved, err)
+	}
+	replayed, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	if err != nil || replayed.Resolved {
+		t.Fatalf("replayed approval = %#v, %v", replayed, err)
+	}
+	actionClaims := make(chan *ActionCall, 2)
+	actionClaimErrors := make(chan error, 2)
+	wait = sync.WaitGroup{}
+	for index := 0; index < 2; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			call, claimErr := stores[index].ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "action-worker-" + string(rune('a'+index)), Now: approvalNow, LeaseDuration: time.Minute})
+			actionClaims <- call
+			actionClaimErrors <- claimErr
+		}(index)
+	}
+	wait.Wait()
+	close(actionClaims)
+	close(actionClaimErrors)
+	for claimErr := range actionClaimErrors {
+		if claimErr != nil {
+			t.Fatal(claimErr)
+		}
+	}
+	var claimedAction *ActionCall
+	actionClaimCount := 0
+	for call := range actionClaims {
+		if call != nil {
+			actionClaimCount++
+			claimedAction = call
+		}
+	}
+	if actionClaimCount != 1 {
+		t.Fatalf("action claims = %d, want 1", actionClaimCount)
+	}
+	currentRun, err := primary.GetAgentRun(ctx, scope, actionRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedCall := cloneActionCall(claimedAction)
+	completedCall.Status = ActionCallStatusSucceeded
+	completedCall.Output = map[string]interface{}{"deployment": "complete"}
+	completedCall.LeaseOwner, completedCall.LeaseExpiresAt = "", nil
+	completedCall.Revision++
+	completedCall.UpdatedAt = approvalNow.Add(time.Second)
+	completedCall.CompletedAt = &completedCall.UpdatedAt
+	resumedRun := cloneAgentRun(currentRun)
+	resumedRun.Status = AgentRunStatusQueued
+	resumedRun.WakeCondition = nil
+	resumedRun.AvailableAt, resumedRun.QueueEnteredAt = completedCall.UpdatedAt, completedCall.UpdatedAt
+	resumedRun.Revision++
+	resumedRun.UpdatedAt = completedCall.UpdatedAt
+	duplicateEvent := &ActivityEvent{ID: proposal.Event.ID, Scope: scope, RunID: actionRun.ID, EventType: "action.succeeded", Summary: "Deployment completed", CreatedAt: completedCall.UpdatedAt}
+	execution := ActionExecutionRecord{Call: completedCall, ExpectedCallRevision: claimedAction.Revision, Run: resumedRun, ExpectedRunRevision: currentRun.Revision, WorkerID: claimedAction.LeaseOwner, Now: approvalNow, Event: duplicateEvent}
+	if _, err := replica.PersistActionExecution(ctx, execution); err == nil {
+		t.Fatal("duplicate activity should roll back the action outcome")
+	}
+	rolledBackCall, err := primary.GetActionCall(ctx, scope, claimedAction.ID)
+	if err != nil || rolledBackCall.Status != ActionCallStatusRunning || rolledBackCall.Revision != claimedAction.Revision {
+		t.Fatalf("rolled back call = %#v, %v", rolledBackCall, err)
+	}
+	execution.Event.ID = uuid.NewString()
+	persistedExecution, err := primary.PersistActionExecution(ctx, execution)
+	if err != nil || persistedExecution.Call.Status != ActionCallStatusSucceeded || persistedExecution.Run.Status != AgentRunStatusQueued {
+		t.Fatalf("persisted execution = %#v, %v", persistedExecution, err)
+	}
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+		t.Fatalf("schema version = %d, %v", version, err)
+	}
+	if err := primary.RollbackPostgresMigrations(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 4 {
+		t.Fatalf("rolled-back schema version = %d, %v", version, err)
+	}
+	var actionTables int
+	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('action_calls','approval_checkpoints')`, primary.schema).Scan(&actionTables); err != nil || actionTables != 0 {
+		t.Fatalf("action tables after rollback = %d, %v", actionTables, err)
+	}
+	if err := primary.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+		t.Fatalf("reapplied schema version = %d, %v", version, err)
+	}
 }

@@ -134,7 +134,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	call := &ActionCall{
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
-		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: cloneMap(req.Arguments),
+		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(req.Arguments, bound.Action.InputSchema),
 		CredentialRefs: boundCredentialReferences(bound), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		MaxAttempts: max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -204,6 +204,38 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		event.Payload["policyReason"] = decision.Reason
 	}
 	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event})
+}
+
+// persistedActionArguments strips values that must be supplied through the
+// credential resolver. Raw sensitive input remains available only during the
+// ephemeral validation/policy decision that precedes proposal persistence.
+func persistedActionArguments(arguments map[string]interface{}, schema map[string]interface{}) map[string]interface{} {
+	properties, _ := schema["properties"].(map[string]interface{})
+	result := make(map[string]interface{}, len(arguments))
+	for key, value := range arguments {
+		childSchema, _ := properties[key].(map[string]interface{})
+		if sensitiveFieldName(key) || schemaSensitive(childSchema) {
+			continue
+		}
+		result[key] = persistedActionValue(value, childSchema)
+	}
+	return result
+}
+
+func persistedActionValue(value interface{}, schema map[string]interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return persistedActionArguments(typed, schema)
+	case []interface{}:
+		itemSchema, _ := schema["items"].(map[string]interface{})
+		result := make([]interface{}, len(typed))
+		for index, child := range typed {
+			result[index] = persistedActionValue(child, itemSchema)
+		}
+		return result
+	default:
+		return typed
+	}
 }
 
 func validActionDisposition(value ActionDisposition) bool {

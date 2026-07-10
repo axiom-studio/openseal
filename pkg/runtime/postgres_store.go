@@ -43,6 +43,8 @@ type PostgresStore struct {
 	schema string
 }
 
+var _ KernelStore = (*PostgresStore)(nil)
+
 // NewPostgresStore opens PostgreSQL and applies OpenSeal's versioned schema.
 func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreOption) (*PostgresStore, error) {
 	if strings.TrimSpace(dsn) == "" {
@@ -127,6 +129,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := s.migrateAgentAndSkillControlPlane(ctx, tx); err != nil {
+		return err
+	}
+	if err := s.migrateActions(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit()
