@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ type panelSection int
 const (
 	sectionRuns panelSection = iota
 	sectionArtifacts
+	sectionChannels
 )
 
 type editorMode int
@@ -73,35 +75,51 @@ type editorMode int
 const (
 	modeCreate editorMode = iota
 	modeGuide
+	modeChannelCreate
+	modeChannelPost
 )
 
 type Model struct {
-	ctx                context.Context
-	client             client.KernelClient
-	config             Config
-	editor             textarea.Model
-	focus              focusArea
-	section            panelSection
-	mode               editorMode
-	width              int
-	height             int
-	loading            bool
-	busy               bool
-	ready              bool
-	unavailable        string
-	err                error
-	status             string
-	runCapability      kernelapi.Capability
-	artifactCapability kernelapi.Capability
-	runs               []*runtime.AgentRun
-	selected           int
-	selectedID         string
-	artifacts          []*runtime.Artifact
-	artifactSelected   int
-	selectedArtifact   string
-	artifactExpanded   bool
-	pendingKey         string
-	pendingGoal        string
+	ctx                      context.Context
+	client                   client.KernelClient
+	conversationClient       client.ConversationClient
+	config                   Config
+	editor                   textarea.Model
+	focus                    focusArea
+	section                  panelSection
+	mode                     editorMode
+	width                    int
+	height                   int
+	loading                  bool
+	busy                     bool
+	ready                    bool
+	unavailable              string
+	err                      error
+	status                   string
+	runCapability            kernelapi.Capability
+	artifactCapability       kernelapi.Capability
+	channelCapability        kernelapi.Capability
+	runs                     []*runtime.AgentRun
+	selected                 int
+	selectedID               string
+	artifacts                []*runtime.Artifact
+	artifactSelected         int
+	selectedArtifact         string
+	artifactExpanded         bool
+	conversations            []*runtime.Conversation
+	conversationSelected     int
+	selectedConversation     string
+	channelMessages          []*runtime.ChannelMessage
+	channelRounds            []*runtime.ParticipationRoundResult
+	channelPresence          []*runtime.ConversationPresence
+	channelAuditExpanded     bool
+	pendingKey               string
+	pendingGoal              string
+	pendingConversationKey   string
+	pendingConversationTitle string
+	pendingMessageKey        string
+	pendingMessageContent    string
+	pendingMessageChannelID  string
 }
 
 type capabilitiesLoaded struct {
@@ -117,6 +135,34 @@ type runsLoaded struct {
 type artifactsLoaded struct {
 	artifacts []*runtime.Artifact
 	err       error
+}
+
+type conversationsLoaded struct {
+	conversations []*runtime.Conversation
+	err           error
+}
+
+type channelDetailLoaded struct {
+	conversationID string
+	messages       []*runtime.ChannelMessage
+	rounds         []*runtime.ParticipationRoundResult
+	presence       []*runtime.ConversationPresence
+	err            error
+}
+
+type conversationCreated struct {
+	conversation *runtime.Conversation
+	err          error
+}
+
+type channelMessagePosted struct {
+	result *runtime.ChannelMessageCommitResult
+	err    error
+}
+
+type conversationCursorAdvanced struct {
+	conversationID string
+	err            error
 }
 
 type artifactDownloaded struct {
@@ -162,6 +208,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
 		focus: focusComposer, section: sectionRuns, width: 100, height: 30,
+		conversationClient: conversationClient(kernelClient),
 	}, nil
 }
 
@@ -201,27 +248,35 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
+		channelCapability, hasChannels := msg.document.Find(kernelapi.TeamChannelsCapabilityID, kernelapi.TeamChannelsCapabilityVersion)
 		m.runCapability = runCapability
 		m.artifactCapability = artifactCapability
+		m.channelCapability = channelCapability
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
 		}
 		if !hasArtifacts || !artifactCapability.Available {
 			m.artifactCapability = kernelapi.Capability{}
 		}
-		if !m.runCapability.Available && !m.artifactCapability.Available {
-			m.unavailable = "This server does not advertise canonical work or artifact evidence."
+		if !hasChannels || !channelCapability.Available || m.conversationClient == nil {
+			m.channelCapability = kernelapi.Capability{}
+		}
+		if !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available {
+			m.unavailable = "This server does not advertise canonical work, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
 		m.ready = true
 		m.unavailable = ""
 		m.err = nil
-		if !m.runCapability.Available && m.artifactCapability.Available {
+		if !m.runCapability.Available && m.channelCapability.Available {
+			m.section = sectionChannels
+			m.focusPanelList()
+		} else if !m.runCapability.Available && m.artifactCapability.Available {
 			m.section = sectionArtifacts
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadRuns(), m.loadArtifacts())
+		return m, tea.Batch(m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 	case runsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -241,6 +296,71 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.artifacts = msg.artifacts
 		m.restoreArtifactSelection()
+		return m, nil
+	case conversationsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.conversations = msg.conversations
+		m.restoreConversationSelection()
+		return m, m.loadSelectedConversation()
+	case channelDetailLoaded:
+		if selected := m.selectedConversationRecord(); selected == nil || selected.ID != msg.conversationID {
+			return m, nil
+		}
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.channelMessages = msg.messages
+		m.channelRounds = msg.rounds
+		m.channelPresence = msg.presence
+		if m.section == sectionChannels {
+			return m, m.markSelectedConversationRead()
+		}
+		return m, nil
+	case conversationCreated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Channel creation failed. The title is preserved for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.pendingConversationKey, m.pendingConversationTitle = "", ""
+		m.editor.Reset()
+		m.selectedConversation = msg.conversation.ID
+		m.status = "Team channel created."
+		m.section = sectionChannels
+		m.focusPanelList()
+		return m, m.loadConversations()
+	case channelMessagePosted:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Message was not sent. Its content is preserved for retry."
+			return m, m.loadConversations()
+		}
+		m.err = nil
+		m.pendingMessageKey, m.pendingMessageContent, m.pendingMessageChannelID = "", "", ""
+		m.editor.Reset()
+		m.mode = modeChannelPost
+		m.selectedConversation = msg.result.Conversation.ID
+		m.status = "Message posted to the durable Team channel."
+		m.focusPanelList()
+		return m, m.loadConversations()
+	case conversationCursorAdvanced:
+		if selected := m.selectedConversationRecord(); selected == nil || selected.ID != msg.conversationID {
+			return m, nil
+		}
+		if msg.err != nil && !isCursorRefreshConflict(msg.err) {
+			m.err = msg.err
+		}
 		return m, nil
 	case artifactDownloaded:
 		m.busy = false
@@ -286,7 +406,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadRuns(), m.loadArtifacts())
+			commands = append(commands, m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -314,25 +434,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == focusComposer {
 			m.focusPanelList()
 		} else {
-			if m.supportsRun(kernelapi.OperationCreate) {
-				m.focusComposerEditor()
-			}
+			m.prepareComposerForSection()
 		}
 		return m, nil
 	case "esc":
-		if m.mode == modeGuide {
-			m.mode = modeCreate
+		if m.mode != modeCreate {
+			m.resetComposerMode()
 			m.editor.Reset()
-			m.editor.Placeholder = "Describe the outcome you want…"
-			m.status = "Guidance canceled."
+			m.status = "Draft canceled."
 			return m, nil
 		}
 	case "ctrl+s":
 		if m.focus == focusComposer {
-			if m.mode == modeGuide {
+			switch m.mode {
+			case modeGuide:
 				return m, m.submitGuidance()
+			case modeChannelCreate:
+				return m, m.submitConversation()
+			case modeChannelPost:
+				return m, m.submitChannelMessage()
+			default:
+				return m, m.submitRun()
 			}
-			return m, m.submitRun()
 		}
 	}
 
@@ -340,8 +463,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "up", "k":
 			m.movePanelSelection(-1)
+			if m.section == sectionChannels {
+				return m, m.loadSelectedConversation()
+			}
 		case "down", "j":
 			m.movePanelSelection(1)
+			if m.section == sectionChannels {
+				return m, m.loadSelectedConversation()
+			}
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
@@ -350,14 +479,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.artifactCapability.Available {
 				m.section = sectionArtifacts
 			}
+		case "c":
+			if m.channelCapability.Available {
+				m.section = sectionChannels
+				return m, m.loadSelectedConversation()
+			}
 		case "n":
-			if m.section == sectionRuns && m.supportsRun(kernelapi.OperationCreate) {
+			if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationCreate) {
+				m.mode = modeChannelCreate
+				m.editor.Reset()
+				m.editor.Placeholder = "Name the Team channel…"
+				m.focusComposerEditor()
+			} else if m.section == sectionRuns && m.supportsRun(kernelapi.OperationCreate) {
 				m.mode = modeCreate
 				m.editor.Placeholder = "Describe the outcome you want…"
 				m.focusComposerEditor()
 			}
 		case "r":
 			return m, m.loadPanel()
+		case "m":
+			if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
+				m.mode = modeChannelPost
+				m.editor.Reset()
+				m.editor.Placeholder = "Share an update or ask a question…"
+				m.focusComposerEditor()
+			}
 		case "p":
 			if m.section == sectionRuns {
 				return m, m.pauseOrResume()
@@ -378,6 +524,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "e", "enter":
 			if m.section == sectionArtifacts && m.selectedArtifactRecord() != nil {
 				m.artifactExpanded = !m.artifactExpanded
+			} else if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationAudit) && len(m.channelRounds) > 0 {
+				m.channelAuditExpanded = !m.channelAuditExpanded
 			}
 		case "d":
 			if m.section == sectionArtifacts {
@@ -426,11 +574,151 @@ func (m *Model) loadArtifacts() tea.Cmd {
 	}
 }
 
+func (m *Model) loadConversations() tea.Cmd {
+	if !m.supportsChannel(kernelapi.OperationList) || m.conversationClient == nil {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		conversations, err := m.conversationClient.ListConversations(m.ctx, runtime.ConversationFilter{
+			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
+		})
+		return conversationsLoaded{conversations: conversations, err: err}
+	}
+}
+
+func (m *Model) loadSelectedConversation() tea.Cmd {
+	conversation := m.selectedConversationRecord()
+	if conversation == nil || m.conversationClient == nil || !m.supportsChannel(kernelapi.OperationList) {
+		m.channelMessages, m.channelRounds, m.channelPresence = nil, nil, nil
+		return nil
+	}
+	m.loading = true
+	conversationID := conversation.ID
+	conversationClient := m.conversationClient
+	ctx, scope := m.ctx, m.config.Scope
+	includeAudit := m.supportsChannel(kernelapi.OperationAudit)
+	includePresence := m.supportsChannel(kernelapi.OperationPresence)
+	return func() tea.Msg {
+		messages, err := conversationClient.ListChannelMessages(ctx, runtime.ChannelMessageFilter{
+			Scope: scope, ConversationID: conversationID, Limit: 50, Descending: true,
+		})
+		if err != nil {
+			return channelDetailLoaded{conversationID: conversationID, err: err}
+		}
+		var rounds []*runtime.ParticipationRoundResult
+		if includeAudit {
+			rounds, err = conversationClient.ListParticipationRounds(ctx, runtime.ParticipationRoundFilter{
+				Scope: scope, ConversationID: conversationID, Limit: 20,
+			})
+			if err != nil {
+				return channelDetailLoaded{conversationID: conversationID, err: err}
+			}
+		}
+		var presence []*runtime.ConversationPresence
+		if includePresence {
+			presence, err = conversationClient.ListConversationPresence(ctx, scope, conversationID)
+		}
+		return channelDetailLoaded{conversationID: conversationID, messages: messages, rounds: rounds, presence: presence, err: err}
+	}
+}
+
 func (m *Model) loadPanel() tea.Cmd {
+	if m.section == sectionChannels {
+		return m.loadConversations()
+	}
 	if m.section == sectionArtifacts {
 		return m.loadArtifacts()
 	}
 	return m.loadRuns()
+}
+
+func (m *Model) submitConversation() tea.Cmd {
+	title := strings.TrimSpace(m.editor.Value())
+	if !m.ready || m.conversationClient == nil || !m.supportsChannel(kernelapi.OperationCreate) || m.busy || title == "" {
+		if title == "" {
+			m.status = "Give the Team channel a clear name."
+		}
+		return nil
+	}
+	if m.pendingConversationKey == "" || m.pendingConversationTitle != title {
+		m.pendingConversationKey = uuid.NewString()
+		m.pendingConversationTitle = title
+	}
+	key := m.pendingConversationKey
+	m.busy = true
+	m.err = nil
+	m.status = "Creating durable Team channel…"
+	request := kernelapi.CreateConversationRequest{Scope: m.config.Scope, Owner: m.config.Owner, Title: title}
+	return func() tea.Msg {
+		conversation, err := m.conversationClient.CreateConversation(m.ctx, request, key)
+		return conversationCreated{conversation: conversation, err: err}
+	}
+}
+
+func (m *Model) submitChannelMessage() tea.Cmd {
+	conversation := m.selectedConversationRecord()
+	content := strings.TrimSpace(m.editor.Value())
+	if conversation == nil || m.conversationClient == nil || !m.supportsChannel(kernelapi.OperationPost) || m.busy || content == "" {
+		if content == "" {
+			m.status = "Write a message before sending it."
+		}
+		return nil
+	}
+	if m.pendingMessageKey == "" || m.pendingMessageContent != content || m.pendingMessageChannelID != conversation.ID {
+		m.pendingMessageKey = uuid.NewString()
+		m.pendingMessageContent = content
+		m.pendingMessageChannelID = conversation.ID
+	}
+	intent := runtime.MessageIntentUpdate
+	requiresResponse := false
+	if strings.HasSuffix(content, "?") {
+		intent = runtime.MessageIntentQuestion
+		requiresResponse = true
+	}
+	request := kernelapi.PostChannelMessageRequest{
+		Scope: m.config.Scope, ExpectedRevision: conversation.Revision,
+		Sender: m.operatorParticipant(), Intent: intent, Content: content,
+		Audience:         runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel},
+		RequiresResponse: requiresResponse,
+	}
+	key := m.pendingMessageKey
+	m.busy = true
+	m.err = nil
+	m.status = "Posting to the Team channel…"
+	return func() tea.Msg {
+		result, err := m.conversationClient.PostChannelMessage(m.ctx, conversation.ID, request, key)
+		return channelMessagePosted{result: result, err: err}
+	}
+}
+
+func (m *Model) markSelectedConversationRead() tea.Cmd {
+	conversation := m.selectedConversationRecord()
+	if conversation == nil || conversation.LastSequence == 0 || m.conversationClient == nil || !m.supportsChannel(kernelapi.OperationRead) {
+		return nil
+	}
+	conversationID, lastSequence := conversation.ID, conversation.LastSequence
+	participant := m.operatorParticipant()
+	conversationClient := m.conversationClient
+	ctx, scope := m.ctx, m.config.Scope
+	return func() tea.Msg {
+		cursor, err := conversationClient.GetConversationCursor(ctx, scope, conversationID, participant)
+		if err != nil && !isHTTPStatus(err, http.StatusNotFound) {
+			return conversationCursorAdvanced{conversationID: conversationID, err: err}
+		}
+		expectedRevision := int64(0)
+		if cursor != nil {
+			expectedRevision = cursor.Revision
+			if cursor.DeliveredSequence >= lastSequence && cursor.ReadSequence >= lastSequence {
+				return conversationCursorAdvanced{conversationID: conversationID}
+			}
+		}
+		_, _, err = conversationClient.AdvanceConversationCursor(ctx, conversationID, kernelapi.AdvanceConversationCursorRequest{
+			Scope: scope, Participant: participant, ExpectedRevision: expectedRevision,
+			DeliveredSequence: lastSequence, ReadSequence: lastSequence,
+		})
+		return conversationCursorAdvanced{conversationID: conversationID, err: err}
+	}
 }
 
 func (m *Model) submitRun() tea.Cmd {
@@ -513,6 +801,10 @@ func (m *Model) supportsRun(operation string) bool {
 
 func (m *Model) supportsArtifact(operation string) bool {
 	return m.ready && m.artifactCapability.Supports(operation)
+}
+
+func (m *Model) supportsChannel(operation string) bool {
+	return m.ready && m.conversationClient != nil && m.channelCapability.Supports(operation)
 }
 
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
@@ -603,11 +895,53 @@ func (m *Model) moveArtifactSelection(delta int) {
 }
 
 func (m *Model) movePanelSelection(delta int) {
+	if m.section == sectionChannels {
+		m.moveConversationSelection(delta)
+		return
+	}
 	if m.section == sectionArtifacts {
 		m.moveArtifactSelection(delta)
 		return
 	}
 	m.moveSelection(delta)
+}
+
+func (m *Model) selectedConversationRecord() *runtime.Conversation {
+	if m.conversationSelected < 0 || m.conversationSelected >= len(m.conversations) {
+		return nil
+	}
+	return m.conversations[m.conversationSelected]
+}
+
+func (m *Model) restoreConversationSelection() {
+	if len(m.conversations) == 0 {
+		m.conversationSelected = 0
+		m.selectedConversation = ""
+		m.channelMessages, m.channelRounds, m.channelPresence = nil, nil, nil
+		m.channelAuditExpanded = false
+		return
+	}
+	if m.selectedConversation != "" {
+		for index, conversation := range m.conversations {
+			if conversation.ID == m.selectedConversation {
+				m.conversationSelected = index
+				return
+			}
+		}
+	}
+	m.conversationSelected = min(m.conversationSelected, len(m.conversations)-1)
+	m.selectedConversation = m.conversations[m.conversationSelected].ID
+	m.channelAuditExpanded = false
+}
+
+func (m *Model) moveConversationSelection(delta int) {
+	if len(m.conversations) == 0 {
+		return
+	}
+	m.conversationSelected = max(0, min(len(m.conversations)-1, m.conversationSelected+delta))
+	m.selectedConversation = m.conversations[m.conversationSelected].ID
+	m.channelMessages, m.channelRounds, m.channelPresence = nil, nil, nil
+	m.channelAuditExpanded = false
 }
 
 func (m *Model) downloadSelectedArtifact() tea.Cmd {
@@ -639,6 +973,64 @@ func (m *Model) focusPanelList() {
 func (m *Model) focusComposerEditor() {
 	m.focus = focusComposer
 	m.editor.Focus()
+}
+
+func (m *Model) prepareComposerForSection() {
+	switch {
+	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
+		m.mode = modeChannelPost
+		m.editor.Placeholder = "Share an update or ask a question…"
+		m.focusComposerEditor()
+	case m.section == sectionChannels && m.supportsChannel(kernelapi.OperationCreate):
+		m.mode = modeChannelCreate
+		m.editor.Placeholder = "Name the Team channel…"
+		m.focusComposerEditor()
+	case m.supportsRun(kernelapi.OperationCreate):
+		m.mode = modeCreate
+		m.editor.Placeholder = "Describe the outcome you want…"
+		m.focusComposerEditor()
+	}
+}
+
+func (m *Model) resetComposerMode() {
+	if m.section == sectionChannels && m.selectedConversationRecord() != nil {
+		m.mode = modeChannelPost
+		m.editor.Placeholder = "Share an update or ask a question…"
+		return
+	}
+	m.mode = modeCreate
+	m.editor.Placeholder = "Describe the outcome you want…"
+}
+
+func (m *Model) operatorParticipant() runtime.ConversationParticipant {
+	participantType := runtime.ConversationParticipantUser
+	switch strings.ToLower(strings.TrimSpace(m.config.Actor.Type)) {
+	case "agent":
+		participantType = runtime.ConversationParticipantAgent
+	case "team":
+		participantType = runtime.ConversationParticipantTeam
+	case "service", "system":
+		participantType = runtime.ConversationParticipantService
+	}
+	id := strings.TrimSpace(m.config.Actor.ID)
+	if id == "" {
+		id = "local"
+	}
+	return runtime.ConversationParticipant{Type: participantType, ID: id}
+}
+
+func conversationClient(kernelClient client.KernelClient) client.ConversationClient {
+	conversationClient, _ := kernelClient.(client.ConversationClient)
+	return conversationClient
+}
+
+func isHTTPStatus(err error, status int) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == status
+}
+
+func isCursorRefreshConflict(err error) bool {
+	return isHTTPStatus(err, http.StatusConflict)
 }
 
 func isTerminal(status runtime.AgentRunStatus) bool {
