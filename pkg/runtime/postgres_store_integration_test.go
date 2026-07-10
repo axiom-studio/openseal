@@ -534,7 +534,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || len(activity) != 5 || activity[0].EventType != "collaboration.completed" {
 		t.Fatalf("team activity = %#v, %v", activity, err)
 	}
-	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != 7 {
+	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }
