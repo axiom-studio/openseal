@@ -423,6 +423,11 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 	if err := req.Owner.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
 	}
+	for _, state := range []map[string]interface{}{req.Context, req.Plan, req.Checkpoint, req.Policy} {
+		if err := ValidateCredentialFreeContext(state); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+		}
+	}
 	if req.ObjectiveID != "" {
 		objective, err := store.GetObjective(ctx, req.Scope, req.ObjectiveID)
 		if err != nil {

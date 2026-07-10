@@ -15,7 +15,7 @@ func TestMemoryAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
 		Goal: "Ship the release", Source: RunSourceManual,
-		Context: map[string]interface{}{"apiKey": "source-only", "private": true},
+		Context: map[string]interface{}{"vaultBindingRef": "binding:source-only", "private": true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestMemoryAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	if accepted.Child == nil || accepted.Child.ParentRunID != source.ID || accepted.Child.RootRunID != source.RootRunID || accepted.Child.Owner != source.Owner || accepted.Child.AssignedAgentID != "marketing" {
 		t.Fatalf("child lineage = %#v", accepted.Child)
 	}
-	if accepted.Child.Context["apiKey"] != nil || accepted.Child.Context["private"] != nil || accepted.Child.Context["release"] != "2026.07" {
+	if accepted.Child.Context["vaultBindingRef"] != nil || accepted.Child.Context["private"] != nil || accepted.Child.Context["release"] != "2026.07" {
 		t.Fatalf("child context = %#v", accepted.Child.Context)
 	}
 	persistedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)

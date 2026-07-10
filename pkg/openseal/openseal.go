@@ -254,6 +254,10 @@ func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDi
 	return runtime.NewToolActionDispatcher(invoker)
 }
 
+func ValidateCredentialFreeContext(value interface{}) error {
+	return runtime.ValidateCredentialFreeContext(value)
+}
+
 // NewPostgresStore opens the production-grade shared persistence adapter and
 // applies OpenSeal's versioned schema migrations.
 func NewPostgresStore(ctx context.Context, dsn string, options ...runtime.PostgresStoreOption) (*runtime.PostgresStore, error) {
