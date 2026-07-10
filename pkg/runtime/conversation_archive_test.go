@@ -41,7 +41,8 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 					},
 					{
 						RecordID: "message-2", Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "37"},
-						Intent: MessageIntentAnswer, Content: "The signed evidence is attached.",
+						SenderDisplayName: "Release accountant",
+						Intent:            MessageIntentAnswer, Content: "The signed evidence is attached.",
 						Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToRecordID: "message-1", CreatedAt: start.Add(time.Minute),
 					},
 				},
@@ -60,7 +61,8 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 				t.Fatalf("resumed import = %#v, %v", resumed, err)
 			}
 			answer := resumed.Messages[1]
-			if !answer.Historical || !answer.CreatedAt.Equal(start.Add(time.Minute)) || answer.ReplyToMessageID != resumed.Messages[0].ID ||
+			if !answer.Historical || answer.SenderDisplayName != "Release accountant" || !answer.CreatedAt.Equal(start.Add(time.Minute)) ||
+				answer.ReplyToMessageID != resumed.Messages[0].ID ||
 				answer.ThreadRootID != resumed.Messages[0].ID || len(answer.References) != 1 ||
 				answer.References[0].Kind != ConversationReferenceExternalSource ||
 				answer.References[0].ID != "cortex:team-chat:conversation-42:message-2" {
