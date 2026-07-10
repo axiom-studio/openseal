@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 )
 
 func migrateActivity(db *sql.DB) error {
@@ -12,6 +14,11 @@ func migrateActivity(db *sql.DB) error {
 			scope_kind TEXT NOT NULL,
 			scope_id TEXT NOT NULL,
 			run_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT '',
+			objective_id TEXT NOT NULL DEFAULT '',
+			team_id TEXT NOT NULL DEFAULT '',
+			severity TEXT NOT NULL DEFAULT 'info',
+			visibility TEXT NOT NULL DEFAULT 'scope',
 			sequence INTEGER NOT NULL,
 			id TEXT NOT NULL,
 			event_type TEXT NOT NULL,
@@ -23,6 +30,64 @@ func migrateActivity(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_run_activity_stream
 			ON run_activity(scope_kind, scope_id, run_id, sequence);
 	`)
+	if err != nil {
+		return err
+	}
+	if err := addMissingActivityColumns(db); err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_run_activity_agent_feed
+			ON run_activity(scope_kind, scope_id, agent_id, created_at DESC, id DESC);
+		CREATE INDEX IF NOT EXISTS idx_run_activity_objective_feed
+			ON run_activity(scope_kind, scope_id, objective_id, created_at DESC, id DESC);
+		CREATE INDEX IF NOT EXISTS idx_run_activity_team_feed
+			ON run_activity(scope_kind, scope_id, team_id, created_at DESC, id DESC);
+	`)
+	return err
+}
+
+func addMissingActivityColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(run_activity)`)
+	if err != nil {
+		return err
+	}
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	additions := []struct{ name, statement string }{
+		{"agent_id", `ALTER TABLE run_activity ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`},
+		{"objective_id", `ALTER TABLE run_activity ADD COLUMN objective_id TEXT NOT NULL DEFAULT ''`},
+		{"team_id", `ALTER TABLE run_activity ADD COLUMN team_id TEXT NOT NULL DEFAULT ''`},
+		{"severity", `ALTER TABLE run_activity ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'`},
+		{"visibility", `ALTER TABLE run_activity ADD COLUMN visibility TEXT NOT NULL DEFAULT 'scope'`},
+	}
+	for _, addition := range additions {
+		if columns[addition.name] {
+			continue
+		}
+		if _, err := db.Exec(addition.statement); err != nil {
+			return fmt.Errorf("add run_activity.%s: %w", addition.name, err)
+		}
+	}
+	_, err = db.Exec(`UPDATE run_activity SET
+		agent_id = COALESCE(NULLIF(agent_id, ''), json_extract(payload, '$.agentId'), ''),
+		objective_id = COALESCE(NULLIF(objective_id, ''), json_extract(payload, '$.objectiveId'), ''),
+		team_id = COALESCE(NULLIF(team_id, ''), json_extract(payload, '$.teamId'), ''),
+		severity = COALESCE(NULLIF(severity, ''), json_extract(payload, '$.severity'), 'info'),
+		visibility = COALESCE(NULLIF(visibility, ''), json_extract(payload, '$.visibility'), 'scope')`)
 	return err
 }
 
@@ -118,8 +183,9 @@ func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *Activity
 		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO run_activity
-		(scope_kind, scope_id, run_id, sequence, id, event_type, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, persisted.RunID,
+		(scope_kind, scope_id, run_id, agent_id, objective_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, persisted.RunID,
+		persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}
@@ -138,14 +204,62 @@ func (s *SQLiteStore) ListActivity(ctx context.Context, filter ActivityFilter) (
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM run_activity
-		WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND sequence > ?
-		ORDER BY sequence ASC LIMIT ?`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+	if !filter.Descending {
+		rows, err := s.db.QueryContext(ctx, `SELECT payload FROM run_activity
+			WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND sequence > ?
+			ORDER BY sequence ASC LIMIT ?`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+		if err != nil {
+			return nil, err
+		}
+		return scanSQLiteActivity(rows, limit)
+	}
+	query := `SELECT payload FROM run_activity WHERE scope_kind = ? AND scope_id = ?`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"team_id", filter.TeamID}}
+	for _, selector := range selectors {
+		if selector.value != "" {
+			query += " AND " + selector.column + " = ?"
+			args = append(args, selector.value)
+		}
+	}
+	query, args = appendSQLiteActivityStrings(query, args, "event_type", filter.EventTypes)
+	severityValues := make([]string, 0, len(filter.Severities))
+	for _, severity := range filter.Severities {
+		severityValues = append(severityValues, string(severity))
+	}
+	query, args = appendSQLiteActivityStrings(query, args, "severity", severityValues)
+	visibilityValues := make([]string, 0, len(filter.Visibilities))
+	for _, visibility := range filter.Visibilities {
+		visibilityValues = append(visibilityValues, string(visibility))
+	}
+	query, args = appendSQLiteActivityStrings(query, args, "visibility", visibilityValues)
+	if filter.BeforeCreatedAt != nil {
+		query += ` AND (created_at < ? OR (created_at = ? AND id < ?))`
+		args = append(args, filter.BeforeCreatedAt, filter.BeforeCreatedAt, filter.BeforeID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	return scanSQLiteActivity(rows, limit)
+}
+
+func appendSQLiteActivityStrings(query string, args []interface{}, column string, values []string) (string, []interface{}) {
+	if len(values) == 0 {
+		return query, args
+	}
+	query += " AND " + column + " IN (" + strings.TrimRight(strings.Repeat("?,", len(values)), ",") + ")"
+	for _, value := range values {
+		args = append(args, value)
+	}
+	return query, args
+}
+
+func scanSQLiteActivity(rows *sql.Rows, capacity int) ([]*ActivityEvent, error) {
 	defer rows.Close()
-	result := make([]*ActivityEvent, 0, limit)
+	result := make([]*ActivityEvent, 0, capacity)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {

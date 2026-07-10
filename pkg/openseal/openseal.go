@@ -84,6 +84,9 @@ type (
 	ActivityEvent               = runtime.ActivityEvent
 	ActivityActor               = runtime.ActivityActor
 	ActivityFilter              = runtime.ActivityFilter
+	ActivityFeedRequest         = runtime.ActivityFeedRequest
+	ActivityProjection          = runtime.ActivityProjection
+	ActivityFeedPage            = runtime.ActivityFeedPage
 	ActivitySeverity            = runtime.ActivitySeverity
 	ActivityVisibility          = runtime.ActivityVisibility
 	RunTransitionRequest        = runtime.RunTransitionRequest
@@ -818,6 +821,10 @@ func (e *Engine) AppendActivity(ctx context.Context, event *runtime.ActivityEven
 
 func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter) ([]*runtime.ActivityEvent, error) {
 	return e.activity.ListActivity(ctx, filter)
+}
+
+func (e *Engine) ListActivityFeed(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
+	return e.activity.ListActivityFeed(ctx, request)
 }
 
 func (e *Engine) BeginAgentTurn(ctx context.Context, req runtime.BeginAgentTurnRequest) (*runtime.AgentTurn, error) {

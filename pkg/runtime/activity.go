@@ -101,10 +101,19 @@ type AgentRunLeaseGuard struct {
 }
 
 type ActivityFilter struct {
-	Scope         Scope
-	RunID         string
-	AfterSequence int64
-	Limit         int
+	Scope           Scope
+	RunID           string
+	AgentID         string
+	ObjectiveID     string
+	TeamID          string
+	EventTypes      []string
+	Severities      []ActivitySeverity
+	Visibilities    []ActivityVisibility
+	AfterSequence   int64
+	BeforeCreatedAt *time.Time
+	BeforeID        string
+	Descending      bool
+	Limit           int
 }
 
 type RunActivityStore interface {
@@ -265,6 +274,7 @@ func (s *RunActivityService) ListActivity(ctx context.Context, filter ActivityFi
 	if strings.TrimSpace(filter.RunID) == "" {
 		return nil, errors.New("run id is required")
 	}
+	filter.Descending = false
 	return s.activity.ListActivity(ctx, filter)
 }
 

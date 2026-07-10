@@ -55,25 +55,40 @@ func (s *MemoryStore) ListActivity(_ context.Context, filter ActivityFilter) ([]
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	key := portfolioKey(filter.Scope, filter.RunID)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.agentRuns[key] == nil {
-		return []*ActivityEvent{}, nil
-	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	result := make([]*ActivityEvent, 0, limit)
-	for _, event := range s.activity[key] {
-		if event.Sequence <= filter.AfterSequence {
-			continue
+	if !filter.Descending {
+		key := portfolioKey(filter.Scope, filter.RunID)
+		if s.agentRuns[key] == nil {
+			return []*ActivityEvent{}, nil
 		}
-		result = append(result, cloneActivityEvent(event))
-		if len(result) == limit {
-			break
+		result := make([]*ActivityEvent, 0, limit)
+		for _, event := range s.activity[key] {
+			if event.Sequence <= filter.AfterSequence || !matchesActivityFilter(event, filter) {
+				continue
+			}
+			result = append(result, cloneActivityEvent(event))
+			if len(result) == limit {
+				break
+			}
 		}
+		return result, nil
+	}
+	result := make([]*ActivityEvent, 0)
+	for _, events := range s.activity {
+		for _, event := range events {
+			if matchesActivityFilter(event, filter) {
+				result = append(result, cloneActivityEvent(event))
+			}
+		}
+	}
+	sortActivityEvents(result, true)
+	if len(result) > limit {
+		result = result[:limit]
 	}
 	return result, nil
 }
