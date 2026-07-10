@@ -31,9 +31,12 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 			defer cleanup()
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 			catalog, proposal := createRunnableAction(t, store, now)
-			worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(_ context.Context, scope Scope, refs map[string]skill.CredentialReference) (map[string]string, error) {
-				if scope != proposal.Call.Scope || refs["token"].ID != "release-secret" {
-					t.Fatalf("credential request mismatch: %v %#v", scope, refs)
+			worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(_ context.Context, request CredentialResolutionRequest) (map[string]string, error) {
+				if request.Scope != proposal.Call.Scope || request.References["token"].ID != "release-secret" ||
+					request.DeploymentID != proposal.Call.DeploymentID || request.SkillID != proposal.Call.SkillID ||
+					request.SkillVersion != proposal.Call.SkillVersion || request.Action != proposal.Call.Action ||
+					request.ActionCallID != proposal.Call.ID || request.RunID != proposal.Call.RunID {
+					t.Fatalf("credential request mismatch: %#v", request)
 				}
 				return map[string]string{"token": "resolved-super-secret"}, nil
 			}), ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
@@ -71,7 +74,7 @@ func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0
-	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, Scope, map[string]skill.CredentialReference) (map[string]string, error) {
+	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "raw-secret-value"}, nil
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		attempts++
@@ -108,7 +111,7 @@ func TestActionWorkerRenewsLeaseDuringLongDispatch(t *testing.T) {
 	store := NewMemoryStore(20)
 	now := time.Now().UTC()
 	catalog, proposal := createRunnableAction(t, store, now)
-	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, Scope, map[string]skill.CredentialReference) (map[string]string, error) {
+	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "secret"}, nil
 	}), ActionDispatcherFunc(func(ctx context.Context, _ ActionDispatchInput) (map[string]interface{}, error) {
 		select {

@@ -160,6 +160,7 @@ type (
 	ActionWorkerScopeSourceFunc = runtime.ActionWorkerScopeSourceFunc
 	CredentialResolver          = runtime.CredentialResolver
 	CredentialResolverFunc      = runtime.CredentialResolverFunc
+	CredentialResolutionRequest = runtime.CredentialResolutionRequest
 	ActionDispatchInput         = runtime.ActionDispatchInput
 	ActionDispatcher            = runtime.ActionDispatcher
 	ActionDispatcherFunc        = runtime.ActionDispatcherFunc
