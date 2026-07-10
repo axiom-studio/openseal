@@ -101,8 +101,11 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 	}
 
 	var currentRevision int64
-	err = conn.QueryRowContext(ctx, `SELECT revision FROM agent_runs
-		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.RunID).Scan(&currentRevision)
+	var currentLeaseOwner string
+	var currentLeaseExpiry sql.NullTime
+	err = conn.QueryRowContext(ctx, `SELECT revision, lease_owner, lease_expires_at FROM agent_runs
+		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.RunID).
+		Scan(&currentRevision, &currentLeaseOwner, &currentLeaseExpiry)
 	if err == sql.ErrNoRows {
 		return nil, ErrRunNotFound
 	}
@@ -111,6 +114,9 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 	}
 	if currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
+	}
+	if proposal.Lease != nil && (currentLeaseOwner != proposal.Lease.WorkerID || !currentLeaseExpiry.Valid || !currentLeaseExpiry.Time.After(proposal.Lease.Now)) {
+		return nil, ErrLeaseLost
 	}
 
 	callPayload, err := json.Marshal(call)
