@@ -148,8 +148,35 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
 	}
 	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
-	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != replay.Round.ID {
+	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != replay.Round.ID || rounds[0].Round.ConversationRevision != 3 {
 		t.Fatalf("rounds = %#v, err = %v", rounds, err)
+	}
+	primaryChanges, err := NewConversationChangeService(primary, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialChanges, err := primaryChanges.ListChanges(ctx, ConversationChangeRequest{
+		Scope: scope, ConversationID: conversation.ID, ActiveAt: fixed,
+	})
+	if err != nil || len(initialChanges.Messages) != 2 || len(initialChanges.Rounds) != 1 ||
+		len(initialChanges.Presence) != 1 || initialChanges.Cursor == "" {
+		t.Fatalf("initial PostgreSQL changes = %#v, err = %v", initialChanges, err)
+	}
+	replicaChanges, err := NewConversationChangeService(replica, replica)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchangedChanges, err := replicaChanges.ListChanges(ctx, ConversationChangeRequest{
+		Scope: scope, ConversationID: conversation.ID, Cursor: initialChanges.Cursor, ActiveAt: fixed,
+	})
+	if err != nil || unchangedChanges.HasChanges {
+		t.Fatalf("replica cursor replay = %#v, err = %v", unchangedChanges, err)
+	}
+	expiredChanges, err := replicaChanges.ListChanges(ctx, ConversationChangeRequest{
+		Scope: scope, ConversationID: conversation.ID, Cursor: initialChanges.Cursor, ActiveAt: fixed.Add(31 * time.Second),
+	})
+	if err != nil || !expiredChanges.HasChanges || len(expiredChanges.Presence) != 0 {
+		t.Fatalf("replica presence expiry = %#v, err = %v", expiredChanges, err)
 	}
 
 	recoveryConversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{

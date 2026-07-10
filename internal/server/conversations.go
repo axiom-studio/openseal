@@ -154,6 +154,36 @@ func (s *Server) handleGetChannelMessage(w http.ResponseWriter, r *http.Request)
 	s.respondJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) handleListConversationChanges(w http.ResponseWriter, r *http.Request) {
+	_, scope, conversationID, ok := s.conversationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	conversationStore, ok := s.store.(runtime.ConversationStore)
+	if !ok {
+		s.respondError(w, http.StatusNotImplemented, "team channel changes are unavailable")
+		return
+	}
+	limit, err := boundedIntQuery(r, "limit", 100, 1, 500)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	service, err := runtime.NewConversationChangeService(conversationStore, s.store)
+	if err != nil {
+		s.respondConversationError(w, err)
+		return
+	}
+	changes, err := service.ListChanges(r.Context(), runtime.ConversationChangeRequest{
+		Scope: scope, ConversationID: conversationID, Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")), Limit: limit,
+	})
+	if err != nil {
+		s.respondConversationError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, changes)
+}
+
 func (s *Server) handleCoordinateParticipation(w http.ResponseWriter, r *http.Request) {
 	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
 	if !ok {

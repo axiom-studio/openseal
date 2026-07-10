@@ -38,6 +38,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/conversations/{id}/messages", s.handlePostChannelMessage)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/messages", s.handleListChannelMessages)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/messages/{messageId}", s.handleGetChannelMessage)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/changes", s.handleListConversationChanges)
 	s.mux.HandleFunc("POST /api/v1/conversations/{id}/participation-rounds", s.handleCoordinateParticipation)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/participation-rounds", s.handleListParticipationRounds)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/participation-rounds/{roundId}", s.handleGetParticipationRound)

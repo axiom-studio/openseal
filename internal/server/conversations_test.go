@@ -95,6 +95,24 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if audit.Code != http.StatusOK || !strings.Contains(audit.Body.String(), `"requested_silence"`) {
 		t.Fatalf("audit status = %d, body = %s", audit.Code, audit.Body.String())
 	}
+	changesResponse := performAgentRunRequest(t, server.Handler(), http.MethodGet,
+		"/api/v1/conversations/"+conversation.ID+"/changes?scopeKind=tenant&scopeId=one", "", "")
+	if changesResponse.Code != http.StatusOK {
+		t.Fatalf("changes status = %d, body = %s", changesResponse.Code, changesResponse.Body.String())
+	}
+	var changes runtime.ConversationChangeSet
+	if err := json.NewDecoder(changesResponse.Body).Decode(&changes); err != nil {
+		t.Fatal(err)
+	}
+	if !changes.HasChanges || len(changes.Messages) != 2 || len(changes.Rounds) != 1 ||
+		changes.Rounds[0].Round.ConversationRevision != 3 || changes.Cursor == "" {
+		t.Fatalf("changes = %#v", changes)
+	}
+	unchangedResponse := performAgentRunRequest(t, server.Handler(), http.MethodGet,
+		"/api/v1/conversations/"+conversation.ID+"/changes?scopeKind=tenant&scopeId=one&cursor="+changes.Cursor, "", "")
+	if unchangedResponse.Code != http.StatusOK || !strings.Contains(unchangedResponse.Body.String(), `"hasChanges":false`) {
+		t.Fatalf("unchanged status = %d, body = %s", unchangedResponse.Code, unchangedResponse.Body.String())
+	}
 
 	cursorBody := `{"scope":{"kind":"tenant","id":"one"},"participant":{"type":"agent","id":"developer"},"deliveredSequence":2,"readSequence":2}`
 	cursor := performAgentRunRequest(t, server.Handler(), http.MethodPut,
@@ -135,7 +153,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 		t.Fatalf("invalid status = %d, body = %s", invalid.Code, invalid.Body.String())
 	}
 	capabilities := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
-	for _, expected := range []string{`"team-channels"`, `"coordinate"`, `"presence"`, `"audit"`} {
+	for _, expected := range []string{`"team-channels"`, `"coordinate"`, `"presence"`, `"audit"`, `"changes"`} {
 		if !strings.Contains(capabilities.Body.String(), expected) {
 			t.Fatalf("capabilities missing %s: %s", expected, capabilities.Body.String())
 		}

@@ -122,22 +122,23 @@ const (
 // ParticipationRound preserves every proposal and deterministic decision,
 // including silence and deferral, without exposing hidden model reasoning.
 type ParticipationRound struct {
-	ID               string                        `json:"id"`
-	Scope            Scope                         `json:"scope"`
-	ConversationID   string                        `json:"conversationId"`
-	TriggerMessageID string                        `json:"triggerMessageId,omitempty"`
-	Status           ParticipationRoundStatus      `json:"status"`
-	Policy           ConversationArbitrationPolicy `json:"policy"`
-	Proposals        []ParticipationProposal       `json:"proposals"`
-	Arbitration      ConversationArbitration       `json:"arbitration"`
-	IdempotencyKey   string                        `json:"idempotencyKey"`
-	Revision         int64                         `json:"revision"`
-	CreatedAt        time.Time                     `json:"createdAt"`
-	CommittedAt      time.Time                     `json:"committedAt"`
+	ID                   string                        `json:"id"`
+	Scope                Scope                         `json:"scope"`
+	ConversationID       string                        `json:"conversationId"`
+	ConversationRevision int64                         `json:"conversationRevision,omitempty"`
+	TriggerMessageID     string                        `json:"triggerMessageId,omitempty"`
+	Status               ParticipationRoundStatus      `json:"status"`
+	Policy               ConversationArbitrationPolicy `json:"policy"`
+	Proposals            []ParticipationProposal       `json:"proposals"`
+	Arbitration          ConversationArbitration       `json:"arbitration"`
+	IdempotencyKey       string                        `json:"idempotencyKey"`
+	Revision             int64                         `json:"revision"`
+	CreatedAt            time.Time                     `json:"createdAt"`
+	CommittedAt          time.Time                     `json:"committedAt"`
 }
 
 func (r *ParticipationRound) Validate() error {
-	if r == nil || !validOpaqueIdentifier(r.ID, 128) || !validOpaqueIdentifier(r.ConversationID, 128) ||
+	if r == nil || !validOpaqueIdentifier(r.ID, 128) || !validOpaqueIdentifier(r.ConversationID, 128) || r.ConversationRevision < 0 ||
 		r.Status != ParticipationRoundCommitted || r.Revision <= 0 || r.CreatedAt.IsZero() || r.CommittedAt.IsZero() ||
 		strings.TrimSpace(r.IdempotencyKey) == "" || len(r.IdempotencyKey) > 256 {
 		return errors.New("invalid participation round")
