@@ -272,3 +272,101 @@ func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
 	}
 	t.Fatal("dynamic Engine worker did not complete the conversation run")
 }
+
+func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T) {
+	store := runtime.NewMemoryStore(50)
+	scope := Scope{Kind: "tenant", ID: "conversation-runtime"}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{{
+			Participant:   ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"},
+			SemanticRoles: []string{"operator"},
+		}}, nil
+	})
+	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		return ParticipationProposal{
+			WantsToSpeak: true, Intent: MessageIntentAnswer,
+			Content:  "Telemetry evidence confirms all three replicas passed their checks.",
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: input.Trigger.ID,
+			Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, HasEvidence: true, RoleRelevant: true},
+		}, nil
+	})
+	scopes := WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{scope}, nil })
+	engine, err := New(
+		WithStore(store),
+		WithConversationCoordinator(participants, proposals, DefaultConversationCoordinatorConfig()),
+		WithDynamicConversationRuns(ConversationRunConfig{
+			Workers: DynamicAgentRunWorkerConfig{
+				Concurrency: 2, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
+				LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+			},
+			Reconciler: ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond},
+		}, scopes),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	immediate, _, err := engine.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Immediate", IdempotencyKey: "immediate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	immediateMessage, err := engine.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: immediate.ID, ExpectedRevision: immediate.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
+		Content: "What is the immediate channel state?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		RequiresResponse: true, IdempotencyKey: "immediate-question",
+	})
+	if err != nil || immediateMessage.Run == nil || immediateMessage.Run.Kind != RunKindConversation ||
+		immediateMessage.Run.ConcurrencyKey != immediate.ID {
+		t.Fatalf("immediate message scheduling = %#v, %v", immediateMessage, err)
+	}
+
+	recovered, _, err := engine.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Recovered", IdempotencyKey: "recovered",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Bypass the Engine hook to model a process dying after the message store
+	// commit and before the immediate Run scheduling call.
+	committedOnly, err := runtime.NewConversationService(store).PostChannelMessage(ctx, runtime.PostChannelMessageRequest{
+		Scope: scope, ConversationID: recovered.ID, ExpectedRevision: recovered.Revision,
+		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "operator"},
+		Intent: runtime.MessageIntentQuestion, Content: "What is the recovered channel state?",
+		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, RequiresResponse: true,
+		IdempotencyKey: "recovered-question",
+	})
+	if err != nil || committedOnly.Run != nil {
+		t.Fatalf("message-only commit = %#v, %v", committedOnly, err)
+	}
+
+	engine.Start(ctx)
+	defer engine.Stop()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		runs, listErr := engine.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		completed := 0
+		for _, run := range runs {
+			if run.Status == AgentRunStatusCompleted {
+				completed++
+			}
+		}
+		if len(runs) == 2 && completed == 2 {
+			for _, conversation := range []*Conversation{immediate, recovered} {
+				messages, messageErr := engine.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+				if messageErr != nil || len(messages) != 2 || messages[1].ParticipationRoundID == "" {
+					t.Fatalf("completed channel %s messages = %#v, %v", conversation.ID, messages, messageErr)
+				}
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("durable conversation runtime did not complete immediate and reconciled messages")
+}

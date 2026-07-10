@@ -6,6 +6,7 @@ package openseal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -142,6 +143,10 @@ type (
 	ParticipationProposalProviderFunc  = runtime.ParticipationProposalProviderFunc
 	ConversationCoordinationRequest    = runtime.ConversationCoordinationRequest
 	ConversationCoordinatorConfig      = runtime.ConversationCoordinatorConfig
+	ConversationRunSchedulerConfig     = runtime.ConversationRunSchedulerConfig
+	ConversationRunTurnRunnerConfig    = runtime.ConversationRunTurnRunnerConfig
+	ConversationRunReconcilerConfig    = runtime.ConversationRunReconcilerConfig
+	ConversationRunReconcileResult     = runtime.ConversationRunReconcileResult
 	CreateConversationRequest          = runtime.CreateConversationRequest
 	ConversationFilter                 = runtime.ConversationFilter
 	PostChannelMessageRequest          = runtime.PostChannelMessageRequest
@@ -641,6 +646,10 @@ type Engine struct {
 	conversationParticipants      runtime.ConversationParticipantSource
 	participationProposals        runtime.ParticipationProposalProvider
 	conversationCoordinatorConfig runtime.ConversationCoordinatorConfig
+	conversationRunScheduler      *runtime.ConversationRunScheduler
+	conversationRunReconciler     *runtime.ConversationRunReconciler
+	conversationRunConfig         *ConversationRunConfig
+	conversationRunScopes         runtime.WorkerScopeSource
 	collaboration                 *runtime.CollaborationService
 	turns                         *runtime.AgentTurnService
 	turnsRun                      *runtime.TurnCoordinator
@@ -675,6 +684,16 @@ type agentRunWorkerSupervisorSpec struct {
 	config   runtime.DynamicAgentRunWorkerConfig
 	source   runtime.WorkerScopeSource
 	resolver runtime.TurnRunnerResolver
+}
+
+// ConversationRunConfig makes Team channel participation durable and
+// server-owned. Worker concurrency controls channels processed per scope;
+// each channel itself is always serialized across replicas.
+type ConversationRunConfig struct {
+	Scheduler  runtime.ConversationRunSchedulerConfig
+	Runner     runtime.ConversationRunTurnRunnerConfig
+	Reconciler runtime.ConversationRunReconcilerConfig
+	Workers    runtime.DynamicAgentRunWorkerConfig
 }
 
 type actionWorkerSpec struct {
@@ -739,6 +758,9 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.rebuildConversationCoordinator(); err != nil {
 		return nil, fmt.Errorf("conversation coordinator configuration: %w", err)
 	}
+	if err := e.rebuildConversationRuns(); err != nil {
+		return nil, fmt.Errorf("conversation Run configuration: %w", err)
+	}
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
 	}
@@ -762,6 +784,9 @@ func New(opts ...Option) (*Engine, error) {
 // Start begins background goroutines (worker pool).
 func (e *Engine) Start(ctx context.Context) {
 	e.pool.Start(ctx)
+	if e.conversationRunReconciler != nil {
+		e.conversationRunReconciler.Start(ctx)
+	}
 	for _, pool := range e.agentPools {
 		pool.Start(ctx)
 	}
@@ -778,6 +803,9 @@ func (e *Engine) Start(ctx context.Context) {
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	if e.conversationRunReconciler != nil {
+		e.conversationRunReconciler.Stop()
+	}
 	for _, supervisor := range e.agentSupervisors {
 		supervisor.Stop()
 	}
@@ -917,6 +945,21 @@ func WithConversationCoordinator(
 	}
 }
 
+// WithDynamicConversationRuns moves channel participation from an interactive
+// caller into durable Run workers for every active host scope. The same host
+// participant/proposal adapters configured by WithConversationCoordinator are
+// used by the Run turn runner.
+func WithDynamicConversationRuns(config ConversationRunConfig, scopes runtime.WorkerScopeSource) Option {
+	return func(e *Engine) error {
+		if scopes == nil {
+			return fmt.Errorf("conversation Run scope source is required")
+		}
+		e.conversationRunConfig = &config
+		e.conversationRunScopes = scopes
+		return nil
+	}
+}
+
 func (e *Engine) rebuildConversationCoordinator() error {
 	e.conversationCoordinator = nil
 	if e.conversationParticipants == nil && e.participationProposals == nil {
@@ -929,6 +972,55 @@ func (e *Engine) rebuildConversationCoordinator() error {
 		return err
 	}
 	e.conversationCoordinator = coordinator
+	return nil
+}
+
+func (e *Engine) rebuildConversationRuns() error {
+	e.conversationRunScheduler = nil
+	e.conversationRunReconciler = nil
+	if e.conversationRunConfig == nil && e.conversationRunScopes == nil {
+		return nil
+	}
+	if e.conversationRunConfig == nil || e.conversationRunScopes == nil || e.conversationCoordinator == nil {
+		return runtime.ErrConversationCoordinationUnavailable
+	}
+	conversationStore, ok := e.store.(runtime.ConversationStore)
+	if !ok {
+		return fmt.Errorf("persistent store does not implement conversation storage")
+	}
+	config := *e.conversationRunConfig
+	if config.Workers.Kind == "" {
+		config.Workers.Kind = runtime.RunKindConversation
+	}
+	if config.Workers.Kind != runtime.RunKindConversation {
+		return fmt.Errorf("conversation workers require Run kind %q", runtime.RunKindConversation)
+	}
+	if config.Workers.MaxActiveForConcurrencyKey == 0 {
+		config.Workers.MaxActiveForConcurrencyKey = 1
+	}
+	if config.Workers.MaxActiveForConcurrencyKey != 1 {
+		return fmt.Errorf("conversation workers require exactly one active Run per channel")
+	}
+	if strings.TrimSpace(config.Workers.WorkerIDPrefix) == "" {
+		config.Workers.WorkerIDPrefix = "conversation-run-worker"
+	}
+	scheduler, err := runtime.NewConversationRunScheduler(conversationStore, e.store, config.Scheduler)
+	if err != nil {
+		return err
+	}
+	runner, err := runtime.NewConversationRunTurnRunner(conversationStore, e.conversationCoordinator, config.Runner)
+	if err != nil {
+		return err
+	}
+	reconciler, err := runtime.NewConversationRunReconciler(scheduler, e.conversationRunScopes, e.logger, config.Reconciler)
+	if err != nil {
+		return err
+	}
+	e.conversationRunScheduler = scheduler
+	e.conversationRunReconciler = reconciler
+	e.agentSupervisorSpecs = append(e.agentSupervisorSpecs, agentRunWorkerSupervisorSpec{
+		config: config.Workers, source: e.conversationRunScopes, resolver: runner,
+	})
 	return nil
 }
 
@@ -1287,7 +1379,21 @@ func (e *Engine) PostChannelMessage(ctx context.Context, request runtime.PostCha
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
-	return e.conversations.PostChannelMessage(ctx, request)
+	result, err := e.conversations.PostChannelMessage(ctx, request)
+	if err != nil || e.conversationRunScheduler == nil {
+		return result, err
+	}
+	scheduled, _, err := e.conversationRunScheduler.ScheduleMessage(ctx, result.Message.Scope, result.Message.ConversationID, result.Message.ID)
+	if err != nil {
+		return nil, err
+	}
+	if scheduled != nil {
+		result.Run = scheduled.Run
+	}
+	if e.conversationRunReconciler != nil {
+		e.conversationRunReconciler.Wake()
+	}
+	return result, nil
 }
 
 func (e *Engine) GetChannelMessage(ctx context.Context, scope runtime.Scope, conversationID, messageID string) (*runtime.ChannelMessage, error) {

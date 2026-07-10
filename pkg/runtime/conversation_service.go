@@ -104,6 +104,7 @@ type ReleaseConversationPresenceRequest struct {
 type ChannelMessageCommitResult struct {
 	Conversation *Conversation   `json:"conversation"`
 	Message      *ChannelMessage `json:"message"`
+	Run          *AgentRun       `json:"run,omitempty"`
 	Replayed     bool            `json:"replayed"`
 }
 
