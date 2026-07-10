@@ -129,6 +129,41 @@ func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequest
 	return events, nil
 }
 
+func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentRequestCompletionRecord) ([]*ActivityEvent, error) {
+	if err := validateAgentRequestCompletionRecord(record); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	requestKey := requestStoreKey(record.Request.Scope, record.Request.ID)
+	currentRequest := s.requests[requestKey]
+	if currentRequest == nil {
+		return nil, ErrAgentRequestNotFound
+	}
+	if currentRequest.Revision != record.ExpectedRequestRevision || record.Request.Revision != currentRequest.Revision+1 {
+		return nil, ErrRevisionConflict
+	}
+	sourceKey := portfolioKey(record.SourceRun.Scope, record.SourceRun.ID)
+	childKey := portfolioKey(record.ChildRun.Scope, record.ChildRun.ID)
+	currentSource := s.agentRuns[sourceKey]
+	currentChild := s.agentRuns[childKey]
+	if currentSource == nil || currentChild == nil {
+		return nil, ErrRunNotFound
+	}
+	if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 ||
+		currentChild.Revision != record.ExpectedChildRevision || record.ChildRun.Revision != currentChild.Revision+1 {
+		return nil, ErrRevisionConflict
+	}
+	s.requests[requestKey] = cloneAgentRequest(record.Request)
+	s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
+	s.agentRuns[childKey] = cloneAgentRun(record.ChildRun)
+	events := make([]*ActivityEvent, 0, 2)
+	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, event)))
+	}
+	return events, nil
+}
+
 func appendMemoryActivityLocked(s *MemoryStore, event *ActivityEvent) *ActivityEvent {
 	key := portfolioKey(event.Scope, event.RunID)
 	persisted := cloneActivityEvent(event)
@@ -206,6 +241,29 @@ func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error
 			return err
 		}
 		if err := record.ChildEvent.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentRequestCompletionRecord(record AgentRequestCompletionRecord) error {
+	if record.Request == nil || record.SourceRun == nil || record.ChildRun == nil || record.SourceEvent == nil || record.ChildEvent == nil {
+		return errors.New("agent request completion requires request, source run, child run, and both events")
+	}
+	if err := record.Request.Validate(); err != nil {
+		return err
+	}
+	if record.Request.Status != AgentRequestStatusCompleted {
+		return ErrInvalidAgentRequestState
+	}
+	for _, run := range []*AgentRun{record.SourceRun, record.ChildRun} {
+		if err := run.Validate(); err != nil {
+			return err
+		}
+	}
+	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+		if err := event.Validate(); err != nil {
 			return err
 		}
 	}

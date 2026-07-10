@@ -270,6 +270,64 @@ func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record AgentReq
 	return events, nil
 }
 
+func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record AgentRequestCompletionRecord) ([]*ActivityEvent, error) {
+	if err := validateAgentRequestCompletionRecord(record); err != nil {
+		return nil, err
+	}
+	requestPayload, err := json.Marshal(record.Request)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var currentRevision int64
+	err = tx.QueryRowContext(ctx, `SELECT revision FROM `+s.table("agent_requests")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`,
+		record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.ID).Scan(&currentRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAgentRequestNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if currentRevision != record.ExpectedRequestRevision {
+		return nil, ErrRevisionConflict
+	}
+	if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
+		return nil, err
+	}
+	if err := s.updatePostgresAgentRunTx(ctx, tx, record.ChildRun, record.ExpectedChildRevision); err != nil {
+		return nil, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("agent_requests")+` SET status = $1, revision = $2, updated_at = $3,
+		payload = $4::jsonb WHERE scope_kind = $5 AND scope_id = $6 AND id = $7 AND revision = $8`, record.Request.Status,
+		record.Request.Revision, record.Request.UpdatedAt, string(requestPayload), record.Request.Scope.Kind, record.Request.Scope.ID,
+		record.Request.ID, record.ExpectedRequestRevision)
+	if err != nil {
+		return nil, err
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
+		if rowsErr != nil {
+			return nil, rowsErr
+		}
+		return nil, ErrRevisionConflict
+	}
+	events := make([]*ActivityEvent, 0, 2)
+	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+		persisted, insertErr := s.insertPostgresActivityTx(ctx, tx, event)
+		if insertErr != nil {
+			return nil, insertErr
+		}
+		events = append(events, persisted)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 func (s *PostgresStore) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *AgentRun) error {
 	payload, err := json.Marshal(run)
 	if err != nil {
