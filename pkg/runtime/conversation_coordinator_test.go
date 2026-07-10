@@ -79,7 +79,8 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 		case "marketing":
 			return ParticipationProposal{
 				WantsToSpeak: true, Intent: MessageIntentUpdate, Content: "The launch is ready and the smoke evidence passed.",
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, Signals: ParticipationSignals{HasNewInformation: true, RoleRelevant: true},
+				Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				Signals:  ParticipationSignals{DirectlyMentioned: true, HasNewInformation: true, RoleRelevant: true},
 			}, nil
 		default:
 			return ParticipationProposal{WantsToSpeak: false}, nil
@@ -109,8 +110,19 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	if len(round.Round.Proposals) != 3 || round.Round.Proposals[0].Participant.ID != "analyst" ||
 		round.Round.Proposals[1].Participant != developer || round.Round.Proposals[1].Priority != 5 ||
 		len(round.Round.Proposals[1].SemanticRoles) != 1 || round.Round.Proposals[1].SemanticRoles[0] != "developer" ||
-		!round.Round.Proposals[1].Signals.DirectlyMentioned {
+		!round.Round.Proposals[1].Signals.DirectlyMentioned || round.Round.Proposals[1].Signals.TriggerTargetsOtherParticipant ||
+		!round.Round.Proposals[0].Signals.TriggerTargetsOtherParticipant || !round.Round.Proposals[2].Signals.TriggerTargetsOtherParticipant {
 		t.Fatalf("governed proposals = %#v", round.Round.Proposals)
+	}
+	var marketingDecision *ParticipationDecision
+	for index := range round.Round.Arbitration.Decisions {
+		if round.Round.Arbitration.Decisions[index].Participant.ID == "marketing" {
+			marketingDecision = &round.Round.Arbitration.Decisions[index]
+		}
+	}
+	if marketingDecision == nil || marketingDecision.Disposition != ParticipationSilent ||
+		!containsParticipationReason(marketingDecision.Reasons, ParticipationReasonNotAddressed) {
+		t.Fatalf("marketing decision = %#v", marketingDecision)
 	}
 	if contexts["developer"].Trigger.ID != question.Message.ID || len(contexts["developer"].RecentMessages) != 1 ||
 		contexts["developer"].RecentMessages[0].ID != question.Message.ID {

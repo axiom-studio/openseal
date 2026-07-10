@@ -82,6 +82,38 @@ func TestConversationArbiterHonorsMentionsObjectionsSilenceAndBackpressure(t *te
 	}
 }
 
+func TestConversationArbiterSuppressesUnaddressedPileOnButKeepsMaterialIntervention(t *testing.T) {
+	t.Parallel()
+	roundID := "round-targeted"
+	channel := ConversationAudience{Kind: ConversationAudienceChannel}
+	proposals := []ParticipationProposal{
+		{
+			ID: "accountant", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "accountant"},
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Reconcile the bank, receivables, payables, payroll, and tax accounts.", Audience: channel,
+			Signals: ParticipationSignals{DirectlyMentioned: true, AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true},
+		},
+		{
+			ID: "support", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "support"},
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Review bank, receivable, payable, payroll, and tax balances.", Audience: channel,
+			Signals: ParticipationSignals{TriggerTargetsOtherParticipant: true, AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true, HasEvidence: true},
+		},
+		{
+			ID: "reviewer", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "reviewer"},
+			WantsToSpeak: true, Intent: MessageIntentObjection, Content: "The checklist omits a legally required segregation-of-duties review.", Audience: channel,
+			Signals: ParticipationSignals{TriggerTargetsOtherParticipant: true, SubstantiveObjection: true, HasEvidence: true, RoleRelevant: true},
+		},
+	}
+	result, err := ArbitrateParticipation(roundID, proposals, nil, DefaultConversationArbitrationPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := decisionsByProposal(result.Decisions)
+	if decisions["accountant"].Disposition != ParticipationSpeak || decisions["reviewer"].Disposition != ParticipationSpeak ||
+		decisions["support"].Disposition != ParticipationSilent || !containsParticipationReason(decisions["support"].Reasons, ParticipationReasonNotAddressed) {
+		t.Fatalf("decisions = %#v", decisions)
+	}
+}
+
 func TestConversationArbiterSuppressesRecentAndAcknowledgmentPileOn(t *testing.T) {
 	t.Parallel()
 	roundID := "round-3"
