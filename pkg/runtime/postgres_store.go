@@ -134,6 +134,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateActions(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateActivityFeed(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

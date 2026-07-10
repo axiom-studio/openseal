@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx) error {
@@ -14,6 +17,11 @@ func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx)
 			scope_kind TEXT NOT NULL,
 			scope_id TEXT NOT NULL,
 			run_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT '',
+			objective_id TEXT NOT NULL DEFAULT '',
+			team_id TEXT NOT NULL DEFAULT '',
+			severity TEXT NOT NULL DEFAULT 'info',
+			visibility TEXT NOT NULL DEFAULT 'scope',
 			sequence BIGINT NOT NULL,
 			id TEXT NOT NULL,
 			event_type TEXT NOT NULL,
@@ -51,6 +59,37 @@ func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx)
 		}
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (3, 'activity streams and agent turns') ON CONFLICT (version) DO NOTHING`)
+	return err
+}
+
+func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE `+s.table("run_activity")+`
+		ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS objective_id TEXT NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS severity TEXT NOT NULL DEFAULT 'info',
+		ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'scope'`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("run_activity")+` SET
+		agent_id = COALESCE(NULLIF(agent_id, ''), payload->>'agentId', ''),
+		objective_id = COALESCE(NULLIF(objective_id, ''), payload->>'objectiveId', ''),
+		team_id = COALESCE(NULLIF(team_id, ''), payload->>'teamId', ''),
+		severity = COALESCE(NULLIF(severity, ''), payload->>'severity', 'info'),
+		visibility = COALESCE(NULLIF(visibility, ''), payload->>'visibility', 'scope')`); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS run_activity_agent_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, agent_id, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS run_activity_objective_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, objective_id, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS run_activity_team_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, team_id, created_at DESC, id DESC)`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (6, 'indexed activity projections') ON CONFLICT (version) DO NOTHING`)
 	return err
 }
 
@@ -136,9 +175,10 @@ func (s *PostgresStore) withActivity(ctx context.Context, event *ActivityEvent, 
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("run_activity")+`
-		(scope_kind, scope_id, run_id, sequence, id, event_type, created_at, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`, persisted.Scope.Kind, persisted.Scope.ID,
-		persisted.RunID, persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
+		(scope_kind, scope_id, run_id, agent_id, objective_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`, persisted.Scope.Kind, persisted.Scope.ID,
+		persisted.RunID, persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
+		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -155,14 +195,64 @@ func (s *PostgresStore) ListActivity(ctx context.Context, filter ActivityFilter)
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("run_activity")+`
-		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4
-		ORDER BY sequence ASC LIMIT $5`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+	if !filter.Descending {
+		rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("run_activity")+`
+			WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4
+			ORDER BY sequence ASC LIMIT $5`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+		if err != nil {
+			return nil, err
+		}
+		return scanPostgresActivity(rows, limit)
+	}
+	query := `SELECT payload FROM ` + s.table("run_activity") + ` WHERE scope_kind = $1 AND scope_id = $2`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	placeholder := 3
+	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"team_id", filter.TeamID}}
+	for _, selector := range selectors {
+		if selector.value == "" {
+			continue
+		}
+		query += fmt.Sprintf(" AND %s = $%d", selector.column, placeholder)
+		args = append(args, selector.value)
+		placeholder++
+	}
+	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "event_type", filter.EventTypes)
+	severityValues := make([]string, 0, len(filter.Severities))
+	for _, severity := range filter.Severities {
+		severityValues = append(severityValues, string(severity))
+	}
+	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "severity", severityValues)
+	visibilityValues := make([]string, 0, len(filter.Visibilities))
+	for _, visibility := range filter.Visibilities {
+		visibilityValues = append(visibilityValues, string(visibility))
+	}
+	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "visibility", visibilityValues)
+	if filter.BeforeCreatedAt != nil {
+		query += fmt.Sprintf(" AND (created_at < $%d OR (created_at = $%d AND id < $%d))", placeholder, placeholder, placeholder+1)
+		args = append(args, filter.BeforeCreatedAt, filter.BeforeID)
+		placeholder += 2
+	}
+	query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", placeholder)
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	return scanPostgresActivity(rows, limit)
+}
+
+func appendPostgresActivityStrings(query string, args []interface{}, placeholder int, column string, values []string) (string, []interface{}, int) {
+	if len(values) == 0 {
+		return query, args, placeholder
+	}
+	query += fmt.Sprintf(" AND %s = ANY($%d)", column, placeholder)
+	args = append(args, pq.Array(values))
+	return query, args, placeholder + 1
+}
+
+func scanPostgresActivity(rows *sql.Rows, capacity int) ([]*ActivityEvent, error) {
 	defer rows.Close()
-	result := make([]*ActivityEvent, 0, limit)
+	result := make([]*ActivityEvent, 0, capacity)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
