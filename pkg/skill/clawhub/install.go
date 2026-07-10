@@ -1,0 +1,519 @@
+package clawhub
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	opensealclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
+)
+
+var (
+	ErrSkillPinned        = errors.New("installed skill is pinned")
+	ErrSkillModified      = errors.New("installed skill has local modifications")
+	ErrVerificationFailed = errors.New("skill verification failed")
+)
+
+type LockEntry struct {
+	Version     *string `json:"version"`
+	InstalledAt int64   `json:"installedAt"`
+	OwnerHandle string  `json:"ownerHandle,omitempty"`
+	Pinned      bool    `json:"pinned,omitempty"`
+	PinReason   string  `json:"pinReason,omitempty"`
+}
+
+type Lockfile struct {
+	Version int                  `json:"version"`
+	Skills  map[string]LockEntry `json:"skills"`
+}
+
+type SkillOrigin struct {
+	Version          int    `json:"version"`
+	Registry         string `json:"registry"`
+	Slug             string `json:"slug"`
+	OwnerHandle      string `json:"ownerHandle,omitempty"`
+	InstalledVersion string `json:"installedVersion"`
+	InstalledAt      int64  `json:"installedAt"`
+	Fingerprint      string `json:"fingerprint,omitempty"`
+	ArchiveSHA256    string `json:"archiveSha256,omitempty"`
+}
+
+type InstallRequest struct {
+	Reference        SkillReference
+	Version          string
+	Tag              string
+	Force            bool
+	SkipVerification bool
+}
+
+type InstalledSkill struct {
+	Reference    SkillReference
+	Version      string
+	Directory    string
+	Origin       SkillOrigin
+	Verification *Verification
+	Compilation  *opensealclaw.Compilation
+	Changed      bool
+}
+
+type InstallManager struct {
+	registryID string
+	registry   Registry
+	workspace  string
+	skillsDir  string
+	now        func() time.Time
+	mu         sync.Mutex
+}
+
+func NewInstallManager(registryID string, registry Registry, workspace string) (*InstallManager, error) {
+	if registry == nil || strings.TrimSpace(registryID) == "" || strings.TrimSpace(workspace) == "" {
+		return nil, errors.New("registry id, registry, and workspace are required")
+	}
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return nil, err
+	}
+	return &InstallManager{registryID: strings.TrimRight(registryID, "/"), registry: registry, workspace: abs, skillsDir: filepath.Join(abs, "skills"), now: time.Now}, nil
+}
+
+func (m *InstallManager) Install(ctx context.Context, req InstallRequest) (*InstalledSkill, error) {
+	if strings.TrimSpace(req.Reference.Slug) == "" || req.Version != "" && req.Tag != "" {
+		return nil, errors.New("skill reference is required and version and tag are mutually exclusive")
+	}
+	if req.SkipVerification && req.Tag != "" {
+		return nil, errors.New("tag resolution requires verification")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := os.MkdirAll(m.skillsDir, 0o755); err != nil {
+		return nil, err
+	}
+	lock, err := m.readLockfile()
+	if err != nil {
+		return nil, err
+	}
+	existing, installed := lock.Skills[req.Reference.Slug]
+	if installed && existing.Pinned {
+		return nil, fmt.Errorf("%w: %s", ErrSkillPinned, req.Reference.String())
+	}
+	detail, err := m.registry.InspectSkill(ctx, req.Reference)
+	if err != nil {
+		return nil, err
+	}
+	resolvedVersion := strings.TrimSpace(req.Version)
+	var verification *Verification
+	if !req.SkipVerification {
+		verification, err = m.registry.VerifySkill(ctx, req.Reference, req.Version, req.Tag)
+		if err != nil {
+			return nil, err
+		}
+		if !verification.OK || verification.Decision != "pass" {
+			return nil, fmt.Errorf("%w: %s", ErrVerificationFailed, strings.Join(verification.Reasons, "; "))
+		}
+		if verification.Slug != req.Reference.Slug || req.Reference.Owner != "" && verification.PublisherHandle != req.Reference.Owner || verification.Version == "" {
+			return nil, fmt.Errorf("%w: verification identity does not match requested skill", ErrVerificationFailed)
+		}
+		resolvedVersion = verification.Version
+	}
+	if resolvedVersion == "" {
+		resolvedVersion = detail.Version
+	}
+	if resolvedVersion == "" {
+		return nil, errors.New("registry did not resolve a skill version")
+	}
+	archive, err := m.registry.DownloadArchive(ctx, req.Reference, resolvedVersion, "")
+	if err != nil {
+		return nil, err
+	}
+	stage, bundle, fingerprint, err := m.stageArchive(req.Reference, resolvedVersion, archive, verification)
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(stage)
+	target := filepath.Join(m.skillsDir, req.Reference.Slug)
+	if installed {
+		modified, err := m.isLocallyModified(target)
+		if err != nil {
+			return nil, err
+		}
+		if modified && !req.Force {
+			return nil, fmt.Errorf("%w: %s", ErrSkillModified, req.Reference.String())
+		}
+		if existing.Version != nil && *existing.Version == resolvedVersion && !modified {
+			return &InstalledSkill{Reference: req.Reference, Version: resolvedVersion, Directory: target, Verification: verification, Compilation: bundle, Changed: false}, nil
+		}
+	}
+	now := m.now().UTC()
+	origin := SkillOrigin{Version: 1, Registry: m.registryID, Slug: req.Reference.Slug, OwnerHandle: req.Reference.Owner, InstalledVersion: resolvedVersion, InstalledAt: now.UnixMilli(), Fingerprint: fingerprint, ArchiveSHA256: archive.SHA256}
+	if err := writeAtomicJSON(filepath.Join(stage, ".clawhub", "origin.json"), origin); err != nil {
+		return nil, err
+	}
+	backup := ""
+	if _, err := os.Stat(target); err == nil {
+		backup = target + ".backup-" + fmt.Sprint(now.UnixNano())
+		if err := os.Rename(target, backup); err != nil {
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.Rename(stage, target); err != nil {
+		if backup != "" {
+			_ = os.Rename(backup, target)
+		}
+		return nil, err
+	}
+	versionCopy := resolvedVersion
+	lock.Skills[req.Reference.Slug] = LockEntry{Version: &versionCopy, InstalledAt: now.UnixMilli(), OwnerHandle: req.Reference.Owner}
+	if err := m.writeLockfile(lock); err != nil {
+		_ = os.RemoveAll(target)
+		if backup != "" {
+			_ = os.Rename(backup, target)
+		}
+		return nil, err
+	}
+	if backup != "" {
+		_ = os.RemoveAll(backup)
+	}
+	return &InstalledSkill{Reference: req.Reference, Version: resolvedVersion, Directory: target, Origin: origin, Verification: verification, Compilation: bundle, Changed: true}, nil
+}
+
+func (m *InstallManager) Update(ctx context.Context, slug string) (*InstalledSkill, error) {
+	lock, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+	entry, ok := lock.Skills[slug]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return m.Install(ctx, InstallRequest{Reference: SkillReference{Owner: entry.OwnerHandle, Slug: slug}})
+}
+
+func (m *InstallManager) Pin(slug, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lock, err := m.readLockfile()
+	if err != nil {
+		return err
+	}
+	entry, ok := lock.Skills[slug]
+	if !ok {
+		return ErrNotFound
+	}
+	entry.Pinned = true
+	entry.PinReason = strings.TrimSpace(reason)
+	lock.Skills[slug] = entry
+	return m.writeLockfile(lock)
+}
+
+func (m *InstallManager) Unpin(slug string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lock, err := m.readLockfile()
+	if err != nil {
+		return err
+	}
+	entry, ok := lock.Skills[slug]
+	if !ok {
+		return ErrNotFound
+	}
+	entry.Pinned = false
+	entry.PinReason = ""
+	lock.Skills[slug] = entry
+	return m.writeLockfile(lock)
+}
+
+func (m *InstallManager) Uninstall(slug string, force bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lock, err := m.readLockfile()
+	if err != nil {
+		return err
+	}
+	entry, ok := lock.Skills[slug]
+	if !ok {
+		return ErrNotFound
+	}
+	if entry.Pinned {
+		return ErrSkillPinned
+	}
+	target := filepath.Join(m.skillsDir, slug)
+	modified, err := m.isLocallyModified(target)
+	if err != nil {
+		return err
+	}
+	if modified && !force {
+		return ErrSkillModified
+	}
+	trash := target + ".remove-" + fmt.Sprint(m.now().UnixNano())
+	if err := os.Rename(target, trash); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	delete(lock.Skills, slug)
+	if err := m.writeLockfile(lock); err != nil {
+		_ = os.Rename(trash, target)
+		return err
+	}
+	return os.RemoveAll(trash)
+}
+
+func (m *InstallManager) List() (Lockfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lock, err := m.readLockfile()
+	if err != nil {
+		return Lockfile{}, err
+	}
+	return *lock, nil
+}
+
+func (m *InstallManager) stageArchive(ref SkillReference, version string, archive *DownloadedArchive, verification *Verification) (string, *opensealclaw.Compilation, string, error) {
+	if archive == nil || len(archive.Bytes) == 0 {
+		return "", nil, "", errors.New("downloaded archive is empty")
+	}
+	stage, err := os.MkdirTemp(m.skillsDir, ".install-"+ref.Slug+"-")
+	if err != nil {
+		return "", nil, "", err
+	}
+	files, err := extractArchive(archive.Bytes, stage)
+	if err != nil {
+		os.RemoveAll(stage)
+		return "", nil, "", err
+	}
+	skillMD, ok := files["SKILL.md"]
+	if !ok {
+		if lowercase, exists := files["skill.md"]; exists {
+			skillMD = lowercase
+			if err := os.Rename(filepath.Join(stage, "skill.md"), filepath.Join(stage, "SKILL.md")); err != nil {
+				os.RemoveAll(stage)
+				return "", nil, "", err
+			}
+			delete(files, "skill.md")
+			files["SKILL.md"] = skillMD
+			ok = true
+		}
+	}
+	if !ok {
+		os.RemoveAll(stage)
+		return "", nil, "", errors.New("ClawHub archive must contain SKILL.md at its root")
+	}
+	bundleFiles := make([]opensealclaw.File, 0, len(files)-1)
+	for path, content := range files {
+		if path != "SKILL.md" {
+			bundleFiles = append(bundleFiles, opensealclaw.File{Path: path, Content: content})
+		}
+	}
+	trust := map[string]interface{}(nil)
+	if verification != nil {
+		encoded, _ := json.Marshal(verification)
+		_ = json.Unmarshal(encoded, &trust)
+	}
+	compilation, err := opensealclaw.Compile(opensealclaw.Bundle{SkillMD: skillMD, Files: bundleFiles, Source: opensealclaw.Source{Registry: m.registryID, Publisher: ref.Owner, Reference: ref.String(), Version: version, Trust: trust}})
+	if err != nil {
+		os.RemoveAll(stage)
+		return "", nil, "", fmt.Errorf("compile installed skill: %w", err)
+	}
+	fingerprint := fingerprintFiles(files)
+	return stage, compilation, fingerprint, nil
+}
+
+func extractArchive(raw []byte, target string) (map[string][]byte, error) {
+	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return nil, fmt.Errorf("open skill archive: %w", err)
+	}
+	if len(reader.File) > 2048 {
+		return nil, errors.New("skill archive contains too many files")
+	}
+	result := make(map[string][]byte)
+	canonicalPaths := make(map[string]string)
+	var total uint64
+	for _, file := range reader.File {
+		path := filepath.ToSlash(filepath.Clean(file.Name))
+		if path == "." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") || strings.Contains(file.Name, "\\") {
+			return nil, fmt.Errorf("unsafe skill archive path %q", file.Name)
+		}
+		if file.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("skill archive symlink %q is not allowed", file.Name)
+		}
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		canonical := strings.ToLower(path)
+		if previous := canonicalPaths[canonical]; previous != "" {
+			return nil, fmt.Errorf("skill archive contains colliding paths %q and %q", previous, path)
+		}
+		canonicalPaths[canonical] = path
+		if file.UncompressedSize64 > 32*1024*1024 {
+			return nil, fmt.Errorf("skill archive file %q exceeds 32 MiB", path)
+		}
+		total += file.UncompressedSize64
+		if total > 256*1024*1024 {
+			return nil, errors.New("skill archive exceeds 256 MiB uncompressed")
+		}
+		stream, err := file.Open()
+		if err != nil {
+			return nil, err
+		}
+		content, err := io.ReadAll(io.LimitReader(stream, 32*1024*1024+1))
+		stream.Close()
+		if err != nil || len(content) > 32*1024*1024 {
+			return nil, fmt.Errorf("read skill archive file %q: %w", path, err)
+		}
+		destination := filepath.Join(target, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return nil, err
+		}
+		mode := os.FileMode(0o644)
+		if file.Mode().Perm()&0o111 != 0 {
+			mode = 0o755
+		}
+		if err := os.WriteFile(destination, content, mode); err != nil {
+			return nil, err
+		}
+		result[path] = content
+	}
+	return result, nil
+}
+
+func (m *InstallManager) isLocallyModified(target string) (bool, error) {
+	origin, err := readOrigin(target)
+	if err != nil {
+		return false, err
+	}
+	if origin == nil || origin.Fingerprint == "" {
+		return true, nil
+	}
+	files, err := readInstalledFiles(target)
+	if err != nil {
+		return false, err
+	}
+	return fingerprintFiles(files) != origin.Fingerprint, nil
+}
+
+func (m *InstallManager) readLockfile() (*Lockfile, error) {
+	path := filepath.Join(m.workspace, ".clawhub", "lock.json")
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return &Lockfile{Version: 1, Skills: make(map[string]LockEntry)}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var lock Lockfile
+	if err := json.Unmarshal(content, &lock); err != nil {
+		return nil, fmt.Errorf("parse ClawHub lockfile: %w", err)
+	}
+	if lock.Version != 1 || lock.Skills == nil {
+		return nil, errors.New("unsupported ClawHub lockfile")
+	}
+	return &lock, nil
+}
+
+func (m *InstallManager) writeLockfile(lock *Lockfile) error {
+	return writeAtomicJSON(filepath.Join(m.workspace, ".clawhub", "lock.json"), lock)
+}
+
+func readOrigin(target string) (*SkillOrigin, error) {
+	content, err := os.ReadFile(filepath.Join(target, ".clawhub", "origin.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var origin SkillOrigin
+	if err := json.Unmarshal(content, &origin); err != nil {
+		return nil, err
+	}
+	if origin.Version != 1 {
+		return nil, errors.New("unsupported skill origin metadata")
+	}
+	return &origin, nil
+}
+
+func readInstalledFiles(root string) (map[string][]byte, error) {
+	result := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if entry.IsDir() {
+			if relative == ".clawhub" || relative == ".git" || relative == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("installed skill contains symlink %q", relative)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		result[relative] = content
+		return nil
+	})
+	return result, err
+}
+
+func fingerprintFiles(files map[string][]byte) string {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	hash := sha256.New()
+	for _, path := range paths {
+		digest := sha256.Sum256(files[path])
+		_, _ = io.WriteString(hash, path+":"+hex.EncodeToString(digest[:])+"\n")
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func writeAtomicJSON(path string, value interface{}) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".tmp-")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	encoder := json.NewEncoder(temp)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempPath, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
