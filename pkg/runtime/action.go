@@ -16,6 +16,7 @@ var (
 	ErrActionNotFound      = errors.New("action call not found")
 	ErrApprovalNotFound    = errors.New("approval checkpoint not found")
 	ErrIdempotencyConflict = errors.New("idempotency key was already used for a different action invocation")
+	ErrApprovalResolved    = errors.New("approval checkpoint is already resolved")
 )
 
 type ActionCallStatus string
@@ -133,6 +134,7 @@ type ApprovalCheckpoint struct {
 	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
 	ExpiresAt              time.Time              `json:"expiresAt"`
 	DecisionBy             *ApprovalPrincipal     `json:"decisionBy,omitempty"`
+	DecisionID             string                 `json:"decisionId,omitempty"`
 	DecisionReason         string                 `json:"decisionReason,omitempty"`
 	Revision               int64                  `json:"revision"`
 	CreatedAt              time.Time              `json:"createdAt"`
@@ -178,6 +180,24 @@ type ActionProposalResult struct {
 	Created  bool
 }
 
+type ApprovalResolutionRecord struct {
+	Approval                 *ApprovalCheckpoint
+	ExpectedApprovalRevision int64
+	Call                     *ActionCall
+	ExpectedCallRevision     int64
+	Run                      *AgentRun
+	ExpectedRunRevision      int64
+	Event                    *ActivityEvent
+}
+
+type ApprovalResolutionResult struct {
+	Approval *ApprovalCheckpoint
+	Call     *ActionCall
+	Run      *AgentRun
+	Event    *ActivityEvent
+	Resolved bool
+}
+
 type ActionFilter struct {
 	Scope  Scope
 	RunID  string
@@ -200,6 +220,7 @@ type ActionStore interface {
 	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
 	GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error)
 	ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error)
+	ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error)
 }
 
 func validActionCallStatus(status ActionCallStatus) bool {

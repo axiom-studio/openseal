@@ -1,0 +1,146 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, cleanup := testCase.open(t)
+			defer cleanup()
+			ctx := context.Background()
+			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+			proposal := createApprovalForStore(t, store, now)
+			approvalCoordinator := NewApprovalCoordinator(store, store, ApprovalAuthorizerFunc(func(_ context.Context, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error {
+				if principal.ID != "alice" || approval.ID != proposal.Approval.ID {
+					return errors.New("not authorized")
+				}
+				return nil
+			}))
+			approvalCoordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+			approvalCoordinator.newID = func() string { return "approval-event" }
+			result, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
+				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+				DecisionID: "decision-1", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change reviewed",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Resolved || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady || result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil {
+				t.Fatalf("resolution mismatch: %#v", result)
+			}
+			retry, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
+				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+				DecisionID: "decision-1", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
+			})
+			if err != nil || retry.Resolved {
+				t.Fatalf("idempotent retry = %#v, %v", retry, err)
+			}
+			_, err = approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
+				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: result.Approval.Revision,
+				DecisionID: "decision-2", Approve: false, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
+			})
+			if !errors.Is(err, ErrApprovalResolved) {
+				t.Fatalf("second decision error = %v", err)
+			}
+			events, err := store.ListActivity(ctx, ActivityFilter{Scope: proposal.Approval.Scope, RunID: proposal.Approval.RunID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) != 2 || events[1].EventType != "approval.approved" {
+				t.Fatalf("approval activity mismatch: %#v", events)
+			}
+			claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: proposal.Approval.Scope, WorkerID: "next-worker", Now: now.Add(3 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			if err != nil || claimed == nil || claimed.ID != proposal.Approval.RunID {
+				t.Fatalf("resolved run was not wake-claimable: %#v, %v", claimed, err)
+			}
+		})
+	}
+}
+
+func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(20)
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	proposal := createApprovalForStore(t, store, now)
+	coordinator := NewApprovalCoordinator(store, store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error {
+		return errors.New("RBAC denied")
+	}))
+	coordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+	_, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		DecisionID: "unauthorized", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "mallory"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "RBAC denied") {
+		t.Fatalf("authorization error = %v", err)
+	}
+	unchanged, err := store.GetApproval(ctx, proposal.Approval.Scope, proposal.Approval.ID)
+	if err != nil || unchanged.Status != ApprovalStatusPending {
+		t.Fatalf("unauthorized decision mutated approval: %#v, %v", unchanged, err)
+	}
+	coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
+	expired, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		DecisionID: "expiry", Approve: true, Principal: ApprovalPrincipal{Type: "system", ID: "expiry-worker"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Approval.Status != ApprovalStatusExpired || expired.Call.Status != ActionCallStatusDenied || expired.Run.Status != AgentRunStatusQueued {
+		t.Fatalf("expiry resolution mismatch: %#v", expired)
+	}
+}
+
+func createApprovalForStore(t *testing.T, store KernelStore, now time.Time) *ActionProposalResult {
+	t.Helper()
+	ctx := context.Background()
+	catalog, scope := governedActionCatalog(t)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "alice"}}, ApprovalTTL: time.Hour}, nil
+	}))
+	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	ids := []string{"call", "approval", "proposal-event"}
+	coordinator.newID = func() string {
+		id := ids[0]
+		ids = ids[1:]
+		return id
+	}
+	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: claimed.ID, WorkerID: "worker", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "deploy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proposal
+}
