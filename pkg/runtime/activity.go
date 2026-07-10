@@ -100,6 +100,7 @@ type RunTransitionRequest struct {
 	WakeSignalID     string
 	EventType        string
 	OccurredAt       *time.Time
+	Intervention     *AgentRunIntervention
 }
 
 type AgentRunLeaseGuard struct {
@@ -124,6 +125,7 @@ type ActivityFilter struct {
 }
 
 type RunActivityStore interface {
+	CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error)
 	UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error)
 	AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error)
 	ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error)
@@ -164,7 +166,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		}
 		leaseGuard = &AgentRunLeaseGuard{WorkerID: req.LeaseOwner, Now: now}
 	}
-	if !canTransitionAgentRun(run.Status, req.Status) {
+	if !canTransitionAgentRun(run.Status, req.Status) && !(req.Intervention != nil && run.Status == req.Status && !isTerminalAgentRunStatus(run.Status)) {
 		return nil, nil, fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, run.Status, req.Status)
 	}
 	previousStatus := run.Status
@@ -175,6 +177,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	if req.OccurredAt != nil {
 		now = *req.OccurredAt
 	}
+	previousWakeCondition := run.WakeCondition
 	run.Status = req.Status
 	run.Revision++
 	run.UpdatedAt = now
@@ -185,6 +188,17 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.Checkpoint = req.Checkpoint
 	}
 	run.WakeCondition = req.WakeCondition
+	if req.Status == AgentRunStatusPaused && previousStatus != AgentRunStatusPaused {
+		run.PausedFrom = previousStatus
+		run.PausedWakeCondition = previousWakeCondition
+		run.WakeCondition = nil
+	} else if previousStatus == AgentRunStatusPaused && req.Status != AgentRunStatusPaused {
+		run.PausedFrom = ""
+		run.PausedWakeCondition = nil
+	}
+	if req.Intervention != nil {
+		run.PendingInterventions = append(run.PendingInterventions, *req.Intervention)
+	}
 	if req.Output != nil {
 		run.Output = req.Output
 	}
@@ -205,7 +219,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.CompletedAt = &now
 		run.WakeCondition = nil
 	}
-	if isWaitingRunStatus(req.Status) || isTerminalAgentRunStatus(req.Status) || req.Status == AgentRunStatusQueued {
+	if isWaitingRunStatus(req.Status) || isTerminalAgentRunStatus(req.Status) || req.Status == AgentRunStatusQueued || req.Status == AgentRunStatusPaused {
 		run.LeaseOwner = ""
 		run.LeaseExpiresAt = nil
 	}
@@ -287,14 +301,15 @@ func (s *RunActivityService) ListActivity(ctx context.Context, filter ActivityFi
 
 func canTransitionAgentRun(from, to AgentRunStatus) bool {
 	allowed := map[AgentRunStatus]map[AgentRunStatus]bool{
-		AgentRunStatusQueued:               {AgentRunStatusPlanning: true, AgentRunStatusRunning: true, AgentRunStatusCanceled: true},
-		AgentRunStatusPlanning:             {AgentRunStatusRunning: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusRunning:              {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCompleted: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusSleeping:             {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForDependency: {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForAgent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForApproval:   {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForEvent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusQueued:               {AgentRunStatusPlanning: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusCanceled: true},
+		AgentRunStatusPlanning:             {AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusRunning:              {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCompleted: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusPaused:               {AgentRunStatusQueued: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCanceled: true},
+		AgentRunStatusSleeping:             {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForDependency: {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForAgent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForApproval:   {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+		AgentRunStatusWaitingForEvent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
 	}
 	return allowed[from][to]
 }

@@ -5,6 +5,27 @@ import (
 	"encoding/json"
 )
 
+func (s *MemoryStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := run.Validate(); err != nil {
+		return nil, err
+	}
+	if err := event.Validate(); err != nil {
+		return nil, err
+	}
+	if run.Scope != event.Scope || run.ID != event.RunID {
+		return nil, ErrInvalidScope
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := portfolioKey(run.Scope, run.ID)
+	if s.agentRuns[key] != nil {
+		return nil, ErrRunIdempotency
+	}
+	s.agentRuns[key] = cloneAgentRun(run)
+	persisted := appendMemoryActivityLocked(s, event)
+	return cloneActivityEvent(persisted), nil
+}
+
 func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err

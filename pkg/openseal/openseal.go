@@ -73,6 +73,7 @@ type (
 	ObjectiveStatus             = runtime.ObjectiveStatus
 	ObjectiveFilter             = runtime.ObjectiveFilter
 	AgentRun                    = runtime.AgentRun
+	AgentRunIntervention        = runtime.AgentRunIntervention
 	AgentRunStatus              = runtime.AgentRunStatus
 	AgentRunFilter              = runtime.AgentRunFilter
 	RunSource                   = runtime.RunSource
@@ -80,6 +81,9 @@ type (
 	CreateObjectiveRequest      = runtime.CreateObjectiveRequest
 	UpdateObjectiveRequest      = runtime.UpdateObjectiveRequest
 	CreateAgentRunRequest       = runtime.CreateAgentRunRequest
+	AgentRunCommandKind         = runtime.AgentRunCommandKind
+	AgentRunCommandRequest      = runtime.AgentRunCommandRequest
+	AgentRunCommandResult       = runtime.AgentRunCommandResult
 	RunActivityStore            = runtime.RunActivityStore
 	ActivityEvent               = runtime.ActivityEvent
 	ActivityActor               = runtime.ActivityActor
@@ -231,6 +235,8 @@ var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
 var (
 	ErrRunNotFound              = runtime.ErrRunNotFound
 	ErrRevisionConflict         = runtime.ErrRevisionConflict
+	ErrInvalidRunTransition     = runtime.ErrInvalidRunTransition
+	ErrRunIdempotency           = runtime.ErrRunIdempotency
 	ErrAgentRequestNotFound     = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized = runtime.ErrAgentRequestUnauthorized
@@ -292,6 +298,7 @@ const (
 	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
 	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning
 	AgentRunStatusRunning              = runtime.AgentRunStatusRunning
+	AgentRunStatusPaused               = runtime.AgentRunStatusPaused
 	AgentRunStatusSleeping             = runtime.AgentRunStatusSleeping
 	AgentRunStatusWaitingForDependency = runtime.AgentRunStatusWaitingForDependency
 	AgentRunStatusWaitingForAgent      = runtime.AgentRunStatusWaitingForAgent
@@ -300,6 +307,11 @@ const (
 	AgentRunStatusCompleted            = runtime.AgentRunStatusCompleted
 	AgentRunStatusFailed               = runtime.AgentRunStatusFailed
 	AgentRunStatusCanceled             = runtime.AgentRunStatusCanceled
+
+	AgentRunCommandPause     = runtime.AgentRunCommandPause
+	AgentRunCommandResume    = runtime.AgentRunCommandResume
+	AgentRunCommandCancel    = runtime.AgentRunCommandCancel
+	AgentRunCommandIntervene = runtime.AgentRunCommandIntervene
 
 	ActivitySeverityDebug   = runtime.ActivitySeverityDebug
 	ActivitySeverityInfo    = runtime.ActivitySeverityInfo
@@ -849,7 +861,15 @@ func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objec
 }
 
 func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
-	return e.portfolio.CreateAgentRun(ctx, req)
+	result, err := runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return result.Run, nil
+}
+
+func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
+	return runtime.NewRunCommandService(e.store).CommandAgentRun(ctx, req)
 }
 
 func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {
