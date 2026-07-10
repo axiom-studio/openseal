@@ -196,6 +196,22 @@ func (c *Catalog) Register(_ context.Context, definition *Definition) error {
 	return nil
 }
 
+func (c *Catalog) GetDefinition(_ context.Context, id, version string) (*Definition, error) {
+	if c == nil {
+		return nil, errors.New("skill catalog is not configured")
+	}
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(version) == "" {
+		return nil, errors.New("skill id and version are required")
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	definition := c.skills[definitionKey(id, version)]
+	if definition == nil {
+		return nil, nil
+	}
+	return cloneDefinition(definition), nil
+}
+
 func (c *Catalog) Bind(_ context.Context, binding *Binding) error {
 	if c == nil {
 		return errors.New("skill catalog is not configured")

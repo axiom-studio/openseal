@@ -13,6 +13,10 @@ func TestCatalogProducesModelSafeScopedActions(t *testing.T) {
 	if err := catalog.Register(context.Background(), definition); err != nil {
 		t.Fatal(err)
 	}
+	loaded, err := catalog.GetDefinition(context.Background(), definition.ID, definition.Version)
+	if err != nil || loaded == definition || loaded.ID != definition.ID {
+		t.Fatalf("immutable definition lookup = %#v, %v", loaded, err)
+	}
 	scope := ScopeReference{Kind: "tenant", ID: "one"}
 	binding := &Binding{
 		ID: "binding", Scope: scope, DeploymentID: "operator", SkillID: definition.ID,
