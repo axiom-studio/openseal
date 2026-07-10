@@ -19,13 +19,26 @@ type ActionExecutionCatalog interface {
 }
 
 type CredentialResolver interface {
-	ResolveCredentials(context.Context, Scope, map[string]skill.CredentialReference) (map[string]string, error)
+	ResolveCredentials(context.Context, CredentialResolutionRequest) (map[string]string, error)
 }
 
-type CredentialResolverFunc func(context.Context, Scope, map[string]skill.CredentialReference) (map[string]string, error)
+// CredentialResolutionRequest provides auditable action identity while keeping
+// opaque references separate from their ephemeral resolved values.
+type CredentialResolutionRequest struct {
+	Scope        Scope
+	DeploymentID string
+	SkillID      string
+	SkillVersion string
+	Action       string
+	ActionCallID string
+	RunID        string
+	References   map[string]skill.CredentialReference
+}
 
-func (f CredentialResolverFunc) ResolveCredentials(ctx context.Context, scope Scope, refs map[string]skill.CredentialReference) (map[string]string, error) {
-	return f(ctx, scope, refs)
+type CredentialResolverFunc func(context.Context, CredentialResolutionRequest) (map[string]string, error)
+
+func (f CredentialResolverFunc) ResolveCredentials(ctx context.Context, request CredentialResolutionRequest) (map[string]string, error) {
+	return f(ctx, request)
 }
 
 type ActionDispatchInput struct {
@@ -80,7 +93,10 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		if w.credentials == nil {
 			executionErr = errors.New("action credentials cannot be resolved")
 		} else {
-			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, scope, call.CredentialRefs)
+			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, CredentialResolutionRequest{
+				Scope: call.Scope, DeploymentID: call.DeploymentID, SkillID: call.SkillID, SkillVersion: call.SkillVersion,
+				Action: call.Action, ActionCallID: call.ID, RunID: call.RunID, References: cloneCredentialReferences(call.CredentialRefs),
+			})
 			if executionErr == nil {
 				for name := range call.CredentialRefs {
 					if credentials[name] == "" {
@@ -274,4 +290,15 @@ func sanitizeActionError(err error, credentials map[string]string) string {
 		message = message[:1024]
 	}
 	return message
+}
+
+func cloneCredentialReferences(input map[string]skill.CredentialReference) map[string]skill.CredentialReference {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]skill.CredentialReference, len(input))
+	for name, reference := range input {
+		result[name] = reference
+	}
+	return result
 }
