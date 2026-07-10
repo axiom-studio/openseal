@@ -87,14 +87,26 @@ type InstallManager struct {
 type CompilationValidator func(*opensealclaw.Compilation) error
 
 func NewInstallManager(registryID string, registry Registry, workspace string) (*InstallManager, error) {
-	if registry == nil || strings.TrimSpace(registryID) == "" || strings.TrimSpace(workspace) == "" {
-		return nil, errors.New("registry id, registry, and workspace are required")
+	return NewInstallManagerWithSkillsDirectory(registryID, registry, workspace, filepath.Join(workspace, "skills"))
+}
+
+// NewInstallManagerWithSkillsDirectory creates an installer whose lock and
+// provenance metadata live in workspace while activated skills live in the
+// caller-selected directory. This lets embedders adopt the verified installer
+// without relocating an existing skills mount.
+func NewInstallManagerWithSkillsDirectory(registryID string, registry Registry, workspace, skillsDirectory string) (*InstallManager, error) {
+	if registry == nil || strings.TrimSpace(registryID) == "" || strings.TrimSpace(workspace) == "" || strings.TrimSpace(skillsDirectory) == "" {
+		return nil, errors.New("registry id, registry, workspace, and skills directory are required")
 	}
-	abs, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return nil, err
 	}
-	return &InstallManager{registryID: strings.TrimRight(registryID, "/"), registry: registry, workspace: abs, skillsDir: filepath.Join(abs, "skills"), now: time.Now}, nil
+	absSkills, err := filepath.Abs(skillsDirectory)
+	if err != nil {
+		return nil, err
+	}
+	return &InstallManager{registryID: strings.TrimRight(registryID, "/"), registry: registry, workspace: absWorkspace, skillsDir: absSkills, now: time.Now}, nil
 }
 
 func (m *InstallManager) Install(ctx context.Context, req InstallRequest) (*InstalledSkill, error) {

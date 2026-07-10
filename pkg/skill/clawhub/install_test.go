@@ -135,6 +135,33 @@ Read references/method.md before monitoring.
 	}
 }
 
+func TestInstallManagerUsesExplicitSkillsDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	skillsDirectory := filepath.Join(t.TempDir(), "mounted-skills")
+	registry := &installRegistry{
+		version:      "1.0.0",
+		verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"},
+		archive: createTestZip(t, map[string]string{
+			"SKILL.md": "---\nname: weather\ndescription: Report current weather.\n---\nUse verified weather sources.",
+		}),
+	}
+	manager, err := NewInstallManagerWithSkillsDirectory("https://registry.example", registry, workspace, skillsDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	installed, err := manager.Install(context.Background(), InstallRequest{Reference: SkillReference{Owner: "acme", Slug: "weather"}, Version: "1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(skillsDirectory, "weather"); installed.Directory != want {
+		t.Fatalf("installed directory = %q, want %q", installed.Directory, want)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".clawhub", "lock.json")); err != nil {
+		t.Fatalf("workspace lockfile: %v", err)
+	}
+}
+
 func TestInstallManagerFailsClosedOnVerificationAndUnsafeArchives(t *testing.T) {
 	registry := &installRegistry{
 		version: "1.0.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: false, Decision: "fail", Reasons: []string{"malicious"}},
