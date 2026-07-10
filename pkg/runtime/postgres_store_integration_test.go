@@ -462,3 +462,67 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("reapplied schema version = %d, %v", version, err)
 	}
 }
+
+func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := "openseal_collab_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+	scope := Scope{Kind: "tenant", ID: "acme"}
+	portfolio := NewPortfolioService(primary)
+	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
+		Goal: "Ship", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(primary)
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Launch",
+		IdempotencyKey: "postgres-launch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := NewCollaborationService(replica).GetAgentRequest(ctx, scope, created.Request.ID)
+	if err != nil || restored.ChildRunID != accepted.Child.ID || restored.Status != AgentRequestStatusAccepted {
+		t.Fatalf("restored request = %#v, %v", restored, err)
+	}
+	child, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, accepted.Child.ID)
+	if err != nil || child.ParentRunID != source.ID || child.AssignedAgentID != "marketing" {
+		t.Fatalf("restored child = %#v, %v", child, err)
+	}
+	activity, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 10})
+	if err != nil || len(activity) != 3 {
+		t.Fatalf("team activity = %#v, %v", activity, err)
+	}
+	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != 7 {
+		t.Fatalf("schema version = %d, %v", version, err)
+	}
+}
