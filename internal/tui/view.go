@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -41,11 +42,11 @@ func (m *Model) render() string {
 		body = panelStyle.Width(width - 4).Render(message)
 	} else {
 		composer := m.renderComposer(m.composerWidth())
-		runs := m.renderRuns(m.runsWidth())
+		panel := m.renderPanel(m.runsWidth())
 		if m.width >= 90 {
-			body = lipgloss.JoinHorizontal(lipgloss.Top, composer, "  ", runs)
+			body = lipgloss.JoinHorizontal(lipgloss.Top, composer, "  ", panel)
 		} else {
-			body = composer + "\n\n" + runs
+			body = composer + "\n\n" + panel
 		}
 	}
 	footer := m.renderFooter(width)
@@ -53,13 +54,19 @@ func (m *Model) render() string {
 }
 
 func (m *Model) renderHeader(width int) string {
-	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Work")
+	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Work & Evidence")
 	connection := mutedStyle.Render(fmt.Sprintf("%s · %s/%s", m.config.Endpoint, m.config.Scope.Kind, m.config.Scope.ID))
 	space := max(1, width-lipgloss.Width(title)-lipgloss.Width(connection))
 	return title + strings.Repeat(" ", space) + connection
 }
 
 func (m *Model) renderComposer(width int) string {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide {
+		content := headerStyle.Render("Start durable work") + "\n" +
+			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
+			"You can still inspect the capabilities and evidence available in this workspace."
+		return panelStyle.Width(max(width-4, 30)).Render(content)
+	}
 	title := "Start durable work"
 	description := "Describe an outcome. OpenSeal will keep the work safe across restarts."
 	if m.mode == modeGuide {
@@ -78,7 +85,41 @@ func (m *Model) renderComposer(width int) string {
 	return panelStyle.Width(max(width-4, 30)).Render(content)
 }
 
-func (m *Model) renderRuns(width int) string {
+func (m *Model) renderPanel(width int) string {
+	tabs := m.renderPanelTabs()
+	var content string
+	if m.section == sectionArtifacts {
+		content = m.renderArtifactsContent(width)
+	} else {
+		content = m.renderRunsContent(width)
+	}
+	return panelStyle.Width(max(width-4, 30)).Render(tabs + "\n\n" + content)
+}
+
+func (m *Model) renderPanelTabs() string {
+	tabs := make([]string, 0, 2)
+	if m.runCapability.Available {
+		label := "w Work"
+		if m.section == sectionRuns {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.artifactCapability.Available {
+		label := "a Evidence"
+		if m.section == sectionArtifacts {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	return strings.Join(tabs, "  ")
+}
+
+func (m *Model) renderRunsContent(width int) string {
 	title := headerStyle.Render("Current work")
 	if m.loading {
 		title += mutedStyle.Render("  refreshing…")
@@ -110,10 +151,84 @@ func (m *Model) renderRuns(width int) string {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(actions))
 		}
 	}
-	if m.focus == focusRuns {
+	if m.focus == focusPanel {
 		lines = append(lines, "", mutedStyle.Render("↑/↓ select · n new · r refresh · Tab compose"))
 	}
-	return panelStyle.Width(max(width-4, 30)).Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderArtifactsContent(width int) string {
+	title := headerStyle.Render("Artifacts & evidence")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.artifacts) == 0 {
+		lines = append(lines, mutedStyle.Render("No durable artifacts have been registered in this workspace."))
+	} else {
+		visible := max(3, min(len(m.artifacts), max(m.height-22, 5)))
+		start := max(0, min(m.artifactSelected-visible/2, len(m.artifacts)-visible))
+		for index := start; index < min(len(m.artifacts), start+visible); index++ {
+			artifact := m.artifacts[index]
+			prefix := "  "
+			style := lipgloss.NewStyle().Foreground(text)
+			if index == m.artifactSelected {
+				prefix = "› "
+				style = selectedStyle
+			}
+			kind := artifact.Type
+			if kind == "" {
+				kind = artifact.MediaType
+			}
+			line := fmt.Sprintf("%s%-10s %s", prefix, compact(kind, 10), compact(artifact.Name, max(width-18, 20)))
+			lines = append(lines, style.Render(line))
+		}
+	}
+	if artifact := m.selectedArtifactRecord(); artifact != nil {
+		lines = append(lines, "", mutedStyle.Render("Selected"), compact(artifact.Name, max(width-8, 24)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf(
+			"%s · v%d · %s · %s", humanBytes(artifact.SizeBytes), artifact.Version,
+			artifact.Classification, relativeTime(artifact.CreatedAt),
+		)))
+		producer := fmt.Sprintf("Produced by %s:%s", artifact.Provenance.Producer.Type, artifact.Provenance.Producer.ID)
+		if artifact.Provenance.RunID != "" {
+			producer += " · run " + compact(artifact.Provenance.RunID, 12)
+		}
+		lines = append(lines, mutedStyle.Render(producer))
+		if len(artifact.Evidence) > 0 {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d evidence link(s)", len(artifact.Evidence))))
+			if m.artifactExpanded {
+				for _, evidence := range artifact.Evidence {
+					confidence := ""
+					if evidence.Confidence != nil {
+						confidence = fmt.Sprintf(" · %.0f%%", *evidence.Confidence*100)
+					}
+					lines = append(lines, compact(fmt.Sprintf("  %s %s%s", evidence.Relation, evidence.TargetRef, confidence), max(width-8, 28)))
+					if evidence.Summary != "" {
+						lines = append(lines, mutedStyle.Render("    "+compact(evidence.Summary, max(width-12, 24))))
+					}
+				}
+			}
+		}
+		actions := make([]string, 0, 2)
+		if len(artifact.Evidence) > 0 {
+			if m.artifactExpanded {
+				actions = append(actions, "e collapse evidence")
+			} else {
+				actions = append(actions, "e expand evidence")
+			}
+		}
+		if m.supportsArtifact(kernelapi.OperationDownload) {
+			actions = append(actions, "d download")
+		}
+		if len(actions) > 0 {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
+		}
+	}
+	if m.focus == focusPanel {
+		lines = append(lines, "", mutedStyle.Render("↑/↓ select · r refresh · w work · a evidence"))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) availableActions(run *runtime.AgentRun) string {
@@ -196,4 +311,19 @@ func relativeTime(value time.Time) string {
 		return fmt.Sprintf("%dh ago", int(delta.Hours()))
 	}
 	return value.Format("2006-01-02")
+}
+
+func humanBytes(size int64) string {
+	const unit = int64(1024)
+	if size < unit {
+		return fmt.Sprintf("%d B", size)
+	}
+	value := float64(size)
+	for _, suffix := range []string{"KB", "MB", "GB", "TB"} {
+		value /= float64(unit)
+		if value < float64(unit) || suffix == "TB" {
+			return fmt.Sprintf("%.1f %s", value, suffix)
+		}
+	}
+	return fmt.Sprintf("%d B", size)
 }

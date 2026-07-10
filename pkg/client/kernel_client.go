@@ -22,6 +22,7 @@ const DefaultKernelBaseURL = "http://127.0.0.1:8080"
 // KernelClient is the thin HTTP boundary used by OpenSeal interactive
 // surfaces. It deliberately exposes only versioned public kernel operations.
 type KernelClient interface {
+	ArtifactClient
 	Capabilities(context.Context) (kernelapi.CapabilityDocument, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)

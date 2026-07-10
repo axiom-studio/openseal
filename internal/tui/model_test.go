@@ -2,11 +2,16 @@ package tui
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +24,9 @@ type fakeKernelClient struct {
 	createKeys     []string
 	createRequests []kernelapi.CreateAgentRunRequest
 	commands       []kernelapi.AgentRunCommandRequest
+	artifacts      []*runtime.Artifact
+	downloadBody   string
+	downloadCalls  int
 }
 
 func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDocument, error) {
@@ -63,6 +71,39 @@ func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ runtime.Scope, i
 	return &runtime.AgentRunCommandResult{Run: run}, nil
 }
 
+func (f *fakeKernelClient) RegisterArtifact(context.Context, runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) GetArtifact(_ context.Context, _ runtime.Scope, id string, version int64) (*runtime.Artifact, error) {
+	for _, artifact := range f.artifacts {
+		if artifact.ID == id && (version == 0 || artifact.Version == version) {
+			return artifact, nil
+		}
+	}
+	return nil, runtime.ErrArtifactNotFound
+}
+
+func (f *fakeKernelClient) ListArtifacts(context.Context, runtime.ArtifactFilter) ([]*runtime.Artifact, error) {
+	return f.artifacts, nil
+}
+
+func (f *fakeKernelClient) UploadArtifactContent(context.Context, runtime.Scope, string, string, int64, io.Reader) (*runtime.ArtifactStoredContent, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) DownloadArtifactContent(context.Context, runtime.Scope, string, int64) (*client.ArtifactDownload, error) {
+	f.downloadCalls++
+	return &client.ArtifactDownload{
+		Body:   io.NopCloser(strings.NewReader(f.downloadBody)),
+		Digest: testDigest(f.downloadBody), SizeBytes: int64(len(f.downloadBody)),
+	}, nil
+}
+
+func (f *fakeKernelClient) ResolveArtifactContent(context.Context, runtime.Scope, string, int64, kernelapi.ResolveArtifactContentRequest) (*runtime.ArtifactContentResolution, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
 func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 	limited := kernelapi.Capability{
 		ID: kernelapi.AgentRunsCapabilityID, Version: kernelapi.AgentRunsCapabilityVersion,
@@ -92,7 +133,7 @@ func TestCreateRetryPreservesIdempotencyAndPrompt(t *testing.T) {
 	}
 	model := newTestModel(t, fake)
 	model.ready = true
-	model.capability = kernelapi.AgentRunsCapability()
+	model.runCapability = kernelapi.AgentRunsCapability()
 	model.editor.SetValue("Monitor Kubernetes events and remediate safely")
 
 	applyCommand(t, model, model.submitRun())
@@ -115,7 +156,7 @@ func TestLifecycleCommandUsesSelectedRevisionAndAdvertisedOperation(t *testing.T
 	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
 	model := newTestModel(t, fake)
 	model.ready = true
-	model.capability = kernelapi.AgentRunsCapability()
+	model.runCapability = kernelapi.AgentRunsCapability()
 	model.runs = []*runtime.AgentRun{testRun("run-7", runtime.AgentRunStatusRunning, 7)}
 	model.selectedID = "run-7"
 
@@ -128,7 +169,7 @@ func TestLifecycleCommandUsesSelectedRevisionAndAdvertisedOperation(t *testing.T
 		t.Fatalf("command = %#v", command)
 	}
 
-	model.capability.Operations = []string{kernelapi.OperationList}
+	model.runCapability.Operations = []string{kernelapi.OperationList}
 	if command := model.commandSelected(runtime.AgentRunCommandCancel, ""); command != nil {
 		t.Fatal("TUI dispatched an unadvertised cancel operation")
 	}
@@ -140,6 +181,63 @@ func TestContractMismatchFailsClosed(t *testing.T) {
 	applyCommand(t, model, model.loadCapabilities())
 	if model.ready || !strings.Contains(model.View(), "Capability unavailable") {
 		t.Fatalf("mismatch did not fail closed:\n%s", model.View())
+	}
+}
+
+func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
+	body := "cited market research"
+	confidence := 0.91
+	artifact := &runtime.Artifact{
+		ID: "research-report", Version: 2, Name: "OpenClaw research.pdf", Type: "report",
+		MediaType: "application/pdf", Digest: testDigest(body), SizeBytes: int64(len(body)),
+		Classification: runtime.ArtifactClassificationInternal, CreatedAt: time.Now(),
+		Provenance: runtime.ArtifactProvenance{
+			Producer: runtime.ActivityActor{Type: "agent", ID: "researcher"}, RunID: "run-research",
+		},
+		Evidence: []runtime.EvidenceLink{{
+			Relation: runtime.EvidenceRelationCites, TargetKind: runtime.EvidenceTargetExternalSource,
+			TargetRef: "https://example.com/source", Summary: "Primary source", Confidence: &confidence,
+		}},
+	}
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(
+			kernelapi.AgentRunsCapability(), kernelapi.ArtifactCapability(kernelapi.OperationDownload),
+		),
+		artifacts: []*runtime.Artifact{artifact}, downloadBody: body,
+	}
+	model := newTestModel(t, fake)
+	model.config.DownloadDir = t.TempDir()
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionArtifacts
+	model.focusPanelList()
+
+	view := model.View()
+	for _, expected := range []string{"Artifacts & evidence", "OpenClaw research.pdf", "1 evidence link(s)", "d download"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("artifact view missing %q:\n%s", expected, view)
+		}
+	}
+	model.artifactExpanded = true
+	if view = model.View(); !strings.Contains(view, "Primary source") || !strings.Contains(view, "91%") {
+		t.Fatalf("expanded evidence missing provenance details:\n%s", view)
+	}
+
+	applyCommand(t, model, model.downloadSelectedArtifact())
+	entries, err := os.ReadDir(model.config.DownloadDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("download entries = %v, err = %v", entries, err)
+	}
+	downloaded, err := os.ReadFile(model.config.DownloadDir + "/" + entries[0].Name())
+	if err != nil || string(downloaded) != body || fake.downloadCalls != 1 {
+		t.Fatalf("downloaded = %q, calls = %d, err = %v", downloaded, fake.downloadCalls, err)
+	}
+
+	model.artifactCapability = kernelapi.ArtifactCapability()
+	if command := model.downloadSelectedArtifact(); command != nil {
+		t.Fatal("TUI dispatched an unadvertised artifact download")
+	}
+	if strings.Contains(model.View(), "d download") {
+		t.Fatal("TUI rendered an unadvertised artifact download")
 	}
 }
 
@@ -160,16 +258,26 @@ func applyCommand(t *testing.T, model *Model, command tea.Cmd) {
 	if command == nil {
 		t.Fatal("expected command")
 	}
+	applyCommandRecursive(t, model, command)
+}
+
+func applyCommandRecursive(t *testing.T, model *Model, command tea.Cmd) {
+	t.Helper()
 	message := command()
+	if batch, ok := message.(tea.BatchMsg); ok {
+		for _, child := range batch {
+			if child != nil {
+				applyCommandRecursive(t, model, child)
+			}
+		}
+		return
+	}
 	updated, followup := model.Update(message)
 	if updated != model {
 		t.Fatal("model identity changed unexpectedly")
 	}
 	if followup != nil {
-		second := followup()
-		if second != nil {
-			model.Update(second)
-		}
+		applyCommandRecursive(t, model, followup)
 	}
 }
 
@@ -180,4 +288,9 @@ func testRun(id string, status runtime.AgentRunStatus, revision int64) *runtime.
 		AssignedAgentID: "operator", Goal: "First durable outcome", Source: runtime.RunSourceManual,
 		Status: status, Revision: revision, UpdatedAt: time.Now(),
 	}
+}
+
+func testDigest(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
