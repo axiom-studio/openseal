@@ -94,6 +94,21 @@ type (
 	ActivitySeverity                 = runtime.ActivitySeverity
 	ActivityVisibility               = runtime.ActivityVisibility
 	RunTransitionRequest             = runtime.RunTransitionRequest
+	RunDependencyStore               = runtime.RunDependencyStore
+	DependencyKernelStore            = runtime.DependencyKernelStore
+	RunDependencyKind                = runtime.RunDependencyKind
+	RunDependencyState               = runtime.RunDependencyState
+	FanInMode                        = runtime.FanInMode
+	DependencyFailureMode            = runtime.DependencyFailureMode
+	RunDependencyGroupStatus         = runtime.RunDependencyGroupStatus
+	RunDependencyPolicy              = runtime.RunDependencyPolicy
+	RunDependencyGroup               = runtime.RunDependencyGroup
+	RunDependency                    = runtime.RunDependency
+	RunDependencySpec                = runtime.RunDependencySpec
+	RunDependencyEvaluation          = runtime.RunDependencyEvaluation
+	CreateRunDependencyGroupRequest  = runtime.CreateRunDependencyGroupRequest
+	ResolveRunDependencyRequest      = runtime.ResolveRunDependencyRequest
+	RunDependencyResult              = runtime.RunDependencyResult
 	CollaborationStore               = runtime.CollaborationStore
 	CollaborationKernelStore         = runtime.CollaborationKernelStore
 	CollaborationParty               = runtime.CollaborationParty
@@ -244,6 +259,7 @@ type (
 type PersistentKernelStore interface {
 	runtime.KernelStore
 	runtime.CollaborationStore
+	runtime.RunDependencyStore
 	runtime.ArtifactStore
 	kernelagent.Store
 	skill.CatalogStore
@@ -271,6 +287,10 @@ var (
 	ErrArtifactImmutable        = runtime.ErrArtifactImmutable
 	ErrArtifactVersionConflict  = runtime.ErrArtifactVersionConflict
 	ErrInvalidArtifactRecord    = runtime.ErrInvalidArtifactRecord
+	ErrRunDependencyNotFound    = runtime.ErrRunDependencyNotFound
+	ErrDependencyGroupNotFound  = runtime.ErrDependencyGroupNotFound
+	ErrInvalidRunDependency     = runtime.ErrInvalidRunDependency
+	ErrDependencyConflict       = runtime.ErrDependencyConflict
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -369,6 +389,31 @@ const (
 	AgentRequestDecisionRequestClarification = runtime.AgentRequestDecisionRequestClarification
 	AgentRequestDecisionProvideClarification = runtime.AgentRequestDecisionProvideClarification
 
+	RunDependencyKindRun          = runtime.RunDependencyKindRun
+	RunDependencyKindAgentRequest = runtime.RunDependencyKindAgentRequest
+	RunDependencyKindHandoff      = runtime.RunDependencyKindHandoff
+	RunDependencyKindAction       = runtime.RunDependencyKindAction
+	RunDependencyKindApproval     = runtime.RunDependencyKindApproval
+
+	RunDependencyStatePending   = runtime.RunDependencyStatePending
+	RunDependencyStateRunning   = runtime.RunDependencyStateRunning
+	RunDependencyStateSatisfied = runtime.RunDependencyStateSatisfied
+	RunDependencyStateFailed    = runtime.RunDependencyStateFailed
+	RunDependencyStateCanceled  = runtime.RunDependencyStateCanceled
+
+	FanInModeAll    = runtime.FanInModeAll
+	FanInModeAny    = runtime.FanInModeAny
+	FanInModeQuorum = runtime.FanInModeQuorum
+
+	DependencyFailureFailFast = runtime.DependencyFailureFailFast
+	DependencyFailureWait     = runtime.DependencyFailureWait
+
+	RunDependencyGroupOpen      = runtime.RunDependencyGroupOpen
+	RunDependencyGroupWaiting   = runtime.RunDependencyGroupWaiting
+	RunDependencyGroupSatisfied = runtime.RunDependencyGroupSatisfied
+	RunDependencyGroupFailed    = runtime.RunDependencyGroupFailed
+	RunDependencyGroupCanceled  = runtime.RunDependencyGroupCanceled
+
 	AgentTurnStatusRunning   = runtime.AgentTurnStatusRunning
 	AgentTurnStatusCompleted = runtime.AgentTurnStatusCompleted
 	AgentTurnStatusFailed    = runtime.AgentTurnStatusFailed
@@ -459,6 +504,7 @@ type Engine struct {
 	scheduler             *runtime.Scheduler
 	portfolio             *runtime.PortfolioService
 	activity              *runtime.RunActivityService
+	dependencies          *runtime.DependencyCoordinator
 	collaboration         *runtime.CollaborationService
 	turns                 *runtime.AgentTurnService
 	turnsRun              *runtime.TurnCoordinator
@@ -526,6 +572,7 @@ func New(opts ...Option) (*Engine, error) {
 		scheduler:     runtime.NewScheduler(pool, store),
 		portfolio:     runtime.NewPortfolioService(store),
 		activity:      runtime.NewRunActivityService(store, store),
+		dependencies:  runtime.NewDependencyCoordinator(store),
 		collaboration: runtime.NewCollaborationService(store),
 		turns:         runtime.NewAgentTurnService(store, store),
 		turnsRun:      runtime.NewTurnCoordinator(store, store, store),
@@ -656,6 +703,11 @@ func WithStore(store runtime.KernelStore) Option {
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.activity = runtime.NewRunActivityService(store, store)
+		if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
+			e.dependencies = runtime.NewDependencyCoordinator(dependencyStore)
+		} else {
+			e.dependencies = nil
+		}
 		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
 			e.collaboration = runtime.NewCollaborationService(collaborationStore)
 		} else {
@@ -981,6 +1033,34 @@ func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter
 
 func (e *Engine) ListActivityFeed(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	return e.activity.ListActivityFeed(ctx, request)
+}
+
+func (e *Engine) CreateRunDependencyGroup(ctx context.Context, request runtime.CreateRunDependencyGroupRequest) (*runtime.RunDependencyResult, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	return e.dependencies.CreateRunDependencyGroup(ctx, request)
+}
+
+func (e *Engine) ResolveRunDependency(ctx context.Context, request runtime.ResolveRunDependencyRequest) (*runtime.RunDependencyResult, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	return e.dependencies.ResolveRunDependency(ctx, request)
+}
+
+func (e *Engine) GetRunDependencyGroup(ctx context.Context, scope runtime.Scope, groupID string) (*runtime.RunDependencyGroup, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	return e.dependencies.GetRunDependencyGroup(ctx, scope, groupID)
+}
+
+func (e *Engine) ListRunDependencies(ctx context.Context, scope runtime.Scope, groupID string) ([]*runtime.RunDependency, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	return e.dependencies.ListRunDependencies(ctx, scope, groupID)
 }
 
 func (e *Engine) CreateAgentRequest(ctx context.Context, request runtime.CreateAgentRequestRequest) (*runtime.AgentRequestResult, error) {
