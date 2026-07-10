@@ -23,6 +23,7 @@ func tuiCmd(args []string) {
 	endpoint := fs.String("endpoint", defaults.Endpoint, "OpenSeal kernel API URL")
 	scope := fs.String("scope", defaults.Scope.Kind+":"+defaults.Scope.ID, "workspace scope as kind:id")
 	owner := fs.String("owner", string(defaults.Owner.Type)+":"+defaults.Owner.ID, "work owner as agent:id or team:id")
+	downloadDir := fs.String("download-dir", defaults.DownloadDir, "directory for verified artifact downloads")
 	poll := fs.Duration("poll", defaults.PollInterval, "run refresh interval; use a negative duration to disable")
 	help := fs.Bool("help", false, "print help for the terminal UI")
 	if err := fs.Parse(args); err != nil {
@@ -38,6 +39,7 @@ Options:
   --endpoint <url>   Kernel API URL (default: http://127.0.0.1:8080)
   --scope <kind:id>  Workspace scope (default: local:default)
   --owner <type:id>  Agent or Team that owns new work (default: agent:operator)
+  --download-dir     Directory for verified artifact downloads (default: artifacts)
   --poll <duration>  Refresh interval (default: 5s; negative disables polling)
   --help             Print this help message
 
@@ -61,7 +63,8 @@ OPENSEAL_API_URL can set the default endpoint.`)
 	}
 	config := tui.Config{
 		Endpoint: strings.TrimSpace(*endpoint), Scope: scopeValue, Owner: ownerValue,
-		Actor: runtime.ActivityActor{Type: "user", ID: "local"}, PollInterval: pollInterval,
+		Actor: runtime.ActivityActor{Type: "user", ID: "local"}, DownloadDir: strings.TrimSpace(*downloadDir),
+		PollInterval: pollInterval,
 	}
 	kernelClient := client.NewKernelHTTPClient(config.Endpoint, nil)
 	if err := tui.Run(context.Background(), kernelClient, config); err != nil {

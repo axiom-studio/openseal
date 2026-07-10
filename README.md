@@ -27,10 +27,11 @@ In another terminal, open the prompt-first workspace:
 
 Running the binary without a subcommand opens the TUI. It discovers the
 server's versioned capabilities before rendering actions and stores no
-authoritative state of its own. Canonical work is persisted by default in
-`data/openseal.db`, so it remains available after either terminal exits or the
-daemon restarts. See [Terminal UI](docs/tui.md) for workspace and keyboard
-options.
+authoritative state of its own. Canonical work and immutable artifact evidence
+are persisted by default in `data/openseal.db`, so they remain available after
+either terminal exits or the daemon restarts. The TUI can inspect provenance,
+expand evidence, and perform verified content downloads when advertised. See
+[Terminal UI](docs/tui.md) for workspace and keyboard options.
 
 To run the daemon through Docker Compose instead:
 
@@ -99,6 +100,10 @@ openseal/
 | `/api/v1/agent-runs` | POST, GET | Create or list canonical durable work |
 | `/api/v1/agent-runs/{id}` | GET | Inspect canonical work |
 | `/api/v1/agent-runs/{id}/commands` | POST | Pause, resume, stop, or guide work |
+| `/api/v1/artifacts` | POST, GET | Register or list immutable artifact evidence |
+| `/api/v1/artifacts/{id}` | GET | Inspect an artifact version and provenance |
+| `/api/v1/artifact-content` | POST | Stream content into a configured content store |
+| `/api/v1/artifacts/{id}/content` | GET | Stream verified artifact content |
 | `/api/v1/skills` | GET | List available skills |
 | `/api/v1/workflows` | GET | List loaded workflows |
 | `/api/v1/workflows/{id}/run` | POST | Trigger execution |
