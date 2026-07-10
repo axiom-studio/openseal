@@ -88,12 +88,23 @@ Read references/method.md before monitoring.
 	if _, err := os.Stat(filepath.Join(installed.Directory, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
+	reloaded, err := manager.LoadInstalled()
+	if err != nil || len(reloaded) != 1 || reloaded[0].Compilation.Definition.Source.Trust["decision"] != "pass" {
+		t.Fatalf("restart load = %#v, %v", reloaded, err)
+	}
+	if verified, err := manager.VerifyInstalled(context.Background(), ref.Slug); err != nil || verified.Version != "1.0.0" {
+		t.Fatalf("verify installed = %#v, %v", verified, err)
+	}
 	lock, err := manager.List()
 	if err != nil || lock.Skills[ref.Slug].Version == nil || *lock.Skills[ref.Slug].Version != "1.0.0" {
 		t.Fatalf("lockfile = %#v, %v", lock, err)
 	}
 	if err := manager.Pin(ref.Slug, "security review"); err != nil {
 		t.Fatal(err)
+	}
+	report := manager.UpdateAll(context.Background())
+	if len(report.SkippedPinned) != 1 || report.SkippedPinned[0] != ref.Slug {
+		t.Fatalf("pinned update-all report = %#v", report)
 	}
 	if _, err := manager.Update(context.Background(), ref.Slug); !errors.Is(err, ErrSkillPinned) {
 		t.Fatalf("pinned update error = %v", err)
