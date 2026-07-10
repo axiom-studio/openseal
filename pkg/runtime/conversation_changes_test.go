@@ -62,7 +62,8 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			initial, err := changes.ListChanges(ctx, ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, ActiveAt: now,
 			})
-			if err != nil || !initial.HasChanges || initial.HasMore || len(initial.Messages) != 1 || len(initial.Rounds) != 0 ||
+			if err != nil || !initial.HasChanges || initial.HasMore || !initial.RunsChanged || !initial.PresenceChanged ||
+				len(initial.Messages) != 1 || len(initial.Rounds) != 0 ||
 				len(initial.Runs) != 1 || initial.Runs[0].ID != scheduled.Run.ID || initial.Runs[0].Status != AgentRunStatusQueued ||
 				len(initial.Presence) != 0 || initial.Cursor == "" {
 				t.Fatalf("initial changes = %#v, %v", initial, err)
@@ -70,7 +71,8 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			unchanged, err := changes.ListChanges(ctx, ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor, ActiveAt: now,
 			})
-			if err != nil || unchanged.HasChanges || len(unchanged.Messages) != 0 || len(unchanged.Rounds) != 0 ||
+			if err != nil || unchanged.HasChanges || unchanged.RunsChanged || unchanged.PresenceChanged ||
+				len(unchanged.Messages) != 0 || len(unchanged.Rounds) != 0 ||
 				len(unchanged.Runs) != 0 || len(unchanged.Presence) != 0 || unchanged.Cursor != initial.Cursor {
 				t.Fatalf("unchanged projection = %#v, %v", unchanged, err)
 			}
@@ -93,7 +95,8 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			working, err := changes.ListChanges(ctx, ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor, ActiveAt: now,
 			})
-			if err != nil || !working.HasChanges || len(working.Runs) != 1 || working.Runs[0].Status != AgentRunStatusRunning ||
+			if err != nil || !working.HasChanges || !working.RunsChanged || !working.PresenceChanged ||
+				len(working.Runs) != 1 || working.Runs[0].Status != AgentRunStatusRunning ||
 				len(working.Presence) != 1 || working.Presence[0].LeaseID != presence.LeaseID {
 				t.Fatalf("working projection = %#v, %v", working, err)
 			}
@@ -126,7 +129,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			expired, err := changes.ListChanges(ctx, ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: afterRound.Cursor, ActiveAt: now.Add(time.Minute),
 			})
-			if err != nil || !expired.HasChanges || len(expired.Presence) != 0 {
+			if err != nil || !expired.HasChanges || !expired.PresenceChanged || len(expired.Presence) != 0 {
 				t.Fatalf("expired presence changes = %#v, %v", expired, err)
 			}
 			if _, err := changes.ListChanges(ctx, ConversationChangeRequest{

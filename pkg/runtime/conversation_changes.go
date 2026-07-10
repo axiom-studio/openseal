@@ -31,14 +31,16 @@ type ConversationChangeRequest struct {
 // Runs and leased presence are authoritative current projections when their
 // digest changes. Consumers merge by stable identity and revision.
 type ConversationChangeSet struct {
-	Conversation *Conversation               `json:"conversation"`
-	Messages     []*ChannelMessage           `json:"messages"`
-	Rounds       []*ParticipationRoundResult `json:"rounds"`
-	Runs         []*AgentRun                 `json:"runs"`
-	Presence     []*ConversationPresence     `json:"presence"`
-	Cursor       string                      `json:"cursor"`
-	HasChanges   bool                        `json:"hasChanges"`
-	HasMore      bool                        `json:"hasMore"`
+	Conversation    *Conversation               `json:"conversation"`
+	Messages        []*ChannelMessage           `json:"messages"`
+	Rounds          []*ParticipationRoundResult `json:"rounds"`
+	Runs            []*AgentRun                 `json:"runs"`
+	Presence        []*ConversationPresence     `json:"presence"`
+	RunsChanged     bool                        `json:"runsChanged"`
+	PresenceChanged bool                        `json:"presenceChanged"`
+	Cursor          string                      `json:"cursor"`
+	HasChanges      bool                        `json:"hasChanges"`
+	HasMore         bool                        `json:"hasMore"`
 }
 
 type conversationChangeCursor struct {
@@ -118,8 +120,9 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	if err != nil {
 		return nil, err
 	}
+	runsChanged := initial || runDigest != cursor.RunDigest
 	projectedRuns := runs
-	if !initial && runDigest == cursor.RunDigest {
+	if !runsChanged {
 		projectedRuns = []*AgentRun{}
 	}
 
@@ -135,8 +138,9 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	if err != nil {
 		return nil, err
 	}
+	presenceChanged := initial || presenceDigest != cursor.PresenceDigest
 	projectedPresence := presence
-	if !initial && presenceDigest == cursor.PresenceDigest {
+	if !presenceChanged {
 		projectedPresence = []*ConversationPresence{}
 	}
 
@@ -150,10 +154,11 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		return nil, err
 	}
 	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 ||
-		len(projectedRuns) > 0 || runDigest != cursor.RunDigest || presenceDigest != cursor.PresenceDigest
+		runsChanged || presenceChanged
 	return &ConversationChangeSet{
 		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Presence: cloneConversationPresences(projectedPresence),
+		RunsChanged: runsChanged, PresenceChanged: presenceChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore,
 	}, nil
 }

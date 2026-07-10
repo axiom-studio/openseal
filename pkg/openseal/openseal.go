@@ -1424,6 +1424,12 @@ func (e *Engine) ListConversationChanges(ctx context.Context, request runtime.Co
 	return e.conversationChanges.ListChanges(ctx, request)
 }
 
+// ConversationChangesAvailable reports whether reconnect-safe channel change
+// projections can be served by the configured persistent kernel store.
+func (e *Engine) ConversationChangesAvailable() bool {
+	return e != nil && e.conversationChanges != nil
+}
+
 func (e *Engine) CoordinateParticipation(ctx context.Context, request runtime.CoordinateParticipationRequest) (*runtime.ParticipationRoundResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
