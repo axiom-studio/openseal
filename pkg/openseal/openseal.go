@@ -101,6 +101,11 @@ type (
 	ModelSkillPrompt           = skill.ModelPrompt
 	BoundSkillAction           = skill.BoundAction
 	SkillPromptModule          = skill.PromptModule
+	SkillHostCapabilityState   = skill.HostCapabilityState
+	SkillAvailabilityReason    = skill.AvailabilityReason
+	ActivatedSkill             = skill.ActivatedSkill
+	UnavailableSkill           = skill.UnavailableSkill
+	SkillActivationSnapshot    = skill.ActivationSnapshot
 	ActionStore                = runtime.ActionStore
 	ActionCall                 = runtime.ActionCall
 	ActionCallStatus           = runtime.ActionCallStatus
@@ -718,6 +723,10 @@ func (e *Engine) ResolveSkillPrompt(ctx context.Context, scope skill.ScopeRefere
 
 func (e *Engine) ResolveSkillAction(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string) (*skill.BoundAction, error) {
 	return e.skills.Resolve(ctx, scope, deploymentID, skillID, version, action)
+}
+
+func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
+	return e.skills.Activate(ctx, scope, deploymentID, host)
 }
 
 func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {

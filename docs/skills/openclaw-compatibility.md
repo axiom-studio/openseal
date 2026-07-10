@@ -31,10 +31,11 @@ envelope.
 | legacy `metadata.clawdbot` | same typed metadata parser | Supported compatibility read |
 | brew, node, go, uv, and download installer fields | typed installer candidates | Preserved; execution is an explicit host policy boundary |
 | `references/`, `scripts/`, `assets/`, and other files | typed, media-aware, digested resources | Native progressive-disclosure inventory |
-| `{baseDir}` | retained portable source token | Materialization belongs to the activated resource/sandbox adapter |
+| `{baseDir}` | trusted per-skill activation resource root | Materialized only in the immutable deployment snapshot; missing/relative roots make the skill unavailable |
 | per-agent allowlists and enablement | scoped `SkillBinding` | Native and revisioned |
 | `skills.entries.*.config` | binding configuration | Native; configuration is scoped to the deployment |
 | `skills.entries.*.env` and `apiKey` | opaque credential references and worker-time resolution | Native security boundary; raw values are never model-visible |
+| session skill snapshots | deterministic activation snapshot ID | Stable across restart for equivalent bindings/host capabilities; host revision changes force refresh identity |
 | ClawHub search, explore, detail, versions, files, verify, archive | typed registry client | Native |
 | ClawHub install, update, update-all, pin, verify, uninstall | verified atomic installer and lockfile | Native with local-modification and rollback protection |
 | registry slug differing from declared skill name | source reference plus declared definition identity | Supported; registry identity remains provenance |
@@ -58,7 +59,7 @@ resolved values.
 
 ## Host extension boundaries
 
-Filesystem precedence, watchers, sandbox materialization, installer execution,
+Filesystem precedence, watchers, sandbox provisioning, installer execution,
 remote-node probing, Git acquisition, and plugin discovery depend on the host
 environment. OpenSeal exposes typed contracts for these concerns without
 pretending that a particular host implementation exists. An embedding

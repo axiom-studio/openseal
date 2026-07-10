@@ -372,6 +372,9 @@ func validateBindingShape(binding *Binding) error {
 	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt) || !validRisk(binding.MaximumRisk) {
 		return errors.New("binding must enable a prompt or explicitly allow actions and set maximum risk")
 	}
+	if err := validateNonSecretConfiguration(binding.Config, ""); err != nil {
+		return err
+	}
 	return nil
 }
 
