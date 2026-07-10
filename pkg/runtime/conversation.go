@@ -8,9 +8,11 @@ import (
 )
 
 var (
-	ErrConversationNotFound = errors.New("conversation not found")
-	ErrInvalidConversation  = errors.New("invalid conversation")
-	ErrMessageConflict      = errors.New("conversation message conflict")
+	ErrConversationNotFound         = errors.New("conversation not found")
+	ErrInvalidConversation          = errors.New("invalid conversation")
+	ErrMessageConflict              = errors.New("conversation message conflict")
+	ErrConversationCursorConflict   = errors.New("conversation cursor conflict")
+	ErrConversationPresenceConflict = errors.New("conversation presence lease conflict")
 )
 
 type ConversationStatus string
