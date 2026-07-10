@@ -117,6 +117,16 @@ func cloneMap(value map[string]interface{}) map[string]interface{} {
 	return result
 }
 
+func cloneValue(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	encoded, _ := json.Marshal(value)
+	var result interface{}
+	_ = json.Unmarshal(encoded, &result)
+	return result
+}
+
 func cloneDefinition(value *Definition) *Definition {
 	if value == nil {
 		return nil

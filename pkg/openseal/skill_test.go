@@ -168,3 +168,18 @@ func TestEngineRunsDurableActionWorkers(t *testing.T) {
 	}
 	t.Fatal("background action worker did not execute and resume the run")
 }
+
+func TestPublicFacadeCompilesAndExportsOpenClawSkill(t *testing.T) {
+	source := []byte("---\nname: facade-skill\ndescription: Test the public facade.\n---\nUse the portable instructions.\n")
+	compilation, err := CompileOpenClawSkill(OpenClawSkillBundle{SkillMD: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := ExportOpenClawSkill(compilation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(exported.SkillMD) != string(source) || compilation.Definition.ID != "facade-skill" {
+		t.Fatalf("public OpenClaw conversion lost semantics: %#v", compilation)
+	}
+}

@@ -3,6 +3,7 @@ package openclaw
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"path/filepath"
@@ -45,6 +46,7 @@ type Compilation struct {
 	Parsed       *skillmd.ParsedSkill
 	Diagnostics  []Diagnostic
 	SourceDigest string
+	Artifact     Bundle
 }
 
 func Compile(bundle Bundle) (*Compilation, error) {
@@ -66,7 +68,8 @@ func Compile(bundle Bundle) (*Compilation, error) {
 
 	definition := &capability.Definition{
 		ID: parsed.Name, Version: resolvedVersion(parsed, bundle.Source.Version, digest), Name: parsed.Name,
-		Description: parsed.Description, Actions: map[string]capability.Action{},
+		Description: parsed.Description, Icon: parsed.Metadata.Emoji, ConfigurationKey: parsed.Metadata.SkillKey,
+		Actions: map[string]capability.Action{},
 		Prompt: &capability.PromptModule{
 			Instructions: parsed.Body, AlwaysActive: parsed.Metadata.Always,
 			UserInvocable: parsed.Invocation.UserInvocable, DisableModelInvocation: parsed.Invocation.DisableModelInvocation,
@@ -88,15 +91,15 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		definition.Prompt = nil
 	}
 
-	dispatchKind, _ := parsed.Frontmatter["command-dispatch"].(string)
-	if dispatchKind != "" && dispatchKind != "tool" {
-		return nil, fmt.Errorf("unsupported command-dispatch %q", dispatchKind)
-	}
-	if dispatchKind == "tool" && parsed.CommandDispatch == nil {
-		return nil, fmt.Errorf("command-dispatch tool requires command-tool")
-	}
 	if parsed.CommandDispatch != nil {
-		definition.Transport = capability.TransportReference{Kind: "tool", Endpoint: parsed.CommandDispatch.ToolName}
+		definition.Transport = capability.TransportReference{
+			Kind: "tool", Endpoint: parsed.CommandDispatch.ToolName,
+			Arguments: map[string]capability.TransportArgument{
+				"command":     {SourceArgument: "command"},
+				"commandName": {Literal: parsed.Name},
+				"skillName":   {Literal: parsed.Name},
+			},
+		}
 		credentials := []capability.CredentialRequirement{}
 		if parsed.Metadata.PrimaryEnv != "" {
 			credentials = append(credentials, capability.CredentialRequirement{Name: parsed.Metadata.PrimaryEnv, Kind: "environment-secret"})
@@ -119,7 +122,20 @@ func Compile(bundle Bundle) (*Compilation, error) {
 	if len(bundle.Files) > 0 {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "resources.indexed", Message: fmt.Sprintf("indexed %d supporting resources for progressive disclosure", len(bundle.Files))})
 	}
-	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest}, nil
+	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest, Artifact: cloneBundle(bundle)}, nil
+}
+
+// ExportBundle returns the exact source artifact retained by the compiler.
+// Deterministic native optimization never replaces or mutates the portable
+// OpenClaw source, so supported imports can be exported byte-for-byte.
+func ExportBundle(compilation *Compilation) (Bundle, error) {
+	if compilation == nil || len(compilation.Artifact.SkillMD) == 0 || compilation.SourceDigest == "" {
+		return Bundle{}, fmt.Errorf("compiled source artifact is required")
+	}
+	if digest := bundleDigest(compilation.Artifact); digest != compilation.SourceDigest {
+		return Bundle{}, fmt.Errorf("compiled source artifact digest does not match provenance")
+	}
+	return cloneBundle(compilation.Artifact), nil
 }
 
 func resolvedVersion(parsed *skillmd.ParsedSkill, sourceVersion, digest string) string {
@@ -179,9 +195,23 @@ func cloneMap(value map[string]interface{}) map[string]interface{} {
 	if value == nil {
 		return nil
 	}
-	result := make(map[string]interface{}, len(value))
-	for key, child := range value {
-		result[key] = child
+	encoded, _ := json.Marshal(value)
+	var result map[string]interface{}
+	_ = json.Unmarshal(encoded, &result)
+	return result
+}
+
+func cloneBundle(value Bundle) Bundle {
+	result := Bundle{
+		SkillMD: append([]byte(nil), value.SkillMD...),
+		Source: Source{
+			Registry: value.Source.Registry, Publisher: value.Source.Publisher, Reference: value.Source.Reference,
+			ExpectedName: value.Source.ExpectedName, Version: value.Source.Version, Trust: cloneMap(value.Source.Trust),
+		},
+		Files: make([]File, len(value.Files)),
+	}
+	for index, file := range value.Files {
+		result.Files[index] = File{Path: file.Path, Content: append([]byte(nil), file.Content...)}
 	}
 	return result
 }

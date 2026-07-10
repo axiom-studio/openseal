@@ -17,6 +17,7 @@ user-invocable: true
 disable-model-invocation: true
 command-dispatch: tool
 command-tool: publish_release
+command-arg-mode: raw
 metadata:
   author: example
   version: "2.3.0"
@@ -49,7 +50,7 @@ Use the release template in references/template.md.
 	if parsed.Version != "2.3.0" || parsed.License != "Apache-2.0" || len(parsed.AllowedTools) != 2 {
 		t.Fatalf("standard fields not preserved: %#v", parsed)
 	}
-	if parsed.Invocation.UserInvocable != true || !parsed.Invocation.DisableModelInvocation || parsed.CommandDispatch == nil || parsed.CommandDispatch.ToolName != "publish_release" {
+	if parsed.Invocation.UserInvocable != true || !parsed.Invocation.DisableModelInvocation || parsed.CommandDispatch == nil || parsed.CommandDispatch.ToolName != "publish_release" || parsed.CommandDispatch.ArgMode != "raw" {
 		t.Fatalf("invocation fields not preserved: %#v", parsed)
 	}
 	meta := parsed.Metadata
@@ -59,6 +60,22 @@ Use the release template in references/template.md.
 	installer := meta.Install[0]
 	if installer.URL == "" || installer.Extract == nil || !*installer.Extract || installer.StripComponents == nil || *installer.StripComponents != 1 {
 		t.Fatalf("installer not preserved: %#v", installer)
+	}
+}
+
+func TestCommandDispatchFailsClosedWithoutSemanticLoss(t *testing.T) {
+	for name, fields := range map[string]string{
+		"unsupported dispatch": "command-dispatch: shell\ncommand-tool: publish",
+		"missing tool":         "command-dispatch: tool",
+		"orphan tool":          "command-tool: publish",
+		"unsupported args":     "command-dispatch: tool\ncommand-tool: publish\ncommand-arg-mode: json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseSkillMD([]byte("---\nname: dispatcher\ndescription: Dispatch a command.\n" + fields + "\n---\nbody"))
+			if err == nil {
+				t.Fatal("unsupported command semantics should fail explicitly")
+			}
+		})
 	}
 }
 

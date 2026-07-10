@@ -94,6 +94,7 @@ type (
 	SkillCredentialRequirement = skill.CredentialRequirement
 	SkillCredentialReference   = skill.CredentialReference
 	SkillTransportReference    = skill.TransportReference
+	SkillTransportArgument     = skill.TransportArgument
 	SkillArgumentRule          = skill.ArgumentRule
 	SkillActionRetryPolicy     = skill.ActionRetryPolicy
 	ModelSkillAction           = skill.ModelAction
@@ -125,6 +126,14 @@ type (
 	ActionDispatchInput        = runtime.ActionDispatchInput
 	ActionDispatcher           = runtime.ActionDispatcher
 	ActionDispatcherFunc       = runtime.ActionDispatcherFunc
+	ToolInvoker                = runtime.ToolInvoker
+	ToolInvokerFunc            = runtime.ToolInvokerFunc
+	ToolActionDispatcher       = runtime.ToolActionDispatcher
+	OpenClawSkillSource        = skillopenclaw.Source
+	OpenClawSkillFile          = skillopenclaw.File
+	OpenClawSkillBundle        = skillopenclaw.Bundle
+	OpenClawSkillDiagnostic    = skillopenclaw.Diagnostic
+	OpenClawSkillCompilation   = skillopenclaw.Compilation
 	ClawHubRegistry            = clawhub.Registry
 	ClawHubClient              = clawhub.ClawHubClient
 	ClawHubSkillReference      = clawhub.SkillReference
@@ -140,6 +149,18 @@ type (
 	ClawHubVersionDetail       = clawhub.VersionDetail
 	ClawHubDownloadedArchive   = clawhub.DownloadedArchive
 )
+
+func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
+	return runtime.NewToolActionDispatcher(invoker)
+}
+
+func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilation, error) {
+	return skillopenclaw.Compile(bundle)
+}
+
+func ExportOpenClawSkill(compilation *skillopenclaw.Compilation) (skillopenclaw.Bundle, error) {
+	return skillopenclaw.ExportBundle(compilation)
+}
 
 const (
 	OwnerTypeAgent = runtime.OwnerTypeAgent

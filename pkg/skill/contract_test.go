@@ -128,6 +128,29 @@ func TestCatalogRejectsExternalSchemaReferencesAndMutableVersions(t *testing.T) 
 	}
 }
 
+func TestMaterializeTransportArgumentsKeepsCredentialsOutOfEnvelope(t *testing.T) {
+	bound := &BoundAction{
+		Definition: &Definition{Transport: TransportReference{
+			Kind: "tool", Endpoint: "publish",
+			Arguments: map[string]TransportArgument{
+				"command":     {SourceArgument: "request"},
+				"commandName": {Literal: "publisher"},
+			},
+		}},
+		Action: Action{Name: "invoke"},
+	}
+	arguments, err := MaterializeTransportArguments(bound, map[string]interface{}{"request": "release 1.2.3", "credential": "must-not-pass"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if arguments["command"] != "release 1.2.3" || arguments["commandName"] != "publisher" || len(arguments) != 2 {
+		t.Fatalf("transport projection = %#v", arguments)
+	}
+	if _, err := MaterializeTransportArguments(bound, map[string]interface{}{}); err == nil {
+		t.Fatal("missing mapped input should fail")
+	}
+}
+
 func testSkillDefinition() *Definition {
 	return &Definition{
 		ID: "release", Version: "1.0.0", Name: "Release", Description: "Release software",

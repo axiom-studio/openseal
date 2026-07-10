@@ -74,8 +74,17 @@ type Action struct {
 }
 
 type TransportReference struct {
-	Kind     string `json:"kind"`
-	Endpoint string `json:"endpoint,omitempty"`
+	Kind      string                       `json:"kind"`
+	Endpoint  string                       `json:"endpoint,omitempty"`
+	Arguments map[string]TransportArgument `json:"arguments,omitempty"`
+}
+
+// TransportArgument deterministically projects a model-visible action input
+// or a compiler-provided literal into the transport-specific call envelope.
+// Credentials are deliberately resolved and passed out of band.
+type TransportArgument struct {
+	SourceArgument string      `json:"sourceArgument,omitempty"`
+	Literal        interface{} `json:"literal,omitempty"`
 }
 
 type PromptModule struct {
@@ -132,17 +141,19 @@ type SourceProvenance struct {
 }
 
 type Definition struct {
-	ID           string             `json:"id"`
-	Version      string             `json:"version"`
-	Name         string             `json:"name"`
-	Description  string             `json:"description,omitempty"`
-	Actions      map[string]Action  `json:"actions"`
-	Transport    TransportReference `json:"transport"`
-	Prompt       *PromptModule      `json:"prompt,omitempty"`
-	Requirements Requirements       `json:"requirements,omitempty"`
-	Installers   []Installer        `json:"installers,omitempty"`
-	Resources    []Resource         `json:"resources,omitempty"`
-	Source       *SourceProvenance  `json:"source,omitempty"`
+	ID               string             `json:"id"`
+	Version          string             `json:"version"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description,omitempty"`
+	Icon             string             `json:"icon,omitempty"`
+	ConfigurationKey string             `json:"configurationKey,omitempty"`
+	Actions          map[string]Action  `json:"actions"`
+	Transport        TransportReference `json:"transport"`
+	Prompt           *PromptModule      `json:"prompt,omitempty"`
+	Requirements     Requirements       `json:"requirements,omitempty"`
+	Installers       []Installer        `json:"installers,omitempty"`
+	Resources        []Resource         `json:"resources,omitempty"`
+	Source           *SourceProvenance  `json:"source,omitempty"`
 }
 
 type ArgumentRule struct {
