@@ -35,7 +35,7 @@ func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T)
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 9 {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("schema version = %d, err = %v", version, err)
 	}
 
