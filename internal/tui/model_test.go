@@ -6,15 +6,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	tea "github.com/charmbracelet/bubbletea"
+	"go.uber.org/zap"
 )
 
 type fakeKernelClient struct {
@@ -27,6 +30,125 @@ type fakeKernelClient struct {
 	artifacts      []*runtime.Artifact
 	downloadBody   string
 	downloadCalls  int
+}
+
+type fakeChannelKernelClient struct {
+	*fakeKernelClient
+	conversations              []*runtime.Conversation
+	messages                   []*runtime.ChannelMessage
+	rounds                     []*runtime.ParticipationRoundResult
+	presence                   []*runtime.ConversationPresence
+	createConversationErrors   []error
+	createConversationKeys     []string
+	createConversationRequests []kernelapi.CreateConversationRequest
+	postErrors                 []error
+	postKeys                   []string
+	postRequests               []kernelapi.PostChannelMessageRequest
+	cursor                     *runtime.ConversationCursor
+	cursorAdvances             []kernelapi.AdvanceConversationCursorRequest
+}
+
+func (f *fakeChannelKernelClient) CreateConversation(_ context.Context, request kernelapi.CreateConversationRequest, key string) (*runtime.Conversation, error) {
+	f.createConversationKeys = append(f.createConversationKeys, key)
+	f.createConversationRequests = append(f.createConversationRequests, request)
+	if len(f.createConversationErrors) > 0 {
+		err := f.createConversationErrors[0]
+		f.createConversationErrors = f.createConversationErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	conversation := testConversation("created-channel", request.Title, 0, 1)
+	f.conversations = append([]*runtime.Conversation{conversation}, f.conversations...)
+	return conversation, nil
+}
+
+func (f *fakeChannelKernelClient) ListConversations(context.Context, runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+	return f.conversations, nil
+}
+
+func (f *fakeChannelKernelClient) GetConversation(_ context.Context, _ runtime.Scope, id string) (*runtime.Conversation, error) {
+	for _, conversation := range f.conversations {
+		if conversation.ID == id {
+			return conversation, nil
+		}
+	}
+	return nil, runtime.ErrConversationNotFound
+}
+
+func (f *fakeChannelKernelClient) PostChannelMessage(_ context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, key string) (*runtime.ChannelMessageCommitResult, error) {
+	f.postKeys = append(f.postKeys, key)
+	f.postRequests = append(f.postRequests, request)
+	if len(f.postErrors) > 0 {
+		err := f.postErrors[0]
+		f.postErrors = f.postErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	conversation, err := f.GetConversation(context.Background(), request.Scope, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	conversation.Revision++
+	conversation.LastSequence++
+	message := &runtime.ChannelMessage{
+		ID: "posted-message", Scope: request.Scope, ConversationID: conversationID,
+		Sequence: conversation.LastSequence, Sender: request.Sender, Intent: request.Intent,
+		Content: request.Content, Audience: request.Audience, RequiresResponse: request.RequiresResponse,
+		CreatedAt: time.Now(),
+	}
+	f.messages = append([]*runtime.ChannelMessage{message}, f.messages...)
+	return &runtime.ChannelMessageCommitResult{Conversation: conversation, Message: message}, nil
+}
+
+func (f *fakeChannelKernelClient) ListChannelMessages(context.Context, runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
+	return f.messages, nil
+}
+
+func (f *fakeChannelKernelClient) GetChannelMessage(context.Context, runtime.Scope, string, string) (*runtime.ChannelMessage, error) {
+	return nil, runtime.ErrChannelMessageNotFound
+}
+
+func (f *fakeChannelKernelClient) CoordinateParticipation(context.Context, string, kernelapi.CoordinateParticipationRequest, string) (*runtime.ParticipationRoundResult, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeChannelKernelClient) GetParticipationRound(context.Context, runtime.Scope, string, string) (*runtime.ParticipationRoundResult, error) {
+	return nil, runtime.ErrParticipationRoundNotFound
+}
+
+func (f *fakeChannelKernelClient) ListParticipationRounds(context.Context, runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error) {
+	return f.rounds, nil
+}
+
+func (f *fakeChannelKernelClient) AdvanceConversationCursor(_ context.Context, conversationID string, request kernelapi.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error) {
+	f.cursorAdvances = append(f.cursorAdvances, request)
+	f.cursor = &runtime.ConversationCursor{
+		Scope: request.Scope, ConversationID: conversationID, Participant: request.Participant,
+		DeliveredSequence: request.DeliveredSequence, ReadSequence: request.ReadSequence,
+		Revision: request.ExpectedRevision + 1, UpdatedAt: time.Now(),
+	}
+	return f.cursor, false, nil
+}
+
+func (f *fakeChannelKernelClient) GetConversationCursor(context.Context, runtime.Scope, string, runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
+	if f.cursor == nil {
+		return nil, &client.APIError{StatusCode: 404, Message: "conversation cursor not found"}
+	}
+	return f.cursor, nil
+}
+
+func (f *fakeChannelKernelClient) SetConversationPresence(context.Context, string, kernelapi.SetConversationPresenceRequest) (*runtime.ConversationPresence, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeChannelKernelClient) ReleaseConversationPresence(context.Context, string, kernelapi.ReleaseConversationPresenceRequest) error {
+	return errors.New("not implemented by test client")
+}
+
+func (f *fakeChannelKernelClient) ListConversationPresence(context.Context, runtime.Scope, string) ([]*runtime.ConversationPresence, error) {
+	return f.presence, nil
 }
 
 func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDocument, error) {
@@ -241,16 +363,198 @@ func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 	}
 }
 
+func TestTeamChannelsRequireAdvertisedCapabilityAndConcreteClient(t *testing.T) {
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.TeamChannelsCapability())}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.ready || strings.Contains(model.View(), "c Channels") {
+		t.Fatalf("channel controls rendered without a channel client:\n%s", model.View())
+	}
+}
+
+func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testing.T) {
+	conversation := testConversation("release", "release-coordination", 2, 3)
+	question := &runtime.ChannelMessage{
+		ID: "question", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
+		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local"},
+		Intent: runtime.MessageIntentQuestion, Content: "Is the release ready?",
+		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now().Add(-time.Minute),
+	}
+	answer := &runtime.ChannelMessage{
+		ID: "answer", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 2,
+		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
+		Intent: runtime.MessageIntentAnswer, Content: "The canary is healthy.",
+		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
+	}
+	round := &runtime.ParticipationRoundResult{Round: &runtime.ParticipationRound{
+		ID: "round-1", CommittedAt: time.Now(), Arbitration: runtime.ConversationArbitration{
+			RoundID: "round-1", Decisions: []runtime.ParticipationDecision{{
+				ProposalID: "observer", Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "observer"},
+				Disposition: runtime.ParticipationSilent, Score: 0, Reasons: []runtime.ParticipationReason{runtime.ParticipationReasonNoNewInformation},
+			}},
+		},
+	}}
+	fake := &fakeChannelKernelClient{
+		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.TeamChannelsCapability())},
+		conversations:    []*runtime.Conversation{conversation}, messages: []*runtime.ChannelMessage{answer, question},
+		rounds: []*runtime.ParticipationRoundResult{round},
+		presence: []*runtime.ConversationPresence{{
+			Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "sre"},
+			State:       runtime.ConversationPresenceWorking, Summary: "checking rollout", ExpiresAt: time.Now().Add(time.Minute),
+		}},
+	}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	for _, expected := range []string{"c Channels", "release-coordination", "Is the release ready?", "The canary is healthy.", "sre is working", "1 participation round(s)"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("channel view missing %q:\n%s", expected, view)
+		}
+	}
+	if len(fake.cursorAdvances) != 1 || fake.cursorAdvances[0].ReadSequence != 2 {
+		t.Fatalf("cursor advances = %#v", fake.cursorAdvances)
+	}
+	model.channelAuditExpanded = true
+	view = model.View()
+	for _, expected := range []string{"agent:observer", "silent", "no new information"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("channel audit missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestBackgroundChannelRefreshDoesNotInventReadReceipt(t *testing.T) {
+	conversation := testConversation("release", "release-coordination", 1, 2)
+	fake := &fakeChannelKernelClient{
+		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
+			kernelapi.AgentRunsCapability(), kernelapi.TeamChannelsCapability(),
+		)},
+		conversations: []*runtime.Conversation{conversation},
+		messages: []*runtime.ChannelMessage{{
+			ID: "unread", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
+			Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
+			Intent: runtime.MessageIntentUpdate, Content: "Canary is ready.",
+			Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
+		}},
+	}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionRuns || len(fake.cursorAdvances) != 0 {
+		t.Fatalf("background refresh marked channel read: section=%v advances=%#v", model.section, fake.cursorAdvances)
+	}
+	model.section = sectionChannels
+	applyCommand(t, model, model.loadSelectedConversation())
+	if len(fake.cursorAdvances) != 1 || fake.cursorAdvances[0].ReadSequence != 1 {
+		t.Fatalf("visible channel did not advance read state: %#v", fake.cursorAdvances)
+	}
+}
+
+func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
+	conversation := testConversation("research", "market-research", 0, 4)
+	fake := &fakeChannelKernelClient{
+		fakeKernelClient:         &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.TeamChannelsCapability())},
+		conversations:            []*runtime.Conversation{conversation},
+		createConversationErrors: []error{errors.New("temporary disconnect"), nil},
+		postErrors:               []error{errors.New("revision conflict"), nil},
+	}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+
+	model.mode = modeChannelCreate
+	model.focusComposerEditor()
+	model.editor.SetValue("launch-planning")
+	applyCommand(t, model, model.submitConversation())
+	applyCommand(t, model, model.submitConversation())
+	if len(fake.createConversationKeys) != 2 || fake.createConversationKeys[0] == "" || fake.createConversationKeys[0] != fake.createConversationKeys[1] {
+		t.Fatalf("conversation keys = %#v", fake.createConversationKeys)
+	}
+	if fake.createConversationRequests[0].Owner != model.config.Owner {
+		t.Fatalf("conversation owner = %#v", fake.createConversationRequests[0].Owner)
+	}
+
+	model.selectedConversation = conversation.ID
+	model.restoreConversationSelection()
+	model.mode = modeChannelPost
+	model.focusComposerEditor()
+	model.editor.SetValue("Should we publish the cited report?")
+	applyCommand(t, model, model.submitChannelMessage())
+	applyCommand(t, model, model.submitChannelMessage())
+	if len(fake.postKeys) != 2 || fake.postKeys[0] == "" || fake.postKeys[0] != fake.postKeys[1] {
+		t.Fatalf("message keys = %#v", fake.postKeys)
+	}
+	request := fake.postRequests[0]
+	if request.ExpectedRevision != 4 || request.Intent != runtime.MessageIntentQuestion || !request.RequiresResponse || request.Sender.Type != runtime.ConversationParticipantUser {
+		t.Fatalf("post request = %#v", request)
+	}
+}
+
+func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
+	store := runtime.NewMemoryStore(100)
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+
+	config := DefaultConfig()
+	config.Endpoint = httpServer.URL
+	config.Scope = runtime.Scope{Kind: "tenant", ID: "one"}
+	config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "engineering"}
+	config.PollInterval = -1
+	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	model, err := NewModel(context.Background(), httpClient, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.width, model.height = 120, 36
+	applyCommand(t, model, model.loadCapabilities())
+
+	model.mode = modeChannelCreate
+	model.focusComposerEditor()
+	model.editor.SetValue("release-room")
+	applyCommand(t, model, model.submitConversation())
+	if model.section != sectionChannels || model.selectedConversationRecord() == nil {
+		t.Fatalf("created channel was not selected: %#v", model.conversations)
+	}
+
+	model.mode = modeChannelPost
+	model.focusComposerEditor()
+	model.editor.SetValue("Is the canary healthy?")
+	applyCommand(t, model, model.submitChannelMessage())
+	view := model.View()
+	if !strings.Contains(view, "release-room") || !strings.Contains(view, "Is the canary healthy?") {
+		t.Fatalf("HTTP-backed channel not rendered:\n%s", view)
+	}
+	conversation := model.selectedConversationRecord()
+	messages, err := httpClient.ListChannelMessages(context.Background(), runtime.ChannelMessageFilter{
+		Scope: config.Scope, ConversationID: conversation.ID,
+	})
+	if err != nil || len(messages) != 1 || messages[0].Intent != runtime.MessageIntentQuestion || !messages[0].RequiresResponse {
+		t.Fatalf("durable HTTP messages = %#v, err = %v", messages, err)
+	}
+}
+
 func newTestModel(t *testing.T, fake *fakeKernelClient) *Model {
+	return newModelWithClient(t, fake)
+}
+
+func newModelWithClient(t *testing.T, kernelClient client.KernelClient) *Model {
 	t.Helper()
 	config := DefaultConfig()
 	config.PollInterval = -1
-	model, err := NewModel(context.Background(), fake, config)
+	model, err := NewModel(context.Background(), kernelClient, config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	model.width, model.height = 120, 36
 	return model
+}
+
+func testConversation(id, title string, lastSequence, revision int64) *runtime.Conversation {
+	return &runtime.Conversation{
+		ID: id, Scope: runtime.Scope{Kind: "local", ID: "default"},
+		Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
+		Title: title, Status: runtime.ConversationStatusActive, LastSequence: lastSequence,
+		Revision: revision, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
 }
 
 func applyCommand(t *testing.T, model *Model, command tea.Cmd) {

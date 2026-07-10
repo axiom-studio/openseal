@@ -54,14 +54,20 @@ func (m *Model) render() string {
 }
 
 func (m *Model) renderHeader(width int) string {
-	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Work & Evidence")
+	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Work, Channels & Evidence")
 	connection := mutedStyle.Render(fmt.Sprintf("%s · %s/%s", m.config.Endpoint, m.config.Scope.Kind, m.config.Scope.ID))
 	space := max(1, width-lipgloss.Width(title)-lipgloss.Width(connection))
 	return title + strings.Repeat(" ", space) + connection
 }
 
 func (m *Model) renderComposer(width int) string {
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide {
+	if m.mode == modeChannelCreate && !m.supportsChannel(kernelapi.OperationCreate) {
+		return m.renderUnavailableComposer(width, "Create a Team channel", "This server does not advertise channel creation.")
+	}
+	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
+		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
+	}
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -69,26 +75,40 @@ func (m *Model) renderComposer(width int) string {
 	}
 	title := "Start durable work"
 	description := "Describe an outcome. OpenSeal will keep the work safe across restarts."
-	if m.mode == modeGuide {
+	owner := humanOwner(m.config.Owner)
+	switch m.mode {
+	case modeGuide:
 		title = "Guide selected work"
 		description = "Add a concise instruction without replacing the objective."
+	case modeChannelCreate:
+		title = "Create a Team channel"
+		description = "Name a durable place for focused collaboration."
+	case modeChannelPost:
+		title = "Message the Team"
+		description = "Share useful context or ask a question. Messages remain auditable."
+		if conversation := m.selectedConversationRecord(); conversation != nil {
+			owner = "In #" + conversation.Title
+		}
 	}
-	ownerType := string(m.config.Owner.Type)
-	if ownerType != "" {
-		ownerType = strings.ToUpper(ownerType[:1]) + ownerType[1:]
-	}
-	owner := fmt.Sprintf("For %s %s", ownerType, m.config.Owner.ID)
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
-		content += "\n" + lipgloss.NewStyle().Foreground(accentSoft).Render("Ctrl+S submit  ·  Tab view work")
+		content += "\n" + lipgloss.NewStyle().Foreground(accentSoft).Render("Ctrl+S submit  ·  Tab inspect")
 	}
+	return panelStyle.Width(max(width-4, 30)).Render(content)
+}
+
+func (m *Model) renderUnavailableComposer(width int, title, message string) string {
+	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(message) + "\n\n" +
+		"You can still inspect the durable channel history available in this workspace."
 	return panelStyle.Width(max(width-4, 30)).Render(content)
 }
 
 func (m *Model) renderPanel(width int) string {
 	tabs := m.renderPanelTabs()
 	var content string
-	if m.section == sectionArtifacts {
+	if m.section == sectionChannels {
+		content = m.renderChannelsContent(width)
+	} else if m.section == sectionArtifacts {
 		content = m.renderArtifactsContent(width)
 	} else {
 		content = m.renderRunsContent(width)
@@ -97,10 +117,19 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 2)
+	tabs := make([]string, 0, 3)
 	if m.runCapability.Available {
 		label := "w Work"
 		if m.section == sectionRuns {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.channelCapability.Available {
+		label := "c Channels"
+		if m.section == sectionChannels {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -234,6 +263,123 @@ func (m *Model) renderArtifactsContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m *Model) renderChannelsContent(width int) string {
+	title := headerStyle.Render("Team channels")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.conversations) == 0 {
+		lines = append(lines, mutedStyle.Render("No channels yet. Create one for focused Team collaboration."))
+	} else {
+		visible := max(1, min(len(m.conversations), 3))
+		start := max(0, min(m.conversationSelected-visible/2, len(m.conversations)-visible))
+		for index := start; index < min(len(m.conversations), start+visible); index++ {
+			conversation := m.conversations[index]
+			prefix := "  # "
+			style := lipgloss.NewStyle().Foreground(text)
+			if index == m.conversationSelected {
+				prefix = "› # "
+				style = selectedStyle
+			}
+			line := fmt.Sprintf("%s%-24s %d message(s)", prefix, compact(conversation.Title, 24), conversation.LastSequence)
+			lines = append(lines, style.Render(compact(line, max(width-6, 28))))
+		}
+	}
+
+	if conversation := m.selectedConversationRecord(); conversation != nil {
+		if presence := activePresenceSummary(m.channelPresence, width); presence != "" {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(presence))
+		}
+		lines = append(lines, "", mutedStyle.Render("Recent conversation"))
+		if len(m.channelMessages) == 0 {
+			lines = append(lines, mutedStyle.Render("No messages yet. Start with useful context or a clear question."))
+		} else {
+			visibleMessages := max(2, min(len(m.channelMessages), max(m.height-25, 4)))
+			start := min(len(m.channelMessages), visibleMessages) - 1
+			for index := start; index >= 0; index-- {
+				message := m.channelMessages[index]
+				if message == nil {
+					continue
+				}
+				sender := fmt.Sprintf("%s:%s", message.Sender.Type, message.Sender.ID)
+				meta := fmt.Sprintf("%s · %s · %s", compact(sender, 24), humanIntent(message.Intent), relativeTime(message.CreatedAt))
+				if message.ThreadRootID != "" {
+					meta += " · thread"
+				}
+				lines = append(lines, mutedStyle.Render(compact(meta, max(width-8, 28))))
+				lines = append(lines, "  "+compact(message.Content, max(width-10, 24)))
+			}
+		}
+
+		if m.supportsChannel(kernelapi.OperationAudit) && len(m.channelRounds) > 0 {
+			label := fmt.Sprintf("%d participation round(s)", len(m.channelRounds))
+			if m.channelAuditExpanded {
+				label += " · e collapse audit"
+			} else {
+				label += " · e inspect audit"
+			}
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(label))
+			if m.channelAuditExpanded {
+				lines = append(lines, renderParticipationAudit(m.channelRounds, width)...)
+			}
+		}
+	}
+	if m.focus == focusPanel {
+		actions := []string{"↑/↓ channel", "r refresh"}
+		if m.supportsChannel(kernelapi.OperationCreate) {
+			actions = append(actions, "n new")
+		}
+		if m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
+			actions = append(actions, "m message", "Tab compose")
+		}
+		lines = append(lines, "", mutedStyle.Render(strings.Join(actions, " · ")))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func activePresenceSummary(presence []*runtime.ConversationPresence, width int) string {
+	active := make([]string, 0, len(presence))
+	now := time.Now()
+	for _, item := range presence {
+		if item == nil || !item.ExpiresAt.After(now) {
+			continue
+		}
+		label := fmt.Sprintf("%s:%s is %s", item.Participant.Type, item.Participant.ID, item.State)
+		if item.Summary != "" {
+			label += " — " + item.Summary
+		}
+		active = append(active, label)
+	}
+	if len(active) == 0 {
+		return ""
+	}
+	return compact(strings.Join(active, " · "), max(width-6, 28))
+}
+
+func renderParticipationAudit(rounds []*runtime.ParticipationRoundResult, width int) []string {
+	for _, result := range rounds {
+		if result == nil || result.Round == nil {
+			continue
+		}
+		round := result.Round
+		lines := []string{mutedStyle.Render(fmt.Sprintf("Round %s · %s", compact(round.ID, 12), relativeTime(round.CommittedAt)))}
+		for _, decision := range round.Arbitration.Decisions {
+			reasons := make([]string, len(decision.Reasons))
+			for index, reason := range decision.Reasons {
+				reasons[index] = strings.ReplaceAll(string(reason), "_", " ")
+			}
+			line := fmt.Sprintf("  %s:%s · %s · %d", decision.Participant.Type, decision.Participant.ID, decision.Disposition, decision.Score)
+			if len(reasons) > 0 {
+				line += " · " + strings.Join(reasons, ", ")
+			}
+			lines = append(lines, mutedStyle.Render(compact(line, max(width-8, 28))))
+		}
+		return lines
+	}
+	return nil
+}
+
 func (m *Model) availableActions(run *runtime.AgentRun) string {
 	actions := make([]string, 0, 3)
 	if run.Status == runtime.AgentRunStatusPaused && m.commandAllowed(run, runtime.AgentRunCommandResume) {
@@ -288,6 +434,18 @@ func humanStatus(status runtime.AgentRunStatus) string {
 	default:
 		return strings.ReplaceAll(string(status), "_", " ")
 	}
+}
+
+func humanIntent(intent runtime.ConversationMessageIntent) string {
+	return strings.ReplaceAll(string(intent), "_", " ")
+}
+
+func humanOwner(owner runtime.ObjectiveOwner) string {
+	ownerType := string(owner.Type)
+	if ownerType != "" {
+		ownerType = strings.ToUpper(ownerType[:1]) + ownerType[1:]
+	}
+	return fmt.Sprintf("For %s %s", ownerType, owner.ID)
 }
 
 func compact(value string, limit int) string {
