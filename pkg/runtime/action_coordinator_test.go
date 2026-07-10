@@ -115,6 +115,36 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	}
 }
 
+func TestActionCoordinatorPersistsPolicyDenialAndRequeues(t *testing.T) {
+	store := NewMemoryStore(20)
+	catalog, scope := governedActionCatalog(t)
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	run := claimedActionRun(t, store, scope, now, "worker")
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionDeny, Reason: "production freeze"}, nil
+	}))
+	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	coordinator.newID = func() string { return "denied" }
+	result, err := coordinator.Propose(context.Background(), ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
+		Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "denied-deploy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Call.Status != ActionCallStatusDenied || result.Call.Error != "production freeze" || result.Approval != nil || result.Event.EventType != "action.denied" {
+		t.Fatalf("denial mismatch: %#v", result)
+	}
+	persisted, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || persisted.Status != AgentRunStatusQueued || persisted.LeaseOwner != "" {
+		t.Fatalf("denied run did not requeue: %#v, %v", persisted, err)
+	}
+	call, err := store.ClaimNextAction(context.Background(), ActionClaim{Scope: scope, WorkerID: "action-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute})
+	if err != nil || call != nil {
+		t.Fatalf("denied action became executable: %#v, %v", call, err)
+	}
+}
+
 func (d ActionDisposition) String() string { return string(d) }
 
 func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
