@@ -69,6 +69,9 @@ func migratePortfolio(db *sql.DB) error {
 	if err := migrateAgentTurns(db); err != nil {
 		return err
 	}
+	if err := migrateCollaboration(db); err != nil {
+		return err
+	}
 	return migrateActions(db)
 }
 
