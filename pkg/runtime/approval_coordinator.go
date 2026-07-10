@@ -137,7 +137,7 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 	summary := fmt.Sprintf("Approval %s for %s.%s", status, call.SkillID, call.Action)
 	event := &ActivityEvent{
 		ID: c.newID(), Scope: req.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
-		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: call.TurnID,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: call.TurnID, TeamID: teamIDForRun(run),
 		ParentRunID: run.ParentRunID, Actor: ActivityActor{Type: req.Principal.Type, ID: req.Principal.ID},
 		Summary: summary, Visibility: ActivityVisibilityScope, CorrelationID: req.CorrelationID,
 		CausationID: approval.ID, CreatedAt: now,

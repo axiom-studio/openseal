@@ -189,6 +189,13 @@ func (w *ActionWorker) holdActionLease(parent context.Context, call *ActionCall,
 
 func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string) (*ActionExecutionResult, error) {
 	now := w.now().UTC()
+	sourceRun, err := w.store.GetAgentRun(ctx, call.Scope, call.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if sourceRun == nil {
+		return nil, ErrRunNotFound
+	}
 	updatedCall := cloneActionCall(call)
 	updatedCall.Revision++
 	updatedCall.UpdatedAt = now
@@ -221,18 +228,11 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 			eventType = "action.failed"
 			summary = fmt.Sprintf("Failed %s.%s after %d attempts", call.SkillID, call.Action, call.Attempt)
 		}
-		run, err := w.store.GetAgentRun(ctx, call.Scope, call.RunID)
-		if err != nil {
-			return nil, err
-		}
-		if run == nil {
-			return nil, ErrRunNotFound
-		}
-		if run.Status != AgentRunStatusWaitingForDependency || run.WakeCondition == nil || run.WakeCondition.Type != "action" || run.WakeCondition.Reference != call.ID {
+		if sourceRun.Status != AgentRunStatusWaitingForDependency || sourceRun.WakeCondition == nil || sourceRun.WakeCondition.Type != "action" || sourceRun.WakeCondition.Reference != call.ID {
 			return nil, fmt.Errorf("%w: run is not waiting on action %s", ErrInvalidRunTransition, call.ID)
 		}
-		expectedRunRevision = run.Revision
-		updatedRun = cloneAgentRun(run)
+		expectedRunRevision = sourceRun.Revision
+		updatedRun = cloneAgentRun(sourceRun)
 		updatedRun.Status = AgentRunStatusQueued
 		updatedRun.WakeCondition = nil
 		updatedRun.AvailableAt = now
@@ -249,7 +249,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 	}
 	event := &ActivityEvent{
 		ID: w.newID(), Scope: call.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
-		AgentID: call.DeploymentID, RunID: call.RunID, TurnID: call.TurnID, Actor: ActivityActor{Type: "worker", ID: workerID},
+		AgentID: call.DeploymentID, ObjectiveID: sourceRun.ObjectiveID, TeamID: teamIDForRun(sourceRun), RunID: call.RunID, TurnID: call.TurnID, Actor: ActivityActor{Type: "worker", ID: workerID},
 		Summary: summary, Visibility: ActivityVisibilityScope, CausationID: call.ID, CreatedAt: now,
 		Payload: map[string]interface{}{"actionCallId": call.ID, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
 	}
