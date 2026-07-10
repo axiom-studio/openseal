@@ -26,13 +26,29 @@ func ParseSkillReference(value string) (SkillReference, error) {
 	}
 	value = strings.TrimPrefix(value, "@")
 	parts := strings.Split(value, "/")
-	if len(parts) == 1 && parts[0] != "" {
+	if len(parts) == 1 && validReferencePart(parts[0]) {
 		return SkillReference{Slug: parts[0]}, nil
 	}
-	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+	if len(parts) == 2 && validReferencePart(parts[0]) && validReferencePart(parts[1]) {
 		return SkillReference{Owner: parts[0], Slug: parts[1]}, nil
 	}
 	return SkillReference{}, fmt.Errorf("invalid skill reference %q", value)
+}
+
+func validReferencePart(value string) bool {
+	if value == "" || value == "." || value == ".." {
+		return false
+	}
+	for i, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		if i > 0 && (r == '-' || r == '_') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (r SkillReference) String() string {
