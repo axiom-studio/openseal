@@ -1,14 +1,16 @@
 package client
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"io"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/internal/server"
+	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
@@ -99,15 +101,25 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
 	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	contentStore, err := artifactstore.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.SetArtifactContentStore(contentStore)
+	api.SetArtifactContentResolver(clientTestResolver{})
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
 	scope := runtime.Scope{Kind: "local", ID: "artifacts"}
-	digest := sha256.Sum256([]byte("report"))
+	content := []byte("report")
+	stored, err := client.UploadArtifactContent(context.Background(), scope, "application/pdf", "", int64(len(content)), bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
 	created, err := client.RegisterArtifact(context.Background(), runtime.RegisterArtifactRequest{Artifact: &runtime.Artifact{
 		ID: "report", Version: 1, Scope: scope, Name: "report.pdf", Type: "report",
-		MediaType: "application/pdf", ContentRef: "object-store:report",
-		Digest: "sha256:" + hex.EncodeToString(digest[:]), Classification: runtime.ArtifactClassificationConfidential,
+		MediaType: "application/pdf", ContentRef: stored.ContentRef, SizeBytes: stored.SizeBytes,
+		Digest: stored.Digest, Classification: runtime.ArtifactClassificationConfidential,
 		Provenance: runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: "analyst"}, RunID: "run-1"},
 	}})
 	if err != nil {
@@ -123,4 +135,25 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ID != created.Artifact.ID {
 		t.Fatalf("listed = %#v, %v", listed, err)
 	}
+	download, err := client.DownloadArtifactContent(context.Background(), scope, created.Artifact.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedContent, err := io.ReadAll(download.Body)
+	_ = download.Body.Close()
+	if err != nil || !bytes.Equal(loadedContent, content) || download.Digest != stored.Digest {
+		t.Fatalf("download = %q / %#v / %v", loadedContent, download, err)
+	}
+	resolution, err := client.ResolveArtifactContent(context.Background(), scope, created.Artifact.ID, 1, kernelapi.ResolveArtifactContentRequest{
+		Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Purpose: "preview", TTLSeconds: 30,
+	})
+	if err != nil || resolution.URL != "https://delivery.example/ephemeral" {
+		t.Fatalf("resolution = %#v, %v", resolution, err)
+	}
+}
+
+type clientTestResolver struct{}
+
+func (clientTestResolver) Resolve(_ context.Context, request runtime.ArtifactContentResolutionRequest) (runtime.ArtifactContentResolution, error) {
+	return runtime.ArtifactContentResolution{URL: "https://delivery.example/ephemeral", ExpiresAt: time.Now().Add(request.TTL)}, nil
 }
