@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/webui"
 )
 
@@ -33,15 +34,7 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
-	s.respondJSON(w, http.StatusOK, map[string]interface{}{
-		"version": "1",
-		"capabilities": []map[string]interface{}{
-			{
-				"id": "agent-runs", "version": "1", "available": true,
-				"operations": []string{"create", "get", "list", "pause", "resume", "cancel", "intervene"},
-			},
-		},
-	})
+	s.respondJSON(w, http.StatusOK, kernelapi.Capabilities())
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
