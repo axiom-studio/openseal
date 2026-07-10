@@ -138,6 +138,9 @@ type (
 	AgentRequestDecision             = runtime.AgentRequestDecision
 	AgentRequestFilter               = runtime.AgentRequestFilter
 	CreateAgentRequestRequest        = runtime.CreateAgentRequestRequest
+	AgentRequestGroupSpec            = runtime.AgentRequestGroupSpec
+	CreateAgentRequestGroupRequest   = runtime.CreateAgentRequestGroupRequest
+	AgentRequestGroupResult          = runtime.AgentRequestGroupResult
 	RespondAgentRequestRequest       = runtime.RespondAgentRequestRequest
 	CompleteAgentRequestRequest      = runtime.CompleteAgentRequestRequest
 	AgentRequestResult               = runtime.AgentRequestResult
@@ -1056,6 +1059,13 @@ func (e *Engine) GetRunDependencyGroup(ctx context.Context, scope runtime.Scope,
 	return e.dependencies.GetRunDependencyGroup(ctx, scope, groupID)
 }
 
+func (e *Engine) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope runtime.Scope, key string) (*runtime.RunDependencyGroup, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	return e.dependencies.FindRunDependencyGroupByIdempotencyKey(ctx, scope, key)
+}
+
 func (e *Engine) ListRunDependencies(ctx context.Context, scope runtime.Scope, groupID string) ([]*runtime.RunDependency, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
@@ -1068,6 +1078,13 @@ func (e *Engine) CreateAgentRequest(ctx context.Context, request runtime.CreateA
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
 	return e.collaboration.CreateAgentRequest(ctx, request)
+}
+
+func (e *Engine) CreateAgentRequestGroup(ctx context.Context, request runtime.CreateAgentRequestGroupRequest) (*runtime.AgentRequestGroupResult, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.CreateAgentRequestGroup(ctx, request)
 }
 
 func (e *Engine) RespondAgentRequest(ctx context.Context, request runtime.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
