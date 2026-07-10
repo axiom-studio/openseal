@@ -102,6 +102,7 @@ type Requirements struct {
 	Environment      []string `json:"environment,omitempty"`
 	Configuration    []string `json:"configuration,omitempty"`
 	Compatibility    string   `json:"compatibility,omitempty"`
+	AlwaysAvailable  bool     `json:"alwaysAvailable,omitempty"`
 }
 
 type Installer struct {

@@ -79,6 +79,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 			OperatingSystems: append([]string(nil), parsed.Metadata.OS...), Executables: append([]string(nil), parsed.Metadata.RequiresBins...),
 			AnyExecutables: append([]string(nil), parsed.Metadata.RequiresAnyBin...), Environment: append([]string(nil), parsed.Metadata.RequiresEnv...),
 			Configuration: append([]string(nil), parsed.Metadata.RequiresConfig...), Compatibility: parsed.Compatibility,
+			AlwaysAvailable: parsed.Metadata.Always,
 		},
 		Installers: compileInstallers(parsed.Metadata.Install), Resources: compileResources(bundle.Files),
 		Source: &capability.SourceProvenance{
