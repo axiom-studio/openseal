@@ -590,6 +590,10 @@ func cloneConversation(in *Conversation) *Conversation {
 		return nil
 	}
 	out := *in
+	if in.Origin != nil {
+		origin := *in.Origin
+		out.Origin = &origin
+	}
 	if in.ArchivedAt != nil {
 		archived := *in.ArchivedAt
 		out.ArchivedAt = &archived
