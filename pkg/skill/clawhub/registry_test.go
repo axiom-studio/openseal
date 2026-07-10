@@ -69,7 +69,7 @@ func TestRegistryDiscoveryAndVerificationAreStrict(t *testing.T) {
 				http.Error(w, "safe filter missing", http.StatusBadRequest)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": []map[string]interface{}{{"slug": "safe", "displayName": "Safe"}}, "nextCursor": "next"})
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": []map[string]interface{}{{"slug": "safe", "displayName": "Safe", "latestVersion": map[string]interface{}{"version": "1.2.3"}}}, "nextCursor": "next"})
 		case "/skills/bad/verify":
 			json.NewEncoder(w).Encode(map[string]interface{}{"schema": "unknown", "ok": true})
 		default:
@@ -79,7 +79,7 @@ func TestRegistryDiscoveryAndVerificationAreStrict(t *testing.T) {
 	defer server.Close()
 	client := NewClawHubClient(server.URL)
 	page, err := client.SearchSkills(context.Background(), SearchRequest{Query: "safe", NonSuspiciousOnly: true})
-	if err != nil || len(page.Items) != 1 || page.NextCursor != "next" {
+	if err != nil || len(page.Items) != 1 || page.Items[0].Version != "1.2.3" || page.NextCursor != "next" {
 		t.Fatalf("search = %#v, %v", page, err)
 	}
 	if _, err := client.VerifySkill(context.Background(), SkillReference{Slug: "bad"}, "", ""); err == nil {
