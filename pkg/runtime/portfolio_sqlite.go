@@ -72,6 +72,9 @@ func migratePortfolio(db *sql.DB) error {
 	if err := migrateCollaboration(db); err != nil {
 		return err
 	}
+	if err := migrateRunDependencies(db); err != nil {
+		return err
+	}
 	if err := migrateActions(db); err != nil {
 		return err
 	}
