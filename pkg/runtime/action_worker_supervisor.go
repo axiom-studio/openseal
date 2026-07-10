@@ -12,19 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ActionWorkerScopeSource returns the currently active isolation scopes. The
-// source is owned by the embedding control plane; OpenSeal never guesses or
-// falls back to a process-wide scope.
-type ActionWorkerScopeSource interface {
-	ListActionWorkerScopes(context.Context) ([]Scope, error)
-}
-
-type ActionWorkerScopeSourceFunc func(context.Context) ([]Scope, error)
-
-func (f ActionWorkerScopeSourceFunc) ListActionWorkerScopes(ctx context.Context) ([]Scope, error) {
-	return f(ctx)
-}
-
 // DynamicActionWorkerConfig controls a set of scope-bound worker pools. Each
 // active scope receives an independent pool and lease namespace.
 type DynamicActionWorkerConfig struct {
@@ -65,7 +52,7 @@ type ActionWorkerSupervisor struct {
 	catalog     ActionExecutionCatalog
 	credentials CredentialResolver
 	dispatcher  ActionDispatcher
-	source      ActionWorkerScopeSource
+	source      WorkerScopeSource
 	config      DynamicActionWorkerConfig
 	logger      *zap.SugaredLogger
 
@@ -80,7 +67,7 @@ func NewActionWorkerSupervisor(
 	catalog ActionExecutionCatalog,
 	credentials CredentialResolver,
 	dispatcher ActionDispatcher,
-	source ActionWorkerScopeSource,
+	source WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
 ) (*ActionWorkerSupervisor, error) {
@@ -167,7 +154,7 @@ func (s *ActionWorkerSupervisor) run(ctx context.Context) {
 }
 
 func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
-	scopes, err := s.source.ListActionWorkerScopes(ctx)
+	scopes, err := s.source.ListWorkerScopes(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Warnw("action worker scope reconciliation failed", "error", err)
@@ -180,7 +167,7 @@ func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
 			s.logger.Warnw("ignoring invalid action worker scope", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 			continue
 		}
-		desired[actionWorkerScopeKey(scope)] = scope
+		desired[workerScopeKey(scope)] = scope
 	}
 
 	keys := make([]string, 0, len(desired))
@@ -220,8 +207,4 @@ func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
 	for _, pool := range removed {
 		pool.Stop()
 	}
-}
-
-func actionWorkerScopeKey(scope Scope) string {
-	return scope.Kind + "\x00" + scope.ID
 }
