@@ -29,11 +29,13 @@ func (s ConversationArchiveSource) Validate() error {
 }
 
 func (s ConversationArchiveSource) reference(recordID string) ConversationReference {
+	parts := []string{strings.TrimSpace(s.System), strings.TrimSpace(s.ResourceType), strings.TrimSpace(s.ResourceID)}
+	if strings.TrimSpace(recordID) != "" {
+		parts = append(parts, strings.TrimSpace(recordID))
+	}
 	return ConversationReference{
 		Kind: ConversationReferenceExternalSource,
-		ID: strings.Join([]string{
-			strings.TrimSpace(s.System), strings.TrimSpace(s.ResourceType), strings.TrimSpace(s.ResourceID), strings.TrimSpace(recordID),
-		}, ":"),
+		ID:   strings.Join(parts, ":"),
 	}
 }
 
@@ -201,19 +203,26 @@ func (s *ConversationService) importArchiveConversation(
 	if existing, err := s.store.FindConversationByIdempotencyKey(ctx, req.Scope, key); err != nil {
 		return nil, false, err
 	} else if existing != nil {
-		if existing.Owner != req.Owner || existing.Title != title || !existing.CreatedAt.Equal(createdAt) {
+		if existing.Owner != req.Owner || existing.Title != title || !existing.CreatedAt.Equal(createdAt) ||
+			!reflect.DeepEqual(existing.Origin, archiveConversationOrigin(req.Source)) {
 			return nil, false, ErrMessageConflict
 		}
 		return existing, true, nil
 	}
 	conversation := &Conversation{
 		ID: stableConversationID(req.Scope, key, "archive-conversation"), Scope: req.Scope, Owner: req.Owner,
-		Title: title, Status: ConversationStatusActive, Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
+		Title: title, Origin: archiveConversationOrigin(req.Source), Status: ConversationStatusActive,
+		Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
 	return s.store.CreateConversation(ctx, conversation, key)
+}
+
+func archiveConversationOrigin(source ConversationArchiveSource) *ConversationReference {
+	reference := source.reference("")
+	return &reference
 }
 
 func sameArchivedChannelMessage(existing, expected *ChannelMessage) bool {

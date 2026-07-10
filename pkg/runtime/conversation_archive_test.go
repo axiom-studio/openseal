@@ -52,7 +52,8 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			partial.Messages = partial.Messages[:1]
 			first, err := service.ImportArchive(ctx, partial)
 			if err != nil || first.ImportedMessages != 1 || first.ReplayedMessages != 0 || first.Replayed ||
-				!first.Conversation.CreatedAt.Equal(start) {
+				!first.Conversation.CreatedAt.Equal(start) || first.Conversation.Origin == nil ||
+				first.Conversation.Origin.ID != "cortex:team-chat:conversation-42" {
 				t.Fatalf("partial import = %#v, %v", first, err)
 			}
 			resumed, err := service.ImportArchive(ctx, request)

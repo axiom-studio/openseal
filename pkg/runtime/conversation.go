@@ -51,16 +51,17 @@ func (p ConversationParticipant) Validate() error {
 }
 
 type Conversation struct {
-	ID           string             `json:"id"`
-	Scope        Scope              `json:"scope"`
-	Owner        ObjectiveOwner     `json:"owner"`
-	Title        string             `json:"title"`
-	Status       ConversationStatus `json:"status"`
-	LastSequence int64              `json:"lastSequence"`
-	Revision     int64              `json:"revision"`
-	CreatedAt    time.Time          `json:"createdAt"`
-	UpdatedAt    time.Time          `json:"updatedAt"`
-	ArchivedAt   *time.Time         `json:"archivedAt,omitempty"`
+	ID           string                 `json:"id"`
+	Scope        Scope                  `json:"scope"`
+	Owner        ObjectiveOwner         `json:"owner"`
+	Title        string                 `json:"title"`
+	Origin       *ConversationReference `json:"origin,omitempty"`
+	Status       ConversationStatus     `json:"status"`
+	LastSequence int64                  `json:"lastSequence"`
+	Revision     int64                  `json:"revision"`
+	CreatedAt    time.Time              `json:"createdAt"`
+	UpdatedAt    time.Time              `json:"updatedAt"`
+	ArchivedAt   *time.Time             `json:"archivedAt,omitempty"`
 }
 
 func (c *Conversation) Validate() error {
@@ -75,6 +76,14 @@ func (c *Conversation) Validate() error {
 	}
 	if !validOpaqueIdentifier(c.ID, 128) || strings.TrimSpace(c.Title) == "" || len(c.Title) > 240 {
 		return fmt.Errorf("%w: portable id and title of at most 240 characters are required", ErrInvalidConversation)
+	}
+	if c.Origin != nil {
+		if c.Origin.Kind != ConversationReferenceExternalSource {
+			return fmt.Errorf("%w: conversation origin must be an external source reference", ErrInvalidConversation)
+		}
+		if err := c.Origin.Validate(); err != nil {
+			return err
+		}
 	}
 	if c.Revision <= 0 || c.LastSequence < 0 || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: positive revision, sequence, and timestamps are required", ErrInvalidConversation)
