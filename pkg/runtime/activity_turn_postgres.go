@@ -1,0 +1,359 @@
+package runtime
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+)
+
+func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS `+s.table("run_activity")+` (
+			scope_kind TEXT NOT NULL,
+			scope_id TEXT NOT NULL,
+			run_id TEXT NOT NULL,
+			sequence BIGINT NOT NULL,
+			id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			payload JSONB NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, run_id, sequence),
+			UNIQUE (scope_kind, scope_id, id)
+		);
+		CREATE TABLE IF NOT EXISTS `+s.table("agent_turns")+` (
+			id TEXT NOT NULL,
+			scope_kind TEXT NOT NULL,
+			scope_id TEXT NOT NULL,
+			run_id TEXT NOT NULL,
+			sequence BIGINT NOT NULL,
+			status TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_expires_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL,
+			payload JSONB NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, id),
+			UNIQUE (scope_kind, scope_id, run_id, sequence),
+			CHECK (revision > 0)
+		)`); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS run_activity_stream_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, run_id, sequence)`,
+		`CREATE INDEX IF NOT EXISTS agent_turns_run_idx ON ` + s.table("agent_turns") + ` (scope_kind, scope_id, run_id, sequence)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS agent_turns_one_active_idx ON ` + s.table("agent_turns") + ` (scope_kind, scope_id, run_id) WHERE status = 'running'`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (3, 'activity streams and agent turns') ON CONFLICT (version) DO NOTHING`)
+	return err
+}
+
+func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
+	if err := run.Validate(); err != nil {
+		return nil, err
+	}
+	if err := event.Validate(); err != nil {
+		return nil, err
+	}
+	if run.Scope != event.Scope || run.ID != event.RunID {
+		return nil, ErrInvalidScope
+	}
+	if run.Revision != expectedRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	runPayload, err := json.Marshal(run)
+	if err != nil {
+		return nil, err
+	}
+	return s.withActivity(ctx, event, func(tx *sql.Tx) error {
+		query := `UPDATE ` + s.table("agent_runs") + ` SET status = $1, priority = $2, assigned_agent_id = $3, revision = $4,
+			deadline = $5, available_at = $6, queue_entered_at = $7, lease_owner = $8, lease_expires_at = $9,
+			last_claimed_at = $10, attempt = $11, payload = $12::jsonb
+			WHERE scope_kind = $13 AND scope_id = $14 AND id = $15 AND revision = $16`
+		args := []interface{}{run.Status, run.Priority, run.AssignedAgentID, run.Revision, run.Deadline, run.AvailableAt,
+			run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, string(runPayload),
+			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision}
+		if lease != nil {
+			query += ` AND lease_owner = $17 AND lease_expires_at > $18`
+			args = append(args, lease.WorkerID, lease.Now)
+		}
+		result, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			if lease != nil {
+				return ErrLeaseLost
+			}
+			return ErrRevisionConflict
+		}
+		return nil
+	})
+}
+
+func (s *PostgresStore) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := event.Validate(); err != nil {
+		return nil, err
+	}
+	return s.withActivity(ctx, event, func(*sql.Tx) error { return nil })
+}
+
+func (s *PostgresStore) withActivity(ctx context.Context, event *ActivityEvent, beforeInsert func(*sql.Tx) error) (*ActivityEvent, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var exists int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := beforeInsert(tx); err != nil {
+		return nil, err
+	}
+	persisted := cloneActivityEvent(event)
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM `+s.table("run_activity")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&persisted.Sequence); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(persisted)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("run_activity")+`
+		(scope_kind, scope_id, run_id, sequence, id, event_type, created_at, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`, persisted.Scope.Kind, persisted.Scope.ID,
+		persisted.RunID, persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return cloneActivityEvent(persisted), nil
+}
+
+func (s *PostgresStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("run_activity")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4
+		ORDER BY sequence ASC LIMIT $5`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*ActivityEvent, 0, limit)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var event ActivityEvent
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			return nil, err
+		}
+		result = append(result, &event)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*AgentTurn, error) {
+	if err := turn.Validate(); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var exists int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_turns")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND status = $4 LIMIT 1`,
+		turn.Scope.Kind, turn.Scope.ID, turn.RunID, AgentTurnStatusRunning).Scan(&exists)
+	if err == nil {
+		return nil, ErrActiveTurnExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	persisted := cloneAgentTurn(turn)
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM `+s.table("agent_turns")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3`, turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&persisted.Sequence); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(persisted)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_turns")+`
+		(id, scope_kind, scope_id, run_id, sequence, status, revision, lease_owner, lease_expires_at, created_at, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`, persisted.ID, persisted.Scope.Kind,
+		persisted.Scope.ID, persisted.RunID, persisted.Sequence, persisted.Status, persisted.Revision, persisted.LeaseOwner,
+		persisted.LeaseExpiresAt, persisted.CreatedAt, string(payload)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return cloneAgentTurn(persisted), nil
+}
+
+func (s *PostgresStore) GetAgentTurn(ctx context.Context, scope Scope, turnID string) (*AgentTurn, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	var payload string
+	err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_turns")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, turnID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeAgentTurnRecord(payload)
+}
+
+func (s *PostgresStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilter) ([]*AgentTurn, error) {
+	if err := filter.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_turns")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4
+		ORDER BY sequence ASC LIMIT $5`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*AgentTurn, 0, limit)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		turn, err := decodeAgentTurnRecord(payload)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, turn)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
+	if err := turn.Validate(); err != nil {
+		return err
+	}
+	if turn.Revision != expectedRevision+1 {
+		return ErrRevisionConflict
+	}
+	payload, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("agent_turns")+`
+		SET status = $1, revision = $2, lease_owner = $3, lease_expires_at = $4, payload = $5::jsonb
+		WHERE scope_kind = $6 AND scope_id = $7 AND id = $8 AND run_id = $9 AND sequence = $10 AND revision = $11 AND lease_owner = $12`,
+		turn.Status, turn.Revision, turn.LeaseOwner, turn.LeaseExpiresAt, string(payload), turn.Scope.Kind, turn.Scope.ID,
+		turn.ID, turn.RunID, turn.Sequence, expectedRevision, workerID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrRevisionConflict
+	}
+	return nil
+}
+
+func (s *PostgresStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var payload, status, leaseOwner string
+	var leaseExpires sql.NullTime
+	err = tx.QueryRowContext(ctx, `SELECT payload, status, lease_owner, lease_expires_at FROM `+s.table("agent_turns")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, scope.Kind, scope.ID, turnID).
+		Scan(&payload, &status, &leaseOwner, &leaseExpires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTurnNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if AgentTurnStatus(status) != AgentTurnStatusRunning || (leaseOwner != workerID && leaseExpires.Valid && leaseExpires.Time.After(now)) {
+		return nil, ErrTurnLeaseHeld
+	}
+	turn, err := decodeAgentTurnRecord(payload)
+	if err != nil {
+		return nil, err
+	}
+	expires := now.Add(leaseDuration)
+	turn.LeaseOwner = workerID
+	turn.LeaseExpiresAt = &expires
+	turn.UpdatedAt = now
+	previousRevision := turn.Revision
+	turn.Revision++
+	updatedPayload, err := json.Marshal(turn)
+	if err != nil {
+		return nil, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("agent_turns")+`
+		SET revision = $1, lease_owner = $2, lease_expires_at = $3, payload = $4::jsonb
+		WHERE scope_kind = $5 AND scope_id = $6 AND id = $7 AND revision = $8`, turn.Revision, workerID, expires,
+		string(updatedPayload), scope.Kind, scope.ID, turnID, previousRevision)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return turn, nil
+}
