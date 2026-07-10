@@ -61,7 +61,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if len(key) > 256 {
-		return nil, errors.New("run idempotency key cannot exceed 256 characters")
+		return nil, fmt.Errorf("%w: idempotency key cannot exceed 256 characters", ErrInvalidAgentRun)
 	}
 	fingerprint, err := runCreationFingerprint(req)
 	if err != nil {
@@ -130,10 +130,10 @@ func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCom
 		return nil, err
 	}
 	if strings.TrimSpace(req.RunID) == "" {
-		return nil, errors.New("run id is required")
+		return nil, fmt.Errorf("%w: run id is required", ErrInvalidRunCommand)
 	}
 	if req.ExpectedRevision <= 0 {
-		return nil, errors.New("expected run revision must be positive")
+		return nil, fmt.Errorf("%w: expected revision must be positive", ErrInvalidRunCommand)
 	}
 	current, err := s.store.GetAgentRun(ctx, req.Scope, req.RunID)
 	if err != nil {
@@ -199,7 +199,7 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 	case AgentRunCommandIntervene:
 		instruction := strings.TrimSpace(req.Instruction)
 		if instruction == "" {
-			return transition, errors.New("intervention instruction is required")
+			return transition, fmt.Errorf("%w: intervention instruction is required", ErrInvalidRunCommand)
 		}
 		if isTerminalAgentRunStatus(current.Status) {
 			return transition, fmt.Errorf("%w: cannot intervene on %s run", ErrInvalidRunTransition, current.Status)
@@ -213,7 +213,7 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 			transition.Summary = "Operator steered the run"
 		}
 	default:
-		return transition, errors.New("run command must be pause, resume, cancel, or intervene")
+		return transition, fmt.Errorf("%w: kind must be pause, resume, cancel, or intervene", ErrInvalidRunCommand)
 	}
 	return transition, nil
 }
