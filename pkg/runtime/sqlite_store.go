@@ -65,7 +65,10 @@ func migrate(db *sql.DB) error {
 	`); err != nil {
 		return err
 	}
-	return migratePortfolio(db)
+	if err := migratePortfolio(db); err != nil {
+		return err
+	}
+	return migrateAgentRegistry(db)
 }
 
 func addMissingRunColumns(db *sql.DB) error {
