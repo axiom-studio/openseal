@@ -100,6 +100,16 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		EvidenceTarget:    strings.TrimSpace(r.URL.Query().Get("evidenceTarget")),
 		LatestOnly:        latestOnly, Limit: limit, Offset: offset,
 	}
+	ownerType := strings.TrimSpace(r.URL.Query().Get("ownerType"))
+	ownerID := strings.TrimSpace(r.URL.Query().Get("ownerId"))
+	if ownerType != "" || ownerID != "" {
+		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
+		if err := owner.Validate(); err != nil {
+			s.respondError(w, http.StatusBadRequest, "ownerType and ownerId must identify an Agent or Team")
+			return
+		}
+		filter.Owner = &owner
+	}
 	for _, value := range queryValues(r, "classification") {
 		classification := runtime.ArtifactClassification(value)
 		switch classification {

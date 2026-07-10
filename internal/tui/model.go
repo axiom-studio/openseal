@@ -420,7 +420,7 @@ func (m *Model) loadArtifacts() tea.Cmd {
 	m.loading = true
 	return func() tea.Msg {
 		artifacts, err := m.client.ListArtifacts(m.ctx, runtime.ArtifactFilter{
-			Scope: m.config.Scope, LatestOnly: true, Limit: 100,
+			Scope: m.config.Scope, Owner: &m.config.Owner, LatestOnly: true, Limit: 100,
 		})
 		return artifactsLoaded{artifacts: artifacts, err: err}
 	}

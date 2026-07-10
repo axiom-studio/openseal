@@ -27,7 +27,7 @@ func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testin
 			"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000",
 			"sizeBytes":1200,"classification":"confidential",
 			"metadata":{"pages":4},
-			"provenance":{"producer":{"type":"agent","id":"analyst"},"runId":"run-1"},
+			"provenance":{"producer":{"type":"agent","id":"analyst"},"owner":{"type":"team","id":"research"},"runId":"run-1"},
 			"evidence":[{"relation":"cites","targetKind":"external_source","targetRef":"https://forum.example/thread/1"}]
 		},
 		"expectedLatestVersion":0
@@ -49,9 +49,14 @@ func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testin
 		t.Fatalf("replay status = %d, body = %s", replayed.Code, replayed.Body.String())
 	}
 	listed := performAgentRunRequest(t, server.Handler(), http.MethodGet,
-		"/api/v1/artifacts?scopeKind=tenant&scopeId=one&type=report&classification=confidential&evidenceTarget=https%3A%2F%2Fforum.example%2Fthread%2F1", "", "")
+		"/api/v1/artifacts?scopeKind=tenant&scopeId=one&ownerType=team&ownerId=research&type=report&classification=confidential&evidenceTarget=https%3A%2F%2Fforum.example%2Fthread%2F1", "", "")
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"id":"report"`) {
 		t.Fatalf("list status = %d, body = %s", listed.Code, listed.Body.String())
+	}
+	otherOwner := performAgentRunRequest(t, server.Handler(), http.MethodGet,
+		"/api/v1/artifacts?scopeKind=tenant&scopeId=one&ownerType=agent&ownerId=analyst", "", "")
+	if otherOwner.Code != http.StatusOK || otherOwner.Body.String() != "[]\n" {
+		t.Fatalf("other owner list status = %d, body = %s", otherOwner.Code, otherOwner.Body.String())
 	}
 	loaded := performAgentRunRequest(t, server.Handler(), http.MethodGet,
 		"/api/v1/artifacts/report?scopeKind=tenant&scopeId=one&version=1", "", "")

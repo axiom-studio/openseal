@@ -111,6 +111,7 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
 	scope := runtime.Scope{Kind: "local", ID: "artifacts"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}
 	content := []byte("report")
 	stored, err := client.UploadArtifactContent(context.Background(), scope, "application/pdf", "", int64(len(content)), bytes.NewReader(content))
 	if err != nil {
@@ -120,7 +121,7 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 		ID: "report", Version: 1, Scope: scope, Name: "report.pdf", Type: "report",
 		MediaType: "application/pdf", ContentRef: stored.ContentRef, SizeBytes: stored.SizeBytes,
 		Digest: stored.Digest, Classification: runtime.ArtifactClassificationConfidential,
-		Provenance: runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: "analyst"}, RunID: "run-1"},
+		Provenance: runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: "analyst"}, Owner: &owner, RunID: "run-1"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +131,7 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 		t.Fatalf("loaded = %#v, %v", loaded, err)
 	}
 	listed, err := client.ListArtifacts(context.Background(), runtime.ArtifactFilter{
-		Scope: scope, Types: []string{"report"}, ProducerRunID: "run-1", LatestOnly: true,
+		Scope: scope, Owner: &owner, Types: []string{"report"}, ProducerRunID: "run-1", LatestOnly: true,
 	})
 	if err != nil || len(listed) != 1 || listed[0].ID != created.Artifact.ID {
 		t.Fatalf("listed = %#v, %v", listed, err)

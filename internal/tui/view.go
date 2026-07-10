@@ -191,6 +191,9 @@ func (m *Model) renderArtifactsContent(width int) string {
 			artifact.Classification, relativeTime(artifact.CreatedAt),
 		)))
 		producer := fmt.Sprintf("Produced by %s:%s", artifact.Provenance.Producer.Type, artifact.Provenance.Producer.ID)
+		if artifact.Provenance.Owner != nil {
+			producer += fmt.Sprintf(" · for %s:%s", artifact.Provenance.Owner.Type, artifact.Provenance.Owner.ID)
+		}
 		if artifact.Provenance.RunID != "" {
 			producer += " · run " + compact(artifact.Provenance.RunID, 12)
 		}
