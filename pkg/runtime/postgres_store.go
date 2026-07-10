@@ -140,6 +140,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateCollaboration(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateArtifacts(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

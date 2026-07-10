@@ -243,6 +243,7 @@ type (
 type PersistentKernelStore interface {
 	runtime.KernelStore
 	runtime.CollaborationStore
+	runtime.ArtifactStore
 	kernelagent.Store
 	skill.CatalogStore
 }
