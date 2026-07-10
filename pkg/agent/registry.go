@@ -17,6 +17,7 @@ import (
 var (
 	ErrDefinitionNotFound = errors.New("agent definition not found")
 	ErrDeploymentNotFound = errors.New("agent deployment not found")
+	ErrAmendmentNotFound  = errors.New("agent definition amendment not found")
 	ErrRevisionConflict   = errors.New("agent deployment revision conflict")
 )
 
@@ -38,19 +39,8 @@ func (r *Registry) RegisterDefinition(ctx context.Context, definition *AgentDefi
 	if r == nil {
 		return nil, errors.New("agent registry is not configured")
 	}
-	candidate := cloneDefinition(definition)
-	canonicalizeDefinition(candidate)
-	if candidate.CreatedAt.IsZero() {
-		candidate.CreatedAt = r.now().UTC()
-	}
-	providedDigest := candidate.Digest
-	candidate.Digest = ""
-	digest := definitionDigest(candidate)
-	if providedDigest != "" && providedDigest != digest {
-		return nil, errors.New("agent definition digest does not match content")
-	}
-	candidate.Digest = digest
-	if err := candidate.Validate(); err != nil {
+	candidate, err := prepareDefinition(definition, r.now().UTC())
+	if err != nil {
 		return nil, err
 	}
 	if err := r.store.CreateDefinition(ctx, candidate); err != nil {
@@ -113,6 +103,9 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
 		return nil, nil, errors.New("deployment activation actor is required")
 	}
+	if strings.EqualFold(strings.TrimSpace(actorType), "agent") {
+		return nil, nil, errors.New("agents must activate behavior changes through the amendment workflow")
+	}
 	current, err := r.store.GetDeployment(ctx, scope, deploymentID)
 	if err != nil {
 		return nil, nil, err
@@ -163,6 +156,222 @@ func (r *Registry) ListActivations(ctx context.Context, scope capability.ScopeRe
 	return r.store.ListActivations(ctx, scope, deploymentID)
 }
 
+func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentRequest) (*DefinitionAmendment, error) {
+	deployment, err := r.store.GetDeployment(ctx, req.Scope, req.DeploymentID)
+	if err != nil {
+		return nil, err
+	}
+	base, err := r.store.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(strings.TrimSpace(req.ProposerType), "agent") && !base.Amendments.AgentMayPropose {
+		return nil, errors.New("agent definition policy does not allow agent-proposed amendments")
+	}
+	if strings.TrimSpace(req.ProposerType) == "" || strings.TrimSpace(req.ProposerID) == "" || strings.TrimSpace(req.Rationale) == "" {
+		return nil, errors.New("amendment proposer and rationale are required")
+	}
+	candidate, err := prepareDefinition(req.Candidate, r.now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if candidate.ID != base.ID || candidate.Version == base.Version {
+		return nil, errors.New("amendment candidate must use the same definition id and a new version")
+	}
+	if existing, lookupErr := r.store.GetDefinition(ctx, candidate.ID, candidate.Version); lookupErr == nil && existing != nil {
+		return nil, errors.New("amendment candidate version already exists")
+	} else if lookupErr != nil && !errors.Is(lookupErr, ErrDefinitionNotFound) {
+		return nil, lookupErr
+	}
+	candidate.Provenance.DerivedFrom = base.Digest
+	candidate.Provenance.CreatedBy = strings.TrimSpace(req.ProposerType) + ":" + strings.TrimSpace(req.ProposerID)
+	candidate.Digest = definitionDigest(candidate)
+	changes := definitionChanges(base, candidate)
+	if len(changes) == 0 {
+		return nil, errors.New("amendment candidate does not change behavior")
+	}
+	changedFields := make([]string, len(changes))
+	for index := range changes {
+		changedFields[index] = changes[index].Field
+	}
+	if !isSubset(changedFields, base.Amendments.AllowedFields) {
+		return nil, errors.New("amendment changes fields outside the definition policy")
+	}
+	riskWidening := riskRank(candidate.Authority.MaximumRisk) > riskRank(base.Authority.MaximumRisk) || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !isSubset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs)
+	if riskWidening && len(base.Amendments.ApproverPrincipals) == 0 {
+		return nil, errors.New("risk-widening amendments require eligible approver principals")
+	}
+	status := AmendmentReady
+	if len(base.Evaluations) > 0 {
+		status = AmendmentEvaluating
+	} else if base.Amendments.RequiresApproval || riskWidening {
+		status = AmendmentAwaitingApproval
+	}
+	now := r.now().UTC()
+	amendment := &DefinitionAmendment{
+		ID: r.newID(), Scope: req.Scope, DeploymentID: deployment.ID, DefinitionID: base.ID,
+		BaseVersion: base.Version, BaseDigest: base.Digest, Candidate: *candidate, Changes: changes, RiskWidening: riskWidening,
+		ProposerType: strings.TrimSpace(req.ProposerType), ProposerID: strings.TrimSpace(req.ProposerID), Rationale: strings.TrimSpace(req.Rationale),
+		EvidenceRefs: normalizedStrings(req.EvidenceRefs), Status: status, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := amendment.Validate(); err != nil {
+		return nil, err
+	}
+	if err := r.store.CreateAmendment(ctx, amendment); err != nil {
+		return nil, err
+	}
+	return cloneAmendment(amendment), nil
+}
+
+func (r *Registry) GetAmendment(ctx context.Context, scope capability.ScopeReference, amendmentID string) (*DefinitionAmendment, error) {
+	return r.store.GetAmendment(ctx, scope, amendmentID)
+}
+
+func (r *Registry) SubmitAmendmentEvaluation(ctx context.Context, req SubmitAmendmentEvaluationRequest) (*DefinitionAmendment, error) {
+	current, err := r.store.GetAmendment(ctx, req.Scope, req.AmendmentID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Revision != req.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	if current.Status != AmendmentEvaluating {
+		return nil, errors.New("amendment is not awaiting evaluation")
+	}
+	base, err := r.store.GetDefinition(ctx, current.DefinitionID, current.BaseVersion)
+	if err != nil {
+		return nil, err
+	}
+	results := make(map[string]AmendmentEvaluation)
+	for _, result := range req.Evaluations {
+		if strings.TrimSpace(result.CriterionID) == "" || strings.TrimSpace(result.Summary) == "" || results[result.CriterionID].CriterionID != "" {
+			return nil, errors.New("evaluation results require unique criterion ids and summaries")
+		}
+		result.EvidenceRefs = normalizedStrings(result.EvidenceRefs)
+		results[result.CriterionID] = result
+	}
+	passed := true
+	ordered := make([]AmendmentEvaluation, 0, len(base.Evaluations))
+	for _, criterion := range base.Evaluations {
+		result, ok := results[criterion.ID]
+		if !ok {
+			return nil, errors.New("evaluation result is missing a definition criterion")
+		}
+		if criterion.Required && !result.Passed {
+			passed = false
+		}
+		ordered = append(ordered, result)
+	}
+	if len(results) != len(base.Evaluations) {
+		return nil, errors.New("evaluation results contain unknown criteria")
+	}
+	updated := cloneAmendment(current)
+	updated.Evaluations = ordered
+	updated.Revision++
+	updated.UpdatedAt = r.now().UTC()
+	if !passed {
+		updated.Status = AmendmentEvaluationFailed
+	} else if base.Amendments.RequiresApproval || updated.RiskWidening {
+		updated.Status = AmendmentAwaitingApproval
+	} else {
+		updated.Status = AmendmentReady
+	}
+	if err := r.store.UpdateAmendment(ctx, updated, current.Revision); err != nil {
+		return nil, err
+	}
+	return cloneAmendment(updated), nil
+}
+
+func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentRequest) (*DefinitionAmendment, error) {
+	current, err := r.store.GetAmendment(ctx, req.Scope, req.AmendmentID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Revision != req.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	if current.Status != AmendmentAwaitingApproval || strings.TrimSpace(req.ActorType) == "" || strings.TrimSpace(req.ActorID) == "" {
+		return nil, errors.New("amendment is not awaiting a valid approval decision")
+	}
+	base, err := r.store.GetDefinition(ctx, current.DefinitionID, current.BaseVersion)
+	if err != nil {
+		return nil, err
+	}
+	principal := strings.TrimSpace(req.ActorType) + ":" + strings.TrimSpace(req.ActorID)
+	if !isSubset([]string{principal}, base.Amendments.ApproverPrincipals) {
+		return nil, errors.New("principal is not eligible to approve this amendment")
+	}
+	updated := cloneAmendment(current)
+	now := r.now().UTC()
+	updated.Decision = &AmendmentDecision{Approved: req.Approved, ActorType: strings.TrimSpace(req.ActorType), ActorID: strings.TrimSpace(req.ActorID), Reason: strings.TrimSpace(req.Reason), DecidedAt: now}
+	if req.Approved {
+		updated.Status = AmendmentApproved
+	} else {
+		updated.Status = AmendmentRejected
+	}
+	updated.Revision++
+	updated.UpdatedAt = now
+	if err := r.store.UpdateAmendment(ctx, updated, current.Revision); err != nil {
+		return nil, err
+	}
+	return cloneAmendment(updated), nil
+}
+
+func (r *Registry) ActivateAmendment(ctx context.Context, scope capability.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*DefinitionAmendment, *AgentDeployment, *DefinitionActivation, error) {
+	current, err := r.store.GetAmendment(ctx, scope, amendmentID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if current.Revision != expectedRevision {
+		return nil, nil, nil, ErrRevisionConflict
+	}
+	if current.Status != AmendmentReady && current.Status != AmendmentApproved {
+		return nil, nil, nil, errors.New("amendment is not ready for activation")
+	}
+	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
+		return nil, nil, nil, errors.New("amendment activation actor is required")
+	}
+	deployment, err := r.store.GetDeployment(ctx, scope, current.DeploymentID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if deployment.ActiveVersion != current.BaseVersion {
+		return nil, nil, nil, errors.New("amendment base version is no longer active")
+	}
+	base, err := r.store.GetDefinition(ctx, current.DefinitionID, current.BaseVersion)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if base.Digest != current.BaseDigest {
+		return nil, nil, nil, errors.New("amendment base digest no longer matches")
+	}
+	definition := cloneDefinition(&current.Candidate)
+	updatedDeployment := cloneDeployment(deployment)
+	updatedDeployment.PreviousVersion = deployment.ActiveVersion
+	updatedDeployment.ActiveVersion = definition.Version
+	updatedDeployment.RolloutStatus = RolloutActive
+	updatedDeployment.Revision++
+	updatedDeployment.UpdatedAt = r.now().UTC()
+	if err := validateNarrowing(definition, updatedDeployment); err != nil {
+		return nil, nil, nil, err
+	}
+	activation := DefinitionActivation{
+		ID: r.newID(), Scope: scope, DeploymentID: deployment.ID, DefinitionID: definition.ID,
+		FromVersion: deployment.ActiveVersion, ToVersion: definition.Version, DeploymentRevision: updatedDeployment.Revision,
+		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updatedDeployment.UpdatedAt,
+	}
+	updatedAmendment := cloneAmendment(current)
+	updatedAmendment.Status = AmendmentActivated
+	updatedAmendment.ActivationID = activation.ID
+	updatedAmendment.Revision++
+	updatedAmendment.UpdatedAt = updatedDeployment.UpdatedAt
+	if err := r.store.ActivateAmendment(ctx, updatedAmendment, current.Revision, definition, updatedDeployment, deployment.Revision, activation); err != nil {
+		return nil, nil, nil, err
+	}
+	copyActivation := activation
+	return cloneAmendment(updatedAmendment), cloneDeployment(updatedDeployment), &copyActivation, nil
+}
+
 func canonicalizeDefinition(value *AgentDefinition) {
 	if value == nil {
 		return
@@ -172,12 +381,69 @@ func canonicalizeDefinition(value *AgentDefinition) {
 	value.OperatingPrinciples = normalizedStrings(value.OperatingPrinciples)
 	value.Authority.AllowedSkillIDs = normalizedStrings(value.Authority.AllowedSkillIDs)
 	value.Amendments.AllowedFields = normalizedStrings(value.Amendments.AllowedFields)
+	value.Amendments.ApproverPrincipals = normalizedStrings(value.Amendments.ApproverPrincipals)
 	for index := range value.SkillRequirements {
 		value.SkillRequirements[index].RequiredActions = normalizedStrings(value.SkillRequirements[index].RequiredActions)
 	}
 	sort.Slice(value.SkillRequirements, func(i, j int) bool { return value.SkillRequirements[i].SkillID < value.SkillRequirements[j].SkillID })
 	sort.Slice(value.ObjectiveTemplates, func(i, j int) bool { return value.ObjectiveTemplates[i].ID < value.ObjectiveTemplates[j].ID })
 	sort.Slice(value.Evaluations, func(i, j int) bool { return value.Evaluations[i].ID < value.Evaluations[j].ID })
+}
+
+func prepareDefinition(definition *AgentDefinition, now time.Time) (*AgentDefinition, error) {
+	candidate := cloneDefinition(definition)
+	canonicalizeDefinition(candidate)
+	if candidate == nil {
+		return nil, errors.New("agent definition is required")
+	}
+	if candidate.CreatedAt.IsZero() {
+		candidate.CreatedAt = now
+	}
+	providedDigest := candidate.Digest
+	candidate.Digest = ""
+	digest := definitionDigest(candidate)
+	if providedDigest != "" && providedDigest != digest {
+		return nil, errors.New("agent definition digest does not match content")
+	}
+	candidate.Digest = digest
+	if err := candidate.Validate(); err != nil {
+		return nil, err
+	}
+	return candidate, nil
+}
+
+func definitionChanges(base, candidate *AgentDefinition) []DefinitionFieldChange {
+	baseMap, candidateMap := make(map[string]interface{}), make(map[string]interface{})
+	baseJSON, _ := json.Marshal(base)
+	candidateJSON, _ := json.Marshal(candidate)
+	_ = json.Unmarshal(baseJSON, &baseMap)
+	_ = json.Unmarshal(candidateJSON, &candidateMap)
+	ignored := map[string]bool{"version": true, "digest": true, "createdAt": true, "provenance": true}
+	fieldSet := make(map[string]bool, len(baseMap)+len(candidateMap))
+	for field := range baseMap {
+		if !ignored[field] {
+			fieldSet[field] = true
+		}
+	}
+	for field := range candidateMap {
+		if !ignored[field] {
+			fieldSet[field] = true
+		}
+	}
+	fields := mapKeys(fieldSet)
+	sort.Strings(fields)
+	changes := make([]DefinitionFieldChange, 0)
+	for _, field := range fields {
+		before, _ := json.Marshal(baseMap[field])
+		after, _ := json.Marshal(candidateMap[field])
+		if string(before) == string(after) {
+			continue
+		}
+		beforeDigest := sha256.Sum256(before)
+		afterDigest := sha256.Sum256(after)
+		changes = append(changes, DefinitionFieldChange{Field: field, BeforeDigest: hex.EncodeToString(beforeDigest[:]), AfterDigest: hex.EncodeToString(afterDigest[:])})
+	}
+	return changes
 }
 
 func definitionDigest(value *AgentDefinition) string {
@@ -193,6 +459,9 @@ func definitionKey(id, version string) string {
 	return strings.TrimSpace(id) + "@" + strings.TrimSpace(version)
 }
 func deploymentKey(scope capability.ScopeReference, id string) string {
+	return scope.Kind + ":" + scope.ID + ":" + strings.TrimSpace(id)
+}
+func amendmentKey(scope capability.ScopeReference, id string) string {
 	return scope.Kind + ":" + scope.ID + ":" + strings.TrimSpace(id)
 }
 
@@ -211,6 +480,16 @@ func cloneDeployment(value *AgentDeployment) *AgentDeployment {
 		return nil
 	}
 	var result AgentDeployment
+	encoded, _ := json.Marshal(value)
+	_ = json.Unmarshal(encoded, &result)
+	return &result
+}
+
+func cloneAmendment(value *DefinitionAmendment) *DefinitionAmendment {
+	if value == nil {
+		return nil
+	}
+	var result DefinitionAmendment
 	encoded, _ := json.Marshal(value)
 	_ = json.Unmarshal(encoded, &result)
 	return &result

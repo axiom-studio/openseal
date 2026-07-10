@@ -29,27 +29,35 @@ type (
 	StepExecutor         = executor.StepExecutor
 	ExecutionGraph       = executor.ExecutionGraph
 
-	AgentNodeDefinition         = types.AgentNodeDefinition
-	AgentConnection             = types.AgentConnection
-	AgentLibraryBean            = types.AgentLibraryBean
-	AgentInstanceBean           = types.AgentInstanceBean
-	AgentWorkflow               = types.AgentWorkflow
-	AgentWorkflowBean           = types.AgentWorkflowBean
-	AgentDefinition             = kernelagent.AgentDefinition
-	AgentSkillRequirement       = kernelagent.SkillRequirement
-	AgentAuthorityPolicy        = kernelagent.AuthorityPolicy
-	AgentMemoryPolicy           = kernelagent.MemoryPolicy
-	AgentEscalationPolicy       = kernelagent.EscalationPolicy
-	AgentObjectiveTemplate      = kernelagent.ObjectiveTemplate
-	AgentEvaluationCriterion    = kernelagent.EvaluationCriterion
-	AgentAmendmentPolicy        = kernelagent.AmendmentPolicy
-	AgentDefinitionProvenance   = kernelagent.DefinitionProvenance
-	AgentDeployment             = kernelagent.AgentDeployment
-	AgentDeploymentRestrictions = kernelagent.DeploymentRestrictions
-	AgentDeploymentCapacity     = kernelagent.DeploymentCapacity
-	AgentDeploymentHealth       = kernelagent.DeploymentHealth
-	AgentDefinitionActivation   = kernelagent.DefinitionActivation
-	AgentRolloutStatus          = kernelagent.RolloutStatus
+	AgentNodeDefinition                   = types.AgentNodeDefinition
+	AgentConnection                       = types.AgentConnection
+	AgentLibraryBean                      = types.AgentLibraryBean
+	AgentInstanceBean                     = types.AgentInstanceBean
+	AgentWorkflow                         = types.AgentWorkflow
+	AgentWorkflowBean                     = types.AgentWorkflowBean
+	AgentDefinition                       = kernelagent.AgentDefinition
+	AgentSkillRequirement                 = kernelagent.SkillRequirement
+	AgentAuthorityPolicy                  = kernelagent.AuthorityPolicy
+	AgentMemoryPolicy                     = kernelagent.MemoryPolicy
+	AgentEscalationPolicy                 = kernelagent.EscalationPolicy
+	AgentObjectiveTemplate                = kernelagent.ObjectiveTemplate
+	AgentEvaluationCriterion              = kernelagent.EvaluationCriterion
+	AgentAmendmentPolicy                  = kernelagent.AmendmentPolicy
+	AgentDefinitionProvenance             = kernelagent.DefinitionProvenance
+	AgentDeployment                       = kernelagent.AgentDeployment
+	AgentDeploymentRestrictions           = kernelagent.DeploymentRestrictions
+	AgentDeploymentCapacity               = kernelagent.DeploymentCapacity
+	AgentDeploymentHealth                 = kernelagent.DeploymentHealth
+	AgentDefinitionActivation             = kernelagent.DefinitionActivation
+	AgentRolloutStatus                    = kernelagent.RolloutStatus
+	AgentDefinitionAmendment              = kernelagent.DefinitionAmendment
+	AgentAmendmentStatus                  = kernelagent.AmendmentStatus
+	AgentDefinitionFieldChange            = kernelagent.DefinitionFieldChange
+	AgentAmendmentEvaluation              = kernelagent.AmendmentEvaluation
+	AgentAmendmentDecision                = kernelagent.AmendmentDecision
+	ProposeAgentAmendmentRequest          = kernelagent.ProposeAmendmentRequest
+	SubmitAgentAmendmentEvaluationRequest = kernelagent.SubmitAmendmentEvaluationRequest
+	ResolveAgentAmendmentRequest          = kernelagent.ResolveAmendmentRequest
 
 	RunRecord                  = runtime.RunRecord
 	RetryPolicy                = runtime.RetryPolicy
@@ -291,6 +299,14 @@ const (
 	AgentRolloutDegraded = kernelagent.RolloutDegraded
 	AgentRolloutPaused   = kernelagent.RolloutPaused
 	AgentRolloutRetired  = kernelagent.RolloutRetired
+
+	AgentAmendmentEvaluating       = kernelagent.AmendmentEvaluating
+	AgentAmendmentAwaitingApproval = kernelagent.AmendmentAwaitingApproval
+	AgentAmendmentReady            = kernelagent.AmendmentReady
+	AgentAmendmentApproved         = kernelagent.AmendmentApproved
+	AgentAmendmentRejected         = kernelagent.AmendmentRejected
+	AgentAmendmentEvaluationFailed = kernelagent.AmendmentEvaluationFailed
+	AgentAmendmentActivated        = kernelagent.AmendmentActivated
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -812,6 +828,26 @@ func (e *Engine) RollbackAgentDefinition(ctx context.Context, scope skill.ScopeR
 
 func (e *Engine) ListAgentDefinitionActivations(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
 	return e.agents.ListActivations(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ProposeAgentDefinitionAmendment(ctx context.Context, request kernelagent.ProposeAmendmentRequest) (*kernelagent.DefinitionAmendment, error) {
+	return e.agents.ProposeAmendment(ctx, request)
+}
+
+func (e *Engine) GetAgentDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string) (*kernelagent.DefinitionAmendment, error) {
+	return e.agents.GetAmendment(ctx, scope, amendmentID)
+}
+
+func (e *Engine) SubmitAgentDefinitionAmendmentEvaluation(ctx context.Context, request kernelagent.SubmitAmendmentEvaluationRequest) (*kernelagent.DefinitionAmendment, error) {
+	return e.agents.SubmitAmendmentEvaluation(ctx, request)
+}
+
+func (e *Engine) ResolveAgentDefinitionAmendment(ctx context.Context, request kernelagent.ResolveAmendmentRequest) (*kernelagent.DefinitionAmendment, error) {
+	return e.agents.ResolveAmendment(ctx, request)
+}
+
+func (e *Engine) ActivateAgentDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.DefinitionAmendment, *kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return e.agents.ActivateAmendment(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason)
 }
 
 func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {

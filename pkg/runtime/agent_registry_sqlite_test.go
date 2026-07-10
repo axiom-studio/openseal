@@ -142,6 +142,57 @@ func TestSQLiteAgentDeploymentAndActivationRollbackAtomically(t *testing.T) {
 	}
 }
 
+func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "amendments.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := kernelagent.NewRegistryWithStore(store)
+	base := sqliteAgentDefinition("1")
+	base.Amendments = kernelagent.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true, ApproverPrincipals: []string{"user:admin"}}
+	registered, err := registry.RegisterDefinition(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "amendment"}
+	deployment, _, err := registry.CreateDeployment(context.Background(), &kernelagent.AgentDeployment{ID: "operator", Scope: scope, DefinitionID: base.ID, ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Environment: "prod", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "admin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := *registered
+	candidate.Version, candidate.SystemPrompt, candidate.Digest, candidate.CreatedAt = "2", "Operate safely and cite evidence.", "", time.Time{}
+	amendment, err := registry.ProposeAmendment(context.Background(), kernelagent.ProposeAmendmentRequest{Scope: scope, DeploymentID: deployment.ID, Candidate: &candidate, ProposerType: "agent", ProposerID: "operator", Rationale: "Evidence improves reviewability"})
+	if err != nil || amendment.Status != kernelagent.AmendmentAwaitingApproval {
+		t.Fatalf("propose amendment = %#v, %v", amendment, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restarted := kernelagent.NewRegistryWithStore(reopened)
+	restored, err := restarted.GetAmendment(context.Background(), scope, amendment.ID)
+	if err != nil || restored.Status != kernelagent.AmendmentAwaitingApproval {
+		t.Fatalf("restored amendment = %#v, %v", restored, err)
+	}
+	approved, err := restarted.ResolveAmendment(context.Background(), kernelagent.ResolveAmendmentRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: restored.Revision, Approved: true, ActorType: "user", ActorID: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, updated, activation, err := restarted.ActivateAmendment(context.Background(), scope, amendment.ID, approved.Revision, "user", "admin", "approved")
+	if err != nil || activated.Status != kernelagent.AmendmentActivated || updated.ActiveVersion != "2" || activation.ID != activated.ActivationID {
+		t.Fatalf("activate restored amendment = %#v %#v %#v, %v", activated, updated, activation, err)
+	}
+	if _, err := restarted.GetDefinition(context.Background(), "operator", "2"); err != nil {
+		t.Fatalf("activated candidate was not persisted: %v", err)
+	}
+}
+
 func sqliteAgentDefinition(version string) *kernelagent.AgentDefinition {
 	return &kernelagent.AgentDefinition{
 		ID: "operator", Version: version, DisplayName: "Operator", Purpose: "Operate", SystemPrompt: "Operate safely.",
