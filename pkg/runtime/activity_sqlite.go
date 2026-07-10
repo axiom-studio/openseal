@@ -172,6 +172,18 @@ func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *Activity
 	if err := beforeInsert(conn); err != nil {
 		return nil, err
 	}
+	persisted, err := insertSQLiteActivityConn(ctx, conn, event)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return cloneActivityEvent(persisted), nil
+}
+
+func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *ActivityEvent) (*ActivityEvent, error) {
 	persisted := cloneActivityEvent(event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`,
@@ -189,10 +201,6 @@ func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *Activity
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return nil, err
-	}
-	committed = true
 	return cloneActivityEvent(persisted), nil
 }
 
