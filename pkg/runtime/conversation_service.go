@@ -412,7 +412,7 @@ func (s *ConversationService) GetChannelMessage(ctx context.Context, scope Scope
 		return nil, err
 	}
 	if message == nil {
-		return nil, ErrMessageConflict
+		return nil, ErrChannelMessageNotFound
 	}
 	return message, nil
 }
@@ -423,7 +423,7 @@ func (s *ConversationService) GetParticipationRound(ctx context.Context, scope S
 		return nil, err
 	}
 	if result == nil {
-		return nil, ErrMessageConflict
+		return nil, ErrParticipationRoundNotFound
 	}
 	return result, nil
 }
