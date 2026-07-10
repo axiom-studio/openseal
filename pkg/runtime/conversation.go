@@ -161,12 +161,13 @@ func (a ConversationAudience) Validate() error {
 type ConversationReferenceKind string
 
 const (
-	ConversationReferenceObjective ConversationReferenceKind = "objective"
-	ConversationReferenceRun       ConversationReferenceKind = "run"
-	ConversationReferenceRequest   ConversationReferenceKind = "agent_request"
-	ConversationReferenceApproval  ConversationReferenceKind = "approval"
-	ConversationReferenceArtifact  ConversationReferenceKind = "artifact"
-	ConversationReferenceActivity  ConversationReferenceKind = "activity"
+	ConversationReferenceObjective      ConversationReferenceKind = "objective"
+	ConversationReferenceRun            ConversationReferenceKind = "run"
+	ConversationReferenceRequest        ConversationReferenceKind = "agent_request"
+	ConversationReferenceApproval       ConversationReferenceKind = "approval"
+	ConversationReferenceArtifact       ConversationReferenceKind = "artifact"
+	ConversationReferenceActivity       ConversationReferenceKind = "activity"
+	ConversationReferenceExternalSource ConversationReferenceKind = "external_source"
 )
 
 type ConversationReference struct {
@@ -178,7 +179,8 @@ type ConversationReference struct {
 func (r ConversationReference) Validate() error {
 	switch r.Kind {
 	case ConversationReferenceObjective, ConversationReferenceRun, ConversationReferenceRequest,
-		ConversationReferenceApproval, ConversationReferenceArtifact, ConversationReferenceActivity:
+		ConversationReferenceApproval, ConversationReferenceArtifact, ConversationReferenceActivity,
+		ConversationReferenceExternalSource:
 	default:
 		return fmt.Errorf("%w: invalid reference kind %q", ErrInvalidConversation, r.Kind)
 	}
@@ -209,6 +211,7 @@ type ChannelMessage struct {
 	SupersedesMessageID  string                    `json:"supersedesMessageId,omitempty"`
 	IdempotencyKey       string                    `json:"idempotencyKey,omitempty"`
 	ParticipationRoundID string                    `json:"participationRoundId,omitempty"`
+	Historical           bool                      `json:"historical,omitempty"`
 	CreatedAt            time.Time                 `json:"createdAt"`
 }
 

@@ -280,7 +280,7 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 		conversation.Owner.Type != OwnerTypeTeam || message.ConversationID != conversation.ID || message.Scope != conversation.Scope {
 		return false
 	}
-	if message.Intent == MessageIntentSystem || message.ParticipationRoundID != "" {
+	if message.Historical || message.Intent == MessageIntentSystem || message.ParticipationRoundID != "" {
 		return false
 	}
 	switch message.Sender.Type {
