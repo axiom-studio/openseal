@@ -428,6 +428,19 @@ func (s *ConversationService) GetParticipationRound(ctx context.Context, scope S
 	return result, nil
 }
 
+func (s *ConversationService) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRoundResult, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("conversation store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if !validOpaqueIdentifier(strings.TrimSpace(conversationID), 128) || strings.TrimSpace(key) == "" || len(key) > 256 {
+		return nil, fmt.Errorf("%w: conversation and idempotency key are required", ErrInvalidConversation)
+	}
+	return s.store.FindParticipationRoundByIdempotencyKey(ctx, scope, strings.TrimSpace(conversationID), strings.TrimSpace(key))
+}
+
 func (s *ConversationService) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
 	return s.store.ListParticipationRounds(ctx, filter)
 }
