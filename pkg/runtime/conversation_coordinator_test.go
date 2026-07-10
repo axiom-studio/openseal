@@ -86,7 +86,7 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 		}
 	})
 	coordinator, err := NewConversationCoordinator(service, participants, provider, ConversationCoordinatorConfig{
-		MaximumParticipants: 8, MaximumConcurrency: 2, RecentMessageLimit: 20,
+		MaximumParticipants: 8, MaximumConcurrency: 4, RecentMessageLimit: 20,
 		ProposalTimeout: time.Second, PresenceTTL: 30 * time.Second,
 	})
 	if err != nil {
@@ -94,7 +94,7 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	}
 	request := ConversationCoordinationRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
-		TriggerMessageID: question.Message.ID, IdempotencyKey: "launch-round",
+		TriggerMessageID: question.Message.ID, MaximumConcurrency: 2, IdempotencyKey: "launch-round",
 	}
 	round, err := coordinator.Coordinate(ctx, request)
 	if err != nil {
