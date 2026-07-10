@@ -53,6 +53,7 @@ func TestSQLiteSkillCatalogRestoresBindingsAndEnforcesRevisions(t *testing.T) {
 
 	updated := *binding
 	updated.Revision = 2
+	updated.Disabled = true
 	updated.Config = map[string]interface{}{"region": "us-east"}
 	if err := restarted.Bind(context.Background(), &updated); err != nil {
 		t.Fatal(err)
@@ -61,6 +62,9 @@ func TestSQLiteSkillCatalogRestoresBindingsAndEnforcesRevisions(t *testing.T) {
 		t.Fatalf("stale binding update = %v", err)
 	}
 	freshCatalog := skill.NewCatalogWithStore(reopened)
+	if prompts, err := freshCatalog.ListModelPrompts(context.Background(), scope, "analyst"); err != nil || len(prompts) != 0 {
+		t.Fatalf("disabled binding survived restart as active: %#v, %v", prompts, err)
+	}
 	if err := freshCatalog.Register(context.Background(), definition); !errors.Is(err, skill.ErrDefinitionImmutable) {
 		t.Fatalf("immutable definition overwrite = %v", err)
 	}

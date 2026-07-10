@@ -80,6 +80,9 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	}
 	definitions := make(map[string]*Definition)
 	for _, binding := range bindings {
+		if binding.Disabled {
+			continue
+		}
 		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
 		if err != nil {
 			return nil, err
@@ -89,6 +92,13 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 	}
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].ID < bindings[j].ID })
+	activeBindings := bindings[:0]
+	for _, binding := range bindings {
+		if !binding.Disabled {
+			activeBindings = append(activeBindings, binding)
+		}
+	}
+	bindings = activeBindings
 
 	snapshot := &ActivationSnapshot{
 		Scope: scope, DeploymentID: deploymentID, HostRevision: strings.TrimSpace(host.Revision),

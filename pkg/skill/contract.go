@@ -163,6 +163,9 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 	}
 	result := make([]ModelAction, 0)
 	for _, binding := range bindings {
+		if binding.Disabled {
+			continue
+		}
 		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
 		if err != nil {
 			return nil, err
@@ -193,7 +196,7 @@ func (c *Catalog) ListModelPrompts(ctx context.Context, scope ScopeReference, de
 	}
 	result := make([]ModelPrompt, 0)
 	for _, binding := range bindings {
-		if !binding.EnablePrompt {
+		if binding.Disabled || !binding.EnablePrompt {
 			continue
 		}
 		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
@@ -222,7 +225,7 @@ func (c *Catalog) ResolvePrompt(ctx context.Context, scope ScopeReference, deplo
 		return nil, err
 	}
 	for _, binding := range bindings {
-		if binding.SkillID != skillID || binding.SkillVersion != version || !binding.EnablePrompt {
+		if binding.Disabled || binding.SkillID != skillID || binding.SkillVersion != version || !binding.EnablePrompt {
 			continue
 		}
 		definition, err := c.definitionFor(ctx, skillID, version)
@@ -246,7 +249,7 @@ func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentI
 		return nil, err
 	}
 	for _, binding := range bindings {
-		if binding.SkillID != skillID || binding.SkillVersion != version ||
+		if binding.Disabled || binding.SkillID != skillID || binding.SkillVersion != version ||
 			!containsString(binding.AllowedActions, actionName) {
 			continue
 		}

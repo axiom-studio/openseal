@@ -173,6 +173,7 @@ type Binding struct {
 	DeploymentID         string                             `json:"deploymentId"`
 	SkillID              string                             `json:"skillId"`
 	SkillVersion         string                             `json:"skillVersion"`
+	Disabled             bool                               `json:"disabled,omitempty"`
 	AllowedActions       []string                           `json:"allowedActions"`
 	EnablePrompt         bool                               `json:"enablePrompt,omitempty"`
 	MaximumRisk          RiskLevel                          `json:"maximumRisk"`
