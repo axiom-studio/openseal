@@ -146,13 +146,7 @@ func (c *KernelHTTPClient) do(ctx context.Context, method, path string, body int
 	defer resp.Body.Close()
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		var payload struct {
-			Error string `json:"error"`
-		}
-		if decodeErr := decoder.Decode(&payload); decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-			payload.Error = http.StatusText(resp.StatusCode)
-		}
-		return &APIError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(payload.Error)}
+		return decodeAPIError(resp.StatusCode, decoder)
 	}
 	if result == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
@@ -161,6 +155,16 @@ func (c *KernelHTTPClient) do(ctx context.Context, method, path string, body int
 		return fmt.Errorf("decode OpenSeal response: %w", err)
 	}
 	return nil
+}
+
+func decodeAPIError(statusCode int, decoder *json.Decoder) error {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if decodeErr := decoder.Decode(&payload); decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
+		payload.Error = http.StatusText(statusCode)
+	}
+	return &APIError{StatusCode: statusCode, Message: strings.TrimSpace(payload.Error)}
 }
 
 func scopeQuery(scope runtime.Scope) url.Values {
