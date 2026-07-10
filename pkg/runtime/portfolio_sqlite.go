@@ -72,7 +72,10 @@ func migratePortfolio(db *sql.DB) error {
 	if err := migrateCollaboration(db); err != nil {
 		return err
 	}
-	return migrateActions(db)
+	if err := migrateActions(db); err != nil {
+		return err
+	}
+	return migrateArtifacts(db)
 }
 
 func addMissingAgentRunColumns(db *sql.DB) error {

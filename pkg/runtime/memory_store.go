@@ -22,6 +22,7 @@ type MemoryStore struct {
 	actionKeys  map[string]string
 	requests    map[string]*AgentRequest
 	requestKeys map[string]string
+	artifacts   map[string]map[int64]*Artifact
 	maxSize     int
 	nextID      int
 }
@@ -42,6 +43,7 @@ func NewMemoryStore(maxSize int) *MemoryStore {
 		actionKeys:  make(map[string]string),
 		requests:    make(map[string]*AgentRequest),
 		requestKeys: make(map[string]string),
+		artifacts:   make(map[string]map[int64]*Artifact),
 		maxSize:     maxSize,
 		nextID:      1,
 	}
