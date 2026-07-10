@@ -11,6 +11,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
+	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 	"github.com/axiom-studio/openseal/pkg/types"
 	"go.uber.org/zap"
 )
@@ -123,6 +125,20 @@ type (
 	ActionDispatchInput        = runtime.ActionDispatchInput
 	ActionDispatcher           = runtime.ActionDispatcher
 	ActionDispatcherFunc       = runtime.ActionDispatcherFunc
+	ClawHubRegistry            = clawhub.Registry
+	ClawHubClient              = clawhub.ClawHubClient
+	ClawHubSkillReference      = clawhub.SkillReference
+	ClawHubSearchRequest       = clawhub.SearchRequest
+	ClawHubExploreRequest      = clawhub.ExploreRequest
+	ClawHubSkillPage           = clawhub.SkillPage
+	ClawHubSkillSummary        = clawhub.SkillSummary
+	ClawHubSkillDetail         = clawhub.SkillDetail
+	ClawHubInstallRequest      = clawhub.InstallRequest
+	ClawHubInstalledSkill      = clawhub.InstalledSkill
+	ClawHubVerification        = clawhub.Verification
+	ClawHubVersionPage         = clawhub.VersionPage
+	ClawHubVersionDetail       = clawhub.VersionDetail
+	ClawHubDownloadedArchive   = clawhub.DownloadedArchive
 )
 
 const (
@@ -220,6 +236,8 @@ type Engine struct {
 	approvals       *runtime.ApprovalCoordinator
 	actionPolicy    runtime.ActionPolicyEvaluator
 	approvalAuth    runtime.ApprovalAuthorizer
+	clawHub         *clawhub.InstallManager
+	clawHubRegistry clawhub.Registry
 	agentPoolSpecs  []agentRunWorkerSpec
 	agentPools      []*runtime.AgentRunWorkerPool
 	actionPoolSpecs []actionWorkerSpec
@@ -279,6 +297,9 @@ func New(opts ...Option) (*Engine, error) {
 		if err := opt(e); err != nil {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
+	}
+	if err := e.restoreClawHubSkills(); err != nil {
+		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
 	}
 	e.rebuildGovernance()
 	if err := e.rebuildActionWorkerPools(); err != nil {
@@ -448,6 +469,18 @@ func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.Cr
 	}
 }
 
+func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace string) Option {
+	return func(e *Engine) error {
+		manager, err := clawhub.NewInstallManager(registryID, registry, workspace)
+		if err != nil {
+			return err
+		}
+		e.clawHub = manager
+		e.clawHubRegistry = registry
+		return nil
+	}
+}
+
 func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 	return func(e *Engine) error {
 		if authorizer == nil {
@@ -461,6 +494,62 @@ func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 func (e *Engine) rebuildGovernance() {
 	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy)
 	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
+}
+
+func (e *Engine) restoreClawHubSkills() error {
+	if e.clawHub == nil {
+		return nil
+	}
+	installed, err := e.clawHub.LoadInstalled()
+	if err != nil {
+		return err
+	}
+	for _, item := range installed {
+		if err := e.activateInstalledSkill(context.Background(), item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Engine) activateInstalledSkill(ctx context.Context, installed *clawhub.InstalledSkill) error {
+	if installed == nil || installed.Compilation == nil || installed.Compilation.Definition == nil {
+		return fmt.Errorf("installed skill compilation is required")
+	}
+	definition := installed.Compilation.Definition
+	if err := e.validateClawHubCompilation(installed.Compilation); err != nil {
+		return err
+	}
+	existing, err := e.skills.GetDefinition(ctx, definition.ID, definition.Version)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		if existing.Source != nil && definition.Source != nil && existing.Source.Digest == definition.Source.Digest {
+			return nil
+		}
+		return fmt.Errorf("skill %s@%s conflicts with an active immutable definition", definition.ID, definition.Version)
+	}
+	return e.skills.Register(ctx, definition)
+}
+
+func (e *Engine) validateClawHubCompilation(compilation *skillopenclaw.Compilation) error {
+	if compilation == nil || compilation.Definition == nil {
+		return fmt.Errorf("compiled skill definition is required")
+	}
+	definition := compilation.Definition
+	validationCatalog := skill.NewCatalog()
+	if err := validationCatalog.Register(context.Background(), definition); err != nil {
+		return err
+	}
+	existing, err := e.skills.GetDefinition(context.Background(), definition.ID, definition.Version)
+	if err != nil {
+		return err
+	}
+	if existing != nil && (existing.Source == nil || definition.Source == nil || existing.Source.Digest != definition.Source.Digest) {
+		return fmt.Errorf("skill %s@%s conflicts with an active immutable definition", definition.ID, definition.Version)
+	}
+	return nil
 }
 
 func (e *Engine) rebuildActionWorkerPools() error {
@@ -586,6 +675,10 @@ func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition
 	return e.skills.Register(ctx, definition)
 }
 
+func (e *Engine) GetSkillDefinition(ctx context.Context, skillID, version string) (*skill.Definition, error) {
+	return e.skills.GetDefinition(ctx, skillID, version)
+}
+
 func (e *Engine) BindSkill(ctx context.Context, binding *skill.Binding) error {
 	return e.skills.Bind(ctx, binding)
 }
@@ -636,4 +729,78 @@ func (e *Engine) GetApproval(ctx context.Context, scope runtime.Scope, approvalI
 
 func (e *Engine) ListApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
 	return e.store.ListApprovals(ctx, filter)
+}
+
+func NewClawHubClient(baseURL string) *clawhub.ClawHubClient {
+	return clawhub.NewClawHubClient(baseURL)
+}
+
+func (e *Engine) SearchClawHubSkills(ctx context.Context, request clawhub.SearchRequest) (*clawhub.SkillPage, error) {
+	if e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.SearchSkills(ctx, request)
+}
+
+func (e *Engine) ExploreClawHubSkills(ctx context.Context, request clawhub.ExploreRequest) (*clawhub.SkillPage, error) {
+	if e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.ExploreSkills(ctx, request)
+}
+
+func (e *Engine) InspectClawHubSkill(ctx context.Context, reference clawhub.SkillReference) (*clawhub.SkillDetail, error) {
+	if e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.InspectSkill(ctx, reference)
+}
+
+func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.InstallRequest) (*clawhub.InstalledSkill, error) {
+	if e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	installed, err := e.clawHub.InstallValidated(ctx, request, e.validateClawHubCompilation)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.activateInstalledSkill(ctx, installed); err != nil {
+		return nil, err
+	}
+	return installed, nil
+}
+
+func (e *Engine) UpdateClawHubSkill(ctx context.Context, slug string) (*clawhub.InstalledSkill, error) {
+	if e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	installed, err := e.clawHub.UpdateValidated(ctx, slug, e.validateClawHubCompilation)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.activateInstalledSkill(ctx, installed); err != nil {
+		return nil, err
+	}
+	return installed, nil
+}
+
+func (e *Engine) VerifyInstalledClawHubSkill(ctx context.Context, slug string) (*clawhub.Verification, error) {
+	if e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHub.VerifyInstalled(ctx, slug)
+}
+
+func (e *Engine) PinClawHubSkill(slug, reason string) error {
+	if e.clawHub == nil {
+		return fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHub.Pin(slug, reason)
+}
+
+func (e *Engine) UnpinClawHubSkill(slug string) error {
+	if e.clawHub == nil {
+		return fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHub.Unpin(slug)
 }
