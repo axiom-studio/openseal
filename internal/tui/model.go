@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textarea"
-	tea "charm.land/bubbletea/v2"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/charmbracelet/bubbles/textarea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 )
 
@@ -127,12 +127,9 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	editor.Prompt = "│ "
 	editor.ShowLineNumbers = false
 	editor.CharLimit = 8_000
-	editor.DynamicHeight = true
-	editor.MinHeight = 3
 	editor.MaxHeight = 8
-	editor.MaxContentHeight = 40
+	editor.SetHeight(4)
 	editor.SetWidth(48)
-	editor.SetVirtualCursor(true)
 	editor.Focus()
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
@@ -145,7 +142,7 @@ func Run(ctx context.Context, kernelClient client.KernelClient, config Config) e
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
+	_, err = tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen()).Run()
 	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -231,7 +228,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			commands = append(commands, m.loadRuns())
 		}
 		return m, tea.Batch(commands...)
-	case tea.KeyPressMsg:
+	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
@@ -243,15 +240,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) View() tea.View {
-	content := m.render()
-	view := tea.NewView(content)
-	view.AltScreen = true
-	view.WindowTitle = "OpenSeal — Work"
-	return view
+func (m *Model) View() string {
+	return m.render()
 }
 
-func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
 	case "ctrl+c":

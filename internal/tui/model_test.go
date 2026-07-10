@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type fakeKernelClient struct {
@@ -74,7 +74,7 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	view := model.View().Content
+	view := model.View()
 	if !strings.Contains(view, "Current work") || !strings.Contains(view, "First durable outcome") {
 		t.Fatalf("work view missing canonical run:\n%s", view)
 	}
@@ -138,8 +138,8 @@ func TestContractMismatchFailsClosed(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.CapabilityDocument{Version: "99"}}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	if model.ready || !strings.Contains(model.View().Content, "Capability unavailable") {
-		t.Fatalf("mismatch did not fail closed:\n%s", model.View().Content)
+	if model.ready || !strings.Contains(model.View(), "Capability unavailable") {
+		t.Fatalf("mismatch did not fail closed:\n%s", model.View())
 	}
 }
 

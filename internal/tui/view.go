@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var (
