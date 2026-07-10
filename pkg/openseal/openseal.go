@@ -162,6 +162,7 @@ type (
 	ActionDispatcherFunc       = runtime.ActionDispatcherFunc
 	ToolInvoker                = runtime.ToolInvoker
 	ToolInvokerFunc            = runtime.ToolInvokerFunc
+	ToolInvocation             = runtime.ToolInvocation
 	ToolActionDispatcher       = runtime.ToolActionDispatcher
 	OpenClawSkillSource        = skillopenclaw.Source
 	OpenClawSkillFile          = skillopenclaw.File
