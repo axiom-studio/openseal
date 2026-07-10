@@ -9,25 +9,32 @@ import (
 )
 
 const (
-	Version                    = "1"
-	AgentRunsCapabilityID      = "agent-runs"
-	AgentRunsCapabilityVersion = "1"
-	ArtifactsCapabilityID      = "artifacts"
-	ArtifactsCapabilityVersion = "1"
+	Version                       = "1"
+	AgentRunsCapabilityID         = "agent-runs"
+	AgentRunsCapabilityVersion    = "1"
+	ArtifactsCapabilityID         = "artifacts"
+	ArtifactsCapabilityVersion    = "1"
+	TeamChannelsCapabilityID      = "team-channels"
+	TeamChannelsCapabilityVersion = "1"
 )
 
 const (
-	OperationCreate    = "create"
-	OperationGet       = "get"
-	OperationList      = "list"
-	OperationPause     = "pause"
-	OperationResume    = "resume"
-	OperationCancel    = "cancel"
-	OperationIntervene = "intervene"
-	OperationRegister  = "register"
-	OperationUpload    = "upload"
-	OperationDownload  = "download"
-	OperationResolve   = "resolve"
+	OperationCreate     = "create"
+	OperationGet        = "get"
+	OperationList       = "list"
+	OperationPause      = "pause"
+	OperationResume     = "resume"
+	OperationCancel     = "cancel"
+	OperationIntervene  = "intervene"
+	OperationRegister   = "register"
+	OperationUpload     = "upload"
+	OperationDownload   = "download"
+	OperationResolve    = "resolve"
+	OperationPost       = "post"
+	OperationCoordinate = "coordinate"
+	OperationRead       = "read"
+	OperationPresence   = "presence"
+	OperationAudit      = "audit"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -78,7 +85,7 @@ func AgentRunsCapability() Capability {
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{AgentRunsCapability()},
+		Capabilities: []Capability{AgentRunsCapability(), TeamChannelsCapability()},
 	}
 }
 
@@ -96,6 +103,13 @@ func ArtifactCapability(contentOperations ...string) Capability {
 		}
 	}
 	return capability
+}
+
+func TeamChannelsCapability() Capability {
+	return Capability{
+		ID: TeamChannelsCapabilityID, Version: TeamChannelsCapabilityVersion, Available: true,
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationCoordinate, OperationRead, OperationPresence, OperationAudit},
+	}
 }
 
 func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
@@ -140,4 +154,64 @@ type ResolveArtifactContentRequest struct {
 	Actor      runtime.ActivityActor `json:"actor"`
 	Purpose    string                `json:"purpose"`
 	TTLSeconds int64                 `json:"ttlSeconds"`
+}
+
+type CreateConversationRequest struct {
+	ID             string                 `json:"id,omitempty"`
+	Scope          runtime.Scope          `json:"scope"`
+	Owner          runtime.ObjectiveOwner `json:"owner"`
+	Title          string                 `json:"title"`
+	IdempotencyKey string                 `json:"idempotencyKey,omitempty"`
+}
+
+type PostChannelMessageRequest struct {
+	ID                  string                            `json:"id,omitempty"`
+	Scope               runtime.Scope                     `json:"scope"`
+	ExpectedRevision    int64                             `json:"expectedRevision"`
+	Sender              runtime.ConversationParticipant   `json:"sender"`
+	Intent              runtime.ConversationMessageIntent `json:"intent"`
+	Content             string                            `json:"content"`
+	Audience            runtime.ConversationAudience      `json:"audience"`
+	ReplyToMessageID    string                            `json:"replyToMessageId,omitempty"`
+	Mentions            []runtime.ConversationParticipant `json:"mentions,omitempty"`
+	References          []runtime.ConversationReference   `json:"references,omitempty"`
+	RequiresResponse    bool                              `json:"requiresResponse,omitempty"`
+	ResolvesMessageID   string                            `json:"resolvesMessageId,omitempty"`
+	SupersedesMessageID string                            `json:"supersedesMessageId,omitempty"`
+	IdempotencyKey      string                            `json:"idempotencyKey,omitempty"`
+}
+
+type CoordinateParticipationRequest struct {
+	ID               string                                `json:"id,omitempty"`
+	Scope            runtime.Scope                         `json:"scope"`
+	ExpectedRevision int64                                 `json:"expectedRevision"`
+	TriggerMessageID string                                `json:"triggerMessageId,omitempty"`
+	Policy           runtime.ConversationArbitrationPolicy `json:"policy,omitempty"`
+	Proposals        []runtime.ParticipationProposal       `json:"proposals"`
+	IdempotencyKey   string                                `json:"idempotencyKey,omitempty"`
+}
+
+type AdvanceConversationCursorRequest struct {
+	Scope             runtime.Scope                   `json:"scope"`
+	Participant       runtime.ConversationParticipant `json:"participant"`
+	ExpectedRevision  int64                           `json:"expectedRevision,omitempty"`
+	DeliveredSequence int64                           `json:"deliveredSequence"`
+	ReadSequence      int64                           `json:"readSequence"`
+}
+
+type SetConversationPresenceRequest struct {
+	Scope            runtime.Scope                     `json:"scope"`
+	Participant      runtime.ConversationParticipant   `json:"participant"`
+	State            runtime.ConversationPresenceState `json:"state"`
+	Summary          string                            `json:"summary,omitempty"`
+	RunID            string                            `json:"runId,omitempty"`
+	LeaseID          string                            `json:"leaseId,omitempty"`
+	ExpectedRevision int64                             `json:"expectedRevision,omitempty"`
+	TTLSeconds       int64                             `json:"ttlSeconds,omitempty"`
+}
+
+type ReleaseConversationPresenceRequest struct {
+	Scope       runtime.Scope                   `json:"scope"`
+	Participant runtime.ConversationParticipant `json:"participant"`
+	LeaseID     string                          `json:"leaseId"`
 }
