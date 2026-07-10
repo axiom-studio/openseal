@@ -76,6 +76,7 @@ type ArtifactRequirement struct {
 // audits identity and provenance without exposing signed URLs or credentials.
 type ArtifactReference struct {
 	ID              string                 `json:"id"`
+	Version         int64                  `json:"version"`
 	RequirementName string                 `json:"requirementName,omitempty"`
 	Name            string                 `json:"name"`
 	Type            string                 `json:"type,omitempty"`
@@ -258,21 +259,23 @@ type CollaborationKernelStore interface {
 	PortfolioStore
 	RunActivityStore
 	CollaborationStore
+	ArtifactStore
 }
 
 type CollaborationService struct {
-	store CollaborationStore
-	runs  PortfolioStore
-	now   func() time.Time
-	newID func() string
+	store     CollaborationStore
+	runs      PortfolioStore
+	artifacts ArtifactStore
+	now       func() time.Time
+	newID     func() string
 }
 
 func NewCollaborationService(store CollaborationKernelStore) *CollaborationService {
-	return &CollaborationService{store: store, runs: store, now: time.Now, newID: uuid.NewString}
+	return &CollaborationService{store: store, runs: store, artifacts: store, now: time.Now, newID: uuid.NewString}
 }
 
 func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
-	if s == nil || s.store == nil || s.runs == nil {
+	if s == nil || s.store == nil || s.runs == nil || s.artifacts == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
 	if err := req.Scope.Validate(); err != nil {
@@ -440,7 +443,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 // Principal is the authorized recipient; Actor is the agent or Team member
 // that actually performed the completion and is retained in the audit trail.
 func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req CompleteAgentRequestRequest) (*AgentRequestResult, error) {
-	if s == nil || s.store == nil || s.runs == nil {
+	if s == nil || s.store == nil || s.runs == nil || s.artifacts == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
 	if err := req.Scope.Validate(); err != nil {
@@ -456,11 +459,15 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if req.Principal != request.Recipient {
 		return nil, ErrAgentRequestUnauthorized
 	}
+	artifacts, err := s.resolveArtifactReferences(ctx, req.Scope, request.ArtifactRequirements, req.Artifacts)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
+	}
 	if request.Status == AgentRequestStatusCompleted {
 		if request.CompletionKey != strings.TrimSpace(req.CompletionKey) || request.CompletionKey == "" {
 			return nil, ErrInvalidAgentRequestState
 		}
-		if !sameAgentRequestCompletion(request, req) {
+		if !sameAgentRequestCompletion(request, req, artifacts) {
 			return nil, ErrAgentRequestIdempotency
 		}
 		source, sourceErr := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
@@ -495,9 +502,6 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if err := validateCredentialFreeContext(req.AcceptanceEvidence); err != nil {
 		return nil, err
 	}
-	if err := validateArtifactReferences(request.ArtifactRequirements, req.Artifacts); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
-	}
 	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
 	if err != nil {
 		return nil, err
@@ -520,7 +524,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	updatedRequest.Status = AgentRequestStatusCompleted
 	updatedRequest.CompletionSummary = strings.TrimSpace(req.Summary)
 	updatedRequest.AcceptanceEvidence = cloneMap(req.AcceptanceEvidence)
-	updatedRequest.Artifacts = normalizeArtifactReferences(req.Artifacts)
+	updatedRequest.Artifacts = artifacts
 	updatedRequest.CompletionKey = strings.TrimSpace(req.CompletionKey)
 	updatedRequest.Revision++
 	updatedRequest.UpdatedAt = now
@@ -700,7 +704,7 @@ func collaborationCompletionEvent(run *AgentRun, request *AgentRequest, eventTyp
 	artifacts := make([]map[string]interface{}, 0, len(request.Artifacts))
 	for _, artifact := range request.Artifacts {
 		artifacts = append(artifacts, map[string]interface{}{
-			"id": artifact.ID, "requirementName": artifact.RequirementName, "name": artifact.Name,
+			"id": artifact.ID, "version": artifact.Version, "requirementName": artifact.RequirementName, "name": artifact.Name,
 			"type": artifact.Type, "mediaType": artifact.MediaType, "digest": artifact.Digest, "sizeBytes": artifact.SizeBytes,
 		})
 	}
@@ -781,8 +785,8 @@ func validateArtifactReferences(requirements []ArtifactRequirement, artifacts []
 		artifact.ID = strings.TrimSpace(artifact.ID)
 		artifact.Name = strings.TrimSpace(artifact.Name)
 		artifact.ContentRef = strings.TrimSpace(artifact.ContentRef)
-		if artifact.ID == "" || artifact.Name == "" || artifact.ContentRef == "" {
-			return fmt.Errorf("artifact %d id, name, and content reference are required", index)
+		if artifact.ID == "" || artifact.Version <= 0 || artifact.Name == "" || artifact.ContentRef == "" {
+			return fmt.Errorf("artifact %d id, version, name, and content reference are required", index)
 		}
 		if _, exists := seenIDs[artifact.ID]; exists {
 			return fmt.Errorf("artifact id %q is duplicated", artifact.ID)
@@ -841,6 +845,75 @@ func validateArtifactReferences(requirements []ArtifactRequirement, artifacts []
 		}
 	}
 	return nil
+}
+
+func validateArtifactReferenceIntents(requirements []ArtifactRequirement, references []ArtifactReference) error {
+	requirementsByName := make(map[string]ArtifactRequirement, len(requirements))
+	for _, requirement := range requirements {
+		requirementsByName[strings.TrimSpace(requirement.Name)] = requirement
+	}
+	seen := make(map[string]struct{}, len(references))
+	provided := make(map[string]struct{}, len(references))
+	for index, reference := range references {
+		id := strings.TrimSpace(reference.ID)
+		if id == "" || reference.Version <= 0 {
+			return fmt.Errorf("artifact reference %d id and positive version are required", index)
+		}
+		key := fmt.Sprintf("%s:%d", id, reference.Version)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("artifact reference %q version %d is duplicated", id, reference.Version)
+		}
+		seen[key] = struct{}{}
+		if reference.Name != "" || reference.Type != "" || reference.MediaType != "" || reference.ContentRef != "" ||
+			reference.Digest != "" || reference.SizeBytes != 0 || reference.Metadata != nil || len(reference.EvidenceRefs) > 0 {
+			return fmt.Errorf("artifact reference %q must contain only id, version, and requirementName", id)
+		}
+		requirementName := strings.TrimSpace(reference.RequirementName)
+		if requirementName == "" {
+			continue
+		}
+		if _, exists := requirementsByName[requirementName]; !exists {
+			return fmt.Errorf("artifact reference %q names unknown requirement %q", id, requirementName)
+		}
+		provided[requirementName] = struct{}{}
+	}
+	for _, requirement := range requirements {
+		if requirement.Required {
+			if _, exists := provided[strings.TrimSpace(requirement.Name)]; !exists {
+				return fmt.Errorf("required artifact %q was not provided", requirement.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, scope Scope, requirements []ArtifactRequirement, references []ArtifactReference) ([]ArtifactReference, error) {
+	if err := validateArtifactReferenceIntents(requirements, references); err != nil {
+		return nil, err
+	}
+	resolved := make([]ArtifactReference, 0, len(references))
+	for _, reference := range references {
+		artifact, err := s.artifacts.GetArtifact(ctx, scope, strings.TrimSpace(reference.ID), reference.Version)
+		if err != nil {
+			return nil, err
+		}
+		if artifact == nil {
+			return nil, fmt.Errorf("%w: %s version %d", ErrArtifactNotFound, reference.ID, reference.Version)
+		}
+		evidenceRefs := make([]string, 0, len(artifact.Evidence))
+		for _, evidence := range artifact.Evidence {
+			evidenceRefs = append(evidenceRefs, evidence.TargetRef)
+		}
+		resolved = append(resolved, ArtifactReference{
+			ID: artifact.ID, Version: artifact.Version, RequirementName: strings.TrimSpace(reference.RequirementName),
+			Name: artifact.Name, Type: artifact.Type, MediaType: artifact.MediaType, ContentRef: artifact.ContentRef,
+			Digest: artifact.Digest, SizeBytes: artifact.SizeBytes, Metadata: cloneMap(artifact.Metadata), EvidenceRefs: evidenceRefs,
+		})
+	}
+	if err := validateArtifactReferences(requirements, resolved); err != nil {
+		return nil, err
+	}
+	return normalizeArtifactReferences(resolved), nil
 }
 
 func validateOpaqueArtifactRef(value string) error {
@@ -918,7 +991,7 @@ func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestReques
 		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal)
 }
 
-func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequestRequest) bool {
+func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequestRequest, artifacts []ArtifactReference) bool {
 	left, _ := json.Marshal(struct {
 		Summary   string
 		Evidence  map[string]interface{}
@@ -928,7 +1001,7 @@ func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequest
 		Summary   string
 		Evidence  map[string]interface{}
 		Artifacts []ArtifactReference
-	}{strings.TrimSpace(req.Summary), req.AcceptanceEvidence, normalizeArtifactReferences(req.Artifacts)})
+	}{strings.TrimSpace(req.Summary), req.AcceptanceEvidence, artifacts})
 	return bytes.Equal(left, right)
 }
 
