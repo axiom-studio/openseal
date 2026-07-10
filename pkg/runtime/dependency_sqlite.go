@@ -182,6 +182,18 @@ func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record RunDepend
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
+	result, err := s.resolveSQLiteDependencyConn(ctx, conn, record)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return result, nil
+}
+
+func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql.Conn, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
 	group, err := getSQLiteDependencyGroup(ctx, conn, record.Scope, record.GroupID, "")
 	if err != nil {
 		return nil, err
@@ -198,15 +210,8 @@ func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record RunDepend
 		return nil, err
 	}
 	result, err := applyRunDependencyResolution(group, edges, source, record)
-	if err != nil {
-		return nil, err
-	}
-	if result.Replayed {
-		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-			return nil, err
-		}
-		committed = true
-		return result, nil
+	if err != nil || result.Replayed {
+		return result, err
 	}
 	if err := updateSQLiteDependency(ctx, conn, result.Dependency, record.ExpectedDependencyRevision); err != nil {
 		return nil, err
@@ -225,10 +230,6 @@ func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record RunDepend
 		}
 		persisted = append(persisted, stored)
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return nil, err
-	}
-	committed = true
 	result.Events = persisted
 	return result, nil
 }

@@ -236,9 +236,22 @@ func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record AgentReq
 		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
 		}
+	}
+	if record.ChildRun != nil {
 		if err := s.insertPostgresAgentRunTx(ctx, tx, record.ChildRun); err != nil {
 			return nil, err
 		}
+	}
+	var dependencyEvents []*ActivityEvent
+	if record.DependencyResolution != nil {
+		dependencyResult, err := s.resolvePostgresDependencyTx(ctx, tx, *record.DependencyResolution)
+		if err != nil {
+			return nil, err
+		}
+		if dependencyResult.Replayed {
+			return nil, ErrInvalidAgentRequestState
+		}
+		dependencyEvents = dependencyResult.Events
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("agent_requests")+` SET status = $1, child_run_id = $2, revision = $3,
 		updated_at = $4, payload = $5::jsonb WHERE scope_kind = $6 AND scope_id = $7 AND id = $8 AND revision = $9`,
@@ -253,7 +266,7 @@ func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record AgentReq
 		}
 		return nil, ErrRevisionConflict
 	}
-	events := make([]*ActivityEvent, 0, 2)
+	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		if event == nil {
 			continue
@@ -264,6 +277,7 @@ func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record AgentReq
 		}
 		events = append(events, persisted)
 	}
+	events = append(events, dependencyEvents...)
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -295,8 +309,20 @@ func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record AgentRe
 	if currentRevision != record.ExpectedRequestRevision {
 		return nil, ErrRevisionConflict
 	}
-	if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
-		return nil, err
+	var dependencyEvents []*ActivityEvent
+	if record.DependencyResolution != nil {
+		dependencyResult, err := s.resolvePostgresDependencyTx(ctx, tx, *record.DependencyResolution)
+		if err != nil {
+			return nil, err
+		}
+		if dependencyResult.Replayed {
+			return nil, ErrInvalidAgentRequestState
+		}
+		dependencyEvents = dependencyResult.Events
+	} else {
+		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.updatePostgresAgentRunTx(ctx, tx, record.ChildRun, record.ExpectedChildRevision); err != nil {
 		return nil, err
@@ -314,7 +340,7 @@ func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record AgentRe
 		}
 		return nil, ErrRevisionConflict
 	}
-	events := make([]*ActivityEvent, 0, 2)
+	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		persisted, insertErr := s.insertPostgresActivityTx(ctx, tx, event)
 		if insertErr != nil {
@@ -322,6 +348,7 @@ func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record AgentRe
 		}
 		events = append(events, persisted)
 	}
+	events = append(events, dependencyEvents...)
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

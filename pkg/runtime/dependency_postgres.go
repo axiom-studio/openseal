@@ -199,6 +199,17 @@ func (s *PostgresStore) ResolveRunDependency(ctx context.Context, record RunDepe
 		return nil, err
 	}
 	defer tx.Rollback()
+	result, err := s.resolvePostgresDependencyTx(ctx, tx, record)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *PostgresStore) resolvePostgresDependencyTx(ctx context.Context, tx *sql.Tx, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
 	group, err := s.getPostgresDependencyGroup(ctx, tx, record.Scope, record.GroupID, "", true)
 	if err != nil {
 		return nil, err
@@ -215,14 +226,8 @@ func (s *PostgresStore) ResolveRunDependency(ctx context.Context, record RunDepe
 		return nil, err
 	}
 	result, err := applyRunDependencyResolution(group, edges, source, record)
-	if err != nil {
-		return nil, err
-	}
-	if result.Replayed {
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		return result, nil
+	if err != nil || result.Replayed {
+		return result, err
 	}
 	if err := s.updatePostgresDependencyTx(ctx, tx, result.Dependency, record.ExpectedDependencyRevision); err != nil {
 		return nil, err
@@ -240,9 +245,6 @@ func (s *PostgresStore) ResolveRunDependency(ctx context.Context, record RunDepe
 			return nil, err
 		}
 		persisted = append(persisted, stored)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	result.Events = persisted
 	return result, nil

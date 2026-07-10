@@ -343,6 +343,16 @@ func (c *DependencyCoordinator) GetRunDependencyGroup(ctx context.Context, scope
 	return group, nil
 }
 
+func (c *DependencyCoordinator) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope Scope, key string) (*RunDependencyGroup, error) {
+	if c == nil || c.store == nil {
+		return nil, errors.New("run dependency store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	return c.store.FindRunDependencyGroupByIdempotencyKey(ctx, scope, strings.TrimSpace(key))
+}
+
 func (c *DependencyCoordinator) ListRunDependencies(ctx context.Context, scope Scope, groupID string) ([]*RunDependency, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("run dependency store is not configured")

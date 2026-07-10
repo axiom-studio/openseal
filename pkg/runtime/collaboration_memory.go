@@ -112,19 +112,49 @@ func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequest
 		if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 {
 			return nil, ErrRevisionConflict
 		}
-		if record.ChildRun == nil || s.agentRuns[portfolioKey(record.ChildRun.Scope, record.ChildRun.ID)] != nil {
+		s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
+	}
+	if record.ChildRun != nil {
+		childKey := portfolioKey(record.ChildRun.Scope, record.ChildRun.ID)
+		if s.agentRuns[childKey] != nil {
 			return nil, ErrInvalidAgentRequestState
 		}
-		s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
-		s.agentRuns[portfolioKey(record.ChildRun.Scope, record.ChildRun.ID)] = cloneAgentRun(record.ChildRun)
+		s.agentRuns[childKey] = cloneAgentRun(record.ChildRun)
+	}
+	var dependencyEvents []*ActivityEvent
+	if record.DependencyResolution != nil {
+		resolution := *record.DependencyResolution
+		groupKey := dependencyGroupStoreKey(resolution.Scope, resolution.GroupID)
+		group := s.dependencyGroups[groupKey]
+		if group == nil {
+			return nil, ErrDependencyGroupNotFound
+		}
+		edges := dependencyMapSlice(s.dependencies[groupKey])
+		sourceKey := portfolioKey(group.Scope, group.SourceRunID)
+		result, err := applyRunDependencyResolution(group, edges, s.agentRuns[sourceKey], resolution)
+		if err != nil || result.Replayed {
+			if err != nil {
+				return nil, err
+			}
+			return nil, ErrInvalidAgentRequestState
+		}
+		s.dependencyGroups[groupKey] = cloneRunDependencyGroup(result.Group)
+		for _, edge := range result.Dependencies {
+			s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
+		}
+		s.agentRuns[sourceKey] = cloneAgentRun(result.Source)
+		dependencyEvents = result.Events
 	}
 	s.requests[key] = cloneAgentRequest(record.Request)
-	events := make([]*ActivityEvent, 0, 2)
+	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	if record.SourceEvent != nil {
 		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, record.SourceEvent)))
 	}
 	if record.ChildEvent != nil {
 		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, record.ChildEvent)))
+	}
+	for _, event := range dependencyEvents {
+		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, event)))
 	}
 	return events, nil
 }
@@ -143,22 +173,55 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 	if currentRequest.Revision != record.ExpectedRequestRevision || record.Request.Revision != currentRequest.Revision+1 {
 		return nil, ErrRevisionConflict
 	}
-	sourceKey := portfolioKey(record.SourceRun.Scope, record.SourceRun.ID)
 	childKey := portfolioKey(record.ChildRun.Scope, record.ChildRun.ID)
-	currentSource := s.agentRuns[sourceKey]
 	currentChild := s.agentRuns[childKey]
-	if currentSource == nil || currentChild == nil {
+	if currentChild == nil {
 		return nil, ErrRunNotFound
 	}
-	if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 ||
-		currentChild.Revision != record.ExpectedChildRevision || record.ChildRun.Revision != currentChild.Revision+1 {
+	if currentChild.Revision != record.ExpectedChildRevision || record.ChildRun.Revision != currentChild.Revision+1 {
 		return nil, ErrRevisionConflict
 	}
+	var dependencyEvents []*ActivityEvent
+	if record.DependencyResolution != nil {
+		resolution := *record.DependencyResolution
+		groupKey := dependencyGroupStoreKey(resolution.Scope, resolution.GroupID)
+		group := s.dependencyGroups[groupKey]
+		if group == nil {
+			return nil, ErrDependencyGroupNotFound
+		}
+		edges := dependencyMapSlice(s.dependencies[groupKey])
+		sourceKey := portfolioKey(group.Scope, group.SourceRunID)
+		result, err := applyRunDependencyResolution(group, edges, s.agentRuns[sourceKey], resolution)
+		if err != nil {
+			return nil, err
+		}
+		if result.Replayed {
+			return nil, ErrInvalidAgentRequestState
+		}
+		s.dependencyGroups[groupKey] = cloneRunDependencyGroup(result.Group)
+		for _, edge := range result.Dependencies {
+			s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
+		}
+		s.agentRuns[sourceKey] = cloneAgentRun(result.Source)
+		dependencyEvents = result.Events
+	} else {
+		sourceKey := portfolioKey(record.SourceRun.Scope, record.SourceRun.ID)
+		currentSource := s.agentRuns[sourceKey]
+		if currentSource == nil {
+			return nil, ErrRunNotFound
+		}
+		if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 {
+			return nil, ErrRevisionConflict
+		}
+		s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
+	}
 	s.requests[requestKey] = cloneAgentRequest(record.Request)
-	s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
 	s.agentRuns[childKey] = cloneAgentRun(record.ChildRun)
-	events := make([]*ActivityEvent, 0, 2)
+	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
+		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, event)))
+	}
+	for _, event := range dependencyEvents {
 		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, event)))
 	}
 	return events, nil
@@ -230,12 +293,14 @@ func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error
 	if err := record.SourceEvent.Validate(); err != nil {
 		return err
 	}
-	if record.SourceRun != nil {
+	if record.SourceRun != nil || record.ChildRun != nil {
 		if record.ChildRun == nil || record.ChildEvent == nil {
-			return errors.New("accepted agent request requires source run, child run, and child event")
+			return errors.New("accepted agent request requires child run and child event")
 		}
-		if err := record.SourceRun.Validate(); err != nil {
-			return err
+		if record.SourceRun != nil {
+			if err := record.SourceRun.Validate(); err != nil {
+				return err
+			}
 		}
 		if err := record.ChildRun.Validate(); err != nil {
 			return err
@@ -244,12 +309,25 @@ func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error
 			return err
 		}
 	}
+	if record.DependencyResolution != nil {
+		if err := validateRunDependencyResolutionRecord(*record.DependencyResolution); err != nil {
+			return err
+		}
+		if record.DependencyResolution.Scope != record.Request.Scope ||
+			record.DependencyResolution.GroupID != record.Request.DependencyGroupID ||
+			record.DependencyResolution.DependencyID != record.Request.DependencyID {
+			return ErrInvalidScope
+		}
+	}
 	return nil
 }
 
 func validateAgentRequestCompletionRecord(record AgentRequestCompletionRecord) error {
-	if record.Request == nil || record.SourceRun == nil || record.ChildRun == nil || record.SourceEvent == nil || record.ChildEvent == nil {
+	if record.Request == nil || record.ChildRun == nil || record.SourceEvent == nil || record.ChildEvent == nil {
 		return errors.New("agent request completion requires request, source run, child run, and both events")
+	}
+	if (record.SourceRun == nil) == (record.DependencyResolution == nil) {
+		return errors.New("agent request completion requires exactly one direct source update or dependency resolution")
 	}
 	if err := record.Request.Validate(); err != nil {
 		return err
@@ -258,8 +336,21 @@ func validateAgentRequestCompletionRecord(record AgentRequestCompletionRecord) e
 		return ErrInvalidAgentRequestState
 	}
 	for _, run := range []*AgentRun{record.SourceRun, record.ChildRun} {
+		if run == nil {
+			continue
+		}
 		if err := run.Validate(); err != nil {
 			return err
+		}
+	}
+	if record.DependencyResolution != nil {
+		if err := validateRunDependencyResolutionRecord(*record.DependencyResolution); err != nil {
+			return err
+		}
+		if record.DependencyResolution.Scope != record.Request.Scope ||
+			record.DependencyResolution.GroupID != record.Request.DependencyGroupID ||
+			record.DependencyResolution.DependencyID != record.Request.DependencyID {
+			return ErrInvalidScope
 		}
 	}
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
