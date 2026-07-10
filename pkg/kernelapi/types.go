@@ -126,6 +126,7 @@ type CreateAgentRunRequest struct {
 	ParentRunID     string                     `json:"parentRunId,omitempty"`
 	Owner           runtime.ObjectiveOwner     `json:"owner"`
 	AssignedAgentID string                     `json:"assignedAgentId,omitempty"`
+	ConcurrencyKey  string                     `json:"concurrencyKey,omitempty"`
 	Goal            string                     `json:"goal"`
 	Source          runtime.RunSource          `json:"source"`
 	Priority        int                        `json:"priority,omitempty"`

@@ -146,6 +146,69 @@ func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 	}
 }
 
+func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conversation-capacity.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "conversation-capacity"}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	for _, candidate := range []struct {
+		key      string
+		priority int
+	}{
+		{key: "channel-a", priority: 10},
+		{key: "channel-a", priority: 9},
+		{key: "channel-b", priority: 1},
+	} {
+		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+			Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
+			ConcurrencyKey: candidate.key, Goal: "Coordinate " + candidate.key, Source: RunSourceChat, Priority: candidate.priority,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim := AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: "worker-1", Now: now,
+		LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForConcurrencyKey: 1,
+	}
+	first, err := store.ClaimNextAgentRun(ctx, claim)
+	if err != nil || first == nil || first.ConcurrencyKey != "channel-a" {
+		t.Fatalf("first keyed claim = %#v, %v", first, err)
+	}
+	claim.WorkerID = "worker-2"
+	second, err := store.ClaimNextAgentRun(ctx, claim)
+	if err != nil || second == nil || second.ConcurrencyKey != "channel-b" {
+		t.Fatalf("independent keyed claim = %#v, %v", second, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	claim.WorkerID = "worker-3"
+	blocked, err := reopened.ClaimNextAgentRun(ctx, claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked != nil {
+		t.Fatalf("same-key capacity was lost across restart: %#v", blocked)
+	}
+	claim.WorkerID = "recovery-worker"
+	claim.Now = now.Add(time.Minute)
+	recovered, err := reopened.ClaimNextAgentRun(ctx, claim)
+	if err != nil || recovered == nil || recovered.ConcurrencyKey != "channel-a" {
+		t.Fatalf("expired keyed lease was not recoverable: %#v, %v", recovered, err)
+	}
+}
+
 func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-kinds.db")
 	store, err := NewSQLiteStore(path)

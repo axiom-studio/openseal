@@ -243,7 +243,7 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 		return nil, err
 	}
 	defer tx.Rollback()
-	if claim.MaxActiveForAgent > 0 {
+	if claim.MaxActiveForAgent > 0 || claim.MaxActiveForConcurrencyKey > 0 {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:agent-claim:"+claim.Scope.Kind+":"+claim.Scope.ID); err != nil {
 			return nil, err
 		}
@@ -262,11 +262,17 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 			AND active.assigned_agent_id = candidate.assigned_agent_id AND active.status = $5
 			AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
 		) < $7)
+		AND ($10 = 0 OR COALESCE(candidate.payload->>'concurrencyKey', '') = '' OR (
+			SELECT COUNT(*) FROM `+s.table("agent_runs")+` AS active
+			WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
+			AND COALESCE(active.payload->>'concurrencyKey', '') = COALESCE(candidate.payload->>'concurrencyKey', '')
+			AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
+		) < $10)
 		ORDER BY candidate.priority + FLOOR(GREATEST(EXTRACT(EPOCH FROM ($6 - candidate.queue_entered_at)), 0) / $8) DESC,
 			candidate.deadline ASC NULLS LAST, candidate.queue_entered_at ASC, candidate.id ASC
 		FOR UPDATE OF candidate SKIP LOCKED LIMIT 1`,
 		claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning,
-		claim.Now, claim.MaxActiveForAgent, agingSeconds, claim.Kind).Scan(&payload)
+		claim.Now, claim.MaxActiveForAgent, agingSeconds, claim.Kind, claim.MaxActiveForConcurrencyKey).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, err

@@ -173,6 +173,7 @@ type AgentRun struct {
 	RootRunID            string                 `json:"rootRunId"`
 	Owner                ObjectiveOwner         `json:"owner"`
 	AssignedAgentID      string                 `json:"assignedAgentId,omitempty"`
+	ConcurrencyKey       string                 `json:"concurrencyKey,omitempty"`
 	Goal                 string                 `json:"goal"`
 	Source               RunSource              `json:"source"`
 	Status               AgentRunStatus         `json:"status"`
@@ -225,6 +226,9 @@ func (r *AgentRun) Validate() error {
 	}
 	if r.Priority < 0 {
 		return errors.New("run priority cannot be negative")
+	}
+	if len(r.ConcurrencyKey) > 256 || strings.ContainsAny(r.ConcurrencyKey, "\r\n") {
+		return errors.New("run concurrency key cannot exceed 256 characters or contain line breaks")
 	}
 	return nil
 }
@@ -312,6 +316,7 @@ type CreateAgentRunRequest struct {
 	ParentRunID     string
 	Owner           ObjectiveOwner
 	AssignedAgentID string
+	ConcurrencyKey  string
 	Goal            string
 	Source          RunSource
 	Priority        int
@@ -484,7 +489,8 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 	run := &AgentRun{
 		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
-		AssignedAgentID: req.AssignedAgentID, Goal: req.Goal, Source: source,
+		AssignedAgentID: req.AssignedAgentID, ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
+		Goal: req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,

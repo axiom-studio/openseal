@@ -28,7 +28,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
 			service := NewRunCommandService(fixture.store(t))
 			create := CreateAgentRunRequest{
-				Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Operate the service",
+				Scope: scope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:operations", Goal: "Operate the service",
 				Source: RunSourceManual, IdempotencyKey: "run-one", Actor: ActivityActor{Type: "user", ID: "7"},
 			}
 			created, err := service.CreateAgentRun(ctx, create)
@@ -38,8 +38,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if created.Event == nil || created.Event.EventType != "run.created" || created.Event.Sequence != 1 {
 				t.Fatalf("creation event = %#v", created.Event)
 			}
-			if created.Run.Kind != RunKindAgentWork {
-				t.Fatalf("default run kind = %q", created.Run.Kind)
+			if created.Run.Kind != RunKindAgentWork || created.Run.ConcurrencyKey != "agent-1:operations" {
+				t.Fatalf("created run = %#v", created.Run)
 			}
 			replayed, err := service.CreateAgentRun(ctx, create)
 			if err != nil {
@@ -57,6 +57,11 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			changed.Kind = RunKindConversation
 			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
 				t.Fatalf("run kind replay conflict = %v", err)
+			}
+			changed = create
+			changed.ConcurrencyKey = "agent-1:other"
+			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+				t.Fatalf("concurrency key replay conflict = %v", err)
 			}
 
 			paused, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{

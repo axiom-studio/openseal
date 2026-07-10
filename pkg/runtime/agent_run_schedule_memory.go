@@ -12,11 +12,18 @@ func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	activeByAgent := make(map[string]int)
-	if claim.MaxActiveForAgent > 0 {
+	activeByConcurrencyKey := make(map[string]int)
+	if claim.MaxActiveForAgent > 0 || claim.MaxActiveForConcurrencyKey > 0 {
 		for _, run := range s.agentRuns {
-			if run.Scope == claim.Scope && run.Status == AgentRunStatusRunning && run.AssignedAgentID != "" &&
-				run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(claim.Now) {
+			if run.Scope != claim.Scope || run.Status != AgentRunStatusRunning ||
+				run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now) {
+				continue
+			}
+			if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
 				activeByAgent[run.AssignedAgentID]++
+			}
+			if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
+				activeByConcurrencyKey[run.ConcurrencyKey]++
 			}
 		}
 	}
@@ -26,6 +33,9 @@ func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) 
 			continue
 		}
 		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
+			continue
+		}
+		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
 			continue
 		}
 		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {

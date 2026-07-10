@@ -227,6 +227,58 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("capacity-limited claims = %d, want 1", limitedClaims)
 	}
 
+	for _, candidate := range []struct {
+		key      string
+		priority int
+	}{
+		{key: "channel-a", priority: 10},
+		{key: "channel-a", priority: 9},
+		{key: "channel-b", priority: 1},
+	} {
+		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+			Scope: scope, Kind: RunKindConversation, Owner: owner, ConcurrencyKey: candidate.key,
+			Goal: "Coordinate " + candidate.key, Source: RunSourceChat, Priority: candidate.priority,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keyed := make(chan *AgentRun, 3)
+	keyedErrors := make(chan error, 3)
+	wait = sync.WaitGroup{}
+	for worker := 0; worker < 3; worker++ {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			run, claimErr := stores[worker%len(stores)].ClaimNextAgentRun(ctx, AgentRunClaim{
+				Scope: scope, Kind: RunKindConversation, WorkerID: "keyed-worker-" + string(rune('a'+worker)),
+				Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForConcurrencyKey: 1,
+			})
+			if claimErr != nil {
+				keyedErrors <- claimErr
+				return
+			}
+			keyed <- run
+		}(worker)
+	}
+	wait.Wait()
+	close(keyed)
+	close(keyedErrors)
+	for claimErr := range keyedErrors {
+		t.Fatal(claimErr)
+	}
+	keyedClaims := 0
+	keyedClaimCounts := make(map[string]int)
+	for run := range keyed {
+		if run == nil {
+			continue
+		}
+		keyedClaims++
+		keyedClaimCounts[run.ConcurrencyKey]++
+	}
+	if keyedClaims != 2 || keyedClaimCounts["channel-a"] != 1 || keyedClaimCounts["channel-b"] != 1 {
+		t.Fatalf("cross-replica keyed claims = %d, counts = %#v", keyedClaims, keyedClaimCounts)
+	}
+
 	auditRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "auditor"}, AssignedAgentID: "auditor", Goal: "Audit activity", Source: RunSourceObjective})
 	if err != nil {
 		t.Fatal(err)
