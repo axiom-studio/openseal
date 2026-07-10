@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -10,8 +13,9 @@ import (
 )
 
 var (
-	ErrActionNotFound   = errors.New("action call not found")
-	ErrApprovalNotFound = errors.New("approval checkpoint not found")
+	ErrActionNotFound      = errors.New("action call not found")
+	ErrApprovalNotFound    = errors.New("approval checkpoint not found")
+	ErrIdempotencyConflict = errors.New("idempotency key was already used for a different action invocation")
 )
 
 type ActionCallStatus string
@@ -29,33 +33,34 @@ const (
 )
 
 type ActionCall struct {
-	ID             string                               `json:"id"`
-	Scope          Scope                                `json:"scope"`
-	RunID          string                               `json:"runId"`
-	TurnID         string                               `json:"turnId,omitempty"`
-	DeploymentID   string                               `json:"deploymentId"`
-	SkillID        string                               `json:"skillId"`
-	SkillVersion   string                               `json:"skillVersion"`
-	Action         string                               `json:"action"`
-	Status         ActionCallStatus                     `json:"status"`
-	Risk           skill.RiskLevel                      `json:"risk"`
-	SideEffect     skill.SideEffect                     `json:"sideEffect"`
-	Arguments      map[string]interface{}               `json:"arguments,omitempty"`
-	CredentialRefs map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
-	IdempotencyKey string                               `json:"idempotencyKey,omitempty"`
-	ApprovalID     string                               `json:"approvalId,omitempty"`
-	Attempt        int                                  `json:"attempt"`
-	MaxAttempts    int                                  `json:"maxAttempts"`
-	AvailableAt    time.Time                            `json:"availableAt"`
-	LeaseOwner     string                               `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt *time.Time                           `json:"leaseExpiresAt,omitempty"`
-	Output         map[string]interface{}               `json:"output,omitempty"`
-	Error          string                               `json:"error,omitempty"`
-	Revision       int64                                `json:"revision"`
-	CreatedAt      time.Time                            `json:"createdAt"`
-	UpdatedAt      time.Time                            `json:"updatedAt"`
-	StartedAt      *time.Time                           `json:"startedAt,omitempty"`
-	CompletedAt    *time.Time                           `json:"completedAt,omitempty"`
+	ID               string                               `json:"id"`
+	Scope            Scope                                `json:"scope"`
+	RunID            string                               `json:"runId"`
+	TurnID           string                               `json:"turnId,omitempty"`
+	DeploymentID     string                               `json:"deploymentId"`
+	SkillID          string                               `json:"skillId"`
+	SkillVersion     string                               `json:"skillVersion"`
+	Action           string                               `json:"action"`
+	Status           ActionCallStatus                     `json:"status"`
+	Risk             skill.RiskLevel                      `json:"risk"`
+	SideEffect       skill.SideEffect                     `json:"sideEffect"`
+	Arguments        map[string]interface{}               `json:"arguments,omitempty"`
+	CredentialRefs   map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+	IdempotencyKey   string                               `json:"idempotencyKey,omitempty"`
+	InvocationDigest string                               `json:"invocationDigest,omitempty"`
+	ApprovalID       string                               `json:"approvalId,omitempty"`
+	Attempt          int                                  `json:"attempt"`
+	MaxAttempts      int                                  `json:"maxAttempts"`
+	AvailableAt      time.Time                            `json:"availableAt"`
+	LeaseOwner       string                               `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt   *time.Time                           `json:"leaseExpiresAt,omitempty"`
+	Output           map[string]interface{}               `json:"output,omitempty"`
+	Error            string                               `json:"error,omitempty"`
+	Revision         int64                                `json:"revision"`
+	CreatedAt        time.Time                            `json:"createdAt"`
+	UpdatedAt        time.Time                            `json:"updatedAt"`
+	StartedAt        *time.Time                           `json:"startedAt,omitempty"`
+	CompletedAt      *time.Time                           `json:"completedAt,omitempty"`
 }
 
 func (c *ActionCall) Validate() error {
@@ -72,7 +77,30 @@ func (c *ActionCall) Validate() error {
 	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
 		return errors.New("action call lifecycle metadata is invalid")
 	}
+	if c.IdempotencyKey != "" && c.InvocationDigest == "" {
+		return errors.New("idempotent action calls require an invocation digest")
+	}
 	return nil
+}
+
+func ComputeActionInvocationDigest(call *ActionCall) string {
+	if call == nil {
+		return ""
+	}
+	canonical := struct {
+		DeploymentID   string                               `json:"deploymentId"`
+		SkillID        string                               `json:"skillId"`
+		SkillVersion   string                               `json:"skillVersion"`
+		Action         string                               `json:"action"`
+		Arguments      map[string]interface{}               `json:"arguments,omitempty"`
+		CredentialRefs map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+	}{call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 type ApprovalStatus string

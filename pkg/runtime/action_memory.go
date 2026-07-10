@@ -17,6 +17,9 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 		key := actionIdempotencyKey(call.Scope, call.RunID, call.IdempotencyKey)
 		if existingID := s.actionKeys[key]; existingID != "" {
 			existing := s.actions[portfolioKey(call.Scope, existingID)]
+			if existing.InvocationDigest != call.InvocationDigest {
+				return nil, ErrIdempotencyConflict
+			}
 			return &ActionProposalResult{
 				Call: cloneActionCall(existing), Approval: cloneApprovalCheckpoint(s.approvals[portfolioKey(call.Scope, existing.ApprovalID)]),
 				Created: false,
