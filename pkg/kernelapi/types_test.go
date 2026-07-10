@@ -17,3 +17,13 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 		t.Fatal("unsupported operation was advertised")
 	}
 }
+
+func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *testing.T) {
+	capability := ArtifactCapability()
+	if !capability.Supports(OperationRegister) || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {
+		t.Fatalf("artifact operations = %#v", capability.Operations)
+	}
+	if capability.Supports("upload") || capability.Supports("resolve") || capability.Supports("download") {
+		t.Fatalf("unconfigured content operation advertised: %#v", capability.Operations)
+	}
+}

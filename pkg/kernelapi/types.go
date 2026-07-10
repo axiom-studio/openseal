@@ -12,6 +12,8 @@ const (
 	Version                    = "1"
 	AgentRunsCapabilityID      = "agent-runs"
 	AgentRunsCapabilityVersion = "1"
+	ArtifactsCapabilityID      = "artifacts"
+	ArtifactsCapabilityVersion = "1"
 )
 
 const (
@@ -22,6 +24,7 @@ const (
 	OperationResume    = "resume"
 	OperationCancel    = "cancel"
 	OperationIntervene = "intervene"
+	OperationRegister  = "register"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -74,6 +77,17 @@ func Capabilities() CapabilityDocument {
 		Version:      Version,
 		Capabilities: []Capability{AgentRunsCapability()},
 	}
+}
+
+func ArtifactCapability() Capability {
+	return Capability{
+		ID: ArtifactsCapabilityID, Version: ArtifactsCapabilityVersion, Available: true,
+		Operations: []string{OperationRegister, OperationGet, OperationList},
+	}
+}
+
+func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
+	return CapabilityDocument{Version: Version, Capabilities: append([]Capability(nil), capabilities...)}
 }
 
 // CreateAgentRunRequest is the public request body for canonical durable work.

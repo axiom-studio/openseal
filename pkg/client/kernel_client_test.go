@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http/httptest"
 	"testing"
@@ -91,5 +93,34 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
+	store := runtime.NewMemoryStore(100)
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	scope := runtime.Scope{Kind: "local", ID: "artifacts"}
+	digest := sha256.Sum256([]byte("report"))
+	created, err := client.RegisterArtifact(context.Background(), runtime.RegisterArtifactRequest{Artifact: &runtime.Artifact{
+		ID: "report", Version: 1, Scope: scope, Name: "report.pdf", Type: "report",
+		MediaType: "application/pdf", ContentRef: "object-store:report",
+		Digest: "sha256:" + hex.EncodeToString(digest[:]), Classification: runtime.ArtifactClassificationConfidential,
+		Provenance: runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: "analyst"}, RunID: "run-1"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := client.GetArtifact(context.Background(), scope, created.Artifact.ID, 0)
+	if err != nil || loaded.Fingerprint != created.Artifact.Fingerprint {
+		t.Fatalf("loaded = %#v, %v", loaded, err)
+	}
+	listed, err := client.ListArtifacts(context.Background(), runtime.ArtifactFilter{
+		Scope: scope, Types: []string{"report"}, ProducerRunID: "run-1", LatestOnly: true,
+	})
+	if err != nil || len(listed) != 1 || listed[0].ID != created.Artifact.ID {
+		t.Fatalf("listed = %#v, %v", listed, err)
 	}
 }
