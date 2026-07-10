@@ -34,6 +34,9 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	if currentRun.Revision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
 	}
+	if proposal.Lease != nil && (currentRun.LeaseOwner != proposal.Lease.WorkerID || currentRun.LeaseExpiresAt == nil || !currentRun.LeaseExpiresAt.After(proposal.Lease.Now)) {
+		return nil, ErrLeaseLost
+	}
 	if s.actions[portfolioKey(call.Scope, call.ID)] != nil {
 		return nil, ErrRevisionConflict
 	}

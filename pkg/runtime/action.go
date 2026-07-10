@@ -126,6 +126,7 @@ type ApprovalCheckpoint struct {
 	Status                 ApprovalStatus         `json:"status"`
 	Risk                   skill.RiskLevel        `json:"risk"`
 	Summary                string                 `json:"summary"`
+	PolicyReason           string                 `json:"policyReason,omitempty"`
 	ProposedAction         map[string]interface{} `json:"proposedAction"`
 	EvidenceRefs           []string               `json:"evidenceRefs,omitempty"`
 	EligibleApprovers      []ApprovalPrincipal    `json:"eligibleApprovers"`
@@ -166,6 +167,7 @@ type ActionProposalRecord struct {
 	Approval            *ApprovalCheckpoint
 	Run                 *AgentRun
 	ExpectedRunRevision int64
+	Lease               *AgentRunLeaseGuard
 	Event               *ActivityEvent
 }
 
