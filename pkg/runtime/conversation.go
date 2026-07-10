@@ -9,6 +9,8 @@ import (
 
 var (
 	ErrConversationNotFound         = errors.New("conversation not found")
+	ErrChannelMessageNotFound       = errors.New("channel message not found")
+	ErrParticipationRoundNotFound   = errors.New("participation round not found")
 	ErrInvalidConversation          = errors.New("invalid conversation")
 	ErrMessageConflict              = errors.New("conversation message conflict")
 	ErrConversationCursorConflict   = errors.New("conversation cursor conflict")

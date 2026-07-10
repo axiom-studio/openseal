@@ -330,6 +330,8 @@ var (
 	ErrInvalidRunDependency         = runtime.ErrInvalidRunDependency
 	ErrDependencyConflict           = runtime.ErrDependencyConflict
 	ErrConversationNotFound         = runtime.ErrConversationNotFound
+	ErrChannelMessageNotFound       = runtime.ErrChannelMessageNotFound
+	ErrParticipationRoundNotFound   = runtime.ErrParticipationRoundNotFound
 	ErrInvalidConversation          = runtime.ErrInvalidConversation
 	ErrMessageConflict              = runtime.ErrMessageConflict
 	ErrConversationCursorConflict   = runtime.ErrConversationCursorConflict
