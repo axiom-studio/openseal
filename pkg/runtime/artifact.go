@@ -304,12 +304,18 @@ func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*A
 	return c.store.ListArtifacts(ctx, filter)
 }
 
-// ArtifactContentStore is implemented by a host that owns bytes. Raw content,
-// credentials, and signed URLs returned here must never be persisted in
-// Artifact or Activity state.
+// ArtifactContentStore is implemented by a host that owns bytes. Raw content
+// and storage credentials must never be persisted in Artifact or Activity
+// state. SizeBytes may be -1 when the incoming stream size is unknown.
 type ArtifactContentStore interface {
 	Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error)
 	Open(context.Context, Scope, string) (io.ReadCloser, error)
+}
+
+// ArtifactContentResolver optionally provides an authorized, short-lived
+// delivery URL. Resolutions are ephemeral API results and must never be stored
+// in kernel state or model context.
+type ArtifactContentResolver interface {
 	Resolve(context.Context, ArtifactContentResolutionRequest) (ArtifactContentResolution, error)
 }
 
