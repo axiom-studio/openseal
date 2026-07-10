@@ -121,6 +121,10 @@ type (
 	ConversationAudience               = runtime.ConversationAudience
 	ConversationReferenceKind          = runtime.ConversationReferenceKind
 	ConversationReference              = runtime.ConversationReference
+	ConversationArchiveSource          = runtime.ConversationArchiveSource
+	ConversationArchiveMessage         = runtime.ConversationArchiveMessage
+	ImportConversationArchiveRequest   = runtime.ImportConversationArchiveRequest
+	ConversationArchiveImportResult    = runtime.ConversationArchiveImportResult
 	ChannelMessage                     = runtime.ChannelMessage
 	ConversationCursor                 = runtime.ConversationCursor
 	ConversationPresenceState          = runtime.ConversationPresenceState
@@ -496,12 +500,13 @@ const (
 	ConversationAudienceParticipants = runtime.ConversationAudienceParticipants
 	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
 
-	ConversationReferenceObjective = runtime.ConversationReferenceObjective
-	ConversationReferenceRun       = runtime.ConversationReferenceRun
-	ConversationReferenceRequest   = runtime.ConversationReferenceRequest
-	ConversationReferenceApproval  = runtime.ConversationReferenceApproval
-	ConversationReferenceArtifact  = runtime.ConversationReferenceArtifact
-	ConversationReferenceActivity  = runtime.ConversationReferenceActivity
+	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
+	ConversationReferenceRun            = runtime.ConversationReferenceRun
+	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
+	ConversationReferenceApproval       = runtime.ConversationReferenceApproval
+	ConversationReferenceArtifact       = runtime.ConversationReferenceArtifact
+	ConversationReferenceActivity       = runtime.ConversationReferenceActivity
+	ConversationReferenceExternalSource = runtime.ConversationReferenceExternalSource
 
 	ConversationPresenceTyping  = runtime.ConversationPresenceTyping
 	ConversationPresenceWorking = runtime.ConversationPresenceWorking
@@ -1380,6 +1385,15 @@ func (e *Engine) ListConversations(ctx context.Context, filter runtime.Conversat
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListConversations(ctx, filter)
+}
+
+// ImportConversationArchive migrates user-visible historical collaboration
+// facts without scheduling new conversation Runs for old messages.
+func (e *Engine) ImportConversationArchive(ctx context.Context, request runtime.ImportConversationArchiveRequest) (*runtime.ConversationArchiveImportResult, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.ImportArchive(ctx, request)
 }
 
 func (e *Engine) PostChannelMessage(ctx context.Context, request runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error) {
