@@ -14,7 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// Server is the HTTP API server for the OpenSeal web GUI.
+// Server exposes the versioned OpenSeal kernel API and temporary workflow
+// compatibility routes. Interactive clients discover its capabilities.
 type Server struct {
 	registry     *executor.Registry
 	scheduler    *runtime.Scheduler

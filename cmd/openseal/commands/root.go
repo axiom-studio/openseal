@@ -11,11 +11,13 @@ const version = "0.1.0"
 // Args should be os.Args[1:].
 func Execute(args []string) {
 	if len(args) == 0 {
-		printUsage()
-		os.Exit(1)
+		tuiCmd(nil)
+		return
 	}
 
 	switch args[0] {
+	case "tui":
+		tuiCmd(args[1:])
 	case "run":
 		runCmd(args[1:])
 	case "daemon":
@@ -44,6 +46,7 @@ Usage:
   openseal <command> [arguments]
 
 Commands:
+  tui       Open the prompt-first Agent and Team workspace (default)
   run       Execute a workflow from an HCL file
   daemon    Start the daemon with trigger-driven execution
   validate  Validate a workflow HCL file
