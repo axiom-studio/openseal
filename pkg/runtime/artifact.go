@@ -210,8 +210,8 @@ type ArtifactStore interface {
 }
 
 type RegisterArtifactRequest struct {
-	Artifact              *Artifact
-	ExpectedLatestVersion int64
+	Artifact              *Artifact `json:"artifact"`
+	ExpectedLatestVersion int64     `json:"expectedLatestVersion"`
 }
 
 type ArtifactRegistrationResult struct {
