@@ -69,7 +69,11 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
-	existing, err := getSQLiteDependencyGroup(ctx, conn, record.Group.Scope, record.Group.ID, record.Group.IdempotencyKey)
+	existingGroupID := record.Group.ID
+	if record.Group.IdempotencyKey != "" {
+		existingGroupID = ""
+	}
+	existing, err := getSQLiteDependencyGroup(ctx, conn, record.Group.Scope, existingGroupID, record.Group.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
