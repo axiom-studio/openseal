@@ -12,6 +12,25 @@ import (
 	"time"
 )
 
+func TestParseSkillReferenceRejectsPathAndAmbiguousValues(t *testing.T) {
+	valid := map[string]SkillReference{
+		"summarize":               {Slug: "summarize"},
+		"@sean-ford/summarize_v2": {Owner: "sean-ford", Slug: "summarize_v2"},
+	}
+	for value, expected := range valid {
+		actual, err := ParseSkillReference(value)
+		if err != nil || actual != expected {
+			t.Fatalf("ParseSkillReference(%q) = %#v, %v; want %#v", value, actual, err, expected)
+		}
+	}
+
+	for _, value := range []string{"", ".", "..", "../skill", "owner/../skill", "/skill", "owner/skill/extra", "owner%2Fskill", "-owner/skill", "owner/-skill", "owner/skill.name"} {
+		if actual, err := ParseSkillReference(value); err == nil {
+			t.Fatalf("ParseSkillReference(%q) unexpectedly accepted %#v", value, actual)
+		}
+	}
+}
+
 func TestRegistrySupportsOwnerQualifiedLifecycle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("ownerHandle") != "acme" {
