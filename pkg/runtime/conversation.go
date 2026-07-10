@@ -199,6 +199,7 @@ type ChannelMessage struct {
 	ConversationID       string                    `json:"conversationId"`
 	Sequence             int64                     `json:"sequence"`
 	Sender               ConversationParticipant   `json:"sender"`
+	SenderDisplayName    string                    `json:"senderDisplayName,omitempty"`
 	Intent               ConversationMessageIntent `json:"intent"`
 	Content              string                    `json:"content"`
 	Audience             ConversationAudience      `json:"audience"`
@@ -227,6 +228,9 @@ func (m *ChannelMessage) Validate() error {
 	}
 	if err := m.Sender.Validate(); err != nil {
 		return err
+	}
+	if len(m.SenderDisplayName) > 160 || strings.ContainsAny(m.SenderDisplayName, "\r\n") {
+		return fmt.Errorf("%w: sender display name cannot exceed 160 characters or contain line breaks", ErrInvalidConversation)
 	}
 	if !validConversationMessageIntent(m.Intent) || strings.TrimSpace(m.Content) == "" || len(m.Content) > 65536 {
 		return fmt.Errorf("%w: valid intent and content of at most 64 KiB are required", ErrInvalidConversation)

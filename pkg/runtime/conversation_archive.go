@@ -42,16 +42,17 @@ func (s ConversationArchiveSource) reference(recordID string) ConversationRefere
 // be supplied as channel messages; preserve those through governed artifacts
 // or activity records instead.
 type ConversationArchiveMessage struct {
-	RecordID         string
-	Sender           ConversationParticipant
-	Intent           ConversationMessageIntent
-	Content          string
-	Audience         ConversationAudience
-	Mentions         []ConversationParticipant
-	References       []ConversationReference
-	ReplyToRecordID  string
-	RequiresResponse bool
-	CreatedAt        time.Time
+	RecordID          string
+	Sender            ConversationParticipant
+	SenderDisplayName string
+	Intent            ConversationMessageIntent
+	Content           string
+	Audience          ConversationAudience
+	Mentions          []ConversationParticipant
+	References        []ConversationReference
+	ReplyToRecordID   string
+	RequiresResponse  bool
+	CreatedAt         time.Time
 }
 
 type ImportConversationArchiveRequest struct {
@@ -137,7 +138,8 @@ func (s *ConversationService) ImportArchive(ctx context.Context, req ImportConve
 		message := &ChannelMessage{
 			ID: records[archived.RecordID], Scope: req.Scope, ConversationID: conversation.ID,
 			Sequence: current.LastSequence + 1, Sender: archived.Sender, Intent: archived.Intent,
-			Content: strings.TrimSpace(archived.Content), Audience: archived.Audience,
+			SenderDisplayName: strings.TrimSpace(archived.SenderDisplayName),
+			Content:           strings.TrimSpace(archived.Content), Audience: archived.Audience,
 			ReplyToMessageID: replyToID, Mentions: cloneParticipants(archived.Mentions), References: references,
 			RequiresResponse: archived.RequiresResponse, IdempotencyKey: messageKey, Historical: true, CreatedAt: archived.CreatedAt.UTC(),
 		}
