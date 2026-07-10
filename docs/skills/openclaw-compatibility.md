@@ -36,6 +36,8 @@ envelope.
 | `skills.entries.*.config` | binding configuration | Native; configuration is scoped to the deployment |
 | `skills.entries.*.env` and `apiKey` | opaque credential references and worker-time resolution | Native security boundary; raw values are never model-visible |
 | session skill snapshots | deterministic activation snapshot ID | Stable across restart for equivalent bindings/host capabilities; host revision changes force refresh identity |
+| workspace/project/personal/managed/bundled/plugin/extra roots | secure source catalog | Declared-name conflicts use documented precedence; one grouping level is supported |
+| directory refresh | debounced effective-source watcher | Emits only when the winning skill surface changes; shadowed edits stay quiet |
 | ClawHub search, explore, detail, versions, files, verify, archive | typed registry client | Native |
 | ClawHub install, update, update-all, pin, verify, uninstall | verified atomic installer and lockfile | Native with local-modification and rollback protection |
 | registry slug differing from declared skill name | source reference plus declared definition identity | Supported; registry identity remains provenance |
@@ -59,8 +61,10 @@ resolved values.
 
 ## Host extension boundaries
 
-Filesystem precedence, watchers, sandbox provisioning, installer execution,
-remote-node probing, Git acquisition, and plugin discovery depend on the host
-environment. OpenSeal exposes typed contracts for these concerns without
-pretending that a particular host implementation exists. An embedding
-application must advertise and test each adapter it enables.
+OpenSeal owns secure multi-root precedence and effective-source refresh, while
+the host chooses which concrete roots exist and which symlink targets it
+trusts. Sandbox provisioning, installer execution, remote-node probing, Git
+acquisition, and plugin discovery still depend on the host environment.
+OpenSeal exposes typed contracts for these concerns without pretending that a
+particular host implementation exists. An embedding application must advertise
+and test each adapter it enables.
