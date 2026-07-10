@@ -52,6 +52,38 @@ func TestCatalogProducesModelSafeScopedActions(t *testing.T) {
 	}
 }
 
+func TestCatalogDisabledBindingHidesCapabilities(t *testing.T) {
+	catalog := NewCatalog()
+	definition := testSkillDefinition()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &Binding{
+		ID: "binding", Scope: ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "operator",
+		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"deploy"},
+		MaximumRisk: RiskLevelProduction, Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "opaque"}}, Revision: 1,
+	}
+	if err := catalog.Bind(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	binding.Disabled = true
+	binding.Revision = 2
+	if err := catalog.Bind(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	actions, err := catalog.ListModelActions(context.Background(), binding.Scope, binding.DeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("disabled binding exposed actions: %#v", actions)
+	}
+	resolved, err := catalog.Resolve(context.Background(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, "deploy")
+	if err == nil || resolved != nil {
+		t.Fatalf("disabled binding resolved action: %#v, %v", resolved, err)
+	}
+}
+
 func TestCatalogValidatesSchemaRestrictionsRiskAndCredentials(t *testing.T) {
 	catalog := NewCatalog()
 	definition := testSkillDefinition()
