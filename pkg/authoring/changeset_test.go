@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,73 @@ func (g *sequenceChangeSetGenerator) Generate(context.Context, GenerateRequest) 
 	payload := g.payloads[0]
 	g.payloads = g.payloads[1:]
 	return payload, nil
+}
+
+func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Placement: ChangeSetPlacement{TeamDeploymentID: "marketing-live", AgentDeploymentIDs: map[string]string{"community-researcher": "researcher-live"}, Environment: "production"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
+	if err != nil || ready.Status != ChangeSetReady {
+		t.Fatalf("ready=%#v err=%v", ready, err)
+	}
+	req := ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	results := make(chan *ChangeSet, 2)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			value, _, err := service.Apply(context.Background(), req)
+			results <- value
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var receipt string
+	for value := range results {
+		if value.Status != ChangeSetApplied || value.ApplyReceipt == nil || len(value.ApplyReceipt.Resources) < 4 {
+			t.Fatalf("applied=%#v", value)
+		}
+		if receipt != "" && receipt != value.ApplyReceipt.ID {
+			t.Fatalf("receipts differ")
+		}
+		receipt = value.ApplyReceipt.ID
+	}
+	if len(store.definitions) != 2 || len(store.deployments) != 2 {
+		t.Fatalf("definitions=%d deployments=%d", len(store.definitions), len(store.deployments))
+	}
+	if _, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Actor: req.Actor, IdempotencyKey: "other"}); !errors.Is(err, ErrChangeSetIdempotency) {
+		t.Fatalf("different retry=%v", err)
+	}
+}
+
+func TestAtomicMemoryApplyRejectsIncompletePlacementWithoutPartialState(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	created, _, _ := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	ready, _, _ := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
+	_, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	if err == nil || len(store.definitions) != 0 || len(store.deployments) != 0 {
+		t.Fatalf("err=%v definitions=%d deployments=%d", err, len(store.definitions), len(store.deployments))
+	}
 }
 
 func TestChangeSetServicePersistsIdempotentImmutableCreateAndRefineLineage(t *testing.T) {
