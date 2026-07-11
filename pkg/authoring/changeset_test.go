@@ -36,7 +36,7 @@ func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	if err != nil || ready.Status != ChangeSetReady {
 		t.Fatalf("ready=%#v err=%v", ready, err)
 	}
-	req := ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"}
+	req := ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	results := make(chan *ChangeSet, 2)
@@ -62,15 +62,23 @@ func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 		if value.Status != ChangeSetApplied || value.ApplyReceipt == nil || len(value.ApplyReceipt.Resources) < 4 {
 			t.Fatalf("applied=%#v", value)
 		}
+		if value.ApplyReceipt.Reason != req.Reason || value.Lifecycle[len(value.Lifecycle)-1].Reason != req.Reason {
+			t.Fatalf("apply audit=%#v", value)
+		}
 		if receipt != "" && receipt != value.ApplyReceipt.ID {
 			t.Fatalf("receipts differ")
 		}
 		receipt = value.ApplyReceipt.ID
 	}
+	changedReason := req
+	changedReason.Reason = "Different activation reason"
+	if _, _, err := service.Apply(context.Background(), changedReason); !errors.Is(err, ErrChangeSetIdempotency) {
+		t.Fatalf("changed reason replay=%v", err)
+	}
 	if len(store.definitions) != 2 || len(store.deployments) != 2 {
 		t.Fatalf("definitions=%d deployments=%d", len(store.definitions), len(store.deployments))
 	}
-	if _, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Actor: req.Actor, IdempotencyKey: "other"}); !errors.Is(err, ErrChangeSetIdempotency) {
+	if _, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: req.Reason, Actor: req.Actor, IdempotencyKey: "other"}); !errors.Is(err, ErrChangeSetIdempotency) {
 		t.Fatalf("different retry=%v", err)
 	}
 }
@@ -83,7 +91,7 @@ func TestAtomicMemoryApplyRejectsIncompletePlacementWithoutPartialState(t *testi
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	created, _, _ := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
 	ready, _, _ := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
-	_, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	_, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
 	if err == nil || len(store.definitions) != 0 || len(store.deployments) != 0 {
 		t.Fatalf("err=%v definitions=%d deployments=%d", err, len(store.definitions), len(store.deployments))
 	}
@@ -126,7 +134,7 @@ func TestAtomicMemoryApplySupportsAgentWithoutTeam(t *testing.T) {
 		t.Fatalf("created=%#v err=%v", created, err)
 	}
 	ready, _, _ := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
-	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
 	if err != nil || applied.Status != ChangeSetApplied {
 		t.Fatalf("applied=%#v err=%v", applied, err)
 	}
