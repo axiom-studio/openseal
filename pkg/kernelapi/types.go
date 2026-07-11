@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -27,6 +28,8 @@ const (
 	TeamDefinitionsCapabilityVersion    = "1"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
 	WorkforceAuthoringCapabilityVersion = "2"
+	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
+	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 )
 
 const (
@@ -161,6 +164,14 @@ func InitiativesCapability() Capability {
 		ID: InitiativesCapabilityID, Version: InitiativesCapabilityVersion, Available: true,
 		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPatch},
 	}
+}
+
+func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capability {
+	operations := make([]string, 0, len(lifecycle.Operations))
+	for _, operation := range lifecycle.Operations {
+		operations = append(operations, string(operation))
+	}
+	return Capability{ID: ClawHubLifecycleCapabilityID, Version: ClawHubLifecycleCapabilityVersion, Available: len(operations) > 0, Operations: operations}
 }
 
 func Capabilities() CapabilityDocument {

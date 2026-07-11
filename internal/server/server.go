@@ -11,6 +11,7 @@ import (
 	internalWorkflow "github.com/axiom-studio/openseal/internal/workflow"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
@@ -36,6 +37,15 @@ type Server struct {
 	logger             *zap.SugaredLogger
 	mux                *http.ServeMux
 	httpServer         *http.Server
+	clawHub            *opensealkernel.Engine
+	clawHubMutations   bool
+}
+
+// SetClawHubLifecycle enables the canonical registry/install engine. Mutation
+// authority is supplied by the host and should only be true at a trusted local
+// operator boundary; read operations remain available otherwise.
+func (s *Server) SetClawHubLifecycle(engine *opensealkernel.Engine, allowMutations bool) {
+	s.clawHub, s.clawHubMutations = engine, allowMutations
 }
 
 // WorkflowEntry holds a loaded workflow with its source info.
