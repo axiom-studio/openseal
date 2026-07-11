@@ -9,6 +9,7 @@ import (
 	"time"
 
 	internalWorkflow "github.com/axiom-studio/openseal/internal/workflow"
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
@@ -22,6 +23,7 @@ type Server struct {
 	store            runtime.KernelStore
 	artifactContent  runtime.ArtifactContentStore
 	artifactResolver runtime.ArtifactContentResolver
+	authoring        *authoring.Compiler
 	workflowsDir     string
 	workflows        map[string]*WorkflowEntry
 	muWorkflows      sync.RWMutex
@@ -113,6 +115,11 @@ func (s *Server) SetArtifactContentStore(store runtime.ArtifactContentStore) {
 // Resolved URLs are returned to the caller and never persisted by Server.
 func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentResolver) {
 	s.artifactResolver = resolver
+}
+
+// SetWorkforceAuthoringCompiler enables non-activating prompt compilation.
+func (s *Server) SetWorkforceAuthoringCompiler(compiler *authoring.Compiler) {
+	s.authoring = compiler
 }
 
 // ListenAndServe starts the server on the given address.

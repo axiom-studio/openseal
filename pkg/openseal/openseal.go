@@ -5,11 +5,14 @@ package openseal
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -87,6 +90,18 @@ type (
 	WorkforceAmendmentPolicy              = workforce.AmendmentPolicy
 	WorkforceDefinitionProvenance         = workforce.DefinitionProvenance
 	WorkforceDefinitionActivation         = workforce.DefinitionActivation
+	WorkforceAuthoringMode                = authoring.Mode
+	WorkforceSkillCapability              = authoring.SkillCapability
+	WorkforceCapabilityCatalog            = authoring.CapabilityCatalog
+	WorkforceAssignment                   = authoring.Assignment
+	WorkforceCandidate                    = authoring.WorkforceCandidate
+	WorkforceAuthoringRequest             = authoring.GenerateRequest
+	WorkforceAuthoringGenerator           = authoring.Generator
+	WorkforceAuthoringResult              = authoring.CompileResult
+	WorkforceAuthoringValidationIssue     = authoring.ValidationIssue
+	WorkforceAuthoringMissingRequirement  = authoring.MissingRequirement
+	WorkforceAuthoringRiskChange          = authoring.RiskChange
+	WorkforceAuthoringFieldDiff           = authoring.FieldDiff
 
 	RunRecord                          = runtime.RunRecord
 	RetryPolicy                        = runtime.RetryPolicy
@@ -466,6 +481,9 @@ func NewSkillSourceWatcher(catalog *skillsource.Catalog, roots []skillsource.Roo
 }
 
 const (
+	WorkforceAuthoringCreate = authoring.ModeCreate
+	WorkforceAuthoringAmend  = authoring.ModeAmend
+
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
 
@@ -771,6 +789,7 @@ type Engine struct {
 	skills                        *skill.Catalog
 	agents                        *kernelagent.Registry
 	teams                         *kernelteam.Registry
+	authoring                     *authoring.Compiler
 	logger                        *zap.SugaredLogger
 }
 
@@ -1189,6 +1208,26 @@ func WithSkillCatalog(catalog *skill.Catalog) Option {
 		e.skills = catalog
 		return nil
 	}
+}
+
+// WithWorkforceAuthoringGenerator enables prompt-first workforce compilation.
+// The generator is the only probabilistic boundary; OpenSeal validates every
+// returned Agent and Team candidate and never activates compiled state.
+func WithWorkforceAuthoringGenerator(generator authoring.Generator) Option {
+	return func(e *Engine) error {
+		compiler, err := authoring.NewCompiler(generator)
+		if err != nil {
+			return err
+		}
+		e.authoring = compiler
+		return nil
+	}
+}
+
+// NewOpenAICompatibleWorkforceGenerator creates the portable chat-completions
+// adapter used by both standalone OpenSeal and embedding hosts.
+func NewOpenAICompatibleWorkforceGenerator(endpoint, apiKey, model string, client *http.Client) (authoring.Generator, error) {
+	return authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, client)
 }
 
 func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
@@ -1838,6 +1877,21 @@ func (e *Engine) GetTeamDefinition(ctx context.Context, id, version string) (*ke
 
 func (e *Engine) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
 	return e.teams.ListDefinitionVersions(ctx, id)
+}
+
+// WorkforceAuthoringAvailable reports whether this Engine has a configured
+// generation boundary. Hosts should use it for exact capability discovery.
+func (e *Engine) WorkforceAuthoringAvailable() bool {
+	return e != nil && e.authoring != nil
+}
+
+// CompileWorkforcePrompt produces a verified, reviewable candidate without
+// registering definitions, creating deployments, or activating state.
+func (e *Engine) CompileWorkforcePrompt(ctx context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
+	if e == nil || e.authoring == nil {
+		return nil, errors.New("workforce authoring is not configured")
+	}
+	return e.authoring.Compile(ctx, request)
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -36,6 +37,7 @@ type KernelClient interface {
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
 	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
+	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 }
 
 type TeamClient interface {
@@ -84,6 +86,14 @@ func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.Capabili
 	var document kernelapi.CapabilityDocument
 	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities", nil, "", &document)
 	return document, err
+}
+
+func (c *KernelHTTPClient) CompileWorkforce(ctx context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
+	var result authoring.CompileResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/authoring/workforce/compile", request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (c *KernelHTTPClient) CreateObjective(ctx context.Context, request kernelapi.CreateObjectiveRequest, idempotencyKey string) (*runtime.Objective, error) {
