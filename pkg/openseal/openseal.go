@@ -72,6 +72,9 @@ type (
 	ObjectiveOwner                     = runtime.ObjectiveOwner
 	Objective                          = runtime.Objective
 	ObjectiveStatus                    = runtime.ObjectiveStatus
+	ObjectiveCadence                   = runtime.ObjectiveCadence
+	ObjectiveCadenceType               = runtime.ObjectiveCadenceType
+	ObjectiveScheduleResult            = runtime.ObjectiveScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
@@ -440,6 +443,9 @@ const (
 	ObjectiveStatusSatisfied = runtime.ObjectiveStatusSatisfied
 	ObjectiveStatusFailed    = runtime.ObjectiveStatusFailed
 	ObjectiveStatusRetired   = runtime.ObjectiveStatusRetired
+	ObjectiveCadenceInterval = runtime.ObjectiveCadenceInterval
+	ObjectiveCadenceDaily    = runtime.ObjectiveCadenceDaily
+	ObjectiveCadenceWeekly   = runtime.ObjectiveCadenceWeekly
 
 	RunSourceManual    = runtime.RunSourceManual
 	RunSourceChat      = runtime.RunSourceChat
@@ -1339,6 +1345,10 @@ func (e *Engine) ListObjectives(ctx context.Context, filter runtime.ObjectiveFil
 
 func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, req runtime.UpdateObjectiveRequest) (*runtime.Objective, error) {
 	return e.portfolio.UpdateObjective(ctx, scope, objectiveID, req)
+}
+
+func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.ObjectiveScheduleResult, error) {
+	return runtime.NewObjectiveScheduler(e.store).ReconcileScope(ctx, scope, limit)
 }
 
 func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {

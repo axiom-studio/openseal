@@ -77,7 +77,7 @@ type Objective struct {
 	Goal                string                  `json:"goal"`
 	Status              ObjectiveStatus         `json:"status"`
 	Priority            int                     `json:"priority"`
-	Cadence             map[string]interface{}  `json:"cadence,omitempty"`
+	Cadence             *ObjectiveCadence       `json:"cadence,omitempty"`
 	EventRules          map[string]interface{}  `json:"eventRules,omitempty"`
 	Budget              *BudgetPolicy           `json:"budget,omitempty"`
 	BudgetAllocations   map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
@@ -111,12 +111,18 @@ func (o *Objective) Validate() error {
 	if !validObjectiveStatus(o.Status) {
 		return errors.New("objective status is invalid")
 	}
+	if err := o.Cadence.Validate(); err != nil {
+		return err
+	}
 	if o.Budget != nil {
 		if err := o.Budget.Validate(); err != nil {
 			return err
 		}
 		if err := validatePolicyAllocations(*o.Budget, o.BudgetAllocations); err != nil {
 			return err
+		}
+		if o.Cadence != nil && o.Cadence.RunBudget == nil {
+			return errors.New("budgeted recurring objective requires cadence runBudget allocation")
 		}
 	} else if len(o.BudgetAllocations) > 0 {
 		return errors.New("objective budget allocations require an objective budget")
@@ -336,7 +342,7 @@ type CreateObjectiveRequest struct {
 	Goal             string
 	Status           ObjectiveStatus
 	Priority         int
-	Cadence          map[string]interface{}
+	Cadence          *ObjectiveCadence
 	EventRules       map[string]interface{}
 	Budget           *BudgetPolicy
 	Constraints      map[string]interface{}
@@ -351,7 +357,7 @@ type UpdateObjectiveRequest struct {
 	Goal             *string
 	Status           *ObjectiveStatus
 	Priority         *int
-	Cadence          map[string]interface{}
+	Cadence          *ObjectiveCadence
 	EventRules       map[string]interface{}
 	Budget           *BudgetPolicy
 	Constraints      map[string]interface{}
@@ -415,6 +421,14 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 		return nil, err
 	}
 	now := s.now()
+	nextEvaluationAt := req.NextEvaluationAt
+	if nextEvaluationAt == nil && req.Cadence != nil {
+		next, nextErr := req.Cadence.Next(now)
+		if nextErr != nil {
+			return nil, nextErr
+		}
+		nextEvaluationAt = &next
+	}
 	status := req.Status
 	if status == "" {
 		status = ObjectiveStatusDraft
@@ -441,7 +455,7 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 		ID: objectiveID, Scope: req.Scope, Owner: req.Owner, Title: req.Title,
 		Goal: req.Goal, Status: status, Priority: req.Priority, Cadence: req.Cadence,
 		EventRules: req.EventRules, Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints,
-		SuccessCriteria: req.SuccessCriteria, NextEvaluationAt: req.NextEvaluationAt,
+		SuccessCriteria: req.SuccessCriteria, NextEvaluationAt: nextEvaluationAt,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, CreationFingerprint: fingerprint,
 	}
 	if key != "" {
@@ -725,7 +739,7 @@ func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {
 		Goal             string                 `json:"goal"`
 		Status           ObjectiveStatus        `json:"status"`
 		Priority         int                    `json:"priority"`
-		Cadence          map[string]interface{} `json:"cadence,omitempty"`
+		Cadence          *ObjectiveCadence      `json:"cadence,omitempty"`
 		EventRules       map[string]interface{} `json:"eventRules,omitempty"`
 		Budget           *BudgetPolicy          `json:"budget,omitempty"`
 		Constraints      map[string]interface{} `json:"constraints,omitempty"`

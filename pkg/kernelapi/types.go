@@ -155,34 +155,34 @@ type CreateAgentRunRequest struct {
 }
 
 type CreateObjectiveRequest struct {
-	Scope            runtime.Scope           `json:"scope"`
-	Owner            runtime.ObjectiveOwner  `json:"owner"`
-	Title            string                  `json:"title"`
-	Goal             string                  `json:"goal"`
-	Status           runtime.ObjectiveStatus `json:"status,omitempty"`
-	Priority         int                     `json:"priority,omitempty"`
-	Cadence          map[string]interface{}  `json:"cadence,omitempty"`
-	EventRules       map[string]interface{}  `json:"eventRules,omitempty"`
-	Budget           *runtime.BudgetPolicy   `json:"budget,omitempty"`
-	Constraints      map[string]interface{}  `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{}  `json:"successCriteria,omitempty"`
-	NextEvaluationAt *time.Time              `json:"nextEvaluationAt,omitempty"`
-	IdempotencyKey   string                  `json:"idempotencyKey,omitempty"`
+	Scope            runtime.Scope             `json:"scope"`
+	Owner            runtime.ObjectiveOwner    `json:"owner"`
+	Title            string                    `json:"title"`
+	Goal             string                    `json:"goal"`
+	Status           runtime.ObjectiveStatus   `json:"status,omitempty"`
+	Priority         int                       `json:"priority,omitempty"`
+	Cadence          *runtime.ObjectiveCadence `json:"cadence,omitempty"`
+	EventRules       map[string]interface{}    `json:"eventRules,omitempty"`
+	Budget           *runtime.BudgetPolicy     `json:"budget,omitempty"`
+	Constraints      map[string]interface{}    `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}    `json:"successCriteria,omitempty"`
+	NextEvaluationAt *time.Time                `json:"nextEvaluationAt,omitempty"`
+	IdempotencyKey   string                    `json:"idempotencyKey,omitempty"`
 }
 
 type UpdateObjectiveRequest struct {
-	ExpectedRevision int64                    `json:"expectedRevision"`
-	Title            *string                  `json:"title,omitempty"`
-	Goal             *string                  `json:"goal,omitempty"`
-	Status           *runtime.ObjectiveStatus `json:"status,omitempty"`
-	Priority         *int                     `json:"priority,omitempty"`
-	Cadence          map[string]interface{}   `json:"cadence,omitempty"`
-	EventRules       map[string]interface{}   `json:"eventRules,omitempty"`
-	Budget           *runtime.BudgetPolicy    `json:"budget,omitempty"`
-	Constraints      map[string]interface{}   `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{}   `json:"successCriteria,omitempty"`
-	ProgressSummary  *string                  `json:"progressSummary,omitempty"`
-	NextEvaluationAt *time.Time               `json:"nextEvaluationAt,omitempty"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	Title            *string                   `json:"title,omitempty"`
+	Goal             *string                   `json:"goal,omitempty"`
+	Status           *runtime.ObjectiveStatus  `json:"status,omitempty"`
+	Priority         *int                      `json:"priority,omitempty"`
+	Cadence          *runtime.ObjectiveCadence `json:"cadence,omitempty"`
+	EventRules       map[string]interface{}    `json:"eventRules,omitempty"`
+	Budget           *runtime.BudgetPolicy     `json:"budget,omitempty"`
+	Constraints      map[string]interface{}    `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}    `json:"successCriteria,omitempty"`
+	ProgressSummary  *string                   `json:"progressSummary,omitempty"`
+	NextEvaluationAt *time.Time                `json:"nextEvaluationAt,omitempty"`
 }
 
 type ObjectiveDetail struct {
