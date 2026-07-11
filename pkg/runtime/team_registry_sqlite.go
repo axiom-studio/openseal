@@ -31,11 +31,105 @@ func migrateTeamRegistry(db *sql.DB) error {
 			created_at DATETIME NOT NULL, payload TEXT NOT NULL,
 			UNIQUE (scope_kind, scope_id, deployment_id, deployment_revision)
 		);
+		CREATE TABLE IF NOT EXISTS team_definition_amendments (
+			id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
+			deployment_id TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL,
+			updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, id)
+		);
 		CREATE INDEX IF NOT EXISTS idx_team_definition_versions ON team_definitions(id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_team_definition_activations
 			ON team_definition_activations(scope_kind, scope_id, deployment_id, deployment_revision);
+		CREATE INDEX IF NOT EXISTS idx_team_definition_amendments
+			ON team_definition_amendments(scope_kind, scope_id, deployment_id, status, updated_at);
 	`)
 	return err
+}
+
+func (s *SQLiteStore) CreateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment) error {
+	payload, err := json.Marshal(amendment)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO team_definition_amendments(id, scope_kind, scope_id, deployment_id, status, revision, updated_at, payload) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		amendment.ID, amendment.Scope.Kind, amendment.Scope.ID, amendment.DeploymentID, amendment.Status, amendment.Revision, amendment.UpdatedAt, string(payload))
+	return err
+}
+
+func (s *SQLiteStore) GetTeamAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.DefinitionAmendment, error) {
+	var payload string
+	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM team_definition_amendments WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, kernelteam.ErrAmendmentNotFound
+		}
+		return nil, err
+	}
+	var amendment kernelteam.DefinitionAmendment
+	if err := json.Unmarshal([]byte(payload), &amendment); err != nil {
+		return nil, err
+	}
+	return &amendment, nil
+}
+
+func (s *SQLiteStore) UpdateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedRevision int64) error {
+	payload, err := json.Marshal(amendment)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE team_definition_amendments SET status = ?, revision = ?, updated_at = ?, payload = ? WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+		amendment.Status, amendment.Revision, amendment.UpdatedAt, string(payload), amendment.Scope.Kind, amendment.Scope.ID, amendment.ID, expectedRevision)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		if err != nil {
+			return err
+		}
+		return kernelteam.ErrRevisionConflict
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ActivateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelteam.Definition, deployment *kernelteam.Deployment, expectedDeploymentRevision int64, activation workforce.DefinitionActivation) error {
+	amendmentPayload, err := json.Marshal(amendment)
+	if err != nil {
+		return err
+	}
+	definitionPayload, err := json.Marshal(definition)
+	if err != nil {
+		return err
+	}
+	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO team_definitions(id, version, digest, created_at, payload) VALUES(?, ?, ?, ?, ?)`, definition.ID, definition.Version, definition.Digest, definition.CreatedAt, string(definitionPayload)); err != nil {
+		return err
+	}
+	deploymentResult, err := tx.ExecContext(ctx, `UPDATE team_deployments SET active_version = ?, revision = ?, updated_at = ?, payload = ? WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+		deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, deploymentPayload, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID, expectedDeploymentRevision)
+	if err != nil {
+		return err
+	}
+	amendmentResult, err := tx.ExecContext(ctx, `UPDATE team_definition_amendments SET status = ?, revision = ?, updated_at = ?, payload = ? WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+		amendment.Status, amendment.Revision, amendment.UpdatedAt, string(amendmentPayload), amendment.Scope.Kind, amendment.Scope.ID, amendment.ID, expectedAmendmentRevision)
+	if err != nil {
+		return err
+	}
+	deploymentRows, _ := deploymentResult.RowsAffected()
+	amendmentRows, _ := amendmentResult.RowsAffected()
+	if deploymentRows != 1 || amendmentRows != 1 {
+		return kernelteam.ErrRevisionConflict
+	}
+	if err := insertTeamActivation(ctx, tx, activation, activationPayload); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) CreateTeamDefinition(ctx context.Context, definition *kernelteam.Definition) error {

@@ -8,6 +8,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
@@ -35,11 +36,8 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	teams := kernelteam.NewRegistryWithStore(store, agents)
-	for _, version := range []string{"1", "2"} {
-		definition := sqliteTeamDefinition(version)
-		if _, err := teams.RegisterDefinition(ctx, definition); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := teams.RegisterDefinition(ctx, sqliteTeamDefinition("1")); err != nil {
+		t.Fatal(err)
 	}
 	deployment, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
 		ID: "research-team", Scope: scope, DefinitionID: "research-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
@@ -48,7 +46,21 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, _, err := teams.ActivateDefinition(ctx, scope, deployment.ID, "2", deployment.Revision, "user", "operator", "reviewed")
+	candidate := sqliteTeamDefinition("2")
+	candidate.Purpose = "Produce reviewed evidence-backed findings"
+	amendment, err := teams.ProposeAmendment(ctx, kernelteam.ProposeAmendmentRequest{
+		Scope: scope, DeploymentID: deployment.ID, Candidate: candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Require reviewed findings",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := teams.ResolveAmendment(ctx, kernelteam.ResolveAmendmentRequest{
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: true, ActorType: "user", ActorID: "operator", Reason: "reviewed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, updated, _, err := teams.ActivateAmendment(ctx, scope, amendment.ID, approved.Revision, "user", "operator", "approved")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +75,10 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	defer reopened.Close()
 	restartedAgents := kernelagent.NewRegistryWithStore(reopened)
 	restartedTeams := kernelteam.NewRegistryWithStore(reopened, restartedAgents)
+	restoredAmendment, err := restartedTeams.GetAmendment(ctx, scope, amendment.ID)
+	if err != nil || restoredAmendment.Status != kernelteam.AmendmentActivated || restoredAmendment.ActivationID != activated.ActivationID {
+		t.Fatalf("restored Team amendment = %#v, err = %v", restoredAmendment, err)
+	}
 	restored, err := restartedTeams.GetDeployment(ctx, scope, deployment.ID)
 	if err != nil || restored.ActiveVersion != updated.ActiveVersion || restored.Revision != 2 || restored.Roster[0].AgentDeploymentID != agentDeployment.ID {
 		t.Fatalf("restored Team = %#v, err = %v", restored, err)
@@ -87,5 +103,8 @@ func sqliteTeamDefinition(version string) *kernelteam.Definition {
 		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, MaximumSpeakersPerRound: 2, QuietByDefault: true},
 		Delegation:   kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 4, RequireAcceptance: true},
 		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"researcher"}},
+		Amendments: workforce.AmendmentPolicy{
+			AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"},
+		},
 	}
 }
