@@ -303,6 +303,12 @@ type (
 	TurnRunner                         = runtime.TurnRunner
 	TurnRunnerFunc                     = runtime.TurnRunnerFunc
 	TurnOutcome                        = runtime.TurnOutcome
+	HostedSkillPrompt                  = runtime.HostedSkillPrompt
+	HostedTurnRequest                  = runtime.HostedTurnRequest
+	HostedTurnResponse                 = runtime.HostedTurnResponse
+	TurnHost                           = runtime.TurnHost
+	HostedTurnRunnerConfig             = runtime.HostedTurnRunnerConfig
+	HostedTurnRunner                   = runtime.HostedTurnRunner
 	AdvanceAgentRunRequest             = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult              = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore              = runtime.AgentRunScheduleStore
@@ -419,6 +425,10 @@ type (
 	ClawHubLifecycleBatchResult        = clawhub.LifecycleBatchResult
 	ClawHubInstalledState              = clawhub.InstalledState
 )
+
+const HostedTurnAPIVersion = runtime.HostedTurnAPIVersion
+
+var NewHostedTurnRunner = runtime.NewHostedTurnRunner
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.
