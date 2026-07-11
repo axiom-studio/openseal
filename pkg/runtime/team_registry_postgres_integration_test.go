@@ -104,6 +104,34 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	if activated.Load() != 1 {
 		t.Fatalf("successful concurrent activations = %d, want 1", activated.Load())
 	}
+	candidate := sqliteTeamDefinition("3")
+	candidate.Purpose = "Produce independently reviewed evidence-backed findings"
+	amendment, err := primaryTeams.ProposeAmendment(ctx, kernelteam.ProposeAmendmentRequest{
+		Scope: scope, DeploymentID: deploymentInput.ID, Candidate: candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Independent review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := primaryTeams.ResolveAmendment(ctx, kernelteam.ResolveAmendmentRequest{
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: true, ActorType: "user", ActorID: "operator", Reason: "reviewed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var amendmentActivated atomic.Int32
+	for index := range registries {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			if _, _, _, err := registries[index].ActivateAmendment(ctx, scope, amendment.ID, approved.Revision, "user", "operator", "concurrent amendment activation"); err == nil {
+				amendmentActivated.Add(1)
+			}
+		}(index)
+	}
+	wait.Wait()
+	if amendmentActivated.Load() != 1 {
+		t.Fatalf("successful concurrent amendment activations = %d, want 1", amendmentActivated.Load())
+	}
 
 	restarted, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
@@ -112,12 +140,16 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	defer restarted.Close()
 	restartedTeams := kernelteam.NewRegistryWithStore(restarted, kernelagent.NewRegistryWithStore(restarted))
 	restored, err := restartedTeams.GetDeployment(ctx, scope, deploymentInput.ID)
-	if err != nil || restored.ActiveVersion != "2" || restored.Revision != 2 || restored.Roster[0].AgentDeploymentID != agentDeployment.ID {
+	if err != nil || restored.ActiveVersion != "3" || restored.Revision != 3 || restored.Roster[0].AgentDeploymentID != agentDeployment.ID {
 		t.Fatalf("restored Team = %#v, err = %v", restored, err)
 	}
 	activations, err := restartedTeams.ListActivations(ctx, scope, deploymentInput.ID)
-	if err != nil || len(activations) != 2 {
+	if err != nil || len(activations) != 3 {
 		t.Fatalf("restored activations = %#v, err = %v", activations, err)
+	}
+	restoredAmendment, err := restartedTeams.GetAmendment(ctx, scope, amendment.ID)
+	if err != nil || restoredAmendment.Status != kernelteam.AmendmentActivated {
+		t.Fatalf("restored amendment = %#v, err = %v", restoredAmendment, err)
 	}
 	if _, err := restartedTeams.GetDeployment(ctx, capability.ScopeReference{Kind: "tenant", ID: "other"}, deploymentInput.ID); err == nil {
 		t.Fatal("cross-scope Team deployment should not be visible")
