@@ -49,3 +49,15 @@ func TestWorkforceAuthoringAdvertisesCompilationWithoutActivation(t *testing.T) 
 		t.Fatalf("unsafe authoring operation advertised: %#v", capability.Operations)
 	}
 }
+
+func TestContextualApprovalEligibilityIsTypedAndNotAnOperationInference(t *testing.T) {
+	capability := WorkforceAuthoringCapability(true)
+	capability.Context = &CapabilityContext{ChangeSetID: "change-1", Revision: 4, EligibleApprovalRequirements: []ApprovalRequirementReference{{EvaluationID: "eval-1", PolicyID: "production", Role: "operator"}}}
+	if capability.Supports(OperationApprove) {
+		t.Fatal("eligibility context must not silently advertise an operation")
+	}
+	capability.Operations = append(capability.Operations, OperationApprove)
+	if !capability.Supports(OperationApprove) || capability.Context.Revision != 4 || capability.Context.EligibleApprovalRequirements[0].EvaluationID != "eval-1" {
+		t.Fatalf("contextual capability = %#v", capability)
+	}
+}

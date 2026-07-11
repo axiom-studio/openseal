@@ -3,14 +3,18 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"go.uber.org/zap"
 )
 
@@ -18,6 +22,41 @@ type authoringFixtureGenerator struct{}
 
 func (authoringFixtureGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
 	return []byte(`{"candidate":{"agents":[],"assignments":[]},"questions":["Which responsibilities should this Team own?"]}`), nil
+}
+
+type governedAuthoringGenerator struct{}
+
+func (governedAuthoringGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
+	agent := &kernelagent.AgentDefinition{ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Collect evidence", SystemPrompt: "Collect attributed evidence.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}}
+	team := &kernelteam.Definition{ID: "research", Version: "1", DisplayName: "Research", Purpose: "Synthesize evidence",
+		Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1, RequiredDefinitionIDs: []string{agent.ID}, ChannelParticipation: kernelteam.RoleChannelActive}},
+		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
+		Delegation:   kernelteam.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1, RequireAcceptance: true}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}}
+	return json.Marshal(authoring.GenerationResponse{Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{agent}, Team: team,
+		Assignments: []authoring.Assignment{{ID: "researcher", RoleID: "researcher", AgentDefinitionID: agent.ID, DisplayName: agent.DisplayName}}}})
+}
+
+type governedFixtureAuthority struct {
+	role  string
+	actor string
+}
+
+func (a governedFixtureAuthority) AuthorizeWorkforceLifecycle(_ context.Context, operation string, changeSet *authoring.ChangeSet) (WorkforceLifecycleAuthorization, error) {
+	switch operation {
+	case kernelapi.OperationEvaluate:
+		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "policy_evaluator", ID: "configured-policy"}}, nil
+	case kernelapi.OperationApprove:
+		result := WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}
+		if len(changeSet.Evaluations) > 0 {
+			evaluation := changeSet.Evaluations[len(changeSet.Evaluations)-1]
+			result.EligibleApprovalRequirements = []kernelapi.ApprovalRequirementReference{{EvaluationID: evaluation.ID, PolicyID: "production", Role: a.role}}
+		}
+		return result, nil
+	case kernelapi.OperationApply:
+		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
+	default:
+		return WorkforceLifecycleAuthorization{}, errors.New("unsupported operation")
+	}
 }
 
 func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
@@ -89,4 +128,113 @@ func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
 	if result.Valid || len(result.Questions) != 1 || len(result.Validation) == 0 {
 		t.Fatalf("compile result = %#v", result)
 	}
+}
+
+func TestGovernedWorkforceLifecycleIsContextualExactAndAtomic(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "governed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	createRequest := authoring.CreateChangeSetRequest{Scope: scope, Prompt: "Create a governed research Team",
+		Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}, Environment: "production"},
+		Actor:     authoring.ChangeSetActor{Type: "user", ID: "requester"}}
+	createdResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", mustJSON(t, createRequest), "create-governed")
+	var created authoring.ChangeSet
+	if createdResponse.Code != http.StatusCreated || json.NewDecoder(createdResponse.Body).Decode(&created) != nil || created.Status != authoring.ChangeSetReview {
+		t.Fatalf("created = %d %s", createdResponse.Code, createdResponse.Body.String())
+	}
+	capabilityPath := "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId=" + created.ID
+	unconfigured := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if strings.Contains(unconfigured.Body.String(), `"evaluate"`) || strings.Contains(unconfigured.Body.String(), `"approve"`) || strings.Contains(unconfigured.Body.String(), `"apply"`) || !strings.Contains(unconfigured.Body.String(), `"revision":1`) {
+		t.Fatalf("unconfigured capability = %s", unconfigured.Body.String())
+	}
+	bodyOnly := authoring.SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"}, IdempotencyKey: "body-only"}
+	bodyOnlyResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/evaluations", mustJSON(t, bodyOnly), "")
+	if bodyOnlyResponse.Code != http.StatusBadRequest {
+		t.Fatalf("body-only idempotency = %d %s", bodyOnlyResponse.Code, bodyOnlyResponse.Body.String())
+	}
+
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{role: "operator", actor: "configured-operator"})
+	reviewCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if !strings.Contains(reviewCapability.Body.String(), `"evaluate"`) || strings.Contains(reviewCapability.Body.String(), `"approve"`) || strings.Contains(reviewCapability.Body.String(), `"apply"`) {
+		t.Fatalf("review capability = %s", reviewCapability.Body.String())
+	}
+	evaluationRequest := bodyOnly
+	evaluationRequest.ApprovalRequirements = []authoring.ChangeSetApprovalRequirement{{PolicyID: "production", Role: "operator", Count: 1}, {PolicyID: "production", Role: "security", Count: 1}}
+	evaluationResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/evaluations", mustJSON(t, evaluationRequest), "evaluation-header")
+	var evaluated authoring.ChangeSet
+	if evaluationResponse.Code != http.StatusCreated || json.NewDecoder(evaluationResponse.Body).Decode(&evaluated) != nil || evaluated.Status != authoring.ChangeSetAwaitingApproval || evaluated.Evaluations[0].Actor.ID != "configured-policy" || evaluated.Evaluations[0].IdempotencyKey != "evaluation-header" {
+		t.Fatalf("evaluated = %d %s", evaluationResponse.Code, evaluationResponse.Body.String())
+	}
+	approvalCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if strings.Contains(approvalCapability.Body.String(), `"evaluate"`) || !strings.Contains(approvalCapability.Body.String(), `"approve"`) || strings.Contains(approvalCapability.Body.String(), `"role":"security"`) || !strings.Contains(approvalCapability.Body.String(), `"revision":2`) {
+		t.Fatalf("approval capability = %s", approvalCapability.Body.String())
+	}
+	approval := authoring.ResolveChangeSetApprovalRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: evaluated.Revision, EvaluationID: evaluated.Evaluations[0].ID, PolicyID: "production", Role: "security", Approved: true, Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"}}
+	forgedApproval := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/approvals", mustJSON(t, approval), "forged-approval")
+	if forgedApproval.Code != http.StatusForbidden {
+		t.Fatalf("forged approval = %d %s", forgedApproval.Code, forgedApproval.Body.String())
+	}
+	approval.Role = "operator"
+	approvedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/approvals", mustJSON(t, approval), "approval-header")
+	var approved authoring.ChangeSet
+	if approvedResponse.Code != http.StatusCreated || json.NewDecoder(approvedResponse.Body).Decode(&approved) != nil || approved.Status != authoring.ChangeSetAwaitingApproval || approved.ApprovalDecisions[0].Actor.ID != "configured-operator" {
+		t.Fatalf("approved = %d %s", approvedResponse.Code, approvedResponse.Body.String())
+	}
+	// The remaining security requirement is intentionally not granted to this
+	// principal, so Apply must remain absent and the exact decided requirement
+	// must disappear from its contextual capability.
+	afterDecision := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if strings.Contains(afterDecision.Body.String(), `"approve"`) || strings.Contains(afterDecision.Body.String(), `"apply"`) || !strings.Contains(afterDecision.Body.String(), `"revision":3`) {
+		t.Fatalf("post-decision capability = %s", afterDecision.Body.String())
+	}
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{role: "security", actor: "configured-security"})
+	securityCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if !strings.Contains(securityCapability.Body.String(), `"approve"`) || !strings.Contains(securityCapability.Body.String(), `"role":"security"`) || strings.Contains(securityCapability.Body.String(), `"role":"operator"`) {
+		t.Fatalf("security capability = %s", securityCapability.Body.String())
+	}
+	approval.ExpectedRevision = approved.Revision
+	approval.Role = "security"
+	securityApproval := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/approvals", mustJSON(t, approval), "security-approval")
+	var ready authoring.ChangeSet
+	if securityApproval.Code != http.StatusCreated || json.NewDecoder(securityApproval.Body).Decode(&ready) != nil || ready.Status != authoring.ChangeSetReady || ready.Revision != 4 {
+		t.Fatalf("security approval = %d %s", securityApproval.Code, securityApproval.Body.String())
+	}
+	readyCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if !strings.Contains(readyCapability.Body.String(), `"apply"`) || strings.Contains(readyCapability.Body.String(), `"approve"`) || strings.Contains(readyCapability.Body.String(), `"evaluate"`) || !strings.Contains(readyCapability.Body.String(), `"revision":4`) {
+		t.Fatalf("ready capability = %s", readyCapability.Body.String())
+	}
+	apply := authoring.ApplyChangeSetRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 3, CandidateDigest: ready.CandidateDigest, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"}}
+	staleApply := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/apply", mustJSON(t, apply), "apply-stable")
+	if staleApply.Code != http.StatusConflict {
+		t.Fatalf("stale apply = %d %s", staleApply.Code, staleApply.Body.String())
+	}
+	apply.ExpectedRevision = ready.Revision
+	appliedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/apply", mustJSON(t, apply), "apply-stable")
+	var applied authoring.ChangeSet
+	if appliedResponse.Code != http.StatusCreated || json.NewDecoder(appliedResponse.Body).Decode(&applied) != nil || applied.Status != authoring.ChangeSetApplied || applied.ApplyReceipt == nil || len(applied.ApplyReceipt.Resources) < 4 || applied.ApplyReceipt.Actor.ID != "configured-security" || applied.ApplyReceipt.Reason != apply.Reason {
+		t.Fatalf("applied = %d %s", appliedResponse.Code, appliedResponse.Body.String())
+	}
+	replayApply := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/apply", mustJSON(t, apply), "apply-stable")
+	if replayApply.Code != http.StatusOK || !strings.Contains(replayApply.Body.String(), applied.ApplyReceipt.ID) {
+		t.Fatalf("apply replay = %d %s", replayApply.Code, replayApply.Body.String())
+	}
+	appliedCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if strings.Contains(appliedCapability.Body.String(), `"evaluate"`) || strings.Contains(appliedCapability.Body.String(), `"approve"`) || strings.Contains(appliedCapability.Body.String(), `"apply"`) || !strings.Contains(appliedCapability.Body.String(), `"revision":5`) {
+		t.Fatalf("applied capability = %s", appliedCapability.Body.String())
+	}
+}
+
+func mustJSON(t *testing.T, value interface{}) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
