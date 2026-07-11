@@ -36,6 +36,11 @@ func TestPostgresInitiativeRestartAndAtomicActivity(t *testing.T) {
 	if err != nil || got.Revision != 1 {
 		t.Fatalf("restart initiative=%#v err=%v", got, err)
 	}
+	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}
+	listed, err := store.ListInitiatives(ctx, InitiativeFilter{Scope: scope, Owner: &owner, Statuses: []InitiativeStatus{InitiativeStatusDraft}, ObjectiveID: "objective-a", Limit: 1})
+	if err != nil || len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("filtered list=%#v err=%v", listed, err)
+	}
 	feed, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, Descending: true, Limit: 10})
 	if err != nil || len(feed) != 1 || feed[0].InitiativeID != created.ID {
 		t.Fatalf("restart activity=%#v err=%v", feed, err)

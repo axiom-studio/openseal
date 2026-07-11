@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 func migrateInitiatives(db *sql.DB) error {
@@ -39,7 +40,7 @@ func migrateInitiatives(db *sql.DB) error {
 			return err
 		}
 	}
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_initiatives_scope ON initiatives(scope_kind,scope_id,status,updated_at); CREATE UNIQUE INDEX IF NOT EXISTS idx_initiatives_idempotency ON initiatives(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''`)
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_initiatives_scope ON initiatives(scope_kind,scope_id,status,updated_at); CREATE INDEX IF NOT EXISTS idx_initiatives_owner ON initiatives(scope_kind,scope_id,owner_type,owner_id,updated_at); CREATE UNIQUE INDEX IF NOT EXISTS idx_initiatives_idempotency ON initiatives(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''`)
 	return err
 }
 func (s *SQLiteStore) CreateInitiativeWithEvent(ctx context.Context, i *Initiative, e *ActivityEvent) (*ActivityEvent, error) {
@@ -73,7 +74,7 @@ func (s *SQLiteStore) CreateInitiative(ctx context.Context, i *Initiative) error
 	if e != nil {
 		return e
 	}
-	_, e = s.db.ExecContext(ctx, `INSERT INTO initiatives(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,payload)VALUES(?,?,?,?,?,?,?,?,?)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b))
+	_, e = s.db.ExecContext(ctx, `INSERT INTO initiatives(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES(?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b))
 	return e
 }
 func (s *SQLiteStore) UpdateInitiativeWithEvent(ctx context.Context, i *Initiative, expected int64, e *ActivityEvent) (*ActivityEvent, error) {
@@ -116,7 +117,29 @@ func (s *SQLiteStore) ListInitiatives(ctx context.Context, f InitiativeFilter) (
 	if err := f.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, e := s.db.QueryContext(ctx, `SELECT payload FROM initiatives WHERE scope_kind=? AND scope_id=? ORDER BY updated_at DESC`, f.Scope.Kind, f.Scope.ID)
+	q := `SELECT payload FROM initiatives WHERE scope_kind=? AND scope_id=?`
+	args := []interface{}{f.Scope.Kind, f.Scope.ID}
+	if f.Owner != nil {
+		q += ` AND owner_type=? AND owner_id=?`
+		args = append(args, f.Owner.Type, f.Owner.ID)
+	}
+	if len(f.Statuses) > 0 {
+		q += ` AND status IN (` + strings.TrimRight(strings.Repeat("?,", len(f.Statuses)), ",") + `)`
+		for _, v := range f.Statuses {
+			args = append(args, v)
+		}
+	}
+	if f.ObjectiveID != "" {
+		q += ` AND EXISTS (SELECT 1 FROM json_each(initiatives.payload,'$.objectiveRefs') WHERE value=?)`
+		args = append(args, f.ObjectiveID)
+	}
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q += ` ORDER BY updated_at DESC,id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, f.Offset)
+	rows, e := s.db.QueryContext(ctx, q, args...)
 	if e != nil {
 		return nil, e
 	}
@@ -131,26 +154,9 @@ func (s *SQLiteStore) ListInitiatives(ctx context.Context, f InitiativeFilter) (
 		if e = json.Unmarshal([]byte(p), &i); e != nil {
 			return nil, e
 		}
-		if f.Owner != nil && i.Owner != *f.Owner {
-			continue
-		}
-		if len(f.Statuses) > 0 && !initiativeStatusContains(f.Statuses, i.Status) {
-			continue
-		}
-		if f.ObjectiveID != "" && !containsString(i.ObjectiveRefs, f.ObjectiveID) {
-			continue
-		}
 		out = append(out, &i)
 	}
-	start := f.Offset
-	if start > len(out) {
-		start = len(out)
-	}
-	end := len(out)
-	if f.Limit > 0 && start+f.Limit < end {
-		end = start + f.Limit
-	}
-	return out[start:end], rows.Err()
+	return out, rows.Err()
 }
 func (s *SQLiteStore) UpdateInitiative(ctx context.Context, i *Initiative, expected int64) error {
 	if err := i.Validate(); err != nil {

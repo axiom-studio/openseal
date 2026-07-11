@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 )
 
 func (s *PostgresStore) migrateInitiatives(ctx context.Context, tx *sql.Tx) error {
-	if _, e := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("initiatives")+` (id TEXT NOT NULL,scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,owner_type TEXT NOT NULL,owner_id TEXT NOT NULL,status TEXT NOT NULL,revision BIGINT NOT NULL,updated_at TIMESTAMPTZ NOT NULL,idempotency_key_hash TEXT NOT NULL DEFAULT '',payload JSONB NOT NULL,PRIMARY KEY(scope_kind,scope_id,id),CHECK(revision>0)); CREATE UNIQUE INDEX IF NOT EXISTS initiatives_idempotency_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''; CREATE INDEX IF NOT EXISTS initiatives_scope_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,status,updated_at DESC)`); e != nil {
+	if _, e := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("initiatives")+` (id TEXT NOT NULL,scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,owner_type TEXT NOT NULL,owner_id TEXT NOT NULL,status TEXT NOT NULL,revision BIGINT NOT NULL,updated_at TIMESTAMPTZ NOT NULL,idempotency_key_hash TEXT NOT NULL DEFAULT '',payload JSONB NOT NULL,PRIMARY KEY(scope_kind,scope_id,id),CHECK(revision>0)); CREATE UNIQUE INDEX IF NOT EXISTS initiatives_idempotency_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''; CREATE INDEX IF NOT EXISTS initiatives_scope_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,status,updated_at DESC); CREATE INDEX IF NOT EXISTS initiatives_owner_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,owner_type,owner_id,updated_at DESC)`); e != nil {
 		return e
 	}
 	_, e := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name)VALUES(13,'durable initiatives')ON CONFLICT(version)DO NOTHING`)
@@ -57,7 +59,7 @@ func (s *PostgresStore) CreateInitiative(ctx context.Context, i *Initiative) err
 	if e != nil {
 		return e
 	}
-	_, e = s.db.ExecContext(ctx, `INSERT INTO `+s.table("initiatives")+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b))
+	_, e = s.db.ExecContext(ctx, `INSERT INTO `+s.table("initiatives")+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b))
 	return e
 }
 func (s *PostgresStore) UpdateInitiativeWithEvent(ctx context.Context, i *Initiative, expected int64, e *ActivityEvent) (*ActivityEvent, error) {
@@ -110,7 +112,35 @@ func (s *PostgresStore) ListInitiatives(ctx context.Context, f InitiativeFilter)
 	if e := f.Scope.Validate(); e != nil {
 		return nil, e
 	}
-	rows, e := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("initiatives")+` WHERE scope_kind=$1 AND scope_id=$2 ORDER BY updated_at DESC`, f.Scope.Kind, f.Scope.ID)
+	q := `SELECT payload FROM ` + s.table("initiatives") + ` WHERE scope_kind=$1 AND scope_id=$2`
+	args := []interface{}{f.Scope.Kind, f.Scope.ID}
+	next := 3
+	if f.Owner != nil {
+		q += fmt.Sprintf(` AND owner_type=$%d AND owner_id=$%d`, next, next+1)
+		args = append(args, f.Owner.Type, f.Owner.ID)
+		next += 2
+	}
+	if len(f.Statuses) > 0 {
+		marks := make([]string, len(f.Statuses))
+		for x, v := range f.Statuses {
+			marks[x] = fmt.Sprintf("$%d", next)
+			next++
+			args = append(args, v)
+		}
+		q += ` AND status IN (` + strings.Join(marks, ",") + `)`
+	}
+	if f.ObjectiveID != "" {
+		q += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(payload->'objectiveRefs') value WHERE value=$%d)`, next)
+		args = append(args, f.ObjectiveID)
+		next++
+	}
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q += fmt.Sprintf(` ORDER BY updated_at DESC,id ASC LIMIT $%d OFFSET $%d`, next, next+1)
+	args = append(args, limit, f.Offset)
+	rows, e := s.db.QueryContext(ctx, q, args...)
 	if e != nil {
 		return nil, e
 	}
@@ -125,26 +155,9 @@ func (s *PostgresStore) ListInitiatives(ctx context.Context, f InitiativeFilter)
 		if e = json.Unmarshal(p, &i); e != nil {
 			return nil, e
 		}
-		if f.Owner != nil && i.Owner != *f.Owner {
-			continue
-		}
-		if len(f.Statuses) > 0 && !initiativeStatusContains(f.Statuses, i.Status) {
-			continue
-		}
-		if f.ObjectiveID != "" && !containsString(i.ObjectiveRefs, f.ObjectiveID) {
-			continue
-		}
 		out = append(out, &i)
 	}
-	start := f.Offset
-	if start > len(out) {
-		start = len(out)
-	}
-	end := len(out)
-	if f.Limit > 0 && start+f.Limit < end {
-		end = start + f.Limit
-	}
-	return out[start:end], rows.Err()
+	return out, rows.Err()
 }
 func (s *PostgresStore) UpdateInitiative(ctx context.Context, i *Initiative, expected int64) error {
 	if e := i.Validate(); e != nil {

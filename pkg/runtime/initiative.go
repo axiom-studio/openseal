@@ -397,6 +397,15 @@ func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequ
 	e := initiativeEvent(i, "initiative.created", req.Actor, req.Visibility, "Initiative created")
 	e, err = s.store.CreateInitiativeWithEvent(ctx, i, e)
 	if err != nil {
+		if i.IdempotencyKeyHash != "" {
+			winner, lookupErr := s.store.GetInitiativeByIdempotency(ctx, i.Scope, i.IdempotencyKeyHash)
+			if lookupErr == nil {
+				if winner.CreationFingerprint == fp {
+					return winner, nil, nil
+				}
+				return nil, nil, ErrInitiativeIdempotency
+			}
+		}
 		return nil, nil, err
 	}
 	return cloneInitiative(i), e, nil

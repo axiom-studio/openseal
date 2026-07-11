@@ -101,45 +101,80 @@ func TestInitiativeRejectsDuplicatedStateAndSecrets(t *testing.T) {
 }
 
 func TestInitiativeConcurrentIdempotentCreateHasOneWinner(t *testing.T) {
-	store := NewMemoryStore(100)
-	scope := Scope{Kind: "tenant", ID: "a"}
-	seedInitiativeObjectives(t, store, scope)
-	svc := NewInitiativeService(store, store)
-	const n = 24
-	ids := make(chan string, n)
-	errs := make(chan error, n)
-	var wg sync.WaitGroup
-	for x := 0; x < n; x++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			i := initiativeFixture(scope)
-			i.ID = ""
-			got, _, err := svc.Create(context.Background(), CreateInitiativeRequest{Initiative: i, IdempotencyKey: "same"})
-			if err == nil {
-				ids <- got.ID
+	tests := []struct {
+		name string
+		open func(*testing.T) (interface {
+			InitiativeStore
+			PortfolioStore
+		}, func())
+	}{
+		{"memory", func(*testing.T) (interface {
+			InitiativeStore
+			PortfolioStore
+		}, func()) {
+			return NewMemoryStore(100), func() {}
+		}},
+		{"sqlite", func(t *testing.T) (interface {
+			InitiativeStore
+			PortfolioStore
+		}, func()) {
+			s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "race.db"))
+			if err != nil {
+				t.Fatal(err)
 			}
-			errs <- err
-		}()
+			return s, func() { s.Close() }
+		}},
 	}
-	wg.Wait()
-	close(ids)
-	close(errs)
-	unique := map[string]bool{}
-	for id := range ids {
-		unique[id] = true
-	}
-	for err := range errs {
-		if err != nil && err != ErrInitiativeIdempotency {
-			t.Fatal(err)
-		}
-	}
-	if len(unique) != 1 {
-		t.Fatalf("created identities=%v", unique)
-	}
-	listed, err := store.ListInitiatives(context.Background(), InitiativeFilter{Scope: scope})
-	if err != nil || len(listed) != 1 {
-		t.Fatalf("rows=%d err=%v", len(listed), err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, closeStore := tc.open(t)
+			defer closeStore()
+			scope := Scope{Kind: "tenant", ID: "a"}
+			seedInitiativeObjectives(t, store, scope)
+			svc := NewInitiativeService(store, store)
+			base := initiativeFixture(scope)
+			base.ID = ""
+			const n = 24
+			ids := make(chan string, n)
+			errs := make(chan error, n)
+			var wg sync.WaitGroup
+			for x := 0; x < n; x++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					i := cloneInitiative(base)
+					got, _, err := svc.Create(context.Background(), CreateInitiativeRequest{Initiative: i, IdempotencyKey: "same"})
+					if err == nil {
+						ids <- got.ID
+					}
+					errs <- err
+				}()
+			}
+			wg.Wait()
+			close(ids)
+			close(errs)
+			unique := map[string]bool{}
+			for id := range ids {
+				unique[id] = true
+			}
+			for err := range errs {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(unique) != 1 {
+				t.Fatalf("created identities=%v", unique)
+			}
+			listed, err := store.ListInitiatives(context.Background(), InitiativeFilter{Scope: scope})
+			if err != nil || len(listed) != 1 {
+				t.Fatalf("rows=%d err=%v", len(listed), err)
+			}
+			conflict := cloneInitiative(base)
+			conflict.Purpose = "different"
+			if _, _, err = svc.Create(context.Background(), CreateInitiativeRequest{Initiative: conflict, IdempotencyKey: "same"}); err != ErrInitiativeIdempotency {
+				t.Fatalf("conflict=%v", err)
+			}
+		})
 	}
 }
 func TestInitiativePatchPreservesIdentityAndCreationProvenance(t *testing.T) {
@@ -209,6 +244,53 @@ func TestSQLiteInitiativeUpgradeBackfillsIdempotencyIndex(t *testing.T) {
 	var count int
 	if err = store.db.QueryRow(`SELECT count(*) FROM pragma_table_info('initiatives') WHERE name='idempotency_key_hash'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("column=%d err=%v", count, err)
+	}
+}
+
+func TestInitiativeStoreFiltersAndPaginatesInDeterministicOrder(t *testing.T) {
+	openers := []struct {
+		name string
+		open func(*testing.T) (InitiativeStore, func())
+	}{{"memory", func(*testing.T) (InitiativeStore, func()) { return NewMemoryStore(100), func() {} }}, {"sqlite", func(t *testing.T) (InitiativeStore, func()) {
+		s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "filter.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s, func() { s.Close() }
+	}}}
+	for _, tc := range openers {
+		t.Run(tc.name, func(t *testing.T) {
+			s, closeStore := tc.open(t)
+			defer closeStore()
+			scope := Scope{Kind: "tenant", ID: "a"}
+			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			for x, id := range []string{"a", "b", "c"} {
+				i := initiativeFixture(scope)
+				i.ID = id
+				i.CreatedAt = base
+				i.UpdatedAt = base.Add(time.Duration(x) * time.Hour)
+				if id == "b" {
+					i.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-b"}
+				}
+				if id == "c" {
+					i.Status = InitiativeStatusActive
+					i.ObjectiveRefs = []string{"objective-c"}
+					i.Milestones = nil
+				}
+				if err := s.CreateInitiative(context.Background(), i); err != nil {
+					t.Fatal(err)
+				}
+			}
+			owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}
+			rows, err := s.ListInitiatives(context.Background(), InitiativeFilter{Scope: scope, Owner: &owner, Statuses: []InitiativeStatus{InitiativeStatusDraft}, ObjectiveID: "objective-a", Limit: 1})
+			if err != nil || len(rows) != 1 || rows[0].ID != "a" {
+				t.Fatalf("filtered=%#v err=%v", rows, err)
+			}
+			rows, err = s.ListInitiatives(context.Background(), InitiativeFilter{Scope: scope, Limit: 1, Offset: 1})
+			if err != nil || len(rows) != 1 || rows[0].ID != "b" {
+				t.Fatalf("page=%#v err=%v", rows, err)
+			}
+		})
 	}
 }
 
