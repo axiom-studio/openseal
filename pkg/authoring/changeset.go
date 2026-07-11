@@ -59,6 +59,21 @@ type ChangeSetEvaluation struct {
 	SubmittedAt          time.Time                      `json:"submittedAt"`
 }
 
+// ChangeSetApprovalDecision records one principal's immutable decision against
+// one requirement emitted by a specific evaluation. Enterprise hosts own the
+// identity and role authorization boundary before submitting this fact.
+type ChangeSetApprovalDecision struct {
+	ID             string         `json:"id"`
+	IdempotencyKey string         `json:"idempotencyKey"`
+	EvaluationID   string         `json:"evaluationId"`
+	PolicyID       string         `json:"policyId"`
+	Role           string         `json:"role"`
+	Approved       bool           `json:"approved"`
+	Reason         string         `json:"reason,omitempty"`
+	Actor          ChangeSetActor `json:"actor"`
+	DecidedAt      time.Time      `json:"decidedAt"`
+}
+
 type ChangeSetLifecycleEvent struct {
 	Revision int64           `json:"revision"`
 	From     ChangeSetStatus `json:"from,omitempty"`
@@ -78,22 +93,23 @@ type ChangeSetPlacement struct {
 // lifecycle. Apply is deliberately a later transition, never a side effect of
 // compilation or refinement.
 type ChangeSet struct {
-	ID              string                    `json:"id"`
-	Scope           capability.ScopeReference `json:"scope"`
-	ParentID        string                    `json:"parentId,omitempty"`
-	Mode            Mode                      `json:"mode"`
-	Prompt          string                    `json:"prompt"`
-	PromptDigest    string                    `json:"promptDigest"`
-	CandidateDigest string                    `json:"candidateDigest"`
-	Result          CompileResult             `json:"result"`
-	Placement       ChangeSetPlacement        `json:"placement"`
-	Status          ChangeSetStatus           `json:"status"`
-	Actor           ChangeSetActor            `json:"actor"`
-	Evaluations     []ChangeSetEvaluation     `json:"evaluations,omitempty"`
-	Lifecycle       []ChangeSetLifecycleEvent `json:"lifecycle"`
-	Revision        int64                     `json:"revision"`
-	CreatedAt       time.Time                 `json:"createdAt"`
-	UpdatedAt       time.Time                 `json:"updatedAt"`
+	ID                string                      `json:"id"`
+	Scope             capability.ScopeReference   `json:"scope"`
+	ParentID          string                      `json:"parentId,omitempty"`
+	Mode              Mode                        `json:"mode"`
+	Prompt            string                      `json:"prompt"`
+	PromptDigest      string                      `json:"promptDigest"`
+	CandidateDigest   string                      `json:"candidateDigest"`
+	Result            CompileResult               `json:"result"`
+	Placement         ChangeSetPlacement          `json:"placement"`
+	Status            ChangeSetStatus             `json:"status"`
+	Actor             ChangeSetActor              `json:"actor"`
+	Evaluations       []ChangeSetEvaluation       `json:"evaluations,omitempty"`
+	ApprovalDecisions []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
+	Lifecycle         []ChangeSetLifecycleEvent   `json:"lifecycle"`
+	Revision          int64                       `json:"revision"`
+	CreatedAt         time.Time                   `json:"createdAt"`
+	UpdatedAt         time.Time                   `json:"updatedAt"`
 }
 
 type SubmitChangeSetEvaluationRequest struct {
@@ -106,6 +122,19 @@ type SubmitChangeSetEvaluationRequest struct {
 	ApprovalRequirements []ChangeSetApprovalRequirement `json:"approvalRequirements,omitempty"`
 	Actor                ChangeSetActor                 `json:"actor"`
 	IdempotencyKey       string                         `json:"idempotencyKey"`
+}
+
+type ResolveChangeSetApprovalRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ChangeSetID      string                    `json:"changeSetId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	EvaluationID     string                    `json:"evaluationId"`
+	PolicyID         string                    `json:"policyId"`
+	Role             string                    `json:"role"`
+	Approved         bool                      `json:"approved"`
+	Reason           string                    `json:"reason,omitempty"`
+	Actor            ChangeSetActor            `json:"actor"`
+	IdempotencyKey   string                    `json:"idempotencyKey"`
 }
 
 type CreateChangeSetRequest struct {
@@ -247,12 +276,18 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 	if current.Status != ChangeSetReview && current.Status != ChangeSetEvaluating {
 		return nil, false, fmt.Errorf("%w: cannot evaluate status %s", ErrChangeSetTransition, current.Status)
 	}
+	approvalKeys := make(map[string]struct{}, len(request.ApprovalRequirements))
 	for i := range request.ApprovalRequirements {
 		request.ApprovalRequirements[i].PolicyID = strings.TrimSpace(request.ApprovalRequirements[i].PolicyID)
 		request.ApprovalRequirements[i].Role = strings.TrimSpace(request.ApprovalRequirements[i].Role)
 		if request.ApprovalRequirements[i].PolicyID == "" || request.ApprovalRequirements[i].Role == "" || request.ApprovalRequirements[i].Count < 1 {
 			return nil, false, errors.New("approval requirements need a policy, role, and positive count")
 		}
+		key := request.ApprovalRequirements[i].PolicyID + "\x00" + request.ApprovalRequirements[i].Role
+		if _, duplicate := approvalKeys[key]; duplicate {
+			return nil, false, errors.New("approval requirements must have unique policy and role pairs")
+		}
+		approvalKeys[key] = struct{}{}
 	}
 	if !request.Allowed && len(request.ApprovalRequirements) > 0 {
 		return nil, false, errors.New("a denied evaluation cannot require approval")
@@ -279,6 +314,122 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 		return s.SubmitEvaluation(ctx, request)
 	}
 	return updated, false, err
+}
+
+func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveChangeSetApprovalRequest) (*ChangeSet, bool, error) {
+	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
+	request.EvaluationID = strings.TrimSpace(request.EvaluationID)
+	request.PolicyID = strings.TrimSpace(request.PolicyID)
+	request.Role = strings.TrimSpace(request.Role)
+	request.Reason = strings.TrimSpace(request.Reason)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	request.Actor.Type = strings.TrimSpace(request.Actor.Type)
+	request.Actor.ID = strings.TrimSpace(request.Actor.ID)
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" ||
+		request.ExpectedRevision < 1 || request.EvaluationID == "" || request.PolicyID == "" || request.Role == "" ||
+		request.Actor.Type == "" || request.Actor.ID == "" || request.IdempotencyKey == "" {
+		return nil, false, errors.New("approval scope, change set, revision, evaluation, policy, role, actor, and idempotency key are required")
+	}
+	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
+	if err != nil {
+		return nil, false, err
+	}
+	decisionDigest, err := digestJSON(struct {
+		EvaluationID string
+		PolicyID     string
+		Role         string
+		Approved     bool
+		Reason       string
+		Actor        ChangeSetActor
+	}{request.EvaluationID, request.PolicyID, request.Role, request.Approved, request.Reason, request.Actor})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, decision := range current.ApprovalDecisions {
+		if decision.IdempotencyKey != request.IdempotencyKey {
+			continue
+		}
+		storedDigest, _ := digestJSON(struct {
+			EvaluationID string
+			PolicyID     string
+			Role         string
+			Approved     bool
+			Reason       string
+			Actor        ChangeSetActor
+		}{decision.EvaluationID, decision.PolicyID, decision.Role, decision.Approved, decision.Reason, decision.Actor})
+		if storedDigest != decisionDigest {
+			return nil, false, ErrChangeSetIdempotency
+		}
+		return current, true, nil
+	}
+	if current.Revision != request.ExpectedRevision {
+		return nil, false, ErrChangeSetRevision
+	}
+	if current.Status != ChangeSetAwaitingApproval {
+		return nil, false, fmt.Errorf("%w: cannot approve status %s", ErrChangeSetTransition, current.Status)
+	}
+	var evaluation *ChangeSetEvaluation
+	for i := range current.Evaluations {
+		if current.Evaluations[i].ID == request.EvaluationID {
+			evaluation = &current.Evaluations[i]
+			break
+		}
+	}
+	if evaluation == nil || !evaluation.Allowed {
+		return nil, false, fmt.Errorf("%w: approval evaluation is not active", ErrChangeSetTransition)
+	}
+	var requirement *ChangeSetApprovalRequirement
+	for i := range evaluation.ApprovalRequirements {
+		candidate := &evaluation.ApprovalRequirements[i]
+		if candidate.PolicyID == request.PolicyID && candidate.Role == request.Role {
+			requirement = candidate
+			break
+		}
+	}
+	if requirement == nil {
+		return nil, false, fmt.Errorf("%w: approval requirement is not present", ErrChangeSetTransition)
+	}
+	for _, decision := range current.ApprovalDecisions {
+		if decision.EvaluationID == request.EvaluationID && decision.PolicyID == request.PolicyID && decision.Role == request.Role &&
+			decision.Actor.Type == request.Actor.Type && decision.Actor.ID == request.Actor.ID {
+			return nil, false, fmt.Errorf("%w: principal already decided this requirement", ErrChangeSetTransition)
+		}
+	}
+	now := s.now().UTC()
+	next := cloneChangeSet(current)
+	next.ApprovalDecisions = append(next.ApprovalDecisions, ChangeSetApprovalDecision{
+		ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, EvaluationID: request.EvaluationID,
+		PolicyID: request.PolicyID, Role: request.Role, Approved: request.Approved, Reason: request.Reason,
+		Actor: request.Actor, DecidedAt: now,
+	})
+	nextStatus, lifecycleReason := ChangeSetAwaitingApproval, "approval_recorded"
+	if !request.Approved {
+		nextStatus, lifecycleReason = ChangeSetRejected, "approval_rejected"
+	} else if approvalRequirementsSatisfied(evaluation.ApprovalRequirements, next.ApprovalDecisions, request.EvaluationID) {
+		nextStatus, lifecycleReason = ChangeSetReady, "approvals_satisfied"
+	}
+	next.Status, next.Revision, next.UpdatedAt = nextStatus, current.Revision+1, now
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: nextStatus, Reason: lifecycleReason, Actor: request.Actor, At: now})
+	updated, err := s.store.UpdateChangeSet(ctx, next, current.Revision)
+	if errors.Is(err, ErrChangeSetRevision) {
+		return s.ResolveApproval(ctx, request)
+	}
+	return updated, false, err
+}
+
+func approvalRequirementsSatisfied(requirements []ChangeSetApprovalRequirement, decisions []ChangeSetApprovalDecision, evaluationID string) bool {
+	for _, requirement := range requirements {
+		approved := 0
+		for _, decision := range decisions {
+			if decision.EvaluationID == evaluationID && decision.PolicyID == requirement.PolicyID && decision.Role == requirement.Role && decision.Approved {
+				approved++
+			}
+		}
+		if approved < requirement.Count {
+			return false
+		}
+	}
+	return len(requirements) > 0
 }
 
 func digestChangeSetRequest(request CreateChangeSetRequest, mode Mode, existing *WorkforceCandidate) (string, error) {

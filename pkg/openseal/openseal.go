@@ -109,9 +109,11 @@ type (
 	WorkforceChangeSetPolicyFinding           = authoring.ChangeSetPolicyFinding
 	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
 	WorkforceChangeSetEvaluation              = authoring.ChangeSetEvaluation
+	WorkforceChangeSetApprovalDecision        = authoring.ChangeSetApprovalDecision
 	WorkforceChangeSetLifecycleEvent          = authoring.ChangeSetLifecycleEvent
 	CreateWorkforceChangeSetRequest           = authoring.CreateChangeSetRequest
 	SubmitWorkforceChangeSetEvaluationRequest = authoring.SubmitChangeSetEvaluationRequest
+	ResolveWorkforceChangeSetApprovalRequest  = authoring.ResolveChangeSetApprovalRequest
 	WorkforceChangeSetStore                   = authoring.ChangeSetStore
 
 	RunRecord                          = runtime.RunRecord
@@ -1964,6 +1966,13 @@ func (e *Engine) SubmitWorkforceChangeSetEvaluation(ctx context.Context, request
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.SubmitEvaluation(ctx, request)
+}
+
+func (e *Engine) ResolveWorkforceChangeSetApproval(ctx context.Context, request authoring.ResolveChangeSetApprovalRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.ResolveApproval(ctx, request)
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {

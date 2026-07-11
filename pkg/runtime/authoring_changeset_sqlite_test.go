@@ -52,6 +52,7 @@ func TestSQLiteWorkforceChangeSetsAreConcurrentRestartSafeAndScoped(t *testing.T
 	updated := *value
 	updated.Status, updated.Revision = authoring.ChangeSetReady, 2
 	updated.UpdatedAt = value.UpdatedAt.Add(time.Minute)
+	updated.ApprovalDecisions = []authoring.ChangeSetApprovalDecision{{ID: "decision", EvaluationID: "evaluation", PolicyID: "production", Role: "operator", Approved: true, Actor: authoring.ChangeSetActor{Type: "user", ID: "7"}, DecidedAt: updated.UpdatedAt}}
 	if persisted, err := store.UpdateChangeSet(context.Background(), &updated, 1); err != nil || persisted.Revision != 2 {
 		t.Fatalf("update = %#v, err = %v", persisted, err)
 	}
@@ -74,7 +75,7 @@ func TestSQLiteWorkforceChangeSetsAreConcurrentRestartSafeAndScoped(t *testing.T
 	}
 	defer restarted.Close()
 	restored, err := restarted.GetChangeSet(context.Background(), scope, value.ID)
-	if err != nil || restored.CandidateDigest != value.CandidateDigest || restored.Status != authoring.ChangeSetReady || restored.Revision != 2 {
+	if err != nil || restored.CandidateDigest != value.CandidateDigest || restored.Status != authoring.ChangeSetReady || restored.Revision != 2 || len(restored.ApprovalDecisions) != 1 || restored.ApprovalDecisions[0].ID != "decision" {
 		t.Fatalf("restored = %#v, err = %v", restored, err)
 	}
 }

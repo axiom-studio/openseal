@@ -146,6 +146,69 @@ func TestChangeSetEvaluationCanMakeCandidateReadyOrRejectIt(t *testing.T) {
 	}
 }
 
+func TestChangeSetApprovalsRequireDistinctPrincipalsAndAreAuditable(t *testing.T) {
+	store := NewMemoryChangeSetStore()
+	now := time.Now().UTC()
+	evaluation := ChangeSetEvaluation{ID: "evaluation", CandidateDigest: "candidate", Allowed: true,
+		ApprovalRequirements: []ChangeSetApprovalRequirement{{PolicyID: "production", Role: "workforce_admin", Count: 2}}}
+	value := &ChangeSet{ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, CandidateDigest: "candidate",
+		Status: ChangeSetAwaitingApproval, Evaluations: []ChangeSetEvaluation{evaluation}, Revision: 2, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	service := &ChangeSetService{store: store, now: func() time.Time { return now.Add(time.Minute) }}
+	firstRequest := ResolveChangeSetApprovalRequest{Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: 2,
+		EvaluationID: evaluation.ID, PolicyID: "production", Role: "workforce_admin", Approved: true,
+		Actor: ChangeSetActor{Type: "user", ID: "alice"}, IdempotencyKey: "alice-approves"}
+	first, replay, err := service.ResolveApproval(context.Background(), firstRequest)
+	if err != nil || replay || first.Status != ChangeSetAwaitingApproval || first.Revision != 3 || len(first.ApprovalDecisions) != 1 || first.Lifecycle[0].Reason != "approval_recorded" {
+		t.Fatalf("first approval = %#v replay=%t err=%v", first, replay, err)
+	}
+	replayed, replay, err := service.ResolveApproval(context.Background(), firstRequest)
+	if err != nil || !replay || replayed.Revision != 3 {
+		t.Fatalf("approval replay = %#v replay=%t err=%v", replayed, replay, err)
+	}
+	duplicatePrincipal := firstRequest
+	duplicatePrincipal.ExpectedRevision = 3
+	duplicatePrincipal.IdempotencyKey = "alice-again"
+	if _, _, err := service.ResolveApproval(context.Background(), duplicatePrincipal); !errors.Is(err, ErrChangeSetTransition) {
+		t.Fatalf("duplicate principal = %v", err)
+	}
+	secondRequest := firstRequest
+	secondRequest.ExpectedRevision = 3
+	secondRequest.Actor.ID = "bob"
+	secondRequest.IdempotencyKey = "bob-approves"
+	ready, replay, err := service.ResolveApproval(context.Background(), secondRequest)
+	if err != nil || replay || ready.Status != ChangeSetReady || ready.Revision != 4 || len(ready.ApprovalDecisions) != 2 || ready.Lifecycle[1].Reason != "approvals_satisfied" {
+		t.Fatalf("ready = %#v replay=%t err=%v", ready, replay, err)
+	}
+	stale := secondRequest
+	stale.Actor.ID = "carol"
+	stale.IdempotencyKey = "carol-stale"
+	if _, _, err := service.ResolveApproval(context.Background(), stale); !errors.Is(err, ErrChangeSetRevision) {
+		t.Fatalf("stale approval = %v", err)
+	}
+}
+
+func TestChangeSetApprovalRejectionFailsClosed(t *testing.T) {
+	store := NewMemoryChangeSetStore()
+	now := time.Now().UTC()
+	evaluation := ChangeSetEvaluation{ID: "evaluation", CandidateDigest: "candidate", Allowed: true,
+		ApprovalRequirements: []ChangeSetApprovalRequirement{{PolicyID: "production", Role: "workforce_admin", Count: 1}}}
+	value := &ChangeSet{ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, CandidateDigest: "candidate",
+		Status: ChangeSetAwaitingApproval, Evaluations: []ChangeSetEvaluation{evaluation}, Revision: 2, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	service := &ChangeSetService{store: store, now: func() time.Time { return now.Add(time.Minute) }}
+	rejected, _, err := service.ResolveApproval(context.Background(), ResolveChangeSetApprovalRequest{Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: 2,
+		EvaluationID: evaluation.ID, PolicyID: "production", Role: "workforce_admin", Approved: false, Reason: "insufficient controls",
+		Actor: ChangeSetActor{Type: "user", ID: "alice"}, IdempotencyKey: "reject"})
+	if err != nil || rejected.Status != ChangeSetRejected || rejected.Lifecycle[0].Reason != "approval_rejected" || rejected.ApprovalDecisions[0].Reason != "insufficient controls" {
+		t.Fatalf("rejected = %#v err=%v", rejected, err)
+	}
+}
+
 func jsonMarshal(value interface{}) ([]byte, error) {
 	return json.Marshal(value)
 }
