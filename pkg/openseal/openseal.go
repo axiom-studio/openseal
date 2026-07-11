@@ -166,6 +166,7 @@ type (
 	BudgetState                        = runtime.BudgetState
 	AgentRunStatus                     = runtime.AgentRunStatus
 	AgentRunFilter                     = runtime.AgentRunFilter
+	AgentRunOwnerSummary               = runtime.AgentRunOwnerSummary
 	RunSource                          = runtime.RunSource
 	RunKind                            = runtime.RunKind
 	WakeCondition                      = runtime.WakeCondition
@@ -1668,6 +1669,10 @@ func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID str
 
 func (e *Engine) ListAgentRuns(ctx context.Context, filter runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
 	return e.portfolio.ListAgentRuns(ctx, filter)
+}
+
+func (e *Engine) SummarizeAgentRuns(ctx context.Context, scope runtime.Scope, owners []runtime.ObjectiveOwner) ([]runtime.AgentRunOwnerSummary, error) {
+	return e.portfolio.SummarizeAgentRuns(ctx, scope, owners)
 }
 
 func (e *Engine) RegisterArtifact(ctx context.Context, request runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {

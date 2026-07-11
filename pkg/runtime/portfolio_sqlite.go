@@ -361,6 +361,33 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *SQLiteStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ?`, scope.Kind, scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	runs := make([]*AgentRun, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		run, err := decodeAgentRun(payload)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return summarizeAgentRunOwners(runs, owners), nil
+}
+
 func decodeObjective(payload string) (*Objective, error) {
 	var objective Objective
 	if err := json.Unmarshal([]byte(payload), &objective); err != nil {

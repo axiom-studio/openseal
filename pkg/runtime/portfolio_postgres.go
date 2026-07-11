@@ -7,6 +7,8 @@ import (
 	"errors"
 	"sort"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 func (s *PostgresStore) migratePortfolio(ctx context.Context, tx *sql.Tx) error {
@@ -289,6 +291,42 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 		return result[i].ID < result[j].ID
 	})
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
+}
+
+func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if len(owners) == 0 {
+		return []AgentRunOwnerSummary{}, nil
+	}
+	keys := make([]string, 0, len(owners))
+	for _, owner := range owners {
+		keys = append(keys, string(owner.Type)+"\x1f"+owner.ID)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2
+		AND ((payload->'owner'->>'type') || chr(31) || (payload->'owner'->>'id')) = ANY($3)`, scope.Kind, scope.ID, pq.Array(keys))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	runs := make([]*AgentRun, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		run, err := decodeAgentRun(payload)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return summarizeAgentRunOwners(runs, owners), nil
 }
 
 func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {

@@ -312,6 +312,48 @@ type AgentRunFilter struct {
 	Offset          int
 }
 
+type AgentRunOwnerSummary struct {
+	Owner      ObjectiveOwner `json:"owner"`
+	RunCount   int64          `json:"runCount"`
+	LastRunAt  *time.Time     `json:"lastRunAt,omitempty"`
+	LastStatus AgentRunStatus `json:"lastStatus,omitempty"`
+}
+
+type AgentRunSummaryStore interface {
+	SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error)
+}
+
+func summarizeAgentRunOwners(runs []*AgentRun, owners []ObjectiveOwner) []AgentRunOwnerSummary {
+	requested := make(map[string]ObjectiveOwner, len(owners))
+	for _, owner := range owners {
+		requested[string(owner.Type)+"\x1f"+owner.ID] = owner
+	}
+	summaries := make(map[string]AgentRunOwnerSummary, len(owners))
+	for _, run := range runs {
+		key := string(run.Owner.Type) + "\x1f" + run.Owner.ID
+		owner, ok := requested[key]
+		if !ok {
+			continue
+		}
+		summary := summaries[key]
+		summary.Owner = owner
+		summary.RunCount++
+		if summary.LastRunAt == nil || run.CreatedAt.After(*summary.LastRunAt) {
+			at := run.CreatedAt
+			summary.LastRunAt = &at
+			summary.LastStatus = run.Status
+		}
+		summaries[key] = summary
+	}
+	result := make([]AgentRunOwnerSummary, 0, len(summaries))
+	for _, owner := range owners {
+		if summary, ok := summaries[string(owner.Type)+"\x1f"+owner.ID]; ok {
+			result = append(result, summary)
+		}
+	}
+	return result
+}
+
 // PortfolioStore persists the multi-objective agent kernel independently from
 // any one enterprise database implementation.
 type PortfolioStore interface {
@@ -733,6 +775,25 @@ func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFil
 		}
 	}
 	return s.store.ListAgentRuns(ctx, filter)
+}
+
+func (s *PortfolioService) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("portfolio service is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	for _, owner := range owners {
+		if err := owner.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	store, ok := s.store.(AgentRunSummaryStore)
+	if !ok {
+		return nil, errors.New("agent run summaries are unavailable")
+	}
+	return store.SummarizeAgentRuns(ctx, scope, owners)
 }
 
 func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
