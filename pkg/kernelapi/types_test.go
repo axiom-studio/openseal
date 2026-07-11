@@ -27,3 +27,15 @@ func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *test
 		t.Fatalf("unconfigured content operation advertised: %#v", capability.Operations)
 	}
 }
+
+func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
+	capability := TeamDefinitionsCapability()
+	for _, operation := range []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationActivate} {
+		if !capability.Supports(operation) {
+			t.Fatalf("Team definition operation %q not advertised", operation)
+		}
+	}
+	if capability.Supports(OperationUpdate) || capability.Supports("delete") {
+		t.Fatalf("unsupported Team definition operation advertised: %#v", capability.Operations)
+	}
+}

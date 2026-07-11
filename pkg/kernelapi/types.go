@@ -5,19 +5,24 @@ package kernelapi
 import (
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 const (
-	Version                       = "1"
-	AgentRunsCapabilityID         = "agent-runs"
-	AgentRunsCapabilityVersion    = "1"
-	ObjectivesCapabilityID        = "objectives"
-	ObjectivesCapabilityVersion   = "1"
-	ArtifactsCapabilityID         = "artifacts"
-	ArtifactsCapabilityVersion    = "1"
-	TeamChannelsCapabilityID      = "team-channels"
-	TeamChannelsCapabilityVersion = "1"
+	Version                          = "1"
+	AgentRunsCapabilityID            = "agent-runs"
+	AgentRunsCapabilityVersion       = "1"
+	ObjectivesCapabilityID           = "objectives"
+	ObjectivesCapabilityVersion      = "1"
+	ArtifactsCapabilityID            = "artifacts"
+	ArtifactsCapabilityVersion       = "1"
+	TeamChannelsCapabilityID         = "team-channels"
+	TeamChannelsCapabilityVersion    = "1"
+	TeamDefinitionsCapabilityID      = "team-definitions"
+	TeamDefinitionsCapabilityVersion = "1"
 )
 
 const (
@@ -39,6 +44,8 @@ const (
 	OperationPresence   = "presence"
 	OperationAudit      = "audit"
 	OperationChanges    = "changes"
+	OperationDeploy     = "deploy"
+	OperationActivate   = "activate"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -53,6 +60,27 @@ type Capability struct {
 	Version    string   `json:"version"`
 	Available  bool     `json:"available"`
 	Operations []string `json:"operations"`
+}
+
+type CreateTeamDeploymentRequest struct {
+	Deployment *kernelteam.Deployment `json:"deployment"`
+	ActorType  string                 `json:"actorType"`
+	ActorID    string                 `json:"actorId"`
+	Reason     string                 `json:"reason,omitempty"`
+}
+
+type ActivateTeamDefinitionRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	Version          string                    `json:"version"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	ActorType        string                    `json:"actorType"`
+	ActorID          string                    `json:"actorId"`
+	Reason           string                    `json:"reason,omitempty"`
+}
+
+type TeamDeploymentResult struct {
+	Deployment *kernelteam.Deployment          `json:"deployment"`
+	Activation *workforce.DefinitionActivation `json:"activation"`
 }
 
 func (d CapabilityDocument) Find(id, version string) (Capability, bool) {
@@ -96,7 +124,7 @@ func ObjectivesCapability() Capability {
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), AgentRunsCapability(), TeamChannelsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), AgentRunsCapability(), TeamChannelsCapability(), TeamDefinitionsCapability()},
 	}
 }
 
@@ -120,6 +148,13 @@ func TeamChannelsCapability() Capability {
 	return Capability{
 		ID: TeamChannelsCapabilityID, Version: TeamChannelsCapabilityVersion, Available: true,
 		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationCoordinate, OperationRead, OperationPresence, OperationAudit, OperationChanges},
+	}
+}
+
+func TeamDefinitionsCapability() Capability {
+	return Capability{
+		ID: TeamDefinitionsCapabilityID, Version: TeamDefinitionsCapabilityVersion, Available: true,
+		Operations: []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationActivate},
 	}
 }
 

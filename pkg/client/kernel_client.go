@@ -13,8 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 const DefaultKernelBaseURL = "http://127.0.0.1:8080"
@@ -23,6 +26,7 @@ const DefaultKernelBaseURL = "http://127.0.0.1:8080"
 // surfaces. It deliberately exposes only versioned public kernel operations.
 type KernelClient interface {
 	ArtifactClient
+	TeamClient
 	Capabilities(context.Context) (kernelapi.CapabilityDocument, error)
 	CreateObjective(context.Context, kernelapi.CreateObjectiveRequest, string) (*runtime.Objective, error)
 	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
@@ -32,6 +36,16 @@ type KernelClient interface {
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
 	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
+}
+
+type TeamClient interface {
+	RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error)
+	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
+	ListTeamDefinitionVersions(context.Context, string) ([]*kernelteam.Definition, error)
+	CreateTeamDeployment(context.Context, kernelapi.CreateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error)
+	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+	ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error)
+	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
 }
 
 type KernelHTTPClient struct {
@@ -176,6 +190,71 @@ func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope runtime.Sc
 	return &result, nil
 }
 
+func (c *KernelHTTPClient) RegisterTeamDefinition(ctx context.Context, definition *kernelteam.Definition) (*kernelteam.Definition, error) {
+	var result kernelteam.Definition
+	if err := c.do(ctx, http.MethodPost, "/api/v1/team-definitions", definition, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) GetTeamDefinition(ctx context.Context, id, version string) (*kernelteam.Definition, error) {
+	query := make(url.Values)
+	query.Set("version", strings.TrimSpace(version))
+	var result kernelteam.Definition
+	path := "/api/v1/team-definitions/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
+	var result []*kernelteam.Definition
+	path := "/api/v1/team-definitions/" + url.PathEscape(strings.TrimSpace(id))
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *KernelHTTPClient) CreateTeamDeployment(ctx context.Context, request kernelapi.CreateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error) {
+	var result kernelapi.TeamDeploymentResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/team-deployments", request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	query := capabilityScopeQuery(scope)
+	var result kernelteam.Deployment
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ActivateTeamDefinition(ctx context.Context, deploymentID string, request kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error) {
+	var result kernelapi.TeamDeploymentResult
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/activations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListTeamDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
+	query := capabilityScopeQuery(scope)
+	var result []workforce.DefinitionActivation
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/activations?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (c *KernelHTTPClient) do(ctx context.Context, method, path string, body interface{}, idempotencyKey string, result interface{}) error {
 	var reader io.Reader
 	if body != nil {
@@ -224,6 +303,13 @@ func decodeAPIError(statusCode int, decoder *json.Decoder) error {
 }
 
 func scopeQuery(scope runtime.Scope) url.Values {
+	query := make(url.Values)
+	query.Set("scopeKind", strings.TrimSpace(scope.Kind))
+	query.Set("scopeId", strings.TrimSpace(scope.ID))
+	return query
+}
+
+func capabilityScopeQuery(scope capability.ScopeReference) url.Values {
 	query := make(url.Values)
 	query.Set("scopeKind", strings.TrimSpace(scope.Kind))
 	query.Set("scopeId", strings.TrimSpace(scope.ID))

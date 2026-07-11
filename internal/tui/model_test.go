@@ -13,9 +13,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/internal/server"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	tea "github.com/charmbracelet/bubbletea"
 	"go.uber.org/zap"
 )
@@ -233,6 +236,34 @@ func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ runtime.Scope, i
 	}
 	run := testRun(id, status, request.ExpectedRevision+1)
 	return &runtime.AgentRunCommandResult{Run: run}, nil
+}
+
+func (f *fakeKernelClient) RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) ListTeamDefinitionVersions(context.Context, string) ([]*kernelteam.Definition, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) CreateTeamDeployment(context.Context, kernelapi.CreateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error) {
+	return nil, errors.New("not implemented by test client")
 }
 
 func (f *fakeKernelClient) RegisterArtifact(context.Context, runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
