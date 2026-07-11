@@ -228,6 +228,46 @@ func TestGovernedWorkforceLifecycleIsContextualExactAndAtomic(t *testing.T) {
 	if strings.Contains(appliedCapability.Body.String(), `"evaluate"`) || strings.Contains(appliedCapability.Body.String(), `"approve"`) || strings.Contains(appliedCapability.Body.String(), `"apply"`) || !strings.Contains(appliedCapability.Body.String(), `"revision":5`) {
 		t.Fatalf("applied capability = %s", appliedCapability.Body.String())
 	}
+	rejectedCreate := createRequest
+	rejectedCreate.Prompt = "Create a rejected research Team"
+	rejectedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", mustJSON(t, rejectedCreate), "create-rejected")
+	var rejectedCandidate authoring.ChangeSet
+	if rejectedResponse.Code != http.StatusCreated || json.NewDecoder(rejectedResponse.Body).Decode(&rejectedCandidate) != nil {
+		t.Fatalf("rejected candidate = %d %s", rejectedResponse.Code, rejectedResponse.Body.String())
+	}
+	denial := authoring.SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: rejectedCandidate.ID, ExpectedRevision: rejectedCandidate.Revision, CandidateDigest: rejectedCandidate.CandidateDigest, Allowed: false, Findings: []authoring.ChangeSetPolicyFinding{{PolicyID: "production", Code: "denied", Message: "Production policy denied the candidate."}}, Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"}}
+	deniedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+rejectedCandidate.ID+"/evaluations", mustJSON(t, denial), "deny-header")
+	var rejected authoring.ChangeSet
+	if deniedResponse.Code != http.StatusCreated || json.NewDecoder(deniedResponse.Body).Decode(&rejected) != nil || rejected.Status != authoring.ChangeSetRejected || rejected.Evaluations[0].Actor.ID != "configured-policy" {
+		t.Fatalf("denied = %d %s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+	rejectedCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId="+rejected.ID, "", "")
+	if strings.Contains(rejectedCapability.Body.String(), `"evaluate"`) || strings.Contains(rejectedCapability.Body.String(), `"approve"`) || strings.Contains(rejectedCapability.Body.String(), `"apply"`) {
+		t.Fatalf("rejected capability = %s", rejectedCapability.Body.String())
+	}
+}
+
+func TestWorkforceCapabilityDoesNotAdvertiseEvaluationBeforeCandidateExists(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "pending.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{role: "operator", actor: "configured-operator"})
+	prepared, _, err := api.authoringChanges.Prepare(context.Background(), authoring.CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "pending"}, Prompt: "Create a research Team",
+		Actor: authoring.ChangeSetActor{Type: "user", ID: "requester"}, IdempotencyKey: "prepare-1",
+	})
+	if err != nil || prepared.Status != authoring.ChangeSetEvaluating || prepared.CandidateDigest != "" {
+		t.Fatalf("prepared=%#v err=%v", prepared, err)
+	}
+	response := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities?scopeKind=tenant&scopeId=pending&changeSetId="+prepared.ID, "", "")
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), `"evaluate"`) || !strings.Contains(response.Body.String(), `"revision":1`) {
+		t.Fatalf("pre-generation capability = %d %s", response.Code, response.Body.String())
+	}
 }
 
 func mustJSON(t *testing.T, value interface{}) string {

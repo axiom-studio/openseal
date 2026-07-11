@@ -102,7 +102,7 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 	if s.workforceAuthority == nil {
 		return
 	}
-	if changeSet.Status == authoring.ChangeSetReview || changeSet.Status == authoring.ChangeSetEvaluating {
+	if strings.TrimSpace(changeSet.CandidateDigest) != "" && (changeSet.Status == authoring.ChangeSetReview || changeSet.Status == authoring.ChangeSetEvaluating) {
 		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationEvaluate, changeSet); err == nil {
 			result.Operations = append(result.Operations, kernelapi.OperationEvaluate)
 		}
@@ -210,6 +210,7 @@ func activeAuthorizedApprovalRequirements(changeSet *authoring.ChangeSet, author
 			continue
 		}
 		result := make([]kernelapi.ApprovalRequirementReference, 0, len(authorization.EligibleApprovalRequirements))
+		seen := make(map[string]bool, len(authorization.EligibleApprovalRequirements))
 		for _, authorized := range authorization.EligibleApprovalRequirements {
 			if authorized.EvaluationID != evaluation.ID {
 				continue
@@ -231,8 +232,10 @@ func activeAuthorizedApprovalRequirements(changeSet *authoring.ChangeSet, author
 					break
 				}
 			}
-			if !alreadyDecided {
+			key := authorized.EvaluationID + "\x00" + authorized.PolicyID + "\x00" + authorized.Role
+			if !alreadyDecided && !seen[key] {
 				result = append(result, authorized)
+				seen[key] = true
 			}
 		}
 		return result
