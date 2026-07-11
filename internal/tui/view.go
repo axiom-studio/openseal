@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -76,6 +77,9 @@ func (m *Model) renderComposer(width int) string {
 	}
 	if m.mode == modeInitiativeEdit && !m.supportsInitiative(kernelapi.OperationPatch) {
 		return m.renderUnavailableComposer(width, "Amend Initiative", "This server does not advertise Initiative updates.")
+	}
+	if m.mode == modeSkillInstall && !m.supportsClawHub(clawhub.LifecycleInstall) {
+		return m.renderUnavailableComposer(width, "Install a Skill", "This server does not advertise governed ClawHub installation.")
 	}
 	if m.mode == modeChannelCreate && !m.supportsChannel(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Create a Team channel", "This server does not advertise channel creation.")
@@ -147,6 +151,18 @@ func (m *Model) renderComposer(width int) string {
 	case modeInitiativeEdit:
 		title = "Amend selected Initiative"
 		description = "Refine its purpose without losing coordination state or audit history."
+	case modeSkillInstall:
+		title = "Install a ClawHub Skill"
+		description = "Enter an owner-qualified reference. OpenSeal verifies, compiles, and activates it atomically."
+		owner = "Governed canonical Skill lifecycle"
+	case modeSkillPin:
+		title = "Pin selected Skill version"
+		description = "Record why updates must stay fixed at this exact verified version."
+		owner = "Permanent lifecycle reason"
+	case modeSkillRemove:
+		title = "Confirm Skill removal"
+		description = "Type REMOVE exactly. OpenSeal will preserve modified or pinned installations."
+		owner = "Governed uninstall · no force fallback"
 	}
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
@@ -170,6 +186,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionInitiatives {
 		content = m.renderInitiativesContent(width)
+	} else if m.section == sectionSkills {
+		content = m.renderClawHubSkillsContent(width)
 	} else if m.section == sectionChannels {
 		content = m.renderChannelsContent(width)
 	} else if m.section == sectionArtifacts {
@@ -203,6 +221,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.initiativeCapability.Available {
 		label := "i Initiatives"
 		if m.section == sectionInitiatives {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.clawHubCapability.Available {
+		label := "s Skills"
+		if m.section == sectionSkills {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -434,6 +461,67 @@ func (m *Model) renderInitiativesContent(width int) string {
 		}
 	} else if m.supportsInitiative(kernelapi.OperationCreate) {
 		lines = append(lines, "", mutedStyle.Render("Select an Objective, then press i and n to compose an Initiative."))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderClawHubSkillsContent(width int) string {
+	title := headerStyle.Render("Installed Skills")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.clawHubSkills) == 0 {
+		lines = append(lines, mutedStyle.Render("No ClawHub Skills installed. Press n and enter @owner/skill."))
+	} else {
+		visible := max(3, min(len(m.clawHubSkills), max(m.height-18, 5)))
+		start := max(0, min(m.clawHubSelected-visible/2, len(m.clawHubSkills)-visible))
+		for index := start; index < min(len(m.clawHubSkills), start+visible); index++ {
+			skill := m.clawHubSkills[index]
+			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+			if index == m.clawHubSelected {
+				prefix, style = "› ", selectedStyle
+			}
+			state := "verified"
+			if !skill.Verified {
+				state = "unverified"
+			}
+			if skill.Pinned {
+				state = "pinned"
+			}
+			lines = append(lines, style.Render(fmt.Sprintf("%s%-10s %s@%s", prefix, state, skill.Reference.String(), skill.Version)))
+		}
+	}
+	if skill := m.selectedClawHubRecord(); skill != nil {
+		lines = append(lines, "", mutedStyle.Render("Selected"), skill.SourceIdentity, mutedStyle.Render(fmt.Sprintf("v%s · installed %s", skill.Version, time.UnixMilli(skill.InstalledAt).Format("2006-01-02"))))
+		if skill.PinReason != "" {
+			lines = append(lines, mutedStyle.Render("Pin · "+skill.PinReason))
+		}
+		if skill.LocallyModified {
+			lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render("Local modifications detected · update and removal are protected"))
+		}
+		actions := []string{}
+		if m.supportsClawHub(clawhub.LifecycleVerifyInstalled) {
+			actions = append(actions, "v verify")
+		}
+		if m.supportsClawHub(clawhub.LifecycleUpdate) && !skill.Pinned && !skill.LocallyModified {
+			actions = append(actions, "u update")
+		}
+		if m.supportsClawHub(clawhub.LifecycleUpdateAll) {
+			actions = append(actions, "U update all")
+		}
+		if skill.Pinned && m.supportsClawHub(clawhub.LifecycleUnpin) {
+			actions = append(actions, "p unpin")
+		} else if !skill.Pinned && m.supportsClawHub(clawhub.LifecyclePin) {
+			actions = append(actions, "p pin")
+		}
+		if m.supportsClawHub(clawhub.LifecycleUninstall) {
+			actions = append(actions, "x remove")
+		}
+		if m.supportsClawHub(clawhub.LifecycleInstall) {
+			actions = append(actions, "n install")
+		}
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 	}
 	return strings.Join(lines, "\n")
 }
