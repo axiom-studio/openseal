@@ -42,6 +42,10 @@ type fakeKernelClient struct {
 	authoringResult   *authoring.CompileResult
 	authoringRequests []authoring.GenerateRequest
 	authoringErrors   []error
+	changeSets        []*authoring.ChangeSet
+	changeSetRequests []authoring.CreateChangeSetRequest
+	changeSetKeys     []string
+	changeSetErrors   []error
 }
 
 type fakeChannelKernelClient struct {
@@ -179,8 +183,24 @@ func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring
 	return f.authoringResult, nil
 }
 
-func (f *fakeKernelClient) CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error) {
-	return nil, errors.New("workforce change sets are not configured in this test")
+func (f *fakeKernelClient) CreateWorkforceChangeSet(_ context.Context, request authoring.CreateChangeSetRequest, key string) (*authoring.ChangeSet, error) {
+	f.changeSetRequests = append(f.changeSetRequests, request)
+	f.changeSetKeys = append(f.changeSetKeys, key)
+	if len(f.changeSetErrors) > 0 {
+		err := f.changeSetErrors[0]
+		f.changeSetErrors = f.changeSetErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(f.changeSets) == 0 {
+		return nil, errors.New("workforce change sets are not configured in this test")
+	}
+	result := f.changeSets[0]
+	if len(f.changeSets) > 1 {
+		f.changeSets = f.changeSets[1:]
+	}
+	return result, nil
 }
 
 func (f *fakeKernelClient) GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error) {
@@ -428,6 +448,64 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	}
 	if !strings.Contains(model.View(), "1 field changes") {
 		t.Fatalf("amendment diff was not rendered:\n%s", model.View())
+	}
+}
+
+func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
+	createResult := authoring.CompileResult{
+		Valid: true,
+		Candidate: authoring.WorkforceCandidate{Team: &kernelteam.Definition{
+			ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
+			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
+			Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
+			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		}},
+	}
+	amendResult := createResult
+	amendResult.Diff = []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "approval-required"}}
+	created := &authoring.ChangeSet{
+		ID: "change-create", Scope: capability.ScopeReference{Kind: "local", ID: "default"},
+		Mode: authoring.ModeCreate, Result: createResult, Status: authoring.ChangeSetReview, Revision: 1,
+	}
+	amended := &authoring.ChangeSet{
+		ID: "change-amend", ParentID: created.ID, Scope: created.Scope,
+		Mode: authoring.ModeAmend, Result: amendResult, Status: authoring.ChangeSetReview, Revision: 1,
+	}
+	fake := &fakeKernelClient{
+		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(true)),
+		changeSets:      []*authoring.ChangeSet{created, amended},
+		changeSetErrors: []error{errors.New("temporary disconnect"), nil},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+
+	model.editor.SetValue("Create a customer research Team")
+	applyCommand(t, model, model.submitWorkforceAuthoring())
+	if model.editor.Value() == "" || model.pendingAuthoringKey == "" {
+		t.Fatal("failed proposal did not preserve prompt and idempotency key")
+	}
+	applyCommand(t, model, model.submitWorkforceAuthoring())
+	if len(fake.changeSetKeys) != 2 || fake.changeSetKeys[0] == "" || fake.changeSetKeys[0] != fake.changeSetKeys[1] {
+		t.Fatalf("change set retry keys = %#v", fake.changeSetKeys)
+	}
+	request := fake.changeSetRequests[0]
+	if request.Scope != created.Scope || request.Actor.Type != "user" || request.Actor.ID != "local" || request.ParentID != "" {
+		t.Fatalf("create change set request = %#v", request)
+	}
+	if len(fake.authoringRequests) != 0 || model.authoringChangeSet == nil || model.authoringChangeSet.ID != created.ID {
+		t.Fatalf("authoring used ephemeral compilation or lost change set: requests=%#v changeSet=%#v", fake.authoringRequests, model.authoringChangeSet)
+	}
+	if !strings.Contains(model.View(), "change-create") || !strings.Contains(model.View(), "review") {
+		t.Fatalf("durable change set identity was not rendered:\n%s", model.View())
+	}
+
+	model.editor.SetValue("Require approval before external outreach")
+	applyCommand(t, model, model.submitWorkforceAuthoring())
+	if len(fake.changeSetRequests) != 3 || fake.changeSetRequests[2].ParentID != created.ID || fake.changeSetKeys[2] == fake.changeSetKeys[1] {
+		t.Fatalf("refinement did not create a child change set: requests=%#v keys=%#v", fake.changeSetRequests, fake.changeSetKeys)
+	}
+	if model.authoringChangeSet == nil || model.authoringChangeSet.ID != amended.ID || !model.authoringAmendment || !strings.Contains(model.View(), "1 field changes") {
+		t.Fatalf("durable refinement was not rendered: changeSet=%#v\n%s", model.authoringChangeSet, model.View())
 	}
 }
 

@@ -61,8 +61,8 @@ func (m *Model) renderHeader(width int) string {
 }
 
 func (m *Model) renderComposer(width int) string {
-	if m.mode == modeWorkforceAuthoring && !m.supportsAuthoring(kernelapi.OperationCompile) {
-		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce compilation.")
+	if m.mode == modeWorkforceAuthoring && !m.supportsWorkforceAuthoring() {
+		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce authoring.")
 	}
 	if m.mode == modeObjectiveCreate && !m.supportsObjective(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Add an objective", "This server does not advertise objective creation.")
@@ -94,7 +94,7 @@ func (m *Model) renderComposer(width int) string {
 			title = "Refine the workforce"
 			description = "Describe a change. OpenSeal will compile a new immutable candidate and show its governed diff."
 		}
-		owner = "Preview only · compilation never activates state"
+		owner = "Governed review · authoring never activates state"
 	case modeGuide:
 		title = "Guide selected work"
 		description = "Add a concise instruction without replacing the objective."
@@ -197,7 +197,7 @@ func (m *Model) renderPanelTabs() string {
 func (m *Model) renderAuthoringContent(width int) string {
 	title := headerStyle.Render("Workforce candidate")
 	if m.busy {
-		return title + "\n\n" + mutedStyle.Render("Compiling a verified Agent and Team preview…")
+		return title + "\n\n" + mutedStyle.Render("Saving a verified Agent and Team change set…")
 	}
 	result := m.authoringResult
 	if result == nil {
@@ -214,6 +214,9 @@ func (m *Model) renderAuthoringContent(width int) string {
 		roles, objectives = len(result.Candidate.Team.Roles), len(result.Candidate.Team.ObjectiveTemplates)
 	}
 	lines := []string{title, state, "", headerStyle.Render(compact(teamName, max(width-8, 24)))}
+	if m.authoringChangeSet != nil {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s", compact(m.authoringChangeSet.ID, 16), m.authoringChangeSet.Status)))
+	}
 	if teamPurpose != "" {
 		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))
 	}

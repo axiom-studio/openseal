@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -108,6 +109,7 @@ type Model struct {
 	channelCapability        kernelapi.Capability
 	authoringCapability      kernelapi.Capability
 	authoringResult          *authoring.CompileResult
+	authoringChangeSet       *authoring.ChangeSet
 	authoringAmendment       bool
 	runs                     []*runtime.AgentRun
 	objectives               []*runtime.Objective
@@ -128,6 +130,9 @@ type Model struct {
 	channelAuditExpanded     bool
 	pendingKey               string
 	pendingGoal              string
+	pendingAuthoringKey      string
+	pendingAuthoringPrompt   string
+	pendingAuthoringParentID string
 	pendingObjectiveKey      string
 	pendingObjectivePrompt   string
 	pendingConversationKey   string
@@ -143,9 +148,10 @@ type capabilitiesLoaded struct {
 }
 
 type workforceCompiled struct {
-	result *authoring.CompileResult
-	mode   authoring.Mode
-	err    error
+	result    *authoring.CompileResult
+	changeSet *authoring.ChangeSet
+	mode      authoring.Mode
+	err       error
 }
 
 type runsLoaded struct {
@@ -338,15 +344,21 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.busy = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.status = "Compilation failed. Your prompt is preserved for retry."
+			m.status = "Authoring failed. Your prompt is preserved for retry."
 			return m, nil
 		}
 		m.err = nil
 		m.authoringResult = msg.result
+		m.authoringChangeSet = msg.changeSet
 		m.authoringAmendment = msg.mode == authoring.ModeAmend
+		m.pendingAuthoringKey, m.pendingAuthoringPrompt, m.pendingAuthoringParentID = "", "", ""
 		m.editor.Reset()
 		m.editor.Placeholder = "Describe what should change…"
-		m.status = "Workforce candidate compiled. Nothing has been activated."
+		if msg.changeSet != nil {
+			m.status = "Workforce change set saved for governed review. Nothing has been activated."
+		} else {
+			m.status = "Workforce candidate compiled. Nothing has been activated."
+		}
 		m.section = sectionAuthoring
 		m.focusPanelList()
 		return m, nil
@@ -686,7 +698,7 @@ func (m *Model) loadCapabilities() tea.Cmd {
 
 func (m *Model) submitWorkforceAuthoring() tea.Cmd {
 	prompt := strings.TrimSpace(m.editor.Value())
-	if !m.supportsAuthoring(kernelapi.OperationCompile) || m.busy || prompt == "" {
+	if !m.supportsWorkforceAuthoring() || m.busy || prompt == "" {
 		if prompt == "" {
 			m.status = "Describe the workforce before compiling it."
 		}
@@ -694,7 +706,34 @@ func (m *Model) submitWorkforceAuthoring() tea.Cmd {
 	}
 	m.busy = true
 	m.err = nil
-	m.status = "Compiling a reviewable Agent and Team candidate…"
+	m.status = "Saving a reviewable Agent and Team change set…"
+	if m.supportsAuthoring(kernelapi.OperationPropose) {
+		parentID := ""
+		if m.authoringChangeSet != nil {
+			parentID = m.authoringChangeSet.ID
+		}
+		if m.pendingAuthoringKey == "" || m.pendingAuthoringPrompt != prompt || m.pendingAuthoringParentID != parentID {
+			m.pendingAuthoringKey = uuid.NewString()
+			m.pendingAuthoringPrompt = prompt
+			m.pendingAuthoringParentID = parentID
+		}
+		request := authoring.CreateChangeSetRequest{
+			Scope:    capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID},
+			ParentID: parentID, Prompt: prompt, Catalog: authoring.CapabilityCatalog{},
+			Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+		}
+		idempotencyKey := m.pendingAuthoringKey
+		return func() tea.Msg {
+			changeSet, err := m.client.CreateWorkforceChangeSet(m.ctx, request, idempotencyKey)
+			if err != nil {
+				return workforceCompiled{err: err}
+			}
+			if changeSet == nil {
+				return workforceCompiled{err: errors.New("workforce authoring returned no change set")}
+			}
+			return workforceCompiled{result: &changeSet.Result, changeSet: changeSet, mode: changeSet.Mode}
+		}
+	}
 	request := authoring.GenerateRequest{Mode: authoring.ModeCreate, Prompt: prompt, Catalog: authoring.CapabilityCatalog{}}
 	if m.authoringResult != nil {
 		request.Mode = authoring.ModeAmend
@@ -1031,6 +1070,10 @@ func (m *Model) supportsAuthoring(operation string) bool {
 	return m.ready && m.authoringCapability.Supports(operation)
 }
 
+func (m *Model) supportsWorkforceAuthoring() bool {
+	return m.supportsAuthoring(kernelapi.OperationPropose) || m.supportsAuthoring(kernelapi.OperationCompile)
+}
+
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
 	if run == nil || isTerminal(run.Status) {
 		return false
@@ -1238,7 +1281,7 @@ func (m *Model) focusComposerEditor() {
 
 func (m *Model) prepareComposerForSection() {
 	switch {
-	case m.section == sectionAuthoring && m.supportsAuthoring(kernelapi.OperationCompile):
+	case m.section == sectionAuthoring && m.supportsWorkforceAuthoring():
 		m.mode = modeWorkforceAuthoring
 		m.editor.Placeholder = "Describe the Agents and Team you need…"
 		m.focusComposerEditor()
