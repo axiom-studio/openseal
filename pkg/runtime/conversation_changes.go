@@ -124,6 +124,12 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	if err != nil {
 		return nil, err
 	}
+	if req.Viewer != nil {
+		rounds, err = s.filterVisibleRounds(ctx, req.Scope, conversationID, rounds, *req.Viewer)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	runs, err := s.listConversationRuns(ctx, conversation)
 	if err != nil {
@@ -187,6 +193,31 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore,
 	}, nil
+}
+
+func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, scope Scope, conversationID string, rounds []*ParticipationRoundResult, viewer ConversationViewer) ([]*ParticipationRoundResult, error) {
+	visible := make([]*ParticipationRoundResult, 0, len(rounds))
+	for _, result := range rounds {
+		if result == nil || result.Round == nil {
+			continue
+		}
+		if triggerID := strings.TrimSpace(result.Round.TriggerMessageID); triggerID != "" {
+			if _, err := s.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, triggerID, viewer); err != nil {
+				if errors.Is(err, ErrChannelMessageNotFound) {
+					continue
+				}
+				return nil, err
+			}
+		}
+		messages, err := s.conversations.filterVisibleChannelMessages(ctx, scope, conversationID, result.Messages, viewer)
+		if err != nil {
+			return nil, err
+		}
+		projected := cloneParticipationRoundResult(result, result.Replayed)
+		projected.Messages = messages
+		visible = append(visible, projected)
+	}
+	return visible, nil
 }
 
 func (s *ConversationChangeService) listRoundsAfter(
