@@ -147,11 +147,11 @@ func TestWorkforceAuthoringStartupRecoversIntentPersistedBeforeEnqueue(t *testin
 }
 
 func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
 	generator := testAuthoringGenerator(t)
 	generator.started, generator.release = make(chan struct{}), make(chan struct{})
 	compiler, _ := authoring.NewCompiler(generator)
@@ -187,6 +187,15 @@ func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T)
 	if retried.Generation.Request.InvocationKey != "workforce-change-set:"+changeSet.ID+":1" {
 		t.Fatalf("retry invocation key = %q", retried.Generation.Request.InvocationKey)
 	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service, _ = NewWorkforceAuthoringRunService(compiler, store)
 	replayed, replayRun, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
 		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
 		Reason: "retry after provider timeout", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
@@ -201,6 +210,9 @@ func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T)
 	if !errors.Is(err, authoring.ErrChangeSetIdempotency) {
 		t.Fatalf("changed retry replay = %v", err)
 	}
+	worker, _ = NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "retry-worker", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
 	if worked, err := worker.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatalf("retry worked=%t err=%v", worked, err)
 	}
