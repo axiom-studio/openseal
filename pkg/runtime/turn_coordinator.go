@@ -182,12 +182,22 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if releaseErr != nil {
 			return nil, releaseErr
 		}
-		retryAt := c.activity.now().Add(5 * time.Second)
+		retryAttempt := released.Revision / 2
+		if retryAttempt < 1 {
+			retryAttempt = 1
+		}
+		retryAt := c.activity.now().Add(hostedTurnRetryDelay(retryAttempt))
 		requeued, event, transitionErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: AgentRunStatusSleeping, LeaseOwner: req.WorkerID,
 			WakeCondition: &WakeCondition{Type: "timer", WakeAt: &retryAt, Reference: "hosted-turn-retry"},
 			Summary:       "Agent turn host unavailable; the bounded turn will retry", EventType: "turn.retry_scheduled",
-			Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+			Actor:       ActivityActor{Type: "worker", ID: req.WorkerID},
+			TurnID:      turn.ID,
+			CausationID: turn.ID,
+			Payload: map[string]interface{}{
+				"attempt": retryAttempt,
+				"retryAt": retryAt.UTC().Format(time.RFC3339Nano),
+			},
 		})
 		if transitionErr != nil {
 			return nil, transitionErr
@@ -259,6 +269,16 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		return nil, err
 	}
 	return result, executionErr
+}
+
+func hostedTurnRetryDelay(attempt int64) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 4 {
+		attempt = 4
+	}
+	return 5 * time.Second * time.Duration(1<<(attempt-1))
 }
 
 func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID string, reconciled bool) (*AdvanceAgentRunResult, error) {
