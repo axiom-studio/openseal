@@ -48,13 +48,14 @@ Read {baseDir}/references/policy.md before searching.
 		t.Fatal(err)
 	}
 	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	definitionVersion := compilation.Definition.Version
 	bind := func(catalog *Catalog, deployment string, credentialID string) {
 		t.Helper()
 		if err := catalog.Register(context.Background(), compilation.Definition); err != nil {
 			t.Fatal(err)
 		}
 		if err := catalog.Bind(context.Background(), &Binding{
-			ID: "research", Scope: scope, DeploymentID: deployment, SkillID: "research", SkillVersion: "1.0.0",
+			ID: "research", Scope: scope, DeploymentID: deployment, SkillID: "research", SkillVersion: definitionVersion,
 			AllowedActions: []string{"invoke"}, EnablePrompt: true, MaximumRisk: RiskLevelExternal,
 			Credentials: map[string]CredentialReference{"RESEARCH_TOKEN": {Kind: "environment-secret", ID: credentialID}},
 			Config:      map[string]interface{}{"resultLimit": float64(20)}, Revision: 1,
@@ -68,7 +69,7 @@ Read {baseDir}/references/policy.md before searching.
 	host := HostCapabilityState{
 		OperatingSystem: "linux", Executables: map[string]bool{"curl": true, "jq": true},
 		Configuration: map[string]interface{}{"research": map[string]interface{}{"enabled": true}},
-		ResourceRoots: map[string]string{"research@1.0.0": "/sandbox/skills/research"},
+		ResourceRoots: map[string]string{"research@" + definitionVersion: "/sandbox/skills/research"},
 		Adapters: map[string]AdapterCapability{
 			"tool": {State: AdapterStateAvailable}, "sandbox": {State: AdapterStateAvailable},
 		}, Revision: "host-7",
@@ -163,7 +164,7 @@ func TestActivationStagesDeclaredResourcesAndPinsStageIdentity(t *testing.T) {
 	}
 	scope := ScopeReference{Kind: "tenant", ID: "one"}
 	if err := catalog.Bind(context.Background(), &Binding{
-		ID: "binding", Scope: scope, DeploymentID: "agent", SkillID: "staged", SkillVersion: "1.0.0",
+		ID: "binding", Scope: scope, DeploymentID: "agent", SkillID: "staged", SkillVersion: compilation.Definition.Version,
 		EnablePrompt: true, MaximumRisk: RiskLevelRead, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)

@@ -195,7 +195,8 @@ func TestEngineInstallsAndRestoresCompiledClawHubSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition, err := engine.GetSkillDefinition(context.Background(), "research", "1.0.0")
+	definitionVersion := installed.Compilation.Definition.Version
+	definition, err := engine.GetSkillDefinition(context.Background(), "research", definitionVersion)
 	if err != nil || definition == nil || definition.Prompt == nil || definition.Source.Digest != installed.Compilation.SourceDigest {
 		t.Fatalf("activated definition = %#v, %v", definition, err)
 	}
@@ -213,7 +214,7 @@ func TestEngineInstallsAndRestoresCompiledClawHubSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := restarted.GetSkillDefinition(context.Background(), "research", "1.0.0")
+	restored, err := restarted.GetSkillDefinition(context.Background(), "research", definitionVersion)
 	if err != nil || restored == nil || restored.Source.Digest != definition.Source.Digest {
 		t.Fatalf("restart restore = %#v, %v", restored, err)
 	}

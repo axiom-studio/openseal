@@ -39,7 +39,7 @@ Read references/policy.md before publishing.
 		t.Fatal(err)
 	}
 	definition := compilation.Definition
-	if definition.Version != "1.4.0" || definition.Prompt == nil || len(definition.Actions) != 1 || len(definition.Resources) != 2 {
+	if definition.Version != "1.4.0+source."+compilation.SourceDigest[:12] || definition.Source.ResolvedVersion != "1.4.0" || definition.Prompt == nil || len(definition.Actions) != 1 || len(definition.Resources) != 2 {
 		t.Fatalf("incomplete compilation: %#v", definition)
 	}
 	if definition.ConfigurationKey != "release-config" || definition.Icon != "🚀" {
