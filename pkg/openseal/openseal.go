@@ -2303,6 +2303,30 @@ func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.Instal
 	return installed, nil
 }
 
+// InstallClawHubSkillLifecycle installs and activates a verified canonical
+// Skill and returns the audit-safe receipt separately from host-only compiled
+// material. Hosts persist the receipt and may use InstalledSkill to project
+// the same Definition into their authorized catalog without re-parsing it.
+func (e *Engine) InstallClawHubSkillLifecycle(ctx context.Context, request clawhub.InstallRequest) (*clawhub.InstalledSkill, *clawhub.LifecycleResult, error) {
+	installed, err := e.InstallClawHubSkill(ctx, request)
+	if err != nil {
+		return nil, nil, err
+	}
+	result := &clawhub.LifecycleResult{
+		APIVersion:     clawhub.LifecycleAPIVersion,
+		Operation:      clawhub.LifecycleInstall,
+		SourceIdentity: installed.SourceIdentity,
+		Reference:      installed.Reference,
+		Version:        installed.Version,
+		Outcome:        clawhub.LifecycleOutcomeInstalled,
+		Changed:        installed.Changed,
+	}
+	if !installed.Changed {
+		result.Outcome = clawhub.LifecycleOutcomeUnchanged
+	}
+	return installed, result, nil
+}
+
 func (e *Engine) UpdateClawHubSkill(ctx context.Context, slug string) (*clawhub.InstalledSkill, error) {
 	if e.clawHub == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
