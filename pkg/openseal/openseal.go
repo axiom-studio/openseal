@@ -143,6 +143,13 @@ type (
 	ObjectiveCadenceType               = runtime.ObjectiveCadenceType
 	ObjectiveScheduleResult            = runtime.ObjectiveScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
+	Initiative                         = runtime.Initiative
+	InitiativeStatus                   = runtime.InitiativeStatus
+	InitiativeFilter                   = runtime.InitiativeFilter
+	InitiativeStore                    = runtime.InitiativeStore
+	CreateInitiativeRequest            = runtime.CreateInitiativeRequest
+	UpdateInitiativeRequest            = runtime.UpdateInitiativeRequest
+	InitiativeResourceReference        = runtime.ResourceReference
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
 	BudgetPolicy                       = runtime.BudgetPolicy
@@ -813,6 +820,7 @@ type Engine struct {
 	pool                          *runtime.WorkerPool
 	scheduler                     *runtime.Scheduler
 	portfolio                     *runtime.PortfolioService
+	initiatives                   *runtime.InitiativeService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
 	conversations                 *runtime.ConversationService
@@ -915,6 +923,7 @@ func New(opts ...Option) (*Engine, error) {
 		pool:                pool,
 		scheduler:           runtime.NewScheduler(pool, store),
 		portfolio:           runtime.NewPortfolioService(store),
+		initiatives:         runtime.NewInitiativeService(store, store),
 		activity:            runtime.NewRunActivityService(store, store),
 		dependencies:        runtime.NewDependencyCoordinator(store),
 		conversations:       runtime.NewConversationService(store),
@@ -1073,6 +1082,11 @@ func WithStore(store runtime.KernelStore) Option {
 		e.pool.SetStore(store)
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
+		if initiativeStore, ok := store.(runtime.InitiativeStore); ok {
+			e.initiatives = runtime.NewInitiativeService(initiativeStore, store)
+		} else {
+			e.initiatives = nil
+		}
 		e.activity = runtime.NewRunActivityService(store, store)
 		if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
 			e.dependencies = runtime.NewDependencyCoordinator(dependencyStore)
@@ -1568,6 +1582,31 @@ func (e *Engine) ListObjectives(ctx context.Context, filter runtime.ObjectiveFil
 
 func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, req runtime.UpdateObjectiveRequest) (*runtime.Objective, error) {
 	return e.portfolio.UpdateObjective(ctx, scope, objectiveID, req)
+}
+
+func (e *Engine) CreateInitiative(ctx context.Context, req runtime.CreateInitiativeRequest) (*runtime.Initiative, *runtime.ActivityEvent, error) {
+	if e.initiatives == nil {
+		return nil, nil, errors.New("initiative capability is unavailable")
+	}
+	return e.initiatives.Create(ctx, req)
+}
+func (e *Engine) GetInitiative(ctx context.Context, scope runtime.Scope, id string) (*runtime.Initiative, error) {
+	if e.initiatives == nil {
+		return nil, errors.New("initiative capability is unavailable")
+	}
+	return e.initiatives.Get(ctx, scope, id)
+}
+func (e *Engine) ListInitiatives(ctx context.Context, filter runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
+	if e.initiatives == nil {
+		return nil, errors.New("initiative capability is unavailable")
+	}
+	return e.initiatives.List(ctx, filter)
+}
+func (e *Engine) UpdateInitiative(ctx context.Context, scope runtime.Scope, initiativeID string, req runtime.UpdateInitiativeRequest) (*runtime.Initiative, *runtime.ActivityEvent, error) {
+	if e.initiatives == nil {
+		return nil, nil, errors.New("initiative capability is unavailable")
+	}
+	return e.initiatives.Patch(ctx, scope, initiativeID, req)
 }
 
 func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.ObjectiveScheduleResult, error) {
