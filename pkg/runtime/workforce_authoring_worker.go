@@ -93,17 +93,17 @@ func (s *WorkforceAuthoringRunService) Enqueue(ctx context.Context, changeSet *a
 	return result.Run, nil
 }
 
-func (s *WorkforceAuthoringRunService) Retry(ctx context.Context, request authoring.RetryChangeSetGenerationRequest) (*authoring.ChangeSet, *AgentRun, error) {
-	changeSet, err := s.changeSets.RetryGeneration(ctx, request)
+func (s *WorkforceAuthoringRunService) Retry(ctx context.Context, request authoring.RetryChangeSetGenerationRequest) (*authoring.ChangeSet, *AgentRun, bool, error) {
+	changeSet, replayed, err := s.changeSets.RetryGeneration(ctx, request)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	run, err := s.Enqueue(ctx, changeSet)
 	if err != nil {
-		return changeSet, nil, err
+		return changeSet, nil, replayed, err
 	}
 	changeSet, err = s.changeSets.Get(ctx, changeSet.Scope, changeSet.ID)
-	return changeSet, run, err
+	return changeSet, run, replayed, err
 }
 
 func (s *WorkforceAuthoringRunService) RecoverPending(ctx context.Context, scope Scope, limit int) ([]*AgentRun, error) {
