@@ -64,9 +64,13 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 	if capability.APIVersion != "openseal.clawhub.lifecycle/v1" || len(capability.Operations) != 13 {
 		t.Fatalf("lifecycle capability = %#v", capability)
 	}
-	installed, err := engine.InstallClawHubSkill(context.Background(), ClawHubInstallRequest{Reference: ClawHubSkillReference{Owner: "acme", Slug: "research"}})
-	if err != nil || installed.Version != "1.0.0" {
-		t.Fatalf("install = %#v, %v", installed, err)
+	installed, installReceipt, err := engine.InstallClawHubSkillLifecycle(context.Background(), ClawHubInstallRequest{Reference: ClawHubSkillReference{Owner: "acme", Slug: "research"}})
+	if err != nil || installed.Version != "1.0.0" || installReceipt.Operation != ClawHubLifecycleOperation("install") || installReceipt.Outcome != ClawHubLifecycleOutcome("installed") || !installReceipt.Changed || installReceipt.SourceIdentity != installed.SourceIdentity || installReceipt.Version != installed.Version {
+		t.Fatalf("install = %#v receipt=%#v, %v", installed, installReceipt, err)
+	}
+	replayedInstall, replayedReceipt, err := engine.InstallClawHubSkillLifecycle(context.Background(), ClawHubInstallRequest{Reference: ClawHubSkillReference{Owner: "acme", Slug: "research"}})
+	if err != nil || replayedInstall.Changed || replayedReceipt.Changed || replayedReceipt.Outcome != ClawHubLifecycleOutcome("unchanged") {
+		t.Fatalf("install replay = %#v receipt=%#v, %v", replayedInstall, replayedReceipt, err)
 	}
 	versions, err := engine.ListClawHubSkillVersions(context.Background(), installed.Reference, 10, "")
 	if err != nil || len(versions.Items) != 1 || versions.Items[0].Version != "1.0.0" {
