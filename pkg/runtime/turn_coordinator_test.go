@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -32,6 +34,7 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 			OutputSummary: "Waiting for the next event", NextRunStatus: AgentRunStatusWaitingForEvent,
 			WakeCondition:          &WakeCondition{Type: "event", Reference: "work.ready"},
 			ContinuationCheckpoint: map[string]interface{}{"phase": "waiting"},
+			Decisions:              []TurnDecision{{Summary: "Use the event monitor", EvidenceRefs: []string{"skill:events@1"}}},
 		}, nil
 	})
 	partial, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{
@@ -66,6 +69,10 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 	}
 	if result.Event.TurnID != result.Turn.ID || result.Event.CausationID != result.Turn.ID {
 		t.Fatalf("activity is not linked to turn: %#v", result.Event)
+	}
+	auditPayload, marshalErr := json.Marshal(result.Event.Payload)
+	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" {
+		t.Fatalf("activity does not expose bounded-turn audit evidence: %#v", result.Event.Payload)
 	}
 	if result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != "work.ready" || result.Run.Checkpoint["phase"] != "waiting" {
 		t.Fatalf("checkpoint was not applied: %#v", result.Run)
