@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -70,6 +71,7 @@ const (
 	sectionAuthoring panelSection = iota
 	sectionObjectives
 	sectionInitiatives
+	sectionSkills
 	sectionRuns
 	sectionArtifacts
 	sectionChannels
@@ -87,6 +89,9 @@ const (
 	modeObjectiveEdit
 	modeInitiativeCreate
 	modeInitiativeEdit
+	modeSkillInstall
+	modeSkillPin
+	modeSkillRemove
 	modeWorkforceApprove
 	modeWorkforceReject
 	modeWorkforceApply
@@ -97,6 +102,7 @@ type Model struct {
 	ctx                       context.Context
 	client                    client.KernelClient
 	conversationClient        client.ConversationClient
+	clawHubClient             client.ClawHubClient
 	config                    Config
 	editor                    textarea.Model
 	focus                     focusArea
@@ -113,6 +119,7 @@ type Model struct {
 	runCapability             kernelapi.Capability
 	objectiveCapability       kernelapi.Capability
 	initiativeCapability      kernelapi.Capability
+	clawHubCapability         kernelapi.Capability
 	artifactCapability        kernelapi.Capability
 	channelCapability         kernelapi.Capability
 	authoringCapability       kernelapi.Capability
@@ -127,6 +134,9 @@ type Model struct {
 	initiatives               []*runtime.Initiative
 	initiativeSelected        int
 	selectedInitiative        string
+	clawHubSkills             []clawhub.InstalledState
+	clawHubSelected           int
+	selectedClawHub           string
 	selected                  int
 	selectedID                string
 	artifacts                 []*runtime.Artifact
@@ -151,6 +161,7 @@ type Model struct {
 	pendingObjectivePrompt    string
 	pendingInitiativeKey      string
 	pendingInitiativePrompt   string
+	pendingClawHubPrompt      string
 	pendingConversationKey    string
 	pendingConversationTitle  string
 	pendingMessageKey         string
@@ -212,6 +223,17 @@ type initiativeCreated struct {
 type initiativeUpdated struct {
 	initiative *runtime.Initiative
 	err        error
+}
+
+type clawHubSkillsLoaded struct {
+	skills []clawhub.InstalledState
+	err    error
+}
+type clawHubLifecycleCompleted struct {
+	result    *clawhub.LifecycleResult
+	batch     *clawhub.LifecycleBatchResult
+	operation clawhub.LifecycleOperation
+	err       error
 }
 
 type artifactsLoaded struct {
@@ -291,6 +313,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
 		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
 		conversationClient: conversationClient(kernelClient),
+		clawHubClient:      clawHubClient(kernelClient),
 	}, nil
 }
 
@@ -331,12 +354,14 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
+		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.TeamChannelsCapabilityID, kernelapi.TeamChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		m.runCapability = runCapability
 		m.objectiveCapability = objectiveCapability
 		m.initiativeCapability = initiativeCapability
+		m.clawHubCapability = clawHubCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
@@ -354,6 +379,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasInitiatives || !initiativeCapability.Available {
 			m.initiativeCapability = kernelapi.Capability{}
 		}
+		if !hasClawHub || !clawHubCapability.Available || m.clawHubClient == nil {
+			m.clawHubCapability = kernelapi.Capability{}
+		}
 		if !hasArtifacts || !artifactCapability.Available {
 			m.artifactCapability = kernelapi.Capability{}
 		}
@@ -363,7 +391,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAuthoring || !authoringCapability.Available {
 			m.authoringCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available {
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -387,6 +415,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionInitiatives
 			m.mode = modeInitiativeCreate
 			m.editor.Placeholder = "Describe the Initiative outcome…"
+		} else if m.clawHubCapability.Available {
+			m.section = sectionSkills
+			m.mode = modeSkillInstall
+			m.editor.Placeholder = "Enter @owner/skill to install…"
 		} else if !m.objectiveCapability.Available && m.runCapability.Available {
 			m.section = sectionRuns
 			m.mode = modeCreate
@@ -397,7 +429,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionArtifacts
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadObjectives(), m.loadInitiatives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -480,6 +512,41 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err, m.initiatives = nil, msg.initiatives
 		m.restoreInitiativeSelection()
 		return m, nil
+	case clawHubSkillsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.clawHubSkills = msg.skills
+		m.restoreClawHubSelection()
+		return m, nil
+	case clawHubLifecycleCompleted:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Skill lifecycle operation failed. The draft is preserved for retry."
+			return m, m.loadClawHubSkills()
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.pendingClawHubPrompt = ""
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.batch != nil {
+			changed := 0
+			for _, item := range msg.batch.Results {
+				if item.Changed {
+					changed++
+				}
+			}
+			m.status = fmt.Sprintf("Skill catalog checked · %d changed · %d total.", changed, len(msg.batch.Results))
+		} else if msg.result != nil {
+			m.selectedClawHub = msg.result.SourceIdentity
+			m.status = fmt.Sprintf("Skill %s · %s.", msg.operation, msg.result.Outcome)
+		}
+		return m, m.loadClawHubSkills()
 	case runsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -667,7 +734,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadObjectives(), m.loadInitiatives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -725,6 +792,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitInitiative()
 			case modeInitiativeEdit:
 				return m, m.submitInitiativeAmendment()
+			case modeSkillInstall:
+				return m, m.submitClawHubInstall()
+			case modeSkillPin:
+				return m, m.submitClawHubPin()
+			case modeSkillRemove:
+				return m, m.submitClawHubRemoval()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
 			case modeWorkforceApprove:
@@ -777,6 +850,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.initiativeCapability.Available {
 				m.section = sectionInitiatives
 			}
+		case "s":
+			if m.clawHubCapability.Available {
+				m.section = sectionSkills
+			}
 		case "a":
 			if m.artifactCapability.Available {
 				m.section = sectionArtifacts
@@ -802,6 +879,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the Initiative outcome…"
 				m.focusComposerEditor()
+			} else if m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall) {
+				m.mode = modeSkillInstall
+				m.editor.Reset()
+				m.editor.Placeholder = "Enter @owner/skill to install…"
+				m.focusComposerEditor()
 			} else if m.section == sectionRuns && m.supportsRun(kernelapi.OperationCreate) {
 				m.mode = modeCreate
 				m.editor.Placeholder = "Describe the outcome you want…"
@@ -825,6 +907,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pauseOrResume()
 			} else if m.section == sectionInitiatives {
 				return m, m.pauseOrResumeInitiative()
+			} else if m.section == sectionSkills {
+				return m, m.pinOrUnpinClawHub()
 			}
 		case "l":
 			if m.section == sectionInitiatives {
@@ -835,6 +919,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.commandSelected(runtime.AgentRunCommandCancel, "")
 			} else if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
+			} else if m.section == sectionSkills && m.selectedClawHubRecord() != nil && m.supportsClawHub(clawhub.LifecycleUninstall) {
+				m.mode = modeSkillRemove
+				m.editor.Reset()
+				m.editor.Placeholder = "Type REMOVE to confirm…"
+				m.focusComposerEditor()
 			}
 		case "y":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
@@ -870,6 +959,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "d":
 			if m.section == sectionArtifacts {
 				return m, m.downloadSelectedArtifact()
+			}
+		case "u":
+			if m.section == sectionSkills {
+				return m, m.updateSelectedClawHub()
+			}
+		case "U":
+			if m.section == sectionSkills {
+				return m, m.updateAllClawHub()
+			}
+		case "v":
+			if m.section == sectionSkills {
+				return m, m.verifySelectedClawHub()
 			}
 		}
 		return m, nil
@@ -1072,6 +1173,17 @@ func (m *Model) loadInitiatives() tea.Cmd {
 	}
 }
 
+func (m *Model) loadClawHubSkills() tea.Cmd {
+	if !m.supportsClawHub(clawhub.LifecycleInspectInstalled) {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		skills, err := m.clawHubClient.ListInstalledClawHubSkills(m.ctx)
+		return clawHubSkillsLoaded{skills, err}
+	}
+}
+
 func (m *Model) loadArtifacts() tea.Cmd {
 	if !m.supportsArtifact(kernelapi.OperationList) {
 		return nil
@@ -1143,6 +1255,9 @@ func (m *Model) loadPanel() tea.Cmd {
 	}
 	if m.section == sectionInitiatives {
 		return m.loadInitiatives()
+	}
+	if m.section == sectionSkills {
+		return m.loadClawHubSkills()
 	}
 	if m.section == sectionChannels {
 		return m.loadConversations()
@@ -1267,6 +1382,117 @@ func (m *Model) toggleSelectedObjectiveLink() tea.Cmd {
 	return func() tea.Msg {
 		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
 		return initiativeUpdated{updated, err}
+	}
+}
+
+func (m *Model) submitClawHubInstall() tea.Cmd {
+	prompt := strings.TrimSpace(m.editor.Value())
+	if prompt == "" || m.busy || !m.supportsClawHub(clawhub.LifecycleInstall) {
+		if prompt == "" {
+			m.status = "Enter an owner-qualified ClawHub reference."
+		}
+		return nil
+	}
+	reference, err := clawhub.ParseSkillReference(prompt)
+	if err != nil {
+		m.status = "Use a valid ClawHub reference such as @owner/skill."
+		return nil
+	}
+	m.busy = true
+	m.err = nil
+	m.pendingClawHubPrompt = prompt
+	m.status = "Verifying, compiling, and installing Skill…"
+	return func() tea.Msg {
+		result, installErr := m.clawHubClient.InstallClawHubSkill(m.ctx, reference, kernelapi.ClawHubVersionRequest{})
+		return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecycleInstall, err: installErr}
+	}
+}
+func (m *Model) submitClawHubPin() tea.Cmd {
+	skill := m.selectedClawHubRecord()
+	reason := strings.TrimSpace(m.editor.Value())
+	if skill == nil || reason == "" || m.busy || !m.supportsClawHub(clawhub.LifecyclePin) {
+		if reason == "" {
+			m.status = "Record why this exact version must stay fixed."
+		}
+		return nil
+	}
+	m.busy = true
+	m.err = nil
+	m.pendingClawHubPrompt = reason
+	reference := skill.Reference.String()
+	return func() tea.Msg {
+		result, err := m.clawHubClient.PinClawHubSkill(m.ctx, reference, reason)
+		return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecyclePin, err: err}
+	}
+}
+func (m *Model) submitClawHubRemoval() tea.Cmd {
+	skill := m.selectedClawHubRecord()
+	if skill == nil || strings.TrimSpace(m.editor.Value()) != "REMOVE" || m.busy || !m.supportsClawHub(clawhub.LifecycleUninstall) {
+		m.status = "Type REMOVE exactly to confirm this governed uninstall."
+		return nil
+	}
+	m.busy = true
+	m.err = nil
+	reference := skill.Reference.String()
+	return func() tea.Msg {
+		result, err := m.clawHubClient.UninstallClawHubSkill(m.ctx, reference)
+		return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecycleUninstall, err: err}
+	}
+}
+func (m *Model) pinOrUnpinClawHub() tea.Cmd {
+	skill := m.selectedClawHubRecord()
+	if skill == nil {
+		return nil
+	}
+	if skill.Pinned && m.supportsClawHub(clawhub.LifecycleUnpin) {
+		m.busy = true
+		reference := skill.Reference.String()
+		return func() tea.Msg {
+			result, err := m.clawHubClient.UnpinClawHubSkill(m.ctx, reference)
+			return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecycleUnpin, err: err}
+		}
+	}
+	if !skill.Pinned && m.supportsClawHub(clawhub.LifecyclePin) {
+		m.mode = modeSkillPin
+		m.editor.Reset()
+		m.editor.Placeholder = "Why must this version stay fixed?…"
+		m.focusComposerEditor()
+	}
+	return nil
+}
+func (m *Model) updateSelectedClawHub() tea.Cmd {
+	skill := m.selectedClawHubRecord()
+	if skill == nil || skill.Pinned || skill.LocallyModified || m.busy || !m.supportsClawHub(clawhub.LifecycleUpdate) {
+		return nil
+	}
+	m.busy = true
+	reference := skill.Reference.String()
+	return func() tea.Msg {
+		result, err := m.clawHubClient.UpdateClawHubSkill(m.ctx, reference)
+		return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecycleUpdate, err: err}
+	}
+}
+func (m *Model) updateAllClawHub() tea.Cmd {
+	if m.busy || !m.supportsClawHub(clawhub.LifecycleUpdateAll) {
+		return nil
+	}
+	m.busy = true
+	return func() tea.Msg {
+		result, err := m.clawHubClient.UpdateAllClawHubSkills(m.ctx)
+		return clawHubLifecycleCompleted{batch: result, operation: clawhub.LifecycleUpdateAll, err: err}
+	}
+}
+func (m *Model) verifySelectedClawHub() tea.Cmd {
+	skill := m.selectedClawHubRecord()
+	if skill == nil || m.busy || !m.supportsClawHub(clawhub.LifecycleVerifyInstalled) {
+		return nil
+	}
+	m.busy = true
+	reference := skill.Reference.String()
+	return func() tea.Msg {
+		_, err := m.clawHubClient.VerifyInstalledClawHubSkill(m.ctx, reference)
+		result := &clawhub.LifecycleResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleVerifyInstalled, SourceIdentity: skill.SourceIdentity, Reference: skill.Reference, Version: skill.Version, Outcome: clawhub.LifecycleOutcomeVerified}
+		return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecycleVerifyInstalled, err: err}
 	}
 }
 
@@ -1463,6 +1689,10 @@ func (m *Model) supportsInitiative(operation string) bool {
 	return m.ready && m.initiativeCapability.Supports(operation)
 }
 
+func (m *Model) supportsClawHub(operation clawhub.LifecycleOperation) bool {
+	return m.ready && m.clawHubClient != nil && m.clawHubCapability.Supports(string(operation))
+}
+
 func (m *Model) supportsArtifact(operation string) bool {
 	return m.ready && m.artifactCapability.Supports(operation)
 }
@@ -1646,6 +1876,10 @@ func (m *Model) movePanelSelection(delta int) {
 		m.moveInitiativeSelection(delta)
 		return
 	}
+	if m.section == sectionSkills {
+		m.moveClawHubSelection(delta)
+		return
+	}
 	if m.section == sectionChannels {
 		m.moveConversationSelection(delta)
 		return
@@ -1662,6 +1896,35 @@ func (m *Model) selectedInitiativeRecord() *runtime.Initiative {
 		return nil
 	}
 	return m.initiatives[m.initiativeSelected]
+}
+
+func (m *Model) selectedClawHubRecord() *clawhub.InstalledState {
+	if m.clawHubSelected < 0 || m.clawHubSelected >= len(m.clawHubSkills) {
+		return nil
+	}
+	return &m.clawHubSkills[m.clawHubSelected]
+}
+func (m *Model) restoreClawHubSelection() {
+	if len(m.clawHubSkills) == 0 {
+		m.clawHubSelected = 0
+		m.selectedClawHub = ""
+		return
+	}
+	for index := range m.clawHubSkills {
+		if m.clawHubSkills[index].SourceIdentity == m.selectedClawHub {
+			m.clawHubSelected = index
+			return
+		}
+	}
+	m.clawHubSelected = min(m.clawHubSelected, len(m.clawHubSkills)-1)
+	m.selectedClawHub = m.clawHubSkills[m.clawHubSelected].SourceIdentity
+}
+func (m *Model) moveClawHubSelection(delta int) {
+	if len(m.clawHubSkills) == 0 {
+		return
+	}
+	m.clawHubSelected = max(0, min(len(m.clawHubSkills)-1, m.clawHubSelected+delta))
+	m.selectedClawHub = m.clawHubSkills[m.clawHubSelected].SourceIdentity
 }
 func (m *Model) restoreInitiativeSelection() {
 	if len(m.initiatives) == 0 {
@@ -1776,6 +2039,10 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeInitiativeCreate
 		m.editor.Placeholder = "Describe the Initiative outcome…"
 		m.focusComposerEditor()
+	case m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall):
+		m.mode = modeSkillInstall
+		m.editor.Placeholder = "Enter @owner/skill to install…"
+		m.focusComposerEditor()
 	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -1805,6 +2072,11 @@ func (m *Model) resetComposerMode() {
 	if m.section == sectionInitiatives {
 		m.mode = modeInitiativeCreate
 		m.editor.Placeholder = "Describe the Initiative outcome…"
+		return
+	}
+	if m.section == sectionSkills {
+		m.mode = modeSkillInstall
+		m.editor.Placeholder = "Enter @owner/skill to install…"
 		return
 	}
 	if m.section == sectionChannels && m.selectedConversationRecord() != nil {
@@ -1844,6 +2116,11 @@ func (m *Model) operatorParticipant() runtime.ConversationParticipant {
 func conversationClient(kernelClient client.KernelClient) client.ConversationClient {
 	conversationClient, _ := kernelClient.(client.ConversationClient)
 	return conversationClient
+}
+
+func clawHubClient(kernelClient client.KernelClient) client.ClawHubClient {
+	value, _ := kernelClient.(client.ClawHubClient)
+	return value
 }
 
 func isHTTPStatus(err error, status int) bool {
