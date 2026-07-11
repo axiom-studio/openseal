@@ -64,7 +64,7 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 		c.MaxTurnsPerClaim = 1
 	}
 	if c.LeaseDuration <= 0 {
-		c.LeaseDuration = 15 * time.Minute
+		c.LeaseDuration = 30 * time.Second
 	}
 	if c.TurnLeaseDuration <= 0 {
 		c.TurnLeaseDuration = c.LeaseDuration
@@ -196,12 +196,20 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	}
 	current := run
 	for turnIndex := 0; turnIndex < p.config.MaxTurnsPerClaim; turnIndex++ {
-		result, advanceErr := p.coordinator.Advance(ctx, AdvanceAgentRunRequest{
+		advanceCtx, cancelAdvance := context.WithCancel(ctx)
+		heartbeatDone := make(chan error, 1)
+		go p.heartbeatRunLease(advanceCtx, cancelAdvance, workerID, current, heartbeatDone)
+		result, advanceErr := p.coordinator.Advance(advanceCtx, AdvanceAgentRunRequest{
 			Scope: current.Scope, RunID: current.ID, WorkerID: workerID, LeaseDuration: p.config.TurnLeaseDuration,
 			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
 			ModelProvider: binding.ModelProvider, Model: binding.Model, InputContextRefs: binding.InputContextRefs,
 			BudgetReservation: binding.BudgetReservation,
 		}, binding.Runner)
+		cancelAdvance()
+		heartbeatErr := <-heartbeatDone
+		if heartbeatErr != nil && (advanceErr == nil || errors.Is(heartbeatErr, ErrLeaseLost)) {
+			advanceErr = heartbeatErr
+		}
 		if result != nil && result.Run != nil {
 			current = result.Run
 		}
@@ -221,6 +229,32 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel context.CancelFunc, workerID string, run *AgentRun, done chan<- error) {
+	interval := p.config.LeaseDuration / 3
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			done <- nil
+			return
+		case <-ticker.C:
+			if _, err := p.scheduler.RenewLease(ctx, run.Scope, run.ID, workerID, p.config.LeaseDuration); err != nil {
+				if ctx.Err() != nil {
+					done <- nil
+					return
+				}
+				cancel()
+				done <- err
+				return
+			}
+		}
+	}
 }
 
 func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {

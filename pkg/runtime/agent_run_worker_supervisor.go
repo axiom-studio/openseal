@@ -49,7 +49,7 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 		c.MaxTurnsPerClaim = 1
 	}
 	if c.LeaseDuration <= 0 {
-		c.LeaseDuration = 15 * time.Minute
+		c.LeaseDuration = 30 * time.Second
 	}
 	if c.TurnLeaseDuration <= 0 {
 		c.TurnLeaseDuration = c.LeaseDuration

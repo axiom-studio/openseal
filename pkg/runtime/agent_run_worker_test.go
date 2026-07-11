@@ -152,3 +152,50 @@ func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
 		t.Fatalf("yield activity was not recorded: %#v", events)
 	}
 }
+
+func TestAgentRunWorkerPoolRenewsLeaseDuringLongTurn(t *testing.T) {
+	store := NewMemoryStore(20)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scope := Scope{Kind: "local", ID: "test"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "finish a long bounded turn", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(ctx context.Context, _ TurnExecutionContext) (*TurnOutcome, error) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(220 * time.Millisecond):
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done"}, nil
+			}
+		})}, nil
+	}), nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "agent", PollInterval: 5 * time.Millisecond,
+		LeaseDuration: 90 * time.Millisecond, TurnLeaseDuration: 90 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Start(ctx)
+	defer pool.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	var completed *AgentRun
+	for time.Now().Before(deadline) {
+		completed, err = NewPortfolioService(store).GetAgentRun(ctx, scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status == AgentRunStatusCompleted {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if completed == nil || completed.Status != AgentRunStatusCompleted || completed.LastAppliedTurn != 1 || completed.Revision < 5 {
+		t.Fatalf("long turn was not protected by renewable ownership: %#v", completed)
+	}
+}

@@ -248,6 +248,35 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	return turn, nil
 }
 
+func (s *AgentTurnService) RenewTurn(ctx context.Context, scope Scope, turnID, workerID string, leaseDuration time.Duration) (*AgentTurn, error) {
+	if s == nil || s.turns == nil {
+		return nil, errors.New("agent turn service is not configured")
+	}
+	if strings.TrimSpace(turnID) == "" || strings.TrimSpace(workerID) == "" {
+		return nil, errors.New("turn id and worker id are required")
+	}
+	if leaseDuration <= 0 {
+		leaseDuration = 5 * time.Minute
+	}
+	turn, err := s.turns.GetAgentTurn(ctx, scope, turnID)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	if turn.Status != AgentTurnStatusRunning || turn.LeaseOwner != workerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
+		return nil, ErrTurnLeaseHeld
+	}
+	expectedRevision := turn.Revision
+	expires := now.Add(leaseDuration)
+	turn.LeaseExpiresAt = &expires
+	turn.UpdatedAt = now
+	turn.Revision++
+	if err := s.turns.UpdateAgentTurn(ctx, turn, expectedRevision, workerID); err != nil {
+		return nil, err
+	}
+	return turn, nil
+}
+
 func (s *AgentTurnService) ReleaseTurn(ctx context.Context, scope Scope, turnID string, expectedRevision int64, workerID string) (*AgentTurn, error) {
 	if s == nil || s.turns == nil || strings.TrimSpace(workerID) == "" {
 		return nil, errors.New("agent turn service and worker id are required")
