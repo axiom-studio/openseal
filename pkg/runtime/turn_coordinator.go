@@ -372,11 +372,19 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 			budgetDelta = &delta
 		}
 	}
+	activityPayload := map[string]interface{}{
+		"turnSequence": turn.Sequence,
+		"decisions":    append([]TurnDecision(nil), turn.Decisions...),
+		"usage":        turn.Usage,
+	}
+	if len(turn.RequestedActions) > 0 {
+		activityPayload["requestedActions"] = append([]TurnAction(nil), turn.RequestedActions...)
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
 		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
-		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID,
+		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,
 		BudgetUsageDelta:          budgetDelta,
 		SettleBudgetReservationID: budgetReservationID(run, turn),
