@@ -64,6 +64,7 @@ type (
 	AgentRegistryStore                    = kernelagent.Store
 	TeamDefinition                        = kernelteam.Definition
 	TeamRoleSlot                          = kernelteam.RoleSlot
+	TeamRoleChannelParticipation          = kernelteam.RoleChannelParticipation
 	TeamCoordinationMode                  = kernelteam.CoordinationMode
 	TeamCoordinationPolicy                = kernelteam.CoordinationPolicy
 	TeamDelegationPolicy                  = kernelteam.DelegationPolicy
@@ -485,6 +486,9 @@ const (
 	TeamCoordinationDynamic           = kernelteam.CoordinationDynamic
 	TeamCoordinationPeer              = kernelteam.CoordinationPeer
 	TeamCoordinationLeaderFacilitated = kernelteam.CoordinationLeaderFacilitated
+	TeamRoleChannelActive             = kernelteam.RoleChannelActive
+	TeamRoleChannelObserveOnly        = kernelteam.RoleChannelObserveOnly
+	TeamRoleChannelDisabled           = kernelteam.RoleChannelDisabled
 	TeamDeploymentDraft               = kernelteam.DeploymentDraft
 	TeamDeploymentActive              = kernelteam.DeploymentActive
 	TeamDeploymentPaused              = kernelteam.DeploymentPaused

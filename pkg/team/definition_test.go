@@ -13,6 +13,7 @@ func TestDefinitionAndDeploymentPreserveExtensibleRoles(t *testing.T) {
 	definition.Roles = append(definition.Roles, RoleSlot{
 		ID: "community-cartographer", DisplayName: "Community cartographer",
 		Purpose: "Maps emerging communities without being a fixed built-in role", MaximumMembers: 2,
+		ChannelParticipation: RoleChannelObserveOnly,
 	})
 	encoded, err := json.Marshal(definition)
 	if err != nil {
@@ -22,7 +23,7 @@ func TestDefinitionAndDeploymentPreserveExtensibleRoles(t *testing.T) {
 	if err := json.Unmarshal(encoded, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if err := restored.Validate(); err != nil || restored.Roles[1].ID != "community-cartographer" {
+	if err := restored.Validate(); err != nil || restored.Roles[1].ID != "community-cartographer" || restored.Roles[1].ChannelParticipation != RoleChannelObserveOnly {
 		t.Fatalf("restored definition = %#v, err = %v", restored, err)
 	}
 
@@ -52,6 +53,12 @@ func TestDefinitionAndDeploymentFailClosedOnInvalidAuthorityOrRoster(t *testing.
 	definition.Approvals.ApproverRoleIDs = []string{"undeclared-leader"}
 	if err := definition.Validate(); err == nil {
 		t.Fatal("undeclared approval authority should fail")
+	}
+
+	definition = validDefinition()
+	definition.Roles[0].ChannelParticipation = "interrupt_everyone"
+	if err := definition.Validate(); err == nil {
+		t.Fatal("unknown role channel participation should fail closed")
 	}
 
 	definition = validDefinition()
