@@ -19,6 +19,7 @@ var (
 	ErrInitiativeConflict    = errors.New("initiative revision conflict")
 	ErrInitiativeIdempotency = errors.New("initiative idempotency key was already used with different input")
 	ErrInitiativeNoChanges   = errors.New("initiative update contains no changes")
+	ErrInvalidInitiative     = errors.New("invalid initiative")
 )
 
 type InitiativeStatus string
@@ -389,7 +390,7 @@ func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequ
 		}
 	}
 	if err := i.Validate(); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidInitiative, err)
 	}
 	if err := s.validateObjectives(ctx, i); err != nil {
 		return nil, nil, err
@@ -504,7 +505,7 @@ func (s *InitiativeService) Update(ctx context.Context, i *Initiative, expected 
 	next.Revision++
 	next.UpdatedAt = s.now().UTC()
 	if err := next.Validate(); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidInitiative, err)
 	}
 	if err := s.validateObjectives(ctx, next); err != nil {
 		return nil, nil, err

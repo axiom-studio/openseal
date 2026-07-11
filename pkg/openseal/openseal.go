@@ -456,6 +456,7 @@ var (
 	ErrInitiativeConflict                  = runtime.ErrInitiativeConflict
 	ErrInitiativeIdempotency               = runtime.ErrInitiativeIdempotency
 	ErrInitiativeNoChanges                 = runtime.ErrInitiativeNoChanges
+	ErrInvalidInitiative                   = runtime.ErrInvalidInitiative
 	ErrObjectiveNotFound                   = runtime.ErrObjectiveNotFound
 	ErrObjectiveIdempotency                = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition          = runtime.ErrInvalidObjectiveTransition
