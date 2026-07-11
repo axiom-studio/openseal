@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -65,7 +66,8 @@ const (
 type panelSection int
 
 const (
-	sectionObjectives panelSection = iota
+	sectionAuthoring panelSection = iota
+	sectionObjectives
 	sectionRuns
 	sectionArtifacts
 	sectionChannels
@@ -75,6 +77,7 @@ type editorMode int
 
 const (
 	modeCreate editorMode = iota
+	modeWorkforceAuthoring
 	modeGuide
 	modeChannelCreate
 	modeChannelPost
@@ -103,6 +106,8 @@ type Model struct {
 	objectiveCapability      kernelapi.Capability
 	artifactCapability       kernelapi.Capability
 	channelCapability        kernelapi.Capability
+	authoringCapability      kernelapi.Capability
+	authoringResult          *authoring.CompileResult
 	runs                     []*runtime.AgentRun
 	objectives               []*runtime.Objective
 	objectiveSelected        int
@@ -134,6 +139,11 @@ type Model struct {
 type capabilitiesLoaded struct {
 	document kernelapi.CapabilityDocument
 	err      error
+}
+
+type workforceCompiled struct {
+	result *authoring.CompileResult
+	err    error
 }
 
 type runsLoaded struct {
@@ -231,7 +241,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	editor.Focus()
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
-		focus: focusComposer, section: sectionObjectives, mode: modeObjectiveCreate, width: 100, height: 30,
+		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
 		conversationClient: conversationClient(kernelClient),
 	}, nil
 }
@@ -274,10 +284,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.TeamChannelsCapabilityID, kernelapi.TeamChannelsCapabilityVersion)
+		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		m.runCapability = runCapability
 		m.objectiveCapability = objectiveCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
+		m.authoringCapability = authoringCapability
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
 		}
@@ -290,15 +302,26 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasChannels || !channelCapability.Available || m.conversationClient == nil {
 			m.channelCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available {
-			m.unavailable = "This server does not advertise objectives, canonical work, Team channels, or artifact evidence."
+		if !hasAuthoring || !authoringCapability.Available {
+			m.authoringCapability = kernelapi.Capability{}
+		}
+		if !m.objectiveCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available {
+			m.unavailable = "This server does not advertise workforce authoring, objectives, canonical work, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
 		m.ready = true
 		m.unavailable = ""
 		m.err = nil
-		if !m.objectiveCapability.Available && m.runCapability.Available {
+		if m.authoringCapability.Available {
+			m.section = sectionAuthoring
+			m.mode = modeWorkforceAuthoring
+			m.editor.Placeholder = "Describe the Agents and Team you need…"
+		} else if m.objectiveCapability.Available {
+			m.section = sectionObjectives
+			m.mode = modeObjectiveCreate
+			m.editor.Placeholder = "Describe the objective and desired outcome…"
+		} else if !m.objectiveCapability.Available && m.runCapability.Available {
 			m.section = sectionRuns
 			m.mode = modeCreate
 		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.channelCapability.Available {
@@ -309,6 +332,19 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 		}
 		return m, tea.Batch(m.loadObjectives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+	case workforceCompiled:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Compilation failed. Your prompt is preserved for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.authoringResult = msg.result
+		m.status = "Workforce candidate compiled. Nothing has been activated."
+		m.section = sectionAuthoring
+		m.focusPanelList()
+		return m, nil
 	case objectivesLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -528,6 +564,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitObjective()
 			case modeObjectiveEdit:
 				return m, m.submitObjectiveAmendment()
+			case modeWorkforceAuthoring:
+				return m, m.submitWorkforceAuthoring()
 			default:
 				return m, m.submitRun()
 			}
@@ -549,6 +587,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
+			}
+		case "f":
+			if m.authoringCapability.Available {
+				m.section = sectionAuthoring
 			}
 		case "o":
 			if m.objectiveCapability.Available {
@@ -634,6 +676,24 @@ func (m *Model) loadCapabilities() tea.Cmd {
 	return func() tea.Msg {
 		document, err := m.client.Capabilities(m.ctx)
 		return capabilitiesLoaded{document: document, err: err}
+	}
+}
+
+func (m *Model) submitWorkforceAuthoring() tea.Cmd {
+	prompt := strings.TrimSpace(m.editor.Value())
+	if !m.supportsAuthoring(kernelapi.OperationCompile) || m.busy || prompt == "" {
+		if prompt == "" {
+			m.status = "Describe the workforce before compiling it."
+		}
+		return nil
+	}
+	m.busy = true
+	m.err = nil
+	m.status = "Compiling a reviewable Agent and Team candidate…"
+	request := authoring.GenerateRequest{Mode: authoring.ModeCreate, Prompt: prompt, Catalog: authoring.CapabilityCatalog{}}
+	return func() tea.Msg {
+		result, err := m.client.CompileWorkforce(m.ctx, request)
+		return workforceCompiled{result: result, err: err}
 	}
 }
 
@@ -957,6 +1017,10 @@ func (m *Model) supportsChannel(operation string) bool {
 	return m.ready && m.conversationClient != nil && m.channelCapability.Supports(operation)
 }
 
+func (m *Model) supportsAuthoring(operation string) bool {
+	return m.ready && m.authoringCapability.Supports(operation)
+}
+
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
 	if run == nil || isTerminal(run.Status) {
 		return false
@@ -1164,6 +1228,10 @@ func (m *Model) focusComposerEditor() {
 
 func (m *Model) prepareComposerForSection() {
 	switch {
+	case m.section == sectionAuthoring && m.supportsAuthoring(kernelapi.OperationCompile):
+		m.mode = modeWorkforceAuthoring
+		m.editor.Placeholder = "Describe the Agents and Team you need…"
+		m.focusComposerEditor()
 	case m.section == sectionObjectives && m.supportsObjective(kernelapi.OperationCreate):
 		m.mode = modeObjectiveCreate
 		m.editor.Placeholder = "Describe the objective and desired outcome…"
@@ -1184,6 +1252,11 @@ func (m *Model) prepareComposerForSection() {
 }
 
 func (m *Model) resetComposerMode() {
+	if m.section == sectionAuthoring {
+		m.mode = modeWorkforceAuthoring
+		m.editor.Placeholder = "Describe the Agents and Team you need…"
+		return
+	}
 	if m.section == sectionObjectives {
 		m.mode = modeObjectiveCreate
 		m.editor.Placeholder = "Describe the objective and desired outcome…"

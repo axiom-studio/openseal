@@ -54,13 +54,16 @@ func (m *Model) render() string {
 }
 
 func (m *Model) renderHeader(width int) string {
-	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Objectives, Work, Channels & Evidence")
+	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Agents, Teams, Objectives & Work")
 	connection := mutedStyle.Render(fmt.Sprintf("%s · %s/%s", m.config.Endpoint, m.config.Scope.Kind, m.config.Scope.ID))
 	space := max(1, width-lipgloss.Width(title)-lipgloss.Width(connection))
 	return title + strings.Repeat(" ", space) + connection
 }
 
 func (m *Model) renderComposer(width int) string {
+	if m.mode == modeWorkforceAuthoring && !m.supportsAuthoring(kernelapi.OperationCompile) {
+		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce compilation.")
+	}
 	if m.mode == modeObjectiveCreate && !m.supportsObjective(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Add an objective", "This server does not advertise objective creation.")
 	}
@@ -73,7 +76,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -83,6 +86,10 @@ func (m *Model) renderComposer(width int) string {
 	description := "Describe an outcome. OpenSeal will keep the work safe across restarts."
 	owner := humanOwner(m.config.Owner)
 	switch m.mode {
+	case modeWorkforceAuthoring:
+		title = "Create Agents and Teams"
+		description = "Describe outcomes, roles, boundaries, and collaboration. Review the exact candidate before activation."
+		owner = "Preview only · compilation never activates state"
 	case modeGuide:
 		title = "Guide selected work"
 		description = "Add a concise instruction without replacing the objective."
@@ -118,7 +125,9 @@ func (m *Model) renderUnavailableComposer(width int, title, message string) stri
 func (m *Model) renderPanel(width int) string {
 	tabs := m.renderPanelTabs()
 	var content string
-	if m.section == sectionObjectives {
+	if m.section == sectionAuthoring {
+		content = m.renderAuthoringContent(width)
+	} else if m.section == sectionObjectives {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionChannels {
 		content = m.renderChannelsContent(width)
@@ -131,7 +140,16 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 4)
+	tabs := make([]string, 0, 5)
+	if m.authoringCapability.Available {
+		label := "f Workforce"
+		if m.section == sectionAuthoring {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
 	if m.objectiveCapability.Available {
 		label := "o Objectives"
 		if m.section == sectionObjectives {
@@ -169,6 +187,46 @@ func (m *Model) renderPanelTabs() string {
 		tabs = append(tabs, label)
 	}
 	return strings.Join(tabs, "  ")
+}
+
+func (m *Model) renderAuthoringContent(width int) string {
+	title := headerStyle.Render("Workforce candidate")
+	if m.busy {
+		return title + "\n\n" + mutedStyle.Render("Compiling a verified Agent and Team preview…")
+	}
+	result := m.authoringResult
+	if result == nil {
+		return title + "\n\n" + mutedStyle.Render("Describe the workforce on the left. OpenSeal will verify every generated definition, Skill gap, authority change, and role assignment.")
+	}
+	state := lipgloss.NewStyle().Foreground(success).Render("READY FOR REVIEW")
+	issues := len(result.Questions) + len(result.Validation) + len(result.MissingRequirements)
+	if !result.Valid {
+		state = lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("%d ITEM(S) NEED ATTENTION", issues))
+	}
+	teamName, teamPurpose, roles, objectives := "Workforce", "", 0, 0
+	if result.Candidate.Team != nil {
+		teamName, teamPurpose = result.Candidate.Team.DisplayName, result.Candidate.Team.Purpose
+		roles, objectives = len(result.Candidate.Team.Roles), len(result.Candidate.Team.ObjectiveTemplates)
+	}
+	lines := []string{title, state, "", headerStyle.Render(compact(teamName, max(width-8, 24)))}
+	if teamPurpose != "" {
+		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))
+	}
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d Agents · %d roles · %d Team objectives", len(result.Candidate.Agents), roles, objectives)), "")
+	for _, agent := range result.Candidate.Agents {
+		lines = append(lines, fmt.Sprintf("• %s  %s · %d concurrent", compact(agent.DisplayName, max(width-28, 18)), agent.Authority.MaximumRisk, agent.Authority.MaxConcurrentRuns))
+	}
+	for _, question := range result.Questions {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question, max(width-8, 24))))
+	}
+	for _, missing := range result.MissingRequirements {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("Connect %s %s for %s", missing.Kind, missing.ID, missing.RequiredBy)))
+	}
+	for _, issue := range result.Validation {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
+	}
+	lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to revise the prompt."))
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderObjectivesContent(width int) string {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/internal/server"
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
@@ -25,19 +26,22 @@ import (
 )
 
 type fakeKernelClient struct {
-	document         kernelapi.CapabilityDocument
-	runs             []*runtime.AgentRun
-	createErrors     []error
-	createKeys       []string
-	createRequests   []kernelapi.CreateAgentRunRequest
-	objectives       []*runtime.Objective
-	objectiveKeys    []string
-	objectiveCreates []kernelapi.CreateObjectiveRequest
-	objectiveUpdates []kernelapi.UpdateObjectiveRequest
-	commands         []kernelapi.AgentRunCommandRequest
-	artifacts        []*runtime.Artifact
-	downloadBody     string
-	downloadCalls    int
+	document          kernelapi.CapabilityDocument
+	runs              []*runtime.AgentRun
+	createErrors      []error
+	createKeys        []string
+	createRequests    []kernelapi.CreateAgentRunRequest
+	objectives        []*runtime.Objective
+	objectiveKeys     []string
+	objectiveCreates  []kernelapi.CreateObjectiveRequest
+	objectiveUpdates  []kernelapi.UpdateObjectiveRequest
+	commands          []kernelapi.AgentRunCommandRequest
+	artifacts         []*runtime.Artifact
+	downloadBody      string
+	downloadCalls     int
+	authoringResult   *authoring.CompileResult
+	authoringRequests []authoring.GenerateRequest
+	authoringErrors   []error
 }
 
 type fakeChannelKernelClient struct {
@@ -163,8 +167,16 @@ func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDo
 	return f.document, nil
 }
 
-func (f *fakeKernelClient) CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error) {
-	return nil, errors.New("workforce authoring is not configured in this test")
+func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
+	f.authoringRequests = append(f.authoringRequests, request)
+	if len(f.authoringErrors) > 0 {
+		err := f.authoringErrors[0]
+		f.authoringErrors = f.authoringErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	return f.authoringResult, nil
 }
 
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
@@ -353,6 +365,45 @@ func TestCreateRetryPreservesIdempotencyAndPrompt(t *testing.T) {
 	}
 	if fake.createRequests[0].AssignedAgentID != "operator" || fake.createRequests[0].Source != runtime.RunSourceManual {
 		t.Fatalf("create request = %#v", fake.createRequests[0])
+	}
+}
+
+func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing.T) {
+	result := &authoring.CompileResult{
+		Valid: false,
+		Candidate: authoring.WorkforceCandidate{
+			Agents: []*kernelagent.AgentDefinition{{
+				ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Gather evidence", SystemPrompt: "Research carefully.",
+				Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 2},
+			}},
+			Team: &kernelteam.Definition{
+				ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
+				Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
+				Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
+				Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+			},
+		},
+		Questions: []string{"Which sources are authorized?"},
+	}
+	fake := &fakeKernelClient{
+		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(), kernelapi.ObjectivesCapability()),
+		authoringResult: result,
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionAuthoring || model.mode != modeWorkforceAuthoring || !strings.Contains(model.View(), "Create Agents and Teams") {
+		t.Fatalf("authoring was not the primary capability:\n%s", model.View())
+	}
+	model.editor.SetValue("Create a customer research Team")
+	applyCommand(t, model, model.submitWorkforceAuthoring())
+	view := model.View()
+	if len(fake.authoringRequests) != 1 || fake.authoringRequests[0].Catalog.Skills != nil {
+		t.Fatalf("authoring requests = %#v", fake.authoringRequests)
+	}
+	for _, expected := range []string{"Research Team", "1 Agents", "Which sources are authorized?", "Nothing is active"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("authoring preview missing %q:\n%s", expected, view)
+		}
 	}
 }
 
