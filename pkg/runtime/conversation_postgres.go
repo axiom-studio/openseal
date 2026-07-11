@@ -444,6 +444,32 @@ func (s *PostgresStore) GetConversationCursor(ctx context.Context, scope Scope, 
 	return s.getPostgresConversationCursor(ctx, s.db, scope, conversationID, participant, false)
 }
 
+func (s *PostgresStore) ListConversationCursors(ctx context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error) {
+	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("conversation_cursors")+`
+		WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3
+		ORDER BY participant_type, participant_id`, scope.Kind, scope.ID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*ConversationCursor, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		cursor, err := decodeConversationCursor(payload)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, cursor)
+	}
+	return result, rows.Err()
+}
+
 func (s *PostgresStore) PutConversationCursor(ctx context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error) {
 	if record.Cursor == nil {
 		return nil, false, ErrConversationCursorConflict

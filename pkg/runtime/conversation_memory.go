@@ -326,6 +326,33 @@ func (s *MemoryStore) GetConversationCursor(_ context.Context, scope Scope, conv
 	return cloneConversationCursor(s.conversationCursors[conversationParticipantStoreKey(scope, conversationID, participant)]), nil
 }
 
+func (s *MemoryStore) ListConversationCursors(_ context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if !validOpaqueIdentifier(conversationID, 128) {
+		return nil, ErrInvalidConversation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.conversations[conversationStoreKey(scope, conversationID)] == nil {
+		return nil, ErrConversationNotFound
+	}
+	result := make([]*ConversationCursor, 0)
+	for _, cursor := range s.conversationCursors {
+		if cursor.Scope == scope && cursor.ConversationID == conversationID {
+			result = append(result, cloneConversationCursor(cursor))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Participant.Type != result[j].Participant.Type {
+			return result[i].Participant.Type < result[j].Participant.Type
+		}
+		return result[i].Participant.ID < result[j].Participant.ID
+	})
+	return result, nil
+}
+
 func (s *MemoryStore) PutConversationCursor(_ context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error) {
 	if record.Cursor == nil {
 		return nil, false, ErrConversationCursorConflict

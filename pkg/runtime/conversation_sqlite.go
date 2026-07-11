@@ -456,6 +456,32 @@ func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope Scope, co
 	return decodeConversationCursor(payload)
 }
 
+func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error) {
+	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM conversation_cursors
+		WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ?
+		ORDER BY participant_type, participant_id`, scope.Kind, scope.ID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*ConversationCursor, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		cursor, err := decodeConversationCursor(payload)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, cursor)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error) {
 	if record.Cursor == nil {
 		return nil, false, ErrConversationCursorConflict

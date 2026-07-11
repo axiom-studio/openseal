@@ -179,6 +179,20 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	}); !errors.Is(err, ErrConversationCursorConflict) {
 		t.Fatalf("cursor regression error = %v", err)
 	}
+	user := ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}
+	if _, _, err := service.AdvanceCursor(ctx, AdvanceConversationCursorRequest{
+		Scope: scope, ConversationID: conversation.ID, Participant: user,
+		DeliveredSequence: message.Message.Sequence, ReadSequence: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cursors, err := service.ListCursors(ctx, scope, conversation.ID)
+	if err != nil || len(cursors) != 2 {
+		t.Fatalf("cursor list = %#v, err = %v", cursors, err)
+	}
+	if cursors[0].Participant != agent || cursors[1].Participant != user {
+		t.Fatalf("cursor list is not deterministically ordered: %#v", cursors)
+	}
 
 	presence, err := service.SetPresence(ctx, SetConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceWorking,
