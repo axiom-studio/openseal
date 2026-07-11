@@ -77,7 +77,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -108,6 +108,10 @@ func (m *Model) renderComposer(width int) string {
 		title = "Create reviewed workforce"
 		description = "Record why this exact candidate should now create its Agents, Team, and objectives atomically."
 		owner = "Atomic Apply · permanent audit receipt"
+	case modeWorkforceRetry:
+		title = "Retry proposal generation"
+		description = "Record why the failed generation should be resumed as a new durable attempt."
+		owner = "Revision-bound retry · idempotent request"
 	case modeGuide:
 		title = "Guide selected work"
 		description = "Add a concise instruction without replacing the objective."
@@ -214,6 +218,22 @@ func (m *Model) renderAuthoringContent(width int) string {
 	}
 	result := m.authoringResult
 	if result == nil {
+		if changeSet := m.authoringChangeSet; changeSet != nil {
+			lines := []string{title, "", mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision))}
+			if changeSet.Generation != nil {
+				lines = append(lines, mutedStyle.Render(fmt.Sprintf("Run %s · attempt %d", compact(changeSet.Generation.RunID, 16), changeSet.Generation.Attempt)))
+				if changeSet.Generation.LastError != "" {
+					lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(changeSet.Generation.LastError, max(width-8, 24))))
+				}
+			}
+			if changeSet.Status == authoring.ChangeSetEvaluating {
+				lines = append(lines, "", mutedStyle.Render("Generation is durable and continues in the background. Refresh is automatic."))
+			}
+			if m.canRetryWorkforce() {
+				lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("r retry generation"))
+			}
+			return strings.Join(lines, "\n")
+		}
 		return title + "\n\n" + mutedStyle.Render("Describe the workforce on the left. OpenSeal will verify every generated definition, Skill gap, authority change, and role assignment.")
 	}
 	state := lipgloss.NewStyle().Foreground(success).Render("READY FOR REVIEW")
