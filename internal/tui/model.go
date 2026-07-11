@@ -84,62 +84,68 @@ const (
 	modeChannelPost
 	modeObjectiveCreate
 	modeObjectiveEdit
+	modeWorkforceApprove
+	modeWorkforceReject
+	modeWorkforceApply
 )
 
 type Model struct {
-	ctx                      context.Context
-	client                   client.KernelClient
-	conversationClient       client.ConversationClient
-	config                   Config
-	editor                   textarea.Model
-	focus                    focusArea
-	section                  panelSection
-	mode                     editorMode
-	width                    int
-	height                   int
-	loading                  bool
-	busy                     bool
-	ready                    bool
-	unavailable              string
-	err                      error
-	status                   string
-	runCapability            kernelapi.Capability
-	objectiveCapability      kernelapi.Capability
-	artifactCapability       kernelapi.Capability
-	channelCapability        kernelapi.Capability
-	authoringCapability      kernelapi.Capability
-	authoringResult          *authoring.CompileResult
-	authoringChangeSet       *authoring.ChangeSet
-	authoringAmendment       bool
-	runs                     []*runtime.AgentRun
-	objectives               []*runtime.Objective
-	objectiveSelected        int
-	selectedObjective        string
-	selected                 int
-	selectedID               string
-	artifacts                []*runtime.Artifact
-	artifactSelected         int
-	selectedArtifact         string
-	artifactExpanded         bool
-	conversations            []*runtime.Conversation
-	conversationSelected     int
-	selectedConversation     string
-	channelMessages          []*runtime.ChannelMessage
-	channelRounds            []*runtime.ParticipationRoundResult
-	channelPresence          []*runtime.ConversationPresence
-	channelAuditExpanded     bool
-	pendingKey               string
-	pendingGoal              string
-	pendingAuthoringKey      string
-	pendingAuthoringPrompt   string
-	pendingAuthoringParentID string
-	pendingObjectiveKey      string
-	pendingObjectivePrompt   string
-	pendingConversationKey   string
-	pendingConversationTitle string
-	pendingMessageKey        string
-	pendingMessageContent    string
-	pendingMessageChannelID  string
+	ctx                       context.Context
+	client                    client.KernelClient
+	conversationClient        client.ConversationClient
+	config                    Config
+	editor                    textarea.Model
+	focus                     focusArea
+	section                   panelSection
+	mode                      editorMode
+	width                     int
+	height                    int
+	loading                   bool
+	busy                      bool
+	ready                     bool
+	unavailable               string
+	err                       error
+	status                    string
+	runCapability             kernelapi.Capability
+	objectiveCapability       kernelapi.Capability
+	artifactCapability        kernelapi.Capability
+	channelCapability         kernelapi.Capability
+	authoringCapability       kernelapi.Capability
+	authoringResult           *authoring.CompileResult
+	authoringChangeSet        *authoring.ChangeSet
+	authoringAmendment        bool
+	authoringApprovalSelected int
+	runs                      []*runtime.AgentRun
+	objectives                []*runtime.Objective
+	objectiveSelected         int
+	selectedObjective         string
+	selected                  int
+	selectedID                string
+	artifacts                 []*runtime.Artifact
+	artifactSelected          int
+	selectedArtifact          string
+	artifactExpanded          bool
+	conversations             []*runtime.Conversation
+	conversationSelected      int
+	selectedConversation      string
+	channelMessages           []*runtime.ChannelMessage
+	channelRounds             []*runtime.ParticipationRoundResult
+	channelPresence           []*runtime.ConversationPresence
+	channelAuditExpanded      bool
+	pendingKey                string
+	pendingGoal               string
+	pendingAuthoringKey       string
+	pendingAuthoringPrompt    string
+	pendingAuthoringParentID  string
+	pendingGovernanceKey      string
+	pendingGovernanceIntent   string
+	pendingObjectiveKey       string
+	pendingObjectivePrompt    string
+	pendingConversationKey    string
+	pendingConversationTitle  string
+	pendingMessageKey         string
+	pendingMessageContent     string
+	pendingMessageChannelID   string
 }
 
 type capabilitiesLoaded struct {
@@ -151,6 +157,17 @@ type workforceCompiled struct {
 	result    *authoring.CompileResult
 	changeSet *authoring.ChangeSet
 	mode      authoring.Mode
+	err       error
+}
+
+type workforceGoverned struct {
+	changeSet *authoring.ChangeSet
+	action    string
+	err       error
+}
+
+type workforceLoaded struct {
+	changeSet *authoring.ChangeSet
 	err       error
 }
 
@@ -298,6 +315,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
+		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
+			m.authoringApprovalSelected = 0
+		} else {
+			m.authoringApprovalSelected = min(m.authoringApprovalSelected, len(authoringCapability.Context.EligibleApprovalRequirements)-1)
+		}
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
 		}
@@ -324,7 +346,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.authoringCapability.Available {
 			m.section = sectionAuthoring
 			m.mode = modeWorkforceAuthoring
-			m.editor.Placeholder = "Describe the Agents and Team you need…"
+			if m.authoringResult != nil {
+				m.editor.Placeholder = "Describe what should change…"
+			} else {
+				m.editor.Placeholder = "Describe the Agents and Team you need…"
+			}
 		} else if m.objectiveCapability.Available {
 			m.section = sectionObjectives
 			m.mode = modeObjectiveCreate
@@ -361,7 +387,37 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.section = sectionAuthoring
 		m.focusPanelList()
-		return m, nil
+		return m, m.loadCapabilities()
+	case workforceGoverned:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. Your reason and retry identity are preserved."
+			return m, nil
+		}
+		m.err = nil
+		m.authoringChangeSet = msg.changeSet
+		if msg.changeSet != nil {
+			m.authoringResult = &msg.changeSet.Result
+		}
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = "", ""
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.status = msg.action + " recorded in the durable workforce audit."
+		m.focusPanelList()
+		return m, m.loadCapabilities()
+	case workforceLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.authoringChangeSet = msg.changeSet
+		if msg.changeSet != nil {
+			m.authoringResult = &msg.changeSet.Result
+		}
+		return m, m.loadCapabilities()
 	case objectivesLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -531,6 +587,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
 			commands = append(commands, m.loadObjectives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+			if m.authoringChangeSet != nil {
+				commands = append(commands, m.loadWorkforceChangeSet())
+			}
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -583,6 +642,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitObjectiveAmendment()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
+			case modeWorkforceApprove:
+				return m, m.submitWorkforceApproval(true)
+			case modeWorkforceReject:
+				return m, m.submitWorkforceApproval(false)
+			case modeWorkforceApply:
+				return m, m.submitWorkforceApply()
 			default:
 				return m, m.submitRun()
 			}
@@ -592,12 +657,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.focus == focusPanel {
 		switch key {
 		case "up", "k":
-			m.movePanelSelection(-1)
+			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
+				m.moveWorkforceApprovalSelection(-1)
+			} else {
+				m.movePanelSelection(-1)
+			}
 			if m.section == sectionChannels {
 				return m, m.loadSelectedConversation()
 			}
 		case "down", "j":
-			m.movePanelSelection(1)
+			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
+				m.moveWorkforceApprovalSelection(1)
+			} else {
+				m.movePanelSelection(1)
+			}
 			if m.section == sectionChannels {
 				return m, m.loadSelectedConversation()
 			}
@@ -654,6 +727,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "x":
 			if m.section == sectionRuns {
 				return m, m.commandSelected(runtime.AgentRunCommandCancel, "")
+			} else if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
+				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
+			}
+		case "y":
+			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
+				m.prepareWorkforceGovernanceComposer(modeWorkforceApprove, "Record why this requirement is satisfied…")
 			}
 		case "g":
 			if m.section == sectionRuns {
@@ -665,7 +744,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "e", "enter":
-			if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
+			if m.section == sectionAuthoring && m.canApplyWorkforce() {
+				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
+			} else if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
 				m.mode = modeObjectiveEdit
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the amended objective…"
@@ -691,8 +772,26 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) loadCapabilities() tea.Cmd {
 	m.loading = true
 	return func() tea.Msg {
-		document, err := m.client.Capabilities(m.ctx)
+		var document kernelapi.CapabilityDocument
+		var err error
+		if m.authoringChangeSet != nil {
+			document, err = m.client.WorkforceChangeSetCapabilities(m.ctx, m.authoringChangeSet.Scope, m.authoringChangeSet.ID)
+		} else {
+			document, err = m.client.Capabilities(m.ctx)
+		}
 		return capabilitiesLoaded{document: document, err: err}
+	}
+}
+
+func (m *Model) loadWorkforceChangeSet() tea.Cmd {
+	if m.authoringChangeSet == nil {
+		return nil
+	}
+	m.loading = true
+	scope, id := m.authoringChangeSet.Scope, m.authoringChangeSet.ID
+	return func() tea.Msg {
+		changeSet, err := m.client.GetWorkforceChangeSet(m.ctx, scope, id)
+		return workforceLoaded{changeSet: changeSet, err: err}
 	}
 }
 
@@ -743,6 +842,65 @@ func (m *Model) submitWorkforceAuthoring() tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.client.CompileWorkforce(m.ctx, request)
 		return workforceCompiled{result: result, mode: request.Mode, err: err}
+	}
+}
+
+func (m *Model) submitWorkforceApproval(approved bool) tea.Cmd {
+	reason := strings.TrimSpace(m.editor.Value())
+	reference, ok := m.selectedWorkforceApprovalRequirement()
+	if !ok || m.busy || reason == "" {
+		if reason == "" {
+			m.status = "Record a reason for the permanent approval audit."
+		}
+		return nil
+	}
+	changeSet := m.authoringChangeSet
+	intent := fmt.Sprintf("approval\x00%s\x00%d\x00%s\x00%s\x00%s\x00%t\x00%s", changeSet.ID, changeSet.Revision, reference.EvaluationID, reference.PolicyID, reference.Role, approved, reason)
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.ResolveChangeSetApprovalRequest{
+		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
+		EvaluationID: reference.EvaluationID, PolicyID: reference.PolicyID, Role: reference.Role,
+		Approved: approved, Reason: reason, Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err = true, nil
+	action := "Approval"
+	if !approved {
+		action = "Rejection"
+	}
+	m.status = action + " is being recorded…"
+	return func() tea.Msg {
+		result, err := m.client.ResolveWorkforceChangeSetApproval(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: action, err: err}
+	}
+}
+
+func (m *Model) submitWorkforceApply() tea.Cmd {
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canApplyWorkforce() || m.busy || reason == "" {
+		if reason == "" {
+			m.status = "Record why this reviewed workforce should be created."
+		}
+		return nil
+	}
+	changeSet := m.authoringChangeSet
+	intent := fmt.Sprintf("apply\x00%s\x00%d\x00%s\x00%s", changeSet.ID, changeSet.Revision, changeSet.CandidateDigest, reason)
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.ApplyChangeSetRequest{
+		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
+		CandidateDigest: changeSet.CandidateDigest, Reason: reason,
+		Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err = true, nil
+	m.status = "Creating the reviewed workforce atomically…"
+	return func() tea.Msg {
+		result, err := m.client.ApplyWorkforceChangeSet(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Workforce Apply", err: err}
 	}
 }
 
@@ -833,6 +991,9 @@ func (m *Model) loadSelectedConversation() tea.Cmd {
 }
 
 func (m *Model) loadPanel() tea.Cmd {
+	if m.section == sectionAuthoring && m.authoringChangeSet != nil {
+		return m.loadWorkforceChangeSet()
+	}
 	if m.section == sectionObjectives {
 		return m.loadObjectives()
 	}
@@ -1074,6 +1235,38 @@ func (m *Model) supportsWorkforceAuthoring() bool {
 	return m.supportsAuthoring(kernelapi.OperationPropose) || m.supportsAuthoring(kernelapi.OperationCompile)
 }
 
+func (m *Model) selectedWorkforceApprovalRequirement() (kernelapi.ApprovalRequirementReference, bool) {
+	if !m.canResolveWorkforceApproval() {
+		return kernelapi.ApprovalRequirementReference{}, false
+	}
+	return m.authoringCapability.Context.EligibleApprovalRequirements[m.authoringApprovalSelected], true
+}
+
+func (m *Model) moveWorkforceApprovalSelection(delta int) {
+	if m.authoringCapability.Context == nil {
+		return
+	}
+	count := len(m.authoringCapability.Context.EligibleApprovalRequirements)
+	if count == 0 {
+		m.authoringApprovalSelected = 0
+		return
+	}
+	m.authoringApprovalSelected = (m.authoringApprovalSelected + delta + count) % count
+}
+
+func (m *Model) canResolveWorkforceApproval() bool {
+	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetAwaitingApproval &&
+		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApprove) &&
+		len(m.authoringCapability.Context.EligibleApprovalRequirements) > 0
+}
+
+func (m *Model) canApplyWorkforce() bool {
+	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetReady &&
+		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApply)
+}
+
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
 	if run == nil || isTerminal(run.Status) {
 		return false
@@ -1277,6 +1470,13 @@ func (m *Model) focusPanelList() {
 func (m *Model) focusComposerEditor() {
 	m.focus = focusComposer
 	m.editor.Focus()
+}
+
+func (m *Model) prepareWorkforceGovernanceComposer(mode editorMode, placeholder string) {
+	m.mode = mode
+	m.editor.Reset()
+	m.editor.Placeholder = placeholder
+	m.focusComposerEditor()
 }
 
 func (m *Model) prepareComposerForSection() {

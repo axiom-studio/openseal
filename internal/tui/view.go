@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/charmbracelet/lipgloss"
@@ -76,7 +77,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -95,6 +96,18 @@ func (m *Model) renderComposer(width int) string {
 			description = "Describe a change. OpenSeal will compile a new immutable candidate and show its governed diff."
 		}
 		owner = "Governed review · authoring never activates state"
+	case modeWorkforceApprove:
+		title = "Approve policy requirement"
+		description = "Record why the exact advertised requirement is satisfied. The decision is permanent."
+		owner = "Revision-bound governed decision"
+	case modeWorkforceReject:
+		title = "Reject workforce proposal"
+		description = "Explain why this reviewed proposal must not proceed. The decision is permanent."
+		owner = "Revision-bound governed decision"
+	case modeWorkforceApply:
+		title = "Create reviewed workforce"
+		description = "Record why this exact candidate should now create its Agents, Team, and objectives atomically."
+		owner = "Atomic Apply · permanent audit receipt"
 	case modeGuide:
 		title = "Guide selected work"
 		description = "Add a concise instruction without replacing the objective."
@@ -215,7 +228,59 @@ func (m *Model) renderAuthoringContent(width int) string {
 	}
 	lines := []string{title, state, "", headerStyle.Render(compact(teamName, max(width-8, 24)))}
 	if m.authoringChangeSet != nil {
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s", compact(m.authoringChangeSet.ID, 16), m.authoringChangeSet.Status)))
+		changeSet := m.authoringChangeSet
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision)))
+		if len(changeSet.Evaluations) > 0 {
+			evaluation := changeSet.Evaluations[len(changeSet.Evaluations)-1]
+			outcome := "denied"
+			if evaluation.Allowed {
+				outcome = "allowed"
+			}
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Policy %s · %s:%s · %d requirement(s)", outcome, evaluation.Actor.Type, evaluation.Actor.ID, len(evaluation.ApprovalRequirements))))
+		}
+		if len(changeSet.ApprovalDecisions) > 0 {
+			decision := changeSet.ApprovalDecisions[len(changeSet.ApprovalDecisions)-1]
+			outcome := "rejected"
+			if decision.Approved {
+				outcome = "approved"
+			}
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Latest decision %s · %s / %s · %s:%s", outcome, decision.PolicyID, decision.Role, decision.Actor.Type, decision.Actor.ID)))
+			if decision.Reason != "" {
+				lines = append(lines, mutedStyle.Render("  "+compact(decision.Reason, max(width-10, 24))))
+			}
+		}
+		if len(changeSet.Lifecycle) > 0 {
+			event := changeSet.Lifecycle[len(changeSet.Lifecycle)-1]
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Audit r%d · %s · %s:%s · %s", event.Revision, event.Reason, event.Actor.Type, event.Actor.ID, event.At.Format(time.RFC3339))))
+		}
+		if changeSet.ApplyReceipt != nil {
+			receipt := changeSet.ApplyReceipt
+			lines = append(lines, lipgloss.NewStyle().Foreground(success).Render(fmt.Sprintf("Created atomically · %d resources · receipt %s", len(receipt.Resources), compact(receipt.ID, 12))))
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s · %s:%s · %s", compact(receipt.Reason, max(width-24, 24)), receipt.Actor.Type, receipt.Actor.ID, receipt.AppliedAt.Format(time.RFC3339))))
+			for _, resource := range receipt.Resources {
+				detail := resource.Version
+				if resource.Revision > 0 {
+					detail = fmt.Sprintf("r%d", resource.Revision)
+				}
+				lines = append(lines, mutedStyle.Render(fmt.Sprintf("  %s  %s  %s", resource.Kind, compact(resource.ID, max(width-28, 16)), detail)))
+			}
+		}
+		if m.canResolveWorkforceApproval() {
+			lines = append(lines, "", mutedStyle.Render("Eligible policy requirements (j/k select)"))
+			for index, reference := range m.authoringCapability.Context.EligibleApprovalRequirements {
+				prefix := "  "
+				style := mutedStyle
+				if index == m.authoringApprovalSelected {
+					prefix, style = "› ", selectedStyle
+				}
+				lines = append(lines, style.Render(fmt.Sprintf("%s%s / %s · evaluation %s", prefix, reference.PolicyID, reference.Role, compact(reference.EvaluationID, 12))))
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("y approve · x reject selected requirement"))
+		} else if m.canApplyWorkforce() {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter create this exact reviewed workforce"))
+		} else if m.supportsAuthoring(kernelapi.OperationEvaluate) {
+			lines = append(lines, "", mutedStyle.Render("Waiting for the configured policy evaluator to submit its decision."))
+		}
 	}
 	if teamPurpose != "" {
 		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))
@@ -242,7 +307,9 @@ func (m *Model) renderAuthoringContent(width int) string {
 	for _, issue := range result.Validation {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
 	}
-	lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
+	if m.authoringChangeSet == nil || m.authoringChangeSet.Status != authoring.ChangeSetApplied {
+		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
+	}
 	return strings.Join(lines, "\n")
 }
 
