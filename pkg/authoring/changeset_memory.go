@@ -3,6 +3,7 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"sync"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -195,6 +196,30 @@ func (s *MemoryChangeSetStore) CompleteChangeSetGeneration(_ context.Context, va
 	copy := cloneChangeSet(value)
 	s.changeSets[key] = copy
 	return cloneChangeSet(copy), nil
+}
+
+func (s *MemoryChangeSetStore) ListPendingChangeSetGenerations(_ context.Context, scope capability.ScopeReference, limit int) ([]*ChangeSet, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 100
+	}
+	values := make([]*ChangeSet, 0)
+	for _, value := range s.changeSets {
+		if value.Scope == scope && value.Status == ChangeSetEvaluating && value.Generation != nil {
+			values = append(values, cloneChangeSet(value))
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].CreatedAt.Equal(values[j].CreatedAt) {
+			return values[i].ID < values[j].ID
+		}
+		return values[i].CreatedAt.Before(values[j].CreatedAt)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
 }
 
 func changeSetKey(scope capability.ScopeReference, id string) string {
