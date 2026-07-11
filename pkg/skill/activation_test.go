@@ -69,7 +69,9 @@ Read {baseDir}/references/policy.md before searching.
 		OperatingSystem: "linux", Executables: map[string]bool{"curl": true, "jq": true},
 		Configuration: map[string]interface{}{"research": map[string]interface{}{"enabled": true}},
 		ResourceRoots: map[string]string{"research@1.0.0": "/sandbox/skills/research"},
-		Adapters:      map[string]bool{"tool": true, "sandbox": true}, Revision: "host-7",
+		Adapters: map[string]AdapterCapability{
+			"tool": {State: AdapterStateAvailable}, "sandbox": {State: AdapterStateAvailable},
+		}, Revision: "host-7",
 	}
 	first, err := catalog.Activate(context.Background(), scope, "researcher-a", host)
 	if err != nil {
@@ -167,11 +169,14 @@ func TestActivationStagesDeclaredResourcesAndPinsStageIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	stager := &activationResourceStager{stage: &ResourceStage{Root: "/sandbox/staged", Revision: "resource-7", Adapter: "sandbox/v1"}}
-	first, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager})
+	host := HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager, Adapters: map[string]AdapterCapability{
+		AdapterResourceStaging: {State: AdapterStateAvailable, Version: "sandbox/v1"},
+	}}
+	first, err := catalog.Activate(context.Background(), scope, "agent", host)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager})
+	second, err := catalog.Activate(context.Background(), scope, "agent", host)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,17 +193,47 @@ func TestActivationStagesDeclaredResourcesAndPinsStageIdentity(t *testing.T) {
 	}
 
 	stager.stage.Revision = "resource-8"
-	refreshed, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager})
+	refreshed, err := catalog.Activate(context.Background(), scope, "agent", host)
 	if err != nil || refreshed.SnapshotID == first.SnapshotID {
 		t.Fatalf("resource revision did not refresh activation identity: %#v, %v", refreshed, err)
 	}
 
 	failed, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{
 		OperatingSystem: "linux", ResourceStager: &activationResourceStager{err: errors.New("provider included sensitive detail")},
+		Adapters: map[string]AdapterCapability{AdapterResourceStaging: {State: AdapterStateAvailable}},
 	})
 	if err != nil || len(failed.Skills) != 0 || len(failed.Unavailable) != 1 || failed.Unavailable[0].Reasons[0].Code != "resource_staging_failed" ||
 		strings.Contains(failed.Unavailable[0].Reasons[0].Message, "sensitive") {
 		t.Fatalf("failed staging was not safely represented: %#v, %v", failed, err)
+	}
+}
+
+func TestActivationRequiresTruthfulAdapterStates(t *testing.T) {
+	catalog := NewCatalog()
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	definition := &Definition{
+		ID: "resource", Version: "1", Name: "resource", Actions: map[string]Action{},
+		Prompt:    &PromptModule{Instructions: "Read {baseDir}/guide.md", UserInvocable: true},
+		Resources: []Resource{{Path: "guide.md", Kind: "reference", Digest: strings.Repeat("a", 64), Size: 1}},
+		Source:    &SourceProvenance{Format: "test", Digest: strings.Repeat("b", 64)},
+	}
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Bind(context.Background(), &Binding{ID: "resource", Scope: scope, DeploymentID: "agent", SkillID: "resource", SkillVersion: "1", EnablePrompt: true, MaximumRisk: RiskLevelRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	stager := &activationResourceStager{stage: &ResourceStage{Root: "/sandbox/resource", Revision: "one", Adapter: "sandbox/v1"}}
+	snapshot, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager, Adapters: map[string]AdapterCapability{
+		AdapterResourceStaging: {State: AdapterStateUnavailable, Reason: "artifact transport is not configured"},
+	}})
+	if err != nil || len(stager.seen) != 0 || len(snapshot.Unavailable) != 1 || snapshot.Unavailable[0].Reasons[0].Code != "resource_staging_unavailable" {
+		t.Fatalf("unavailable adapter was not enforced: snapshot=%#v seen=%#v err=%v", snapshot, stager.seen, err)
+	}
+	if _, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{Adapters: map[string]AdapterCapability{
+		AdapterRemoteNode: {State: AdapterStateDegraded},
+	}}); err == nil || !strings.Contains(err.Error(), "requires a reason") {
+		t.Fatalf("ambiguous adapter state was accepted: %v", err)
 	}
 }
 

@@ -19,14 +19,36 @@ import (
 // a deployment's skill snapshot will run. Environment contains names only;
 // secret values are resolved later by a bounded action worker.
 type HostCapabilityState struct {
-	OperatingSystem string                 `json:"operatingSystem,omitempty"`
-	Executables     map[string]bool        `json:"executables,omitempty"`
-	Environment     map[string]bool        `json:"environment,omitempty"`
-	Configuration   map[string]interface{} `json:"configuration,omitempty"`
-	ResourceRoots   map[string]string      `json:"resourceRoots,omitempty"`
-	Adapters        map[string]bool        `json:"adapters,omitempty"`
-	Revision        string                 `json:"revision,omitempty"`
-	ResourceStager  ResourceStager         `json:"-"`
+	OperatingSystem string                       `json:"operatingSystem,omitempty"`
+	Executables     map[string]bool              `json:"executables,omitempty"`
+	Environment     map[string]bool              `json:"environment,omitempty"`
+	Configuration   map[string]interface{}       `json:"configuration,omitempty"`
+	ResourceRoots   map[string]string            `json:"resourceRoots,omitempty"`
+	Adapters        map[string]AdapterCapability `json:"adapters,omitempty"`
+	Revision        string                       `json:"revision,omitempty"`
+	ResourceStager  ResourceStager               `json:"-"`
+}
+
+type AdapterState string
+
+const (
+	AdapterStateAvailable   AdapterState = "available"
+	AdapterStateUnavailable AdapterState = "unavailable"
+	AdapterStateDegraded    AdapterState = "degraded"
+
+	AdapterLocal           = "local"
+	AdapterGit             = "git"
+	AdapterPlugin          = "plugin"
+	AdapterInstaller       = "installer"
+	AdapterWatcher         = "watcher"
+	AdapterRemoteNode      = "remote-node"
+	AdapterResourceStaging = "resource-staging"
+)
+
+type AdapterCapability struct {
+	State   AdapterState `json:"state"`
+	Version string       `json:"version,omitempty"`
+	Reason  string       `json:"reason,omitempty"`
 }
 
 type AvailabilityReason struct {
@@ -61,14 +83,14 @@ type UnavailableSkill struct {
 // deployment turn/session. SnapshotID excludes CreatedAt and is stable for
 // equivalent bindings and declared host capabilities across process restarts.
 type ActivationSnapshot struct {
-	SnapshotID   string             `json:"snapshotId"`
-	Scope        ScopeReference     `json:"scope"`
-	DeploymentID string             `json:"deploymentId"`
-	HostRevision string             `json:"hostRevision,omitempty"`
-	Adapters     map[string]bool    `json:"adapters,omitempty"`
-	Skills       []ActivatedSkill   `json:"skills"`
-	Unavailable  []UnavailableSkill `json:"unavailable,omitempty"`
-	CreatedAt    time.Time          `json:"createdAt"`
+	SnapshotID   string                       `json:"snapshotId"`
+	Scope        ScopeReference               `json:"scope"`
+	DeploymentID string                       `json:"deploymentId"`
+	HostRevision string                       `json:"hostRevision,omitempty"`
+	Adapters     map[string]AdapterCapability `json:"adapters,omitempty"`
+	Skills       []ActivatedSkill             `json:"skills"`
+	Unavailable  []UnavailableSkill           `json:"unavailable,omitempty"`
+	CreatedAt    time.Time                    `json:"createdAt"`
 }
 
 func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deploymentID string, host HostCapabilityState) (*ActivationSnapshot, error) {
@@ -76,6 +98,10 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		return nil, errors.New("skill catalog is not configured")
 	}
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
+		return nil, err
+	}
+	adapters, err := normalizeAdapterCapabilities(host.Adapters)
+	if err != nil {
 		return nil, err
 	}
 
@@ -107,7 +133,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 
 	snapshot := &ActivationSnapshot{
 		Scope: scope, DeploymentID: deploymentID, HostRevision: strings.TrimSpace(host.Revision),
-		Adapters: cloneBoolMap(host.Adapters), Skills: make([]ActivatedSkill, 0, len(bindings)), CreatedAt: time.Now().UTC(),
+		Adapters: adapters, Skills: make([]ActivatedSkill, 0, len(bindings)), CreatedAt: time.Now().UTC(),
 	}
 	for _, binding := range bindings {
 		definition := definitions[definitionKey(binding.SkillID, binding.SkillVersion)]
@@ -122,7 +148,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		resourceRoot := strings.TrimSpace(host.ResourceRoots[definitionKey(definition.ID, definition.Version)])
 		resourceRevision := ""
 		resourceAdapter := ""
-		if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 {
+		if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 && adapterAvailable(adapters, AdapterResourceStaging) {
 			stage, stageErr := host.ResourceStager.StageResources(ctx, ResourceStageRequest{
 				Scope: scope, DeploymentID: deploymentID, BindingID: binding.ID,
 				SkillID: definition.ID, SkillVersion: definition.Version,
@@ -136,6 +162,8 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 				resourceRevision = strings.TrimSpace(stage.Revision)
 				resourceAdapter = strings.TrimSpace(stage.Adapter)
 			}
+		} else if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 {
+			reasons = append(reasons, AvailabilityReason{Code: "resource_staging_unavailable", Requirement: AdapterResourceStaging, Message: "the configured resource stager is not advertised as available by this host"})
 		}
 		prompt := (*PromptModule)(nil)
 		if binding.EnablePrompt && definition.Prompt != nil {
@@ -289,27 +317,46 @@ func activationTruthy(value interface{}) bool {
 
 func activationSnapshotDigest(snapshot *ActivationSnapshot) string {
 	payload := struct {
-		Scope        ScopeReference     `json:"scope"`
-		DeploymentID string             `json:"deploymentId"`
-		HostRevision string             `json:"hostRevision,omitempty"`
-		Adapters     map[string]bool    `json:"adapters,omitempty"`
-		Skills       []ActivatedSkill   `json:"skills"`
-		Unavailable  []UnavailableSkill `json:"unavailable,omitempty"`
+		Scope        ScopeReference               `json:"scope"`
+		DeploymentID string                       `json:"deploymentId"`
+		HostRevision string                       `json:"hostRevision,omitempty"`
+		Adapters     map[string]AdapterCapability `json:"adapters,omitempty"`
+		Skills       []ActivatedSkill             `json:"skills"`
+		Unavailable  []UnavailableSkill           `json:"unavailable,omitempty"`
 	}{snapshot.Scope, snapshot.DeploymentID, snapshot.HostRevision, snapshot.Adapters, snapshot.Skills, snapshot.Unavailable}
 	encoded, _ := json.Marshal(payload)
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
 }
 
-func cloneBoolMap(value map[string]bool) map[string]bool {
+func normalizeAdapterCapabilities(value map[string]AdapterCapability) (map[string]AdapterCapability, error) {
 	if value == nil {
-		return nil
+		return nil, nil
 	}
-	result := make(map[string]bool, len(value))
-	for key, child := range value {
-		result[key] = child
+	result := make(map[string]AdapterCapability, len(value))
+	for key, capability := range value {
+		key = strings.TrimSpace(key)
+		capability.Version = strings.TrimSpace(capability.Version)
+		capability.Reason = strings.TrimSpace(capability.Reason)
+		if key == "" {
+			return nil, errors.New("host adapter capability id is required")
+		}
+		switch capability.State {
+		case AdapterStateAvailable:
+		case AdapterStateUnavailable, AdapterStateDegraded:
+			if capability.Reason == "" {
+				return nil, fmt.Errorf("host adapter %q in state %q requires a reason", key, capability.State)
+			}
+		default:
+			return nil, fmt.Errorf("host adapter %q has invalid state %q", key, capability.State)
+		}
+		result[key] = capability
 	}
-	return result
+	return result, nil
+}
+
+func adapterAvailable(adapters map[string]AdapterCapability, id string) bool {
+	return adapters[id].State == AdapterStateAvailable
 }
 
 func validateNonSecretConfiguration(value interface{}, path string) error {
