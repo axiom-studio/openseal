@@ -71,6 +71,12 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeObjectiveEdit && !m.supportsObjective(kernelapi.OperationUpdate) {
 		return m.renderUnavailableComposer(width, "Amend objective", "This server does not advertise objective updates.")
 	}
+	if m.mode == modeInitiativeCreate && !m.supportsInitiative(kernelapi.OperationCreate) {
+		return m.renderUnavailableComposer(width, "Create an Initiative", "This server does not advertise Initiative creation.")
+	}
+	if m.mode == modeInitiativeEdit && !m.supportsInitiative(kernelapi.OperationPatch) {
+		return m.renderUnavailableComposer(width, "Amend Initiative", "This server does not advertise Initiative updates.")
+	}
 	if m.mode == modeChannelCreate && !m.supportsChannel(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Create a Team channel", "This server does not advertise channel creation.")
 	}
@@ -130,6 +136,17 @@ func (m *Model) renderComposer(width int) string {
 	case modeObjectiveEdit:
 		title = "Amend selected objective"
 		description = "Record a new goal revision without losing its runs, budget, or audit history."
+	case modeInitiativeCreate:
+		title = "Create an Initiative"
+		description = "Compose durable objectives into a coordinated outcome that survives restarts."
+		if objective := m.selectedObjectiveRecord(); objective != nil {
+			owner = "Starts with Objective · " + compact(objective.Title, 48)
+		} else {
+			owner = "Select an Objective first"
+		}
+	case modeInitiativeEdit:
+		title = "Amend selected Initiative"
+		description = "Refine its purpose without losing coordination state or audit history."
 	}
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
@@ -151,6 +168,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderAuthoringContent(width)
 	} else if m.section == sectionObjectives {
 		content = m.renderObjectivesContent(width)
+	} else if m.section == sectionInitiatives {
+		content = m.renderInitiativesContent(width)
 	} else if m.section == sectionChannels {
 		content = m.renderChannelsContent(width)
 	} else if m.section == sectionArtifacts {
@@ -162,7 +181,7 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 5)
+	tabs := make([]string, 0, 6)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
@@ -175,6 +194,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.objectiveCapability.Available {
 		label := "o Objectives"
 		if m.section == sectionObjectives {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.initiativeCapability.Available {
+		label := "i Initiatives"
+		if m.section == sectionInitiatives {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -366,6 +394,46 @@ func (m *Model) renderObjectivesContent(width int) string {
 		if m.supportsObjective(kernelapi.OperationUpdate) {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter amend  ·  n add objective"))
 		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderInitiativesContent(width int) string {
+	title := headerStyle.Render("Initiative portfolio")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.initiatives) == 0 {
+		lines = append(lines, mutedStyle.Render("No Initiatives yet. Compose one from a selected Objective."))
+	} else {
+		visible := max(3, min(len(m.initiatives), max(m.height-18, 5)))
+		start := max(0, min(m.initiativeSelected-visible/2, len(m.initiatives)-visible))
+		for index := start; index < min(len(m.initiatives), start+visible); index++ {
+			initiative := m.initiatives[index]
+			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+			if index == m.initiativeSelected {
+				prefix, style = "› ", selectedStyle
+			}
+			lines = append(lines, style.Render(fmt.Sprintf("%s%-10s %s", prefix, string(initiative.Status), compact(initiative.Title, max(width-18, 20)))))
+		}
+	}
+	if initiative := m.selectedInitiativeRecord(); initiative != nil {
+		lines = append(lines, "", mutedStyle.Render("Selected"), compact(initiative.Purpose, max(width-8, 24)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(initiative.ObjectiveRefs), len(initiative.Milestones), len(initiative.SourceMonitors), len(initiative.Deliverables))))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", initiative.Revision, relativeTime(initiative.UpdatedAt))))
+		actions := []string{}
+		if m.supportsInitiative(kernelapi.OperationPatch) {
+			actions = append(actions, "Enter amend", "p pause/resume", "l link selected objective")
+		}
+		if m.supportsInitiative(kernelapi.OperationCreate) {
+			actions = append(actions, "n create")
+		}
+		if len(actions) > 0 {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
+		}
+	} else if m.supportsInitiative(kernelapi.OperationCreate) {
+		lines = append(lines, "", mutedStyle.Render("Select an Objective, then press i and n to compose an Initiative."))
 	}
 	return strings.Join(lines, "\n")
 }
