@@ -50,6 +50,8 @@ type fakeKernelClient struct {
 	approvalKeys      []string
 	applyRequests     []authoring.ApplyChangeSetRequest
 	applyKeys         []string
+	retryRequests     []authoring.RetryChangeSetGenerationRequest
+	retryKeys         []string
 	governanceResults []*authoring.ChangeSet
 	governanceErrors  []error
 }
@@ -233,6 +235,12 @@ func (f *fakeKernelClient) ResolveWorkforceChangeSetApproval(_ context.Context, 
 func (f *fakeKernelClient) ApplyWorkforceChangeSet(_ context.Context, request authoring.ApplyChangeSetRequest, key string) (*authoring.ChangeSet, error) {
 	f.applyRequests = append(f.applyRequests, request)
 	f.applyKeys = append(f.applyKeys, key)
+	return f.nextGovernanceResult()
+}
+
+func (f *fakeKernelClient) RetryWorkforceChangeSetGeneration(_ context.Context, request authoring.RetryChangeSetGenerationRequest, key string) (*authoring.ChangeSet, error) {
+	f.retryRequests = append(f.retryRequests, request)
+	f.retryKeys = append(f.retryKeys, key)
 	return f.nextGovernanceResult()
 }
 

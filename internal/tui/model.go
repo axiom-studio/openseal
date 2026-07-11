@@ -87,6 +87,7 @@ const (
 	modeWorkforceApprove
 	modeWorkforceReject
 	modeWorkforceApply
+	modeWorkforceRetry
 )
 
 type Model struct {
@@ -376,12 +377,19 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.authoringResult = msg.result
 		m.authoringChangeSet = msg.changeSet
+		if msg.changeSet != nil && msg.changeSet.Status == authoring.ChangeSetEvaluating && strings.TrimSpace(msg.changeSet.CandidateDigest) == "" {
+			m.authoringResult = nil
+		}
 		m.authoringAmendment = msg.mode == authoring.ModeAmend
 		m.pendingAuthoringKey, m.pendingAuthoringPrompt, m.pendingAuthoringParentID = "", "", ""
 		m.editor.Reset()
 		m.editor.Placeholder = "Describe what should change…"
 		if msg.changeSet != nil {
-			m.status = "Workforce change set saved for governed review. Nothing has been activated."
+			if msg.changeSet.Status == authoring.ChangeSetEvaluating {
+				m.status = "Proposal queued. OpenSeal is generating it durably; you may safely leave."
+			} else {
+				m.status = "Workforce change set saved for governed review. Nothing has been activated."
+			}
 		} else {
 			m.status = "Workforce candidate compiled. Nothing has been activated."
 		}
@@ -397,8 +405,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.authoringChangeSet = msg.changeSet
-		if msg.changeSet != nil {
+		if msg.changeSet != nil && (msg.changeSet.Status != authoring.ChangeSetEvaluating || strings.TrimSpace(msg.changeSet.CandidateDigest) != "") {
 			m.authoringResult = &msg.changeSet.Result
+		} else {
+			m.authoringResult = nil
 		}
 		m.pendingGovernanceKey, m.pendingGovernanceIntent = "", ""
 		m.editor.Reset()
@@ -648,6 +658,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitWorkforceApproval(false)
 			case modeWorkforceApply:
 				return m, m.submitWorkforceApply()
+			case modeWorkforceRetry:
+				return m, m.submitWorkforceRetry()
 			default:
 				return m, m.submitRun()
 			}
@@ -712,6 +724,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focusComposerEditor()
 			}
 		case "r":
+			if m.section == sectionAuthoring && m.canRetryWorkforce() {
+				m.prepareWorkforceGovernanceComposer(modeWorkforceRetry, "Why should generation be retried?…")
+				return m, nil
+			}
 			return m, m.loadPanel()
 		case "m":
 			if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
@@ -901,6 +917,28 @@ func (m *Model) submitWorkforceApply() tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.client.ApplyWorkforceChangeSet(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: "Workforce Apply", err: err}
+	}
+}
+
+func (m *Model) submitWorkforceRetry() tea.Cmd {
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canRetryWorkforce() || m.busy || reason == "" {
+		if reason == "" {
+			m.status = "Record why generation should be retried."
+		}
+		return nil
+	}
+	changeSet := m.authoringChangeSet
+	intent := fmt.Sprintf("retry\x00%s\x00%d\x00%s", changeSet.ID, changeSet.Revision, reason)
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.RetryChangeSetGenerationRequest{Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, Reason: reason}
+	key := m.pendingGovernanceKey
+	m.busy, m.err, m.status = true, nil, "Retrying generation as durable work…"
+	return func() tea.Msg {
+		result, err := m.client.RetryWorkforceChangeSetGeneration(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Generation retry", err: err}
 	}
 }
 
@@ -1265,6 +1303,12 @@ func (m *Model) canApplyWorkforce() bool {
 	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetReady &&
 		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
 		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApply)
+}
+
+func (m *Model) canRetryWorkforce() bool {
+	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetFailed &&
+		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationRetry)
 }
 
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
