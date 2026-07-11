@@ -158,6 +158,17 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 	if err != nil || len(paged) != 1 || paged[0].Content != "operators only" {
 		t.Fatalf("hidden-page scan=%#v err=%v", paged, err)
 	}
+	descending, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 1, Descending: true, Viewer: &ConversationViewer{Participant: target}})
+	if err != nil || len(descending) != 1 || descending[0].ID != reply.Message.ID {
+		t.Fatalf("descending hidden-page scan=%#v err=%v", descending, err)
+	}
+	bounded, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, BeforeSequence: reply.Message.Sequence, Viewer: &ConversationViewer{Participant: target}})
+	if err != nil || len(bounded) != 1 || bounded[0].ID != direct.Message.ID {
+		t.Fatalf("before-sequence page=%#v err=%v", bounded, err)
+	}
+	if _, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, AfterSequence: 2, BeforeSequence: 2}); !errors.Is(err, ErrInvalidConversation) {
+		t.Fatalf("invalid sequence bounds error=%v", err)
+	}
 }
 
 func TestConversationServicePersistsAQuietRound(t *testing.T) {

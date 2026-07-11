@@ -164,7 +164,8 @@ func (s *MemoryStore) ListChannelMessages(_ context.Context, filter ChannelMessa
 	}
 	result := make([]*ChannelMessage, 0)
 	for _, message := range s.channelMessages[conversationKey] {
-		if message.Sequence <= filter.AfterSequence || (filter.ThreadRootID != "" && message.ThreadRootID != filter.ThreadRootID && message.ID != filter.ThreadRootID) ||
+		if message.Sequence <= filter.AfterSequence || (filter.BeforeSequence > 0 && message.Sequence >= filter.BeforeSequence) ||
+			(filter.ThreadRootID != "" && message.ThreadRootID != filter.ThreadRootID && message.ID != filter.ThreadRootID) ||
 			(len(filter.Intents) > 0 && !containsConversationIntent(filter.Intents, message.Intent)) {
 			continue
 		}

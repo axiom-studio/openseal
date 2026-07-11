@@ -261,6 +261,11 @@ func (s *PostgresStore) ListChannelMessages(ctx context.Context, filter ChannelM
 	query := `SELECT payload FROM ` + s.table("channel_messages") + ` WHERE scope_kind = $1 AND scope_id = $2 AND conversation_id = $3 AND sequence > $4`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.AfterSequence}
 	placeholder := 5
+	if filter.BeforeSequence > 0 {
+		query += fmt.Sprintf(` AND sequence < $%d`, placeholder)
+		args = append(args, filter.BeforeSequence)
+		placeholder++
+	}
 	if filter.ThreadRootID != "" {
 		query += fmt.Sprintf(` AND (thread_root_id = $%d OR id = $%d)`, placeholder, placeholder)
 		args = append(args, filter.ThreadRootID)
