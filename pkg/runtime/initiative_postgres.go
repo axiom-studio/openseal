@@ -13,7 +13,7 @@ func (s *PostgresStore) migrateInitiatives(ctx context.Context, tx *sql.Tx) erro
 	if _, e := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("initiatives")+` (id TEXT NOT NULL,scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,owner_type TEXT NOT NULL,owner_id TEXT NOT NULL,status TEXT NOT NULL,revision BIGINT NOT NULL,updated_at TIMESTAMPTZ NOT NULL,idempotency_key_hash TEXT NOT NULL DEFAULT '',payload JSONB NOT NULL,PRIMARY KEY(scope_kind,scope_id,id),CHECK(revision>0)); CREATE UNIQUE INDEX IF NOT EXISTS initiatives_idempotency_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''; CREATE INDEX IF NOT EXISTS initiatives_scope_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,status,updated_at DESC); CREATE INDEX IF NOT EXISTS initiatives_owner_idx ON `+s.table("initiatives")+`(scope_kind,scope_id,owner_type,owner_id,updated_at DESC)`); e != nil {
 		return e
 	}
-	_, e := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name)VALUES(13,'durable initiatives')ON CONFLICT(version)DO NOTHING`)
+	_, e := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name)VALUES(14,'durable initiatives')ON CONFLICT(version)DO NOTHING`)
 	return e
 }
 func (s *PostgresStore) CreateInitiativeWithEvent(ctx context.Context, i *Initiative, e *ActivityEvent) (*ActivityEvent, error) {
