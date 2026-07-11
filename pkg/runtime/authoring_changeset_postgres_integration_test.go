@@ -16,6 +16,84 @@ import (
 	"github.com/google/uuid"
 )
 
+type postgresRetryFailureGenerator struct{}
+
+func (postgresRetryFailureGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
+	return nil, errors.New("provider unavailable")
+}
+
+func TestPostgresGenerationRetryReceiptIsReplicaSafeAcrossRestart(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	schema := "openseal_retry_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := authoring.NewCompiler(postgresRetryFailureGenerator{})
+	primaryService, _ := authoring.NewChangeSetService(compiler, primary)
+	replicaService, _ := authoring.NewChangeSetService(compiler, replica)
+	request := authoring.CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: authoring.ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "failed-generation",
+	}
+	prepared, _, err := primaryService.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := primaryService.GeneratePrepared(ctx, prepared.Scope, prepared.ID, prepared.Revision)
+	if err == nil || failed.Status != authoring.ChangeSetFailed {
+		t.Fatalf("failed=%#v err=%v", failed, err)
+	}
+	retry := authoring.RetryChangeSetGenerationRequest{
+		Scope: failed.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision, Reason: "provider recovered",
+		Actor: failed.Actor, IdempotencyKey: "retry-one",
+	}
+	services := []*authoring.ChangeSetService{primaryService, replicaService}
+	var replayCount atomic.Int32
+	var wait sync.WaitGroup
+	for _, service := range services {
+		wait.Add(1)
+		go func(service *authoring.ChangeSetService) {
+			defer wait.Done()
+			value, replayed, retryErr := service.RetryGeneration(ctx, retry)
+			if retryErr != nil || value == nil || value.Status != authoring.ChangeSetEvaluating || len(value.Generation.Retries) != 1 {
+				t.Errorf("retry=%#v replay=%t err=%v", value, replayed, retryErr)
+			}
+			if replayed {
+				replayCount.Add(1)
+			}
+		}(service)
+	}
+	wait.Wait()
+	if replayCount.Load() != 1 {
+		t.Fatalf("replica replay count=%d", replayCount.Load())
+	}
+	_ = replica.Close()
+	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	reopenedService, _ := authoring.NewChangeSetService(compiler, reopened)
+	value, replayed, err := reopenedService.RetryGeneration(ctx, retry)
+	if err != nil || !replayed || value.Generation.Retries[0].ExpectedRevision != failed.Revision {
+		t.Fatalf("restart replay=%#v replayed=%t err=%v", value, replayed, err)
+	}
+}
+
 func TestPostgresWorkforceChangeSetsAreReplicaSafeAndDurable(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
 	if dsn == "" {
