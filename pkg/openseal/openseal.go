@@ -1381,6 +1381,19 @@ func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace
 	}
 }
 
+// WithClawHubRegistryClient enables side-effect-free catalog discovery,
+// version/file/security inspection, and registry verification without an
+// installation workspace.
+func WithClawHubRegistryClient(registry clawhub.Registry) Option {
+	return func(e *Engine) error {
+		if registry == nil {
+			return errors.New("ClawHub registry is required")
+		}
+		e.clawHubRegistry = registry
+		return nil
+	}
+}
+
 // WithClawHubRegistrySkillsDirectory lets an embedding host keep lifecycle
 // metadata in a governed workspace while adopting an existing managed Skills
 // mount. It is the migration-safe variant of WithClawHubRegistry.
@@ -2269,8 +2282,15 @@ func (e *Engine) UnpinClawHubSkill(slug string) error {
 
 func (e *Engine) ClawHubLifecycleCapabilities() clawhub.LifecycleCapability {
 	capability := clawhub.CanonicalLifecycleCapability()
-	if e == nil || e.clawHub == nil || e.clawHubRegistry == nil {
+	if e == nil || e.clawHubRegistry == nil {
 		capability.Operations = nil
+		return capability
+	}
+	if e.clawHub == nil {
+		capability.Operations = []clawhub.LifecycleOperation{
+			clawhub.LifecycleInspectVersions, clawhub.LifecycleInspectFiles,
+			clawhub.LifecycleInspectSecurity, clawhub.LifecycleVerify,
+		}
 	}
 	return capability
 }
