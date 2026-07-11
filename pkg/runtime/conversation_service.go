@@ -53,6 +53,7 @@ type ChannelMessageFilter struct {
 	Intents        []ConversationMessageIntent
 	Limit          int
 	Descending     bool
+	Viewer         *ConversationViewer
 }
 
 type CoordinateParticipationRequest struct {
@@ -406,7 +407,58 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 }
 
 func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
-	return s.store.ListChannelMessages(ctx, filter)
+	messages, err := s.store.ListChannelMessages(ctx, filter)
+	if err != nil || filter.Viewer == nil {
+		return messages, err
+	}
+	return s.filterVisibleChannelMessages(ctx, filter.Scope, filter.ConversationID, messages, *filter.Viewer)
+}
+
+func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+	if err := viewer.Validate(); err != nil {
+		return nil, err
+	}
+	visible := make([]*ChannelMessage, 0, len(messages))
+	for _, message := range messages {
+		if !CanViewChannelMessage(message, viewer) {
+			continue
+		}
+		allowed := true
+		seen := map[string]bool{message.ID: true}
+		for _, linked := range []string{message.ThreadRootID, message.ReplyToMessageID} {
+			if linked == "" || seen[linked] {
+				continue
+			}
+			seen[linked] = true
+			parent, err := s.store.GetChannelMessage(ctx, scope, conversationID, linked)
+			if err != nil {
+				return nil, err
+			}
+			if !CanViewChannelMessage(parent, viewer) {
+				allowed = false
+				break
+			}
+		}
+		if allowed {
+			visible = append(visible, message)
+		}
+	}
+	return visible, nil
+}
+
+func (s *ConversationService) GetVisibleChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string, viewer ConversationViewer) (*ChannelMessage, error) {
+	message, err := s.GetChannelMessage(ctx, scope, conversationID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	visible, err := s.filterVisibleChannelMessages(ctx, scope, conversationID, []*ChannelMessage{message}, viewer)
+	if err != nil {
+		return nil, err
+	}
+	if len(visible) == 0 {
+		return nil, ErrChannelMessageNotFound
+	}
+	return visible[0], nil
 }
 
 func (s *ConversationService) GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error) {
