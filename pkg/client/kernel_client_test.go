@@ -32,11 +32,25 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !capability.Supports(kernelapi.OperationIntervene) {
 		t.Fatalf("unexpected capabilities: %#v", document)
 	}
+	objectiveCapability, ok := document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
+	if !ok || !objectiveCapability.Supports(kernelapi.OperationUpdate) {
+		t.Fatalf("objective capabilities: %#v", document)
+	}
 
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
+	objective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Research", Goal: "Monitor product feedback", Status: runtime.ObjectiveStatusActive,
+		Budget: &runtime.BudgetPolicy{MaxTurns: 40},
+	}, "research-objective")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if objective.Budget == nil || objective.Budget.MaxTurns != 40 {
+		t.Fatalf("objective = %#v", objective)
+	}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
-		Scope: scope, Kind: runtime.RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID,
+		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, Budget: &runtime.BudgetPolicy{MaxTurns: 24},
 	}, "stable-request")
 	if err != nil {
@@ -47,7 +61,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 
 	replayed, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
-		Scope: scope, Kind: runtime.RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID,
+		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, Budget: &runtime.BudgetPolicy{MaxTurns: 24},
 	}, "stable-request")
 	if err != nil {
@@ -55,6 +69,21 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 	if replayed.Event != nil || replayed.Run.ID != created.Run.ID {
 		t.Fatalf("idempotent replay = %#v", replayed)
+	}
+	detail, err := client.GetObjective(ctx, scope, objective.ID)
+	if err != nil || detail.Objective == nil || len(detail.Runs) != 1 {
+		t.Fatalf("objective detail = %#v, %v", detail, err)
+	}
+	pausedStatus := runtime.ObjectiveStatusPaused
+	updatedObjective, err := client.UpdateObjective(ctx, scope, objective.ID, kernelapi.UpdateObjectiveRequest{
+		ExpectedRevision: detail.Objective.Revision, Status: &pausedStatus,
+	})
+	if err != nil || updatedObjective.Status != runtime.ObjectiveStatusPaused {
+		t.Fatalf("updated objective = %#v, %v", updatedObjective, err)
+	}
+	objectives, err := client.ListObjectives(ctx, runtime.ObjectiveFilter{Scope: scope, Owner: &owner, Statuses: []runtime.ObjectiveStatus{runtime.ObjectiveStatusPaused}})
+	if err != nil || len(objectives) != 1 || objectives[0].ID != objective.ID {
+		t.Fatalf("objectives = %#v, %v", objectives, err)
 	}
 
 	runs, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: &owner, Limit: 20})

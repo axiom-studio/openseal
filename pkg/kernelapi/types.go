@@ -12,6 +12,8 @@ const (
 	Version                       = "1"
 	AgentRunsCapabilityID         = "agent-runs"
 	AgentRunsCapabilityVersion    = "1"
+	ObjectivesCapabilityID        = "objectives"
+	ObjectivesCapabilityVersion   = "1"
 	ArtifactsCapabilityID         = "artifacts"
 	ArtifactsCapabilityVersion    = "1"
 	TeamChannelsCapabilityID      = "team-channels"
@@ -26,6 +28,7 @@ const (
 	OperationResume     = "resume"
 	OperationCancel     = "cancel"
 	OperationIntervene  = "intervene"
+	OperationUpdate     = "update"
 	OperationRegister   = "register"
 	OperationUpload     = "upload"
 	OperationDownload   = "download"
@@ -83,10 +86,17 @@ func AgentRunsCapability() Capability {
 	}
 }
 
+func ObjectivesCapability() Capability {
+	return Capability{
+		ID: ObjectivesCapabilityID, Version: ObjectivesCapabilityVersion, Available: true,
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationUpdate},
+	}
+}
+
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{AgentRunsCapability(), TeamChannelsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), AgentRunsCapability(), TeamChannelsCapability()},
 	}
 }
 
@@ -142,6 +152,42 @@ type CreateAgentRunRequest struct {
 	IdempotencyKey  string                     `json:"idempotencyKey,omitempty"`
 	Actor           runtime.ActivityActor      `json:"actor,omitempty"`
 	Visibility      runtime.ActivityVisibility `json:"visibility,omitempty"`
+}
+
+type CreateObjectiveRequest struct {
+	Scope            runtime.Scope           `json:"scope"`
+	Owner            runtime.ObjectiveOwner  `json:"owner"`
+	Title            string                  `json:"title"`
+	Goal             string                  `json:"goal"`
+	Status           runtime.ObjectiveStatus `json:"status,omitempty"`
+	Priority         int                     `json:"priority,omitempty"`
+	Cadence          map[string]interface{}  `json:"cadence,omitempty"`
+	EventRules       map[string]interface{}  `json:"eventRules,omitempty"`
+	Budget           *runtime.BudgetPolicy   `json:"budget,omitempty"`
+	Constraints      map[string]interface{}  `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}  `json:"successCriteria,omitempty"`
+	NextEvaluationAt *time.Time              `json:"nextEvaluationAt,omitempty"`
+	IdempotencyKey   string                  `json:"idempotencyKey,omitempty"`
+}
+
+type UpdateObjectiveRequest struct {
+	ExpectedRevision int64                    `json:"expectedRevision"`
+	Title            *string                  `json:"title,omitempty"`
+	Goal             *string                  `json:"goal,omitempty"`
+	Status           *runtime.ObjectiveStatus `json:"status,omitempty"`
+	Priority         *int                     `json:"priority,omitempty"`
+	Cadence          map[string]interface{}   `json:"cadence,omitempty"`
+	EventRules       map[string]interface{}   `json:"eventRules,omitempty"`
+	Budget           *runtime.BudgetPolicy    `json:"budget,omitempty"`
+	Constraints      map[string]interface{}   `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}   `json:"successCriteria,omitempty"`
+	ProgressSummary  *string                  `json:"progressSummary,omitempty"`
+	NextEvaluationAt *time.Time               `json:"nextEvaluationAt,omitempty"`
+}
+
+type ObjectiveDetail struct {
+	Objective *runtime.Objective  `json:"objective"`
+	Runs      []*runtime.AgentRun `json:"runs"`
 }
 
 type AgentRunCommandRequest struct {

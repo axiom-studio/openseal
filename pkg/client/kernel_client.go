@@ -24,6 +24,10 @@ const DefaultKernelBaseURL = "http://127.0.0.1:8080"
 type KernelClient interface {
 	ArtifactClient
 	Capabilities(context.Context) (kernelapi.CapabilityDocument, error)
+	CreateObjective(context.Context, kernelapi.CreateObjectiveRequest, string) (*runtime.Objective, error)
+	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
+	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
+	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
@@ -65,6 +69,56 @@ func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.Capabili
 	var document kernelapi.CapabilityDocument
 	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities", nil, "", &document)
 	return document, err
+}
+
+func (c *KernelHTTPClient) CreateObjective(ctx context.Context, request kernelapi.CreateObjectiveRequest, idempotencyKey string) (*runtime.Objective, error) {
+	var objective runtime.Objective
+	if err := c.do(ctx, http.MethodPost, "/api/v1/objectives", request, idempotencyKey, &objective); err != nil {
+		return nil, err
+	}
+	return &objective, nil
+}
+
+func (c *KernelHTTPClient) ListObjectives(ctx context.Context, filter runtime.ObjectiveFilter) ([]*runtime.Objective, error) {
+	query := scopeQuery(filter.Scope)
+	if filter.Owner != nil {
+		query.Set("ownerType", string(filter.Owner.Type))
+		query.Set("ownerId", filter.Owner.ID)
+	}
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var objectives []*runtime.Objective
+	if err := c.do(ctx, http.MethodGet, "/api/v1/objectives?"+query.Encode(), nil, "", &objectives); err != nil {
+		return nil, err
+	}
+	return objectives, nil
+}
+
+func (c *KernelHTTPClient) GetObjective(ctx context.Context, scope runtime.Scope, objectiveID string) (*kernelapi.ObjectiveDetail, error) {
+	query := scopeQuery(scope)
+	var detail kernelapi.ObjectiveDetail
+	path := "/api/v1/objectives/" + url.PathEscape(strings.TrimSpace(objectiveID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &detail); err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}
+
+func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, request kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error) {
+	query := scopeQuery(scope)
+	var objective runtime.Objective
+	path := "/api/v1/objectives/" + url.PathEscape(strings.TrimSpace(objectiveID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodPut, path, request, "", &objective); err != nil {
+		return nil, err
+	}
+	return &objective, nil
 }
 
 func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*runtime.AgentRunCommandResult, error) {

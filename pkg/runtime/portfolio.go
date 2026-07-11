@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,14 +12,16 @@ import (
 )
 
 var (
-	ErrInvalidScope      = errors.New("scope kind and id are required")
-	ErrInvalidOwner      = errors.New("objective owner type and id are required")
-	ErrObjectiveNotFound = errors.New("objective not found")
-	ErrRunNotFound       = errors.New("run not found")
-	ErrRevisionConflict  = errors.New("objective revision conflict")
-	ErrRunIdempotency    = errors.New("run idempotency key was already used with different input")
-	ErrInvalidAgentRun   = errors.New("invalid agent run")
-	ErrInvalidRunCommand = errors.New("invalid run command")
+	ErrInvalidScope               = errors.New("scope kind and id are required")
+	ErrInvalidOwner               = errors.New("objective owner type and id are required")
+	ErrObjectiveNotFound          = errors.New("objective not found")
+	ErrObjectiveIdempotency       = errors.New("objective idempotency key was already used with different input")
+	ErrInvalidObjectiveTransition = errors.New("invalid objective transition")
+	ErrRunNotFound                = errors.New("run not found")
+	ErrRevisionConflict           = errors.New("objective revision conflict")
+	ErrRunIdempotency             = errors.New("run idempotency key was already used with different input")
+	ErrInvalidAgentRun            = errors.New("invalid agent run")
+	ErrInvalidRunCommand          = errors.New("invalid run command")
 )
 
 // Scope is the portable ownership boundary for every kernel resource. Embedding
@@ -67,24 +70,26 @@ const (
 )
 
 type Objective struct {
-	ID                string                  `json:"id"`
-	Scope             Scope                   `json:"scope"`
-	Owner             ObjectiveOwner          `json:"owner"`
-	Title             string                  `json:"title"`
-	Goal              string                  `json:"goal"`
-	Status            ObjectiveStatus         `json:"status"`
-	Priority          int                     `json:"priority"`
-	Cadence           map[string]interface{}  `json:"cadence,omitempty"`
-	EventRules        map[string]interface{}  `json:"eventRules,omitempty"`
-	Budget            *BudgetPolicy           `json:"budget,omitempty"`
-	BudgetAllocations map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
-	Constraints       map[string]interface{}  `json:"constraints,omitempty"`
-	SuccessCriteria   map[string]interface{}  `json:"successCriteria,omitempty"`
-	ProgressSummary   string                  `json:"progressSummary,omitempty"`
-	NextEvaluationAt  *time.Time              `json:"nextEvaluationAt,omitempty"`
-	Revision          int64                   `json:"revision"`
-	CreatedAt         time.Time               `json:"createdAt"`
-	UpdatedAt         time.Time               `json:"updatedAt"`
+	ID                  string                  `json:"id"`
+	Scope               Scope                   `json:"scope"`
+	Owner               ObjectiveOwner          `json:"owner"`
+	Title               string                  `json:"title"`
+	Goal                string                  `json:"goal"`
+	Status              ObjectiveStatus         `json:"status"`
+	Priority            int                     `json:"priority"`
+	Cadence             map[string]interface{}  `json:"cadence,omitempty"`
+	EventRules          map[string]interface{}  `json:"eventRules,omitempty"`
+	Budget              *BudgetPolicy           `json:"budget,omitempty"`
+	BudgetAllocations   map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
+	Constraints         map[string]interface{}  `json:"constraints,omitempty"`
+	SuccessCriteria     map[string]interface{}  `json:"successCriteria,omitempty"`
+	ProgressSummary     string                  `json:"progressSummary,omitempty"`
+	NextEvaluationAt    *time.Time              `json:"nextEvaluationAt,omitempty"`
+	Revision            int64                   `json:"revision"`
+	CreatedAt           time.Time               `json:"createdAt"`
+	UpdatedAt           time.Time               `json:"updatedAt"`
+	IdempotencyKeyHash  string                  `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string                  `json:"creationFingerprint,omitempty"`
 }
 
 func (o *Objective) Validate() error {
@@ -102,6 +107,9 @@ func (o *Objective) Validate() error {
 	}
 	if o.Priority < 0 {
 		return errors.New("objective priority cannot be negative")
+	}
+	if !validObjectiveStatus(o.Status) {
+		return errors.New("objective status is invalid")
 	}
 	if o.Budget != nil {
 		if err := o.Budget.Validate(); err != nil {
@@ -334,6 +342,7 @@ type CreateObjectiveRequest struct {
 	Constraints      map[string]interface{}
 	SuccessCriteria  map[string]interface{}
 	NextEvaluationAt *time.Time
+	IdempotencyKey   string
 }
 
 type UpdateObjectiveRequest struct {
@@ -380,33 +389,80 @@ type PortfolioService struct {
 	now   func() time.Time
 }
 
+type CreateObjectiveResult struct {
+	Objective *Objective `json:"objective"`
+	Created   bool       `json:"created"`
+}
+
 func NewPortfolioService(store PortfolioStore) *PortfolioService {
 	return &PortfolioService{store: store, now: time.Now}
 }
 
 func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObjectiveRequest) (*Objective, error) {
+	result, err := s.CreateObjectiveIdempotent(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return result.Objective, nil
+}
+
+func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req CreateObjectiveRequest) (*CreateObjectiveResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
+	}
+	fingerprint, err := objectiveCreationFingerprint(req)
+	if err != nil {
+		return nil, err
 	}
 	now := s.now()
 	status := req.Status
 	if status == "" {
 		status = ObjectiveStatusDraft
 	}
+	objectiveID := uuid.NewString()
+	key := strings.TrimSpace(req.IdempotencyKey)
+	if len(key) > 256 {
+		return nil, fmt.Errorf("%w: idempotency key cannot exceed 256 characters", ErrObjectiveIdempotency)
+	}
+	if key != "" {
+		objectiveID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+hashString(key))).String()
+		current, getErr := s.store.GetObjective(ctx, req.Scope, objectiveID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if current != nil {
+			if current.CreationFingerprint != fingerprint {
+				return nil, ErrObjectiveIdempotency
+			}
+			return &CreateObjectiveResult{Objective: current, Created: false}, nil
+		}
+	}
 	objective := &Objective{
-		ID: uuid.NewString(), Scope: req.Scope, Owner: req.Owner, Title: req.Title,
+		ID: objectiveID, Scope: req.Scope, Owner: req.Owner, Title: req.Title,
 		Goal: req.Goal, Status: status, Priority: req.Priority, Cadence: req.Cadence,
 		EventRules: req.EventRules, Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints,
 		SuccessCriteria: req.SuccessCriteria, NextEvaluationAt: req.NextEvaluationAt,
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Revision: 1, CreatedAt: now, UpdatedAt: now, CreationFingerprint: fingerprint,
+	}
+	if key != "" {
+		objective.IdempotencyKeyHash = hashString(key)
 	}
 	if err := objective.Validate(); err != nil {
 		return nil, err
 	}
 	if err := s.store.CreateObjective(ctx, objective); err != nil {
+		if key != "" {
+			current, getErr := s.store.GetObjective(ctx, req.Scope, objectiveID)
+			if getErr == nil && current != nil {
+				if current.CreationFingerprint != fingerprint {
+					return nil, ErrObjectiveIdempotency
+				}
+				return &CreateObjectiveResult{Objective: current, Created: false}, nil
+			}
+		}
 		return nil, err
 	}
-	return objective, nil
+	return &CreateObjectiveResult{Objective: objective, Created: true}, nil
 }
 
 func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, objectiveID string, req UpdateObjectiveRequest) (*Objective, error) {
@@ -425,6 +481,9 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 	}
 	if req.ExpectedRevision != current.Revision {
 		return nil, ErrRevisionConflict
+	}
+	if req.Status != nil && *req.Status != current.Status && !canTransitionObjective(current.Status, *req.Status) {
+		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidObjectiveTransition, current.Status, *req.Status)
 	}
 	applyObjectiveUpdate(current, req)
 	current.UpdatedAt = s.now()
@@ -637,6 +696,51 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	if req.NextEvaluationAt != nil {
 		objective.NextEvaluationAt = req.NextEvaluationAt
 	}
+}
+
+func validObjectiveStatus(status ObjectiveStatus) bool {
+	switch status {
+	case ObjectiveStatusDraft, ObjectiveStatusActive, ObjectiveStatusPaused, ObjectiveStatusSatisfied,
+		ObjectiveStatusFailed, ObjectiveStatusRetired:
+		return true
+	default:
+		return false
+	}
+}
+
+func canTransitionObjective(from, to ObjectiveStatus) bool {
+	allowed := map[ObjectiveStatus]map[ObjectiveStatus]bool{
+		ObjectiveStatusDraft:  {ObjectiveStatusActive: true, ObjectiveStatusRetired: true},
+		ObjectiveStatusActive: {ObjectiveStatusPaused: true, ObjectiveStatusSatisfied: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
+		ObjectiveStatusPaused: {ObjectiveStatusActive: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
+	}
+	return allowed[from][to]
+}
+
+func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {
+	payload := struct {
+		Scope            Scope                  `json:"scope"`
+		Owner            ObjectiveOwner         `json:"owner"`
+		Title            string                 `json:"title"`
+		Goal             string                 `json:"goal"`
+		Status           ObjectiveStatus        `json:"status"`
+		Priority         int                    `json:"priority"`
+		Cadence          map[string]interface{} `json:"cadence,omitempty"`
+		EventRules       map[string]interface{} `json:"eventRules,omitempty"`
+		Budget           *BudgetPolicy          `json:"budget,omitempty"`
+		Constraints      map[string]interface{} `json:"constraints,omitempty"`
+		SuccessCriteria  map[string]interface{} `json:"successCriteria,omitempty"`
+		NextEvaluationAt *time.Time             `json:"nextEvaluationAt,omitempty"`
+	}{req.Scope, req.Owner, req.Title, req.Goal, req.Status, req.Priority, req.Cadence, req.EventRules,
+		req.Budget, req.Constraints, req.SuccessCriteria, req.NextEvaluationAt}
+	if payload.Status == "" {
+		payload.Status = ObjectiveStatusDraft
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode objective creation fingerprint: %w", err)
+	}
+	return hashBytes(encoded), nil
 }
 
 func (s Scope) key() string { return fmt.Sprintf("%s:%s", s.Kind, s.ID) }
