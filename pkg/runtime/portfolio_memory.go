@@ -76,7 +76,33 @@ func (s *MemoryStore) CreateAgentRun(_ context.Context, run *AgentRun) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.agentRuns[portfolioKey(run.Scope, run.ID)] = cloneAgentRun(run)
+	key := portfolioKey(run.Scope, run.ID)
+	if s.agentRuns[key] != nil {
+		return ErrRunIdempotency
+	}
+	if err := s.allocateMemoryObjectiveRunLocked(run); err != nil {
+		return err
+	}
+	s.agentRuns[key] = cloneAgentRun(run)
+	return nil
+}
+
+func (s *MemoryStore) allocateMemoryObjectiveRunLocked(run *AgentRun) error {
+	if run == nil || run.ObjectiveID == "" || run.ParentRunID != "" {
+		return nil
+	}
+	key := portfolioKey(run.Scope, run.ObjectiveID)
+	objective := s.objectives[key]
+	if objective == nil {
+		return ErrObjectiveNotFound
+	}
+	updated, err := allocateObjectiveRunBudget(objective, run, run.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if updated != objective {
+		s.objectives[key] = cloneObjective(updated)
+	}
 	return nil
 }
 

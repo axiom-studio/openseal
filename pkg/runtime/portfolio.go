@@ -67,23 +67,24 @@ const (
 )
 
 type Objective struct {
-	ID               string                 `json:"id"`
-	Scope            Scope                  `json:"scope"`
-	Owner            ObjectiveOwner         `json:"owner"`
-	Title            string                 `json:"title"`
-	Goal             string                 `json:"goal"`
-	Status           ObjectiveStatus        `json:"status"`
-	Priority         int                    `json:"priority"`
-	Cadence          map[string]interface{} `json:"cadence,omitempty"`
-	EventRules       map[string]interface{} `json:"eventRules,omitempty"`
-	Budget           *BudgetPolicy          `json:"budget,omitempty"`
-	Constraints      map[string]interface{} `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{} `json:"successCriteria,omitempty"`
-	ProgressSummary  string                 `json:"progressSummary,omitempty"`
-	NextEvaluationAt *time.Time             `json:"nextEvaluationAt,omitempty"`
-	Revision         int64                  `json:"revision"`
-	CreatedAt        time.Time              `json:"createdAt"`
-	UpdatedAt        time.Time              `json:"updatedAt"`
+	ID                string                  `json:"id"`
+	Scope             Scope                   `json:"scope"`
+	Owner             ObjectiveOwner          `json:"owner"`
+	Title             string                  `json:"title"`
+	Goal              string                  `json:"goal"`
+	Status            ObjectiveStatus         `json:"status"`
+	Priority          int                     `json:"priority"`
+	Cadence           map[string]interface{}  `json:"cadence,omitempty"`
+	EventRules        map[string]interface{}  `json:"eventRules,omitempty"`
+	Budget            *BudgetPolicy           `json:"budget,omitempty"`
+	BudgetAllocations map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
+	Constraints       map[string]interface{}  `json:"constraints,omitempty"`
+	SuccessCriteria   map[string]interface{}  `json:"successCriteria,omitempty"`
+	ProgressSummary   string                  `json:"progressSummary,omitempty"`
+	NextEvaluationAt  *time.Time              `json:"nextEvaluationAt,omitempty"`
+	Revision          int64                   `json:"revision"`
+	CreatedAt         time.Time               `json:"createdAt"`
+	UpdatedAt         time.Time               `json:"updatedAt"`
 }
 
 func (o *Objective) Validate() error {
@@ -106,6 +107,11 @@ func (o *Objective) Validate() error {
 		if err := o.Budget.Validate(); err != nil {
 			return err
 		}
+		if err := validatePolicyAllocations(*o.Budget, o.BudgetAllocations); err != nil {
+			return err
+		}
+	} else if len(o.BudgetAllocations) > 0 {
+		return errors.New("objective budget allocations require an objective budget")
 	}
 	return nil
 }
@@ -492,6 +498,11 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		}
 		if objective == nil {
 			return nil, ErrObjectiveNotFound
+		}
+		if req.ParentRunID == "" {
+			if err := validateObjectiveRunBudget(objective, req.Budget); err != nil {
+				return nil, err
+			}
 		}
 	}
 	availableAt := now

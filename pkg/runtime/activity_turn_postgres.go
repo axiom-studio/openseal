@@ -21,22 +21,15 @@ func (s *PostgresStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentR
 	if run.Scope != event.Scope || run.ID != event.RunID {
 		return nil, ErrInvalidScope
 	}
-	payload, err := json.Marshal(run)
-	if err != nil {
-		return nil, err
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_runs")+`
-		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision,
-		 deadline, available_at, queue_entered_at, lease_owner, lease_expires_at, last_claimed_at, attempt, created_at, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb)`,
-		run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID,
-		run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt,
-		run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload)); err != nil {
+	if err := s.allocatePostgresObjectiveRunTx(ctx, tx, run); err != nil {
+		return nil, err
+	}
+	if err := s.insertPostgresAgentRunTx(ctx, tx, run); err != nil {
 		return nil, err
 	}
 	persisted, err := s.insertPostgresActivityTx(ctx, tx, event)
