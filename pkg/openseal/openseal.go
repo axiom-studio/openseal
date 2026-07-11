@@ -416,7 +416,6 @@ func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
 // authoritative persistence boundary.
 type PersistentKernelStore interface {
 	runtime.KernelStore
-	runtime.InitiativeStore
 	runtime.CollaborationStore
 	runtime.RunDependencyStore
 	runtime.ConversationStore
