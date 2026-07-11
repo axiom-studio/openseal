@@ -452,6 +452,10 @@ var (
 	ErrInvalidRunCommand                   = runtime.ErrInvalidRunCommand
 	ErrInvalidScope                        = runtime.ErrInvalidScope
 	ErrInvalidOwner                        = runtime.ErrInvalidOwner
+	ErrInitiativeNotFound                  = runtime.ErrInitiativeNotFound
+	ErrInitiativeConflict                  = runtime.ErrInitiativeConflict
+	ErrInitiativeIdempotency               = runtime.ErrInitiativeIdempotency
+	ErrInitiativeNoChanges                 = runtime.ErrInitiativeNoChanges
 	ErrObjectiveNotFound                   = runtime.ErrObjectiveNotFound
 	ErrObjectiveIdempotency                = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition          = runtime.ErrInvalidObjectiveTransition
