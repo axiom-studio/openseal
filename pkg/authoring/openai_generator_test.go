@@ -42,6 +42,18 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 	}
 }
 
+func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
+	for _, expected := range []string{
+		"cadence, eventRules, successCriteria, and constraints are JSON objects",
+		"never strings or arrays",
+		"omit any of them when no structured value is needed",
+	} {
+		if !strings.Contains(authoringSystemPrompt, expected) {
+			t.Fatalf("authoring schema missing %q", expected)
+		}
+	}
+}
+
 func TestOpenAICompatibleGeneratorRedactsProviderErrorsAndRejectsMultipleChoices(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
