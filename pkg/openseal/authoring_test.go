@@ -33,6 +33,9 @@ func TestEngineExposesDurableWorkforceChangeSetsOnlyWithPersistentSupport(t *tes
 	if !engine.WorkforceAuthoringAvailable() || !engine.WorkforceChangeSetsAvailable() {
 		t.Fatal("durable workforce authoring was not exposed")
 	}
+	if !engine.WorkforceChangeSetApplyAvailable() {
+		t.Fatal("atomic workforce Apply was not exposed for the shared SQLite kernel store")
+	}
 	created, replayed, err := engine.CreateWorkforceChangeSet(t.Context(), CreateWorkforceChangeSetRequest{
 		Scope: SkillScope{Kind: "workspace", ID: "local"}, Prompt: "Create a Team", Catalog: WorkforceCapabilityCatalog{},
 		Placement: WorkforceChangeSetPlacement{TeamDeploymentID: "team-live"}, Actor: WorkforceChangeSetActor{Type: "user", ID: "local"},

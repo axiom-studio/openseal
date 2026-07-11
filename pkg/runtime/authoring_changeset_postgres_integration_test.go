@@ -89,3 +89,67 @@ func TestPostgresWorkforceChangeSetsAreReplicaSafeAndDurable(t *testing.T) {
 		t.Fatalf("candidate mutation = %v", err)
 	}
 }
+
+func TestPostgresAtomicWorkforceApplyHasOneReplicaWinner(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	schema := "openseal_apply_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+	ready := testApplicableWorkforceChangeSet()
+	if _, _, err = primary.CreateChangeSet(ctx, ready, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	candidate := cloneRuntimeChangeSet(ready)
+	candidate.Status = authoring.ChangeSetApplied
+	candidate.Revision = 3
+	candidate.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt", IdempotencyKey: "apply", CandidateDigest: ready.CandidateDigest, Actor: ready.Actor, AppliedAt: ready.UpdatedAt.Add(time.Minute)}
+	candidate.UpdatedAt = candidate.ApplyReceipt.AppliedAt
+	stores := []*PostgresStore{primary, replica}
+	results := make(chan *authoring.ChangeSet, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, store := range stores {
+		wg.Add(1)
+		go func(store *PostgresStore) {
+			defer wg.Done()
+			result, err := store.ApplyChangeSet(ctx, cloneRuntimeChangeSet(candidate), 2)
+			results <- result
+			errs <- err
+		}(store)
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for result := range results {
+		if result.ApplyReceipt == nil || result.ApplyReceipt.ID != "receipt" || result.Status != authoring.ChangeSetApplied {
+			t.Fatalf("result=%#v", result)
+		}
+	}
+	if versions, err := replica.ListDefinitionVersions(ctx, "agent"); err != nil || len(versions) != 1 {
+		t.Fatalf("versions=%d err=%v", len(versions), err)
+	}
+	if objectives, err := replica.ListObjectives(ctx, ObjectiveFilter{Scope: Scope{Kind: "tenant", ID: "one"}}); err != nil || len(objectives) != 2 {
+		t.Fatalf("objectives=%d err=%v", len(objectives), err)
+	}
+}

@@ -50,6 +50,7 @@ const (
 	OperationActivate   = "activate"
 	OperationCompile    = "compile"
 	OperationPropose    = "propose"
+	OperationApply      = "apply"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -177,6 +178,9 @@ func WorkforceAuthoringCapability(changeSets ...bool) Capability {
 	}
 	if len(changeSets) > 0 && changeSets[0] {
 		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
+	}
+	if len(changeSets) > 1 && changeSets[1] {
+		capability.Operations = append(capability.Operations, OperationApply)
 	}
 	return capability
 }

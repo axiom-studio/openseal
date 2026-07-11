@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -88,9 +89,10 @@ type ChangeSetPlacement struct {
 	AgentDeploymentIDs map[string]string `json:"agentDeploymentIds"`
 	// Expected revisions are mandatory for amendments and make stale placement
 	// fail before any definition, deployment, or objective is written.
-	TeamExpectedRevision   int64            `json:"teamExpectedRevision,omitempty"`
-	AgentExpectedRevisions map[string]int64 `json:"agentExpectedRevisions,omitempty"`
-	Environment            string           `json:"environment,omitempty"`
+	TeamExpectedRevision   int64                                                `json:"teamExpectedRevision,omitempty"`
+	AgentExpectedRevisions map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
+	CredentialReferences   map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
+	Environment            string                                               `json:"environment,omitempty"`
 }
 
 type AppliedResourceReference struct {
@@ -113,24 +115,25 @@ type ChangeSetApplyReceipt struct {
 // lifecycle. Apply is deliberately a later transition, never a side effect of
 // compilation or refinement.
 type ChangeSet struct {
-	ID                string                      `json:"id"`
-	Scope             capability.ScopeReference   `json:"scope"`
-	ParentID          string                      `json:"parentId,omitempty"`
-	Mode              Mode                        `json:"mode"`
-	Prompt            string                      `json:"prompt"`
-	PromptDigest      string                      `json:"promptDigest"`
-	CandidateDigest   string                      `json:"candidateDigest"`
-	Result            CompileResult               `json:"result"`
-	Placement         ChangeSetPlacement          `json:"placement"`
-	Status            ChangeSetStatus             `json:"status"`
-	Actor             ChangeSetActor              `json:"actor"`
-	Evaluations       []ChangeSetEvaluation       `json:"evaluations,omitempty"`
-	ApprovalDecisions []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
-	ApplyReceipt      *ChangeSetApplyReceipt      `json:"applyReceipt,omitempty"`
-	Lifecycle         []ChangeSetLifecycleEvent   `json:"lifecycle"`
-	Revision          int64                       `json:"revision"`
-	CreatedAt         time.Time                   `json:"createdAt"`
-	UpdatedAt         time.Time                   `json:"updatedAt"`
+	ID                  string                      `json:"id"`
+	Scope               capability.ScopeReference   `json:"scope"`
+	ParentID            string                      `json:"parentId,omitempty"`
+	Mode                Mode                        `json:"mode"`
+	Prompt              string                      `json:"prompt"`
+	PromptDigest        string                      `json:"promptDigest"`
+	CandidateDigest     string                      `json:"candidateDigest"`
+	Result              CompileResult               `json:"result"`
+	Placement           ChangeSetPlacement          `json:"placement"`
+	RequiredCredentials map[string][]string         `json:"requiredCredentials,omitempty"`
+	Status              ChangeSetStatus             `json:"status"`
+	Actor               ChangeSetActor              `json:"actor"`
+	Evaluations         []ChangeSetEvaluation       `json:"evaluations,omitempty"`
+	ApprovalDecisions   []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
+	ApplyReceipt        *ChangeSetApplyReceipt      `json:"applyReceipt,omitempty"`
+	Lifecycle           []ChangeSetLifecycleEvent   `json:"lifecycle"`
+	Revision            int64                       `json:"revision"`
+	CreatedAt           time.Time                   `json:"createdAt"`
+	UpdatedAt           time.Time                   `json:"updatedAt"`
 }
 
 type SubmitChangeSetEvaluationRequest struct {
@@ -255,7 +258,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	changeSet := &ChangeSet{
 		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), CandidateDigest: candidateDigest,
-		Result: *result, Placement: clonePlacement(request.Placement), Status: status, Actor: request.Actor,
+		Result: *result, Placement: clonePlacement(request.Placement), RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog), Status: status, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: "candidate_compiled", Actor: request.Actor, At: now}}
@@ -328,11 +331,40 @@ func validateApplyPlacement(value *ChangeSet) error {
 		if value.Mode == ModeAmend && value.Placement.AgentExpectedRevisions[definition.ID] < 1 {
 			return errors.New("every amended Agent placement requires an expected revision")
 		}
+		for _, kind := range value.RequiredCredentials[definition.ID] {
+			reference := value.Placement.CredentialReferences[definition.ID][kind]
+			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+				return fmt.Errorf("Agent %s requires an opaque %s credential reference", definition.ID, kind)
+			}
+		}
 	}
 	if value.Mode == ModeAmend && value.Placement.TeamExpectedRevision < 1 {
 		return errors.New("amended Team placement requires an expected revision")
 	}
 	return nil
+}
+
+func requiredCredentials(candidate WorkforceCandidate, catalog CapabilityCatalog) map[string][]string {
+	result := map[string][]string{}
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, requirement := range definition.SkillRequirements {
+			for _, kind := range catalog.Skills[requirement.SkillID].CredentialKinds {
+				kind = strings.TrimSpace(kind)
+				if kind != "" {
+					seen[kind] = true
+				}
+			}
+		}
+		for kind := range seen {
+			result[definition.ID] = append(result[definition.ID], kind)
+		}
+		sort.Strings(result[definition.ID])
+	}
+	return result
 }
 
 func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitChangeSetEvaluationRequest) (*ChangeSet, bool, error) {
@@ -578,6 +610,16 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 		copy.AgentExpectedRevisions = make(map[string]int64, len(value.AgentExpectedRevisions))
 		for definitionID, revision := range value.AgentExpectedRevisions {
 			copy.AgentExpectedRevisions[definitionID] = revision
+		}
+	}
+	if value.CredentialReferences != nil {
+		copy.CredentialReferences = make(map[string]map[string]capability.CredentialReference, len(value.CredentialReferences))
+		for agentID, references := range value.CredentialReferences {
+			nested := make(map[string]capability.CredentialReference, len(references))
+			for kind, reference := range references {
+				nested[kind] = reference
+			}
+			copy.CredentialReferences[agentID] = nested
 		}
 	}
 	return copy
