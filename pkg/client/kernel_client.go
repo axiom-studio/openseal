@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -49,6 +50,20 @@ type KernelClient interface {
 	EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error)
 	ResolveWorkforceChangeSetApproval(context.Context, authoring.ResolveChangeSetApprovalRequest, string) (*authoring.ChangeSet, error)
 	ApplyWorkforceChangeSet(context.Context, authoring.ApplyChangeSetRequest, string) (*authoring.ChangeSet, error)
+}
+
+type ClawHubClient interface {
+	InspectClawHubSkill(context.Context, clawhub.SkillReference) (*clawhub.SkillDetail, error)
+	ListClawHubSkillVersions(context.Context, clawhub.SkillReference, int, string) (*clawhub.VersionPage, error)
+	VerifyClawHubSkill(context.Context, clawhub.SkillReference, kernelapi.ClawHubVersionRequest) (*clawhub.Verification, error)
+	ListInstalledClawHubSkills(context.Context) ([]clawhub.InstalledState, error)
+	InstallClawHubSkill(context.Context, clawhub.SkillReference, kernelapi.ClawHubVersionRequest) (*clawhub.LifecycleResult, error)
+	VerifyInstalledClawHubSkill(context.Context, string) (*clawhub.Verification, error)
+	PinClawHubSkill(context.Context, string, string) (*clawhub.LifecycleResult, error)
+	UnpinClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
+	UpdateClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
+	UpdateAllClawHubSkills(context.Context) (*clawhub.LifecycleBatchResult, error)
+	UninstallClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
 }
 
 type TeamClient interface {
@@ -257,6 +272,76 @@ func (c *KernelHTTPClient) PatchInitiative(ctx context.Context, scope runtime.Sc
 		return nil, err
 	}
 	return &initiative, nil
+}
+
+func clawHubPath(kind, reference, action string) string {
+	path := "/api/v1/clawhub/" + kind + "/" + url.PathEscape(strings.TrimSpace(reference))
+	if action != "" {
+		path += "/" + action
+	}
+	return path
+}
+
+func (c *KernelHTTPClient) InspectClawHubSkill(ctx context.Context, reference clawhub.SkillReference) (*clawhub.SkillDetail, error) {
+	var result clawhub.SkillDetail
+	err := c.do(ctx, http.MethodGet, clawHubPath("catalog", reference.String(), ""), nil, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) ListClawHubSkillVersions(ctx context.Context, reference clawhub.SkillReference, limit int, cursor string) (*clawhub.VersionPage, error) {
+	query := url.Values{}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	setIfPresent(query, "cursor", cursor)
+	var result clawhub.VersionPage
+	err := c.do(ctx, http.MethodGet, clawHubPath("catalog", reference.String(), "versions")+"?"+query.Encode(), nil, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) VerifyClawHubSkill(ctx context.Context, reference clawhub.SkillReference, request kernelapi.ClawHubVersionRequest) (*clawhub.Verification, error) {
+	var result clawhub.Verification
+	err := c.do(ctx, http.MethodPost, clawHubPath("catalog", reference.String(), "verify"), request, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) ListInstalledClawHubSkills(ctx context.Context) ([]clawhub.InstalledState, error) {
+	var result []clawhub.InstalledState
+	err := c.do(ctx, http.MethodGet, "/api/v1/clawhub/installed", nil, "", &result)
+	return result, err
+}
+func (c *KernelHTTPClient) InstallClawHubSkill(ctx context.Context, reference clawhub.SkillReference, request kernelapi.ClawHubVersionRequest) (*clawhub.LifecycleResult, error) {
+	var result clawhub.LifecycleResult
+	err := c.do(ctx, http.MethodPost, clawHubPath("catalog", reference.String(), "install"), request, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) VerifyInstalledClawHubSkill(ctx context.Context, reference string) (*clawhub.Verification, error) {
+	var result clawhub.Verification
+	err := c.do(ctx, http.MethodPost, clawHubPath("installed", reference, "verify"), struct{}{}, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) PinClawHubSkill(ctx context.Context, reference, reason string) (*clawhub.LifecycleResult, error) {
+	var result clawhub.LifecycleResult
+	err := c.do(ctx, http.MethodPost, clawHubPath("installed", reference, "pin"), kernelapi.ClawHubPinRequest{Reason: reason}, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) UnpinClawHubSkill(ctx context.Context, reference string) (*clawhub.LifecycleResult, error) {
+	return c.clawHubMutation(ctx, reference, "unpin")
+}
+func (c *KernelHTTPClient) UpdateClawHubSkill(ctx context.Context, reference string) (*clawhub.LifecycleResult, error) {
+	return c.clawHubMutation(ctx, reference, "update")
+}
+func (c *KernelHTTPClient) UninstallClawHubSkill(ctx context.Context, reference string) (*clawhub.LifecycleResult, error) {
+	var result clawhub.LifecycleResult
+	err := c.do(ctx, http.MethodDelete, clawHubPath("installed", reference, ""), nil, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) clawHubMutation(ctx context.Context, reference, action string) (*clawhub.LifecycleResult, error) {
+	var result clawhub.LifecycleResult
+	err := c.do(ctx, http.MethodPost, clawHubPath("installed", reference, action), struct{}{}, "", &result)
+	return &result, err
+}
+func (c *KernelHTTPClient) UpdateAllClawHubSkills(ctx context.Context) (*clawhub.LifecycleBatchResult, error) {
+	var result clawhub.LifecycleBatchResult
+	err := c.do(ctx, http.MethodPost, "/api/v1/clawhub/installed/update-all", struct{}{}, "", &result)
+	return &result, err
 }
 
 func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*runtime.AgentRunCommandResult, error) {
