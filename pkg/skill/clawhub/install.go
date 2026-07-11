@@ -138,6 +138,9 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 		return nil, err
 	}
 	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(m.skillsDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -223,11 +226,19 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 	backup := ""
 	if _, err := os.Stat(target); err == nil {
 		backup = target + ".backup-" + fmt.Sprint(now.UnixNano())
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	versionCopy := resolvedVersion
+	desired := LockEntry{Version: &versionCopy, InstalledAt: now.UnixMilli(), Registry: m.registryID, OwnerHandle: req.Reference.Owner, Slug: req.Reference.Slug, Directory: filepath.Base(target)}
+	if err := m.writeIntent(lifecycleIntent{Kind: "install", Identity: identity, Target: target, Stage: stage, Backup: backup, Desired: &desired}); err != nil {
+		return nil, err
+	}
+	defer m.reconcileLifecycleLocked()
+	if backup != "" {
 		if err := os.Rename(target, backup); err != nil {
 			return nil, err
 		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
 	}
 	if err := os.Rename(stage, target); err != nil {
 		if backup != "" {
@@ -235,8 +246,7 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 		}
 		return nil, err
 	}
-	versionCopy := resolvedVersion
-	lock.Skills[identity] = LockEntry{Version: &versionCopy, InstalledAt: now.UnixMilli(), Registry: m.registryID, OwnerHandle: req.Reference.Owner, Slug: req.Reference.Slug, Directory: filepath.Base(target)}
+	lock.Skills[identity] = desired
 	if err := m.writeLockfile(lock); err != nil {
 		_ = os.RemoveAll(target)
 		if backup != "" {
@@ -246,6 +256,9 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 	}
 	if backup != "" {
 		_ = os.RemoveAll(backup)
+	}
+	if err := m.clearIntent(); err != nil {
+		return nil, err
 	}
 	return &InstalledSkill{SourceIdentity: identity, Reference: req.Reference, Version: resolvedVersion, Directory: target, Origin: origin, Verification: verification, Compilation: bundle, Changed: true}, nil
 }
@@ -342,6 +355,9 @@ func (m *InstallManager) LoadInstalled() ([]*InstalledSkill, error) {
 		return nil, err
 	}
 	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return nil, err
+	}
 	lock, err := m.readLockfile()
 	if err != nil {
 		return nil, err
@@ -371,6 +387,9 @@ func (m *InstallManager) ListInstalledStates() ([]InstalledState, error) {
 		return nil, err
 	}
 	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return nil, err
+	}
 	lock, err := m.readLockfile()
 	if err != nil {
 		return nil, err
@@ -415,6 +434,9 @@ func (m *InstallManager) Pin(reference, reason string) error {
 		return err
 	}
 	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return err
+	}
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
@@ -437,6 +459,9 @@ func (m *InstallManager) Unpin(reference string) error {
 		return err
 	}
 	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return err
+	}
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
@@ -459,6 +484,9 @@ func (m *InstallManager) Uninstall(reference string, force bool) error {
 		return err
 	}
 	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return err
+	}
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
@@ -479,6 +507,10 @@ func (m *InstallManager) Uninstall(reference string, force bool) error {
 		return ErrSkillModified
 	}
 	trash := target + ".remove-" + fmt.Sprint(m.now().UnixNano())
+	if err := m.writeIntent(lifecycleIntent{Kind: "uninstall", Identity: identity, Target: target, Trash: trash}); err != nil {
+		return err
+	}
+	defer m.reconcileLifecycleLocked()
 	if err := os.Rename(target, trash); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -487,12 +519,23 @@ func (m *InstallManager) Uninstall(reference string, force bool) error {
 		_ = os.Rename(trash, target)
 		return err
 	}
-	return os.RemoveAll(trash)
+	if err := os.RemoveAll(trash); err != nil {
+		return err
+	}
+	return m.clearIntent()
 }
 
 func (m *InstallManager) List() (Lockfile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return Lockfile{}, err
+	}
+	defer release()
+	if err := m.reconcileLifecycleLocked(); err != nil {
+		return Lockfile{}, err
+	}
 	lock, err := m.readLockfile()
 	if err != nil {
 		return Lockfile{}, err
@@ -933,5 +976,17 @@ func writeAtomicJSON(path string, value interface{}) error {
 	if err := os.Chmod(tempPath, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tempPath, path)
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
