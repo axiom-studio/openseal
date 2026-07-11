@@ -6,13 +6,17 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/internal/server"
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"go.uber.org/zap"
 )
 
@@ -124,6 +128,70 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	scope := capability.ScopeReference{Kind: "workspace", ID: "local"}
+	agents := kernelagent.NewRegistryWithStore(store)
+	agentDefinition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Find evidence", SystemPrompt: "Find evidence.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentDeployment, _, err := agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "researcher-one", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "operator", "Team roster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	for _, version := range []string{"1", "2"} {
+		registered, err := client.RegisterTeamDefinition(ctx, &kernelteam.Definition{
+			ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce findings",
+			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
+			Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, QuietByDefault: true},
+			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+		})
+		if err != nil || registered.Digest == "" {
+			t.Fatalf("registered Team definition = %#v, err = %v", registered, err)
+		}
+	}
+	versions, err := client.ListTeamDefinitionVersions(ctx, "research-team")
+	if err != nil || len(versions) != 2 {
+		t.Fatalf("Team versions = %#v, err = %v", versions, err)
+	}
+	created, err := client.CreateTeamDeployment(ctx, kernelapi.CreateTeamDeploymentRequest{
+		Deployment: &kernelteam.Deployment{
+			ID: "research-team-one", Scope: scope, DefinitionID: "research-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive,
+			Roster: []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		},
+		ActorType: "user", ActorID: "operator", Reason: "initial",
+	})
+	if err != nil || created.Activation.ToVersion != "1" {
+		t.Fatalf("created Team = %#v, err = %v", created, err)
+	}
+	activated, err := client.ActivateTeamDefinition(ctx, created.Deployment.ID, kernelapi.ActivateTeamDefinitionRequest{
+		Scope: scope, Version: "2", ExpectedRevision: created.Deployment.Revision, ActorType: "user", ActorID: "operator", Reason: "reviewed",
+	})
+	if err != nil || activated.Deployment.ActiveVersion != "2" || activated.Activation.FromVersion != "1" {
+		t.Fatalf("activated Team = %#v, err = %v", activated, err)
+	}
+	loaded, err := client.GetTeamDeployment(ctx, scope, created.Deployment.ID)
+	if err != nil || loaded.Revision != 2 || loaded.Roster[0].AgentDeploymentID != agentDeployment.ID {
+		t.Fatalf("loaded Team = %#v, err = %v", loaded, err)
 	}
 }
 

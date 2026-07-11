@@ -16,7 +16,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 	skillsource "github.com/axiom-studio/openseal/pkg/skill/source"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/types"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"go.uber.org/zap"
 )
 
@@ -60,6 +62,19 @@ type (
 	SubmitAgentAmendmentEvaluationRequest = kernelagent.SubmitAmendmentEvaluationRequest
 	ResolveAgentAmendmentRequest          = kernelagent.ResolveAmendmentRequest
 	AgentRegistryStore                    = kernelagent.Store
+	TeamDefinition                        = kernelteam.Definition
+	TeamRoleSlot                          = kernelteam.RoleSlot
+	TeamCoordinationMode                  = kernelteam.CoordinationMode
+	TeamCoordinationPolicy                = kernelteam.CoordinationPolicy
+	TeamDelegationPolicy                  = kernelteam.DelegationPolicy
+	TeamApprovalPolicy                    = kernelteam.ApprovalPolicy
+	TeamDeployment                        = kernelteam.Deployment
+	TeamDeploymentStatus                  = kernelteam.DeploymentStatus
+	TeamRosterAssignment                  = kernelteam.RosterAssignment
+	TeamDeploymentRestrictions            = kernelteam.DeploymentRestrictions
+	TeamRegistryStore                     = kernelteam.Store
+	WorkforceSharedContextPolicy          = workforce.SharedContextPolicy
+	WorkforceDefinitionActivation         = workforce.DefinitionActivation
 
 	RunRecord                          = runtime.RunRecord
 	RetryPolicy                        = runtime.RetryPolicy
@@ -336,6 +351,7 @@ type PersistentKernelStore interface {
 	runtime.ConversationStore
 	runtime.ArtifactStore
 	kernelagent.Store
+	kernelteam.Store
 	skill.CatalogStore
 }
 
@@ -377,6 +393,9 @@ var (
 	ErrConversationPresenceConflict        = runtime.ErrConversationPresenceConflict
 	ErrConversationCoordinationUnavailable = runtime.ErrConversationCoordinationUnavailable
 	ErrNoConversationParticipants          = runtime.ErrNoConversationParticipants
+	ErrTeamDefinitionNotFound              = kernelteam.ErrDefinitionNotFound
+	ErrTeamDeploymentNotFound              = kernelteam.ErrDeploymentNotFound
+	ErrTeamDeploymentRevisionConflict      = kernelteam.ErrRevisionConflict
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -458,6 +477,14 @@ const (
 
 	RunKindAgentWork    = runtime.RunKindAgentWork
 	RunKindConversation = runtime.RunKindConversation
+
+	TeamCoordinationDynamic           = kernelteam.CoordinationDynamic
+	TeamCoordinationPeer              = kernelteam.CoordinationPeer
+	TeamCoordinationLeaderFacilitated = kernelteam.CoordinationLeaderFacilitated
+	TeamDeploymentDraft               = kernelteam.DeploymentDraft
+	TeamDeploymentActive              = kernelteam.DeploymentActive
+	TeamDeploymentPaused              = kernelteam.DeploymentPaused
+	TeamDeploymentArchived            = kernelteam.DeploymentArchived
 
 	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
 	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning
@@ -720,6 +747,7 @@ type Engine struct {
 	actionSupervisors             []*runtime.ActionWorkerSupervisor
 	skills                        *skill.Catalog
 	agents                        *kernelagent.Registry
+	teams                         *kernelteam.Registry
 	logger                        *zap.SugaredLogger
 }
 
@@ -777,6 +805,7 @@ func New(opts ...Option) (*Engine, error) {
 	)
 	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
+	agentRegistry := kernelagent.NewRegistry()
 	e := &Engine{
 		registry:            reg,
 		store:               store,
@@ -794,7 +823,8 @@ func New(opts ...Option) (*Engine, error) {
 		wake:                runtime.NewAgentRunWakeService(store, store),
 		artifacts:           runtime.NewArtifactCatalog(store),
 		skills:              skill.NewCatalog(),
-		agents:              kernelagent.NewRegistry(),
+		agents:              agentRegistry,
+		teams:               kernelteam.NewRegistry(agentRegistry),
 		actionPolicy:        runtime.NewDefaultActionPolicy(),
 		approvalAuth:        runtime.EligibleApprovalAuthorizer{},
 		logger:              sugar,
@@ -966,6 +996,9 @@ func WithStore(store runtime.KernelStore) Option {
 		}
 		if agentStore, ok := store.(kernelagent.Store); ok {
 			e.agents = kernelagent.NewRegistryWithStore(agentStore)
+		}
+		if teamStore, ok := store.(kernelteam.Store); ok && e.agents != nil {
+			e.teams = kernelteam.NewRegistryWithStore(teamStore, e.agents)
 		}
 		if skillStore, ok := store.(skill.CatalogStore); ok {
 			e.skills = skill.NewCatalogWithStore(skillStore)
@@ -1770,6 +1803,34 @@ func (e *Engine) ResolveAgentDefinitionAmendment(ctx context.Context, request ke
 
 func (e *Engine) ActivateAgentDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.DefinitionAmendment, *kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	return e.agents.ActivateAmendment(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason)
+}
+
+func (e *Engine) RegisterTeamDefinition(ctx context.Context, definition *kernelteam.Definition) (*kernelteam.Definition, error) {
+	return e.teams.RegisterDefinition(ctx, definition)
+}
+
+func (e *Engine) GetTeamDefinition(ctx context.Context, id, version string) (*kernelteam.Definition, error) {
+	return e.teams.GetDefinition(ctx, id, version)
+}
+
+func (e *Engine) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
+	return e.teams.ListDefinitionVersions(ctx, id)
+}
+
+func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	return e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+}
+
+func (e *Engine) GetTeamDeployment(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*kernelteam.Deployment, error) {
+	return e.teams.GetDeployment(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ActivateTeamDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	return e.teams.ActivateDefinition(ctx, scope, deploymentID, version, expectedRevision, actorType, actorID, reason)
+}
+
+func (e *Engine) ListTeamDefinitionActivations(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
+	return e.teams.ListActivations(ctx, scope, deploymentID)
 }
 
 func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {
