@@ -7,17 +7,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 )
-
-type clawHubVersionRequest struct {
-	Version string `json:"version,omitempty"`
-	Tag     string `json:"tag,omitempty"`
-}
-type clawHubPinRequest struct {
-	Reason string `json:"reason"`
-}
 
 func (s *Server) requireClawHub(w http.ResponseWriter, mutation bool) (*opensealkernel.Engine, bool) {
 	if s.clawHub == nil {
@@ -109,7 +102,7 @@ func (s *Server) handleVerifyClawHub(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, 400, "invalid ClawHub reference")
 		return
 	}
-	var request clawHubVersionRequest
+	var request kernelapi.ClawHubVersionRequest
 	if err := decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, 400, "invalid verification request")
 		return
@@ -143,7 +136,7 @@ func (s *Server) handleInstallClawHub(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, 400, "invalid ClawHub reference")
 		return
 	}
-	var request clawHubVersionRequest
+	var request kernelapi.ClawHubVersionRequest
 	if err := decodeStrictJSON(r, &request); err != nil || request.Version != "" && request.Tag != "" {
 		s.respondError(w, 400, "version and tag are mutually exclusive")
 		return
@@ -176,7 +169,7 @@ func (s *Server) handlePinClawHub(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var request clawHubPinRequest
+	var request kernelapi.ClawHubPinRequest
 	if err := decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, 400, "invalid pin request")
 		return

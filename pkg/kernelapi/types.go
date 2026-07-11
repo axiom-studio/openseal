@@ -86,6 +86,19 @@ type CapabilityContext struct {
 	EligibleApprovalRequirements []ApprovalRequirementReference `json:"eligibleApprovalRequirements,omitempty"`
 }
 
+type ClawHubVersionRequest struct {
+	Version string `json:"version,omitempty"`
+	Tag     string `json:"tag,omitempty"`
+}
+type ClawHubPinRequest struct {
+	Reason string `json:"reason"`
+}
+type ClawHubFile struct {
+	Path          string `json:"path"`
+	Size          int    `json:"size"`
+	ContentBase64 string `json:"contentBase64"`
+}
+
 type ApprovalRequirementReference struct {
 	EvaluationID string `json:"evaluationId"`
 	PolicyID     string `json:"policyId"`
