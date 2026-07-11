@@ -96,14 +96,15 @@ Read references/method.md before monitoring.
 		t.Fatalf("verify installed = %#v, %v", verified, err)
 	}
 	lock, err := manager.List()
-	if err != nil || lock.Skills[ref.Slug].Version == nil || *lock.Skills[ref.Slug].Version != "1.0.0" {
+	identity := manager.identity(ref)
+	if err != nil || lock.Skills[identity].Version == nil || *lock.Skills[identity].Version != "1.0.0" {
 		t.Fatalf("lockfile = %#v, %v", lock, err)
 	}
 	if err := manager.Pin(ref.Slug, "security review"); err != nil {
 		t.Fatal(err)
 	}
 	report := manager.UpdateAll(context.Background())
-	if len(report.SkippedPinned) != 1 || report.SkippedPinned[0] != ref.Slug {
+	if len(report.SkippedPinned) != 1 || report.SkippedPinned[0] != identity {
 		t.Fatalf("pinned update-all report = %#v", report)
 	}
 	if _, err := manager.Update(context.Background(), ref.Slug); !errors.Is(err, ErrSkillPinned) {
@@ -154,11 +155,160 @@ func TestInstallManagerUsesExplicitSkillsDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(skillsDirectory, "weather"); installed.Directory != want {
-		t.Fatalf("installed directory = %q, want %q", installed.Directory, want)
+	if filepath.Dir(installed.Directory) != skillsDirectory || filepath.Base(installed.Directory) == "weather" {
+		t.Fatalf("installed directory is not collision-safe: %q", installed.Directory)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".clawhub", "lock.json")); err != nil {
 		t.Fatalf("workspace lockfile: %v", err)
+	}
+}
+
+func TestInstallManagerPreservesOwnerQualifiedIdentityAndRejectsAmbiguousSlug(t *testing.T) {
+	registry := &installRegistry{
+		version: "1.0.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"},
+		archive: createTestZip(t, map[string]string{"SKILL.md": "---\nname: foo\ndescription: owner-scoped skill\n---\nRun safely."}),
+	}
+	workspace := t.TempDir()
+	manager, err := NewInstallManager("https://registry.test", registry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice := SkillReference{Owner: "alice", Slug: "foo"}
+	bob := SkillReference{Owner: "bob", Slug: "foo"}
+	a, err := manager.Install(context.Background(), InstallRequest{Reference: alice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := manager.Install(context.Background(), InstallRequest{Reference: bob})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Directory == b.Directory {
+		t.Fatalf("owner-scoped installs collided at %q", a.Directory)
+	}
+	if a.SourceIdentity == b.SourceIdentity || a.SourceIdentity == "" || b.SourceIdentity == "" {
+		t.Fatalf("source identities collided: %q and %q", a.SourceIdentity, b.SourceIdentity)
+	}
+
+	restarted, err := NewInstallManager("https://registry.test", registry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := restarted.LoadInstalled()
+	if err != nil || len(loaded) != 2 {
+		t.Fatalf("restarted load = %#v, %v", loaded, err)
+	}
+	if loaded[0].SourceIdentity == loaded[1].SourceIdentity {
+		t.Fatalf("restart lost source identity: %#v", loaded)
+	}
+	lock, err := restarted.List()
+	if err != nil || len(lock.Skills) != 2 {
+		t.Fatalf("lock = %#v, %v", lock, err)
+	}
+	if _, ok := lock.Skills[restarted.identity(alice)]; !ok {
+		t.Fatalf("alice identity missing: %#v", lock.Skills)
+	}
+	if _, ok := lock.Skills[restarted.identity(bob)]; !ok {
+		t.Fatalf("bob identity missing: %#v", lock.Skills)
+	}
+
+	for _, operation := range []struct {
+		name string
+		run  func() error
+	}{
+		{"update", func() error { _, err := restarted.Update(context.Background(), "foo"); return err }},
+		{"verify", func() error { _, err := restarted.VerifyInstalled(context.Background(), "foo"); return err }},
+		{"pin", func() error { return restarted.Pin("foo", "test") }},
+		{"unpin", func() error { return restarted.Unpin("foo") }},
+		{"uninstall", func() error { return restarted.Uninstall("foo", false) }},
+	} {
+		if err := operation.run(); !errors.Is(err, ErrAmbiguousSkill) {
+			t.Fatalf("%s error = %v", operation.name, err)
+		}
+	}
+	if err := restarted.Pin("@alice/foo", "review"); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Unpin("@alice/foo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.VerifyInstalled(context.Background(), "@bob/foo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Update(context.Background(), "@alice/foo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Uninstall("@bob/foo", false); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := restarted.LoadInstalled()
+	if err != nil || len(remaining) != 1 || remaining[0].Reference != alice {
+		t.Fatalf("remaining = %#v, %v", remaining, err)
+	}
+}
+
+func TestInstallManagerMigratesLegacySlugLockAndDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	skills := filepath.Join(workspace, "skills")
+	legacy := filepath.Join(skills, "foo")
+	if err := os.MkdirAll(filepath.Join(legacy, ".clawhub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("---\nname: foo\ndescription: legacy skill\n---\nLegacy body.")
+	if err := os.WriteFile(filepath.Join(legacy, "SKILL.md"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := fingerprintFiles(map[string][]byte{"SKILL.md": content})
+	version := "1.0.0"
+	origin := SkillOrigin{Version: 1, Registry: "https://registry.test", OwnerHandle: "alice", Slug: "foo", InstalledVersion: version, Fingerprint: fingerprint}
+	if err := writeAtomicJSON(filepath.Join(legacy, ".clawhub", "origin.json"), origin); err != nil {
+		t.Fatal(err)
+	}
+	legacyLock := Lockfile{Version: 1, Skills: map[string]LockEntry{"foo": {Version: &version, OwnerHandle: "alice"}}}
+	if err := writeAtomicJSON(filepath.Join(workspace, ".clawhub", "lock.json"), legacyLock); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewInstallManager("https://registry.test", &installRegistry{}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := manager.LoadInstalled()
+	if err != nil || len(loaded) != 1 || loaded[0].Reference.String() != "@alice/foo" {
+		t.Fatalf("migrated load = %#v, %v", loaded, err)
+	}
+	lock, err := manager.List()
+	entry, ok := lock.Skills[manager.identity(SkillReference{Owner: "alice", Slug: "foo"})]
+	if err != nil || lock.Version != 2 || !ok || entry.Directory == "" {
+		t.Fatalf("migrated lock = %#v, %v", lock, err)
+	}
+	if _, err := os.Stat(filepath.Join(skills, entry.Directory)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy directory remains: %v", err)
+	}
+
+	restarted, _ := NewInstallManager("https://registry.test", &installRegistry{}, workspace)
+	if _, err := restarted.LoadInstalled(); err != nil {
+		t.Fatalf("restart after migration: %v", err)
+	}
+}
+
+func TestInstallManagerCanonicalizesCaseAndRejectsTraversalReferences(t *testing.T) {
+	registry := &installRegistry{version: "1.0.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"}, archive: createTestZip(t, map[string]string{"SKILL.md": "---\nname: foo\ndescription: safe\n---\nSafe."})}
+	manager, _ := NewInstallManager("https://REGISTRY.test/", registry, t.TempDir())
+	first, err := manager.Install(context.Background(), InstallRequest{Reference: SkillReference{Owner: "Alice", Slug: "Foo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.Install(context.Background(), InstallRequest{Reference: SkillReference{Owner: "alice", Slug: "foo"}})
+	if err != nil || second.Changed || second.Directory != first.Directory {
+		t.Fatalf("case canonicalization = %#v, %v", second, err)
+	}
+	for _, ref := range []SkillReference{{Owner: "..", Slug: "foo"}, {Owner: "alice", Slug: "../foo"}, {Owner: "alice/bob", Slug: "foo"}} {
+		if _, err := manager.Install(context.Background(), InstallRequest{Reference: ref}); err == nil {
+			t.Fatalf("accepted unsafe reference %#v", ref)
+		}
 	}
 }
 
