@@ -257,6 +257,10 @@ func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMes
 	}
 	query := `SELECT payload FROM channel_messages WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND sequence > ?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.AfterSequence}
+	if filter.BeforeSequence > 0 {
+		query += ` AND sequence < ?`
+		args = append(args, filter.BeforeSequence)
+	}
 	if filter.ThreadRootID != "" {
 		query += ` AND (thread_root_id = ? OR id = ?)`
 		args = append(args, filter.ThreadRootID, filter.ThreadRootID)

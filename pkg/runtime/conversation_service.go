@@ -50,6 +50,7 @@ type ChannelMessageFilter struct {
 	ConversationID string
 	ThreadRootID   string
 	AfterSequence  int64
+	BeforeSequence int64
 	Intents        []ConversationMessageIntent
 	Limit          int
 	Descending     bool
@@ -407,12 +408,11 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 }
 
 func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
-	if filter.Viewer == nil || filter.Descending {
-		messages, err := s.store.ListChannelMessages(ctx, filter)
-		if err != nil || filter.Viewer == nil {
-			return messages, err
-		}
-		return s.filterVisibleChannelMessages(ctx, filter.Scope, filter.ConversationID, messages, *filter.Viewer)
+	if filter.BeforeSequence < 0 || filter.AfterSequence < 0 || (filter.BeforeSequence > 0 && filter.AfterSequence >= filter.BeforeSequence) {
+		return nil, fmt.Errorf("%w: message sequence bounds are invalid", ErrInvalidConversation)
+	}
+	if filter.Viewer == nil {
+		return s.store.ListChannelMessages(ctx, filter)
 	}
 	// Scan through fully hidden pages server-side so an authorized caller does
 	// not get stuck on an empty page and does not need hidden sequence metadata.
@@ -437,7 +437,11 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter Ch
 			return nil, err
 		}
 		result = append(result, visible...)
-		scan.AfterSequence = raw[len(raw)-1].Sequence
+		if scan.Descending {
+			scan.BeforeSequence = raw[len(raw)-1].Sequence
+		} else {
+			scan.AfterSequence = raw[len(raw)-1].Sequence
+		}
 		if len(raw) < scan.Limit {
 			break
 		}
