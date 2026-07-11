@@ -182,7 +182,7 @@ func TestCatalogPreservesInstalledClawHubOriginAndVersion(t *testing.T) {
 	}
 	candidate := snapshot.Effective[0]
 	source := candidate.Compilation.Definition.Source
-	if candidate.Version != "0.1.0" || source == nil || source.Registry != "https://clawhub.ai" || source.Publisher != "seanford" ||
+	if candidate.Version != "0.1.0+source."+candidate.Digest[:12] || source == nil || source.Registry != "https://clawhub.ai" || source.Publisher != "seanford" ||
 		source.Reference != "seanford/summarize" || source.ResolvedVersion != "0.1.0" || source.Trust["fingerprint"] != "fp-1" {
 		t.Fatalf("installed origin was not preserved: candidate=%#v source=%#v", candidate, source)
 	}

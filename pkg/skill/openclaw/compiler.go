@@ -140,13 +140,18 @@ func ExportBundle(compilation *Compilation) (Bundle, error) {
 }
 
 func resolvedVersion(parsed *skillmd.ParsedSkill, sourceVersion, digest string) string {
-	if strings.TrimSpace(sourceVersion) != "" {
-		return strings.TrimSpace(sourceVersion)
+	version := strings.TrimSpace(sourceVersion)
+	if version == "" {
+		version = strings.TrimSpace(parsed.Version)
 	}
-	if strings.TrimSpace(parsed.Version) != "" {
-		return strings.TrimSpace(parsed.Version)
+	if version == "" {
+		version = "0.0.0"
 	}
-	return "0.0.0+source." + digest[:12]
+	separator := "+source."
+	if strings.Contains(version, "+") {
+		separator = ".source."
+	}
+	return version + separator + digest[:12]
 }
 
 func compileInstallers(values []skillmd.InstallSpec) []capability.Installer {
