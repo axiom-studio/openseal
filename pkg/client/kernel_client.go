@@ -34,6 +34,10 @@ type KernelClient interface {
 	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
 	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
 	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
+	CreateInitiative(context.Context, kernelapi.CreateInitiativeRequest, string) (*runtime.Initiative, error)
+	ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error)
+	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
+	PatchInitiative(context.Context, runtime.Scope, string, kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
@@ -202,6 +206,57 @@ func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Sc
 		return nil, err
 	}
 	return &objective, nil
+}
+
+func (c *KernelHTTPClient) CreateInitiative(ctx context.Context, request kernelapi.CreateInitiativeRequest, idempotencyKey string) (*runtime.Initiative, error) {
+	var initiative runtime.Initiative
+	if err := c.do(ctx, http.MethodPost, "/api/v1/initiatives", request, idempotencyKey, &initiative); err != nil {
+		return nil, err
+	}
+	return &initiative, nil
+}
+
+func (c *KernelHTTPClient) ListInitiatives(ctx context.Context, filter runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
+	query := scopeQuery(filter.Scope)
+	if filter.Owner != nil {
+		query.Set("ownerType", string(filter.Owner.Type))
+		query.Set("ownerId", filter.Owner.ID)
+	}
+	setIfPresent(query, "objectiveId", filter.ObjectiveID)
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var initiatives []*runtime.Initiative
+	if err := c.do(ctx, http.MethodGet, "/api/v1/initiatives?"+query.Encode(), nil, "", &initiatives); err != nil {
+		return nil, err
+	}
+	return initiatives, nil
+}
+
+func (c *KernelHTTPClient) GetInitiative(ctx context.Context, scope runtime.Scope, initiativeID string) (*runtime.Initiative, error) {
+	query := scopeQuery(scope)
+	var initiative runtime.Initiative
+	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &initiative); err != nil {
+		return nil, err
+	}
+	return &initiative, nil
+}
+
+func (c *KernelHTTPClient) PatchInitiative(ctx context.Context, scope runtime.Scope, initiativeID string, request kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error) {
+	query := scopeQuery(scope)
+	var initiative runtime.Initiative
+	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodPatch, path, request, "", &initiative); err != nil {
+		return nil, err
+	}
+	return &initiative, nil
 }
 
 func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*runtime.AgentRunCommandResult, error) {

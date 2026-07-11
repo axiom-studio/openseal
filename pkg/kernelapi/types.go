@@ -17,6 +17,8 @@ const (
 	AgentRunsCapabilityVersion          = "1"
 	ObjectivesCapabilityID              = "objectives"
 	ObjectivesCapabilityVersion         = "1"
+	InitiativesCapabilityID             = "initiatives"
+	InitiativesCapabilityVersion        = "1"
 	ArtifactsCapabilityID               = "artifacts"
 	ArtifactsCapabilityVersion          = "1"
 	TeamChannelsCapabilityID            = "team-channels"
@@ -54,6 +56,7 @@ const (
 	OperationApprove    = "approve"
 	OperationApply      = "apply"
 	OperationRetry      = "retry"
+	OperationPatch      = "patch"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -153,10 +156,17 @@ func ObjectivesCapability() Capability {
 	}
 }
 
+func InitiativesCapability() Capability {
+	return Capability{
+		ID: InitiativesCapabilityID, Version: InitiativesCapabilityVersion, Available: true,
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPatch},
+	}
+}
+
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), AgentRunsCapability(), TeamChannelsCapability(), TeamDefinitionsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), AgentRunsCapability(), TeamChannelsCapability(), TeamDefinitionsCapability()},
 	}
 }
 
@@ -269,6 +279,46 @@ type UpdateObjectiveRequest struct {
 type ObjectiveDetail struct {
 	Objective *runtime.Objective  `json:"objective"`
 	Runs      []*runtime.AgentRun `json:"runs"`
+}
+
+type CreateInitiativeRequest struct {
+	ID             string                           `json:"id,omitempty"`
+	Scope          runtime.Scope                    `json:"scope"`
+	Owner          runtime.ObjectiveOwner           `json:"owner"`
+	Title          string                           `json:"title"`
+	Purpose        string                           `json:"purpose"`
+	Status         runtime.InitiativeStatus         `json:"status,omitempty"`
+	AgentRefs      []runtime.ResourceReference      `json:"agentRefs,omitempty"`
+	TeamRefs       []runtime.ResourceReference      `json:"teamRefs,omitempty"`
+	ObjectiveRefs  []string                         `json:"objectiveRefs"`
+	RunRefs        []string                         `json:"runRefs,omitempty"`
+	Milestones     []runtime.InitiativeMilestone    `json:"milestones,omitempty"`
+	Hypotheses     []runtime.InitiativeHypothesis   `json:"hypotheses,omitempty"`
+	SourceMonitors []runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
+	Deliverables   []runtime.InitiativeDeliverable  `json:"deliverables,omitempty"`
+	Budget         *runtime.BudgetPolicy            `json:"budget,omitempty"`
+	Policy         map[string]interface{}           `json:"policy,omitempty"`
+	Checkpoint     map[string]interface{}           `json:"checkpoint,omitempty"`
+	IdempotencyKey string                           `json:"idempotencyKey,omitempty"`
+}
+
+type UpdateInitiativeRequest struct {
+	ExpectedRevision int64                             `json:"expectedRevision"`
+	Title            *string                           `json:"title,omitempty"`
+	Purpose          *string                           `json:"purpose,omitempty"`
+	Status           *runtime.InitiativeStatus         `json:"status,omitempty"`
+	AgentRefs        *[]runtime.ResourceReference      `json:"agentRefs,omitempty"`
+	TeamRefs         *[]runtime.ResourceReference      `json:"teamRefs,omitempty"`
+	ObjectiveRefs    *[]string                         `json:"objectiveRefs,omitempty"`
+	RunRefs          *[]string                         `json:"runRefs,omitempty"`
+	Milestones       *[]runtime.InitiativeMilestone    `json:"milestones,omitempty"`
+	Hypotheses       *[]runtime.InitiativeHypothesis   `json:"hypotheses,omitempty"`
+	SourceMonitors   *[]runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
+	Deliverables     *[]runtime.InitiativeDeliverable  `json:"deliverables,omitempty"`
+	Budget           *runtime.BudgetPolicy             `json:"budget,omitempty"`
+	ClearBudget      bool                              `json:"clearBudget,omitempty"`
+	Policy           map[string]interface{}            `json:"policy,omitempty"`
+	Checkpoint       map[string]interface{}            `json:"checkpoint,omitempty"`
 }
 
 type AgentRunCommandRequest struct {
