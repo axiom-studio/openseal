@@ -75,6 +75,9 @@ type (
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
+	BudgetPolicy                       = runtime.BudgetPolicy
+	BudgetUsage                        = runtime.BudgetUsage
+	BudgetState                        = runtime.BudgetState
 	AgentRunStatus                     = runtime.AgentRunStatus
 	AgentRunFilter                     = runtime.AgentRunFilter
 	RunSource                          = runtime.RunSource
@@ -343,6 +346,7 @@ var (
 	ErrInvalidScope                        = runtime.ErrInvalidScope
 	ErrInvalidOwner                        = runtime.ErrInvalidOwner
 	ErrObjectiveNotFound                   = runtime.ErrObjectiveNotFound
+	ErrBudgetExhausted                     = runtime.ErrBudgetExhausted
 	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
@@ -374,6 +378,10 @@ func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDi
 
 func ValidateCredentialFreeContext(value interface{}) error {
 	return runtime.ValidateCredentialFreeContext(value)
+}
+
+func EvaluateBudget(policy BudgetPolicy, usage BudgetUsage) (BudgetState, []string, error) {
+	return runtime.EvaluateBudget(policy, usage)
 }
 
 func DefaultConversationArbitrationPolicy() runtime.ConversationArbitrationPolicy {
@@ -453,6 +461,10 @@ const (
 	AgentRunStatusCompleted            = runtime.AgentRunStatusCompleted
 	AgentRunStatusFailed               = runtime.AgentRunStatusFailed
 	AgentRunStatusCanceled             = runtime.AgentRunStatusCanceled
+
+	BudgetStateActive    = runtime.BudgetStateActive
+	BudgetStateWarning   = runtime.BudgetStateWarning
+	BudgetStateExhausted = runtime.BudgetStateExhausted
 
 	AgentRunCommandPause     = runtime.AgentRunCommandPause
 	AgentRunCommandResume    = runtime.AgentRunCommandResume

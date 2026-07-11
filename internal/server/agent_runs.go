@@ -29,7 +29,7 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		Goal:   strings.TrimSpace(payload.Goal),
 		Source: payload.Source, Priority: payload.Priority, Deadline: payload.Deadline, AvailableAt: payload.AvailableAt,
 		Context: payload.Context, Plan: payload.Plan, Checkpoint: payload.Checkpoint, WakeCondition: payload.WakeCondition,
-		Budget: payload.Budget, Policy: payload.Policy, IdempotencyKey: idempotencyKey, Actor: payload.Actor, Visibility: payload.Visibility,
+		Budget: payload.Budget, BudgetPolicy: payload.BudgetPolicy, Policy: payload.Policy, IdempotencyKey: idempotencyKey, Actor: payload.Actor, Visibility: payload.Visibility,
 	})
 	if err != nil {
 		s.respondAgentRunError(w, err)

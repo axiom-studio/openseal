@@ -101,6 +101,7 @@ type RunTransitionRequest struct {
 	EventType        string
 	OccurredAt       *time.Time
 	Intervention     *AgentRunIntervention
+	BudgetUsageDelta *BudgetUsage
 }
 
 type AgentRunLeaseGuard struct {
@@ -211,6 +212,21 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 			return nil, nil, fmt.Errorf("%w: applied turn %d after %d", ErrRevisionConflict, req.AppliedTurn, run.LastAppliedTurn)
 		}
 		run.LastAppliedTurn = req.AppliedTurn
+	}
+	if req.BudgetUsageDelta != nil {
+		if run.BudgetPolicy == nil {
+			return nil, nil, errors.New("budget usage cannot be recorded without a budget policy")
+		}
+		usage, err := run.BudgetUsage.Add(*req.BudgetUsageDelta)
+		if err != nil {
+			return nil, nil, err
+		}
+		state, _, err := EvaluateBudget(*run.BudgetPolicy, usage)
+		if err != nil {
+			return nil, nil, err
+		}
+		run.BudgetUsage = usage
+		run.BudgetState = state
 	}
 	if run.StartedAt == nil && (req.Status == AgentRunStatusPlanning || req.Status == AgentRunStatusRunning) {
 		run.StartedAt = &now

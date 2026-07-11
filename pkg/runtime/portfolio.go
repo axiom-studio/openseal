@@ -194,6 +194,9 @@ type AgentRun struct {
 	PausedWakeCondition  *WakeCondition         `json:"pausedWakeCondition,omitempty"`
 	PendingInterventions []AgentRunIntervention `json:"pendingInterventions,omitempty"`
 	Budget               map[string]interface{} `json:"budget,omitempty"`
+	BudgetPolicy         *BudgetPolicy          `json:"budgetPolicy,omitempty"`
+	BudgetUsage          BudgetUsage            `json:"budgetUsage,omitempty"`
+	BudgetState          BudgetState            `json:"budgetState,omitempty"`
 	Policy               map[string]interface{} `json:"policy,omitempty"`
 	Output               map[string]interface{} `json:"output,omitempty"`
 	Error                string                 `json:"error,omitempty"`
@@ -226,6 +229,21 @@ func (r *AgentRun) Validate() error {
 	}
 	if r.Priority < 0 {
 		return errors.New("run priority cannot be negative")
+	}
+	if r.BudgetPolicy != nil {
+		if err := r.BudgetPolicy.Validate(); err != nil {
+			return err
+		}
+		if err := r.BudgetUsage.Validate(); err != nil {
+			return err
+		}
+		state, _, err := EvaluateBudget(*r.BudgetPolicy, r.BudgetUsage)
+		if err != nil {
+			return err
+		}
+		if r.BudgetState != "" && r.BudgetState != state {
+			return errors.New("run budget state does not match its policy and usage")
+		}
 	}
 	if len(r.ConcurrencyKey) > 256 || strings.ContainsAny(r.ConcurrencyKey, "\r\n") {
 		return errors.New("run concurrency key cannot exceed 256 characters or contain line breaks")
@@ -327,6 +345,7 @@ type CreateAgentRunRequest struct {
 	Checkpoint      map[string]interface{}
 	WakeCondition   *WakeCondition
 	Budget          map[string]interface{}
+	BudgetPolicy    *BudgetPolicy
 	Policy          map[string]interface{}
 	IdempotencyKey  string
 	Actor           ActivityActor
@@ -494,7 +513,10 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
-		Budget: req.Budget, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Budget: req.Budget, BudgetPolicy: req.BudgetPolicy, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if run.BudgetPolicy != nil {
+		run.BudgetState = BudgetStateActive
 	}
 	if err := run.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -43,6 +44,13 @@ type TurnUsage struct {
 	OutputTokens int     `json:"outputTokens,omitempty"`
 	Cost         float64 `json:"cost,omitempty"`
 	DurationMS   int64   `json:"durationMs,omitempty"`
+}
+
+func (u TurnUsage) Validate() error {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.DurationMS < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
+		return errors.New("turn usage cannot be negative, NaN, or infinite")
+	}
+	return nil
 }
 
 // AgentTurn is one bounded, resumable reasoning step. It records concise
