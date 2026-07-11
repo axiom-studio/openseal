@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 var ErrBudgetExhausted = errors.New("run budget is exhausted")
@@ -47,6 +48,19 @@ type BudgetUsage struct {
 	CostMicros   int64 `json:"costMicros,omitempty"`
 	DurationMS   int64 `json:"durationMs,omitempty"`
 	Actions      int64 `json:"actions,omitempty"`
+}
+
+type BudgetReservation struct {
+	ID        string      `json:"id"`
+	Usage     BudgetUsage `json:"usage"`
+	CreatedAt time.Time   `json:"createdAt"`
+}
+
+func (r BudgetReservation) Validate() error {
+	if r.ID == "" || r.CreatedAt.IsZero() {
+		return errors.New("budget reservation id and creation time are required")
+	}
+	return r.Usage.Validate()
 }
 
 func (u BudgetUsage) Validate() error {
@@ -111,4 +125,48 @@ func EvaluateBudget(policy BudgetPolicy, usage BudgetUsage) (BudgetState, []stri
 		}
 	}
 	return state, reasons, nil
+}
+
+func EffectiveBudgetUsage(committed BudgetUsage, reservations map[string]BudgetReservation) (BudgetUsage, error) {
+	effective := committed
+	for id, reservation := range reservations {
+		if reservation.ID != id {
+			return BudgetUsage{}, errors.New("budget reservation key does not match its id")
+		}
+		var err error
+		effective, err = effective.Add(reservation.Usage)
+		if err != nil {
+			return BudgetUsage{}, err
+		}
+	}
+	return effective, nil
+}
+
+func BudgetWouldExceed(policy BudgetPolicy, usage BudgetUsage) (bool, []string, error) {
+	if err := policy.Validate(); err != nil {
+		return false, nil, err
+	}
+	if err := usage.Validate(); err != nil {
+		return false, nil, err
+	}
+	limits := []struct {
+		name  string
+		used  int64
+		limit int64
+	}{
+		{"turns", usage.Turns, policy.MaxTurns},
+		{"input_tokens", usage.InputTokens, policy.MaxInputTokens},
+		{"output_tokens", usage.OutputTokens, policy.MaxOutputTokens},
+		{"total_tokens", usage.InputTokens + usage.OutputTokens, policy.MaxTotalTokens},
+		{"cost_micros", usage.CostMicros, policy.MaxCostMicros},
+		{"duration_ms", usage.DurationMS, policy.MaxDurationMS},
+		{"actions", usage.Actions, policy.MaxActions},
+	}
+	reasons := make([]string, 0)
+	for _, item := range limits {
+		if item.limit > 0 && item.used > item.limit {
+			reasons = append(reasons, fmt.Sprintf("%s would reach %d beyond %d", item.name, item.used, item.limit))
+		}
+	}
+	return len(reasons) > 0, reasons, nil
 }

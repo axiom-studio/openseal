@@ -33,3 +33,17 @@ func TestTurnUsageRejectsNonFiniteCost(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectiveBudgetUsageIncludesReservations(t *testing.T) {
+	committed := BudgetUsage{Turns: 2, InputTokens: 20}
+	effective, err := EffectiveBudgetUsage(committed, map[string]BudgetReservation{
+		"turn-3": {ID: "turn-3", Usage: BudgetUsage{Turns: 1, InputTokens: 10}},
+	})
+	if err != nil || effective.Turns != 3 || effective.InputTokens != 30 {
+		t.Fatalf("effective usage = %#v, %v", effective, err)
+	}
+	exceeded, reasons, err := BudgetWouldExceed(BudgetPolicy{MaxTurns: 2}, effective)
+	if err != nil || !exceeded || len(reasons) != 1 {
+		t.Fatalf("exceeded = %t %#v %v", exceeded, reasons, err)
+	}
+}
