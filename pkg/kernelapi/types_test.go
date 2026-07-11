@@ -30,12 +30,22 @@ func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *test
 
 func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	capability := TeamDefinitionsCapability()
-	for _, operation := range []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationActivate} {
+	for _, operation := range []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate} {
 		if !capability.Supports(operation) {
 			t.Fatalf("Team definition operation %q not advertised", operation)
 		}
 	}
-	if capability.Supports(OperationUpdate) || capability.Supports("delete") {
+	if capability.Supports("delete") {
 		t.Fatalf("unsupported Team definition operation advertised: %#v", capability.Operations)
+	}
+}
+
+func TestWorkforceAuthoringAdvertisesCompilationWithoutActivation(t *testing.T) {
+	capability := WorkforceAuthoringCapability()
+	if !capability.Supports(OperationCompile) {
+		t.Fatalf("workforce authoring operations = %#v", capability.Operations)
+	}
+	if capability.Supports(OperationActivate) || capability.Supports(OperationRegister) {
+		t.Fatalf("unsafe authoring operation advertised: %#v", capability.Operations)
 	}
 }

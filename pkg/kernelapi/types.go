@@ -12,17 +12,19 @@ import (
 )
 
 const (
-	Version                          = "1"
-	AgentRunsCapabilityID            = "agent-runs"
-	AgentRunsCapabilityVersion       = "1"
-	ObjectivesCapabilityID           = "objectives"
-	ObjectivesCapabilityVersion      = "1"
-	ArtifactsCapabilityID            = "artifacts"
-	ArtifactsCapabilityVersion       = "1"
-	TeamChannelsCapabilityID         = "team-channels"
-	TeamChannelsCapabilityVersion    = "1"
-	TeamDefinitionsCapabilityID      = "team-definitions"
-	TeamDefinitionsCapabilityVersion = "1"
+	Version                             = "1"
+	AgentRunsCapabilityID               = "agent-runs"
+	AgentRunsCapabilityVersion          = "1"
+	ObjectivesCapabilityID              = "objectives"
+	ObjectivesCapabilityVersion         = "1"
+	ArtifactsCapabilityID               = "artifacts"
+	ArtifactsCapabilityVersion          = "1"
+	TeamChannelsCapabilityID            = "team-channels"
+	TeamChannelsCapabilityVersion       = "1"
+	TeamDefinitionsCapabilityID         = "team-definitions"
+	TeamDefinitionsCapabilityVersion    = "1"
+	WorkforceAuthoringCapabilityID      = "workforce-authoring"
+	WorkforceAuthoringCapabilityVersion = "1"
 )
 
 const (
@@ -46,6 +48,7 @@ const (
 	OperationChanges    = "changes"
 	OperationDeploy     = "deploy"
 	OperationActivate   = "activate"
+	OperationCompile    = "compile"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -163,6 +166,13 @@ func TeamDefinitionsCapability() Capability {
 	return Capability{
 		ID: TeamDefinitionsCapabilityID, Version: TeamDefinitionsCapabilityVersion, Available: true,
 		Operations: []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate},
+	}
+}
+
+func WorkforceAuthoringCapability() Capability {
+	return Capability{
+		ID: WorkforceAuthoringCapabilityID, Version: WorkforceAuthoringCapabilityVersion, Available: true,
+		Operations: []string{OperationCompile},
 	}
 }
 

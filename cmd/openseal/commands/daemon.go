@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/internal/workflow"
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/trigger"
@@ -105,6 +107,30 @@ Options:
 	}
 	apiServer.SetArtifactContentStore(contentStore)
 	sugar.Infow("artifact content store opened", "path", contentPath)
+	endpoint := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_BASE_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	model := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_MODEL"))
+	configured := 0
+	for _, value := range []string{endpoint, apiKey, model} {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured != 0 && configured != 3 {
+		sugar.Fatal("workforce authoring requires OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY, and OPENSEAL_LLM_MODEL together")
+	}
+	if configured == 3 {
+		generator, generatorErr := authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, nil)
+		if generatorErr != nil {
+			sugar.Fatalf("configure workforce authoring: %v", generatorErr)
+		}
+		compiler, compilerErr := authoring.NewCompiler(generator)
+		if compilerErr != nil {
+			sugar.Fatalf("configure workforce authoring compiler: %v", compilerErr)
+		}
+		apiServer.SetWorkforceAuthoringCompiler(compiler)
+		sugar.Infow("workforce authoring enabled", "model", model)
+	}
 
 	go func() {
 		if err := apiServer.ListenAndServe(cfg.API.ListenAddr); err != nil && err != http.ErrServerClosed {

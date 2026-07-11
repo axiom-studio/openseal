@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/internal/server"
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -160,6 +161,10 @@ func (f *fakeChannelKernelClient) ListConversationPresence(context.Context, runt
 
 func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDocument, error) {
 	return f.document, nil
+}
+
+func (f *fakeKernelClient) CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error) {
+	return nil, errors.New("workforce authoring is not configured in this test")
 }
 
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
