@@ -73,6 +73,13 @@ type (
 	TeamDeploymentStatus                  = kernelteam.DeploymentStatus
 	TeamRosterAssignment                  = kernelteam.RosterAssignment
 	TeamDeploymentRestrictions            = kernelteam.DeploymentRestrictions
+	TeamDefinitionAmendment               = kernelteam.DefinitionAmendment
+	TeamAmendmentStatus                   = kernelteam.AmendmentStatus
+	TeamAmendmentEvaluation               = kernelteam.AmendmentEvaluation
+	TeamAmendmentDecision                 = kernelteam.AmendmentDecision
+	ProposeTeamAmendmentRequest           = kernelteam.ProposeAmendmentRequest
+	SubmitTeamAmendmentEvaluationRequest  = kernelteam.SubmitAmendmentEvaluationRequest
+	ResolveTeamAmendmentRequest           = kernelteam.ResolveAmendmentRequest
 	TeamRegistryStore                     = kernelteam.Store
 	WorkforceSharedContextPolicy          = workforce.SharedContextPolicy
 	WorkforceObjectiveTemplate            = workforce.ObjectiveTemplate
@@ -493,6 +500,13 @@ const (
 	TeamDeploymentActive              = kernelteam.DeploymentActive
 	TeamDeploymentPaused              = kernelteam.DeploymentPaused
 	TeamDeploymentArchived            = kernelteam.DeploymentArchived
+	TeamAmendmentEvaluating           = kernelteam.AmendmentEvaluating
+	TeamAmendmentAwaitingApproval     = kernelteam.AmendmentAwaitingApproval
+	TeamAmendmentReady                = kernelteam.AmendmentReady
+	TeamAmendmentApproved             = kernelteam.AmendmentApproved
+	TeamAmendmentRejected             = kernelteam.AmendmentRejected
+	TeamAmendmentEvaluationFailed     = kernelteam.AmendmentEvaluationFailed
+	TeamAmendmentActivated            = kernelteam.AmendmentActivated
 
 	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
 	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning
@@ -1843,6 +1857,26 @@ func (e *Engine) ActivateTeamDefinition(ctx context.Context, scope skill.ScopeRe
 
 func (e *Engine) ListTeamDefinitionActivations(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
 	return e.teams.ListActivations(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ProposeTeamDefinitionAmendment(ctx context.Context, request kernelteam.ProposeAmendmentRequest) (*kernelteam.DefinitionAmendment, error) {
+	return e.teams.ProposeAmendment(ctx, request)
+}
+
+func (e *Engine) GetTeamDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string) (*kernelteam.DefinitionAmendment, error) {
+	return e.teams.GetAmendment(ctx, scope, amendmentID)
+}
+
+func (e *Engine) SubmitTeamDefinitionAmendmentEvaluation(ctx context.Context, request kernelteam.SubmitAmendmentEvaluationRequest) (*kernelteam.DefinitionAmendment, error) {
+	return e.teams.SubmitAmendmentEvaluation(ctx, request)
+}
+
+func (e *Engine) ResolveTeamDefinitionAmendment(ctx context.Context, request kernelteam.ResolveAmendmentRequest) (*kernelteam.DefinitionAmendment, error) {
+	return e.teams.ResolveAmendment(ctx, request)
+}
+
+func (e *Engine) ActivateTeamDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.DefinitionAmendment, *kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	return e.teams.ActivateAmendment(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason)
 }
 
 func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {
