@@ -27,6 +27,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/compile", s.handleCompileWorkforce)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets", s.handleCreateWorkforceChangeSet)
 	s.mux.HandleFunc("GET /api/v1/authoring/workforce/change-sets/{id}", s.handleGetWorkforceChangeSet)
+	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/retry", s.handleRetryWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/evaluations", s.handleEvaluateWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/approvals", s.handleApproveWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/apply", s.handleApplyWorkforceChangeSet)
@@ -95,7 +96,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.authoring != nil {
-		workforceCapability := kernelapi.WorkforceAuthoringCapability(s.authoringChanges != nil)
+		workforceCapability := kernelapi.WorkforceAuthoringCapability(s.authoringRuns != nil && s.authoringWorker != nil)
 		if s.authoringChanges != nil {
 			s.composeWorkforceLifecycleCapability(r, &workforceCapability)
 		}

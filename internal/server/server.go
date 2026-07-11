@@ -25,12 +25,17 @@ type Server struct {
 	artifactResolver   runtime.ArtifactContentResolver
 	authoring          *authoring.Compiler
 	authoringChanges   *authoring.ChangeSetService
+	authoringRuns      *runtime.WorkforceAuthoringRunService
+	authoringWorker    *runtime.WorkforceAuthoringWorker
+	authoringScope     runtime.Scope
+	authoringMu        sync.Mutex
 	workforceAuthority WorkforceLifecycleAuthorizer
 	workflowsDir       string
 	workflows          map[string]*WorkflowEntry
 	muWorkflows        sync.RWMutex
 	logger             *zap.SugaredLogger
 	mux                *http.ServeMux
+	httpServer         *http.Server
 }
 
 // WorkflowEntry holds a loaded workflow with its source info.
@@ -123,9 +128,38 @@ func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentReso
 func (s *Server) SetWorkforceAuthoringCompiler(compiler *authoring.Compiler) {
 	s.authoring = compiler
 	s.authoringChanges = nil
+	s.authoringRuns = nil
 	if store, ok := s.store.(authoring.ChangeSetStore); ok && compiler != nil {
 		s.authoringChanges, _ = authoring.NewChangeSetService(compiler, store)
 	}
+	if store, ok := s.store.(runtime.WorkforceAuthoringRunStore); ok && compiler != nil {
+		s.authoringRuns, _ = runtime.NewWorkforceAuthoringRunService(compiler, store)
+	}
+}
+
+// StartWorkforceAuthoringWorker hosts durable proposal generation for one
+// explicit scope. Standalone OpenSeal deliberately defaults to local/default;
+// multi-tenant scheduling belongs to an embedding host.
+func (s *Server) StartWorkforceAuthoringWorker(ctx context.Context, scope runtime.Scope, workerID string) error {
+	s.authoringMu.Lock()
+	defer s.authoringMu.Unlock()
+	if s.authoringWorker != nil {
+		return fmt.Errorf("workforce authoring worker is already started")
+	}
+	if s.authoringRuns == nil {
+		return fmt.Errorf("workforce authoring durable store is not configured")
+	}
+	worker, err := runtime.NewWorkforceAuthoringWorker(s.authoringRuns, s.logger, runtime.WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: workerID, LeaseDuration: 12 * time.Minute, GenerationTimeout: 10 * time.Minute,
+	})
+	if err != nil {
+		return err
+	}
+	if err := worker.Start(ctx); err != nil {
+		return err
+	}
+	s.authoringScope, s.authoringWorker = scope, worker
+	return nil
 }
 
 // SetWorkforceLifecycleAuthorizer enables governed evaluation, approval, and
@@ -138,11 +172,22 @@ func (s *Server) SetWorkforceLifecycleAuthorizer(authorizer WorkforceLifecycleAu
 // ListenAndServe starts the server on the given address.
 func (s *Server) ListenAndServe(addr string) error {
 	s.logger.Infow("starting API server", "addr", addr)
-	return http.ListenAndServe(addr, s.mux)
+	s.httpServer = &http.Server{Addr: addr, Handler: s.mux}
+	return s.httpServer.ListenAndServe()
 }
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.authoringMu.Lock()
+	worker := s.authoringWorker
+	s.authoringWorker = nil
+	s.authoringMu.Unlock()
+	if worker != nil {
+		worker.Stop()
+	}
+	if s.httpServer != nil {
+		return s.httpServer.Shutdown(ctx)
+	}
 	return nil
 }
 

@@ -23,6 +23,22 @@ type WorkforceLifecycleAuthorizer interface {
 	AuthorizeWorkforceLifecycle(context.Context, string, *authoring.ChangeSet) (WorkforceLifecycleAuthorization, error)
 }
 
+// StandaloneRetryAuthorizer is the deliberately narrow local-daemon authority:
+// it permits recovery of failed generation only and replaces any actor claimed
+// by an interactive client with the configured operator identity.
+type StandaloneRetryAuthorizer struct{ ActorID string }
+
+func (a StandaloneRetryAuthorizer) AuthorizeWorkforceLifecycle(_ context.Context, operation string, _ *authoring.ChangeSet) (WorkforceLifecycleAuthorization, error) {
+	if operation != kernelapi.OperationRetry {
+		return WorkforceLifecycleAuthorization{}, errors.New("operation requires an explicitly configured lifecycle authority")
+	}
+	id := strings.TrimSpace(a.ActorID)
+	if id == "" {
+		id = "local-operator"
+	}
+	return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: id}}, nil
+}
+
 func (s *Server) handleCompileWorkforce(w http.ResponseWriter, r *http.Request) {
 	if s.authoring == nil {
 		s.respondError(w, http.StatusNotImplemented, "workforce authoring is not configured")
@@ -42,7 +58,7 @@ func (s *Server) handleCompileWorkforce(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCreateWorkforceChangeSet(w http.ResponseWriter, r *http.Request) {
-	if s.authoringChanges == nil {
+	if s.authoringRuns == nil || s.authoringWorker == nil {
 		s.respondError(w, http.StatusNotImplemented, "workforce change sets are not configured")
 		return
 	}
@@ -54,7 +70,11 @@ func (s *Server) handleCreateWorkforceChangeSet(w http.ResponseWriter, r *http.R
 	if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
 		request.IdempotencyKey = key
 	}
-	result, replayed, err := s.authoringChanges.Create(r.Context(), request)
+	if request.Scope.Kind != s.authoringScope.Kind || request.Scope.ID != s.authoringScope.ID {
+		s.respondError(w, http.StatusBadRequest, "standalone workforce authoring scope must be "+s.authoringScope.Kind+"/"+s.authoringScope.ID)
+		return
+	}
+	result, _, replayed, err := s.authoringRuns.Prepare(r.Context(), request)
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if errors.Is(err, authoring.ErrChangeSetIdempotency) {
@@ -63,7 +83,35 @@ func (s *Server) handleCreateWorkforceChangeSet(w http.ResponseWriter, r *http.R
 		s.respondError(w, status, err.Error())
 		return
 	}
-	status := http.StatusCreated
+	status := http.StatusAccepted
+	if replayed {
+		status = http.StatusOK
+	}
+	s.authoringWorker.Wake()
+	s.respondJSON(w, status, result)
+}
+
+func (s *Server) handleRetryWorkforceChangeSet(w http.ResponseWriter, r *http.Request) {
+	if s.authoringRuns == nil || s.authoringWorker == nil {
+		s.respondError(w, http.StatusNotImplemented, "workforce change sets are not configured")
+		return
+	}
+	var request authoring.RetryChangeSetGenerationRequest
+	if !s.decodeGovernedWorkforceRequest(w, r, &request) {
+		return
+	}
+	_, authorization, ok := s.authorizeWorkforceLifecycle(w, r, kernelapi.OperationRetry, request.Scope, request.ChangeSetID)
+	if !ok {
+		return
+	}
+	request.Actor = authorization.Actor
+	result, _, replayed, err := s.authoringRuns.Retry(r.Context(), request)
+	if err != nil {
+		s.respondWorkforceMutation(w, result, replayed, err)
+		return
+	}
+	s.authoringWorker.Wake()
+	status := http.StatusAccepted
 	if replayed {
 		status = http.StatusOK
 	}
@@ -101,6 +149,11 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 	result.Context = &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: changeSet.Revision}
 	if s.workforceAuthority == nil {
 		return
+	}
+	if changeSet.Status == authoring.ChangeSetFailed {
+		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationRetry, changeSet); err == nil {
+			result.Operations = append(result.Operations, kernelapi.OperationRetry)
+		}
 	}
 	if strings.TrimSpace(changeSet.CandidateDigest) != "" && (changeSet.Status == authoring.ChangeSetReview || changeSet.Status == authoring.ChangeSetEvaluating) {
 		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationEvaluate, changeSet); err == nil {
@@ -195,6 +248,8 @@ func (s *Server) decodeGovernedWorkforceRequest(w http.ResponseWriter, r *http.R
 	case *authoring.ResolveChangeSetApprovalRequest:
 		request.IdempotencyKey = key
 	case *authoring.ApplyChangeSetRequest:
+		request.IdempotencyKey = key
+	case *authoring.RetryChangeSetGenerationRequest:
 		request.IdempotencyKey = key
 	}
 	return true

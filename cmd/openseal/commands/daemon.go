@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,6 +25,8 @@ import (
 func daemonCmd(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	configPath := fs.String("config", "daemon.yaml", "path to daemon config file")
+	authoringScope := fs.String("scope", "local:default", "standalone authoring scope as kind:id")
+	standaloneOperator := fs.Bool("standalone-operator", false, "allow the loopback TUI to retry failed generation as local-operator")
 	help := fs.Bool("help", false, "print help for daemon")
 	fs.Parse(args)
 
@@ -34,6 +37,8 @@ Start the OpenSeal daemon with trigger-driven workflow execution.
 
 Options:
   --config <path>   Path to daemon config file (default: daemon.yaml)
+  --scope <kind:id> Durable standalone authoring scope (default: local:default)
+  --standalone-operator Allow governed generation retry when API binds to loopback
   --help            Print this help message`)
 		return
 	}
@@ -120,6 +125,11 @@ Options:
 		sugar.Fatal("workforce authoring requires OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY, and OPENSEAL_LLM_MODEL together")
 	}
 	if configured == 3 {
+		scopeParts := strings.SplitN(strings.TrimSpace(*authoringScope), ":", 2)
+		if len(scopeParts) != 2 || strings.TrimSpace(scopeParts[0]) == "" || strings.TrimSpace(scopeParts[1]) == "" {
+			sugar.Fatal("--scope must use kind:id format")
+		}
+		scope := runtime.Scope{Kind: strings.TrimSpace(scopeParts[0]), ID: strings.TrimSpace(scopeParts[1])}
 		generator, generatorErr := authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, nil)
 		if generatorErr != nil {
 			sugar.Fatalf("configure workforce authoring: %v", generatorErr)
@@ -129,7 +139,18 @@ Options:
 			sugar.Fatalf("configure workforce authoring compiler: %v", compilerErr)
 		}
 		apiServer.SetWorkforceAuthoringCompiler(compiler)
-		sugar.Infow("workforce authoring enabled", "model", model)
+		if workerErr := apiServer.StartWorkforceAuthoringWorker(ctx, scope, ""); workerErr != nil {
+			sugar.Fatalf("start workforce authoring worker: %v", workerErr)
+		}
+		if *standaloneOperator && !isLoopbackListenAddress(cfg.API.ListenAddr) {
+			sugar.Fatal("--standalone-operator requires the API listen address to be loopback")
+		}
+		if *standaloneOperator {
+			apiServer.SetWorkforceLifecycleAuthorizer(server.StandaloneRetryAuthorizer{ActorID: "local-operator"})
+		} else {
+			sugar.Warn("generation retry is disabled; use --standalone-operator with a loopback API address or configure an embedding-host lifecycle authority")
+		}
+		sugar.Infow("workforce authoring enabled", "model", model, "scope", scope.Kind+":"+scope.ID)
 	}
 
 	go func() {
@@ -228,4 +249,13 @@ Options:
 	pool.Stop()
 	webhookServer.Shutdown(ctx)
 	apiServer.Shutdown(ctx)
+}
+
+func isLoopbackListenAddress(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
 }

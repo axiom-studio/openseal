@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -68,25 +70,39 @@ func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
 	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(authoringFixtureGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := api.StartWorkforceAuthoringWorker(ctx, runtime.Scope{Kind: "tenant", ID: "one"}, "api-test"); err != nil {
+		t.Fatal(err)
+	}
+	defer api.Shutdown(context.Background())
 	capabilities := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	if !strings.Contains(capabilities.Body.String(), `"operations":["compile","propose","get"]`) {
 		t.Fatalf("change set capability = %s", capabilities.Body.String())
 	}
 	body := `{"scope":{"kind":"tenant","id":"one"},"prompt":"Create a research Team","catalog":{},"placement":{"teamDeploymentId":"research-live","agentDeploymentIds":{}},"actor":{"type":"user","id":"7"}}`
 	created := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", body, "intent-one")
-	if created.Code != http.StatusCreated {
+	if created.Code != http.StatusAccepted {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
 	var changeSet authoring.ChangeSet
-	if err := json.NewDecoder(created.Body).Decode(&changeSet); err != nil || changeSet.ID == "" || changeSet.Status != authoring.ChangeSetBlocked {
+	if err := json.NewDecoder(created.Body).Decode(&changeSet); err != nil || changeSet.ID == "" || changeSet.Status != authoring.ChangeSetEvaluating {
 		t.Fatalf("change set = %#v, err = %v", changeSet, err)
 	}
 	replay := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", body, "intent-one")
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), changeSet.ID) {
 		t.Fatalf("replay status = %d, body = %s", replay.Code, replay.Body.String())
 	}
-	loaded := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"?scopeKind=tenant&scopeId=one", "", "")
-	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), changeSet.CandidateDigest) {
+	var loaded *httptest.ResponseRecorder
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		loaded = performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"?scopeKind=tenant&scopeId=one", "", "")
+		if strings.Contains(loaded.Body.String(), `"status":"blocked"`) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if loaded == nil || loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"status":"blocked"`) {
 		t.Fatalf("load status = %d, body = %s", loaded.Code, loaded.Body.String())
 	}
 	foreign := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"?scopeKind=tenant&scopeId=two", "", "")
@@ -143,11 +159,12 @@ func TestGovernedWorkforceLifecycleIsContextualExactAndAtomic(t *testing.T) {
 	createRequest := authoring.CreateChangeSetRequest{Scope: scope, Prompt: "Create a governed research Team",
 		Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}, Environment: "production"},
 		Actor:     authoring.ChangeSetActor{Type: "user", ID: "requester"}}
-	createdResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", mustJSON(t, createRequest), "create-governed")
-	var created authoring.ChangeSet
-	if createdResponse.Code != http.StatusCreated || json.NewDecoder(createdResponse.Body).Decode(&created) != nil || created.Status != authoring.ChangeSetReview {
-		t.Fatalf("created = %d %s", createdResponse.Code, createdResponse.Body.String())
+	createRequest.IdempotencyKey = "create-governed"
+	createdPointer, _, createErr := api.authoringChanges.Create(context.Background(), createRequest)
+	if createErr != nil || createdPointer.Status != authoring.ChangeSetReview {
+		t.Fatalf("created = %#v err=%v", createdPointer, createErr)
 	}
+	created := *createdPointer
 	capabilityPath := "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId=" + created.ID
 	unconfigured := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
 	if strings.Contains(unconfigured.Body.String(), `"evaluate"`) || strings.Contains(unconfigured.Body.String(), `"approve"`) || strings.Contains(unconfigured.Body.String(), `"apply"`) || !strings.Contains(unconfigured.Body.String(), `"revision":1`) {
@@ -234,11 +251,12 @@ func TestGovernedWorkforceLifecycleIsContextualExactAndAtomic(t *testing.T) {
 	}
 	rejectedCreate := createRequest
 	rejectedCreate.Prompt = "Create a rejected research Team"
-	rejectedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", mustJSON(t, rejectedCreate), "create-rejected")
-	var rejectedCandidate authoring.ChangeSet
-	if rejectedResponse.Code != http.StatusCreated || json.NewDecoder(rejectedResponse.Body).Decode(&rejectedCandidate) != nil {
-		t.Fatalf("rejected candidate = %d %s", rejectedResponse.Code, rejectedResponse.Body.String())
+	rejectedCreate.IdempotencyKey = "create-rejected"
+	rejectedPointer, _, rejectedErr := api.authoringChanges.Create(context.Background(), rejectedCreate)
+	if rejectedErr != nil {
+		t.Fatal(rejectedErr)
 	}
+	rejectedCandidate := *rejectedPointer
 	denial := authoring.SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: rejectedCandidate.ID, ExpectedRevision: rejectedCandidate.Revision, CandidateDigest: rejectedCandidate.CandidateDigest, Allowed: false, Findings: []authoring.ChangeSetPolicyFinding{{PolicyID: "production", Code: "denied", Message: "Production policy denied the candidate."}}, Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"}}
 	deniedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+rejectedCandidate.ID+"/evaluations", mustJSON(t, denial), "deny-header")
 	var rejected authoring.ChangeSet

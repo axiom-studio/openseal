@@ -47,6 +47,13 @@ func (s *WorkforceAuthoringRunService) Prepare(ctx context.Context, request auth
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if replay && changeSet.Status != authoring.ChangeSetEvaluating {
+		var run *AgentRun
+		if changeSet.Generation != nil && strings.TrimSpace(changeSet.Generation.RunID) != "" {
+			run, _ = s.store.GetAgentRun(ctx, Scope{Kind: changeSet.Scope.Kind, ID: changeSet.Scope.ID}, changeSet.Generation.RunID)
+		}
+		return changeSet, run, true, nil
+	}
 	run, err := s.Enqueue(ctx, changeSet)
 	if err != nil {
 		return changeSet, nil, replay, err
@@ -97,6 +104,13 @@ func (s *WorkforceAuthoringRunService) Retry(ctx context.Context, request author
 	changeSet, replayed, err := s.changeSets.RetryGeneration(ctx, request)
 	if err != nil {
 		return nil, nil, false, err
+	}
+	if replayed && changeSet.Status != authoring.ChangeSetEvaluating {
+		var run *AgentRun
+		if changeSet.Generation != nil && strings.TrimSpace(changeSet.Generation.RunID) != "" {
+			run, _ = s.store.GetAgentRun(ctx, Scope{Kind: changeSet.Scope.Kind, ID: changeSet.Scope.ID}, changeSet.Generation.RunID)
+		}
+		return changeSet, run, true, nil
 	}
 	run, err := s.Enqueue(ctx, changeSet)
 	if err != nil {

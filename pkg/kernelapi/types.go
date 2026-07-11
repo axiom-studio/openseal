@@ -24,7 +24,7 @@ const (
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "1"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion = "1"
+	WorkforceAuthoringCapabilityVersion = "2"
 )
 
 const (
@@ -53,6 +53,7 @@ const (
 	OperationEvaluate   = "evaluate"
 	OperationApprove    = "approve"
 	OperationApply      = "apply"
+	OperationRetry      = "retry"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
