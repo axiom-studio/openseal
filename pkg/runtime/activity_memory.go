@@ -5,6 +5,52 @@ import (
 	"encoding/json"
 )
 
+func (s *MemoryStore) CreateObjectiveWithEvent(_ context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := objective.Validate(); err != nil {
+		return nil, err
+	}
+	if err := event.Validate(); err != nil {
+		return nil, err
+	}
+	if objective.Scope != event.Scope || objective.ID != event.ObjectiveID || event.RunID != "" {
+		return nil, ErrInvalidScope
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := portfolioKey(objective.Scope, objective.ID)
+	if s.objectives[key] != nil {
+		return nil, ErrObjectiveIdempotency
+	}
+	s.objectives[key] = cloneObjective(objective)
+	persisted := appendMemoryActivityLocked(s, event)
+	return cloneActivityEvent(persisted), nil
+}
+
+func (s *MemoryStore) UpdateObjectiveWithEvent(_ context.Context, objective *Objective, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := objective.Validate(); err != nil {
+		return nil, err
+	}
+	if err := event.Validate(); err != nil {
+		return nil, err
+	}
+	if objective.Scope != event.Scope || objective.ID != event.ObjectiveID || event.RunID != "" {
+		return nil, ErrInvalidScope
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := portfolioKey(objective.Scope, objective.ID)
+	current := s.objectives[key]
+	if current == nil {
+		return nil, ErrObjectiveNotFound
+	}
+	if current.Revision != expectedRevision || objective.Revision != expectedRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	s.objectives[key] = cloneObjective(objective)
+	persisted := appendMemoryActivityLocked(s, event)
+	return cloneActivityEvent(persisted), nil
+}
+
 func (s *MemoryStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
@@ -63,9 +109,11 @@ func (s *MemoryStore) AppendActivity(_ context.Context, event *ActivityEvent) (*
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := portfolioKey(event.Scope, event.RunID)
-	if s.agentRuns[key] == nil {
+	if event.RunID != "" && s.agentRuns[portfolioKey(event.Scope, event.RunID)] == nil {
 		return nil, ErrRunNotFound
+	}
+	if event.RunID == "" && s.objectives[portfolioKey(event.Scope, event.ObjectiveID)] == nil {
+		return nil, ErrObjectiveNotFound
 	}
 	persisted := appendMemoryActivityLocked(s, event)
 	return cloneActivityEvent(persisted), nil

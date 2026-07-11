@@ -8,6 +8,67 @@ import (
 	"strings"
 )
 
+func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := validateObjectiveActivity(objective, event); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(objective)
+	if err != nil {
+		return nil, err
+	}
+	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
+		_, insertErr := conn.ExecContext(ctx, `INSERT INTO objectives
+			(id, scope_kind, scope_id, owner_type, owner_id, status, priority, revision, updated_at, payload)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, objective.ID, objective.Scope.Kind, objective.Scope.ID,
+			objective.Owner.Type, objective.Owner.ID, objective.Status, objective.Priority, objective.Revision,
+			objective.UpdatedAt, string(payload))
+		return insertErr
+	})
+}
+
+func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *Objective, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := validateObjectiveActivity(objective, event); err != nil {
+		return nil, err
+	}
+	if objective.Revision != expectedRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	payload, err := json.Marshal(objective)
+	if err != nil {
+		return nil, err
+	}
+	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
+		result, updateErr := conn.ExecContext(ctx, `UPDATE objectives SET owner_type = ?, owner_id = ?, status = ?, priority = ?, revision = ?, updated_at = ?, payload = ?
+			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, objective.Owner.Type, objective.Owner.ID,
+			objective.Status, objective.Priority, objective.Revision, objective.UpdatedAt, string(payload), objective.Scope.Kind,
+			objective.Scope.ID, objective.ID, expectedRevision)
+		if updateErr != nil {
+			return updateErr
+		}
+		affected, updateErr := result.RowsAffected()
+		if updateErr != nil {
+			return updateErr
+		}
+		if affected != 1 {
+			return ErrRevisionConflict
+		}
+		return nil
+	})
+}
+
+func validateObjectiveActivity(objective *Objective, event *ActivityEvent) error {
+	if err := objective.Validate(); err != nil {
+		return err
+	}
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	if objective.Scope != event.Scope || objective.ID != event.ObjectiveID || event.RunID != "" {
+		return ErrInvalidScope
+	}
+	return nil
+}
+
 func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
@@ -163,9 +224,16 @@ func (s *SQLiteStore) AppendActivity(ctx context.Context, event *ActivityEvent) 
 	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
 		var exists int
-		err := conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-			event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&exists)
+		table, id := "agent_runs", event.RunID
+		if event.RunID == "" {
+			table, id = "objectives", event.ObjectiveID
+		}
+		err := conn.QueryRowContext(ctx, `SELECT 1 FROM `+table+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			event.Scope.Kind, event.Scope.ID, id).Scan(&exists)
 		if err == sql.ErrNoRows {
+			if event.RunID == "" {
+				return ErrObjectiveNotFound
+			}
 			return ErrRunNotFound
 		}
 		return err
@@ -205,7 +273,7 @@ func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *Activi
 	persisted := cloneActivityEvent(event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
 		WHERE scope_kind = ? AND scope_id = ? AND run_id = ?`,
-		event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&persisted.Sequence); err != nil {
+		event.Scope.Kind, event.Scope.ID, activityStreamID(event)).Scan(&persisted.Sequence); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(persisted)
@@ -214,7 +282,7 @@ func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *Activi
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO run_activity
 		(scope_kind, scope_id, run_id, agent_id, objective_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, persisted.RunID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, activityStreamID(persisted),
 		persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
