@@ -3,8 +3,10 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/internal/server"
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -128,6 +131,49 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	requests := make([]string, 0, 4)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" key="+r.Header.Get("Idempotency-Key"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/capabilities" {
+			_ = json.NewEncoder(w).Encode(kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(true, true)))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(authoring.ChangeSet{ID: "change/one", Scope: scope, Revision: 2})
+	}))
+	defer httpServer.Close()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	ctx := context.Background()
+	if _, err := client.WorkforceChangeSetCapabilities(ctx, scope, "change/one"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.EvaluateWorkforceChangeSet(ctx, authoring.SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: "change/one"}, "evaluate-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ResolveWorkforceChangeSetApproval(ctx, authoring.ResolveChangeSetApprovalRequest{Scope: scope, ChangeSetID: "change/one"}, "approve-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ApplyWorkforceChangeSet(ctx, authoring.ApplyChangeSetRequest{Scope: scope, ChangeSetID: "change/one"}, "apply-1"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"GET /api/v1/capabilities?changeSetId=change%2Fone&scopeId=one&scopeKind=tenant key=",
+		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/evaluations key=evaluate-1",
+		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/approvals key=approve-1",
+		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/apply key=apply-1",
+	}
+	if len(requests) != len(want) {
+		t.Fatalf("requests = %#v", requests)
+	}
+	for i := range want {
+		if requests[i] != want[i] {
+			t.Fatalf("request[%d] = %q, want %q", i, requests[i], want[i])
+		}
 	}
 }
 

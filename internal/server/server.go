@@ -18,18 +18,19 @@ import (
 // Server exposes the versioned OpenSeal kernel API and temporary workflow
 // compatibility routes. Interactive clients discover its capabilities.
 type Server struct {
-	registry         *executor.Registry
-	scheduler        *runtime.Scheduler
-	store            runtime.KernelStore
-	artifactContent  runtime.ArtifactContentStore
-	artifactResolver runtime.ArtifactContentResolver
-	authoring        *authoring.Compiler
-	authoringChanges *authoring.ChangeSetService
-	workflowsDir     string
-	workflows        map[string]*WorkflowEntry
-	muWorkflows      sync.RWMutex
-	logger           *zap.SugaredLogger
-	mux              *http.ServeMux
+	registry           *executor.Registry
+	scheduler          *runtime.Scheduler
+	store              runtime.KernelStore
+	artifactContent    runtime.ArtifactContentStore
+	artifactResolver   runtime.ArtifactContentResolver
+	authoring          *authoring.Compiler
+	authoringChanges   *authoring.ChangeSetService
+	workforceAuthority WorkforceLifecycleAuthorizer
+	workflowsDir       string
+	workflows          map[string]*WorkflowEntry
+	muWorkflows        sync.RWMutex
+	logger             *zap.SugaredLogger
+	mux                *http.ServeMux
 }
 
 // WorkflowEntry holds a loaded workflow with its source info.
@@ -125,6 +126,13 @@ func (s *Server) SetWorkforceAuthoringCompiler(compiler *authoring.Compiler) {
 	if store, ok := s.store.(authoring.ChangeSetStore); ok && compiler != nil {
 		s.authoringChanges, _ = authoring.NewChangeSetService(compiler, store)
 	}
+}
+
+// SetWorkforceLifecycleAuthorizer enables governed evaluation, approval, and
+// Apply operations. With no authorizer these mutations remain unavailable;
+// OpenSeal never manufactures a local approver or policy evaluator.
+func (s *Server) SetWorkforceLifecycleAuthorizer(authorizer WorkforceLifecycleAuthorizer) {
+	s.workforceAuthority = authorizer
 }
 
 // ListenAndServe starts the server on the given address.

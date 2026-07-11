@@ -50,6 +50,8 @@ const (
 	OperationActivate   = "activate"
 	OperationCompile    = "compile"
 	OperationPropose    = "propose"
+	OperationEvaluate   = "evaluate"
+	OperationApprove    = "approve"
 	OperationApply      = "apply"
 )
 
@@ -61,10 +63,26 @@ type CapabilityDocument struct {
 }
 
 type Capability struct {
-	ID         string   `json:"id"`
-	Version    string   `json:"version"`
-	Available  bool     `json:"available"`
-	Operations []string `json:"operations"`
+	ID         string             `json:"id"`
+	Version    string             `json:"version"`
+	Available  bool               `json:"available"`
+	Operations []string           `json:"operations"`
+	Context    *CapabilityContext `json:"context,omitempty"`
+}
+
+// CapabilityContext is server-authored authorization state for one explicitly
+// requested resource. It is never durable policy input and clients must not
+// infer authority from the underlying resource itself.
+type CapabilityContext struct {
+	ChangeSetID                  string                         `json:"changeSetId,omitempty"`
+	Revision                     int64                          `json:"revision,omitempty"`
+	EligibleApprovalRequirements []ApprovalRequirementReference `json:"eligibleApprovalRequirements,omitempty"`
+}
+
+type ApprovalRequirementReference struct {
+	EvaluationID string `json:"evaluationId"`
+	PolicyID     string `json:"policyId"`
+	Role         string `json:"role"`
 }
 
 type CreateTeamDeploymentRequest struct {
