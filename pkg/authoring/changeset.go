@@ -86,7 +86,27 @@ type ChangeSetLifecycleEvent struct {
 type ChangeSetPlacement struct {
 	TeamDeploymentID   string            `json:"teamDeploymentId"`
 	AgentDeploymentIDs map[string]string `json:"agentDeploymentIds"`
-	Environment        string            `json:"environment,omitempty"`
+	// Expected revisions are mandatory for amendments and make stale placement
+	// fail before any definition, deployment, or objective is written.
+	TeamExpectedRevision   int64            `json:"teamExpectedRevision,omitempty"`
+	AgentExpectedRevisions map[string]int64 `json:"agentExpectedRevisions,omitempty"`
+	Environment            string           `json:"environment,omitempty"`
+}
+
+type AppliedResourceReference struct {
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	Version  string `json:"version,omitempty"`
+	Revision int64  `json:"revision,omitempty"`
+}
+
+type ChangeSetApplyReceipt struct {
+	ID              string                     `json:"id"`
+	IdempotencyKey  string                     `json:"idempotencyKey"`
+	CandidateDigest string                     `json:"candidateDigest"`
+	Resources       []AppliedResourceReference `json:"resources"`
+	Actor           ChangeSetActor             `json:"actor"`
+	AppliedAt       time.Time                  `json:"appliedAt"`
 }
 
 // ChangeSet is a durable, immutable workforce candidate plus mutable governed
@@ -106,6 +126,7 @@ type ChangeSet struct {
 	Actor             ChangeSetActor              `json:"actor"`
 	Evaluations       []ChangeSetEvaluation       `json:"evaluations,omitempty"`
 	ApprovalDecisions []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
+	ApplyReceipt      *ChangeSetApplyReceipt      `json:"applyReceipt,omitempty"`
 	Lifecycle         []ChangeSetLifecycleEvent   `json:"lifecycle"`
 	Revision          int64                       `json:"revision"`
 	CreatedAt         time.Time                   `json:"createdAt"`
@@ -135,6 +156,23 @@ type ResolveChangeSetApprovalRequest struct {
 	Reason           string                    `json:"reason,omitempty"`
 	Actor            ChangeSetActor            `json:"actor"`
 	IdempotencyKey   string                    `json:"idempotencyKey"`
+}
+
+type ApplyChangeSetRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ChangeSetID      string                    `json:"changeSetId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	CandidateDigest  string                    `json:"candidateDigest"`
+	Actor            ChangeSetActor            `json:"actor"`
+	IdempotencyKey   string                    `json:"idempotencyKey"`
+}
+
+// AtomicChangeSetStore is deliberately stronger than ChangeSetStore. Hosts
+// advertise Apply only when their single store owns every workforce table and
+// can commit this aggregate as one transaction/CAS.
+type AtomicChangeSetStore interface {
+	ChangeSetStore
+	ApplyChangeSet(context.Context, *ChangeSet, int64) (*ChangeSet, error)
 }
 
 type CreateChangeSetRequest struct {
@@ -226,6 +264,75 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 
 func (s *ChangeSetService) Get(ctx context.Context, scope capability.ScopeReference, id string) (*ChangeSet, error) {
 	return s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
+}
+
+func (s *ChangeSetService) ApplyAvailable() bool {
+	_, ok := s.store.(AtomicChangeSetStore)
+	return ok
+}
+
+func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequest) (*ChangeSet, bool, error) {
+	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
+	request.CandidateDigest = strings.TrimSpace(request.CandidateDigest)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
+	store, ok := s.store.(AtomicChangeSetStore)
+	if !ok {
+		return nil, false, errors.New("atomic workforce apply is unavailable")
+	}
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" || request.ExpectedRevision < 1 || request.CandidateDigest == "" || request.IdempotencyKey == "" || request.Actor.Type == "" || request.Actor.ID == "" {
+		return nil, false, errors.New("apply scope, change set, revision, candidate digest, actor, and idempotency key are required")
+	}
+	current, err := store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
+	if err != nil {
+		return nil, false, err
+	}
+	if current.ApplyReceipt != nil {
+		if current.ApplyReceipt.IdempotencyKey == request.IdempotencyKey && current.ApplyReceipt.CandidateDigest == request.CandidateDigest {
+			return current, true, nil
+		}
+		return nil, false, ErrChangeSetIdempotency
+	}
+	if current.Revision != request.ExpectedRevision || current.CandidateDigest != request.CandidateDigest {
+		return nil, false, ErrChangeSetRevision
+	}
+	if current.Status != ChangeSetReady {
+		return nil, false, fmt.Errorf("%w: cannot apply status %s", ErrChangeSetTransition, current.Status)
+	}
+	if err := validateApplyPlacement(current); err != nil {
+		return nil, false, err
+	}
+	now := s.now().UTC()
+	next := cloneChangeSet(current)
+	next.Status, next.Revision, next.UpdatedAt = ChangeSetApplied, current.Revision+1, now
+	next.ApplyReceipt = &ChangeSetApplyReceipt{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, CandidateDigest: current.CandidateDigest, Actor: request.Actor, AppliedAt: now}
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetApplied, Reason: "workforce_applied", Actor: request.Actor, At: now})
+	applied, err := store.ApplyChangeSet(ctx, next, current.Revision)
+	if errors.Is(err, ErrChangeSetRevision) {
+		return s.Apply(ctx, request)
+	}
+	return applied, false, err
+}
+
+func validateApplyPlacement(value *ChangeSet) error {
+	if !value.Result.Valid || len(value.Result.MissingRequirements) > 0 {
+		return errors.New("workforce candidate has unresolved requirements")
+	}
+	if strings.TrimSpace(value.Placement.TeamDeploymentID) == "" || strings.TrimSpace(value.Placement.Environment) == "" {
+		return errors.New("team deployment and environment placement are required")
+	}
+	for _, definition := range value.Result.Candidate.Agents {
+		if definition == nil || strings.TrimSpace(value.Placement.AgentDeploymentIDs[definition.ID]) == "" {
+			return errors.New("every Agent requires a deployment placement")
+		}
+		if value.Mode == ModeAmend && value.Placement.AgentExpectedRevisions[definition.ID] < 1 {
+			return errors.New("every amended Agent placement requires an expected revision")
+		}
+	}
+	if value.Mode == ModeAmend && value.Placement.TeamExpectedRevision < 1 {
+		return errors.New("amended Team placement requires an expected revision")
+	}
+	return nil
 }
 
 func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitChangeSetEvaluationRequest) (*ChangeSet, bool, error) {
@@ -460,11 +567,17 @@ func digestString(value string) string {
 }
 
 func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
-	copy := ChangeSetPlacement{TeamDeploymentID: value.TeamDeploymentID, Environment: value.Environment}
+	copy := ChangeSetPlacement{TeamDeploymentID: value.TeamDeploymentID, TeamExpectedRevision: value.TeamExpectedRevision, Environment: value.Environment}
 	if value.AgentDeploymentIDs != nil {
 		copy.AgentDeploymentIDs = make(map[string]string, len(value.AgentDeploymentIDs))
 		for definitionID, deploymentID := range value.AgentDeploymentIDs {
 			copy.AgentDeploymentIDs[definitionID] = deploymentID
+		}
+	}
+	if value.AgentExpectedRevisions != nil {
+		copy.AgentExpectedRevisions = make(map[string]int64, len(value.AgentExpectedRevisions))
+		for definitionID, revision := range value.AgentExpectedRevisions {
+			copy.AgentExpectedRevisions[definitionID] = revision
 		}
 	}
 	return copy
