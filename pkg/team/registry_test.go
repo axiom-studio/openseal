@@ -65,6 +65,7 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 
 	next := validDefinition()
 	next.Version = "1.1.0"
+	next.Roles = append(next.Roles, RoleSlot{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review evidence"})
 	next.OperatingPrinciples = []string{"Preserve evidence provenance"}
 	if _, err := registry.RegisterDefinition(ctx, next); err != nil {
 		t.Fatal(err)
@@ -72,7 +73,23 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 	if _, _, err := registry.ActivateDefinition(ctx, scope, deployment.ID, next.Version, 99, "user", "operator", "stale"); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("stale activation err = %v", err)
 	}
-	updated, nextActivation, err := registry.ActivateDefinition(ctx, scope, deployment.ID, next.Version, deployment.Revision, "user", "operator", "reviewed")
+	proposed = cloneDeployment(deployment)
+	proposed.ActiveVersion = next.Version
+	proposed.Roster = append(proposed.Roster, RosterAssignment{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-one"})
+	reviewerDefinition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "reviewer", Version: "1", DisplayName: "Reviewer", Purpose: "Review evidence", SystemPrompt: "Review evidence.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "reviewer-one", Scope: scope, DefinitionID: reviewerDefinition.ID, ActiveVersion: reviewerDefinition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "operator", "reviewer roster"); err != nil {
+		t.Fatal(err)
+	}
+	updated, nextActivation, err := registry.UpdateDeployment(ctx, proposed, deployment.Revision, "user", "operator", "reviewed definition and roster")
 	if err != nil || updated.ActiveVersion != "1.1.0" || updated.Revision != 3 || nextActivation.FromVersion != "1.0.0" {
 		t.Fatalf("updated = %#v, activation = %#v, err = %v", updated, nextActivation, err)
 	}

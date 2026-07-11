@@ -111,9 +111,10 @@ func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeRefe
 	return r.store.GetTeamDeployment(ctx, scope, id)
 }
 
-// UpdateDeployment revises mutable Team composition and operating state while
-// keeping the active immutable definition fixed. The same-version activation
-// entry is the durable actor/reason audit for the deployment revision.
+// UpdateDeployment atomically reconciles a Team's active immutable definition,
+// composition, restrictions, and operating state. This prevents role changes
+// from requiring an impossible ordering between definition activation and
+// roster mutation. The activation entry is the durable actor/reason audit.
 func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
 	if r == nil || r.store == nil || r.agents == nil || proposed == nil {
 		return nil, nil, errors.New("team registry, Agent resolver, and deployment are required")
@@ -128,8 +129,8 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, e
 	if current.Revision != expectedRevision {
 		return nil, nil, ErrRevisionConflict
 	}
-	if proposed.DefinitionID != current.DefinitionID || proposed.ActiveVersion != current.ActiveVersion {
-		return nil, nil, errors.New("team deployment update cannot change the active definition")
+	if proposed.DefinitionID != current.DefinitionID {
+		return nil, nil, errors.New("team deployment update cannot change definition identity")
 	}
 	updated := cloneDeployment(proposed)
 	updated.CreatedAt = current.CreatedAt
@@ -150,7 +151,7 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, e
 	}
 	activation := workforce.DefinitionActivation{
 		ID: r.newID(), Scope: updated.Scope, DeploymentID: updated.ID, DefinitionID: updated.DefinitionID,
-		FromVersion: current.ActiveVersion, ToVersion: current.ActiveVersion, DeploymentRevision: updated.Revision,
+		FromVersion: current.ActiveVersion, ToVersion: updated.ActiveVersion, DeploymentRevision: updated.Revision,
 		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updated.UpdatedAt,
 	}
 	if err := r.store.UpdateTeamDeployment(ctx, updated, expectedRevision, activation); err != nil {
