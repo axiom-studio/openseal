@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -12,6 +14,21 @@ import (
 )
 
 func (s *SQLiteStore) ApplyChangeSet(ctx context.Context, value *authoring.ChangeSet, expectedRevision int64) (*authoring.ChangeSet, error) {
+	for attempt := 0; attempt < 8; attempt++ {
+		result, err := s.applyChangeSetOnce(ctx, value, expectedRevision)
+		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "database is locked") {
+			return result, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 5 * time.Millisecond):
+		}
+	}
+	return nil, errors.New("atomic workforce apply exhausted SQLite lock retries")
+}
+
+func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.ChangeSet, expectedRevision int64) (*authoring.ChangeSet, error) {
 	application, err := materializeWorkforceApplication(value)
 	if err != nil {
 		return nil, err

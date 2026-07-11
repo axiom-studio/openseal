@@ -130,6 +130,52 @@ func TestSQLiteAtomicWorkforceApplyPersistsWholeAggregateAcrossRestart(t *testin
 	}
 }
 
+func TestSQLiteAtomicWorkforceApplyConcurrentRetryHasOneReceipt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	primary, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Close()
+	replica, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+	ctx := context.Background()
+	ready := testApplicableWorkforceChangeSet()
+	if _, _, err = primary.CreateChangeSet(ctx, ready, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	candidate := cloneRuntimeChangeSet(ready)
+	candidate.Status = authoring.ChangeSetApplied
+	candidate.Revision = 3
+	candidate.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt", IdempotencyKey: "apply", CandidateDigest: ready.CandidateDigest, Actor: ready.Actor, AppliedAt: ready.UpdatedAt.Add(time.Minute)}
+	candidate.UpdatedAt = candidate.ApplyReceipt.AppliedAt
+	stores := []*SQLiteStore{primary, replica}
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, store := range stores {
+		wg.Add(1)
+		go func(store *SQLiteStore) {
+			defer wg.Done()
+			_, err := store.ApplyChangeSet(ctx, cloneRuntimeChangeSet(candidate), 2)
+			errs <- err
+		}(store)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored, err := primary.GetChangeSet(ctx, ready.Scope, ready.ID)
+	if err != nil || restored.ApplyReceipt == nil || restored.ApplyReceipt.ID != "receipt" {
+		t.Fatalf("restored=%#v err=%v", restored, err)
+	}
+}
+
 func TestSQLiteAtomicWorkforceAmendRejectsStaleRevisionWithoutPartialState(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
