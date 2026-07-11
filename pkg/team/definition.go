@@ -16,14 +16,23 @@ import (
 var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
 
 type RoleSlot struct {
-	ID                    string   `json:"id"`
-	DisplayName           string   `json:"displayName"`
-	Purpose               string   `json:"purpose"`
-	MinimumMembers        int      `json:"minimumMembers,omitempty"`
-	MaximumMembers        int      `json:"maximumMembers,omitempty"`
-	RequiredSkillIDs      []string `json:"requiredSkillIds,omitempty"`
-	RequiredDefinitionIDs []string `json:"requiredDefinitionIds,omitempty"`
+	ID                    string                   `json:"id"`
+	DisplayName           string                   `json:"displayName"`
+	Purpose               string                   `json:"purpose"`
+	MinimumMembers        int                      `json:"minimumMembers,omitempty"`
+	MaximumMembers        int                      `json:"maximumMembers,omitempty"`
+	RequiredSkillIDs      []string                 `json:"requiredSkillIds,omitempty"`
+	RequiredDefinitionIDs []string                 `json:"requiredDefinitionIds,omitempty"`
+	ChannelParticipation  RoleChannelParticipation `json:"channelParticipation,omitempty"`
 }
+
+type RoleChannelParticipation string
+
+const (
+	RoleChannelActive      RoleChannelParticipation = "active"
+	RoleChannelObserveOnly RoleChannelParticipation = "observe_only"
+	RoleChannelDisabled    RoleChannelParticipation = "disabled"
+)
 
 type CoordinationMode string
 
@@ -96,7 +105,8 @@ func (d *Definition) Validate() error {
 	for _, role := range d.Roles {
 		id := strings.TrimSpace(role.ID)
 		if id == "" || strings.TrimSpace(role.DisplayName) == "" || strings.TrimSpace(role.Purpose) == "" ||
-			role.MinimumMembers < 0 || role.MaximumMembers < 0 || role.MaximumMembers > 0 && role.MaximumMembers < role.MinimumMembers || roles[id] {
+			role.MinimumMembers < 0 || role.MaximumMembers < 0 || role.MaximumMembers > 0 && role.MaximumMembers < role.MinimumMembers ||
+			!validRoleChannelParticipation(role.ChannelParticipation) || roles[id] {
 			return errors.New("team roles require unique ids, names, purposes, and valid member bounds")
 		}
 		roles[id] = true
@@ -107,6 +117,15 @@ func (d *Definition) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validRoleChannelParticipation(value RoleChannelParticipation) bool {
+	switch value {
+	case "", RoleChannelActive, RoleChannelObserveOnly, RoleChannelDisabled:
+		return true
+	default:
+		return false
+	}
 }
 
 func validCoordinationMode(mode CoordinationMode) bool {
