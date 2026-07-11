@@ -71,6 +71,68 @@ func TestPreparedGenerationFailureIsDurable(t *testing.T) {
 	}
 }
 
+func TestGenerationRetryIsConcurrentIdempotent(t *testing.T) {
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, _ := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "failed-concurrent",
+	})
+	failed, _ := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
+	request := RetryChangeSetGenerationRequest{
+		Scope: failed.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision, Reason: "provider recovered",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "retry-concurrent-1",
+	}
+	results := make(chan *ChangeSet, 2)
+	errorsFound := make(chan error, 2)
+	replays := make(chan bool, 2)
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			result, replayed, err := service.RetryGeneration(context.Background(), request)
+			results <- result
+			replays <- replayed
+			errorsFound <- err
+		}()
+	}
+	wait.Wait()
+	close(results)
+	close(errorsFound)
+	close(replays)
+	for err := range errorsFound {
+		if err != nil {
+			t.Fatalf("concurrent retry = %v", err)
+		}
+	}
+	for result := range results {
+		if result == nil || result.Status != ChangeSetEvaluating || result.Revision != failed.Revision+1 || len(result.Generation.Retries) != 1 {
+			t.Fatalf("concurrent retry result = %#v", result)
+		}
+	}
+	replayCount := 0
+	for replayed := range replays {
+		if replayed {
+			replayCount++
+		}
+	}
+	if replayCount != 1 {
+		t.Fatalf("concurrent retry replay count = %d", replayCount)
+	}
+	changed := request
+	changed.Reason = "different"
+	if _, _, err := service.RetryGeneration(context.Background(), changed); !errors.Is(err, ErrChangeSetIdempotency) {
+		t.Fatalf("changed retry key = %v", err)
+	}
+	changed = request
+	changed.ExpectedRevision++
+	if _, _, err := service.RetryGeneration(context.Background(), changed); !errors.Is(err, ErrChangeSetIdempotency) {
+		t.Fatalf("changed retry revision = %v", err)
+	}
+}
+
 func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})

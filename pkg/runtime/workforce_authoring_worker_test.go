@@ -177,11 +177,11 @@ func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T)
 		t.Fatalf("failed run = %#v", failedRun)
 	}
 	close(generator.release)
-	retried, retryRun, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
+	retried, retryRun, wasReplay, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
 		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
 		Reason: "retry after provider timeout", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
 	})
-	if err != nil || retried.Status != authoring.ChangeSetEvaluating || retryRun.ID == firstRun.ID || retried.Generation.RunID != retryRun.ID {
+	if err != nil || wasReplay || retried.Status != authoring.ChangeSetEvaluating || retryRun.ID == firstRun.ID || retried.Generation.RunID != retryRun.ID {
 		t.Fatalf("retried=%#v run=%#v err=%v", retried, retryRun, err)
 	}
 	if retried.Generation.Request.InvocationKey != "workforce-change-set:"+changeSet.ID+":1" {
@@ -196,14 +196,14 @@ func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T)
 	}
 	defer store.Close()
 	service, _ = NewWorkforceAuthoringRunService(compiler, store)
-	replayed, replayRun, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
+	replayed, replayRun, wasReplay, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
 		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
 		Reason: "retry after provider timeout", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
 	})
-	if err != nil || replayed.ID != retried.ID || replayRun.ID != retryRun.ID {
+	if err != nil || !wasReplay || replayed.ID != retried.ID || replayRun.ID != retryRun.ID {
 		t.Fatalf("retry replay changeSet=%#v run=%#v err=%v", replayed, replayRun, err)
 	}
-	_, _, err = service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
+	_, _, _, err = service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
 		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
 		Reason: "changed reason", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
 	})

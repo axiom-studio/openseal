@@ -2053,12 +2053,12 @@ func (e *Engine) GeneratePreparedWorkforceChangeSet(ctx context.Context, scope s
 	return e.authoringChanges.GeneratePrepared(ctx, scope, id, expectedRevision)
 }
 
-func (e *Engine) RetryWorkforceChangeSetGeneration(ctx context.Context, request authoring.RetryChangeSetGenerationRequest) (*authoring.ChangeSet, error) {
+func (e *Engine) RetryWorkforceChangeSetGeneration(ctx context.Context, request authoring.RetryChangeSetGenerationRequest) (*authoring.ChangeSet, bool, error) {
 	if e == nil || e.authoringRuns == nil {
-		return nil, errors.New("durable workforce authoring runs are not configured")
+		return nil, false, errors.New("durable workforce authoring runs are not configured")
 	}
-	changeSet, _, err := e.authoringRuns.Retry(ctx, request)
-	return changeSet, err
+	changeSet, _, replayed, err := e.authoringRuns.Retry(ctx, request)
+	return changeSet, replayed, err
 }
 
 func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string) (*authoring.ChangeSet, error) {
