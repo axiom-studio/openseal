@@ -2548,11 +2548,15 @@ func resolveClawHubLifecycleEntry(lock clawhub.Lockfile, reference string) (stri
 	if entry, ok := lock.Skills[reference]; ok {
 		return reference, entry, nil
 	}
+	parsed, parseErr := clawhub.ParseSkillReference(reference)
 	var identity string
 	var resolved clawhub.LockEntry
 	for candidate, entry := range lock.Skills {
-		qualified := strings.Trim(strings.TrimSpace(entry.OwnerHandle)+"/"+strings.TrimSpace(entry.Slug), "/")
-		if reference != entry.Slug && !strings.EqualFold(reference, qualified) {
+		matches := strings.EqualFold(reference, entry.Slug)
+		if parseErr == nil {
+			matches = strings.EqualFold(parsed.Slug, entry.Slug) && (parsed.Owner == "" || strings.EqualFold(parsed.Owner, entry.OwnerHandle))
+		}
+		if !matches {
 			continue
 		}
 		if identity != "" {
