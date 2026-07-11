@@ -11,13 +11,19 @@ openseal daemon
 openseal
 ```
 
-The current workspace operates canonical Agent- or Team-owned Runs and the
-durable Artifact/Evidence catalog. It can create work from an outcome prompt,
-list durable work, pause and resume it, stop it, record operator guidance,
-inspect immutable artifact provenance, expand evidence links, and download
-content when the server advertises that operation. Every control is derived
-from the versioned `agent-runs` and `artifacts` capabilities. An unavailable or
-incompatible server produces an explicit read-only error state.
+The workspace composes and operates canonical Agents, Teams, objectives, Runs,
+Team channels, and the durable Artifact/Evidence catalog. Workforce authoring
+starts with an outcome prompt and persists a reviewable ChangeSet. When the
+connected host advertises the exact contextual authority, the TUI can resolve a
+specific approval requirement and atomically Apply the reviewed Agent, Team,
+and standing-objective resources. It then shows the durable policy decisions,
+lifecycle, actor, reason, receipt, and created resource references.
+
+Every control comes from the server's versioned capability document, including
+resource-specific revision and approval eligibility. The TUI does not infer
+authority from a ChangeSet or manufacture a local policy evaluator. An
+unavailable, unauthorized, stale, or incompatible operation remains visibly
+read-only.
 
 ## Workspaces
 
@@ -42,22 +48,25 @@ terminal testing.
 |---|---|
 | `Ctrl+S` | Start work or submit guidance from the composer |
 | `Tab` | Move between the composer and current work |
-| `↑` / `↓` or `k` / `j` | Select work |
-| `n` | Compose new work |
+| `↑` / `↓` or `k` / `j` | Select an item or approval requirement |
+| `f` / `o` / `w` / `c` / `a` | Open Workforce, Objectives, Work, Channels, or Evidence |
+| `n` | Compose a new objective, Run, or Team channel in the current section |
 | `r` | Refresh from the kernel |
-| `w` / `a` | Switch between Work and Evidence |
 | `p` | Pause or resume selected work when advertised |
 | `g` | Guide selected work when advertised |
 | `x` | Stop selected work when advertised |
-| `e` / `Enter` | Expand or collapse selected artifact evidence |
+| `m` | Message the selected Team channel when advertised |
+| `y` / `x` | Approve or reject the selected eligible Workforce requirement |
+| `e` / `Enter` | Apply a ready Workforce, edit an objective, or expand selected evidence/audit |
 | `d` | Download selected artifact when advertised |
 | `Esc` | Cancel guidance composition |
 | `Ctrl+C` | Exit the TUI without stopping work |
 
-Creation uses a client-generated idempotency key. A failed request preserves
-both the prompt and that key, so retrying cannot duplicate work. Lifecycle
-commands include the selected Run revision and refresh after conflicts rather
-than overwriting concurrent changes.
+Creation and governed mutations use client-generated idempotency keys. A failed
+request preserves the intent and key, so retrying cannot duplicate work or a
+permanent approval. Lifecycle commands bind the selected resource revision and
+candidate digest and refresh after conflicts rather than overwriting concurrent
+changes. Apply additionally requires an explicit audit reason.
 
 Artifact downloads stream directly from the kernel into a temporary file,
 verify the catalog size and SHA-256 digest, and are atomically published with
@@ -65,7 +74,7 @@ private file permissions. Failed or corrupted transfers leave no partial file.
 The TUI never persists content URLs or treats an opaque content reference as a
 filesystem path.
 
-Future Agent/Team composition, objectives, approvals, skills, and activity
-views will use the same capability-discovered client boundary. Until their
-public APIs exist, the TUI deliberately does not render placeholder controls
-for them.
+Skills remain capability inputs to Workforce authoring and runtime execution;
+the TUI does not render lifecycle controls that the connected server has not
+advertised. The same rule applies to every future surface: no placeholder
+production controls or client-only durable state.
