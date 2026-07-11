@@ -335,6 +335,7 @@ type KernelStore interface {
 	PortfolioStore
 	ObjectiveScopeStore
 	RunActivityStore
+	ObjectiveActivityStore
 	AgentTurnStore
 	AgentRunScheduleStore
 	ActionStore
@@ -354,6 +355,8 @@ type CreateObjectiveRequest struct {
 	SuccessCriteria  map[string]interface{}
 	NextEvaluationAt *time.Time
 	IdempotencyKey   string
+	Actor            ActivityActor
+	Visibility       ActivityVisibility
 }
 
 type UpdateObjectiveRequest struct {
@@ -369,6 +372,9 @@ type UpdateObjectiveRequest struct {
 	SuccessCriteria  map[string]interface{}
 	ProgressSummary  *string
 	NextEvaluationAt *time.Time
+	Actor            ActivityActor
+	Visibility       ActivityVisibility
+	Summary          string
 }
 
 type CreateAgentRunRequest struct {
@@ -469,7 +475,15 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 	if err := objective.Validate(); err != nil {
 		return nil, err
 	}
-	if err := s.store.CreateObjective(ctx, objective); err != nil {
+	persistObjective := func() error {
+		activityStore, ok := s.store.(ObjectiveActivityStore)
+		if !ok {
+			return s.store.CreateObjective(ctx, objective)
+		}
+		_, persistErr := activityStore.CreateObjectiveWithEvent(ctx, objective, objectiveActivityEvent(objective, req.Actor, req.Visibility, "objective.created", "Objective created", now, map[string]interface{}{"status": objective.Status}))
+		return persistErr
+	}
+	if err := persistObjective(); err != nil {
 		if key != "" {
 			current, getErr := s.store.GetObjective(ctx, req.Scope, objectiveID)
 			if getErr == nil && current != nil {
@@ -504,16 +518,55 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 	if req.Status != nil && *req.Status != current.Status && !canTransitionObjective(current.Status, *req.Status) {
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidObjectiveTransition, current.Status, *req.Status)
 	}
+	previousStatus := current.Status
 	applyObjectiveUpdate(current, req)
 	current.UpdatedAt = s.now()
 	current.Revision++
 	if err := current.Validate(); err != nil {
 		return nil, err
 	}
-	if err := s.store.UpdateObjective(ctx, current, req.ExpectedRevision); err != nil {
+	persistUpdate := func() error {
+		activityStore, ok := s.store.(ObjectiveActivityStore)
+		if !ok {
+			return s.store.UpdateObjective(ctx, current, req.ExpectedRevision)
+		}
+		eventType, summary := "objective.updated", strings.TrimSpace(req.Summary)
+		if req.Status != nil && current.Status != previousStatus {
+			eventType = "objective.status_changed"
+			if summary == "" {
+				summary = fmt.Sprintf("Objective changed from %s to %s", previousStatus, current.Status)
+			}
+		}
+		if summary == "" {
+			summary = "Objective updated"
+		}
+		_, persistErr := activityStore.UpdateObjectiveWithEvent(ctx, current, req.ExpectedRevision, objectiveActivityEvent(current, req.Actor, req.Visibility, eventType, summary, current.UpdatedAt, map[string]interface{}{"previousStatus": previousStatus, "status": current.Status, "revision": current.Revision}))
+		return persistErr
+	}
+	if err := persistUpdate(); err != nil {
 		return nil, err
 	}
 	return current, nil
+}
+
+func objectiveActivityEvent(objective *Objective, actor ActivityActor, visibility ActivityVisibility, eventType, summary string, occurredAt time.Time, payload map[string]interface{}) *ActivityEvent {
+	if strings.TrimSpace(actor.Type) == "" {
+		actor = ActivityActor{Type: "system", ID: "openseal"}
+	}
+	if visibility == "" {
+		visibility = ActivityVisibilityScope
+	}
+	event := &ActivityEvent{
+		ID: uuid.NewString(), Scope: objective.Scope, ObjectiveID: objective.ID, EventType: eventType,
+		Severity: ActivitySeverityInfo, Actor: actor, Summary: summary, Payload: payload,
+		Visibility: visibility, CreatedAt: occurredAt,
+	}
+	if objective.Owner.Type == OwnerTypeAgent {
+		event.AgentID = objective.Owner.ID
+	} else if objective.Owner.Type == OwnerTypeTeam {
+		event.TeamID = objective.Owner.ID
+	}
+	return event
 }
 
 func (s *PortfolioService) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {

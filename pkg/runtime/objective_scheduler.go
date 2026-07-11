@@ -86,6 +86,7 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			}
 			if _, updateErr := NewPortfolioService(s.store).UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
 				ExpectedRevision: objective.Revision, NextEvaluationAt: &next,
+				Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Summary: "Objective schedule initialized",
 			}); updateErr != nil && !errors.Is(updateErr, ErrRevisionConflict) {
 				return result, updateErr
 			}
@@ -134,6 +135,7 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 		}
 		if _, updateErr := NewPortfolioService(s.store).UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
 			ExpectedRevision: current.Revision, NextEvaluationAt: &next,
+			Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Summary: "Objective schedule advanced",
 		}); updateErr != nil && !errors.Is(updateErr, ErrRevisionConflict) {
 			return result, updateErr
 		}

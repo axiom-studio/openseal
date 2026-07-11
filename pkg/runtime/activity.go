@@ -73,8 +73,8 @@ func (e *ActivityEvent) Validate() error {
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(e.RunID) == "" || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
-		return errors.New("activity run, type, and summary are required")
+	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
+		return errors.New("activity subject, type, and summary are required")
 	}
 	return nil
 }
@@ -132,6 +132,21 @@ type RunActivityStore interface {
 	UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error)
 	AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error)
 	ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error)
+}
+
+type ObjectiveActivityStore interface {
+	CreateObjectiveWithEvent(ctx context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error)
+	UpdateObjectiveWithEvent(ctx context.Context, objective *Objective, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error)
+}
+
+func activityStreamID(event *ActivityEvent) string {
+	if event == nil {
+		return ""
+	}
+	if event.RunID != "" {
+		return event.RunID
+	}
+	return "objective:" + event.ObjectiveID
 }
 
 type RunActivityService struct {

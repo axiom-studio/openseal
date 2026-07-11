@@ -11,6 +11,75 @@ import (
 	"github.com/lib/pq"
 )
 
+func (s *PostgresStore) CreateObjectiveWithEvent(ctx context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := validateObjectiveActivity(objective, event); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(objective)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("objectives")+`
+		(id, scope_kind, scope_id, owner_type, owner_id, status, priority, revision, updated_at, payload)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, objective.ID, objective.Scope.Kind, objective.Scope.ID,
+		objective.Owner.Type, objective.Owner.ID, objective.Status, objective.Priority, objective.Revision, objective.UpdatedAt, string(payload)); err != nil {
+		return nil, err
+	}
+	persisted, err := s.insertPostgresActivityTx(ctx, tx, event)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return persisted, nil
+}
+
+func (s *PostgresStore) UpdateObjectiveWithEvent(ctx context.Context, objective *Objective, expectedRevision int64, event *ActivityEvent) (*ActivityEvent, error) {
+	if err := validateObjectiveActivity(objective, event); err != nil {
+		return nil, err
+	}
+	if objective.Revision != expectedRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	payload, err := json.Marshal(objective)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("objectives")+` SET owner_type=$1, owner_id=$2, status=$3, priority=$4, revision=$5, updated_at=$6, payload=$7::jsonb
+		WHERE scope_kind=$8 AND scope_id=$9 AND id=$10 AND revision=$11`, objective.Owner.Type, objective.Owner.ID,
+		objective.Status, objective.Priority, objective.Revision, objective.UpdatedAt, string(payload), objective.Scope.Kind,
+		objective.Scope.ID, objective.ID, expectedRevision)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected != 1 {
+		return nil, ErrRevisionConflict
+	}
+	persisted, err := s.insertPostgresActivityTx(ctx, tx, event)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return persisted, nil
+}
+
 func (s *PostgresStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
@@ -185,9 +254,16 @@ func (s *PostgresStore) withActivity(ctx context.Context, event *ActivityEvent, 
 	}
 	defer tx.Rollback()
 	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+`
-		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&exists)
+	table, id := s.table("agent_runs"), event.RunID
+	if event.RunID == "" {
+		table, id = s.table("objectives"), event.ObjectiveID
+	}
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+table+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, event.Scope.Kind, event.Scope.ID, id).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
+		if event.RunID == "" {
+			return nil, ErrObjectiveNotFound
+		}
 		return nil, ErrRunNotFound
 	}
 	if err != nil {
@@ -209,7 +285,7 @@ func (s *PostgresStore) withActivity(ctx context.Context, event *ActivityEvent, 
 func (s *PostgresStore) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx, event *ActivityEvent) (*ActivityEvent, error) {
 	persisted := cloneActivityEvent(event)
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM `+s.table("run_activity")+`
-		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&persisted.Sequence); err != nil {
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3`, event.Scope.Kind, event.Scope.ID, activityStreamID(event)).Scan(&persisted.Sequence); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(persisted)
@@ -219,7 +295,7 @@ func (s *PostgresStore) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("run_activity")+`
 		(scope_kind, scope_id, run_id, agent_id, objective_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)`, persisted.Scope.Kind, persisted.Scope.ID,
-		persisted.RunID, persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
+		activityStreamID(persisted), persisted.AgentID, persisted.ObjectiveID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}

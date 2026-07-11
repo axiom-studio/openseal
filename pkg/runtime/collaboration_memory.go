@@ -228,7 +228,7 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 }
 
 func appendMemoryActivityLocked(s *MemoryStore, event *ActivityEvent) *ActivityEvent {
-	key := portfolioKey(event.Scope, event.RunID)
+	key := portfolioKey(event.Scope, activityStreamID(event))
 	persisted := cloneActivityEvent(event)
 	persisted.Sequence = int64(len(s.activity[key]) + 1)
 	s.activity[key] = append(s.activity[key], persisted)
