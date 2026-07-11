@@ -11,13 +11,13 @@ import (
 )
 
 type Store interface {
-	CreateDefinition(context.Context, *Definition) error
-	GetDefinition(context.Context, string, string) (*Definition, error)
-	ListDefinitionVersions(context.Context, string) ([]*Definition, error)
-	CreateDeployment(context.Context, *Deployment, workforce.DefinitionActivation) error
-	GetDeployment(context.Context, capability.ScopeReference, string) (*Deployment, error)
-	UpdateDeployment(context.Context, *Deployment, int64, workforce.DefinitionActivation) error
-	ListActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
+	CreateTeamDefinition(context.Context, *Definition) error
+	GetTeamDefinition(context.Context, string, string) (*Definition, error)
+	ListTeamDefinitionVersions(context.Context, string) ([]*Definition, error)
+	CreateTeamDeployment(context.Context, *Deployment, workforce.DefinitionActivation) error
+	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*Deployment, error)
+	UpdateTeamDeployment(context.Context, *Deployment, int64, workforce.DefinitionActivation) error
+	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
 }
 
 type MemoryStore struct {
@@ -34,7 +34,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) CreateDefinition(_ context.Context, definition *Definition) error {
+func (s *MemoryStore) CreateTeamDefinition(_ context.Context, definition *Definition) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := definitionKey(definition.ID, definition.Version)
@@ -45,7 +45,7 @@ func (s *MemoryStore) CreateDefinition(_ context.Context, definition *Definition
 	return nil
 }
 
-func (s *MemoryStore) GetDefinition(_ context.Context, id, version string) (*Definition, error) {
+func (s *MemoryStore) GetTeamDefinition(_ context.Context, id, version string) (*Definition, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	value := s.definitions[definitionKey(id, version)]
@@ -55,7 +55,7 @@ func (s *MemoryStore) GetDefinition(_ context.Context, id, version string) (*Def
 	return cloneDefinition(value), nil
 }
 
-func (s *MemoryStore) ListDefinitionVersions(_ context.Context, id string) ([]*Definition, error) {
+func (s *MemoryStore) ListTeamDefinitionVersions(_ context.Context, id string) ([]*Definition, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*Definition, 0)
@@ -68,7 +68,7 @@ func (s *MemoryStore) ListDefinitionVersions(_ context.Context, id string) ([]*D
 	return result, nil
 }
 
-func (s *MemoryStore) CreateDeployment(_ context.Context, deployment *Deployment, activation workforce.DefinitionActivation) error {
+func (s *MemoryStore) CreateTeamDeployment(_ context.Context, deployment *Deployment, activation workforce.DefinitionActivation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := deploymentKey(deployment.Scope, deployment.ID)
@@ -80,7 +80,7 @@ func (s *MemoryStore) CreateDeployment(_ context.Context, deployment *Deployment
 	return nil
 }
 
-func (s *MemoryStore) GetDeployment(_ context.Context, scope capability.ScopeReference, id string) (*Deployment, error) {
+func (s *MemoryStore) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*Deployment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	value := s.deployments[deploymentKey(scope, id)]
@@ -90,7 +90,7 @@ func (s *MemoryStore) GetDeployment(_ context.Context, scope capability.ScopeRef
 	return cloneDeployment(value), nil
 }
 
-func (s *MemoryStore) UpdateDeployment(_ context.Context, deployment *Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
+func (s *MemoryStore) UpdateTeamDeployment(_ context.Context, deployment *Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := deploymentKey(deployment.Scope, deployment.ID)
@@ -106,7 +106,7 @@ func (s *MemoryStore) UpdateDeployment(_ context.Context, deployment *Deployment
 	return nil
 }
 
-func (s *MemoryStore) ListActivations(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
+func (s *MemoryStore) ListTeamDefinitionActivations(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	values := s.activations[deploymentKey(scope, deploymentID)]

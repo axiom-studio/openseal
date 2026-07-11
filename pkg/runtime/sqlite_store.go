@@ -71,6 +71,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateAgentRegistry(db); err != nil {
 		return err
 	}
+	if err := migrateTeamRegistry(db); err != nil {
+		return err
+	}
 	return migrateSkillCatalog(db)
 }
 
