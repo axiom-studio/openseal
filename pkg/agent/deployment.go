@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 type RolloutStatus string
@@ -55,19 +56,7 @@ type AgentDeployment struct {
 	UpdatedAt       time.Time                                 `json:"updatedAt"`
 }
 
-type DefinitionActivation struct {
-	ID                 string                    `json:"id"`
-	Scope              capability.ScopeReference `json:"scope"`
-	DeploymentID       string                    `json:"deploymentId"`
-	DefinitionID       string                    `json:"definitionId"`
-	FromVersion        string                    `json:"fromVersion,omitempty"`
-	ToVersion          string                    `json:"toVersion"`
-	DeploymentRevision int64                     `json:"deploymentRevision"`
-	Reason             string                    `json:"reason,omitempty"`
-	ActorType          string                    `json:"actorType"`
-	ActorID            string                    `json:"actorId"`
-	CreatedAt          time.Time                 `json:"createdAt"`
-}
+type DefinitionActivation = workforce.DefinitionActivation
 
 func (d *AgentDeployment) Validate() error {
 	if d == nil || strings.TrimSpace(d.ID) == "" || strings.TrimSpace(d.Scope.Kind) == "" || strings.TrimSpace(d.Scope.ID) == "" || strings.TrimSpace(d.DefinitionID) == "" || !versionPattern.MatchString(d.ActiveVersion) || strings.TrimSpace(d.Environment) == "" {
