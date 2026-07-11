@@ -1351,6 +1351,10 @@ func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.
 	return runtime.NewObjectiveScheduler(e.store).ReconcileScope(ctx, scope, limit)
 }
 
+func (e *Engine) ReconcileAllObjectiveSchedules(ctx context.Context, limitPerScope int) (*runtime.ObjectiveScheduleResult, error) {
+	return runtime.NewObjectiveScheduler(e.store).ReconcileAll(ctx, limitPerScope)
+}
+
 func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
 	result, err := e.CreateAgentRunCommand(ctx, req)
 	if err != nil {

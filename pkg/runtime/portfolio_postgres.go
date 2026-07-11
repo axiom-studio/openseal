@@ -134,6 +134,23 @@ func (s *PostgresStore) ListObjectives(ctx context.Context, filter ObjectiveFilt
 	return pageObjectives(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *PostgresStore) ListObjectiveScopes(ctx context.Context) ([]Scope, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM `+s.table("objectives")+` ORDER BY scope_kind, scope_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Scope, 0)
+	for rows.Next() {
+		var scope Scope
+		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
+			return nil, err
+		}
+		result = append(result, scope)
+	}
+	return result, rows.Err()
+}
+
 func (s *PostgresStore) UpdateObjective(ctx context.Context, objective *Objective, expectedRevision int64) error {
 	if err := objective.Validate(); err != nil {
 		return err
