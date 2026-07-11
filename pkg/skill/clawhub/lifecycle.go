@@ -7,16 +7,18 @@ const LifecycleAPIVersion = "openseal.clawhub.lifecycle/v1"
 type LifecycleOperation string
 
 const (
-	LifecycleInspectVersions LifecycleOperation = "inspect_versions"
-	LifecycleInspectFiles    LifecycleOperation = "inspect_files"
-	LifecycleInspectSecurity LifecycleOperation = "inspect_security"
-	LifecycleInstall         LifecycleOperation = "install"
-	LifecycleVerify          LifecycleOperation = "verify"
-	LifecyclePin             LifecycleOperation = "pin"
-	LifecycleUnpin           LifecycleOperation = "unpin"
-	LifecycleUpdate          LifecycleOperation = "update"
-	LifecycleUpdateAll       LifecycleOperation = "update_all"
-	LifecycleUninstall       LifecycleOperation = "uninstall"
+	LifecycleInspectVersions  LifecycleOperation = "inspect_versions"
+	LifecycleInspectFiles     LifecycleOperation = "inspect_files"
+	LifecycleInspectSecurity  LifecycleOperation = "inspect_security"
+	LifecycleInspectInstalled LifecycleOperation = "inspect_installed"
+	LifecycleInstall          LifecycleOperation = "install"
+	LifecycleVerify           LifecycleOperation = "verify"
+	LifecycleVerifyInstalled  LifecycleOperation = "verify_installed"
+	LifecyclePin              LifecycleOperation = "pin"
+	LifecycleUnpin            LifecycleOperation = "unpin"
+	LifecycleUpdate           LifecycleOperation = "update"
+	LifecycleUpdateAll        LifecycleOperation = "update_all"
+	LifecycleUninstall        LifecycleOperation = "uninstall"
 )
 
 type LifecycleOutcome string
@@ -57,7 +59,7 @@ type LifecycleCapability struct {
 func CanonicalLifecycleCapability() LifecycleCapability {
 	return LifecycleCapability{APIVersion: LifecycleAPIVersion, Operations: []LifecycleOperation{
 		LifecycleInspectVersions, LifecycleInspectFiles, LifecycleInspectSecurity,
-		LifecycleInstall, LifecycleVerify, LifecyclePin, LifecycleUnpin,
+		LifecycleInspectInstalled, LifecycleInstall, LifecycleVerify, LifecycleVerifyInstalled, LifecyclePin, LifecycleUnpin,
 		LifecycleUpdate, LifecycleUpdateAll, LifecycleUninstall,
 	}}
 }
