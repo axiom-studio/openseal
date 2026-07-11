@@ -170,3 +170,117 @@ func BudgetWouldExceed(policy BudgetPolicy, usage BudgetUsage) (bool, []string, 
 	}
 	return len(reasons) > 0, reasons, nil
 }
+
+func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) error {
+	if parent == nil {
+		return ErrRunNotFound
+	}
+	if allocation != nil {
+		if err := allocation.Validate(); err != nil {
+			return fmt.Errorf("invalid child budget allocation: %w", err)
+		}
+	}
+	if parent.BudgetPolicy == nil {
+		return nil
+	}
+	if allocation == nil {
+		return errors.New("a budgeted source run requires an explicit child budget allocation")
+	}
+	effective, err := EffectiveBudgetUsage(parent.BudgetUsage, parent.BudgetReservations)
+	if err != nil {
+		return err
+	}
+	existing := sumBudgetPolicies(parent.BudgetAllocations)
+	for _, dimension := range budgetDimensions(*parent.BudgetPolicy, effective, addBudgetPolicies(existing, *allocation)) {
+		if dimension.parentLimit == 0 {
+			continue
+		}
+		remaining := dimension.parentLimit - dimension.used
+		if remaining < 0 {
+			remaining = 0
+		}
+		if dimension.allocation == 0 || dimension.allocation > remaining {
+			return fmt.Errorf("child %s budget %d exceeds parent remaining capacity %d", dimension.name, dimension.allocation, remaining)
+		}
+	}
+	return nil
+}
+
+func addRunBudgetAllocation(run *AgentRun, allocationID string, allocation *BudgetPolicy) error {
+	if run == nil || run.BudgetPolicy == nil {
+		return nil
+	}
+	if allocation == nil {
+		return errors.New("a budgeted source run requires an explicit child budget allocation")
+	}
+	if _, exists := run.BudgetAllocations[allocationID]; exists {
+		return errors.New("child budget allocation already exists")
+	}
+	if err := validateChildBudgetAllocation(run, allocation); err != nil {
+		return err
+	}
+	if run.BudgetAllocations == nil {
+		run.BudgetAllocations = make(map[string]BudgetPolicy)
+	}
+	run.BudgetAllocations[allocationID] = *cloneBudgetPolicy(allocation)
+	return nil
+}
+
+func validateGroupedBudgetAllocations(parent *AgentRun, allocations []*BudgetPolicy) error {
+	if parent == nil || parent.BudgetPolicy == nil {
+		return nil
+	}
+	total := BudgetPolicy{}
+	for _, allocation := range allocations {
+		if allocation == nil {
+			return errors.New("a budgeted source run requires explicit allocations for every child")
+		}
+		total.MaxTurns += allocation.MaxTurns
+		total.MaxInputTokens += allocation.MaxInputTokens
+		total.MaxOutputTokens += allocation.MaxOutputTokens
+		total.MaxTotalTokens += allocation.MaxTotalTokens
+		total.MaxCostMicros += allocation.MaxCostMicros
+		total.MaxDurationMS += allocation.MaxDurationMS
+		total.MaxActions += allocation.MaxActions
+	}
+	return validateChildBudgetAllocation(parent, &total)
+}
+
+type budgetDimension struct {
+	name        string
+	parentLimit int64
+	used        int64
+	allocation  int64
+}
+
+func budgetDimensions(parent BudgetPolicy, usage BudgetUsage, allocation BudgetPolicy) []budgetDimension {
+	return []budgetDimension{
+		{"turns", parent.MaxTurns, usage.Turns, allocation.MaxTurns},
+		{"input_tokens", parent.MaxInputTokens, usage.InputTokens, allocation.MaxInputTokens},
+		{"output_tokens", parent.MaxOutputTokens, usage.OutputTokens, allocation.MaxOutputTokens},
+		{"total_tokens", parent.MaxTotalTokens, usage.InputTokens + usage.OutputTokens, allocation.MaxTotalTokens},
+		{"cost_micros", parent.MaxCostMicros, usage.CostMicros, allocation.MaxCostMicros},
+		{"duration_ms", parent.MaxDurationMS, usage.DurationMS, allocation.MaxDurationMS},
+		{"actions", parent.MaxActions, usage.Actions, allocation.MaxActions},
+	}
+}
+
+func sumBudgetPolicies(policies map[string]BudgetPolicy) BudgetPolicy {
+	total := BudgetPolicy{}
+	for _, policy := range policies {
+		total = addBudgetPolicies(total, policy)
+	}
+	return total
+}
+
+func addBudgetPolicies(left, right BudgetPolicy) BudgetPolicy {
+	return BudgetPolicy{
+		MaxTurns:        left.MaxTurns + right.MaxTurns,
+		MaxInputTokens:  left.MaxInputTokens + right.MaxInputTokens,
+		MaxOutputTokens: left.MaxOutputTokens + right.MaxOutputTokens,
+		MaxTotalTokens:  left.MaxTotalTokens + right.MaxTotalTokens,
+		MaxCostMicros:   left.MaxCostMicros + right.MaxCostMicros,
+		MaxDurationMS:   left.MaxDurationMS + right.MaxDurationMS,
+		MaxActions:      left.MaxActions + right.MaxActions,
+	}
+}
