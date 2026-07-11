@@ -3,11 +3,23 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 )
+
+type activationResourceStager struct {
+	stage *ResourceStage
+	err   error
+	seen  []ResourceStageRequest
+}
+
+func (s *activationResourceStager) StageResources(_ context.Context, request ResourceStageRequest) (*ResourceStage, error) {
+	s.seen = append(s.seen, request)
+	return s.stage, s.err
+}
 
 func TestActivationSnapshotIsScopedStableAndSecretFree(t *testing.T) {
 	compilation, err := skillopenclaw.Compile(skillopenclaw.Bundle{
@@ -131,6 +143,62 @@ func TestActivationReportsStructuredUnavailabilityPerDeployment(t *testing.T) {
 		if !codes[code] {
 			t.Fatalf("missing availability reason %q in %#v", code, snapshot.Unavailable[0].Reasons)
 		}
+	}
+}
+
+func TestActivationStagesDeclaredResourcesAndPinsStageIdentity(t *testing.T) {
+	compilation, err := skillopenclaw.Compile(skillopenclaw.Bundle{
+		SkillMD: []byte("---\nname: staged\ndescription: staged resources\n---\nRead {baseDir}/references/guide.md."),
+		Files:   []skillopenclaw.File{{Path: "references/guide.md", Content: []byte("trusted")}},
+		Source:  skillopenclaw.Source{Reference: "test/staged", Version: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := NewCatalog()
+	if err := catalog.Register(context.Background(), compilation.Definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(context.Background(), &Binding{
+		ID: "binding", Scope: scope, DeploymentID: "agent", SkillID: "staged", SkillVersion: "1.0.0",
+		EnablePrompt: true, MaximumRisk: RiskLevelRead, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stager := &activationResourceStager{stage: &ResourceStage{Root: "/sandbox/staged", Revision: "resource-7", Adapter: "sandbox/v1"}}
+	first, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SnapshotID != second.SnapshotID || len(first.Skills) != 1 || len(stager.seen) != 2 {
+		t.Fatalf("staged activation is not stable: first=%#v second=%#v seen=%#v", first, second, stager.seen)
+	}
+	activated := first.Skills[0]
+	if activated.ResourceRoot != "/sandbox/staged" || activated.ResourceRevision != "resource-7" || activated.ResourceAdapter != "sandbox/v1" ||
+		activated.Prompt == nil || !strings.Contains(activated.Prompt.Instructions, "/sandbox/staged/references/guide.md") {
+		t.Fatalf("staged resource identity was not projected: %#v", activated)
+	}
+	if request := stager.seen[0]; request.SourceDigest != compilation.SourceDigest || request.BindingID != "binding" || len(request.Resources) != 1 {
+		t.Fatalf("staging request lost immutable provenance: %#v", request)
+	}
+
+	stager.stage.Revision = "resource-8"
+	refreshed, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager})
+	if err != nil || refreshed.SnapshotID == first.SnapshotID {
+		t.Fatalf("resource revision did not refresh activation identity: %#v, %v", refreshed, err)
+	}
+
+	failed, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{
+		OperatingSystem: "linux", ResourceStager: &activationResourceStager{err: errors.New("provider included sensitive detail")},
+	})
+	if err != nil || len(failed.Skills) != 0 || len(failed.Unavailable) != 1 || failed.Unavailable[0].Reasons[0].Code != "resource_staging_failed" ||
+		strings.Contains(failed.Unavailable[0].Reasons[0].Message, "sensitive") {
+		t.Fatalf("failed staging was not safely represented: %#v, %v", failed, err)
 	}
 }
 

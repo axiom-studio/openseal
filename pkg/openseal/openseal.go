@@ -245,6 +245,10 @@ type (
 	BoundSkillAction                   = skill.BoundAction
 	SkillPromptModule                  = skill.PromptModule
 	SkillHostCapabilityState           = skill.HostCapabilityState
+	SkillResourceStageRequest          = skill.ResourceStageRequest
+	SkillResourceStage                 = skill.ResourceStage
+	SkillResourceStager                = skill.ResourceStager
+	SkillResourceContentProvider       = skill.ResourceContentProvider
 	SkillAvailabilityReason            = skill.AvailabilityReason
 	ActivatedSkill                     = skill.ActivatedSkill
 	UnavailableSkill                   = skill.UnavailableSkill
