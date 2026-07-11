@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -23,6 +24,7 @@ const HostedTurnAPIVersion = "openseal.hosted-turn/v2"
 type HostedSkillPrompt struct {
 	SkillID      string `json:"skillId"`
 	Version      string `json:"version"`
+	Reference    string `json:"reference"`
 	Name         string `json:"name"`
 	Description  string `json:"description,omitempty"`
 	Instructions string `json:"instructions"`
@@ -128,6 +130,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
+	for index := range request.SkillPrompts {
+		request.SkillPrompts[index].Reference = "skill:" + request.SkillPrompts[index].SkillID + "@" + request.SkillPrompts[index].Version
+	}
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
 		return nil, retryableTurnHostError{cause: err}
@@ -160,7 +165,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		selection.SkillRef = strings.TrimSpace(selection.SkillRef)
 		selection.Summary = strings.TrimSpace(selection.Summary)
 		if _, ok := allowedSkillRefs[selection.SkillRef]; !ok {
-			return nil, errors.New("turn host dispositioned an unauthorized Skill")
+			return nil, fmt.Errorf("turn host dispositioned unauthorized Skill reference %q", selection.SkillRef)
 		}
 		if _, duplicate := selected[selection.SkillRef]; duplicate {
 			return nil, errors.New("turn host dispositioned a Skill more than once")
