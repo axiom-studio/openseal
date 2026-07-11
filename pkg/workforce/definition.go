@@ -3,7 +3,11 @@
 // policy, credentials, or provider-specific behavior.
 package workforce
 
-import "time"
+import (
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+)
 
 type ObjectiveTemplate struct {
 	ID              string                 `json:"id"`
@@ -42,4 +46,18 @@ type SharedContextPolicy struct {
 	MaximumBytes     int64         `json:"maximumBytes,omitempty"`
 	AllowMemberRead  bool          `json:"allowMemberRead,omitempty"`
 	AllowMemberWrite bool          `json:"allowMemberWrite,omitempty"`
+}
+
+type DefinitionActivation struct {
+	ID                 string                    `json:"id"`
+	Scope              capability.ScopeReference `json:"scope"`
+	DeploymentID       string                    `json:"deploymentId"`
+	DefinitionID       string                    `json:"definitionId"`
+	FromVersion        string                    `json:"fromVersion,omitempty"`
+	ToVersion          string                    `json:"toVersion"`
+	DeploymentRevision int64                     `json:"deploymentRevision"`
+	Reason             string                    `json:"reason,omitempty"`
+	ActorType          string                    `json:"actorType"`
+	ActorID            string                    `json:"actorId"`
+	CreatedAt          time.Time                 `json:"createdAt"`
 }
