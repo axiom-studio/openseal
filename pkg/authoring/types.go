@@ -19,6 +19,10 @@ const (
 
 type SkillCapability struct {
 	ID              string               `json:"id"`
+	Version         string               `json:"version,omitempty"`
+	Name            string               `json:"name,omitempty"`
+	Description     string               `json:"description,omitempty"`
+	Actions         []string             `json:"actions,omitempty"`
 	CredentialKinds []string             `json:"credentialKinds,omitempty"`
 	MaximumRisk     capability.RiskLevel `json:"maximumRisk,omitempty"`
 }
