@@ -42,7 +42,7 @@ type ActivityProjection struct {
 	Visibility       ActivityVisibility     `json:"visibility"`
 	AgentID          string                 `json:"agentId,omitempty"`
 	ObjectiveID      string                 `json:"objectiveId,omitempty"`
-	RunID            string                 `json:"runId"`
+	RunID            string                 `json:"runId,omitempty"`
 	TurnID           string                 `json:"turnId,omitempty"`
 	ParentRunID      string                 `json:"parentRunId,omitempty"`
 	TeamID           string                 `json:"teamId,omitempty"`
