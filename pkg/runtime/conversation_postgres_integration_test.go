@@ -178,7 +178,6 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil || !expiredChanges.HasChanges || len(expiredChanges.Presence) != 0 {
 		t.Fatalf("replica presence expiry = %#v, err = %v", expiredChanges, err)
 	}
-
 	recoveryConversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Recovery channel", IdempotencyKey: "recovery-channel",
 	})
@@ -245,5 +244,27 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	active, err := restartedService.ListPresence(ctx, scope, conversation.ID)
 	if err != nil || len(active) != 0 {
 		t.Fatalf("expired presence = %#v, err = %v", active, err)
+	}
+	private, err := restartedService.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: restored.Revision,
+		Sender: agent, Intent: MessageIntentUpdate, Content: "Private deployment detail",
+		Audience:       ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantUser, ID: "reviewer"}}},
+		IdempotencyKey: "private-deployment-detail",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}}
+	descendingVisible, err := replicaService.ListChannelMessages(ctx, ChannelMessageFilter{
+		Scope: scope, ConversationID: conversation.ID, Descending: true, Limit: 1, Viewer: &operator,
+	})
+	if err != nil || len(descendingVisible) != 1 || descendingVisible[0].Sequence != private.Message.Sequence-1 {
+		t.Fatalf("PostgreSQL descending audience page = %#v, err = %v", descendingVisible, err)
+	}
+	olderVisible, err := replicaService.ListChannelMessages(ctx, ChannelMessageFilter{
+		Scope: scope, ConversationID: conversation.ID, Descending: true, BeforeSequence: descendingVisible[0].Sequence, Limit: 1, Viewer: &operator,
+	})
+	if err != nil || len(olderVisible) != 1 || olderVisible[0].Sequence != 1 {
+		t.Fatalf("PostgreSQL before-sequence page = %#v, err = %v", olderVisible, err)
 	}
 }
