@@ -218,7 +218,7 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))
 	}
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d Agents · %d roles · %d Team objectives", len(result.Candidate.Agents), roles, objectives)), "")
-	if len(result.Diff) > 0 || len(result.RiskChanges) > 0 {
+	if m.authoringAmendment && (len(result.Diff) > 0 || len(result.RiskChanges) > 0) {
 		widening := 0
 		for _, change := range result.RiskChanges {
 			if change.Widening {

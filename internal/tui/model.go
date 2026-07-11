@@ -108,6 +108,7 @@ type Model struct {
 	channelCapability        kernelapi.Capability
 	authoringCapability      kernelapi.Capability
 	authoringResult          *authoring.CompileResult
+	authoringAmendment       bool
 	runs                     []*runtime.AgentRun
 	objectives               []*runtime.Objective
 	objectiveSelected        int
@@ -143,6 +144,7 @@ type capabilitiesLoaded struct {
 
 type workforceCompiled struct {
 	result *authoring.CompileResult
+	mode   authoring.Mode
 	err    error
 }
 
@@ -341,6 +343,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.authoringResult = msg.result
+		m.authoringAmendment = msg.mode == authoring.ModeAmend
 		m.editor.Reset()
 		m.editor.Placeholder = "Describe what should change…"
 		m.status = "Workforce candidate compiled. Nothing has been activated."
@@ -700,7 +703,7 @@ func (m *Model) submitWorkforceAuthoring() tea.Cmd {
 	}
 	return func() tea.Msg {
 		result, err := m.client.CompileWorkforce(m.ctx, request)
-		return workforceCompiled{result: result, err: err}
+		return workforceCompiled{result: result, mode: request.Mode, err: err}
 	}
 }
 
