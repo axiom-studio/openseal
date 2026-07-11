@@ -16,7 +16,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v1"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v2"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
@@ -26,6 +26,22 @@ type HostedSkillPrompt struct {
 	Name         string `json:"name"`
 	Description  string `json:"description,omitempty"`
 	Instructions string `json:"instructions"`
+}
+
+type HostedSkillDisposition string
+
+const (
+	HostedSkillApplied    HostedSkillDisposition = "applied"
+	HostedSkillNotApplied HostedSkillDisposition = "not_applied"
+)
+
+// HostedSkillSelection is the exhaustive operator-facing disposition of one
+// prompt Skill offered to a hosted turn. It records capability choice without
+// storing hidden model reasoning.
+type HostedSkillSelection struct {
+	SkillRef    string                 `json:"skillRef"`
+	Disposition HostedSkillDisposition `json:"disposition"`
+	Summary     string                 `json:"summary"`
 }
 
 // HostedTurnRequest is the portable execution envelope sent to an Agent host.
@@ -53,6 +69,7 @@ type HostedTurnRequest struct {
 type HostedTurnResponse struct {
 	APIVersion             string                 `json:"apiVersion"`
 	InvocationID           string                 `json:"invocationId"`
+	SkillSelections        []HostedSkillSelection `json:"skillSelections,omitempty"`
 	Decisions              []TurnDecision         `json:"decisions,omitempty"`
 	ProposedActions        []TurnAction           `json:"proposedActions,omitempty"`
 	OutputSummary          string                 `json:"outputSummary"`
@@ -134,6 +151,30 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	for _, prompt := range request.SkillPrompts {
 		allowedSkillRefs["skill:"+prompt.SkillID+"@"+prompt.Version] = struct{}{}
 	}
+	if len(response.SkillSelections) != len(allowedSkillRefs) {
+		return nil, errors.New("turn host must disposition every offered Skill")
+	}
+	selectionDecisions := make([]TurnDecision, 0, len(response.SkillSelections))
+	selected := make(map[string]struct{}, len(response.SkillSelections))
+	for _, selection := range response.SkillSelections {
+		selection.SkillRef = strings.TrimSpace(selection.SkillRef)
+		selection.Summary = strings.TrimSpace(selection.Summary)
+		if _, ok := allowedSkillRefs[selection.SkillRef]; !ok {
+			return nil, errors.New("turn host dispositioned an unauthorized Skill")
+		}
+		if _, duplicate := selected[selection.SkillRef]; duplicate {
+			return nil, errors.New("turn host dispositioned a Skill more than once")
+		}
+		if selection.Summary == "" || (selection.Disposition != HostedSkillApplied && selection.Disposition != HostedSkillNotApplied) {
+			return nil, errors.New("turn host returned an invalid Skill disposition")
+		}
+		selected[selection.SkillRef] = struct{}{}
+		decision := TurnDecision{Summary: selection.Summary}
+		if selection.Disposition == HostedSkillApplied {
+			decision.EvidenceRefs = []string{selection.SkillRef}
+		}
+		selectionDecisions = append(selectionDecisions, decision)
+	}
 	for _, decision := range response.Decisions {
 		for _, evidenceRef := range decision.EvidenceRefs {
 			evidenceRef = strings.TrimSpace(evidenceRef)
@@ -146,7 +187,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		}
 	}
 	return &TurnOutcome{
-		Decisions: append([]TurnDecision(nil), response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
+		Decisions: append(selectionDecisions, response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
