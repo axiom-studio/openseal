@@ -122,7 +122,7 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 		report.Results[0].Version != "2.0.0" || report.Results[0].Outcome != ClawHubLifecycleOutcome("updated") {
 		t.Fatalf("updated report = %#v, %v", report, err)
 	}
-	removed, err := engine.UninstallClawHubSkill("acme/research", false)
+	removed, err := engine.UninstallClawHubSkill(installed.Reference.String(), false)
 	if err != nil || removed.Outcome != ClawHubLifecycleOutcome("removed") || removed.PreviousVersion != "2.0.0" {
 		t.Fatalf("uninstall result = %#v, %v", removed, err)
 	}
