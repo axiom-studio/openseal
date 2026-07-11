@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -16,6 +17,49 @@ type installRegistry struct {
 	version      string
 	archive      []byte
 	verification Verification
+}
+
+func TestInstallManagersSerializeOneSharedWorkspace(t *testing.T) {
+	registry := &installRegistry{version: "1.0.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"}, archive: createTestZip(t, map[string]string{"SKILL.md": "---\nname: shared\ndescription: safe\n---\nSafe."})}
+	workspace := t.TempDir()
+	first, err := NewInstallManager("https://registry.test", registry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewInstallManager("https://registry.test", registry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	failures := make(chan error, 2)
+	var wait sync.WaitGroup
+	for _, item := range []struct {
+		manager *InstallManager
+		ref     SkillReference
+	}{{first, SkillReference{Owner: "alice", Slug: "one"}}, {second, SkillReference{Owner: "bob", Slug: "two"}}} {
+		wait.Add(1)
+		go func(item struct {
+			manager *InstallManager
+			ref     SkillReference
+		}) {
+			defer wait.Done()
+			<-start
+			_, installErr := item.manager.Install(context.Background(), InstallRequest{Reference: item.ref})
+			failures <- installErr
+		}(item)
+	}
+	close(start)
+	wait.Wait()
+	close(failures)
+	for installErr := range failures {
+		if installErr != nil {
+			t.Fatal(installErr)
+		}
+	}
+	lock, err := first.List()
+	if err != nil || len(lock.Skills) != 2 {
+		t.Fatalf("shared lock = %#v, %v", lock, err)
+	}
 }
 
 func (r *installRegistry) SearchSkills(context.Context, SearchRequest) (*SkillPage, error) {

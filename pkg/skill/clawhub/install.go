@@ -133,6 +133,11 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := os.MkdirAll(m.skillsDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -332,6 +337,11 @@ func (m *InstallManager) VerifyInstalled(ctx context.Context, reference string) 
 func (m *InstallManager) LoadInstalled() ([]*InstalledSkill, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return nil, err
@@ -356,6 +366,11 @@ func (m *InstallManager) LoadInstalled() ([]*InstalledSkill, error) {
 func (m *InstallManager) ListInstalledStates() ([]InstalledState, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return nil, err
@@ -395,6 +410,11 @@ func (m *InstallManager) Pin(reference, reason string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return err
+	}
+	defer release()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
@@ -412,6 +432,11 @@ func (m *InstallManager) Pin(reference, reason string) error {
 func (m *InstallManager) Unpin(reference string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return err
+	}
+	defer release()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
@@ -429,6 +454,11 @@ func (m *InstallManager) Unpin(reference string) error {
 func (m *InstallManager) Uninstall(reference string, force bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	release, err := m.lockWorkspace()
+	if err != nil {
+		return err
+	}
+	defer release()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
