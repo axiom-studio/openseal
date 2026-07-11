@@ -46,6 +46,12 @@ type fakeKernelClient struct {
 	changeSetRequests []authoring.CreateChangeSetRequest
 	changeSetKeys     []string
 	changeSetErrors   []error
+	approvalRequests  []authoring.ResolveChangeSetApprovalRequest
+	approvalKeys      []string
+	applyRequests     []authoring.ApplyChangeSetRequest
+	applyKeys         []string
+	governanceResults []*authoring.ChangeSet
+	governanceErrors  []error
 }
 
 type fakeChannelKernelClient struct {
@@ -171,6 +177,10 @@ func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDo
 	return f.document, nil
 }
 
+func (f *fakeKernelClient) WorkforceChangeSetCapabilities(context.Context, capability.ScopeReference, string) (kernelapi.CapabilityDocument, error) {
+	return f.document, nil
+}
+
 func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
 	f.authoringRequests = append(f.authoringRequests, request)
 	if len(f.authoringErrors) > 0 {
@@ -204,7 +214,42 @@ func (f *fakeKernelClient) CreateWorkforceChangeSet(_ context.Context, request a
 }
 
 func (f *fakeKernelClient) GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error) {
+	if len(f.governanceResults) > 0 {
+		return f.governanceResults[0], nil
+	}
 	return nil, authoring.ErrChangeSetNotFound
+}
+
+func (f *fakeKernelClient) EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error) {
+	return nil, errors.New("policy evaluation is not initiated by the TUI")
+}
+
+func (f *fakeKernelClient) ResolveWorkforceChangeSetApproval(_ context.Context, request authoring.ResolveChangeSetApprovalRequest, key string) (*authoring.ChangeSet, error) {
+	f.approvalRequests = append(f.approvalRequests, request)
+	f.approvalKeys = append(f.approvalKeys, key)
+	return f.nextGovernanceResult()
+}
+
+func (f *fakeKernelClient) ApplyWorkforceChangeSet(_ context.Context, request authoring.ApplyChangeSetRequest, key string) (*authoring.ChangeSet, error) {
+	f.applyRequests = append(f.applyRequests, request)
+	f.applyKeys = append(f.applyKeys, key)
+	return f.nextGovernanceResult()
+}
+
+func (f *fakeKernelClient) nextGovernanceResult() (*authoring.ChangeSet, error) {
+	if len(f.governanceErrors) > 0 {
+		err := f.governanceErrors[0]
+		f.governanceErrors = f.governanceErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(f.governanceResults) == 0 {
+		return nil, errors.New("no governance result")
+	}
+	result := f.governanceResults[0]
+	f.governanceResults = f.governanceResults[1:]
+	return result, nil
 }
 
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
@@ -506,6 +551,69 @@ func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
 	}
 	if model.authoringChangeSet == nil || model.authoringChangeSet.ID != amended.ID || !model.authoringAmendment || !strings.Contains(model.View(), "1 field changes") {
 		t.Fatalf("durable refinement was not rendered: changeSet=%#v\n%s", model.authoringChangeSet, model.View())
+	}
+}
+
+func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	evaluation := authoring.ChangeSetEvaluation{ID: "evaluation-1", Allowed: true, ApprovalRequirements: []authoring.ChangeSetApprovalRequirement{{PolicyID: "production", Role: "operator", Count: 1}, {PolicyID: "outreach", Role: "reviewer", Count: 1}}}
+	awaiting := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetAwaitingApproval, Revision: 2, CandidateDigest: "digest-1", Evaluations: []authoring.ChangeSetEvaluation{evaluation}, Result: authoring.CompileResult{Valid: true}}
+	ready := *awaiting
+	ready.Status, ready.Revision = authoring.ChangeSetReady, 3
+	applied := ready
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 4
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-1", CandidateDigest: ready.CandidateDigest, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "user", ID: "server-operator"}, AppliedAt: time.Now(), Resources: []authoring.AppliedResourceReference{{Kind: "agent_definition", ID: "researcher", Version: "1"}, {Kind: "team_deployment", ID: "research-live", Revision: 1}}}
+	approvalCapability := kernelapi.WorkforceAuthoringCapability(true)
+	approvalCapability.Operations = append(approvalCapability.Operations, kernelapi.OperationApprove)
+	approvalCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: awaiting.ID, Revision: awaiting.Revision, EligibleApprovalRequirements: []kernelapi.ApprovalRequirementReference{
+		{EvaluationID: evaluation.ID, PolicyID: "production", Role: "operator"},
+		{EvaluationID: evaluation.ID, PolicyID: "outreach", Role: "reviewer"},
+	}}
+	fake := &fakeKernelClient{
+		document:          kernelapi.NewCapabilityDocument(approvalCapability),
+		governanceErrors:  []error{errors.New("temporary disconnect"), nil, nil},
+		governanceResults: []*authoring.ChangeSet{&ready, &applied},
+	}
+	model := newTestModel(t, fake)
+	model.authoringChangeSet, model.authoringResult = awaiting, &awaiting.Result
+	applyCommand(t, model, model.loadCapabilities())
+	if !strings.Contains(model.View(), "outreach / reviewer") || !strings.Contains(model.View(), "production / operator") {
+		t.Fatalf("eligible requirements not rendered:\n%s", model.View())
+	}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if model.authoringApprovalSelected != 1 {
+		t.Fatalf("selected requirement = %d", model.authoringApprovalSelected)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model.editor.SetValue("Reviewed external outreach boundaries")
+	applyCommand(t, model, model.submitWorkforceApproval(true))
+	if model.editor.Value() == "" || model.pendingGovernanceKey == "" {
+		t.Fatal("failed approval did not preserve reason and retry identity")
+	}
+	firstKey := model.pendingGovernanceKey
+	applyCapability := kernelapi.WorkforceAuthoringCapability(true)
+	applyCapability.Operations = append(applyCapability.Operations, kernelapi.OperationApply)
+	applyCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: ready.ID, Revision: ready.Revision}
+	fake.document = kernelapi.NewCapabilityDocument(applyCapability)
+	applyCommand(t, model, model.submitWorkforceApproval(true))
+	if len(fake.approvalRequests) != 2 || fake.approvalKeys[0] != firstKey || fake.approvalKeys[1] != firstKey || fake.approvalRequests[1].PolicyID != "outreach" || fake.approvalRequests[1].Role != "reviewer" || fake.approvalRequests[1].EvaluationID != evaluation.ID {
+		t.Fatalf("approval requests=%#v keys=%#v", fake.approvalRequests, fake.approvalKeys)
+	}
+	if fake.approvalRequests[1].PolicyID == "production" {
+		t.Fatal("TUI submitted an unselected requirement")
+	}
+	if !model.canApplyWorkforce() || !strings.Contains(model.View(), "Enter create this exact reviewed workforce") {
+		t.Fatalf("ready Apply was not capability gated:\n%s", model.View())
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model.editor.SetValue("Create the reviewed workforce")
+	applyCommand(t, model, model.submitWorkforceApply())
+	if len(fake.applyRequests) != 1 || fake.applyRequests[0].ExpectedRevision != ready.Revision || fake.applyRequests[0].CandidateDigest != ready.CandidateDigest || fake.applyRequests[0].Reason != "Create the reviewed workforce" || fake.applyKeys[0] == "" {
+		t.Fatalf("Apply requests=%#v keys=%#v", fake.applyRequests, fake.applyKeys)
+	}
+	if !strings.Contains(model.View(), "Created atomically") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") {
+		t.Fatalf("Apply receipt was not rendered:\n%s", model.View())
 	}
 }
 
