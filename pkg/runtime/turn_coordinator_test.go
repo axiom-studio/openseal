@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T) {
@@ -124,10 +125,16 @@ func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
 	first, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
 	}, runner)
-	if !errors.Is(err, ErrTurnHostUnavailable) || first.Run.Status != AgentRunStatusQueued || first.Turn.Status != AgentTurnStatusRunning || first.Turn.LeaseOwner != "" || first.Event.EventType != "turn.retry_scheduled" {
+	if !errors.Is(err, ErrTurnHostUnavailable) || first.Run.Status != AgentRunStatusSleeping || first.Run.WakeCondition == nil || first.Run.WakeCondition.Reference != "hosted-turn-retry" || first.Turn.Status != AgentTurnStatusRunning || first.Turn.LeaseOwner != "" || first.Event.EventType != "turn.retry_scheduled" {
 		t.Fatalf("retry result=%#v err=%v", first, err)
 	}
-	claimed, err = NewAgentRunScheduler(store).ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
+	retryNow := first.Run.WakeCondition.WakeAt.Add(time.Second)
+	if _, err := NewAgentRunWakeService(store, store).WakeDueTimers(ctx, scope, retryNow); err != nil {
+		t.Fatal(err)
+	}
+	retryScheduler := NewAgentRunScheduler(store)
+	retryScheduler.now = func() time.Time { return retryNow }
+	claimed, err = retryScheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("retry claim=%#v err=%v", claimed, err)
 	}
