@@ -21,15 +21,19 @@ import (
 )
 
 type fakeKernelClient struct {
-	document       kernelapi.CapabilityDocument
-	runs           []*runtime.AgentRun
-	createErrors   []error
-	createKeys     []string
-	createRequests []kernelapi.CreateAgentRunRequest
-	commands       []kernelapi.AgentRunCommandRequest
-	artifacts      []*runtime.Artifact
-	downloadBody   string
-	downloadCalls  int
+	document         kernelapi.CapabilityDocument
+	runs             []*runtime.AgentRun
+	createErrors     []error
+	createKeys       []string
+	createRequests   []kernelapi.CreateAgentRunRequest
+	objectives       []*runtime.Objective
+	objectiveKeys    []string
+	objectiveCreates []kernelapi.CreateObjectiveRequest
+	objectiveUpdates []kernelapi.UpdateObjectiveRequest
+	commands         []kernelapi.AgentRunCommandRequest
+	artifacts        []*runtime.Artifact
+	downloadBody     string
+	downloadCalls    int
 }
 
 type fakeChannelKernelClient struct {
@@ -155,6 +159,44 @@ func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDo
 	return f.document, nil
 }
 
+func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
+	f.objectiveKeys = append(f.objectiveKeys, key)
+	f.objectiveCreates = append(f.objectiveCreates, request)
+	objective := &runtime.Objective{
+		ID: "objective-created", Scope: request.Scope, Owner: request.Owner, Title: request.Title, Goal: request.Goal,
+		Status: request.Status, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	f.objectives = append([]*runtime.Objective{objective}, f.objectives...)
+	return objective, nil
+}
+
+func (f *fakeKernelClient) ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error) {
+	return f.objectives, nil
+}
+
+func (f *fakeKernelClient) GetObjective(_ context.Context, _ runtime.Scope, id string) (*kernelapi.ObjectiveDetail, error) {
+	for _, objective := range f.objectives {
+		if objective.ID == id {
+			return &kernelapi.ObjectiveDetail{Objective: objective, Runs: f.runs}, nil
+		}
+	}
+	return nil, runtime.ErrObjectiveNotFound
+}
+
+func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error) {
+	f.objectiveUpdates = append(f.objectiveUpdates, request)
+	for _, objective := range f.objectives {
+		if objective.ID == id {
+			if request.Goal != nil {
+				objective.Goal = *request.Goal
+			}
+			objective.Revision++
+			return objective, nil
+		}
+	}
+	return nil, runtime.ErrObjectiveNotFound
+}
+
 func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*runtime.AgentRunCommandResult, error) {
 	f.createKeys = append(f.createKeys, key)
 	f.createRequests = append(f.createRequests, request)
@@ -271,6 +313,34 @@ func TestCreateRetryPreservesIdempotencyAndPrompt(t *testing.T) {
 	}
 	if fake.createRequests[0].AssignedAgentID != "operator" || fake.createRequests[0].Source != runtime.RunSourceManual {
 		t.Fatalf("create request = %#v", fake.createRequests[0])
+	}
+}
+
+func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
+	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if !model.objectiveCapability.Available || model.section != sectionObjectives || !strings.Contains(model.View(), "Objective portfolio") {
+		t.Fatalf("objective capability was not rendered:\n%s", model.View())
+	}
+	model.mode = modeObjectiveCreate
+	model.focusComposerEditor()
+	model.editor.SetValue("Monitor competitor pain points\nContinuously synthesize cited findings.")
+	applyCommand(t, model, model.submitObjective())
+	if len(fake.objectiveCreates) != 1 || fake.objectiveKeys[0] == "" || fake.objectiveCreates[0].Title != "Monitor competitor pain points" ||
+		fake.objectiveCreates[0].Status != runtime.ObjectiveStatusActive {
+		t.Fatalf("objective create = %#v keys=%#v", fake.objectiveCreates, fake.objectiveKeys)
+	}
+	if model.selectedObjectiveRecord() == nil || model.selectedObjectiveRecord().ID != "objective-created" {
+		t.Fatalf("selected objective = %#v", model.selectedObjectiveRecord())
+	}
+	model.mode = modeObjectiveEdit
+	model.focusComposerEditor()
+	model.editor.SetValue("Monitor competitor pain points and publish a weekly cited report.")
+	applyCommand(t, model, model.submitObjectiveAmendment())
+	if len(fake.objectiveUpdates) != 1 || fake.objectiveUpdates[0].ExpectedRevision != 1 ||
+		fake.objectiveUpdates[0].Goal == nil || !strings.Contains(*fake.objectiveUpdates[0].Goal, "weekly") {
+		t.Fatalf("objective update = %#v", fake.objectiveUpdates)
 	}
 }
 

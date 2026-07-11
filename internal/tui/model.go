@@ -65,7 +65,8 @@ const (
 type panelSection int
 
 const (
-	sectionRuns panelSection = iota
+	sectionObjectives panelSection = iota
+	sectionRuns
 	sectionArtifacts
 	sectionChannels
 )
@@ -77,6 +78,8 @@ const (
 	modeGuide
 	modeChannelCreate
 	modeChannelPost
+	modeObjectiveCreate
+	modeObjectiveEdit
 )
 
 type Model struct {
@@ -97,9 +100,13 @@ type Model struct {
 	err                      error
 	status                   string
 	runCapability            kernelapi.Capability
+	objectiveCapability      kernelapi.Capability
 	artifactCapability       kernelapi.Capability
 	channelCapability        kernelapi.Capability
 	runs                     []*runtime.AgentRun
+	objectives               []*runtime.Objective
+	objectiveSelected        int
+	selectedObjective        string
 	selected                 int
 	selectedID               string
 	artifacts                []*runtime.Artifact
@@ -115,6 +122,8 @@ type Model struct {
 	channelAuditExpanded     bool
 	pendingKey               string
 	pendingGoal              string
+	pendingObjectiveKey      string
+	pendingObjectivePrompt   string
 	pendingConversationKey   string
 	pendingConversationTitle string
 	pendingMessageKey        string
@@ -130,6 +139,21 @@ type capabilitiesLoaded struct {
 type runsLoaded struct {
 	runs []*runtime.AgentRun
 	err  error
+}
+
+type objectivesLoaded struct {
+	objectives []*runtime.Objective
+	err        error
+}
+
+type objectiveCreated struct {
+	objective *runtime.Objective
+	err       error
+}
+
+type objectiveUpdated struct {
+	objective *runtime.Objective
+	err       error
 }
 
 type artifactsLoaded struct {
@@ -207,7 +231,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	editor.Focus()
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
-		focus: focusComposer, section: sectionRuns, width: 100, height: 30,
+		focus: focusComposer, section: sectionObjectives, mode: modeObjectiveCreate, width: 100, height: 30,
 		conversationClient: conversationClient(kernelClient),
 	}, nil
 }
@@ -247,13 +271,18 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.TeamChannelsCapabilityID, kernelapi.TeamChannelsCapabilityVersion)
 		m.runCapability = runCapability
+		m.objectiveCapability = objectiveCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
+		}
+		if !hasObjectives || !objectiveCapability.Available {
+			m.objectiveCapability = kernelapi.Capability{}
 		}
 		if !hasArtifacts || !artifactCapability.Available {
 			m.artifactCapability = kernelapi.Capability{}
@@ -261,22 +290,35 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasChannels || !channelCapability.Available || m.conversationClient == nil {
 			m.channelCapability = kernelapi.Capability{}
 		}
-		if !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available {
-			m.unavailable = "This server does not advertise canonical work, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available {
+			m.unavailable = "This server does not advertise objectives, canonical work, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
 		m.ready = true
 		m.unavailable = ""
 		m.err = nil
-		if !m.runCapability.Available && m.channelCapability.Available {
+		if !m.objectiveCapability.Available && m.runCapability.Available {
+			m.section = sectionRuns
+			m.mode = modeCreate
+		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.channelCapability.Available {
 			m.section = sectionChannels
 			m.focusPanelList()
-		} else if !m.runCapability.Available && m.artifactCapability.Available {
+		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.artifactCapability.Available {
 			m.section = sectionArtifacts
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadObjectives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+	case objectivesLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.objectives = msg.objectives
+		m.restoreObjectiveSelection()
+		return m, nil
 	case runsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -387,6 +429,35 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.section = sectionRuns
 		m.focusPanelList()
 		return m, m.loadRuns()
+	case objectiveCreated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Objective creation failed. Your prompt is preserved for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.pendingObjectiveKey, m.pendingObjectivePrompt = "", ""
+		m.editor.Reset()
+		m.selectedObjective = msg.objective.ID
+		m.status = "Objective added to the durable portfolio."
+		m.section = sectionObjectives
+		m.focusPanelList()
+		return m, m.loadObjectives()
+	case objectiveUpdated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "The objective changed elsewhere. Refresh and try again."
+			return m, m.loadObjectives()
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.selectedObjective = msg.objective.ID
+		m.status = "Objective amended and revision recorded."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, m.loadObjectives()
 	case runCommanded:
 		m.busy = false
 		if msg.err != nil {
@@ -406,7 +477,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadObjectives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -453,6 +524,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitConversation()
 			case modeChannelPost:
 				return m, m.submitChannelMessage()
+			case modeObjectiveCreate:
+				return m, m.submitObjective()
+			case modeObjectiveEdit:
+				return m, m.submitObjectiveAmendment()
 			default:
 				return m, m.submitRun()
 			}
@@ -475,6 +550,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.runCapability.Available {
 				m.section = sectionRuns
 			}
+		case "o":
+			if m.objectiveCapability.Available {
+				m.section = sectionObjectives
+			}
 		case "a":
 			if m.artifactCapability.Available {
 				m.section = sectionArtifacts
@@ -489,6 +568,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeChannelCreate
 				m.editor.Reset()
 				m.editor.Placeholder = "Name the Team channel…"
+				m.focusComposerEditor()
+			} else if m.section == sectionObjectives && m.supportsObjective(kernelapi.OperationCreate) {
+				m.mode = modeObjectiveCreate
+				m.editor.Reset()
+				m.editor.Placeholder = "Describe the objective and desired outcome…"
 				m.focusComposerEditor()
 			} else if m.section == sectionRuns && m.supportsRun(kernelapi.OperationCreate) {
 				m.mode = modeCreate
@@ -522,7 +606,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "e", "enter":
-			if m.section == sectionArtifacts && m.selectedArtifactRecord() != nil {
+			if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
+				m.mode = modeObjectiveEdit
+				m.editor.Reset()
+				m.editor.Placeholder = "Describe the amended objective…"
+				m.focusComposerEditor()
+			} else if m.section == sectionArtifacts && m.selectedArtifactRecord() != nil {
 				m.artifactExpanded = !m.artifactExpanded
 			} else if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationAudit) && len(m.channelRounds) > 0 {
 				m.channelAuditExpanded = !m.channelAuditExpanded
@@ -558,6 +647,17 @@ func (m *Model) loadRuns() tea.Cmd {
 			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
 		})
 		return runsLoaded{runs: runs, err: err}
+	}
+}
+
+func (m *Model) loadObjectives() tea.Cmd {
+	if !m.supportsObjective(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		objectives, err := m.client.ListObjectives(m.ctx, runtime.ObjectiveFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
+		return objectivesLoaded{objectives: objectives, err: err}
 	}
 }
 
@@ -624,6 +724,9 @@ func (m *Model) loadSelectedConversation() tea.Cmd {
 }
 
 func (m *Model) loadPanel() tea.Cmd {
+	if m.section == sectionObjectives {
+		return m.loadObjectives()
+	}
 	if m.section == sectionChannels {
 		return m.loadConversations()
 	}
@@ -631,6 +734,49 @@ func (m *Model) loadPanel() tea.Cmd {
 		return m.loadArtifacts()
 	}
 	return m.loadRuns()
+}
+
+func (m *Model) submitObjective() tea.Cmd {
+	prompt := strings.TrimSpace(m.editor.Value())
+	if !m.supportsObjective(kernelapi.OperationCreate) || m.busy || prompt == "" {
+		if prompt == "" {
+			m.status = "Describe the objective before adding it."
+		}
+		return nil
+	}
+	if m.pendingObjectiveKey == "" || m.pendingObjectivePrompt != prompt {
+		m.pendingObjectiveKey, m.pendingObjectivePrompt = uuid.NewString(), prompt
+	}
+	key := m.pendingObjectiveKey
+	m.busy = true
+	m.err = nil
+	m.status = "Adding objective to the durable portfolio…"
+	request := kernelapi.CreateObjectiveRequest{
+		Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Goal: prompt, Status: runtime.ObjectiveStatusActive,
+	}
+	return func() tea.Msg {
+		objective, err := m.client.CreateObjective(m.ctx, request, key)
+		return objectiveCreated{objective: objective, err: err}
+	}
+}
+
+func (m *Model) submitObjectiveAmendment() tea.Cmd {
+	objective := m.selectedObjectiveRecord()
+	goal := strings.TrimSpace(m.editor.Value())
+	if objective == nil || !m.supportsObjective(kernelapi.OperationUpdate) || m.busy || goal == "" {
+		if goal == "" {
+			m.status = "Describe the amended objective."
+		}
+		return nil
+	}
+	m.busy = true
+	m.err = nil
+	m.status = "Recording objective amendment…"
+	request := kernelapi.UpdateObjectiveRequest{ExpectedRevision: objective.Revision, Goal: &goal}
+	return func() tea.Msg {
+		updated, err := m.client.UpdateObjective(m.ctx, m.config.Scope, objective.ID, request)
+		return objectiveUpdated{objective: updated, err: err}
+	}
 }
 
 func (m *Model) submitConversation() tea.Cmd {
@@ -799,6 +945,10 @@ func (m *Model) supportsRun(operation string) bool {
 	return m.ready && m.runCapability.Supports(operation)
 }
 
+func (m *Model) supportsObjective(operation string) bool {
+	return m.ready && m.objectiveCapability.Supports(operation)
+}
+
 func (m *Model) supportsArtifact(operation string) bool {
 	return m.ready && m.artifactCapability.Supports(operation)
 }
@@ -830,6 +980,39 @@ func (m *Model) selectedRun() *runtime.AgentRun {
 		return nil
 	}
 	return m.runs[m.selected]
+}
+
+func (m *Model) selectedObjectiveRecord() *runtime.Objective {
+	if m.objectiveSelected < 0 || m.objectiveSelected >= len(m.objectives) {
+		return nil
+	}
+	return m.objectives[m.objectiveSelected]
+}
+
+func (m *Model) restoreObjectiveSelection() {
+	if len(m.objectives) == 0 {
+		m.objectiveSelected = 0
+		m.selectedObjective = ""
+		return
+	}
+	if m.selectedObjective != "" {
+		for index, objective := range m.objectives {
+			if objective.ID == m.selectedObjective {
+				m.objectiveSelected = index
+				return
+			}
+		}
+	}
+	m.objectiveSelected = min(m.objectiveSelected, len(m.objectives)-1)
+	m.selectedObjective = m.objectives[m.objectiveSelected].ID
+}
+
+func (m *Model) moveObjectiveSelection(delta int) {
+	if len(m.objectives) == 0 {
+		return
+	}
+	m.objectiveSelected = max(0, min(len(m.objectives)-1, m.objectiveSelected+delta))
+	m.selectedObjective = m.objectives[m.objectiveSelected].ID
 }
 
 func (m *Model) restoreSelection() {
@@ -895,6 +1078,10 @@ func (m *Model) moveArtifactSelection(delta int) {
 }
 
 func (m *Model) movePanelSelection(delta int) {
+	if m.section == sectionObjectives {
+		m.moveObjectiveSelection(delta)
+		return
+	}
 	if m.section == sectionChannels {
 		m.moveConversationSelection(delta)
 		return
@@ -977,6 +1164,10 @@ func (m *Model) focusComposerEditor() {
 
 func (m *Model) prepareComposerForSection() {
 	switch {
+	case m.section == sectionObjectives && m.supportsObjective(kernelapi.OperationCreate):
+		m.mode = modeObjectiveCreate
+		m.editor.Placeholder = "Describe the objective and desired outcome…"
+		m.focusComposerEditor()
 	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -993,6 +1184,11 @@ func (m *Model) prepareComposerForSection() {
 }
 
 func (m *Model) resetComposerMode() {
+	if m.section == sectionObjectives {
+		m.mode = modeObjectiveCreate
+		m.editor.Placeholder = "Describe the objective and desired outcome…"
+		return
+	}
 	if m.section == sectionChannels && m.selectedConversationRecord() != nil {
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -1000,6 +1196,14 @@ func (m *Model) resetComposerMode() {
 	}
 	m.mode = modeCreate
 	m.editor.Placeholder = "Describe the outcome you want…"
+}
+
+func objectiveTitle(prompt string) string {
+	title := strings.TrimSpace(strings.SplitN(prompt, "\n", 2)[0])
+	if len(title) > 120 {
+		title = strings.TrimSpace(title[:120])
+	}
+	return title
 }
 
 func (m *Model) operatorParticipant() runtime.ConversationParticipant {

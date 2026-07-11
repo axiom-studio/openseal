@@ -54,13 +54,19 @@ func (m *Model) render() string {
 }
 
 func (m *Model) renderHeader(width int) string {
-	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Work, Channels & Evidence")
+	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Objectives, Work, Channels & Evidence")
 	connection := mutedStyle.Render(fmt.Sprintf("%s · %s/%s", m.config.Endpoint, m.config.Scope.Kind, m.config.Scope.ID))
 	space := max(1, width-lipgloss.Width(title)-lipgloss.Width(connection))
 	return title + strings.Repeat(" ", space) + connection
 }
 
 func (m *Model) renderComposer(width int) string {
+	if m.mode == modeObjectiveCreate && !m.supportsObjective(kernelapi.OperationCreate) {
+		return m.renderUnavailableComposer(width, "Add an objective", "This server does not advertise objective creation.")
+	}
+	if m.mode == modeObjectiveEdit && !m.supportsObjective(kernelapi.OperationUpdate) {
+		return m.renderUnavailableComposer(width, "Amend objective", "This server does not advertise objective updates.")
+	}
 	if m.mode == modeChannelCreate && !m.supportsChannel(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Create a Team channel", "This server does not advertise channel creation.")
 	}
@@ -89,6 +95,12 @@ func (m *Model) renderComposer(width int) string {
 		if conversation := m.selectedConversationRecord(); conversation != nil {
 			owner = "In #" + conversation.Title
 		}
+	case modeObjectiveCreate:
+		title = "Add an objective"
+		description = "Describe a durable outcome. This owner can pursue several objectives concurrently."
+	case modeObjectiveEdit:
+		title = "Amend selected objective"
+		description = "Record a new goal revision without losing its runs, budget, or audit history."
 	}
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
@@ -106,7 +118,9 @@ func (m *Model) renderUnavailableComposer(width int, title, message string) stri
 func (m *Model) renderPanel(width int) string {
 	tabs := m.renderPanelTabs()
 	var content string
-	if m.section == sectionChannels {
+	if m.section == sectionObjectives {
+		content = m.renderObjectivesContent(width)
+	} else if m.section == sectionChannels {
 		content = m.renderChannelsContent(width)
 	} else if m.section == sectionArtifacts {
 		content = m.renderArtifactsContent(width)
@@ -117,7 +131,16 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 3)
+	tabs := make([]string, 0, 4)
+	if m.objectiveCapability.Available {
+		label := "o Objectives"
+		if m.section == sectionObjectives {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
 	if m.runCapability.Available {
 		label := "w Work"
 		if m.section == sectionRuns {
@@ -146,6 +169,43 @@ func (m *Model) renderPanelTabs() string {
 		tabs = append(tabs, label)
 	}
 	return strings.Join(tabs, "  ")
+}
+
+func (m *Model) renderObjectivesContent(width int) string {
+	title := headerStyle.Render("Objective portfolio")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.objectives) == 0 {
+		lines = append(lines, mutedStyle.Render("No objectives yet. Add an outcome this Agent or Team should own."))
+	} else {
+		visible := max(3, min(len(m.objectives), max(m.height-18, 5)))
+		start := max(0, min(m.objectiveSelected-visible/2, len(m.objectives)-visible))
+		for index := start; index < min(len(m.objectives), start+visible); index++ {
+			objective := m.objectives[index]
+			prefix := "  "
+			style := lipgloss.NewStyle().Foreground(text)
+			if index == m.objectiveSelected {
+				prefix = "› "
+				style = selectedStyle
+			}
+			line := fmt.Sprintf("%s%-10s %s", prefix, string(objective.Status), compact(objective.Title, max(width-18, 20)))
+			lines = append(lines, style.Render(line))
+		}
+	}
+	if objective := m.selectedObjectiveRecord(); objective != nil {
+		lines = append(lines, "", mutedStyle.Render("Selected"), compact(objective.Goal, max(width-8, 24)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", objective.Revision, relativeTime(objective.UpdatedAt))))
+		if objective.Budget != nil {
+			allocated := len(objective.BudgetAllocations)
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Bounded autonomy · %d run allocation(s)", allocated)))
+		}
+		if m.supportsObjective(kernelapi.OperationUpdate) {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter amend  ·  n add objective"))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderRunsContent(width int) string {
