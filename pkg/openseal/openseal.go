@@ -390,6 +390,14 @@ type (
 	ClawHubVersionPage                 = clawhub.VersionPage
 	ClawHubVersionDetail               = clawhub.VersionDetail
 	ClawHubDownloadedArchive           = clawhub.DownloadedArchive
+	ClawHubLockEntry                   = clawhub.LockEntry
+	ClawHubLockfile                    = clawhub.Lockfile
+	ClawHubLifecycleOperation          = clawhub.LifecycleOperation
+	ClawHubLifecycleOutcome            = clawhub.LifecycleOutcome
+	ClawHubLifecycleErrorCode          = clawhub.LifecycleErrorCode
+	ClawHubLifecycleCapability         = clawhub.LifecycleCapability
+	ClawHubLifecycleResult             = clawhub.LifecycleResult
+	ClawHubLifecycleBatchResult        = clawhub.LifecycleBatchResult
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -2168,8 +2176,10 @@ func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.Instal
 	if err != nil {
 		return nil, err
 	}
-	if err := e.activateInstalledSkill(ctx, installed); err != nil {
-		return nil, err
+	if installed.Changed {
+		if err := e.activateInstalledSkill(ctx, installed); err != nil {
+			return nil, err
+		}
 	}
 	return installed, nil
 }
@@ -2182,8 +2192,10 @@ func (e *Engine) UpdateClawHubSkill(ctx context.Context, slug string) (*clawhub.
 	if err != nil {
 		return nil, err
 	}
-	if err := e.activateInstalledSkill(ctx, installed); err != nil {
-		return nil, err
+	if installed.Changed {
+		if err := e.activateInstalledSkill(ctx, installed); err != nil {
+			return nil, err
+		}
 	}
 	return installed, nil
 }
@@ -2207,4 +2219,140 @@ func (e *Engine) UnpinClawHubSkill(slug string) error {
 		return fmt.Errorf("ClawHub registry is not configured")
 	}
 	return e.clawHub.Unpin(slug)
+}
+
+func (e *Engine) ClawHubLifecycleCapabilities() clawhub.LifecycleCapability {
+	capability := clawhub.CanonicalLifecycleCapability()
+	if e == nil || e.clawHub == nil || e.clawHubRegistry == nil {
+		capability.Operations = nil
+	}
+	return capability
+}
+
+func (e *Engine) ListInstalledClawHubSkills() ([]*clawhub.InstalledSkill, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHub.LoadInstalled()
+}
+
+// UpdateAllClawHubSkills deliberately reuses UpdateClawHubSkill so every
+// candidate passes the Engine's compiler validation and activation path. A
+// batch result is complete and deterministic even when individual skills are
+// pinned, modified, unavailable, or invalid.
+func (e *Engine) UpdateAllClawHubSkills(ctx context.Context) (*clawhub.LifecycleBatchResult, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	lock, err := e.clawHub.List()
+	if err != nil {
+		return nil, err
+	}
+	result := &clawhub.LifecycleBatchResult{
+		APIVersion: clawhub.LifecycleAPIVersion,
+		Operation:  clawhub.LifecycleUpdateAll,
+		Results:    make([]clawhub.LifecycleResult, 0, len(lock.Skills)),
+	}
+	for identity, entry := range lock.Skills {
+		item := clawhub.LifecycleResult{
+			APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleUpdate,
+			SourceIdentity: identity,
+			Reference:      clawhub.SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug},
+		}
+		if entry.Version != nil {
+			item.PreviousVersion = *entry.Version
+		}
+		if entry.Pinned {
+			item.Version, item.Outcome, item.Reason = item.PreviousVersion, clawhub.LifecycleOutcomeSkipped, "pinned"
+			result.Results = append(result.Results, item)
+			continue
+		}
+		updateReference := entry.Slug
+		if entry.OwnerHandle != "" {
+			updateReference = entry.OwnerHandle + "/" + entry.Slug
+		}
+		installed, updateErr := e.UpdateClawHubSkill(ctx, updateReference)
+		if updateErr != nil {
+			item.Version, item.Outcome, item.ErrorCode = item.PreviousVersion, clawhub.LifecycleOutcomeError, clawHubLifecycleErrorCode(updateErr)
+			result.Results = append(result.Results, item)
+			continue
+		}
+		item.Version, item.Changed = installed.Version, installed.Changed
+		if installed.Changed {
+			item.Outcome = clawhub.LifecycleOutcomeUpdated
+		} else {
+			item.Outcome = clawhub.LifecycleOutcomeUnchanged
+		}
+		result.Results = append(result.Results, item)
+	}
+	result.Sort()
+	return result, nil
+}
+
+func clawHubLifecycleErrorCode(err error) clawhub.LifecycleErrorCode {
+	switch {
+	case errors.Is(err, clawhub.ErrSkillPinned):
+		return clawhub.LifecycleErrorPinned
+	case errors.Is(err, clawhub.ErrSkillModified):
+		return clawhub.LifecycleErrorModified
+	case errors.Is(err, clawhub.ErrVerificationFailed):
+		return clawhub.LifecycleErrorVerificationFailed
+	case errors.Is(err, clawhub.ErrNotFound):
+		return clawhub.LifecycleErrorNotFound
+	case errors.Is(err, clawhub.ErrAmbiguousSkill):
+		return clawhub.LifecycleErrorAmbiguous
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return clawhub.LifecycleErrorCanceled
+	default:
+		return clawhub.LifecycleErrorUnavailable
+	}
+}
+
+func (e *Engine) UninstallClawHubSkill(reference string, force bool) (*clawhub.LifecycleResult, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	lock, err := e.clawHub.List()
+	if err != nil {
+		return nil, err
+	}
+	identity, entry, err := resolveClawHubLifecycleEntry(lock, reference)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.clawHub.Uninstall(reference, force); err != nil {
+		return nil, err
+	}
+	result := &clawhub.LifecycleResult{
+		APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleUninstall,
+		SourceIdentity: identity, Reference: clawhub.SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug},
+		Outcome: clawhub.LifecycleOutcomeRemoved, Changed: true,
+	}
+	if entry.Version != nil {
+		result.PreviousVersion = *entry.Version
+	}
+	return result, nil
+}
+
+func resolveClawHubLifecycleEntry(lock clawhub.Lockfile, reference string) (string, clawhub.LockEntry, error) {
+	reference = strings.TrimSpace(reference)
+	if entry, ok := lock.Skills[reference]; ok {
+		return reference, entry, nil
+	}
+	var identity string
+	var resolved clawhub.LockEntry
+	for candidate, entry := range lock.Skills {
+		qualified := strings.Trim(strings.TrimSpace(entry.OwnerHandle)+"/"+strings.TrimSpace(entry.Slug), "/")
+		if reference != entry.Slug && !strings.EqualFold(reference, qualified) {
+			continue
+		}
+		if identity != "" {
+			return "", clawhub.LockEntry{}, clawhub.ErrAmbiguousSkill
+		}
+		identity, resolved = candidate, entry
+	}
+	if identity == "" {
+		return "", clawhub.LockEntry{}, clawhub.ErrNotFound
+	}
+	return identity, resolved, nil
 }
