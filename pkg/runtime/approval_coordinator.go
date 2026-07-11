@@ -120,6 +120,11 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 		}
 	}
 	updatedRun := cloneAgentRun(run)
+	if callStatus == ActionCallStatusDenied && updatedRun.BudgetPolicy != nil {
+		if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
+			return nil, err
+		}
+	}
 	if callStatus == ActionCallStatusReady {
 		updatedRun.Status = AgentRunStatusWaitingForDependency
 		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}

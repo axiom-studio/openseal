@@ -142,6 +142,19 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	updatedRun := cloneAgentRun(run)
 	updatedRun.Revision++
 	updatedRun.UpdatedAt = now
+	budgetDenied := false
+	if updatedRun.BudgetPolicy != nil && decision.Disposition != ActionDispositionDeny {
+		err := reserveRunBudget(updatedRun, BudgetReservation{
+			ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now,
+		})
+		if errors.Is(err, ErrBudgetExhausted) {
+			budgetDenied = true
+			decision.Disposition = ActionDispositionDeny
+			decision.Reason = "run action budget is exhausted"
+		} else if err != nil {
+			return nil, err
+		}
+	}
 
 	eventType := "action.proposed"
 	eventSummary := req.Summary
@@ -161,6 +174,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		call.Status = ActionCallStatusDenied
 		call.Error = decision.Reason
 		updatedRun.Status = AgentRunStatusQueued
+		if budgetDenied {
+			updatedRun.Status = AgentRunStatusPaused
+		}
 		updatedRun.WakeCondition = nil
 		updatedRun.Checkpoint = cloneMap(req.ContinuationCheckpoint)
 		updatedRun.AvailableAt = now
@@ -168,6 +184,10 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.denied"
+		if budgetDenied {
+			eventType = "budget.exhausted"
+			eventSummary = "Run paused before exceeding its autonomous action budget"
+		}
 	case ActionDispositionRequireApproval:
 		approvalID := c.newID()
 		ttl := decision.ApprovalTTL
@@ -204,6 +224,10 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		event.Payload["policyReason"] = decision.Reason
 	}
 	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event})
+}
+
+func actionBudgetReservationID(actionID string) string {
+	return "action:" + actionID
 }
 
 // persistedActionArguments strips values that must be supplied through the
