@@ -69,6 +69,7 @@ type panelSection int
 const (
 	sectionAuthoring panelSection = iota
 	sectionObjectives
+	sectionInitiatives
 	sectionRuns
 	sectionArtifacts
 	sectionChannels
@@ -84,6 +85,8 @@ const (
 	modeChannelPost
 	modeObjectiveCreate
 	modeObjectiveEdit
+	modeInitiativeCreate
+	modeInitiativeEdit
 	modeWorkforceApprove
 	modeWorkforceReject
 	modeWorkforceApply
@@ -109,6 +112,7 @@ type Model struct {
 	status                    string
 	runCapability             kernelapi.Capability
 	objectiveCapability       kernelapi.Capability
+	initiativeCapability      kernelapi.Capability
 	artifactCapability        kernelapi.Capability
 	channelCapability         kernelapi.Capability
 	authoringCapability       kernelapi.Capability
@@ -120,6 +124,9 @@ type Model struct {
 	objectives                []*runtime.Objective
 	objectiveSelected         int
 	selectedObjective         string
+	initiatives               []*runtime.Initiative
+	initiativeSelected        int
+	selectedInitiative        string
 	selected                  int
 	selectedID                string
 	artifacts                 []*runtime.Artifact
@@ -142,6 +149,8 @@ type Model struct {
 	pendingGovernanceIntent   string
 	pendingObjectiveKey       string
 	pendingObjectivePrompt    string
+	pendingInitiativeKey      string
+	pendingInitiativePrompt   string
 	pendingConversationKey    string
 	pendingConversationTitle  string
 	pendingMessageKey         string
@@ -190,6 +199,19 @@ type objectiveCreated struct {
 type objectiveUpdated struct {
 	objective *runtime.Objective
 	err       error
+}
+
+type initiativesLoaded struct {
+	initiatives []*runtime.Initiative
+	err         error
+}
+type initiativeCreated struct {
+	initiative *runtime.Initiative
+	err        error
+}
+type initiativeUpdated struct {
+	initiative *runtime.Initiative
+	err        error
 }
 
 type artifactsLoaded struct {
@@ -308,11 +330,13 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
+		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.TeamChannelsCapabilityID, kernelapi.TeamChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		m.runCapability = runCapability
 		m.objectiveCapability = objectiveCapability
+		m.initiativeCapability = initiativeCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
@@ -327,6 +351,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasObjectives || !objectiveCapability.Available {
 			m.objectiveCapability = kernelapi.Capability{}
 		}
+		if !hasInitiatives || !initiativeCapability.Available {
+			m.initiativeCapability = kernelapi.Capability{}
+		}
 		if !hasArtifacts || !artifactCapability.Available {
 			m.artifactCapability = kernelapi.Capability{}
 		}
@@ -336,8 +363,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAuthoring || !authoringCapability.Available {
 			m.authoringCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available {
-			m.unavailable = "This server does not advertise workforce authoring, objectives, canonical work, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available {
+			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
@@ -356,6 +383,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionObjectives
 			m.mode = modeObjectiveCreate
 			m.editor.Placeholder = "Describe the objective and desired outcome…"
+		} else if m.initiativeCapability.Available {
+			m.section = sectionInitiatives
+			m.mode = modeInitiativeCreate
+			m.editor.Placeholder = "Describe the Initiative outcome…"
 		} else if !m.objectiveCapability.Available && m.runCapability.Available {
 			m.section = sectionRuns
 			m.mode = modeCreate
@@ -366,7 +397,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionArtifacts
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadObjectives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadObjectives(), m.loadInitiatives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -439,6 +470,15 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.objectives = msg.objectives
 		m.restoreObjectiveSelection()
+		return m, nil
+	case initiativesLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err, m.initiatives = nil, msg.initiatives
+		m.restoreInitiativeSelection()
 		return m, nil
 	case runsLoaded:
 		m.loading = false
@@ -579,6 +619,35 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetComposerMode()
 		m.focusPanelList()
 		return m, m.loadObjectives()
+	case initiativeCreated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Initiative creation failed. Your prompt is preserved for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.pendingInitiativeKey, m.pendingInitiativePrompt = "", ""
+		m.editor.Reset()
+		m.selectedInitiative = msg.initiative.ID
+		m.status = "Initiative added to the durable portfolio."
+		m.section = sectionInitiatives
+		m.focusPanelList()
+		return m, m.loadInitiatives()
+	case initiativeUpdated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "The Initiative changed elsewhere. Refresh and try again."
+			return m, m.loadInitiatives()
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.selectedInitiative = msg.initiative.ID
+		m.status = "Initiative revision recorded."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, m.loadInitiatives()
 	case runCommanded:
 		m.busy = false
 		if msg.err != nil {
@@ -598,7 +667,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadObjectives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadObjectives(), m.loadInitiatives(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -652,6 +721,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitObjective()
 			case modeObjectiveEdit:
 				return m, m.submitObjectiveAmendment()
+			case modeInitiativeCreate:
+				return m, m.submitInitiative()
+			case modeInitiativeEdit:
+				return m, m.submitInitiativeAmendment()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
 			case modeWorkforceApprove:
@@ -700,6 +773,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.objectiveCapability.Available {
 				m.section = sectionObjectives
 			}
+		case "i":
+			if m.initiativeCapability.Available {
+				m.section = sectionInitiatives
+			}
 		case "a":
 			if m.artifactCapability.Available {
 				m.section = sectionArtifacts
@@ -719,6 +796,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeObjectiveCreate
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the objective and desired outcome…"
+				m.focusComposerEditor()
+			} else if m.section == sectionInitiatives && m.supportsInitiative(kernelapi.OperationCreate) {
+				m.mode = modeInitiativeCreate
+				m.editor.Reset()
+				m.editor.Placeholder = "Describe the Initiative outcome…"
 				m.focusComposerEditor()
 			} else if m.section == sectionRuns && m.supportsRun(kernelapi.OperationCreate) {
 				m.mode = modeCreate
@@ -741,6 +823,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "p":
 			if m.section == sectionRuns {
 				return m, m.pauseOrResume()
+			} else if m.section == sectionInitiatives {
+				return m, m.pauseOrResumeInitiative()
+			}
+		case "l":
+			if m.section == sectionInitiatives {
+				return m, m.toggleSelectedObjectiveLink()
 			}
 		case "x":
 			if m.section == sectionRuns {
@@ -768,6 +856,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeObjectiveEdit
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the amended objective…"
+				m.focusComposerEditor()
+			} else if m.section == sectionInitiatives && m.selectedInitiativeRecord() != nil && m.supportsInitiative(kernelapi.OperationPatch) {
+				m.mode = modeInitiativeEdit
+				m.editor.Reset()
+				m.editor.Placeholder = "Describe the amended Initiative purpose…"
 				m.focusComposerEditor()
 			} else if m.section == sectionArtifacts && m.selectedArtifactRecord() != nil {
 				m.artifactExpanded = !m.artifactExpanded
@@ -968,6 +1061,17 @@ func (m *Model) loadObjectives() tea.Cmd {
 	}
 }
 
+func (m *Model) loadInitiatives() tea.Cmd {
+	if !m.supportsInitiative(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		initiatives, err := m.client.ListInitiatives(m.ctx, runtime.InitiativeFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
+		return initiativesLoaded{initiatives, err}
+	}
+}
+
 func (m *Model) loadArtifacts() tea.Cmd {
 	if !m.supportsArtifact(kernelapi.OperationList) {
 		return nil
@@ -1037,6 +1141,9 @@ func (m *Model) loadPanel() tea.Cmd {
 	if m.section == sectionObjectives {
 		return m.loadObjectives()
 	}
+	if m.section == sectionInitiatives {
+		return m.loadInitiatives()
+	}
 	if m.section == sectionChannels {
 		return m.loadConversations()
 	}
@@ -1067,6 +1174,99 @@ func (m *Model) submitObjective() tea.Cmd {
 	return func() tea.Msg {
 		objective, err := m.client.CreateObjective(m.ctx, request, key)
 		return objectiveCreated{objective: objective, err: err}
+	}
+}
+
+func (m *Model) submitInitiative() tea.Cmd {
+	prompt := strings.TrimSpace(m.editor.Value())
+	objective := m.selectedObjectiveRecord()
+	if !m.supportsInitiative(kernelapi.OperationCreate) || m.busy || prompt == "" {
+		if prompt == "" {
+			m.status = "Describe the Initiative before adding it."
+		}
+		return nil
+	}
+	if objective == nil {
+		m.status = "Select or create an Objective before composing an Initiative."
+		return nil
+	}
+	if m.pendingInitiativeKey == "" || m.pendingInitiativePrompt != prompt {
+		m.pendingInitiativeKey, m.pendingInitiativePrompt = uuid.NewString(), prompt
+	}
+	m.busy, m.err, m.status = true, nil, "Adding Initiative to the durable portfolio…"
+	request := kernelapi.CreateInitiativeRequest{Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Purpose: prompt, Status: runtime.InitiativeStatusActive, ObjectiveRefs: []string{objective.ID}}
+	key := m.pendingInitiativeKey
+	return func() tea.Msg {
+		initiative, err := m.client.CreateInitiative(m.ctx, request, key)
+		return initiativeCreated{initiative, err}
+	}
+}
+
+func (m *Model) submitInitiativeAmendment() tea.Cmd {
+	initiative := m.selectedInitiativeRecord()
+	purpose := strings.TrimSpace(m.editor.Value())
+	if initiative == nil || !m.supportsInitiative(kernelapi.OperationPatch) || m.busy || purpose == "" {
+		if purpose == "" {
+			m.status = "Describe the amended Initiative purpose."
+		}
+		return nil
+	}
+	m.busy, m.err, m.status = true, nil, "Recording Initiative revision…"
+	request := kernelapi.UpdateInitiativeRequest{ExpectedRevision: initiative.Revision, Purpose: &purpose}
+	return func() tea.Msg {
+		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
+		return initiativeUpdated{updated, err}
+	}
+}
+
+func (m *Model) pauseOrResumeInitiative() tea.Cmd {
+	initiative := m.selectedInitiativeRecord()
+	if initiative == nil || m.busy || !m.supportsInitiative(kernelapi.OperationPatch) {
+		return nil
+	}
+	status := runtime.InitiativeStatusPaused
+	if initiative.Status == runtime.InitiativeStatusPaused {
+		status = runtime.InitiativeStatusActive
+	}
+	m.busy, m.err, m.status = true, nil, "Updating Initiative lifecycle…"
+	request := kernelapi.UpdateInitiativeRequest{ExpectedRevision: initiative.Revision, Status: &status}
+	return func() tea.Msg {
+		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
+		return initiativeUpdated{updated, err}
+	}
+}
+
+func (m *Model) toggleSelectedObjectiveLink() tea.Cmd {
+	initiative, objective := m.selectedInitiativeRecord(), m.selectedObjectiveRecord()
+	if initiative == nil || objective == nil || m.busy || !m.supportsInitiative(kernelapi.OperationPatch) {
+		if objective == nil {
+			m.status = "Select an Objective before linking it to this Initiative."
+		}
+		return nil
+	}
+	refs, found := append([]string(nil), initiative.ObjectiveRefs...), -1
+	for index, id := range refs {
+		if id == objective.ID {
+			found = index
+			break
+		}
+	}
+	if found >= 0 {
+		if len(refs) == 1 {
+			m.status = "An Initiative must retain at least one Objective."
+			return nil
+		}
+		refs = append(refs[:found], refs[found+1:]...)
+		m.status = "Removing Objective from Initiative…"
+	} else {
+		refs = append(refs, objective.ID)
+		m.status = "Linking Objective to Initiative…"
+	}
+	m.busy, m.err = true, nil
+	request := kernelapi.UpdateInitiativeRequest{ExpectedRevision: initiative.Revision, ObjectiveRefs: &refs}
+	return func() tea.Msg {
+		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
+		return initiativeUpdated{updated, err}
 	}
 }
 
@@ -1259,6 +1459,10 @@ func (m *Model) supportsObjective(operation string) bool {
 	return m.ready && m.objectiveCapability.Supports(operation)
 }
 
+func (m *Model) supportsInitiative(operation string) bool {
+	return m.ready && m.initiativeCapability.Supports(operation)
+}
+
 func (m *Model) supportsArtifact(operation string) bool {
 	return m.ready && m.artifactCapability.Supports(operation)
 }
@@ -1438,6 +1642,10 @@ func (m *Model) movePanelSelection(delta int) {
 		m.moveObjectiveSelection(delta)
 		return
 	}
+	if m.section == sectionInitiatives {
+		m.moveInitiativeSelection(delta)
+		return
+	}
 	if m.section == sectionChannels {
 		m.moveConversationSelection(delta)
 		return
@@ -1447,6 +1655,35 @@ func (m *Model) movePanelSelection(delta int) {
 		return
 	}
 	m.moveSelection(delta)
+}
+
+func (m *Model) selectedInitiativeRecord() *runtime.Initiative {
+	if m.initiativeSelected < 0 || m.initiativeSelected >= len(m.initiatives) {
+		return nil
+	}
+	return m.initiatives[m.initiativeSelected]
+}
+func (m *Model) restoreInitiativeSelection() {
+	if len(m.initiatives) == 0 {
+		m.initiativeSelected = 0
+		m.selectedInitiative = ""
+		return
+	}
+	for i, v := range m.initiatives {
+		if v.ID == m.selectedInitiative {
+			m.initiativeSelected = i
+			return
+		}
+	}
+	m.initiativeSelected = min(m.initiativeSelected, len(m.initiatives)-1)
+	m.selectedInitiative = m.initiatives[m.initiativeSelected].ID
+}
+func (m *Model) moveInitiativeSelection(delta int) {
+	if len(m.initiatives) == 0 {
+		return
+	}
+	m.initiativeSelected = max(0, min(len(m.initiatives)-1, m.initiativeSelected+delta))
+	m.selectedInitiative = m.initiatives[m.initiativeSelected].ID
 }
 
 func (m *Model) selectedConversationRecord() *runtime.Conversation {
@@ -1535,6 +1772,10 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeObjectiveCreate
 		m.editor.Placeholder = "Describe the objective and desired outcome…"
 		m.focusComposerEditor()
+	case m.section == sectionInitiatives && m.supportsInitiative(kernelapi.OperationCreate):
+		m.mode = modeInitiativeCreate
+		m.editor.Placeholder = "Describe the Initiative outcome…"
+		m.focusComposerEditor()
 	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -1559,6 +1800,11 @@ func (m *Model) resetComposerMode() {
 	if m.section == sectionObjectives {
 		m.mode = modeObjectiveCreate
 		m.editor.Placeholder = "Describe the objective and desired outcome…"
+		return
+	}
+	if m.section == sectionInitiatives {
+		m.mode = modeInitiativeCreate
+		m.editor.Placeholder = "Describe the Initiative outcome…"
 		return
 	}
 	if m.section == sectionChannels && m.selectedConversationRecord() != nil {

@@ -35,6 +35,10 @@ type fakeKernelClient struct {
 	objectiveKeys     []string
 	objectiveCreates  []kernelapi.CreateObjectiveRequest
 	objectiveUpdates  []kernelapi.UpdateObjectiveRequest
+	initiatives       []*runtime.Initiative
+	initiativeKeys    []string
+	initiativeCreates []kernelapi.CreateInitiativeRequest
+	initiativeUpdates []kernelapi.UpdateInitiativeRequest
 	commands          []kernelapi.AgentRunCommandRequest
 	artifacts         []*runtime.Artifact
 	downloadBody      string
@@ -342,6 +346,46 @@ func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, i
 		}
 	}
 	return nil, runtime.ErrObjectiveNotFound
+}
+
+func (f *fakeKernelClient) CreateInitiative(_ context.Context, request kernelapi.CreateInitiativeRequest, key string) (*runtime.Initiative, error) {
+	f.initiativeKeys = append(f.initiativeKeys, key)
+	f.initiativeCreates = append(f.initiativeCreates, request)
+	initiative := &runtime.Initiative{ID: "initiative-created", Scope: request.Scope, Owner: request.Owner, Title: request.Title, Purpose: request.Purpose, Status: request.Status, ObjectiveRefs: request.ObjectiveRefs, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.initiatives = append([]*runtime.Initiative{initiative}, f.initiatives...)
+	return initiative, nil
+}
+
+func (f *fakeKernelClient) ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
+	return f.initiatives, nil
+}
+func (f *fakeKernelClient) GetInitiative(_ context.Context, _ runtime.Scope, id string) (*runtime.Initiative, error) {
+	for _, initiative := range f.initiatives {
+		if initiative.ID == id {
+			return initiative, nil
+		}
+	}
+	return nil, runtime.ErrInitiativeNotFound
+}
+func (f *fakeKernelClient) PatchInitiative(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error) {
+	f.initiativeUpdates = append(f.initiativeUpdates, request)
+	for _, initiative := range f.initiatives {
+		if initiative.ID == id {
+			if request.Purpose != nil {
+				initiative.Purpose = *request.Purpose
+			}
+			if request.Status != nil {
+				initiative.Status = *request.Status
+			}
+			if request.ObjectiveRefs != nil {
+				initiative.ObjectiveRefs = append([]string(nil), (*request.ObjectiveRefs)...)
+			}
+			initiative.Revision++
+			initiative.UpdatedAt = time.Now()
+			return initiative, nil
+		}
+	}
+	return nil, runtime.ErrInitiativeNotFound
 }
 
 func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*runtime.AgentRunCommandResult, error) {
@@ -696,6 +740,60 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	if len(fake.objectiveUpdates) != 1 || fake.objectiveUpdates[0].ExpectedRevision != 1 ||
 		fake.objectiveUpdates[0].Goal == nil || !strings.Contains(*fake.objectiveUpdates[0].Goal, "weekly") {
 		t.Fatalf("objective update = %#v", fake.objectiveUpdates)
+	}
+}
+
+func TestInitiativePortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *testing.T) {
+	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*runtime.Objective{{ID: "objective-research", Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, Title: "Research customer pain", Goal: "Gather cited evidence", Status: runtime.ObjectiveStatusActive, Revision: 1}}}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if !model.initiativeCapability.Available {
+		t.Fatal("Initiative capability was not discovered")
+	}
+	model.section, model.mode = sectionInitiatives, modeInitiativeCreate
+	model.focusComposerEditor()
+	model.editor.SetValue("Customer insight campaign\nCoordinate monitoring and a cited report.")
+	applyCommand(t, model, model.submitInitiative())
+	if len(fake.initiativeCreates) != 1 || fake.initiativeKeys[0] == "" || fake.initiativeCreates[0].Status != runtime.InitiativeStatusActive || len(fake.initiativeCreates[0].ObjectiveRefs) != 1 || fake.initiativeCreates[0].ObjectiveRefs[0] != "objective-research" {
+		t.Fatalf("Initiative create=%#v keys=%#v", fake.initiativeCreates, fake.initiativeKeys)
+	}
+	if view := model.View(); !strings.Contains(view, "Initiative portfolio") || !strings.Contains(view, "1 objectives") {
+		t.Fatalf("Initiative not rendered:\n%s", view)
+	}
+	model.mode = modeInitiativeEdit
+	model.focusComposerEditor()
+	model.editor.SetValue("Monitor evidence, coordinate outreach, and publish a cited report.")
+	applyCommand(t, model, model.submitInitiativeAmendment())
+	if len(fake.initiativeUpdates) != 1 || fake.initiativeUpdates[0].ExpectedRevision != 1 || fake.initiativeUpdates[0].Purpose == nil {
+		t.Fatalf("Initiative update=%#v", fake.initiativeUpdates)
+	}
+	applyCommand(t, model, model.pauseOrResumeInitiative())
+	if len(fake.initiativeUpdates) != 2 || fake.initiativeUpdates[1].ExpectedRevision != 2 || fake.initiativeUpdates[1].Status == nil || *fake.initiativeUpdates[1].Status != runtime.InitiativeStatusPaused {
+		t.Fatalf("Initiative lifecycle=%#v", fake.initiativeUpdates)
+	}
+	second := &runtime.Objective{ID: "objective-outreach", Scope: fake.objectives[0].Scope, Owner: fake.objectives[0].Owner, Title: "Coordinate outreach", Goal: "Follow up safely", Status: runtime.ObjectiveStatusActive, Revision: 1}
+	fake.objectives = append(fake.objectives, second)
+	model.objectives = fake.objectives
+	model.objectiveSelected = 1
+	model.selectedObjective = second.ID
+	applyCommand(t, model, model.toggleSelectedObjectiveLink())
+	last := fake.initiativeUpdates[len(fake.initiativeUpdates)-1]
+	if last.ObjectiveRefs == nil || len(*last.ObjectiveRefs) != 2 || (*last.ObjectiveRefs)[1] != second.ID {
+		t.Fatalf("linked objectives=%#v", last.ObjectiveRefs)
+	}
+}
+
+func TestInitiativeCreationRequiresRealObjective(t *testing.T) {
+	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.mode = modeInitiativeCreate
+	model.editor.SetValue("Unbound campaign")
+	if command := model.submitInitiative(); command != nil {
+		t.Fatal("created Initiative without an Objective")
+	}
+	if !strings.Contains(model.status, "Objective") || len(fake.initiativeCreates) != 0 {
+		t.Fatalf("status=%q creates=%#v", model.status, fake.initiativeCreates)
 	}
 }
 
