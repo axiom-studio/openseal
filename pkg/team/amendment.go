@@ -1,4 +1,4 @@
-package agent
+package team
 
 import (
 	"errors"
@@ -10,6 +10,9 @@ import (
 )
 
 type AmendmentStatus = workforce.AmendmentStatus
+type DefinitionFieldChange = workforce.DefinitionFieldChange
+type AmendmentEvaluation = workforce.AmendmentEvaluation
+type AmendmentDecision = workforce.AmendmentDecision
 
 const (
 	AmendmentEvaluating       = workforce.AmendmentEvaluating
@@ -21,12 +24,8 @@ const (
 	AmendmentActivated        = workforce.AmendmentActivated
 )
 
-type DefinitionFieldChange = workforce.DefinitionFieldChange
-type AmendmentEvaluation = workforce.AmendmentEvaluation
-type AmendmentDecision = workforce.AmendmentDecision
-
-// DefinitionAmendment is an auditable proposal, never a mutable live prompt.
-// It stores concise rationale and evidence, not private chain-of-thought.
+// DefinitionAmendment is a durable, auditable Team behavior proposal. It
+// stores concise rationale and evidence references, never private reasoning.
 type DefinitionAmendment struct {
 	ID           string                    `json:"id"`
 	Scope        capability.ScopeReference `json:"scope"`
@@ -34,7 +33,7 @@ type DefinitionAmendment struct {
 	DefinitionID string                    `json:"definitionId"`
 	BaseVersion  string                    `json:"baseVersion"`
 	BaseDigest   string                    `json:"baseDigest"`
-	Candidate    AgentDefinition           `json:"candidate"`
+	Candidate    Definition                `json:"candidate"`
 	Changes      []DefinitionFieldChange   `json:"changes"`
 	RiskWidening bool                      `json:"riskWidening,omitempty"`
 	ProposerType string                    `json:"proposerType"`
@@ -53,7 +52,7 @@ type DefinitionAmendment struct {
 type ProposeAmendmentRequest struct {
 	Scope        capability.ScopeReference
 	DeploymentID string
-	Candidate    *AgentDefinition
+	Candidate    *Definition
 	ProposerType string
 	ProposerID   string
 	Rationale    string
@@ -78,14 +77,14 @@ type ResolveAmendmentRequest struct {
 }
 
 func (a *DefinitionAmendment) Validate() error {
-	if a == nil || strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.Scope.Kind) == "" || strings.TrimSpace(a.Scope.ID) == "" || strings.TrimSpace(a.DeploymentID) == "" || strings.TrimSpace(a.DefinitionID) == "" || strings.TrimSpace(a.BaseVersion) == "" || strings.TrimSpace(a.BaseDigest) == "" || strings.TrimSpace(a.ProposerType) == "" || strings.TrimSpace(a.ProposerID) == "" || strings.TrimSpace(a.Rationale) == "" || a.Revision < 1 {
-		return errors.New("amendment identity, scope, base, proposer, rationale, and revision are required")
+	if a == nil || strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.Scope.Kind) == "" || strings.TrimSpace(a.Scope.ID) == "" ||
+		strings.TrimSpace(a.DeploymentID) == "" || strings.TrimSpace(a.DefinitionID) == "" || strings.TrimSpace(a.BaseVersion) == "" ||
+		strings.TrimSpace(a.BaseDigest) == "" || strings.TrimSpace(a.ProposerType) == "" || strings.TrimSpace(a.ProposerID) == "" ||
+		strings.TrimSpace(a.Rationale) == "" || a.Revision < 1 {
+		return errors.New("team amendment identity, scope, base, proposer, rationale, and revision are required")
 	}
 	if len(a.Changes) == 0 {
-		return errors.New("amendment must change behavior")
+		return errors.New("team amendment must change behavior")
 	}
-	if err := a.Candidate.Validate(); err != nil {
-		return err
-	}
-	return nil
+	return a.Candidate.Validate()
 }
