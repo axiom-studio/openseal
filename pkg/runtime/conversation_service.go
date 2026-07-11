@@ -407,11 +407,45 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 }
 
 func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
-	messages, err := s.store.ListChannelMessages(ctx, filter)
-	if err != nil || filter.Viewer == nil {
-		return messages, err
+	if filter.Viewer == nil || filter.Descending {
+		messages, err := s.store.ListChannelMessages(ctx, filter)
+		if err != nil || filter.Viewer == nil {
+			return messages, err
+		}
+		return s.filterVisibleChannelMessages(ctx, filter.Scope, filter.ConversationID, messages, *filter.Viewer)
 	}
-	return s.filterVisibleChannelMessages(ctx, filter.Scope, filter.ConversationID, messages, *filter.Viewer)
+	// Scan through fully hidden pages server-side so an authorized caller does
+	// not get stuck on an empty page and does not need hidden sequence metadata.
+	desired := filter.Limit
+	if desired <= 0 {
+		desired = 100
+	}
+	scan := filter
+	scan.Limit = desired
+	scan.Viewer = nil
+	result := make([]*ChannelMessage, 0, desired)
+	for len(result) < desired {
+		raw, err := s.store.ListChannelMessages(ctx, scan)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			break
+		}
+		visible, err := s.filterVisibleChannelMessages(ctx, filter.Scope, filter.ConversationID, raw, *filter.Viewer)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, visible...)
+		scan.AfterSequence = raw[len(raw)-1].Sequence
+		if len(raw) < scan.Limit {
+			break
+		}
+	}
+	if len(result) > desired {
+		result = result[:desired]
+	}
+	return result, nil
 }
 
 func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {

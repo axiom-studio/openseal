@@ -154,6 +154,10 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, ConversationViewer{Participant: target}); err != nil {
 		t.Fatalf("target get=%v", err)
 	}
+	paged, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &ConversationViewer{Participant: other, Roles: []string{"operator"}}})
+	if err != nil || len(paged) != 1 || paged[0].Content != "operators only" {
+		t.Fatalf("hidden-page scan=%#v err=%v", paged, err)
+	}
 }
 
 func TestConversationServicePersistsAQuietRound(t *testing.T) {
