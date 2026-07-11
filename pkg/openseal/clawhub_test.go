@@ -117,9 +117,13 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 	if err != nil || replayedUnpin.Changed || replayedUnpin.Outcome != ClawHubLifecycleOutcome("unchanged") {
 		t.Fatalf("unpin replay receipt = %#v, %v", replayedUnpin, err)
 	}
+	updated, updateReceipt, err := engine.UpdateClawHubSkillLifecycle(context.Background(), installed.Reference.String())
+	if err != nil || !updated.Changed || !updateReceipt.Changed || updateReceipt.PreviousVersion != "1.0.0" || updateReceipt.Version != "2.0.0" || updateReceipt.Outcome != ClawHubLifecycleOutcome("updated") {
+		t.Fatalf("update = %#v receipt=%#v, %v", updated, updateReceipt, err)
+	}
 	report, err = engine.UpdateAllClawHubSkills(context.Background())
-	if err != nil || len(report.Results) != 1 || report.Results[0].PreviousVersion != "1.0.0" ||
-		report.Results[0].Version != "2.0.0" || report.Results[0].Outcome != ClawHubLifecycleOutcome("updated") {
+	if err != nil || len(report.Results) != 1 || report.Results[0].PreviousVersion != "2.0.0" ||
+		report.Results[0].Version != "2.0.0" || report.Results[0].Outcome != ClawHubLifecycleOutcome("unchanged") {
 		t.Fatalf("updated report = %#v, %v", report, err)
 	}
 	removed, err := engine.UninstallClawHubSkill(installed.Reference.String(), false)

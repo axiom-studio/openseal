@@ -2343,6 +2343,34 @@ func (e *Engine) UpdateClawHubSkill(ctx context.Context, slug string) (*clawhub.
 	return installed, nil
 }
 
+// UpdateClawHubSkillLifecycle updates one unpinned installation and reports
+// both versions without exposing compilation or workspace internals.
+func (e *Engine) UpdateClawHubSkillLifecycle(ctx context.Context, reference string) (*clawhub.InstalledSkill, *clawhub.LifecycleResult, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	lock, err := e.clawHub.List()
+	if err != nil {
+		return nil, nil, err
+	}
+	identity, entry, err := resolveClawHubLifecycleEntry(lock, reference)
+	if err != nil {
+		return nil, nil, err
+	}
+	installed, err := e.UpdateClawHubSkill(ctx, reference)
+	if err != nil {
+		return nil, nil, err
+	}
+	result := &clawhub.LifecycleResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleUpdate, SourceIdentity: identity, Reference: installed.Reference, Version: installed.Version, Outcome: clawhub.LifecycleOutcomeUpdated, Changed: installed.Changed}
+	if entry.Version != nil {
+		result.PreviousVersion = *entry.Version
+	}
+	if !installed.Changed {
+		result.Outcome = clawhub.LifecycleOutcomeUnchanged
+	}
+	return installed, result, nil
+}
+
 func (e *Engine) VerifyInstalledClawHubSkill(ctx context.Context, slug string) (*clawhub.Verification, error) {
 	if e.clawHub == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
