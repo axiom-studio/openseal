@@ -23,7 +23,8 @@ func (h *recordingTurnHost) ExecuteHostedTurn(_ context.Context, request HostedT
 func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-7", NextRunStatus: AgentRunStatusCompleted,
-		OutputSummary: "Research completed", RunOutput: map[string]interface{}{"answer": "done"},
+		SkillSelections: []HostedSkillSelection{{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Applied faithful summarization"}},
+		OutputSummary:   "Research completed", RunOutput: map[string]interface{}{"answer": "done"},
 		Usage: TurnUsage{InputTokens: 10, OutputTokens: 4},
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
@@ -46,7 +47,7 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	if host.request.InvocationID != "turn-7" || host.request.TurnID != "turn-7" || host.request.RunID != "run-2" || host.request.Goal != "Analyze launch feedback" {
 		t.Fatalf("host request = %#v", host.request)
 	}
-	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || outcome.RunOutput["answer"] != "done" {
+	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
 	}
 	encoded, _ := json.Marshal(host.request)
@@ -77,7 +78,8 @@ func TestHostedTurnRunnerRejectsUnauthorizedActionProposal(t *testing.T) {
 func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusCompleted,
-		Decisions: []TurnDecision{{Summary: "Applied an unbound Skill", EvidenceRefs: []string{"skill:unbound@1.0.0"}}},
+		SkillSelections: []HostedSkillSelection{{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillNotApplied, Summary: "Summarization was not needed"}},
+		Decisions:       []TurnDecision{{Summary: "Applied an unbound Skill", EvidenceRefs: []string{"skill:unbound@1.0.0"}}},
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
 		AgentID: "agent-1", DefinitionID: "definition-1", DefinitionVersion: "1",
@@ -92,6 +94,36 @@ func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unauthorized Skill") {
 		t.Fatalf("expected unauthorized Skill evidence rejection, got %v", err)
+	}
+}
+
+func TestHostedTurnRunnerRequiresExhaustiveSkillSelections(t *testing.T) {
+	for name, selections := range map[string][]HostedSkillSelection{
+		"missing": nil,
+		"duplicate": {
+			{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Used summarization"},
+			{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillNotApplied, Summary: "Duplicate"},
+		},
+		"unauthorized": {{SkillRef: "skill:imagegen@1.0.0", Disposition: HostedSkillNotApplied, Summary: "Not relevant"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			host := &recordingTurnHost{response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusCompleted, SkillSelections: selections,
+			}}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+				SkillPrompts: []HostedSkillPrompt{{SkillID: "summarize", Version: "1.0.0", Instructions: "Summarize faithfully."}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+				Run: &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "7"}, Goal: "Summarize"}, Turn: &AgentTurn{ID: "turn-1"},
+			})
+			if err == nil {
+				t.Fatal("expected invalid Skill selection contract to be rejected")
+			}
+		})
 	}
 }
 

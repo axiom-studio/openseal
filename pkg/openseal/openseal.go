@@ -305,6 +305,8 @@ type (
 	TurnRunnerFunc                     = runtime.TurnRunnerFunc
 	TurnOutcome                        = runtime.TurnOutcome
 	HostedSkillPrompt                  = runtime.HostedSkillPrompt
+	HostedSkillSelection               = runtime.HostedSkillSelection
+	HostedSkillDisposition             = runtime.HostedSkillDisposition
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
 	TurnHost                           = runtime.TurnHost
@@ -427,7 +429,11 @@ type (
 	ClawHubInstalledState              = clawhub.InstalledState
 )
 
-const HostedTurnAPIVersion = runtime.HostedTurnAPIVersion
+const (
+	HostedTurnAPIVersion  = runtime.HostedTurnAPIVersion
+	HostedSkillApplied    = runtime.HostedSkillApplied
+	HostedSkillNotApplied = runtime.HostedSkillNotApplied
+)
 
 var (
 	NewHostedTurnRunner    = runtime.NewHostedTurnRunner
