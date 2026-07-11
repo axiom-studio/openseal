@@ -59,13 +59,13 @@ type ChangeSet struct {
 }
 
 type CreateChangeSetRequest struct {
-	Scope          capability.ScopeReference
-	ParentID       string
-	Prompt         string
-	Catalog        CapabilityCatalog
-	Placement      ChangeSetPlacement
-	Actor          ChangeSetActor
-	IdempotencyKey string
+	Scope          capability.ScopeReference `json:"scope"`
+	ParentID       string                    `json:"parentId,omitempty"`
+	Prompt         string                    `json:"prompt"`
+	Catalog        CapabilityCatalog         `json:"catalog"`
+	Placement      ChangeSetPlacement        `json:"placement"`
+	Actor          ChangeSetActor            `json:"actor"`
+	IdempotencyKey string                    `json:"idempotencyKey,omitempty"`
 }
 
 type ChangeSetStore interface {

@@ -25,6 +25,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
 	s.mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/compile", s.handleCompileWorkforce)
+	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets", s.handleCreateWorkforceChangeSet)
+	s.mux.HandleFunc("GET /api/v1/authoring/workforce/change-sets/{id}", s.handleGetWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/objectives", s.handleCreateObjective)
 	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)
 	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
@@ -90,7 +92,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	if s.authoring != nil {
-		capabilities = append(capabilities, kernelapi.WorkforceAuthoringCapability())
+		capabilities = append(capabilities, kernelapi.WorkforceAuthoringCapability(s.authoringChanges != nil))
 	}
 	s.respondJSON(w, http.StatusOK, kernelapi.NewCapabilityDocument(capabilities...))
 }

@@ -102,6 +102,12 @@ type (
 	WorkforceAuthoringMissingRequirement  = authoring.MissingRequirement
 	WorkforceAuthoringRiskChange          = authoring.RiskChange
 	WorkforceAuthoringFieldDiff           = authoring.FieldDiff
+	WorkforceChangeSet                    = authoring.ChangeSet
+	WorkforceChangeSetStatus              = authoring.ChangeSetStatus
+	WorkforceChangeSetActor               = authoring.ChangeSetActor
+	WorkforceChangeSetPlacement           = authoring.ChangeSetPlacement
+	CreateWorkforceChangeSetRequest       = authoring.CreateChangeSetRequest
+	WorkforceChangeSetStore               = authoring.ChangeSetStore
 
 	RunRecord                          = runtime.RunRecord
 	RetryPolicy                        = runtime.RetryPolicy
@@ -481,8 +487,16 @@ func NewSkillSourceWatcher(catalog *skillsource.Catalog, roots []skillsource.Roo
 }
 
 const (
-	WorkforceAuthoringCreate = authoring.ModeCreate
-	WorkforceAuthoringAmend  = authoring.ModeAmend
+	WorkforceAuthoringCreate           = authoring.ModeCreate
+	WorkforceAuthoringAmend            = authoring.ModeAmend
+	WorkforceChangeSetBlocked          = authoring.ChangeSetBlocked
+	WorkforceChangeSetReview           = authoring.ChangeSetReview
+	WorkforceChangeSetEvaluating       = authoring.ChangeSetEvaluating
+	WorkforceChangeSetAwaitingApproval = authoring.ChangeSetAwaitingApproval
+	WorkforceChangeSetReady            = authoring.ChangeSetReady
+	WorkforceChangeSetApplied          = authoring.ChangeSetApplied
+	WorkforceChangeSetRejected         = authoring.ChangeSetRejected
+	WorkforceChangeSetFailed           = authoring.ChangeSetFailed
 
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
@@ -790,6 +804,7 @@ type Engine struct {
 	agents                        *kernelagent.Registry
 	teams                         *kernelteam.Registry
 	authoring                     *authoring.Compiler
+	authoringChanges              *authoring.ChangeSetService
 	logger                        *zap.SugaredLogger
 }
 
@@ -876,6 +891,9 @@ func New(opts ...Option) (*Engine, error) {
 		if err := opt(e); err != nil {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
+	}
+	if err := e.rebuildAuthoringChangeSets(); err != nil {
+		return nil, fmt.Errorf("workforce change set configuration: %w", err)
 	}
 	if err := e.rebuildConversationCoordinator(); err != nil {
 		return nil, fmt.Errorf("conversation coordinator configuration: %w", err)
@@ -1222,6 +1240,23 @@ func WithWorkforceAuthoringGenerator(generator authoring.Generator) Option {
 		e.authoring = compiler
 		return nil
 	}
+}
+
+func (e *Engine) rebuildAuthoringChangeSets() error {
+	e.authoringChanges = nil
+	if e.authoring == nil {
+		return nil
+	}
+	store, ok := e.store.(authoring.ChangeSetStore)
+	if !ok {
+		return nil
+	}
+	service, err := authoring.NewChangeSetService(e.authoring, store)
+	if err != nil {
+		return err
+	}
+	e.authoringChanges = service
+	return nil
 }
 
 // NewOpenAICompatibleWorkforceGenerator creates the portable chat-completions
@@ -1892,6 +1927,24 @@ func (e *Engine) CompileWorkforcePrompt(ctx context.Context, request authoring.G
 		return nil, errors.New("workforce authoring is not configured")
 	}
 	return e.authoring.Compile(ctx, request)
+}
+
+func (e *Engine) WorkforceChangeSetsAvailable() bool {
+	return e != nil && e.authoringChanges != nil
+}
+
+func (e *Engine) CreateWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.Create(ctx, request)
+}
+
+func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string) (*authoring.ChangeSet, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.Get(ctx, scope, id)
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {

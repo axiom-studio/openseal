@@ -24,6 +24,7 @@ type Server struct {
 	artifactContent  runtime.ArtifactContentStore
 	artifactResolver runtime.ArtifactContentResolver
 	authoring        *authoring.Compiler
+	authoringChanges *authoring.ChangeSetService
 	workflowsDir     string
 	workflows        map[string]*WorkflowEntry
 	muWorkflows      sync.RWMutex
@@ -120,6 +121,10 @@ func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentReso
 // SetWorkforceAuthoringCompiler enables non-activating prompt compilation.
 func (s *Server) SetWorkforceAuthoringCompiler(compiler *authoring.Compiler) {
 	s.authoring = compiler
+	s.authoringChanges = nil
+	if store, ok := s.store.(authoring.ChangeSetStore); ok && compiler != nil {
+		s.authoringChanges, _ = authoring.NewChangeSetService(compiler, store)
+	}
 }
 
 // ListenAndServe starts the server on the given address.

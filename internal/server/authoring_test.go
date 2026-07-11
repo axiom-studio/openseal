@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -16,6 +18,42 @@ type authoringFixtureGenerator struct{}
 
 func (authoringFixtureGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
 	return []byte(`{"candidate":{"agents":[],"assignments":[]},"questions":["Which responsibilities should this Team own?"]}`), nil
+}
+
+func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(authoringFixtureGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	capabilities := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
+	if !strings.Contains(capabilities.Body.String(), `"operations":["compile","propose","get"]`) {
+		t.Fatalf("change set capability = %s", capabilities.Body.String())
+	}
+	body := `{"scope":{"kind":"tenant","id":"one"},"prompt":"Create a research Team","catalog":{},"placement":{"teamDeploymentId":"research-live","agentDeploymentIds":{}},"actor":{"type":"user","id":"7"}}`
+	created := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", body, "intent-one")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
+	}
+	var changeSet authoring.ChangeSet
+	if err := json.NewDecoder(created.Body).Decode(&changeSet); err != nil || changeSet.ID == "" || changeSet.Status != authoring.ChangeSetBlocked {
+		t.Fatalf("change set = %#v, err = %v", changeSet, err)
+	}
+	replay := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", body, "intent-one")
+	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), changeSet.ID) {
+		t.Fatalf("replay status = %d, body = %s", replay.Code, replay.Body.String())
+	}
+	loaded := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"?scopeKind=tenant&scopeId=one", "", "")
+	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), changeSet.CandidateDigest) {
+		t.Fatalf("load status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+	foreign := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"?scopeKind=tenant&scopeId=two", "", "")
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("foreign status = %d, body = %s", foreign.Code, foreign.Body.String())
+	}
 }
 
 func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {

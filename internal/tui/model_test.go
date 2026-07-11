@@ -179,6 +179,14 @@ func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring
 	return f.authoringResult, nil
 }
 
+func (f *fakeKernelClient) CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error) {
+	return nil, errors.New("workforce change sets are not configured in this test")
+}
+
+func (f *fakeKernelClient) GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error) {
+	return nil, authoring.ErrChangeSetNotFound
+}
+
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
 	f.objectiveKeys = append(f.objectiveKeys, key)
 	f.objectiveCreates = append(f.objectiveCreates, request)
