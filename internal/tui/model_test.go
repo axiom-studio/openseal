@@ -260,6 +260,39 @@ func (f *fakeKernelClient) nextGovernanceResult() (*authoring.ChangeSet, error) 
 	return result, nil
 }
 
+func TestFailedWorkforceGenerationRetriesWithStableIdentity(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	failed := &authoring.ChangeSet{ID: "failed-one", Scope: scope, Status: authoring.ChangeSetFailed, Revision: 4, Generation: &authoring.ChangeSetGeneration{RunID: "run-one", Attempt: 1, LastError: "provider unavailable"}}
+	evaluating := *failed
+	evaluating.Status = authoring.ChangeSetEvaluating
+	evaluating.Revision = 5
+	fake := &fakeKernelClient{governanceResults: []*authoring.ChangeSet{&evaluating, &evaluating}}
+	m := newModelWithClient(t, fake)
+	m.ready, m.section, m.focus = true, sectionAuthoring, focusComposer
+	m.authoringChangeSet = failed
+	m.authoringCapability = kernelapi.Capability{ID: kernelapi.WorkforceAuthoringCapabilityID, Version: kernelapi.WorkforceAuthoringCapabilityVersion, Available: true, Operations: []string{kernelapi.OperationRetry}, Context: &kernelapi.CapabilityContext{ChangeSetID: failed.ID, Revision: failed.Revision}}
+	m.mode = modeWorkforceRetry
+	m.editor.SetValue("provider recovered")
+	msg := m.submitWorkforceRetry()()
+	if _, ok := msg.(workforceGoverned); !ok {
+		t.Fatalf("message = %T", msg)
+	}
+	firstKey := fake.retryKeys[0]
+	m.busy = false
+	msg = m.submitWorkforceRetry()()
+	if _, ok := msg.(workforceGoverned); !ok || fake.retryKeys[1] != firstKey || firstKey == "" {
+		t.Fatalf("retry keys = %#v", fake.retryKeys)
+	}
+	if fake.retryRequests[0].Actor.ID != "" {
+		t.Fatalf("client forged retry actor = %#v", fake.retryRequests[0].Actor)
+	}
+	m.busy = false
+	view := m.renderAuthoringContent(80)
+	if !strings.Contains(view, "provider unavailable") || !strings.Contains(view, "r retry generation") {
+		t.Fatalf("failed generation not rendered: %s", view)
+	}
+}
+
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
 	f.objectiveKeys = append(f.objectiveKeys, key)
 	f.objectiveCreates = append(f.objectiveCreates, request)
