@@ -74,7 +74,8 @@ func TestPostgresWorkforceChangeSetsAreReplicaSafeAndDurable(t *testing.T) {
 	}
 	updated := *restored
 	updated.Status, updated.Revision, updated.UpdatedAt = authoring.ChangeSetReady, 2, restored.UpdatedAt.Add(time.Minute)
-	if persisted, err := primary.UpdateChangeSet(ctx, &updated, 1); err != nil || persisted.Revision != 2 {
+	updated.ApprovalDecisions = []authoring.ChangeSetApprovalDecision{{ID: "decision", EvaluationID: "evaluation", PolicyID: "production", Role: "operator", Approved: true, Actor: authoring.ChangeSetActor{Type: "user", ID: "7"}, DecidedAt: updated.UpdatedAt}}
+	if persisted, err := primary.UpdateChangeSet(ctx, &updated, 1); err != nil || persisted.Revision != 2 || len(persisted.ApprovalDecisions) != 1 {
 		t.Fatalf("update = %#v, err = %v", persisted, err)
 	}
 	stale := updated
