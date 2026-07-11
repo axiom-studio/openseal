@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 const HostedTurnAPIVersion = "openseal.hosted-turn/v1"
@@ -22,21 +24,22 @@ type HostedSkillPrompt struct {
 // OpenSeal remains authoritative for leases, Turns, actions and state changes;
 // the host performs one bounded proposal-only model invocation.
 type HostedTurnRequest struct {
-	APIVersion             string                 `json:"apiVersion"`
-	InvocationID           string                 `json:"invocationId"`
-	Scope                  Scope                  `json:"scope"`
-	RunID                  string                 `json:"runId"`
-	TurnID                 string                 `json:"turnId"`
-	AgentID                string                 `json:"agentId"`
-	DefinitionID           string                 `json:"definitionId"`
-	DefinitionVersion      string                 `json:"definitionVersion"`
-	Goal                   string                 `json:"goal"`
-	SystemInstructions     []string               `json:"systemInstructions,omitempty"`
-	SkillPrompts           []HostedSkillPrompt    `json:"skillPrompts,omitempty"`
-	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
-	PendingInterventions   []AgentRunIntervention `json:"pendingInterventions,omitempty"`
-	ModelProvider          string                 `json:"modelProvider,omitempty"`
-	Model                  string                 `json:"model,omitempty"`
+	APIVersion             string                   `json:"apiVersion"`
+	InvocationID           string                   `json:"invocationId"`
+	Scope                  Scope                    `json:"scope"`
+	RunID                  string                   `json:"runId"`
+	TurnID                 string                   `json:"turnId"`
+	AgentID                string                   `json:"agentId"`
+	DefinitionID           string                   `json:"definitionId"`
+	DefinitionVersion      string                   `json:"definitionVersion"`
+	Goal                   string                   `json:"goal"`
+	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
+	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
+	Actions                []capability.ModelAction `json:"actions,omitempty"`
+	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
+	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
+	ModelProvider          string                   `json:"modelProvider,omitempty"`
+	Model                  string                   `json:"model,omitempty"`
 }
 
 type HostedTurnResponse struct {
@@ -63,6 +66,7 @@ type HostedTurnRunnerConfig struct {
 	DefinitionVersion  string
 	SystemInstructions []string
 	SkillPrompts       []HostedSkillPrompt
+	Actions            []capability.ModelAction
 	ModelProvider      string
 	Model              string
 }
@@ -94,6 +98,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
 		Goal: input.Run.Goal, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
+		Actions:                cloneHostedModelActions(r.config.Actions),
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
@@ -108,12 +113,33 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if err := response.Usage.Validate(); err != nil {
 		return nil, err
 	}
+	allowed := make(map[string]struct{}, len(request.Actions))
+	for _, action := range request.Actions {
+		allowed[action.Name] = struct{}{}
+	}
+	for _, proposed := range response.ProposedActions {
+		if _, ok := allowed[proposed.Capability]; !ok {
+			return nil, errors.New("turn host proposed an unauthorized capability")
+		}
+	}
 	return &TurnOutcome{
 		Decisions: append([]TurnDecision(nil), response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 	}, nil
+}
+
+func cloneHostedModelActions(values []capability.ModelAction) []capability.ModelAction {
+	if values == nil {
+		return nil
+	}
+	result := make([]capability.ModelAction, len(values))
+	for index, value := range values {
+		result[index] = value
+		result[index].InputSchema = cloneMap(value.InputSchema)
+	}
+	return result
 }
 
 func cloneHostedSkillPrompts(values []HostedSkillPrompt) []HostedSkillPrompt {

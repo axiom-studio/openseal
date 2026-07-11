@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 type recordingTurnHost struct {
@@ -28,6 +30,7 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		AgentID: "agent-3", DefinitionID: "researcher", DefinitionVersion: "2",
 		SystemInstructions: []string{"Preserve evidence."},
 		SkillPrompts:       []HostedSkillPrompt{{SkillID: "summarize", Version: "1.0.0", Name: "summarize", Instructions: "Summarize sources."}},
+		Actions:            []capability.ModelAction{{Name: "web.search", SkillID: "web", Version: "1", Action: "search"}},
 		ModelProvider:      "openai-compatible", Model: "deepseek-v4-flash",
 	})
 	if err != nil {
@@ -51,6 +54,23 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		if strings.Contains(strings.ToLower(string(encoded)), strings.ToLower(forbidden)) {
 			t.Fatalf("host envelope exposes forbidden credential surface %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestHostedTurnRunnerRejectsUnauthorizedActionProposal(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ProposedActions: []TurnAction{{Capability: "shell.exec", Summary: "run arbitrary command"}},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(context.Background(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Work"}, Turn: &AgentTurn{ID: "turn"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
