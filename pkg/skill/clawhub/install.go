@@ -353,7 +353,46 @@ func (m *InstallManager) LoadInstalled() ([]*InstalledSkill, error) {
 	return result, nil
 }
 
+func (m *InstallManager) ListInstalledStates() ([]InstalledState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lock, err := m.readLockfile()
+	if err != nil {
+		return nil, err
+	}
+	identities := make([]string, 0, len(lock.Skills))
+	for identity := range lock.Skills {
+		identities = append(identities, identity)
+	}
+	sort.Strings(identities)
+	states := make([]InstalledState, 0, len(identities))
+	for _, identity := range identities {
+		entry := lock.Skills[identity]
+		installed, err := m.loadInstalled(identity, entry)
+		if err != nil {
+			return nil, fmt.Errorf("inspect installed skill %s: %w", identity, err)
+		}
+		modified, err := m.isLocallyModified(m.entryPath(identity, entry))
+		if err != nil {
+			return nil, err
+		}
+		state := InstalledState{
+			APIVersion: LifecycleAPIVersion, SourceIdentity: identity, Reference: installed.Reference,
+			Registry: installed.Origin.Registry, Version: installed.Version, InstalledAt: installed.Origin.InstalledAt,
+			Fingerprint: installed.Origin.Fingerprint, ArchiveSHA256: installed.Origin.ArchiveSHA256,
+			Pinned: entry.Pinned, PinReason: entry.PinReason, LocallyModified: modified,
+		}
+		state.Verified = installed.Verification != nil && installed.Verification.OK && installed.Verification.Decision == "pass"
+		states = append(states, state)
+	}
+	return states, nil
+}
+
 func (m *InstallManager) Pin(reference, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 240 || strings.ContainsAny(reason, "\r\n") {
+		return errors.New("pin reason must be 1-240 characters without line breaks")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	lock, err := m.readLockfile()
@@ -365,7 +404,7 @@ func (m *InstallManager) Pin(reference, reason string) error {
 		return err
 	}
 	entry.Pinned = true
-	entry.PinReason = strings.TrimSpace(reason)
+	entry.PinReason = reason
 	lock.Skills[identity] = entry
 	return m.writeLockfile(lock)
 }

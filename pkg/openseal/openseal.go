@@ -388,7 +388,10 @@ type (
 	ClawHubInstalledSkill              = clawhub.InstalledSkill
 	ClawHubVerification                = clawhub.Verification
 	ClawHubVersionPage                 = clawhub.VersionPage
+	ClawHubVersionSummary              = clawhub.VersionSummary
 	ClawHubVersionDetail               = clawhub.VersionDetail
+	ClawHubFileEntry                   = clawhub.FileEntry
+	ClawHubSecurityStatus              = clawhub.SecurityStatus
 	ClawHubDownloadedArchive           = clawhub.DownloadedArchive
 	ClawHubLockEntry                   = clawhub.LockEntry
 	ClawHubLockfile                    = clawhub.Lockfile
@@ -398,6 +401,7 @@ type (
 	ClawHubLifecycleCapability         = clawhub.LifecycleCapability
 	ClawHubLifecycleResult             = clawhub.LifecycleResult
 	ClawHubLifecycleBatchResult        = clawhub.LifecycleBatchResult
+	ClawHubInstalledState              = clawhub.InstalledState
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -2168,6 +2172,34 @@ func (e *Engine) InspectClawHubSkill(ctx context.Context, reference clawhub.Skil
 	return e.clawHubRegistry.InspectSkill(ctx, reference)
 }
 
+func (e *Engine) ListClawHubSkillVersions(ctx context.Context, reference clawhub.SkillReference, limit int, cursor string) (*clawhub.VersionPage, error) {
+	if e == nil || e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.ListVersions(ctx, reference, limit, cursor)
+}
+
+func (e *Engine) GetClawHubSkillVersion(ctx context.Context, reference clawhub.SkillReference, version string) (*clawhub.VersionDetail, error) {
+	if e == nil || e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.GetVersion(ctx, reference, version)
+}
+
+func (e *Engine) GetClawHubSkillFile(ctx context.Context, reference clawhub.SkillReference, version, tag, path string) ([]byte, error) {
+	if e == nil || e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.GetFile(ctx, reference, version, tag, path)
+}
+
+func (e *Engine) VerifyClawHubSkill(ctx context.Context, reference clawhub.SkillReference, version, tag string) (*clawhub.Verification, error) {
+	if e == nil || e.clawHubRegistry == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	return e.clawHubRegistry.VerifySkill(ctx, reference, version, tag)
+}
+
 func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.InstallRequest) (*clawhub.InstalledSkill, error) {
 	if e.clawHub == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
@@ -2229,11 +2261,11 @@ func (e *Engine) ClawHubLifecycleCapabilities() clawhub.LifecycleCapability {
 	return capability
 }
 
-func (e *Engine) ListInstalledClawHubSkills() ([]*clawhub.InstalledSkill, error) {
+func (e *Engine) ListInstalledClawHubSkillStates() ([]clawhub.InstalledState, error) {
 	if e == nil || e.clawHub == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
 	}
-	return e.clawHub.LoadInstalled()
+	return e.clawHub.ListInstalledStates()
 }
 
 // UpdateAllClawHubSkills deliberately reuses UpdateClawHubSkill so every

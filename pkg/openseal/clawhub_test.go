@@ -35,13 +35,13 @@ func (r *facadeClawHubRegistry) InspectSkill(_ context.Context, ref ClawHubSkill
 	return &ClawHubSkillDetail{SkillSummary: ClawHubSkillSummary{Slug: ref.Slug, Name: "Research"}, Version: r.resolvedVersion(), Owner: ref.Owner}, nil
 }
 func (r *facadeClawHubRegistry) ListVersions(context.Context, ClawHubSkillReference, int, string) (*ClawHubVersionPage, error) {
-	return &ClawHubVersionPage{}, nil
+	return &ClawHubVersionPage{Items: []ClawHubVersionSummary{{Version: r.resolvedVersion()}}}, nil
 }
 func (r *facadeClawHubRegistry) GetVersion(context.Context, ClawHubSkillReference, string) (*ClawHubVersionDetail, error) {
-	return &ClawHubVersionDetail{Version: "1.0.0"}, nil
+	return &ClawHubVersionDetail{Version: r.resolvedVersion(), Files: []ClawHubFileEntry{{Path: "SKILL.md", Size: 12}}, Security: &ClawHubSecurityStatus{Status: "clean"}}, nil
 }
 func (r *facadeClawHubRegistry) GetFile(context.Context, ClawHubSkillReference, string, string, string) ([]byte, error) {
-	return nil, nil
+	return []byte("file content"), nil
 }
 func (r *facadeClawHubRegistry) VerifySkill(_ context.Context, ref ClawHubSkillReference, _, _ string) (*ClawHubVerification, error) {
 	if r.verifyErr != nil {
@@ -64,8 +64,28 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 	if err != nil || installed.Version != "1.0.0" {
 		t.Fatalf("install = %#v, %v", installed, err)
 	}
+	versions, err := engine.ListClawHubSkillVersions(context.Background(), installed.Reference, 10, "")
+	if err != nil || len(versions.Items) != 1 || versions.Items[0].Version != "1.0.0" {
+		t.Fatalf("versions = %#v, %v", versions, err)
+	}
+	version, err := engine.GetClawHubSkillVersion(context.Background(), installed.Reference, "1.0.0")
+	if err != nil || version.Security == nil || version.Security.Status != "clean" || len(version.Files) != 1 {
+		t.Fatalf("version detail = %#v, %v", version, err)
+	}
+	file, err := engine.GetClawHubSkillFile(context.Background(), installed.Reference, "1.0.0", "", "SKILL.md")
+	if err != nil || string(file) != "file content" {
+		t.Fatalf("file = %q, %v", file, err)
+	}
+	verification, err := engine.VerifyClawHubSkill(context.Background(), installed.Reference, "1.0.0", "")
+	if err != nil || !verification.OK {
+		t.Fatalf("verification = %#v, %v", verification, err)
+	}
 	if err := engine.PinClawHubSkill("acme/research", "production review"); err != nil {
 		t.Fatal(err)
+	}
+	states, err := engine.ListInstalledClawHubSkillStates()
+	if err != nil || len(states) != 1 || !states[0].Pinned || states[0].PinReason != "production review" || !states[0].Verified {
+		t.Fatalf("installed states = %#v, %v", states, err)
 	}
 	registry.version = "2.0.0"
 	report, err := engine.UpdateAllClawHubSkills(context.Background())
@@ -85,7 +105,7 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 	if err != nil || removed.Outcome != ClawHubLifecycleOutcome("removed") || removed.PreviousVersion != "2.0.0" {
 		t.Fatalf("uninstall result = %#v, %v", removed, err)
 	}
-	if installed, err := engine.ListInstalledClawHubSkills(); err != nil || len(installed) != 0 {
+	if installed, err := engine.ListInstalledClawHubSkillStates(); err != nil || len(installed) != 0 {
 		t.Fatalf("installed after removal = %#v, %v", installed, err)
 	}
 }

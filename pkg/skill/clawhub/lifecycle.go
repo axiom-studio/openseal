@@ -85,6 +85,24 @@ type LifecycleBatchResult struct {
 	Results    []LifecycleResult  `json:"results"`
 }
 
+// InstalledState is the safe control-plane projection of an installation. It
+// intentionally omits local paths, compiled prompts/actions, files, archives,
+// and registry-provided free-form verification payloads.
+type InstalledState struct {
+	APIVersion      string         `json:"apiVersion"`
+	SourceIdentity  string         `json:"sourceIdentity"`
+	Reference       SkillReference `json:"reference"`
+	Registry        string         `json:"registry"`
+	Version         string         `json:"version"`
+	InstalledAt     int64          `json:"installedAt"`
+	Fingerprint     string         `json:"fingerprint,omitempty"`
+	ArchiveSHA256   string         `json:"archiveSha256,omitempty"`
+	Pinned          bool           `json:"pinned"`
+	PinReason       string         `json:"pinReason,omitempty"`
+	LocallyModified bool           `json:"locallyModified"`
+	Verified        bool           `json:"verified"`
+}
+
 func (r *LifecycleBatchResult) Sort() {
 	if r == nil {
 		return
