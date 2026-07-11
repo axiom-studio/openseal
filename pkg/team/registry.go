@@ -111,6 +111,55 @@ func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeRefe
 	return r.store.GetTeamDeployment(ctx, scope, id)
 }
 
+// UpdateDeployment revises mutable Team composition and operating state while
+// keeping the active immutable definition fixed. The same-version activation
+// entry is the durable actor/reason audit for the deployment revision.
+func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
+	if r == nil || r.store == nil || r.agents == nil || proposed == nil {
+		return nil, nil, errors.New("team registry, Agent resolver, and deployment are required")
+	}
+	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" || strings.TrimSpace(reason) == "" {
+		return nil, nil, errors.New("team deployment update actor and reason are required")
+	}
+	current, err := r.store.GetTeamDeployment(ctx, proposed.Scope, proposed.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if current.Revision != expectedRevision {
+		return nil, nil, ErrRevisionConflict
+	}
+	if proposed.DefinitionID != current.DefinitionID || proposed.ActiveVersion != current.ActiveVersion {
+		return nil, nil, errors.New("team deployment update cannot change the active definition")
+	}
+	updated := cloneDeployment(proposed)
+	updated.CreatedAt = current.CreatedAt
+	updated.UpdatedAt = r.now().UTC()
+	updated.Revision = current.Revision + 1
+	definition, err := r.store.GetTeamDefinition(ctx, updated.DefinitionID, updated.ActiveVersion)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := updated.Validate(definition); err != nil {
+		return nil, nil, err
+	}
+	if err := r.validateRoster(ctx, definition, updated); err != nil {
+		return nil, nil, err
+	}
+	if err := validateNarrowing(definition, updated); err != nil {
+		return nil, nil, err
+	}
+	activation := workforce.DefinitionActivation{
+		ID: r.newID(), Scope: updated.Scope, DeploymentID: updated.ID, DefinitionID: updated.DefinitionID,
+		FromVersion: current.ActiveVersion, ToVersion: current.ActiveVersion, DeploymentRevision: updated.Revision,
+		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updated.UpdatedAt,
+	}
+	if err := r.store.UpdateTeamDeployment(ctx, updated, expectedRevision, activation); err != nil {
+		return nil, nil, err
+	}
+	copyActivation := activation
+	return cloneDeployment(updated), &copyActivation, nil
+}
+
 func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
 		return nil, nil, errors.New("team deployment activation actor is required")

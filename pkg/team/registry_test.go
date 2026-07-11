@@ -50,6 +50,18 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 	if _, err := registry.GetDeployment(ctx, capability.ScopeReference{Kind: "tenant", ID: "other"}, deployment.ID); !errors.Is(err, ErrDeploymentNotFound) {
 		t.Fatalf("cross-scope deployment lookup err = %v", err)
 	}
+	proposed := cloneDeployment(deployment)
+	proposed.Status = DeploymentPaused
+	proposed.Roster[0].DisplayName = "Evidence lead"
+	if _, _, err := registry.UpdateDeployment(ctx, proposed, 99, "user", "operator", "pause for review"); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale deployment update err = %v", err)
+	}
+	updatedComposition, compositionActivation, err := registry.UpdateDeployment(ctx, proposed, deployment.Revision, "user", "operator", "pause for review")
+	if err != nil || updatedComposition.Status != DeploymentPaused || updatedComposition.Roster[0].DisplayName != "Evidence lead" ||
+		updatedComposition.Revision != 2 || compositionActivation.FromVersion != registered.Version || compositionActivation.ToVersion != registered.Version {
+		t.Fatalf("updated composition = %#v, activation = %#v, err = %v", updatedComposition, compositionActivation, err)
+	}
+	deployment = updatedComposition
 
 	next := validDefinition()
 	next.Version = "1.1.0"
@@ -61,11 +73,11 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 		t.Fatalf("stale activation err = %v", err)
 	}
 	updated, nextActivation, err := registry.ActivateDefinition(ctx, scope, deployment.ID, next.Version, deployment.Revision, "user", "operator", "reviewed")
-	if err != nil || updated.ActiveVersion != "1.1.0" || updated.Revision != 2 || nextActivation.FromVersion != "1.0.0" {
+	if err != nil || updated.ActiveVersion != "1.1.0" || updated.Revision != 3 || nextActivation.FromVersion != "1.0.0" {
 		t.Fatalf("updated = %#v, activation = %#v, err = %v", updated, nextActivation, err)
 	}
 	activations, err := registry.ListActivations(ctx, scope, deployment.ID)
-	if err != nil || len(activations) != 2 || activations[1].DeploymentRevision != 2 {
+	if err != nil || len(activations) != 3 || activations[1].DeploymentRevision != 2 || activations[2].DeploymentRevision != 3 {
 		t.Fatalf("activations = %#v, err = %v", activations, err)
 	}
 }

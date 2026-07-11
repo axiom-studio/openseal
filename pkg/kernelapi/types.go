@@ -78,6 +78,14 @@ type ActivateTeamDefinitionRequest struct {
 	Reason           string                    `json:"reason,omitempty"`
 }
 
+type UpdateTeamDeploymentRequest struct {
+	Deployment       *kernelteam.Deployment `json:"deployment"`
+	ExpectedRevision int64                  `json:"expectedRevision"`
+	ActorType        string                 `json:"actorType"`
+	ActorID          string                 `json:"actorId"`
+	Reason           string                 `json:"reason"`
+}
+
 type TeamDeploymentResult struct {
 	Deployment *kernelteam.Deployment          `json:"deployment"`
 	Activation *workforce.DefinitionActivation `json:"activation"`
@@ -154,7 +162,7 @@ func TeamChannelsCapability() Capability {
 func TeamDefinitionsCapability() Capability {
 	return Capability{
 		ID: TeamDefinitionsCapabilityID, Version: TeamDefinitionsCapabilityVersion, Available: true,
-		Operations: []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationActivate},
+		Operations: []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate},
 	}
 }
 
