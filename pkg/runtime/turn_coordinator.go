@@ -176,7 +176,39 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			run = reservedRun
 		}
 	}
-	outcome, runErr := runner.RunTurn(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
+	executionCtx, cancelExecution := context.WithCancel(ctx)
+	heartbeatDone := make(chan turnLeaseHeartbeatResult, 1)
+	go c.heartbeatTurnLease(executionCtx, cancelExecution, req.Scope, turn, req.WorkerID, req.LeaseDuration, heartbeatDone)
+	outcome, runErr := runner.RunTurn(executionCtx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
+	cancelExecution()
+	heartbeat := <-heartbeatDone
+	if heartbeat.turn != nil {
+		turn = heartbeat.turn
+	}
+	if heartbeat.err != nil {
+		if runErr == nil || errors.Is(heartbeat.err, ErrTurnLeaseHeld) || errors.Is(heartbeat.err, ErrLeaseLost) {
+			runErr = heartbeat.err
+		}
+	}
+	refreshed, refreshErr := c.portfolio.GetAgentRun(ctx, req.Scope, req.RunID)
+	if refreshErr != nil {
+		return nil, refreshErr
+	}
+	if refreshed.Status != AgentRunStatusRunning || refreshed.LeaseOwner != "" && refreshed.LeaseOwner != req.WorkerID {
+		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
+		if releaseErr != nil && !errors.Is(releaseErr, ErrLeaseLost) {
+			return nil, releaseErr
+		}
+		return &AdvanceAgentRunResult{Run: refreshed, Turn: released}, ErrLeaseLost
+	}
+	run = refreshed
+	if heartbeat.err != nil {
+		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
+		if releaseErr != nil && !errors.Is(releaseErr, ErrLeaseLost) && !errors.Is(releaseErr, ErrTurnLeaseHeld) {
+			return nil, releaseErr
+		}
+		return &AdvanceAgentRunResult{Run: run, Turn: released}, heartbeat.err
+	}
 	if errors.Is(runErr, ErrTurnHostUnavailable) {
 		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
 		if releaseErr != nil {
@@ -269,6 +301,40 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		return nil, err
 	}
 	return result, executionErr
+}
+
+type turnLeaseHeartbeatResult struct {
+	turn *AgentTurn
+	err  error
+}
+
+func (c *TurnCoordinator) heartbeatTurnLease(ctx context.Context, cancel context.CancelFunc, scope Scope, turn *AgentTurn, workerID string, leaseDuration time.Duration, done chan<- turnLeaseHeartbeatResult) {
+	if leaseDuration <= 0 {
+		leaseDuration = 5 * time.Minute
+	}
+	interval := leaseDuration / 3
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	latest := turn
+	for {
+		select {
+		case <-ctx.Done():
+			done <- turnLeaseHeartbeatResult{turn: latest}
+			return
+		case <-ticker.C:
+			renewed, err := c.turns.RenewTurn(ctx, scope, turn.ID, workerID, leaseDuration)
+			if err != nil {
+				if ctx.Err() != nil {
+					done <- turnLeaseHeartbeatResult{turn: latest}
+					return
+				}
+				cancel()
+				done <- turnLeaseHeartbeatResult{turn: latest, err: err}
+				return
+			}
+			latest = renewed
+		}
+	}
 }
 
 func hostedTurnRetryDelay(attempt int64) time.Duration {
