@@ -47,7 +47,7 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	if host.request.InvocationID != "turn-7" || host.request.TurnID != "turn-7" || host.request.RunID != "run-2" || host.request.Goal != "Analyze launch feedback" {
 		t.Fatalf("host request = %#v", host.request)
 	}
-	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" {
+	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || host.request.SkillPrompts[0].Reference != "skill:summarize@1.0.0" || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
 	}
 	encoded, _ := json.Marshal(host.request)
