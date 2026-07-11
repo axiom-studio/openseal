@@ -13,7 +13,7 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	portfolio := NewPortfolioService(store)
 	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship and announce", BudgetPolicy: &BudgetPolicy{MaxTurns: 10, MaxTotalTokens: 1000, MaxCostMicros: 1_000_000},
+		Goal: "Ship and announce", Budget: &BudgetPolicy{MaxTurns: 10, MaxTotalTokens: 1000, MaxCostMicros: 1_000_000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,8 +40,8 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Child.BudgetPolicy == nil || accepted.Child.BudgetPolicy.MaxTurns != 4 ||
-		accepted.Child.BudgetPolicy.MaxTotalTokens != 400 || accepted.Child.BudgetUsage != (BudgetUsage{}) ||
+	if accepted.Child.Budget == nil || accepted.Child.Budget.MaxTurns != 4 ||
+		accepted.Child.Budget.MaxTotalTokens != 400 || accepted.Child.BudgetUsage != (BudgetUsage{}) ||
 		accepted.Child.BudgetState != BudgetStateActive {
 		t.Fatalf("child budget = %#v", accepted.Child)
 	}
@@ -63,7 +63,7 @@ func TestGroupedDelegationCannotOverAllocateParentBudget(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "group-budget"}
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
-		Goal: "Research", BudgetPolicy: &BudgetPolicy{MaxTurns: 10},
+		Goal: "Research", Budget: &BudgetPolicy{MaxTurns: 10},
 	})
 	if err != nil {
 		t.Fatal(err)

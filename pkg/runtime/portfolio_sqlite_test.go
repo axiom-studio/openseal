@@ -22,7 +22,7 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 	objective, err := service.CreateObjective(ctx, CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Launch", Goal: "Launch the product",
 		Status: ObjectiveStatusActive, Priority: 100,
-		Budget:          map[string]interface{}{"tokens": float64(50000)},
+		Budget:          &BudgetPolicy{MaxTotalTokens: 50000},
 		SuccessCriteria: map[string]interface{}{"qualifiedLeads": float64(25)},
 	})
 	if err != nil {
