@@ -760,6 +760,11 @@ const (
 	ArtifactEvidenceTargetClaim          = runtime.EvidenceTargetClaim
 )
 
+var (
+	ErrWorkforceChangeSetNotFound    = authoring.ErrChangeSetNotFound
+	ErrWorkforceChangeSetIdempotency = authoring.ErrChangeSetIdempotency
+)
+
 // Engine is the primary entry point for OpenSeal.
 // It wires together the registry, execution store, worker pool, and scheduler.
 type Engine struct {
