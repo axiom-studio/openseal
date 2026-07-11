@@ -93,6 +93,56 @@ func TestTurnCoordinatorPersistsRunnerFailure(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
+	store := NewMemoryStore(100)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "work", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-1"})
+	if err != nil || claimed == nil {
+		t.Fatalf("claim=%#v err=%v", claimed, err)
+	}
+	calls := 0
+	var turnID string
+	runner := TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+		calls++
+		if turnID == "" {
+			turnID = input.Turn.ID
+		} else if input.Turn.ID != turnID {
+			t.Fatalf("retry created a different turn: first=%s retry=%s", turnID, input.Turn.ID)
+		}
+		if calls == 1 {
+			return nil, retryableTurnHostError{cause: errors.New("connection reset")}
+		}
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done"}, nil
+	})
+	first, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
+	}, runner)
+	if !errors.Is(err, ErrTurnHostUnavailable) || first.Run.Status != AgentRunStatusQueued || first.Turn.Status != AgentTurnStatusRunning || first.Turn.LeaseOwner != "" || first.Event.EventType != "turn.retry_scheduled" {
+		t.Fatalf("retry result=%#v err=%v", first, err)
+	}
+	claimed, err = NewAgentRunScheduler(store).ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("retry claim=%#v err=%v", claimed, err)
+	}
+	second, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
+	}, runner)
+	if err != nil || second.Run.Status != AgentRunStatusCompleted || second.Run.LastAppliedTurn != 1 || calls != 2 {
+		t.Fatalf("completion=%#v calls=%d err=%v", second, calls, err)
+	}
+	turns, err := NewAgentTurnService(store, store).ListTurns(ctx, AgentTurnFilter{Scope: scope, RunID: run.ID, Limit: 10})
+	if err != nil || len(turns) != 1 || turns[0].ID != turnID {
+		t.Fatalf("turns=%#v err=%v", turns, err)
+	}
+}
+
 func TestTurnCoordinatorReconcilesAcrossSQLiteRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "coordinator.db")
 	store, err := NewSQLiteStore(path)

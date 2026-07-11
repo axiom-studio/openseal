@@ -428,7 +428,10 @@ type (
 
 const HostedTurnAPIVersion = runtime.HostedTurnAPIVersion
 
-var NewHostedTurnRunner = runtime.NewHostedTurnRunner
+var (
+	NewHostedTurnRunner    = runtime.NewHostedTurnRunner
+	ErrTurnHostUnavailable = runtime.ErrTurnHostUnavailable
+)
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.
