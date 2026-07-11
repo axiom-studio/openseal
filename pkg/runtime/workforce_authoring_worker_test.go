@@ -196,6 +196,57 @@ func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T)
 	}
 }
 
+func TestWorkforceAuthoringShutdownYieldsRunForImmediateReplicaRecovery(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	generator := testAuthoringGenerator(t)
+	generator.started, generator.release = make(chan struct{}), make(chan struct{})
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	first, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "terminating-replica", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
+	workerCtx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, runErr := first.RunOnce(workerCtx)
+		result <- runErr
+	}()
+	<-generator.started
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("shutdown error = %v", err)
+	}
+	interrupted, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || interrupted.Status != AgentRunStatusQueued || interrupted.Checkpoint["phase"] != "interrupted" || interrupted.LeaseOwner != "" {
+		t.Fatalf("interrupted run = %#v, err = %v", interrupted, err)
+	}
+	pending, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || pending.Status != authoring.ChangeSetEvaluating || pending.Generation.Attempt != 0 {
+		t.Fatalf("pending change set = %#v, err = %v", pending, err)
+	}
+	close(generator.release)
+	second, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "replacement-replica", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
+	if worked, err := second.RunOnce(context.Background()); err != nil || !worked {
+		t.Fatalf("replacement worked=%t err=%v", worked, err)
+	}
+	completed, _ := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if completed.Status != authoring.ChangeSetReview || generator.calls.Load() != 2 {
+		t.Fatalf("completed=%#v provider invocations=%d", completed, generator.calls.Load())
+	}
+}
+
 func TestWorkforceAuthoringWorkerRequiresLeaseLongerThanGenerationTimeout(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {

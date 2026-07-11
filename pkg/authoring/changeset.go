@@ -364,6 +364,12 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	changeSet.Generation.Attempt++
 	result, err := s.compiler.Compile(ctx, changeSet.Generation.Request)
 	if err != nil {
+		// Host shutdown is not a candidate failure. The leased Run worker yields
+		// this unchanged evaluating intent so another process can resume it with
+		// the same stable provider invocation key.
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		failureCode, publicMessage := classifyGenerationFailure(err)
 		failed := cloneChangeSet(changeSet)
 		failed.Status = ChangeSetFailed

@@ -270,6 +270,12 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	defer cancel()
 	generated, generateErr := w.service.changeSets.GeneratePrepared(generationCtx, scope, changeSet.ID, changeSet.Revision)
 	if generateErr != nil {
+		if errors.Is(generateErr, context.Canceled) && ctx.Err() != nil {
+			yieldCtx, yieldCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer yieldCancel()
+			yieldErr := w.yieldInterruptedRun(yieldCtx, run)
+			return errors.Join(generateErr, yieldErr)
+		}
 		if errors.Is(generateErr, authoring.ErrChangeSetRevision) {
 			current, getErr := w.service.changeSets.Get(ctx, scope, changeSet.ID)
 			if getErr == nil && current.Status != authoring.ChangeSetEvaluating {
@@ -289,6 +295,23 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 		"changeSetId": generated.ID, "changeSetStatus": generated.Status, "candidateDigest": generated.CandidateDigest,
 	}, "", "workforce.generation.completed")
+}
+
+func (w *WorkforceAuthoringWorker) yieldInterruptedRun(ctx context.Context, claimed *AgentRun) error {
+	current, err := w.service.store.GetAgentRun(ctx, claimed.Scope, claimed.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Status != AgentRunStatusRunning {
+		return nil
+	}
+	_, _, err = w.activity.TransitionRun(ctx, current.Scope, current.ID, RunTransitionRequest{
+		ExpectedRevision: current.Revision, Status: AgentRunStatusQueued, LeaseOwner: w.config.WorkerID,
+		Checkpoint: map[string]interface{}{"phase": "interrupted", "changeSetId": claimed.Context["changeSetId"]},
+		EventType:  "workforce.generation.interrupted", Summary: "Workforce generation yielded during worker shutdown",
+		Actor: ActivityActor{Type: "worker", ID: w.config.WorkerID}, Severity: ActivitySeverityWarning,
+	})
+	return err
 }
 
 func cloneRuntimeChangeSetForAuthoring(value *authoring.ChangeSet) *authoring.ChangeSet {
