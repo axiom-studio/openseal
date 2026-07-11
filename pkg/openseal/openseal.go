@@ -408,6 +408,7 @@ var (
 	ErrTeamDefinitionNotFound              = kernelteam.ErrDefinitionNotFound
 	ErrTeamDeploymentNotFound              = kernelteam.ErrDeploymentNotFound
 	ErrTeamDeploymentRevisionConflict      = kernelteam.ErrRevisionConflict
+	ErrTeamAmendmentNotFound               = kernelteam.ErrAmendmentNotFound
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
