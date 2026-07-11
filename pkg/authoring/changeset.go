@@ -135,6 +135,7 @@ type ChangeSet struct {
 	RequiredCredentials map[string][]string         `json:"requiredCredentials,omitempty"`
 	Status              ChangeSetStatus             `json:"status"`
 	Actor               ChangeSetActor              `json:"actor"`
+	Generation          *ChangeSetGeneration        `json:"generation,omitempty"`
 	Evaluations         []ChangeSetEvaluation       `json:"evaluations,omitempty"`
 	ApprovalDecisions   []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
 	ApplyReceipt        *ChangeSetApplyReceipt      `json:"applyReceipt,omitempty"`
@@ -142,6 +143,17 @@ type ChangeSet struct {
 	Revision            int64                       `json:"revision"`
 	CreatedAt           time.Time                   `json:"createdAt"`
 	UpdatedAt           time.Time                   `json:"updatedAt"`
+}
+
+// ChangeSetGeneration is the durable, credential-free input and progress for
+// probabilistic candidate generation. Hosts may enqueue it into their canonical
+// Run scheduler after Prepare returns; the prompt request does not need to stay
+// connected while generation is in flight.
+type ChangeSetGeneration struct {
+	Request     GenerateRequest `json:"request"`
+	Attempt     int             `json:"attempt"`
+	LastError   string          `json:"lastError,omitempty"`
+	CompletedAt *time.Time      `json:"completedAt,omitempty"`
 }
 
 type SubmitChangeSetEvaluationRequest struct {
@@ -202,6 +214,7 @@ type ChangeSetStore interface {
 	CreateChangeSet(context.Context, *ChangeSet, string, string) (*ChangeSet, bool, error)
 	GetChangeSet(context.Context, capability.ScopeReference, string) (*ChangeSet, error)
 	UpdateChangeSet(context.Context, *ChangeSet, int64) (*ChangeSet, error)
+	CompleteChangeSetGeneration(context.Context, *ChangeSet, int64) (*ChangeSet, error)
 }
 
 var (
@@ -279,6 +292,100 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	}
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: "candidate_compiled", Actor: request.Actor, At: now}}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
+}
+
+// Prepare durably records generation intent before any model call. Replaying
+// the same idempotency key returns the same aggregate without another call.
+func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetRequest) (*ChangeSet, bool, error) {
+	request.Prompt = strings.TrimSpace(request.Prompt)
+	request.ParentID = strings.TrimSpace(request.ParentID)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.Prompt == "" ||
+		strings.TrimSpace(request.Actor.Type) == "" || strings.TrimSpace(request.Actor.ID) == "" || request.IdempotencyKey == "" {
+		return nil, false, errors.New("change set scope, prompt, actor, and idempotency key are required")
+	}
+	mode := ModeCreate
+	var existing *WorkforceCandidate
+	if request.ParentID != "" {
+		parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ParentID)
+		if err != nil {
+			return nil, false, err
+		}
+		mode = ModeAmend
+		candidate := parent.Result.Candidate
+		existing = &candidate
+	}
+	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
+	requestDigest, err := digestChangeSetRequest(request, mode, existing)
+	if err != nil {
+		return nil, false, err
+	}
+	if replay, found, err := s.store.GetChangeSetByIdempotency(ctx, request.Scope, request.IdempotencyKey, requestDigest); err != nil || found {
+		return replay, found, err
+	}
+	now := s.now().UTC()
+	changeSet := &ChangeSet{
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
+		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), Placement: clonePlacement(request.Placement),
+		Status: ChangeSetEvaluating, Actor: request.Actor, Generation: &ChangeSetGeneration{Request: compileRequest},
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: ChangeSetEvaluating, Reason: "candidate_generation_queued", Actor: request.Actor, At: now}}
+	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
+}
+
+// GeneratePrepared compiles one previously persisted generation intent and
+// commits the immutable candidate with revision CAS.
+func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64) (*ChangeSet, error) {
+	changeSet, err := s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	if changeSet.Revision != expectedRevision || changeSet.Status != ChangeSetEvaluating || changeSet.Generation == nil {
+		return nil, ErrChangeSetRevision
+	}
+	changeSet.Generation.Attempt++
+	result, err := s.compiler.Compile(ctx, changeSet.Generation.Request)
+	if err != nil {
+		failed := cloneChangeSet(changeSet)
+		failed.Status = ChangeSetFailed
+		failed.Generation.LastError = err.Error()
+		failed.Revision++
+		failed.UpdatedAt = s.now().UTC()
+		failed.Lifecycle = append(failed.Lifecycle, ChangeSetLifecycleEvent{Revision: failed.Revision, From: ChangeSetEvaluating, To: ChangeSetFailed, Reason: "candidate_generation_failed", Actor: failed.Actor, At: failed.UpdatedAt})
+		persisted, updateErr := s.store.UpdateChangeSet(ctx, failed, expectedRevision)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		return persisted, err
+	}
+	existing := changeSet.Generation.Request.Existing
+	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
+	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate, existing)
+	result.Validation = validateCandidate(&result.Candidate, existing)
+	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Generation.Request.Catalog)
+	result.RiskChanges = riskChanges(existing, &result.Candidate)
+	result.Diff = workforceDiff(existing, &result.Candidate)
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
+	candidateDigest, err := digestJSON(result.Candidate)
+	if err != nil {
+		return nil, fmt.Errorf("digest workforce candidate: %w", err)
+	}
+	now := s.now().UTC()
+	status := ChangeSetReview
+	if !result.Valid {
+		status = ChangeSetBlocked
+	}
+	changeSet.CandidateDigest = candidateDigest
+	changeSet.Result = *result
+	changeSet.RequiredCredentials = requiredCredentials(result.Candidate, changeSet.Generation.Request.Catalog)
+	changeSet.Status = status
+	changeSet.Revision++
+	changeSet.UpdatedAt = now
+	changeSet.Generation.CompletedAt = &now
+	changeSet.Generation.LastError = ""
+	changeSet.Lifecycle = append(changeSet.Lifecycle, ChangeSetLifecycleEvent{Revision: changeSet.Revision, From: ChangeSetEvaluating, To: status, Reason: "candidate_compiled", Actor: changeSet.Actor, At: now})
+	return s.store.CompleteChangeSetGeneration(ctx, changeSet, expectedRevision)
 }
 
 func (s *ChangeSetService) Get(ctx context.Context, scope capability.ScopeReference, id string) (*ChangeSet, error) {
