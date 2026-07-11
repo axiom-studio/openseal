@@ -2510,7 +2510,7 @@ func (e *Engine) UpdateAllClawHubSkills(ctx context.Context) (*clawhub.Lifecycle
 		}
 		installed, updateErr := e.UpdateClawHubSkill(ctx, updateReference)
 		if updateErr != nil {
-			item.Version, item.Outcome, item.ErrorCode = item.PreviousVersion, clawhub.LifecycleOutcomeError, clawHubLifecycleErrorCode(updateErr)
+			item.Version, item.Outcome, item.ErrorCode = item.PreviousVersion, clawhub.LifecycleOutcomeError, ClassifyClawHubLifecycleError(updateErr)
 			result.Results = append(result.Results, item)
 			continue
 		}
@@ -2526,7 +2526,9 @@ func (e *Engine) UpdateAllClawHubSkills(ctx context.Context) (*clawhub.Lifecycle
 	return result, nil
 }
 
-func clawHubLifecycleErrorCode(err error) clawhub.LifecycleErrorCode {
+// ClassifyClawHubLifecycleError maps internal/registry failures onto the
+// stable secret-free lifecycle contract used by batch and host audit results.
+func ClassifyClawHubLifecycleError(err error) clawhub.LifecycleErrorCode {
 	switch {
 	case errors.Is(err, clawhub.ErrSkillPinned):
 		return clawhub.LifecycleErrorPinned
