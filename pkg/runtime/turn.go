@@ -68,6 +68,7 @@ type AgentTurn struct {
 	Model                  string                 `json:"model,omitempty"`
 	InputContextRefs       []string               `json:"inputContextRefs,omitempty"`
 	PlanRevision           int64                  `json:"planRevision,omitempty"`
+	SkillSelections        []HostedSkillSelection `json:"skillSelections,omitempty"`
 	Decisions              []TurnDecision         `json:"decisions,omitempty"`
 	RequestedActions       []TurnAction           `json:"requestedActions,omitempty"`
 	OutputSummary          string                 `json:"outputSummary,omitempty"`
@@ -137,6 +138,7 @@ type BeginAgentTurnRequest struct {
 type FinishAgentTurnRequest struct {
 	ExpectedRevision       int64
 	Status                 AgentTurnStatus
+	SkillSelections        []HostedSkillSelection
 	Decisions              []TurnDecision
 	RequestedActions       []TurnAction
 	OutputSummary          string
@@ -227,6 +229,7 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	if isWaitingRunStatus(req.NextRunStatus) && req.WakeCondition == nil {
 		return nil, errors.New("waiting turn outcome requires a wake condition")
 	}
+	turn.SkillSelections = append([]HostedSkillSelection(nil), req.SkillSelections...)
 	turn.Decisions = req.Decisions
 	turn.RequestedActions = req.RequestedActions
 	turn.OutputSummary = req.OutputSummary

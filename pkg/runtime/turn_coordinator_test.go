@@ -32,6 +32,7 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 		}
 		return &TurnOutcome{
 			OutputSummary: "Waiting for the next event", NextRunStatus: AgentRunStatusWaitingForEvent,
+			SkillSelections:        []HostedSkillSelection{{SkillRef: "skill:events@1", Disposition: HostedSkillApplied, Summary: "Applied event monitoring"}},
 			WakeCondition:          &WakeCondition{Type: "event", Reference: "work.ready"},
 			ContinuationCheckpoint: map[string]interface{}{"phase": "waiting"},
 			Decisions:              []TurnDecision{{Summary: "Use the event monitor", EvidenceRefs: []string{"skill:events@1"}}},
@@ -71,7 +72,7 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 		t.Fatalf("activity is not linked to turn: %#v", result.Event)
 	}
 	auditPayload, marshalErr := json.Marshal(result.Event.Payload)
-	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" {
+	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || !strings.Contains(string(auditPayload), `"disposition":"applied"`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" {
 		t.Fatalf("activity does not expose bounded-turn audit evidence: %#v", result.Event.Payload)
 	}
 	if result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != "work.ready" || result.Run.Checkpoint["phase"] != "waiting" {
