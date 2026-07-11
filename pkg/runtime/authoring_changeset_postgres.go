@@ -126,6 +126,34 @@ func (s *PostgresStore) CompleteChangeSetGeneration(ctx context.Context, value *
 	return decodeChangeSet(string(payload))
 }
 
+func (s *PostgresStore) ListPendingChangeSetGenerations(ctx context.Context, scope capability.ScopeReference, limit int) ([]*authoring.ChangeSet, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("workforce_change_sets")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND status = $3 ORDER BY created_at, id LIMIT $4`,
+		scope.Kind, scope.ID, authoring.ChangeSetEvaluating, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]*authoring.ChangeSet, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		value, err := decodeChangeSet(payload)
+		if err != nil {
+			return nil, err
+		}
+		if value.Generation != nil {
+			values = append(values, value)
+		}
+	}
+	return values, rows.Err()
+}
+
 func decodeChangeSet(payload string) (*authoring.ChangeSet, error) {
 	var value authoring.ChangeSet
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {

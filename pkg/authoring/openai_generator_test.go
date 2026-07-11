@@ -16,6 +16,9 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 		if request.Method != http.MethodPost || request.Header.Get("Authorization") != "Bearer "+apiKey {
 			t.Fatalf("request method/auth = %s / %q", request.Method, request.Header.Get("Authorization"))
 		}
+		if request.Header.Get("Idempotency-Key") != "change-set:one:0" {
+			t.Fatalf("idempotency header = %q", request.Header.Get("Idempotency-Key"))
+		}
 		var body map[string]interface{}
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
@@ -33,12 +36,15 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team", Catalog: CapabilityCatalog{}})
+	payload, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team", Catalog: CapabilityCatalog{}, InvocationKey: "change-set:one:0"})
 	if err != nil || !strings.Contains(string(payload), "Which Team") {
 		t.Fatalf("payload = %s, err = %v", payload, err)
 	}
 	if strings.Contains(requestBody, apiKey) || strings.Contains(string(payload), apiKey) {
 		t.Fatal("transport credential leaked into model-visible or returned content")
+	}
+	if strings.Contains(requestBody, "change-set:one:0") {
+		t.Fatal("transport idempotency token should not become model-visible prompt data")
 	}
 }
 

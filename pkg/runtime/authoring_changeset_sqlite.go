@@ -121,4 +121,32 @@ func (s *SQLiteStore) CompleteChangeSetGeneration(ctx context.Context, value *au
 	return decodeChangeSet(string(payload))
 }
 
+func (s *SQLiteStore) ListPendingChangeSetGenerations(ctx context.Context, scope capability.ScopeReference, limit int) ([]*authoring.ChangeSet, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM workforce_change_sets
+		WHERE scope_kind = ? AND scope_id = ? AND status = ? ORDER BY created_at, id LIMIT ?`,
+		scope.Kind, scope.ID, authoring.ChangeSetEvaluating, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]*authoring.ChangeSet, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		value, err := decodeChangeSet(payload)
+		if err != nil {
+			return nil, err
+		}
+		if value.Generation != nil {
+			values = append(values, value)
+		}
+	}
+	return values, rows.Err()
+}
+
 var _ authoring.ChangeSetStore = (*SQLiteStore)(nil)

@@ -46,10 +46,11 @@ type WorkforceCandidate struct {
 }
 
 type GenerateRequest struct {
-	Mode     Mode                `json:"mode"`
-	Prompt   string              `json:"prompt"`
-	Existing *WorkforceCandidate `json:"existing,omitempty"`
-	Catalog  CapabilityCatalog   `json:"catalog"`
+	Mode          Mode                `json:"mode"`
+	Prompt        string              `json:"prompt"`
+	Existing      *WorkforceCandidate `json:"existing,omitempty"`
+	Catalog       CapabilityCatalog   `json:"catalog"`
+	InvocationKey string              `json:"invocationKey,omitempty"`
 }
 
 // Generator is the only probabilistic boundary. Implementations may use an

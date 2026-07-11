@@ -151,9 +151,19 @@ type ChangeSet struct {
 // connected while generation is in flight.
 type ChangeSetGeneration struct {
 	Request     GenerateRequest `json:"request"`
+	RunID       string          `json:"runId,omitempty"`
 	Attempt     int             `json:"attempt"`
+	FailureCode string          `json:"failureCode,omitempty"`
 	LastError   string          `json:"lastError,omitempty"`
 	CompletedAt *time.Time      `json:"completedAt,omitempty"`
+}
+
+type RetryChangeSetGenerationRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ChangeSetID      string                    `json:"changeSetId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	Reason           string                    `json:"reason"`
+	Actor            ChangeSetActor            `json:"actor"`
 }
 
 type SubmitChangeSetEvaluationRequest struct {
@@ -215,6 +225,12 @@ type ChangeSetStore interface {
 	GetChangeSet(context.Context, capability.ScopeReference, string) (*ChangeSet, error)
 	UpdateChangeSet(context.Context, *ChangeSet, int64) (*ChangeSet, error)
 	CompleteChangeSetGeneration(context.Context, *ChangeSet, int64) (*ChangeSet, error)
+}
+
+// PendingChangeSetGenerationStore is an optional recovery index implemented by
+// durable stores that host asynchronous generation workers.
+type PendingChangeSetGenerationStore interface {
+	ListPendingChangeSetGenerations(context.Context, capability.ScopeReference, int) ([]*ChangeSet, error)
 }
 
 var (
@@ -330,6 +346,7 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		Status: ChangeSetEvaluating, Actor: request.Actor, Generation: &ChangeSetGeneration{Request: compileRequest},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	changeSet.Generation.Request.InvocationKey = generationInvocationKey(changeSet.ID, 0)
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: ChangeSetEvaluating, Reason: "candidate_generation_queued", Actor: request.Actor, At: now}}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
 }
@@ -347,13 +364,17 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	changeSet.Generation.Attempt++
 	result, err := s.compiler.Compile(ctx, changeSet.Generation.Request)
 	if err != nil {
+		failureCode, publicMessage := classifyGenerationFailure(err)
 		failed := cloneChangeSet(changeSet)
 		failed.Status = ChangeSetFailed
-		failed.Generation.LastError = err.Error()
+		failed.Generation.FailureCode = failureCode
+		failed.Generation.LastError = publicMessage
 		failed.Revision++
 		failed.UpdatedAt = s.now().UTC()
 		failed.Lifecycle = append(failed.Lifecycle, ChangeSetLifecycleEvent{Revision: failed.Revision, From: ChangeSetEvaluating, To: ChangeSetFailed, Reason: "candidate_generation_failed", Actor: failed.Actor, At: failed.UpdatedAt})
-		persisted, updateErr := s.store.UpdateChangeSet(ctx, failed, expectedRevision)
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		persisted, updateErr := s.store.UpdateChangeSet(persistCtx, failed, expectedRevision)
 		if updateErr != nil {
 			return nil, updateErr
 		}
@@ -383,13 +404,63 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	changeSet.Revision++
 	changeSet.UpdatedAt = now
 	changeSet.Generation.CompletedAt = &now
+	changeSet.Generation.FailureCode = ""
 	changeSet.Generation.LastError = ""
 	changeSet.Lifecycle = append(changeSet.Lifecycle, ChangeSetLifecycleEvent{Revision: changeSet.Revision, From: ChangeSetEvaluating, To: status, Reason: "candidate_compiled", Actor: changeSet.Actor, At: now})
-	return s.store.CompleteChangeSetGeneration(ctx, changeSet, expectedRevision)
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return s.store.CompleteChangeSetGeneration(persistCtx, changeSet, expectedRevision)
 }
 
 func (s *ChangeSetService) Get(ctx context.Context, scope capability.ScopeReference, id string) (*ChangeSet, error) {
 	return s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
+}
+
+// RetryGeneration explicitly requeues a failed model attempt. The previous
+// error and lifecycle remain auditable; a host schedules a new canonical Run.
+func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryChangeSetGenerationRequest) (*ChangeSet, error) {
+	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
+	request.Reason = strings.TrimSpace(request.Reason)
+	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" ||
+		request.ExpectedRevision < 1 || request.Reason == "" || request.Actor.Type == "" || request.Actor.ID == "" {
+		return nil, errors.New("retry scope, change set, revision, reason, and actor are required")
+	}
+	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Revision != request.ExpectedRevision {
+		return nil, ErrChangeSetRevision
+	}
+	if current.Status != ChangeSetFailed || current.Generation == nil {
+		return nil, fmt.Errorf("%w: cannot retry status %s", ErrChangeSetTransition, current.Status)
+	}
+	next := cloneChangeSet(current)
+	now := s.now().UTC()
+	next.Status, next.Revision, next.UpdatedAt = ChangeSetEvaluating, current.Revision+1, now
+	next.Generation.RunID = ""
+	next.Generation.Request.InvocationKey = generationInvocationKey(next.ID, next.Generation.Attempt)
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetEvaluating, Reason: request.Reason, Actor: request.Actor, At: now})
+	return s.store.UpdateChangeSet(ctx, next, current.Revision)
+}
+
+func generationInvocationKey(changeSetID string, attempt int) string {
+	return fmt.Sprintf("workforce-change-set:%s:%d", strings.TrimSpace(changeSetID), attempt)
+}
+
+func classifyGenerationFailure(err error) (string, string) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout", "Workforce generation timed out"
+	case errors.Is(err, context.Canceled):
+		return "canceled", "Workforce generation was canceled"
+	case strings.Contains(err.Error(), "decode workforce candidate"), strings.Contains(err.Error(), "decode repaired workforce candidate"),
+		strings.Contains(err.Error(), "generated workforce candidate must"), strings.Contains(err.Error(), "repaired workforce candidate must"):
+		return "schema_failed", "The provider returned an invalid workforce candidate"
+	default:
+		return "provider_failed", "The workforce generation provider failed"
+	}
 }
 
 func (s *ChangeSetService) ApplyAvailable() bool {
