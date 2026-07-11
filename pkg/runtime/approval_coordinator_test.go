@@ -118,7 +118,7 @@ func createApprovalForStore(t *testing.T, store KernelStore, now time.Time) *Act
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
-		BudgetPolicy: &BudgetPolicy{MaxActions: 1},
+		Budget: &BudgetPolicy{MaxActions: 1},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -186,7 +186,7 @@ func TestTurnCoordinatorPausesAndAccountsExhaustedBudget(t *testing.T) {
 	scope := Scope{Kind: "local", ID: "budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded work",
-		BudgetPolicy: &BudgetPolicy{MaxTurns: 1, MaxTotalTokens: 30, MaxCostMicros: 250_000},
+		Budget: &BudgetPolicy{MaxTurns: 1, MaxTotalTokens: 30, MaxCostMicros: 250_000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
 	scope := Scope{Kind: "local", ID: "budget-recovery"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "recover",
-		BudgetPolicy: &BudgetPolicy{MaxTurns: 10},
+		Budget: &BudgetPolicy{MaxTurns: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestTurnBudgetReservationPreventsKnownOverspend(t *testing.T) {
 	scope := Scope{Kind: "local", ID: "budget-reservation"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded",
-		BudgetPolicy: &BudgetPolicy{MaxInputTokens: 10},
+		Budget: &BudgetPolicy{MaxInputTokens: 10},
 	})
 	if err != nil {
 		t.Fatal(err)

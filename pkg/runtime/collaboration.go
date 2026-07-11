@@ -870,9 +870,9 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: source.ConcurrencyKey,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
-		Budget: cloneMap(source.Budget), BudgetPolicy: cloneBudgetPolicy(request.BudgetAllocation), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Budget: cloneBudgetPolicy(request.BudgetAllocation), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if child.BudgetPolicy != nil {
+	if child.Budget != nil {
 		child.BudgetState = BudgetStateActive
 	}
 	return child

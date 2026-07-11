@@ -77,7 +77,7 @@ func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
-		Goal: "deploy once", BudgetPolicy: &BudgetPolicy{MaxActions: 1},
+		Goal: "deploy once", Budget: &BudgetPolicy{MaxActions: 1},
 	})
 	if err != nil {
 		t.Fatal(err)

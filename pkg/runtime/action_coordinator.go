@@ -143,7 +143,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	updatedRun.Revision++
 	updatedRun.UpdatedAt = now
 	budgetDenied := false
-	if updatedRun.BudgetPolicy != nil && decision.Disposition != ActionDispositionDeny {
+	if updatedRun.Budget != nil && decision.Disposition != ActionDispositionDeny {
 		err := reserveRunBudget(updatedRun, BudgetReservation{
 			ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now,
 		})

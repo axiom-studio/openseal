@@ -35,7 +35,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
 				Goal: "Ship the release", Source: RunSourceManual,
 				Context: map[string]interface{}{"sourceOnly": true, "vaultBindingRef": "binding:must-not-transfer"},
-				Budget:  map[string]interface{}{"tokens": 1000}, Policy: map[string]interface{}{"risk": "guarded"},
+				Budget:  &BudgetPolicy{MaxTotalTokens: 1000}, Policy: map[string]interface{}{"risk": "guarded"},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -55,7 +55,8 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 					},
 				}},
 				SharedContext: map[string]interface{}{"release": "2026.07"}, ConversationRefs: []string{"team:gtm:42"},
-				IdempotencyKey: "release-launch-brief",
+				IdempotencyKey:   "release-launch-brief",
+				BudgetAllocation: &BudgetPolicy{MaxTotalTokens: 500},
 			}
 			created, err := service.CreateAgentRequest(ctx, create)
 			if err != nil {

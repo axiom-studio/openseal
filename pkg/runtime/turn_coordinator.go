@@ -127,7 +127,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	if err != nil {
 		return nil, err
 	}
-	if run.BudgetPolicy != nil {
+	if run.Budget != nil {
 		if _, reserved := run.BudgetReservations[turn.ID]; !reserved {
 			leaseOwner := ""
 			if run.LeaseOwner != "" {
@@ -146,7 +146,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			if err != nil {
 				return nil, err
 			}
-			exceeded, _, err := BudgetWouldExceed(*run.BudgetPolicy, projected)
+			exceeded, _, err := BudgetWouldExceed(*run.Budget, projected)
 			if err != nil {
 				return nil, err
 			}
@@ -213,13 +213,13 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.RunError = outcome.RunError
 		}
 	}
-	if run.BudgetPolicy != nil && finish.Status == AgentTurnStatusCompleted {
+	if run.Budget != nil && finish.Status == AgentTurnStatusCompleted {
 		delta := budgetUsageForTurn(finish.Usage)
 		usage, usageErr := run.BudgetUsage.Add(delta)
 		if usageErr != nil {
 			return nil, usageErr
 		}
-		state, _, usageErr := EvaluateBudget(*run.BudgetPolicy, usage)
+		state, _, usageErr := EvaluateBudget(*run.Budget, usage)
 		if usageErr != nil {
 			return nil, usageErr
 		}
@@ -263,7 +263,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		leaseOwner = workerID
 	}
 	var budgetDelta *BudgetUsage
-	if run.BudgetPolicy != nil {
+	if run.Budget != nil {
 		if _, reserved := run.BudgetReservations[turn.ID]; reserved {
 			delta := budgetUsageForTurn(turn.Usage)
 			budgetDelta = &delta
@@ -285,7 +285,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 }
 
 func budgetReservationID(run *AgentRun, turn *AgentTurn) string {
-	if run == nil || turn == nil || run.BudgetPolicy == nil {
+	if run == nil || turn == nil || run.Budget == nil {
 		return ""
 	}
 	if _, reserved := run.BudgetReservations[turn.ID]; !reserved {

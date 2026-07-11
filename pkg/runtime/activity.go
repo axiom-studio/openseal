@@ -216,7 +216,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.LastAppliedTurn = req.AppliedTurn
 	}
 	if req.BudgetReservation != nil {
-		if run.BudgetPolicy == nil {
+		if run.Budget == nil {
 			return nil, nil, errors.New("budget cannot be reserved without a budget policy")
 		}
 		if err := req.BudgetReservation.Validate(); err != nil {
@@ -233,14 +233,14 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		if err != nil {
 			return nil, nil, err
 		}
-		exceeded, _, err := BudgetWouldExceed(*run.BudgetPolicy, effective)
+		exceeded, _, err := BudgetWouldExceed(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
 		if exceeded {
 			return nil, nil, ErrBudgetExhausted
 		}
-		state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+		state, _, err := EvaluateBudget(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -253,7 +253,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		delete(run.BudgetReservations, req.SettleBudgetReservationID)
 	}
 	if req.BudgetUsageDelta != nil {
-		if run.BudgetPolicy == nil {
+		if run.Budget == nil {
 			return nil, nil, errors.New("budget usage cannot be recorded without a budget policy")
 		}
 		usage, err := run.BudgetUsage.Add(*req.BudgetUsageDelta)
@@ -264,7 +264,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		if err != nil {
 			return nil, nil, err
 		}
-		state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+		state, _, err := EvaluateBudget(*run.Budget, effective)
 		if err != nil {
 			return nil, nil, err
 		}

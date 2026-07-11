@@ -120,7 +120,7 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 		}
 	}
 	updatedRun := cloneAgentRun(run)
-	if callStatus == ActionCallStatusDenied && updatedRun.BudgetPolicy != nil {
+	if callStatus == ActionCallStatusDenied && updatedRun.Budget != nil {
 		if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
 			return nil, err
 		}

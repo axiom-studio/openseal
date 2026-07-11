@@ -76,7 +76,7 @@ type Objective struct {
 	Priority         int                    `json:"priority"`
 	Cadence          map[string]interface{} `json:"cadence,omitempty"`
 	EventRules       map[string]interface{} `json:"eventRules,omitempty"`
-	Budget           map[string]interface{} `json:"budget,omitempty"`
+	Budget           *BudgetPolicy          `json:"budget,omitempty"`
 	Constraints      map[string]interface{} `json:"constraints,omitempty"`
 	SuccessCriteria  map[string]interface{} `json:"successCriteria,omitempty"`
 	ProgressSummary  string                 `json:"progressSummary,omitempty"`
@@ -101,6 +101,11 @@ func (o *Objective) Validate() error {
 	}
 	if o.Priority < 0 {
 		return errors.New("objective priority cannot be negative")
+	}
+	if o.Budget != nil {
+		if err := o.Budget.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -193,8 +198,7 @@ type AgentRun struct {
 	PausedFrom           AgentRunStatus               `json:"pausedFrom,omitempty"`
 	PausedWakeCondition  *WakeCondition               `json:"pausedWakeCondition,omitempty"`
 	PendingInterventions []AgentRunIntervention       `json:"pendingInterventions,omitempty"`
-	Budget               map[string]interface{}       `json:"budget,omitempty"`
-	BudgetPolicy         *BudgetPolicy                `json:"budgetPolicy,omitempty"`
+	Budget               *BudgetPolicy                `json:"budget,omitempty"`
 	BudgetUsage          BudgetUsage                  `json:"budgetUsage,omitempty"`
 	BudgetState          BudgetState                  `json:"budgetState,omitempty"`
 	BudgetReservations   map[string]BudgetReservation `json:"budgetReservations,omitempty"`
@@ -232,8 +236,8 @@ func (r *AgentRun) Validate() error {
 	if r.Priority < 0 {
 		return errors.New("run priority cannot be negative")
 	}
-	if r.BudgetPolicy != nil {
-		if err := r.BudgetPolicy.Validate(); err != nil {
+	if r.Budget != nil {
+		if err := r.Budget.Validate(); err != nil {
 			return err
 		}
 		if err := r.BudgetUsage.Validate(); err != nil {
@@ -251,7 +255,7 @@ func (r *AgentRun) Validate() error {
 		if err != nil {
 			return err
 		}
-		state, _, err := EvaluateBudget(*r.BudgetPolicy, effective)
+		state, _, err := EvaluateBudget(*r.Budget, effective)
 		if err != nil {
 			return err
 		}
@@ -320,7 +324,7 @@ type CreateObjectiveRequest struct {
 	Priority         int
 	Cadence          map[string]interface{}
 	EventRules       map[string]interface{}
-	Budget           map[string]interface{}
+	Budget           *BudgetPolicy
 	Constraints      map[string]interface{}
 	SuccessCriteria  map[string]interface{}
 	NextEvaluationAt *time.Time
@@ -334,7 +338,7 @@ type UpdateObjectiveRequest struct {
 	Priority         *int
 	Cadence          map[string]interface{}
 	EventRules       map[string]interface{}
-	Budget           map[string]interface{}
+	Budget           *BudgetPolicy
 	Constraints      map[string]interface{}
 	SuccessCriteria  map[string]interface{}
 	ProgressSummary  *string
@@ -358,8 +362,7 @@ type CreateAgentRunRequest struct {
 	Plan            map[string]interface{}
 	Checkpoint      map[string]interface{}
 	WakeCondition   *WakeCondition
-	Budget          map[string]interface{}
-	BudgetPolicy    *BudgetPolicy
+	Budget          *BudgetPolicy
 	Policy          map[string]interface{}
 	IdempotencyKey  string
 	Actor           ActivityActor
@@ -387,7 +390,7 @@ func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObject
 	objective := &Objective{
 		ID: uuid.NewString(), Scope: req.Scope, Owner: req.Owner, Title: req.Title,
 		Goal: req.Goal, Status: status, Priority: req.Priority, Cadence: req.Cadence,
-		EventRules: req.EventRules, Budget: req.Budget, Constraints: req.Constraints,
+		EventRules: req.EventRules, Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints,
 		SuccessCriteria: req.SuccessCriteria, NextEvaluationAt: req.NextEvaluationAt,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -527,9 +530,9 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
-		Budget: req.Budget, BudgetPolicy: req.BudgetPolicy, Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Budget: cloneBudgetPolicy(req.Budget), Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if run.BudgetPolicy != nil {
+	if run.Budget != nil {
 		run.BudgetState = BudgetStateActive
 	}
 	if err := run.Validate(); err != nil {
@@ -609,7 +612,7 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 		objective.EventRules = req.EventRules
 	}
 	if req.Budget != nil {
-		objective.Budget = req.Budget
+		objective.Budget = cloneBudgetPolicy(req.Budget)
 	}
 	if req.Constraints != nil {
 		objective.Constraints = req.Constraints

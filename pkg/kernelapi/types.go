@@ -137,8 +137,7 @@ type CreateAgentRunRequest struct {
 	Plan            map[string]interface{}     `json:"plan,omitempty"`
 	Checkpoint      map[string]interface{}     `json:"checkpoint,omitempty"`
 	WakeCondition   *runtime.WakeCondition     `json:"wakeCondition,omitempty"`
-	Budget          map[string]interface{}     `json:"budget,omitempty"`
-	BudgetPolicy    *runtime.BudgetPolicy      `json:"budgetPolicy,omitempty"`
+	Budget          *runtime.BudgetPolicy      `json:"budget,omitempty"`
 	Policy          map[string]interface{}     `json:"policy,omitempty"`
 	IdempotencyKey  string                     `json:"idempotencyKey,omitempty"`
 	Actor           runtime.ActivityActor      `json:"actor,omitempty"`

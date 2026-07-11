@@ -180,7 +180,7 @@ func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) e
 			return fmt.Errorf("invalid child budget allocation: %w", err)
 		}
 	}
-	if parent.BudgetPolicy == nil {
+	if parent.Budget == nil {
 		return nil
 	}
 	if allocation == nil {
@@ -191,7 +191,7 @@ func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) e
 		return err
 	}
 	existing := sumBudgetPolicies(parent.BudgetAllocations)
-	for _, dimension := range budgetDimensions(*parent.BudgetPolicy, effective, addBudgetPolicies(existing, *allocation)) {
+	for _, dimension := range budgetDimensions(*parent.Budget, effective, addBudgetPolicies(existing, *allocation)) {
 		if dimension.parentLimit == 0 {
 			continue
 		}
@@ -207,7 +207,7 @@ func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) e
 }
 
 func addRunBudgetAllocation(run *AgentRun, allocationID string, allocation *BudgetPolicy) error {
-	if run == nil || run.BudgetPolicy == nil {
+	if run == nil || run.Budget == nil {
 		return nil
 	}
 	if allocation == nil {
@@ -227,7 +227,7 @@ func addRunBudgetAllocation(run *AgentRun, allocationID string, allocation *Budg
 }
 
 func reserveRunBudget(run *AgentRun, reservation BudgetReservation) error {
-	if run == nil || run.BudgetPolicy == nil {
+	if run == nil || run.Budget == nil {
 		return nil
 	}
 	if err := reservation.Validate(); err != nil {
@@ -245,7 +245,7 @@ func reserveRunBudget(run *AgentRun, reservation BudgetReservation) error {
 		delete(run.BudgetReservations, reservation.ID)
 		return err
 	}
-	exceeded, _, err := BudgetWouldExceed(*run.BudgetPolicy, effective)
+	exceeded, _, err := BudgetWouldExceed(*run.Budget, effective)
 	if err != nil || exceeded {
 		delete(run.BudgetReservations, reservation.ID)
 		if err != nil {
@@ -253,7 +253,7 @@ func reserveRunBudget(run *AgentRun, reservation BudgetReservation) error {
 		}
 		return ErrBudgetExhausted
 	}
-	state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+	state, _, err := EvaluateBudget(*run.Budget, effective)
 	if err != nil {
 		delete(run.BudgetReservations, reservation.ID)
 		return err
@@ -263,7 +263,7 @@ func reserveRunBudget(run *AgentRun, reservation BudgetReservation) error {
 }
 
 func settleRunBudgetReservation(run *AgentRun, reservationID string, usage BudgetUsage) error {
-	if run == nil || run.BudgetPolicy == nil {
+	if run == nil || run.Budget == nil {
 		return nil
 	}
 	if _, exists := run.BudgetReservations[reservationID]; !exists {
@@ -278,7 +278,7 @@ func settleRunBudgetReservation(run *AgentRun, reservationID string, usage Budge
 	if err != nil {
 		return err
 	}
-	state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+	state, _, err := EvaluateBudget(*run.Budget, effective)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func settleRunBudgetReservation(run *AgentRun, reservationID string, usage Budge
 }
 
 func releaseRunBudgetReservation(run *AgentRun, reservationID string) error {
-	if run == nil || run.BudgetPolicy == nil {
+	if run == nil || run.Budget == nil {
 		return nil
 	}
 	if _, exists := run.BudgetReservations[reservationID]; !exists {
@@ -299,7 +299,7 @@ func releaseRunBudgetReservation(run *AgentRun, reservationID string) error {
 	if err != nil {
 		return err
 	}
-	state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+	state, _, err := EvaluateBudget(*run.Budget, effective)
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func releaseRunBudgetReservation(run *AgentRun, reservationID string) error {
 }
 
 func validateGroupedBudgetAllocations(parent *AgentRun, allocations []*BudgetPolicy) error {
-	if parent == nil || parent.BudgetPolicy == nil {
+	if parent == nil || parent.Budget == nil {
 		return nil
 	}
 	total := BudgetPolicy{}
