@@ -72,4 +72,19 @@ func TestPostgresWorkforceChangeSetsAreReplicaSafeAndDurable(t *testing.T) {
 	if err != nil || restored.CandidateDigest != value.CandidateDigest {
 		t.Fatalf("restored = %#v, err = %v", restored, err)
 	}
+	updated := *restored
+	updated.Status, updated.Revision, updated.UpdatedAt = authoring.ChangeSetReady, 2, restored.UpdatedAt.Add(time.Minute)
+	if persisted, err := primary.UpdateChangeSet(ctx, &updated, 1); err != nil || persisted.Revision != 2 {
+		t.Fatalf("update = %#v, err = %v", persisted, err)
+	}
+	stale := updated
+	stale.Status, stale.Revision = authoring.ChangeSetRejected, 3
+	if _, err := replica.UpdateChangeSet(ctx, &stale, 1); !errors.Is(err, authoring.ErrChangeSetRevision) {
+		t.Fatalf("stale replica update = %v", err)
+	}
+	modifiedCandidate := updated
+	modifiedCandidate.CandidateDigest, modifiedCandidate.Revision = "changed", 3
+	if _, err := replica.UpdateChangeSet(ctx, &modifiedCandidate, 2); !errors.Is(err, authoring.ErrChangeSetRevision) {
+		t.Fatalf("candidate mutation = %v", err)
+	}
 }

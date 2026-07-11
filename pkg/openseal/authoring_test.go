@@ -14,6 +14,12 @@ func (workforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringReq
 	return []byte(`{"candidate":{"agents":[],"assignments":[]},"questions":["What should this Team own?"]}`), nil
 }
 
+type evaluableWorkforceFixtureGenerator struct{}
+
+func (evaluableWorkforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
+	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[]},"questions":[]}`), nil
+}
+
 func TestEngineExposesDurableWorkforceChangeSetsOnlyWithPersistentSupport(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
@@ -38,5 +44,28 @@ func TestEngineExposesDurableWorkforceChangeSetsOnlyWithPersistentSupport(t *tes
 	restored, err := engine.GetWorkforceChangeSet(t.Context(), created.Scope, created.ID)
 	if err != nil || restored.CandidateDigest != created.CandidateDigest {
 		t.Fatalf("restored = %#v, err = %v", restored, err)
+	}
+}
+
+func TestEngineSubmitsGovernedWorkforceEvaluation(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	engine, err := New(WithPersistentStore(store), WithWorkforceAuthoringGenerator(evaluableWorkforceFixtureGenerator{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := engine.CreateWorkforceChangeSet(t.Context(), CreateWorkforceChangeSetRequest{Scope: SkillScope{Kind: "workspace", ID: "local"}, Prompt: "Create a Team", Actor: WorkforceChangeSetActor{Type: "user", ID: "local"}, IdempotencyKey: "create"})
+	if err != nil || created.Status != WorkforceChangeSetReview {
+		t.Fatalf("created = %#v, err = %v", created, err)
+	}
+	evaluated, replay, err := engine.SubmitWorkforceChangeSetEvaluation(t.Context(), SubmitWorkforceChangeSetEvaluationRequest{
+		Scope: created.Scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest,
+		Allowed: true, Actor: WorkforceChangeSetActor{Type: "policy_evaluator", ID: "local"}, IdempotencyKey: "evaluate",
+	})
+	if err != nil || replay || evaluated.Status != WorkforceChangeSetReady {
+		t.Fatalf("evaluated = %#v replay=%t err=%v", evaluated, replay, err)
 	}
 }

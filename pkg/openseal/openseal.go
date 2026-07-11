@@ -35,79 +35,84 @@ type (
 	StepExecutor         = executor.StepExecutor
 	ExecutionGraph       = executor.ExecutionGraph
 
-	AgentNodeDefinition                   = types.AgentNodeDefinition
-	AgentConnection                       = types.AgentConnection
-	AgentLibraryBean                      = types.AgentLibraryBean
-	AgentInstanceBean                     = types.AgentInstanceBean
-	AgentWorkflow                         = types.AgentWorkflow
-	AgentWorkflowBean                     = types.AgentWorkflowBean
-	AgentDefinition                       = kernelagent.AgentDefinition
-	AgentSkillRequirement                 = kernelagent.SkillRequirement
-	AgentAuthorityPolicy                  = kernelagent.AuthorityPolicy
-	AgentMemoryPolicy                     = kernelagent.MemoryPolicy
-	AgentEscalationPolicy                 = kernelagent.EscalationPolicy
-	AgentObjectiveTemplate                = kernelagent.ObjectiveTemplate
-	AgentEvaluationCriterion              = kernelagent.EvaluationCriterion
-	AgentAmendmentPolicy                  = kernelagent.AmendmentPolicy
-	AgentDefinitionProvenance             = kernelagent.DefinitionProvenance
-	AgentDeployment                       = kernelagent.AgentDeployment
-	AgentDeploymentRestrictions           = kernelagent.DeploymentRestrictions
-	AgentDeploymentCapacity               = kernelagent.DeploymentCapacity
-	AgentDeploymentHealth                 = kernelagent.DeploymentHealth
-	AgentDefinitionActivation             = kernelagent.DefinitionActivation
-	AgentRolloutStatus                    = kernelagent.RolloutStatus
-	AgentDefinitionAmendment              = kernelagent.DefinitionAmendment
-	AgentAmendmentStatus                  = kernelagent.AmendmentStatus
-	AgentDefinitionFieldChange            = kernelagent.DefinitionFieldChange
-	AgentAmendmentEvaluation              = kernelagent.AmendmentEvaluation
-	AgentAmendmentDecision                = kernelagent.AmendmentDecision
-	ProposeAgentAmendmentRequest          = kernelagent.ProposeAmendmentRequest
-	SubmitAgentAmendmentEvaluationRequest = kernelagent.SubmitAmendmentEvaluationRequest
-	ResolveAgentAmendmentRequest          = kernelagent.ResolveAmendmentRequest
-	AgentRegistryStore                    = kernelagent.Store
-	TeamDefinition                        = kernelteam.Definition
-	TeamRoleSlot                          = kernelteam.RoleSlot
-	TeamRoleChannelParticipation          = kernelteam.RoleChannelParticipation
-	TeamCoordinationMode                  = kernelteam.CoordinationMode
-	TeamCoordinationPolicy                = kernelteam.CoordinationPolicy
-	TeamDelegationPolicy                  = kernelteam.DelegationPolicy
-	TeamApprovalPolicy                    = kernelteam.ApprovalPolicy
-	TeamDeployment                        = kernelteam.Deployment
-	TeamDeploymentStatus                  = kernelteam.DeploymentStatus
-	TeamRosterAssignment                  = kernelteam.RosterAssignment
-	TeamDeploymentRestrictions            = kernelteam.DeploymentRestrictions
-	TeamDefinitionAmendment               = kernelteam.DefinitionAmendment
-	TeamAmendmentStatus                   = kernelteam.AmendmentStatus
-	TeamAmendmentEvaluation               = kernelteam.AmendmentEvaluation
-	TeamAmendmentDecision                 = kernelteam.AmendmentDecision
-	ProposeTeamAmendmentRequest           = kernelteam.ProposeAmendmentRequest
-	SubmitTeamAmendmentEvaluationRequest  = kernelteam.SubmitAmendmentEvaluationRequest
-	ResolveTeamAmendmentRequest           = kernelteam.ResolveAmendmentRequest
-	TeamRegistryStore                     = kernelteam.Store
-	WorkforceSharedContextPolicy          = workforce.SharedContextPolicy
-	WorkforceObjectiveTemplate            = workforce.ObjectiveTemplate
-	WorkforceEvaluationCriterion          = workforce.EvaluationCriterion
-	WorkforceAmendmentPolicy              = workforce.AmendmentPolicy
-	WorkforceDefinitionProvenance         = workforce.DefinitionProvenance
-	WorkforceDefinitionActivation         = workforce.DefinitionActivation
-	WorkforceAuthoringMode                = authoring.Mode
-	WorkforceSkillCapability              = authoring.SkillCapability
-	WorkforceCapabilityCatalog            = authoring.CapabilityCatalog
-	WorkforceAssignment                   = authoring.Assignment
-	WorkforceCandidate                    = authoring.WorkforceCandidate
-	WorkforceAuthoringRequest             = authoring.GenerateRequest
-	WorkforceAuthoringGenerator           = authoring.Generator
-	WorkforceAuthoringResult              = authoring.CompileResult
-	WorkforceAuthoringValidationIssue     = authoring.ValidationIssue
-	WorkforceAuthoringMissingRequirement  = authoring.MissingRequirement
-	WorkforceAuthoringRiskChange          = authoring.RiskChange
-	WorkforceAuthoringFieldDiff           = authoring.FieldDiff
-	WorkforceChangeSet                    = authoring.ChangeSet
-	WorkforceChangeSetStatus              = authoring.ChangeSetStatus
-	WorkforceChangeSetActor               = authoring.ChangeSetActor
-	WorkforceChangeSetPlacement           = authoring.ChangeSetPlacement
-	CreateWorkforceChangeSetRequest       = authoring.CreateChangeSetRequest
-	WorkforceChangeSetStore               = authoring.ChangeSetStore
+	AgentNodeDefinition                       = types.AgentNodeDefinition
+	AgentConnection                           = types.AgentConnection
+	AgentLibraryBean                          = types.AgentLibraryBean
+	AgentInstanceBean                         = types.AgentInstanceBean
+	AgentWorkflow                             = types.AgentWorkflow
+	AgentWorkflowBean                         = types.AgentWorkflowBean
+	AgentDefinition                           = kernelagent.AgentDefinition
+	AgentSkillRequirement                     = kernelagent.SkillRequirement
+	AgentAuthorityPolicy                      = kernelagent.AuthorityPolicy
+	AgentMemoryPolicy                         = kernelagent.MemoryPolicy
+	AgentEscalationPolicy                     = kernelagent.EscalationPolicy
+	AgentObjectiveTemplate                    = kernelagent.ObjectiveTemplate
+	AgentEvaluationCriterion                  = kernelagent.EvaluationCriterion
+	AgentAmendmentPolicy                      = kernelagent.AmendmentPolicy
+	AgentDefinitionProvenance                 = kernelagent.DefinitionProvenance
+	AgentDeployment                           = kernelagent.AgentDeployment
+	AgentDeploymentRestrictions               = kernelagent.DeploymentRestrictions
+	AgentDeploymentCapacity                   = kernelagent.DeploymentCapacity
+	AgentDeploymentHealth                     = kernelagent.DeploymentHealth
+	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
+	AgentRolloutStatus                        = kernelagent.RolloutStatus
+	AgentDefinitionAmendment                  = kernelagent.DefinitionAmendment
+	AgentAmendmentStatus                      = kernelagent.AmendmentStatus
+	AgentDefinitionFieldChange                = kernelagent.DefinitionFieldChange
+	AgentAmendmentEvaluation                  = kernelagent.AmendmentEvaluation
+	AgentAmendmentDecision                    = kernelagent.AmendmentDecision
+	ProposeAgentAmendmentRequest              = kernelagent.ProposeAmendmentRequest
+	SubmitAgentAmendmentEvaluationRequest     = kernelagent.SubmitAmendmentEvaluationRequest
+	ResolveAgentAmendmentRequest              = kernelagent.ResolveAmendmentRequest
+	AgentRegistryStore                        = kernelagent.Store
+	TeamDefinition                            = kernelteam.Definition
+	TeamRoleSlot                              = kernelteam.RoleSlot
+	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
+	TeamCoordinationMode                      = kernelteam.CoordinationMode
+	TeamCoordinationPolicy                    = kernelteam.CoordinationPolicy
+	TeamDelegationPolicy                      = kernelteam.DelegationPolicy
+	TeamApprovalPolicy                        = kernelteam.ApprovalPolicy
+	TeamDeployment                            = kernelteam.Deployment
+	TeamDeploymentStatus                      = kernelteam.DeploymentStatus
+	TeamRosterAssignment                      = kernelteam.RosterAssignment
+	TeamDeploymentRestrictions                = kernelteam.DeploymentRestrictions
+	TeamDefinitionAmendment                   = kernelteam.DefinitionAmendment
+	TeamAmendmentStatus                       = kernelteam.AmendmentStatus
+	TeamAmendmentEvaluation                   = kernelteam.AmendmentEvaluation
+	TeamAmendmentDecision                     = kernelteam.AmendmentDecision
+	ProposeTeamAmendmentRequest               = kernelteam.ProposeAmendmentRequest
+	SubmitTeamAmendmentEvaluationRequest      = kernelteam.SubmitAmendmentEvaluationRequest
+	ResolveTeamAmendmentRequest               = kernelteam.ResolveAmendmentRequest
+	TeamRegistryStore                         = kernelteam.Store
+	WorkforceSharedContextPolicy              = workforce.SharedContextPolicy
+	WorkforceObjectiveTemplate                = workforce.ObjectiveTemplate
+	WorkforceEvaluationCriterion              = workforce.EvaluationCriterion
+	WorkforceAmendmentPolicy                  = workforce.AmendmentPolicy
+	WorkforceDefinitionProvenance             = workforce.DefinitionProvenance
+	WorkforceDefinitionActivation             = workforce.DefinitionActivation
+	WorkforceAuthoringMode                    = authoring.Mode
+	WorkforceSkillCapability                  = authoring.SkillCapability
+	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
+	WorkforceAssignment                       = authoring.Assignment
+	WorkforceCandidate                        = authoring.WorkforceCandidate
+	WorkforceAuthoringRequest                 = authoring.GenerateRequest
+	WorkforceAuthoringGenerator               = authoring.Generator
+	WorkforceAuthoringResult                  = authoring.CompileResult
+	WorkforceAuthoringValidationIssue         = authoring.ValidationIssue
+	WorkforceAuthoringMissingRequirement      = authoring.MissingRequirement
+	WorkforceAuthoringRiskChange              = authoring.RiskChange
+	WorkforceAuthoringFieldDiff               = authoring.FieldDiff
+	WorkforceChangeSet                        = authoring.ChangeSet
+	WorkforceChangeSetStatus                  = authoring.ChangeSetStatus
+	WorkforceChangeSetActor                   = authoring.ChangeSetActor
+	WorkforceChangeSetPlacement               = authoring.ChangeSetPlacement
+	WorkforceChangeSetPolicyFinding           = authoring.ChangeSetPolicyFinding
+	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
+	WorkforceChangeSetEvaluation              = authoring.ChangeSetEvaluation
+	WorkforceChangeSetLifecycleEvent          = authoring.ChangeSetLifecycleEvent
+	CreateWorkforceChangeSetRequest           = authoring.CreateChangeSetRequest
+	SubmitWorkforceChangeSetEvaluationRequest = authoring.SubmitChangeSetEvaluationRequest
+	WorkforceChangeSetStore                   = authoring.ChangeSetStore
 
 	RunRecord                          = runtime.RunRecord
 	RetryPolicy                        = runtime.RetryPolicy
@@ -763,6 +768,8 @@ const (
 var (
 	ErrWorkforceChangeSetNotFound    = authoring.ErrChangeSetNotFound
 	ErrWorkforceChangeSetIdempotency = authoring.ErrChangeSetIdempotency
+	ErrWorkforceChangeSetRevision    = authoring.ErrChangeSetRevision
+	ErrWorkforceChangeSetTransition  = authoring.ErrChangeSetTransition
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -1950,6 +1957,13 @@ func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeRef
 		return nil, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.Get(ctx, scope, id)
+}
+
+func (e *Engine) SubmitWorkforceChangeSetEvaluation(ctx context.Context, request authoring.SubmitChangeSetEvaluationRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.SubmitEvaluation(ctx, request)
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {

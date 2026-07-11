@@ -86,6 +86,26 @@ func (s *PostgresStore) GetChangeSet(ctx context.Context, scope capability.Scope
 	return decodeChangeSet(payload)
 }
 
+func (s *PostgresStore) UpdateChangeSet(ctx context.Context, value *authoring.ChangeSet, expectedRevision int64) (*authoring.ChangeSet, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("workforce_change_sets")+` SET status = $1, revision = $2, updated_at = $3, payload = $4::jsonb
+		WHERE scope_kind = $5 AND scope_id = $6 AND id = $7 AND revision = $8 AND candidate_digest = $9`,
+		value.Status, value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, value.CandidateDigest)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		if _, err := s.GetChangeSet(ctx, value.Scope, value.ID); err != nil {
+			return nil, err
+		}
+		return nil, authoring.ErrChangeSetRevision
+	}
+	return decodeChangeSet(string(payload))
+}
+
 func decodeChangeSet(payload string) (*authoring.ChangeSet, error) {
 	var value authoring.ChangeSet
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {

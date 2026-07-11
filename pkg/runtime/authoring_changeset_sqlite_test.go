@@ -49,6 +49,22 @@ func TestSQLiteWorkforceChangeSetsAreConcurrentRestartSafeAndScoped(t *testing.T
 	if _, err := store.GetChangeSet(context.Background(), capability.ScopeReference{Kind: "tenant", ID: "two"}, value.ID); !errors.Is(err, authoring.ErrChangeSetNotFound) {
 		t.Fatalf("cross-scope read = %v", err)
 	}
+	updated := *value
+	updated.Status, updated.Revision = authoring.ChangeSetReady, 2
+	updated.UpdatedAt = value.UpdatedAt.Add(time.Minute)
+	if persisted, err := store.UpdateChangeSet(context.Background(), &updated, 1); err != nil || persisted.Revision != 2 {
+		t.Fatalf("update = %#v, err = %v", persisted, err)
+	}
+	stale := updated
+	stale.Status, stale.Revision = authoring.ChangeSetRejected, 3
+	if _, err := store.UpdateChangeSet(context.Background(), &stale, 1); !errors.Is(err, authoring.ErrChangeSetRevision) {
+		t.Fatalf("stale update = %v", err)
+	}
+	modifiedCandidate := updated
+	modifiedCandidate.CandidateDigest, modifiedCandidate.Revision = "changed", 3
+	if _, err := store.UpdateChangeSet(context.Background(), &modifiedCandidate, 2); !errors.Is(err, authoring.ErrChangeSetRevision) {
+		t.Fatalf("candidate mutation = %v", err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +74,7 @@ func TestSQLiteWorkforceChangeSetsAreConcurrentRestartSafeAndScoped(t *testing.T
 	}
 	defer restarted.Close()
 	restored, err := restarted.GetChangeSet(context.Background(), scope, value.ID)
-	if err != nil || restored.CandidateDigest != value.CandidateDigest || restored.Status != authoring.ChangeSetReview {
+	if err != nil || restored.CandidateDigest != value.CandidateDigest || restored.Status != authoring.ChangeSetReady || restored.Revision != 2 {
 		t.Fatalf("restored = %#v, err = %v", restored, err)
 	}
 }
