@@ -164,6 +164,45 @@ func (s *MemoryStore) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *MemoryStore) SummarizeAgentRuns(_ context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	requested := make(map[string]ObjectiveOwner, len(owners))
+	for _, owner := range owners {
+		requested[string(owner.Type)+"\x1f"+owner.ID] = owner
+	}
+	summaries := make(map[string]AgentRunOwnerSummary, len(owners))
+	for _, run := range s.agentRuns {
+		if run.Scope != scope {
+			continue
+		}
+		key := string(run.Owner.Type) + "\x1f" + run.Owner.ID
+		owner, ok := requested[key]
+		if !ok {
+			continue
+		}
+		summary := summaries[key]
+		summary.Owner = owner
+		summary.RunCount++
+		if summary.LastRunAt == nil || run.CreatedAt.After(*summary.LastRunAt) {
+			at := run.CreatedAt
+			summary.LastRunAt = &at
+			summary.LastStatus = run.Status
+		}
+		summaries[key] = summary
+	}
+	result := make([]AgentRunOwnerSummary, 0, len(summaries))
+	for _, owner := range owners {
+		if summary, ok := summaries[string(owner.Type)+"\x1f"+owner.ID]; ok {
+			result = append(result, summary)
+		}
+	}
+	return result, nil
+}
+
 func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 	if filter.Owner != nil && objective.Owner != *filter.Owner {
 		return false
