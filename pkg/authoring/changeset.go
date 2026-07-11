@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/google/uuid"
 )
 
@@ -92,7 +93,13 @@ type ChangeSetPlacement struct {
 	TeamExpectedRevision   int64                                                `json:"teamExpectedRevision,omitempty"`
 	AgentExpectedRevisions map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
 	CredentialReferences   map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
+	Objectives             map[string]ObjectivePlacement                        `json:"objectives,omitempty"`
 	Environment            string                                               `json:"environment,omitempty"`
+}
+
+type ObjectivePlacement struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expectedRevision,omitempty"`
 }
 
 type AppliedResourceReference struct {
@@ -246,6 +253,13 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	if err != nil {
 		return nil, false, err
 	}
+	canonicalizeCandidateScope(&result.Candidate, request.Scope)
+	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate, existing)
+	result.Validation = validateCandidate(&result.Candidate, existing)
+	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
+	result.RiskChanges = riskChanges(existing, &result.Candidate)
+	result.Diff = workforceDiff(existing, &result.Candidate)
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, false, fmt.Errorf("digest workforce candidate: %w", err)
@@ -321,8 +335,11 @@ func validateApplyPlacement(value *ChangeSet) error {
 	if !value.Result.Valid || len(value.Result.MissingRequirements) > 0 {
 		return errors.New("workforce candidate has unresolved requirements")
 	}
-	if strings.TrimSpace(value.Placement.TeamDeploymentID) == "" || strings.TrimSpace(value.Placement.Environment) == "" {
-		return errors.New("team deployment and environment placement are required")
+	if strings.TrimSpace(value.Placement.Environment) == "" {
+		return errors.New("deployment environment placement is required")
+	}
+	if value.Result.Candidate.Team != nil && strings.TrimSpace(value.Placement.TeamDeploymentID) == "" {
+		return errors.New("Team deployment placement is required")
 	}
 	for _, definition := range value.Result.Candidate.Agents {
 		if definition == nil || strings.TrimSpace(value.Placement.AgentDeploymentIDs[definition.ID]) == "" {
@@ -338,10 +355,108 @@ func validateApplyPlacement(value *ChangeSet) error {
 			}
 		}
 	}
-	if value.Mode == ModeAmend && value.Placement.TeamExpectedRevision < 1 {
+	if value.Mode == ModeAmend && value.Result.Candidate.Team != nil && value.Placement.TeamExpectedRevision < 1 {
 		return errors.New("amended Team placement requires an expected revision")
 	}
+	for key, objective := range value.Placement.Objectives {
+		if strings.TrimSpace(objective.ID) == "" || objective.ExpectedRevision < 0 {
+			return fmt.Errorf("objective %s placement is invalid", key)
+		}
+	}
 	return nil
+}
+
+func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
+	return ownerType + ":" + definitionID + ":" + templateID
+}
+
+func canonicalIdentity(scope capability.ScopeReference, id string) string {
+	prefix := scope.Kind + "/" + scope.ID + "/"
+	if strings.HasPrefix(id, prefix) {
+		return id
+	}
+	return prefix + id
+}
+
+func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.ScopeReference) {
+	ids := map[string]string{}
+	for _, definition := range candidate.Agents {
+		if definition != nil {
+			old := definition.ID
+			definition.ID = canonicalIdentity(scope, old)
+			ids[old] = definition.ID
+		}
+	}
+	for i := range candidate.Assignments {
+		candidate.Assignments[i].AgentDefinitionID = ids[candidate.Assignments[i].AgentDefinitionID]
+	}
+	if candidate.Team != nil {
+		candidate.Team.ID = canonicalIdentity(scope, candidate.Team.ID)
+		for i := range candidate.Team.Roles {
+			for j, id := range candidate.Team.Roles[i].RequiredDefinitionIDs {
+				if qualified := ids[id]; qualified != "" {
+					candidate.Team.Roles[i].RequiredDefinitionIDs[j] = qualified
+				}
+			}
+		}
+	}
+}
+
+func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.ScopeReference, candidate *WorkforceCandidate, existing *WorkforceCandidate) {
+	stringsByAgent := map[string]string{}
+	for id, value := range placement.AgentDeploymentIDs {
+		stringsByAgent[canonicalIdentity(scope, id)] = value
+	}
+	placement.AgentDeploymentIDs = stringsByAgent
+	revisions := map[string]int64{}
+	for id, value := range placement.AgentExpectedRevisions {
+		revisions[canonicalIdentity(scope, id)] = value
+	}
+	placement.AgentExpectedRevisions = revisions
+	credentials := map[string]map[string]capability.CredentialReference{}
+	for id, value := range placement.CredentialReferences {
+		credentials[canonicalIdentity(scope, id)] = value
+	}
+	placement.CredentialReferences = credentials
+	if placement.Objectives == nil {
+		placement.Objectives = map[string]ObjectivePlacement{}
+	}
+	existingKeys := map[string]bool{}
+	if existing != nil {
+		for _, definition := range existing.Agents {
+			if definition != nil {
+				for _, template := range definition.ObjectiveTemplates {
+					existingKeys[WorkforceObjectiveKey("agent", definition.ID, template.ID)] = true
+				}
+			}
+		}
+		if existing.Team != nil {
+			for _, template := range existing.Team.ObjectiveTemplates {
+				existingKeys[WorkforceObjectiveKey("team", existing.Team.ID, template.ID)] = true
+			}
+		}
+	}
+	add := func(ownerType, definitionID string, templates []workforce.ObjectiveTemplate) {
+		for _, template := range templates {
+			key := WorkforceObjectiveKey(ownerType, definitionID, template.ID)
+			p := placement.Objectives[key]
+			if p.ID == "" {
+				p.ID = "objective:" + key
+			}
+			if existingKeys[key] && p.ExpectedRevision < 1 {
+				p.ExpectedRevision = 1
+			}
+			placement.Objectives[key] = p
+		}
+	}
+	for _, definition := range candidate.Agents {
+		if definition != nil {
+			add("agent", definition.ID, definition.ObjectiveTemplates)
+		}
+	}
+	if candidate.Team != nil {
+		add("team", candidate.Team.ID, candidate.Team.ObjectiveTemplates)
+	}
 }
 
 func requiredCredentials(candidate WorkforceCandidate, catalog CapabilityCatalog) map[string][]string {
@@ -620,6 +735,12 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 				nested[kind] = reference
 			}
 			copy.CredentialReferences[agentID] = nested
+		}
+	}
+	if value.Objectives != nil {
+		copy.Objectives = make(map[string]ObjectivePlacement, len(value.Objectives))
+		for key, placement := range value.Objectives {
+			copy.Objectives[key] = placement
 		}
 	}
 	return copy

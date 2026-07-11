@@ -111,7 +111,12 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		}
 	}
 	if candidate.Team == nil {
-		issues = append(issues, issue("team", "required", "Team definition is required"))
+		if len(candidate.Agents) == 0 {
+			issues = append(issues, issue("workforce", "required", "At least one Agent or Team definition is required"))
+		}
+		if len(candidate.Assignments) > 0 {
+			issues = append(issues, issue("assignments", "team_required", "Assignments require a Team definition"))
+		}
 		return issues
 	}
 	if err := candidate.Team.Validate(); err != nil {

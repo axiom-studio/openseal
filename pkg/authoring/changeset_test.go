@@ -89,6 +89,54 @@ func TestAtomicMemoryApplyRejectsIncompletePlacementWithoutPartialState(t *testi
 	}
 }
 
+func TestChangeSetCanonicalizesDefinitionIdentityPerScopeBeforeApproval(t *testing.T) {
+	response := GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)}
+	payload, _ := json.Marshal(response)
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload, payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	create := func(scopeID, key string) *ChangeSet {
+		scope := capability.ScopeReference{Kind: "tenant", ID: scopeID}
+		value, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Placement: ChangeSetPlacement{TeamDeploymentID: "team-live", AgentDeploymentIDs: map[string]string{"community-researcher": "agent-live"}, Environment: "test"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	one, two := create("one", "one"), create("two", "two")
+	if one.Result.Candidate.Agents[0].ID != "tenant/one/community-researcher" || two.Result.Candidate.Agents[0].ID != "tenant/two/community-researcher" || one.CandidateDigest == two.CandidateDigest {
+		t.Fatalf("one=%s two=%s", one.Result.Candidate.Agents[0].ID, two.Result.Candidate.Agents[0].ID)
+	}
+	if one.Placement.AgentDeploymentIDs[one.Result.Candidate.Agents[0].ID] != "agent-live" {
+		t.Fatalf("placement=%#v", one.Placement)
+	}
+}
+
+func TestAtomicMemoryApplySupportsAgentWithoutTeam(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Team = nil
+	candidate.Assignments = nil
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "agent only", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Placement: ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"community-researcher": "agent-live"}, Environment: "test"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	if err != nil || !created.Result.Valid {
+		t.Fatalf("created=%#v err=%v", created, err)
+	}
+	ready, _, _ := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	if err != nil || applied.Status != ChangeSetApplied {
+		t.Fatalf("applied=%#v err=%v", applied, err)
+	}
+	for _, resource := range applied.ApplyReceipt.Resources {
+		if resource.Kind == "team_definition" || resource.Kind == "team_deployment" {
+			t.Fatalf("unexpected Team resource %#v", resource)
+		}
+	}
+}
+
 func TestChangeSetServicePersistsIdempotentImmutableCreateAndRefineLineage(t *testing.T) {
 	create := GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead), Questions: []string{"Which sources are authorized?"}}
 	amend := GenerationResponse{Candidate: marketingCandidate("2", capability.RiskLevelExternal)}
