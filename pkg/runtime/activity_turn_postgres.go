@@ -331,6 +331,7 @@ func (s *PostgresStore) ListActivity(ctx context.Context, filter ActivityFilter)
 		args = append(args, selector.value)
 		placeholder++
 	}
+	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "run_id", filter.RunIDs)
 	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "event_type", filter.EventTypes)
 	severityValues := make([]string, 0, len(filter.Severities))
 	for _, severity := range filter.Severities {

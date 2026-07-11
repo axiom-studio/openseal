@@ -316,6 +316,7 @@ func (s *SQLiteStore) ListActivity(ctx context.Context, filter ActivityFilter) (
 			args = append(args, selector.value)
 		}
 	}
+	query, args = appendSQLiteActivityStrings(query, args, "run_id", filter.RunIDs)
 	query, args = appendSQLiteActivityStrings(query, args, "event_type", filter.EventTypes)
 	severityValues := make([]string, 0, len(filter.Severities))
 	for _, severity := range filter.Severities {

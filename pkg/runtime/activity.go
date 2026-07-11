@@ -114,6 +114,7 @@ type AgentRunLeaseGuard struct {
 type ActivityFilter struct {
 	Scope           Scope
 	RunID           string
+	RunIDs          []string
 	AgentID         string
 	ObjectiveID     string
 	TeamID          string

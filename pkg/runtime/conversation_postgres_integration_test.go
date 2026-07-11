@@ -225,6 +225,19 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		conversationRuns[0].Context[conversationRunContextTriggerID] != recoveryMessage.Message.ID {
 		t.Fatalf("cross-replica reconciled Runs = %#v, err = %v", conversationRuns, err)
 	}
+	restartedChanges, err := NewConversationChangeService(restarted, restarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryChanges, err := restartedChanges.ListChanges(ctx, ConversationChangeRequest{
+		Scope: scope, ConversationID: recoveryConversation.ID, ActiveAt: fixed,
+	})
+	if err != nil || !recoveryChanges.RunsChanged || !recoveryChanges.ActivityChanged ||
+		len(recoveryChanges.Runs) != 1 || recoveryChanges.Runs[0].ID != conversationRuns[0].ID ||
+		len(recoveryChanges.Activity) != 1 || recoveryChanges.Activity[0].RunID != conversationRuns[0].ID ||
+		recoveryChanges.Activity[0].EventType != "run.created" {
+		t.Fatalf("restart-safe Run activity projection = %#v, err = %v", recoveryChanges, err)
+	}
 	if foreign, err := restartedService.GetConversation(ctx, Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
 		t.Fatalf("foreign conversation = %#v, err = %v", foreign, err)
 	}
