@@ -323,12 +323,17 @@ type PortfolioStore interface {
 	ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error)
 }
 
+type ObjectiveScopeStore interface {
+	ListObjectiveScopes(ctx context.Context) ([]Scope, error)
+}
+
 // KernelStore is the complete persistence contract required by the OpenSeal
 // Engine. Embedding applications can supply an implementation; standalone
 // OpenSeal ships memory and SQLite implementations.
 type KernelStore interface {
 	ExecutionStore
 	PortfolioStore
+	ObjectiveScopeStore
 	RunActivityStore
 	AgentTurnStore
 	AgentRunScheduleStore

@@ -8,6 +8,7 @@ import (
 )
 
 type ObjectiveScheduleResult struct {
+	Scopes        int `json:"scopes"`
 	Examined      int `json:"examined"`
 	Scheduled     int `json:"scheduled"`
 	Replayed      int `json:"replayed"`
@@ -18,12 +19,41 @@ type ObjectiveScheduleResult struct {
 // ObjectiveScheduler projects due recurring Objectives into the same durable
 // Run primitive used by chat, events, handoffs, and manual work.
 type ObjectiveScheduler struct {
-	store RunCommandStore
-	now   func() time.Time
+	store interface {
+		RunCommandStore
+		ObjectiveScopeStore
+	}
+	now func() time.Time
 }
 
-func NewObjectiveScheduler(store RunCommandStore) *ObjectiveScheduler {
+func NewObjectiveScheduler(store interface {
+	RunCommandStore
+	ObjectiveScopeStore
+}) *ObjectiveScheduler {
 	return &ObjectiveScheduler{store: store, now: time.Now}
+}
+
+func (s *ObjectiveScheduler) ReconcileAll(ctx context.Context, limitPerScope int) (*ObjectiveScheduleResult, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("objective scheduler store is not configured")
+	}
+	scopes, err := s.store.ListObjectiveScopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	total := &ObjectiveScheduleResult{Scopes: len(scopes)}
+	for _, scope := range scopes {
+		result, reconcileErr := s.ReconcileScope(ctx, scope, limitPerScope)
+		if reconcileErr != nil {
+			return total, reconcileErr
+		}
+		total.Examined += result.Examined
+		total.Scheduled += result.Scheduled
+		total.Replayed += result.Replayed
+		total.Backpressured += result.Backpressured
+		total.Initialized += result.Initialized
+	}
+	return total, nil
 }
 
 func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, limit int) (*ObjectiveScheduleResult, error) {

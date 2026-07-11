@@ -56,6 +56,26 @@ func (s *MemoryStore) ListObjectives(_ context.Context, filter ObjectiveFilter) 
 	return pageObjectives(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *MemoryStore) ListObjectiveScopes(_ context.Context) ([]Scope, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[Scope]struct{})
+	for _, objective := range s.objectives {
+		seen[objective.Scope] = struct{}{}
+	}
+	result := make([]Scope, 0, len(seen))
+	for scope := range seen {
+		result = append(result, scope)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Kind != result[j].Kind {
+			return result[i].Kind < result[j].Kind
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result, nil
+}
+
 func (s *MemoryStore) UpdateObjective(_ context.Context, objective *Objective, expectedRevision int64) error {
 	if err := objective.Validate(); err != nil {
 		return err
