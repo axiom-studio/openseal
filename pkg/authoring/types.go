@@ -55,6 +55,10 @@ type Generator interface {
 	Generate(context.Context, GenerateRequest) ([]byte, error)
 }
 
+type RepairGenerator interface {
+	Repair(context.Context, GenerateRequest, []byte, error) ([]byte, error)
+}
+
 type GenerationResponse struct {
 	Candidate   WorkforceCandidate `json:"candidate"`
 	Assumptions []string           `json:"assumptions,omitempty"`
