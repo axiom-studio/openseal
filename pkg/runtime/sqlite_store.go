@@ -74,7 +74,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateTeamRegistry(db); err != nil {
 		return err
 	}
-	return migrateSkillCatalog(db)
+	if err := migrateSkillCatalog(db); err != nil {
+		return err
+	}
+	return migrateAuthoringChangeSets(db)
 }
 
 func addMissingRunColumns(db *sql.DB) error {
