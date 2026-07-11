@@ -27,6 +27,7 @@ func (f TurnRunnerFunc) RunTurn(ctx context.Context, input TurnExecutionContext)
 }
 
 type TurnOutcome struct {
+	SkillSelections        []HostedSkillSelection
 	Decisions              []TurnDecision
 	ProposedActions        []TurnAction
 	OutputSummary          string
@@ -261,6 +262,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.OutputSummary = "Bounded agent turn produced an invalid outcome"
 		} else {
 			finish.Status = AgentTurnStatusCompleted
+			finish.SkillSelections = outcome.SkillSelections
 			finish.Decisions = outcome.Decisions
 			finish.RequestedActions = outcome.ProposedActions
 			finish.OutputSummary = outcome.OutputSummary
@@ -373,9 +375,10 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		}
 	}
 	activityPayload := map[string]interface{}{
-		"turnSequence": turn.Sequence,
-		"decisions":    append([]TurnDecision(nil), turn.Decisions...),
-		"usage":        turn.Usage,
+		"turnSequence":    turn.Sequence,
+		"skillSelections": append([]HostedSkillSelection(nil), turn.SkillSelections...),
+		"decisions":       append([]TurnDecision(nil), turn.Decisions...),
+		"usage":           turn.Usage,
 	}
 	if len(turn.RequestedActions) > 0 {
 		activityPayload["requestedActions"] = append([]TurnAction(nil), turn.RequestedActions...)
