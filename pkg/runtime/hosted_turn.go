@@ -130,6 +130,21 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, errors.New("turn host proposed an unauthorized capability")
 		}
 	}
+	allowedSkillRefs := make(map[string]struct{}, len(request.SkillPrompts))
+	for _, prompt := range request.SkillPrompts {
+		allowedSkillRefs["skill:"+prompt.SkillID+"@"+prompt.Version] = struct{}{}
+	}
+	for _, decision := range response.Decisions {
+		for _, evidenceRef := range decision.EvidenceRefs {
+			evidenceRef = strings.TrimSpace(evidenceRef)
+			if !strings.HasPrefix(evidenceRef, "skill:") {
+				continue
+			}
+			if _, ok := allowedSkillRefs[evidenceRef]; !ok {
+				return nil, errors.New("turn host cited an unauthorized Skill")
+			}
+		}
+	}
 	return &TurnOutcome{
 		Decisions: append([]TurnDecision(nil), response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
 		OutputSummary: response.OutputSummary, Usage: response.Usage,

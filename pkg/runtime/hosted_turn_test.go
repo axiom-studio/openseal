@@ -74,6 +74,27 @@ func TestHostedTurnRunnerRejectsUnauthorizedActionProposal(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusCompleted,
+		Decisions: []TurnDecision{{Summary: "Applied an unbound Skill", EvidenceRefs: []string{"skill:unbound@1.0.0"}}},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent-1", DefinitionID: "definition-1", DefinitionVersion: "1",
+		SkillPrompts: []HostedSkillPrompt{{SkillID: "summarize", Version: "1.0.0", Instructions: "Summarize faithfully."}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "7"}, Goal: "Summarize evidence"},
+		Turn: &AgentTurn{ID: "turn-1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unauthorized Skill") {
+		t.Fatalf("expected unauthorized Skill evidence rejection, got %v", err)
+	}
+}
+
 func TestHostedTurnRunnerRejectsMismatchedReplayEnvelope(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: "another-turn"}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
