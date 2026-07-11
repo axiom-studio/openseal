@@ -44,6 +44,8 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 
 func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 	for _, expected := range []string{
+		"domainContext is a JSON object, never a string or array",
+		"authority.budgetCeilings is a JSON object whose values are non-negative numbers",
 		"cadence, eventRules, successCriteria, and constraints are JSON objects",
 		"never strings or arrays",
 		"omit any of them when no structured value is needed",
