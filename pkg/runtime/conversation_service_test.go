@@ -109,6 +109,53 @@ func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 	}
 }
 
+func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
+	service := NewConversationService(NewMemoryStore(100))
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "visibility"}
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}
+	target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "target"}
+	other := ConversationParticipant{Type: ConversationParticipantAgent, ID: "other"}
+	direct, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: sender, Intent: MessageIntentQuestion, Content: "private question", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: direct.Conversation.Revision, Sender: target, Intent: MessageIntentAnswer, Content: "public-looking reply", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: direct.Message.ID, IdempotencyKey: "reply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: reply.Conversation.Revision, Sender: sender, Intent: MessageIntentUpdate, Content: "operators only", Audience: ConversationAudience{Kind: ConversationAudienceRoles, Roles: []string{"operator"}}, IdempotencyKey: "role"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, viewer := range map[string]struct {
+		viewer ConversationViewer
+		want   int
+	}{
+		"sender": {ConversationViewer{Participant: sender}, 3},
+		"target": {ConversationViewer{Participant: target}, 2},
+		"other":  {ConversationViewer{Participant: other}, 0},
+		"role":   {ConversationViewer{Participant: other, Roles: []string{"operator"}}, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Viewer: &viewer.viewer})
+			if err != nil || len(messages) != viewer.want {
+				t.Fatalf("messages=%#v err=%v", messages, err)
+			}
+		})
+	}
+	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, ConversationViewer{Participant: other}); !errors.Is(err, ErrChannelMessageNotFound) {
+		t.Fatalf("hidden get error=%v", err)
+	}
+	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, ConversationViewer{Participant: target}); err != nil {
+		t.Fatalf("target get=%v", err)
+	}
+}
+
 func TestConversationServicePersistsAQuietRound(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryStore(100)

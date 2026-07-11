@@ -132,6 +132,54 @@ type ConversationAudience struct {
 	Roles        []string                  `json:"roles,omitempty"`
 }
 
+type ConversationViewer struct {
+	Participant ConversationParticipant `json:"participant"`
+	Roles       []string                `json:"roles,omitempty"`
+}
+
+func (v ConversationViewer) Validate() error {
+	if err := v.Participant.Validate(); err != nil {
+		return err
+	}
+	for _, role := range v.Roles {
+		if strings.TrimSpace(role) == "" || len(role) > 80 {
+			return fmt.Errorf("%w: viewer role must be 1-80 characters", ErrInvalidConversation)
+		}
+	}
+	return nil
+}
+
+// CanViewChannelMessage fails closed for targeted audiences. The caller must
+// first authorize the viewer as a channel participant. Mentions never widen
+// the durable audience.
+func CanViewChannelMessage(message *ChannelMessage, viewer ConversationViewer) bool {
+	if message == nil || viewer.Validate() != nil {
+		return false
+	}
+	if message.Sender == viewer.Participant {
+		return true
+	}
+	switch message.Audience.Kind {
+	case ConversationAudienceChannel:
+		return true
+	case ConversationAudienceParticipants:
+		for _, participant := range message.Audience.Participants {
+			if participant == viewer.Participant {
+				return true
+			}
+		}
+	case ConversationAudienceRoles:
+		for _, audienceRole := range message.Audience.Roles {
+			for _, viewerRole := range viewer.Roles {
+				if strings.EqualFold(strings.TrimSpace(audienceRole), strings.TrimSpace(viewerRole)) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (a ConversationAudience) Validate() error {
 	switch a.Kind {
 	case ConversationAudienceChannel:

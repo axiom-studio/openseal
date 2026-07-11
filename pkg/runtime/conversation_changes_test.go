@@ -148,6 +148,43 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 	}
 }
 
+func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
+	store := NewMemoryStore(100)
+	conversations := NewConversationService(store)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "private-stream"}
+	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private stream", IdempotencyKey: "channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}
+	target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "target"}
+	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "viewer"}}
+	hidden, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: sender, Intent: MessageIntentUpdate, Content: "target only", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "hidden"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = conversations.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: hidden.Conversation.Revision, Sender: sender, Intent: MessageIntentUpdate, Content: "channel update", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, _ := NewConversationChangeService(store, store)
+	first, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &viewer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Messages) != 0 || !first.HasMore || first.Cursor == "" {
+		t.Fatalf("first=%#v", first)
+	}
+	second, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: first.Cursor, Limit: 1, Viewer: &viewer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Messages) != 1 || second.Messages[0].Content != "channel update" {
+		t.Fatalf("second=%#v", second)
+	}
+}
+
 func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "conversation-change-restart.db")

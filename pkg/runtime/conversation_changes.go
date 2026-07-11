@@ -25,6 +25,7 @@ type ConversationChangeRequest struct {
 	Cursor         string
 	Limit          int
 	ActiveAt       time.Time
+	Viewer         *ConversationViewer
 }
 
 // ConversationChangeSet is a portable, transport-neutral projection for
@@ -100,17 +101,24 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		return nil, err
 	}
 
-	messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+	rawMessages, err := s.conversations.store.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: req.Scope, ConversationID: conversationID, AfterSequence: cursor.MessageSequence, Limit: limit,
 	})
 	if err != nil {
 		return nil, err
 	}
-	nextMessageSequence := cursor.MessageSequence
-	if len(messages) > 0 {
-		nextMessageSequence = messages[len(messages)-1].Sequence
+	messages := rawMessages
+	if req.Viewer != nil {
+		messages, err = s.conversations.filterVisibleChannelMessages(ctx, req.Scope, conversationID, rawMessages, *req.Viewer)
+		if err != nil {
+			return nil, err
+		}
 	}
-	messageHasMore := len(messages) == limit && nextMessageSequence < conversation.LastSequence
+	nextMessageSequence := cursor.MessageSequence
+	if len(rawMessages) > 0 {
+		nextMessageSequence = rawMessages[len(rawMessages)-1].Sequence
+	}
+	messageHasMore := len(rawMessages) == limit && nextMessageSequence < conversation.LastSequence
 
 	rounds, roundHasMore, nextRoundRevision, err := s.listRoundsAfter(ctx, req.Scope, conversationID, cursor.RoundRevision, limit)
 	if err != nil {
