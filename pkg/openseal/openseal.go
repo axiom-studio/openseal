@@ -245,6 +245,8 @@ type (
 	BoundSkillAction                   = skill.BoundAction
 	SkillPromptModule                  = skill.PromptModule
 	SkillHostCapabilityState           = skill.HostCapabilityState
+	SkillAdapterState                  = skill.AdapterState
+	SkillAdapterCapability             = skill.AdapterCapability
 	SkillResourceStageRequest          = skill.ResourceStageRequest
 	SkillResourceStage                 = skill.ResourceStage
 	SkillResourceStager                = skill.ResourceStager
@@ -581,6 +583,18 @@ const (
 	SkillIdempotencyNone      = skill.IdempotencyNone
 	SkillIdempotencySupported = skill.IdempotencySupported
 	SkillIdempotencyRequired  = skill.IdempotencyRequired
+
+	SkillAdapterAvailable   = skill.AdapterStateAvailable
+	SkillAdapterUnavailable = skill.AdapterStateUnavailable
+	SkillAdapterDegraded    = skill.AdapterStateDegraded
+
+	SkillAdapterLocal           = skill.AdapterLocal
+	SkillAdapterGit             = skill.AdapterGit
+	SkillAdapterPlugin          = skill.AdapterPlugin
+	SkillAdapterInstaller       = skill.AdapterInstaller
+	SkillAdapterWatcher         = skill.AdapterWatcher
+	SkillAdapterRemoteNode      = skill.AdapterRemoteNode
+	SkillAdapterResourceStaging = skill.AdapterResourceStaging
 
 	ActionDispositionAllow           = runtime.ActionDispositionAllow
 	ActionDispositionDeny            = runtime.ActionDispositionDeny
