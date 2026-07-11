@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *testing.T) {
@@ -145,5 +146,78 @@ func TestRegistryRejectsMissingOrUnderqualifiedRosterAgentsAndAuthorityWidening(
 	base.Restrictions.MaximumRisk = capability.RiskLevelProduction
 	if _, _, err := registry.CreateDeployment(ctx, base, "user", "operator", ""); err == nil {
 		t.Fatal("authority widening should fail closed")
+	}
+}
+
+func TestRegistryGovernsEvaluatesApprovesAndAtomicallyActivatesTeamAmendment(t *testing.T) {
+	ctx := context.Background()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	agents := kernelagent.NewRegistry()
+	agentDefinition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Find evidence", SystemPrompt: "Find evidence.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelExternal, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentDeployment, _, err := agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "researcher-one", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "test", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "Team roster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(agents)
+	definition := validDefinition()
+	definition.Evaluations = []workforce.EvaluationCriterion{{ID: "coordination", Description: "Coordination remains calm", Required: true}}
+	definition.Amendments = workforce.AmendmentPolicy{
+		AgentMayPropose: true, AllowedFields: []string{"purpose", "coordination"}, RequiresApproval: true,
+		ApproverPrincipals: []string{"user:admin"},
+	}
+	registered, err := registry.RegisterDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, _, err := registry.CreateDeployment(ctx, &Deployment{
+		ID: "market-team", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
+		Roster: []RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Status: DeploymentActive,
+	}, "user", "admin", "initial Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := cloneDefinition(registered)
+	candidate.Version = "1.1.0"
+	candidate.Purpose = "Discover and validate evidence-backed needs"
+	amendment, err := registry.ProposeAmendment(ctx, ProposeAmendmentRequest{
+		Scope: scope, DeploymentID: deployment.ID, Candidate: candidate, ProposerType: "agent", ProposerID: agentDeployment.ID,
+		Rationale: "Validation reduces false conclusions", EvidenceRefs: []string{"artifact:evaluation-1"},
+	})
+	if err != nil || amendment.Status != AmendmentEvaluating || len(amendment.Changes) != 1 || amendment.Changes[0].Field != "purpose" {
+		t.Fatalf("proposed amendment = %#v, err = %v", amendment, err)
+	}
+	evaluated, err := registry.SubmitAmendmentEvaluation(ctx, SubmitAmendmentEvaluationRequest{
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision,
+		Evaluations: []AmendmentEvaluation{{CriterionID: "coordination", Passed: true, Summary: "No coordination regression", EvidenceRefs: []string{"artifact:eval-result"}}},
+	})
+	if err != nil || evaluated.Status != AmendmentAwaitingApproval {
+		t.Fatalf("evaluated amendment = %#v, err = %v", evaluated, err)
+	}
+	if _, err := registry.ResolveAmendment(ctx, ResolveAmendmentRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: evaluated.Revision, Approved: true, ActorType: "user", ActorID: "intruder"}); err == nil {
+		t.Fatal("ineligible principal approved Team amendment")
+	}
+	approved, err := registry.ResolveAmendment(ctx, ResolveAmendmentRequest{
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: evaluated.Revision, Approved: true, ActorType: "user", ActorID: "admin", Reason: "reviewed evidence",
+	})
+	if err != nil || approved.Status != AmendmentApproved {
+		t.Fatalf("approved amendment = %#v, err = %v", approved, err)
+	}
+	activated, updated, activation, err := registry.ActivateAmendment(ctx, scope, amendment.ID, approved.Revision, "user", "admin", "approved Team behavior")
+	if err != nil || activated.Status != AmendmentActivated || updated.ActiveVersion != candidate.Version || updated.Revision != 2 || activation.FromVersion != registered.Version {
+		t.Fatalf("activated amendment = %#v, deployment = %#v, activation = %#v, err = %v", activated, updated, activation, err)
+	}
+	stored, err := registry.GetDefinition(ctx, registered.ID, candidate.Version)
+	if err != nil || stored.Purpose != candidate.Purpose || stored.Provenance.DerivedFrom != registered.Digest {
+		t.Fatalf("stored candidate = %#v, err = %v", stored, err)
 	}
 }
