@@ -13,9 +13,12 @@ import (
 )
 
 type facadeClawHubRegistry struct {
-	archive   []byte
-	version   string
-	verifyErr error
+	archive     []byte
+	version     string
+	verifyErr   error
+	filePath    string
+	fileVersion string
+	fileTag     string
 }
 
 func (r *facadeClawHubRegistry) resolvedVersion() string {
@@ -40,7 +43,8 @@ func (r *facadeClawHubRegistry) ListVersions(context.Context, ClawHubSkillRefere
 func (r *facadeClawHubRegistry) GetVersion(context.Context, ClawHubSkillReference, string) (*ClawHubVersionDetail, error) {
 	return &ClawHubVersionDetail{Version: r.resolvedVersion(), Files: []ClawHubFileEntry{{Path: "SKILL.md", Size: 12}}, Security: &ClawHubSecurityStatus{Status: "clean"}}, nil
 }
-func (r *facadeClawHubRegistry) GetFile(context.Context, ClawHubSkillReference, string, string, string) ([]byte, error) {
+func (r *facadeClawHubRegistry) GetFile(_ context.Context, _ ClawHubSkillReference, path, version, tag string) ([]byte, error) {
+	r.filePath, r.fileVersion, r.fileTag = path, version, tag
 	return []byte("file content"), nil
 }
 func (r *facadeClawHubRegistry) VerifySkill(_ context.Context, ref ClawHubSkillReference, _, _ string) (*ClawHubVerification, error) {
@@ -75,6 +79,9 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 	file, err := engine.GetClawHubSkillFile(context.Background(), installed.Reference, "1.0.0", "", "SKILL.md")
 	if err != nil || string(file) != "file content" {
 		t.Fatalf("file = %q, %v", file, err)
+	}
+	if registry.filePath != "SKILL.md" || registry.fileVersion != "1.0.0" || registry.fileTag != "" {
+		t.Fatalf("registry file arguments = path %q version %q tag %q", registry.filePath, registry.fileVersion, registry.fileTag)
 	}
 	verification, err := engine.VerifyClawHubSkill(context.Background(), installed.Reference, "1.0.0", "")
 	if err != nil || !verification.OK {

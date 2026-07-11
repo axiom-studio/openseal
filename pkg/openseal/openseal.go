@@ -2256,7 +2256,7 @@ func (e *Engine) GetClawHubSkillFile(ctx context.Context, reference clawhub.Skil
 	if e == nil || e.clawHubRegistry == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
 	}
-	return e.clawHubRegistry.GetFile(ctx, reference, version, tag, path)
+	return e.clawHubRegistry.GetFile(ctx, reference, path, version, tag)
 }
 
 func (e *Engine) VerifyClawHubSkill(ctx context.Context, reference clawhub.SkillReference, version, tag string) (*clawhub.Verification, error) {
