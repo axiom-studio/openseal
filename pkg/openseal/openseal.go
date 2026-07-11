@@ -150,6 +150,14 @@ type (
 	CreateInitiativeRequest            = runtime.CreateInitiativeRequest
 	UpdateInitiativeRequest            = runtime.UpdateInitiativeRequest
 	InitiativeResourceReference        = runtime.ResourceReference
+	InitiativeResourceKind             = runtime.ResourceKind
+	InitiativeMilestone                = runtime.InitiativeMilestone
+	InitiativeMilestoneStatus          = runtime.MilestoneStatus
+	InitiativeHypothesis               = runtime.InitiativeHypothesis
+	InitiativeHypothesisStatus         = runtime.HypothesisStatus
+	InitiativeSourceMonitorReference   = runtime.SourceMonitorReference
+	InitiativeDeliverable              = runtime.InitiativeDeliverable
+	InitiativeDeliverableStatus        = runtime.DeliverableStatus
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
 	BudgetPolicy                       = runtime.BudgetPolicy
@@ -239,6 +247,7 @@ type (
 	ConversationFilter                 = runtime.ConversationFilter
 	PostChannelMessageRequest          = runtime.PostChannelMessageRequest
 	ChannelMessageFilter               = runtime.ChannelMessageFilter
+	ConversationViewer                 = runtime.ConversationViewer
 	CoordinateParticipationRequest     = runtime.CoordinateParticipationRequest
 	ParticipationRoundFilter           = runtime.ParticipationRoundFilter
 	AdvanceConversationCursorRequest   = runtime.AdvanceConversationCursorRequest
@@ -1743,6 +1752,13 @@ func (e *Engine) ListChannelMessages(ctx context.Context, filter runtime.Channel
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListChannelMessages(ctx, filter)
+}
+
+func (e *Engine) GetVisibleChannelMessage(ctx context.Context, scope runtime.Scope, conversationID, messageID string, viewer runtime.ConversationViewer) (*runtime.ChannelMessage, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, messageID, viewer)
 }
 
 func (e *Engine) ListConversationChanges(ctx context.Context, request runtime.ConversationChangeRequest) (*runtime.ConversationChangeSet, error) {
