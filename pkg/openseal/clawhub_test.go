@@ -87,8 +87,13 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 	if err != nil || !verification.OK {
 		t.Fatalf("verification = %#v, %v", verification, err)
 	}
-	if err := engine.PinClawHubSkill("acme/research", "production review"); err != nil {
-		t.Fatal(err)
+	pinned, err := engine.PinClawHubSkillLifecycle("acme/research", "production review")
+	if err != nil || !pinned.Changed || pinned.Outcome != ClawHubLifecycleOutcome("pinned") || pinned.SourceIdentity == "" || pinned.Version != "1.0.0" || pinned.Reason != "production review" {
+		t.Fatalf("pin receipt = %#v, %v", pinned, err)
+	}
+	replayedPin, err := engine.PinClawHubSkillLifecycle("acme/research", "production review")
+	if err != nil || replayedPin.Changed || replayedPin.Outcome != ClawHubLifecycleOutcome("unchanged") {
+		t.Fatalf("pin replay receipt = %#v, %v", replayedPin, err)
 	}
 	states, err := engine.ListInstalledClawHubSkillStates()
 	if err != nil || len(states) != 1 || !states[0].Pinned || states[0].PinReason != "production review" || !states[0].Verified {
@@ -100,8 +105,13 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 		report.Results[0].Outcome != ClawHubLifecycleOutcome("skipped") || report.Results[0].Reason != "pinned" {
 		t.Fatalf("pinned update report = %#v, %v", report, err)
 	}
-	if err := engine.UnpinClawHubSkill("acme/research"); err != nil {
-		t.Fatal(err)
+	unpinned, err := engine.UnpinClawHubSkillLifecycle("acme/research")
+	if err != nil || !unpinned.Changed || unpinned.Outcome != ClawHubLifecycleOutcome("unpinned") || unpinned.Version != "1.0.0" {
+		t.Fatalf("unpin receipt = %#v, %v", unpinned, err)
+	}
+	replayedUnpin, err := engine.UnpinClawHubSkillLifecycle("acme/research")
+	if err != nil || replayedUnpin.Changed || replayedUnpin.Outcome != ClawHubLifecycleOutcome("unchanged") {
+		t.Fatalf("unpin replay receipt = %#v, %v", replayedUnpin, err)
 	}
 	report, err = engine.UpdateAllClawHubSkills(context.Background())
 	if err != nil || len(report.Results) != 1 || report.Results[0].PreviousVersion != "1.0.0" ||

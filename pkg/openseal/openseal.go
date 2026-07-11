@@ -2333,11 +2333,70 @@ func (e *Engine) PinClawHubSkill(slug, reason string) error {
 	return e.clawHub.Pin(slug, reason)
 }
 
+// PinClawHubSkillLifecycle applies the atomic lockfile mutation and returns the
+// canonical secret-free receipt hosts persist in their audit/control plane.
+func (e *Engine) PinClawHubSkillLifecycle(reference, reason string) (*clawhub.LifecycleResult, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	lock, err := e.clawHub.List()
+	if err != nil {
+		return nil, err
+	}
+	identity, entry, err := resolveClawHubLifecycleEntry(lock, reference)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.clawHub.Pin(reference, reason); err != nil {
+		return nil, err
+	}
+	result := clawHubLifecycleStateResult(clawhub.LifecyclePin, clawhub.LifecycleOutcomePinned, identity, entry)
+	result.Changed = !entry.Pinned || entry.PinReason != reason
+	if !result.Changed {
+		result.Outcome = clawhub.LifecycleOutcomeUnchanged
+	}
+	result.Reason = reason
+	return result, nil
+}
+
 func (e *Engine) UnpinClawHubSkill(slug string) error {
 	if e.clawHub == nil {
 		return fmt.Errorf("ClawHub registry is not configured")
 	}
 	return e.clawHub.Unpin(slug)
+}
+
+// UnpinClawHubSkillLifecycle returns a canonical receipt even for an
+// idempotent replay, allowing hosts to expose truthful mutation outcomes.
+func (e *Engine) UnpinClawHubSkillLifecycle(reference string) (*clawhub.LifecycleResult, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub registry is not configured")
+	}
+	lock, err := e.clawHub.List()
+	if err != nil {
+		return nil, err
+	}
+	identity, entry, err := resolveClawHubLifecycleEntry(lock, reference)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.clawHub.Unpin(reference); err != nil {
+		return nil, err
+	}
+	result := clawHubLifecycleStateResult(clawhub.LifecycleUnpin, clawhub.LifecycleOutcomeUnpinned, identity, entry)
+	result.Changed = entry.Pinned
+	if !result.Changed {
+		result.Outcome = clawhub.LifecycleOutcomeUnchanged
+	}
+	return result, nil
+}
+
+func clawHubLifecycleStateResult(operation clawhub.LifecycleOperation, outcome clawhub.LifecycleOutcome, identity string, entry clawhub.LockEntry) *clawhub.LifecycleResult {
+	result := &clawhub.LifecycleResult{APIVersion: clawhub.LifecycleAPIVersion, Operation: operation, SourceIdentity: identity, Reference: clawhub.SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug}, Outcome: outcome}
+	if entry.Version != nil {
+		result.Version = *entry.Version
+	}
+	return result
 }
 
 func (e *Engine) ClawHubLifecycleCapabilities() clawhub.LifecycleCapability {
