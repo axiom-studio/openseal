@@ -74,6 +74,10 @@ type (
 	TeamDeploymentRestrictions            = kernelteam.DeploymentRestrictions
 	TeamRegistryStore                     = kernelteam.Store
 	WorkforceSharedContextPolicy          = workforce.SharedContextPolicy
+	WorkforceObjectiveTemplate            = workforce.ObjectiveTemplate
+	WorkforceEvaluationCriterion          = workforce.EvaluationCriterion
+	WorkforceAmendmentPolicy              = workforce.AmendmentPolicy
+	WorkforceDefinitionProvenance         = workforce.DefinitionProvenance
 	WorkforceDefinitionActivation         = workforce.DefinitionActivation
 
 	RunRecord                          = runtime.RunRecord
