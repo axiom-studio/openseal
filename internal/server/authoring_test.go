@@ -26,6 +26,67 @@ func (authoringFixtureGenerator) Generate(context.Context, authoring.GenerateReq
 	return []byte(`{"candidate":{"agents":[],"assignments":[]},"questions":["Which responsibilities should this Team own?"]}`), nil
 }
 
+type failingAuthoringGenerator struct{}
+
+func (failingAuthoringGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
+	return nil, errors.New("provider temporarily unavailable")
+}
+
+func TestStandaloneAuthoringFailureIsRetryableAndReplaySafe(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "retry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(failingAuthoringGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	api.SetWorkforceLifecycleAuthorizer(StandaloneRetryAuthorizer{ActorID: "operator-one"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := api.StartWorkforceAuthoringWorker(ctx, runtime.Scope{Kind: "local", ID: "research"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.StartWorkforceAuthoringWorker(ctx, runtime.Scope{Kind: "local", ID: "research"}, ""); err == nil {
+		t.Fatal("duplicate worker start succeeded")
+	}
+	defer api.Shutdown(context.Background())
+	body := `{"scope":{"kind":"local","id":"research"},"prompt":"Create a Team","catalog":{},"actor":{"type":"user","id":"forged"}}`
+	created := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", body, "create-failing")
+	if created.Code != http.StatusAccepted {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	var changeSet authoring.ChangeSet
+	if err := json.NewDecoder(created.Body).Decode(&changeSet); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		loaded, _ := api.authoringChanges.Get(context.Background(), changeSet.Scope, changeSet.ID)
+		if loaded.Status == authoring.ChangeSetFailed {
+			changeSet = *loaded
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if changeSet.Status != authoring.ChangeSetFailed {
+		t.Fatalf("status = %s", changeSet.Status)
+	}
+	capabilityPath := "/api/v1/capabilities?scopeKind=local&scopeId=research&changeSetId=" + changeSet.ID
+	if response := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", ""); !strings.Contains(response.Body.String(), `"retry"`) {
+		t.Fatalf("retry capability = %s", response.Body.String())
+	}
+	retry := authoring.RetryChangeSetGenerationRequest{Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, Reason: "provider recovered", Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"}}
+	first := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"/retry", mustJSON(t, retry), "retry-stable")
+	if first.Code != http.StatusAccepted || !strings.Contains(first.Body.String(), `"id":"operator-one"`) {
+		t.Fatalf("retry = %d %s", first.Code, first.Body.String())
+	}
+	replay := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"/retry", mustJSON(t, retry), "retry-stable")
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay = %d %s", replay.Code, replay.Body.String())
+	}
+}
+
 type governedAuthoringGenerator struct{}
 
 func (governedAuthoringGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
