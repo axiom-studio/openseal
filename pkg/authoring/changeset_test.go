@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -65,6 +66,83 @@ func TestChangeSetServicePersistsIdempotentImmutableCreateAndRefineLineage(t *te
 	}
 	if _, err := service.Get(context.Background(), capability.ScopeReference{Kind: "tenant", ID: "two"}, refined.ID); !errors.Is(err, ErrChangeSetNotFound) {
 		t.Fatalf("cross-scope lookup = %v", err)
+	}
+}
+
+func TestChangeSetEvaluationIsScopedIdempotentAuditableAndPolicyDerived(t *testing.T) {
+	payload, err := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryChangeSetStore()
+	service, err := NewChangeSetService(compiler, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create team",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Actor:   ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create",
+	})
+	if err != nil || created.Status != ChangeSetReview {
+		t.Fatalf("created = %#v, err = %v", created, err)
+	}
+	request := SubmitChangeSetEvaluationRequest{Scope: created.Scope, ChangeSetID: created.ID, ExpectedRevision: 1,
+		CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "policy_evaluator", ID: "atlas"},
+		IdempotencyKey: "evaluation-1", Findings: []ChangeSetPolicyFinding{{PolicyID: "production", Code: "review", Message: "Human review required"}},
+		ApprovalRequirements: []ChangeSetApprovalRequirement{{PolicyID: "production", Role: "workforce_admin", Count: 1}}}
+	evaluated, replay, err := service.SubmitEvaluation(context.Background(), request)
+	if err != nil || replay || evaluated.Status != ChangeSetAwaitingApproval || evaluated.Revision != 2 {
+		t.Fatalf("evaluated = %#v replay=%t err=%v", evaluated, replay, err)
+	}
+	if evaluated.CandidateDigest != created.CandidateDigest || len(evaluated.Evaluations) != 1 || len(evaluated.Lifecycle) != 2 || evaluated.Lifecycle[1].Reason != "policy_requires_approval" {
+		t.Fatalf("evaluation audit = %#v", evaluated)
+	}
+	replayed, replay, err := service.SubmitEvaluation(context.Background(), request)
+	if err != nil || !replay || replayed.Revision != 2 {
+		t.Fatalf("replay = %#v replay=%t err=%v", replayed, replay, err)
+	}
+	conflict := request
+	conflict.Allowed = false
+	if _, _, err := service.SubmitEvaluation(context.Background(), conflict); !errors.Is(err, ErrChangeSetIdempotency) {
+		t.Fatalf("idempotency conflict = %v", err)
+	}
+	other := request
+	other.Scope.ID = "two"
+	if _, _, err := service.SubmitEvaluation(context.Background(), other); !errors.Is(err, ErrChangeSetNotFound) {
+		t.Fatalf("cross scope = %v", err)
+	}
+	stale := request
+	stale.IdempotencyKey = "evaluation-2"
+	if _, _, err := service.SubmitEvaluation(context.Background(), stale); !errors.Is(err, ErrChangeSetRevision) {
+		t.Fatalf("stale revision = %v", err)
+	}
+}
+
+func TestChangeSetEvaluationCanMakeCandidateReadyOrRejectIt(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		allowed bool
+		want    ChangeSetStatus
+		reason  string
+	}{{"ready", true, ChangeSetReady, "policy_allowed"}, {"rejected", false, ChangeSetRejected, "policy_denied"}} {
+		t.Run(test.name, func(t *testing.T) {
+			store := NewMemoryChangeSetStore()
+			now := time.Now().UTC()
+			value := &ChangeSet{ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, CandidateDigest: "candidate", Status: ChangeSetReview, Revision: 1, CreatedAt: now, UpdatedAt: now}
+			if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
+				t.Fatal(err)
+			}
+			service := &ChangeSetService{store: store, now: func() time.Time { return now.Add(time.Minute) }}
+			updated, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: 1, CandidateDigest: "candidate", Allowed: test.allowed, Actor: ChangeSetActor{Type: "evaluator", ID: "one"}, IdempotencyKey: "eval"})
+			if err != nil || updated.Status != test.want || updated.Lifecycle[0].Reason != test.reason {
+				t.Fatalf("updated = %#v, err = %v", updated, err)
+			}
+		})
 	}
 }
 
