@@ -1825,6 +1825,10 @@ func (e *Engine) GetTeamDeployment(ctx context.Context, scope skill.ScopeReferen
 	return e.teams.GetDeployment(ctx, scope, deploymentID)
 }
 
+func (e *Engine) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
+	return e.teams.UpdateDeployment(ctx, deployment, expectedRevision, actorType, actorID, reason)
+}
+
 func (e *Engine) ActivateTeamDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
 	return e.teams.ActivateDefinition(ctx, scope, deploymentID, version, expectedRevision, actorType, actorID, reason)
 }

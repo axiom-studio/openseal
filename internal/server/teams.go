@@ -103,6 +103,30 @@ func (s *Server) handleGetTeamDeployment(w http.ResponseWriter, r *http.Request)
 	s.respondJSON(w, http.StatusOK, deployment)
 }
 
+func (s *Server) handleUpdateTeamDeployment(w http.ResponseWriter, r *http.Request) {
+	registry, err := s.teamRegistry()
+	if err != nil {
+		s.respondError(w, http.StatusNotImplemented, err.Error())
+		return
+	}
+	var payload kernelapi.UpdateTeamDeploymentRequest
+	if err := decodeStrictJSON(r, &payload); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if payload.Deployment == nil || strings.TrimSpace(payload.Deployment.ID) != strings.TrimSpace(r.PathValue("id")) {
+		s.respondError(w, http.StatusBadRequest, "team deployment path and payload ids must match")
+		return
+	}
+	deployment, activation, err := registry.UpdateDeployment(r.Context(), payload.Deployment, payload.ExpectedRevision,
+		payload.ActorType, payload.ActorID, payload.Reason)
+	if err != nil {
+		s.respondTeamError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, kernelapi.TeamDeploymentResult{Deployment: deployment, Activation: activation})
+}
+
 func (s *Server) handleActivateTeamDefinition(w http.ResponseWriter, r *http.Request) {
 	registry, err := s.teamRegistry()
 	if err != nil {

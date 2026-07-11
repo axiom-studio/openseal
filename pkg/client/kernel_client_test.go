@@ -183,14 +183,24 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	if err != nil || created.Activation.ToVersion != "1" {
 		t.Fatalf("created Team = %#v, err = %v", created, err)
 	}
+	proposed := *created.Deployment
+	proposed.Status = kernelteam.DeploymentPaused
+	proposed.Roster = append([]kernelteam.RosterAssignment(nil), created.Deployment.Roster...)
+	proposed.Roster[0].DisplayName = "Evidence lead"
+	updated, err := client.UpdateTeamDeployment(ctx, proposed.ID, kernelapi.UpdateTeamDeploymentRequest{
+		Deployment: &proposed, ExpectedRevision: proposed.Revision, ActorType: "user", ActorID: "operator", Reason: "pause for review",
+	})
+	if err != nil || updated.Deployment.Status != kernelteam.DeploymentPaused || updated.Deployment.Revision != 2 || updated.Activation.FromVersion != updated.Activation.ToVersion {
+		t.Fatalf("updated Team = %#v, err = %v", updated, err)
+	}
 	activated, err := client.ActivateTeamDefinition(ctx, created.Deployment.ID, kernelapi.ActivateTeamDefinitionRequest{
-		Scope: scope, Version: "2", ExpectedRevision: created.Deployment.Revision, ActorType: "user", ActorID: "operator", Reason: "reviewed",
+		Scope: scope, Version: "2", ExpectedRevision: updated.Deployment.Revision, ActorType: "user", ActorID: "operator", Reason: "reviewed",
 	})
 	if err != nil || activated.Deployment.ActiveVersion != "2" || activated.Activation.FromVersion != "1" {
 		t.Fatalf("activated Team = %#v, err = %v", activated, err)
 	}
 	loaded, err := client.GetTeamDeployment(ctx, scope, created.Deployment.ID)
-	if err != nil || loaded.Revision != 2 || loaded.Roster[0].AgentDeploymentID != agentDeployment.ID {
+	if err != nil || loaded.Revision != 3 || loaded.Roster[0].DisplayName != "Evidence lead" || loaded.Roster[0].AgentDeploymentID != agentDeployment.ID {
 		t.Fatalf("loaded Team = %#v, err = %v", loaded, err)
 	}
 }

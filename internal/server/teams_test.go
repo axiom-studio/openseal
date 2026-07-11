@@ -67,9 +67,24 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"toVersion":"1"`) {
 		t.Fatalf("deployment create = %d %s", created.Code, created.Body.String())
 	}
+	deployment.Revision = 1
+	deployment.Status = kernelteam.DeploymentPaused
+	deployment.Roster[0].DisplayName = "Evidence lead"
+	updatePayload, _ := json.Marshal(kernelapi.UpdateTeamDeploymentRequest{
+		Deployment: deployment, ExpectedRevision: 1, ActorType: "user", ActorID: "operator", Reason: "pause for review",
+	})
+	updated := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/team-deployments/research-team-one", string(updatePayload), "")
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"status":"paused"`) ||
+		!strings.Contains(updated.Body.String(), `"displayName":"Evidence lead"`) || !strings.Contains(updated.Body.String(), `"revision":2`) {
+		t.Fatalf("deployment update = %d %s", updated.Code, updated.Body.String())
+	}
+	stale := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/team-deployments/research-team-one", string(updatePayload), "")
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale deployment update = %d %s", stale.Code, stale.Body.String())
+	}
 
 	activatePayload, _ := json.Marshal(kernelapi.ActivateTeamDefinitionRequest{
-		Scope: scope, Version: "2", ExpectedRevision: 1, ActorType: "user", ActorID: "operator", Reason: "reviewed",
+		Scope: scope, Version: "2", ExpectedRevision: 2, ActorType: "user", ActorID: "operator", Reason: "reviewed",
 	})
 	activated := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-team-one/activations", string(activatePayload), "")
 	if activated.Code != http.StatusOK || !strings.Contains(activated.Body.String(), `"activeVersion":"2"`) || !strings.Contains(activated.Body.String(), `"fromVersion":"1"`) {

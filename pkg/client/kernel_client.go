@@ -44,6 +44,7 @@ type TeamClient interface {
 	ListTeamDefinitionVersions(context.Context, string) ([]*kernelteam.Definition, error)
 	CreateTeamDeployment(context.Context, kernelapi.CreateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error)
 	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+	UpdateTeamDeployment(context.Context, string, kernelapi.UpdateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error)
 	ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error)
 	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
 }
@@ -231,6 +232,15 @@ func (c *KernelHTTPClient) GetTeamDeployment(ctx context.Context, scope capabili
 	var result kernelteam.Deployment
 	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) UpdateTeamDeployment(ctx context.Context, deploymentID string, request kernelapi.UpdateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error) {
+	var result kernelapi.TeamDeploymentResult
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID))
+	if err := c.do(ctx, http.MethodPut, path, request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
