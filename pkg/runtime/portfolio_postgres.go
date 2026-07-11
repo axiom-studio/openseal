@@ -167,18 +167,58 @@ func (s *PostgresStore) CreateAgentRun(ctx context.Context, run *AgentRun) error
 	if err := run.Validate(); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(run)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO `+s.table("agent_runs")+`
-		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision,
-		 deadline, available_at, queue_entered_at, lease_owner, lease_expires_at, last_claimed_at, attempt, created_at, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::jsonb)`,
-		run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID,
-		run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt,
-		run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload))
-	return err
+	defer tx.Rollback()
+	if err := s.allocatePostgresObjectiveRunTx(ctx, tx, run); err != nil {
+		return err
+	}
+	if err := s.insertPostgresAgentRunTx(ctx, tx, run); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *sql.Tx, run *AgentRun) error {
+	if run == nil || run.ObjectiveID == "" || run.ParentRunID != "" {
+		return nil
+	}
+	var payload string
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("objectives")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, run.Scope.Kind, run.Scope.ID, run.ObjectiveID).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrObjectiveNotFound
+		}
+		return err
+	}
+	objective, err := decodeObjective(payload)
+	if err != nil {
+		return err
+	}
+	updated, err := allocateObjectiveRunBudget(objective, run, run.CreatedAt)
+	if err != nil || updated == objective {
+		return err
+	}
+	updatedPayload, err := json.Marshal(updated)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("objectives")+` SET revision = $1, updated_at = $2, payload = $3::jsonb
+		WHERE scope_kind = $4 AND scope_id = $5 AND id = $6 AND revision = $7`, updated.Revision, updated.UpdatedAt,
+		string(updatedPayload), updated.Scope.Kind, updated.Scope.ID, updated.ID, objective.Revision)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrRevisionConflict
+	}
+	return nil
 }
 
 func (s *PostgresStore) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {

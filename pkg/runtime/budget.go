@@ -327,6 +327,64 @@ func validateGroupedBudgetAllocations(parent *AgentRun, allocations []*BudgetPol
 	return validateChildBudgetAllocation(parent, &total)
 }
 
+func validateObjectiveRunBudget(objective *Objective, allocation *BudgetPolicy) error {
+	if objective == nil || objective.Budget == nil {
+		return nil
+	}
+	if allocation == nil {
+		return errors.New("a budgeted objective requires an explicit run budget allocation")
+	}
+	if err := allocation.Validate(); err != nil {
+		return err
+	}
+	combined := addBudgetPolicies(sumBudgetPolicies(objective.BudgetAllocations), *allocation)
+	return validatePolicyWithinLimit(*objective.Budget, combined, "run", true)
+}
+
+func validatePolicyAllocations(limit BudgetPolicy, allocations map[string]BudgetPolicy) error {
+	for id, allocation := range allocations {
+		if id == "" {
+			return errors.New("budget allocation id is required")
+		}
+		if err := allocation.Validate(); err != nil {
+			return fmt.Errorf("budget allocation %s: %w", id, err)
+		}
+	}
+	return validatePolicyWithinLimit(limit, sumBudgetPolicies(allocations), "aggregate", false)
+}
+
+func validatePolicyWithinLimit(limit, allocated BudgetPolicy, subject string, requireBounded bool) error {
+	for _, dimension := range budgetDimensions(limit, BudgetUsage{}, allocated) {
+		if dimension.parentLimit > 0 && (requireBounded && dimension.allocation == 0 || dimension.allocation > dimension.parentLimit) {
+			return fmt.Errorf("%w: %s %s budget %d exceeds limit %d", ErrBudgetExhausted, subject, dimension.name, dimension.allocation, dimension.parentLimit)
+		}
+	}
+	return nil
+}
+
+func allocateObjectiveRunBudget(objective *Objective, run *AgentRun, now time.Time) (*Objective, error) {
+	if objective == nil || run == nil || run.ParentRunID != "" || objective.Budget == nil {
+		return objective, nil
+	}
+	if err := validateObjectiveRunBudget(objective, run.Budget); err != nil {
+		return nil, err
+	}
+	updated := cloneObjective(objective)
+	if updated.BudgetAllocations == nil {
+		updated.BudgetAllocations = make(map[string]BudgetPolicy)
+	}
+	if _, exists := updated.BudgetAllocations[run.ID]; exists {
+		return nil, ErrRunIdempotency
+	}
+	updated.BudgetAllocations[run.ID] = *cloneBudgetPolicy(run.Budget)
+	updated.Revision++
+	updated.UpdatedAt = now
+	if err := updated.Validate(); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 type budgetDimension struct {
 	name        string
 	parentLimit int64

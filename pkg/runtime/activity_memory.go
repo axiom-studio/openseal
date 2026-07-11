@@ -21,6 +21,9 @@ func (s *MemoryStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if s.agentRuns[key] != nil {
 		return nil, ErrRunIdempotency
 	}
+	if err := s.allocateMemoryObjectiveRunLocked(run); err != nil {
+		return nil, err
+	}
 	s.agentRuns[key] = cloneAgentRun(run)
 	persisted := appendMemoryActivityLocked(s, event)
 	return cloneActivityEvent(persisted), nil

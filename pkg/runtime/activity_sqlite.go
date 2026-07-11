@@ -18,19 +18,11 @@ func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun
 	if run.Scope != event.Scope || run.ID != event.RunID {
 		return nil, ErrInvalidScope
 	}
-	payload, err := json.Marshal(run)
-	if err != nil {
-		return nil, err
-	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `INSERT INTO agent_runs
-			(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision,
-			 deadline, available_at, queue_entered_at, lease_owner, lease_expires_at, last_claimed_at, attempt, created_at, payload)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID,
-			run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt,
-			run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload))
-		return err
+		if err := allocateSQLiteObjectiveRunConn(ctx, conn, run); err != nil {
+			return err
+		}
+		return insertSQLiteAgentRunConn(ctx, conn, run)
 	})
 }
 

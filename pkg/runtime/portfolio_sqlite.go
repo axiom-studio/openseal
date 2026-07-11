@@ -232,18 +232,63 @@ func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
 	if err := run.Validate(); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(run)
+	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_runs
-		(id, scope_kind, scope_id, objective_id, parent_run_id, root_run_id, assigned_agent_id, status, priority, revision,
-		 deadline, available_at, queue_entered_at, lease_owner, lease_expires_at, last_claimed_at, attempt, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID,
-		run.AssignedAgentID, run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt,
-		run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload))
-	return err
+	committed := false
+	defer rollbackSQLiteConn(conn, &committed)
+	if err := allocateSQLiteObjectiveRunConn(ctx, conn, run); err != nil {
+		return err
+	}
+	if err := insertSQLiteAgentRunConn(ctx, conn, run); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func allocateSQLiteObjectiveRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun) error {
+	if run == nil || run.ObjectiveID == "" || run.ParentRunID != "" {
+		return nil
+	}
+	var payload string
+	if err := conn.QueryRowContext(ctx, `SELECT payload FROM objectives WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+		run.Scope.Kind, run.Scope.ID, run.ObjectiveID).Scan(&payload); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrObjectiveNotFound
+		}
+		return err
+	}
+	objective, err := decodeObjective(payload)
+	if err != nil {
+		return err
+	}
+	updated, err := allocateObjectiveRunBudget(objective, run, run.CreatedAt)
+	if err != nil || updated == objective {
+		return err
+	}
+	updatedPayload, err := json.Marshal(updated)
+	if err != nil {
+		return err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE objectives SET revision = ?, updated_at = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, updated.Revision, updated.UpdatedAt,
+		string(updatedPayload), updated.Scope.Kind, updated.Scope.ID, updated.ID, objective.Revision)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrRevisionConflict
+	}
+	return nil
 }
 
 func (s *SQLiteStore) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {

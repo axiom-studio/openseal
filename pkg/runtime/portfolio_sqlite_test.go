@@ -39,6 +39,7 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 		Plan:          map[string]interface{}{"next": "draft"},
 		Checkpoint:    map[string]interface{}{"turn": float64(3)},
 		WakeCondition: &WakeCondition{Type: "event", Reference: "approval:launch"},
+		Budget:        &BudgetPolicy{MaxTotalTokens: 25000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,11 +58,15 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 	}
 
 	summary := "Launch copy drafted"
-	updated, err := service.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: 1, ProgressSummary: &summary})
+	allocatedObjective, err := service.GetObjective(ctx, scope, objective.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Revision != 2 || updated.ProgressSummary != summary {
+	updated, err := service.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: allocatedObjective.Revision, ProgressSummary: &summary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != allocatedObjective.Revision+1 || updated.ProgressSummary != summary {
 		t.Fatalf("objective update did not round-trip: %#v", updated)
 	}
 	if _, err := service.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: 1, ProgressSummary: &summary}); !errors.Is(err, ErrRevisionConflict) {
