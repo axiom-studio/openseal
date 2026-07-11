@@ -35,6 +35,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)
 	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
 	s.mux.HandleFunc("PUT /api/v1/objectives/{id}", s.handleUpdateObjective)
+	s.mux.HandleFunc("POST /api/v1/initiatives", s.handleCreateInitiative)
+	s.mux.HandleFunc("GET /api/v1/initiatives", s.handleListInitiatives)
+	s.mux.HandleFunc("GET /api/v1/initiatives/{id}", s.handleGetInitiative)
+	s.mux.HandleFunc("PATCH /api/v1/initiatives/{id}", s.handlePatchInitiative)
 	s.mux.HandleFunc("POST /api/v1/agent-runs", s.handleCreateAgentRun)
 	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}", s.handleGetAgentRun)
@@ -77,6 +81,9 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.AgentRunsCapability()}
+	if _, ok := s.store.(runtime.InitiativeStore); ok {
+		capabilities = append(capabilities, kernelapi.InitiativesCapability())
+	}
 	if _, ok := s.store.(runtime.ArtifactStore); ok {
 		contentOperations := make([]string, 0, 3)
 		if s.artifactContent != nil {

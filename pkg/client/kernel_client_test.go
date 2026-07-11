@@ -43,6 +43,10 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !objectiveCapability.Supports(kernelapi.OperationUpdate) {
 		t.Fatalf("objective capabilities: %#v", document)
 	}
+	initiativeCapability, ok := document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
+	if !ok || !initiativeCapability.Supports(kernelapi.OperationPatch) {
+		t.Fatalf("initiative capabilities: %#v", document)
+	}
 
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
@@ -91,6 +95,30 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	objectives, err := client.ListObjectives(ctx, runtime.ObjectiveFilter{Scope: scope, Owner: &owner, Statuses: []runtime.ObjectiveStatus{runtime.ObjectiveStatusPaused}})
 	if err != nil || len(objectives) != 1 || objectives[0].ID != objective.ID {
 		t.Fatalf("objectives = %#v, %v", objectives, err)
+	}
+	initiative, err := client.CreateInitiative(ctx, kernelapi.CreateInitiativeRequest{
+		Scope: scope, Owner: owner, Title: "Research initiative", Purpose: "Deliver cited findings",
+		Status: runtime.InitiativeStatusActive, ObjectiveRefs: []string{objective.ID},
+	}, "research-initiative")
+	if err != nil || initiative.Revision != 1 {
+		t.Fatalf("initiative = %#v, %v", initiative, err)
+	}
+	loadedInitiative, err := client.GetInitiative(ctx, scope, initiative.ID)
+	if err != nil || loadedInitiative.ID != initiative.ID {
+		t.Fatalf("loaded initiative = %#v, %v", loadedInitiative, err)
+	}
+	initiativeStatus := runtime.InitiativeStatusPaused
+	patchedInitiative, err := client.PatchInitiative(ctx, scope, initiative.ID, kernelapi.UpdateInitiativeRequest{
+		ExpectedRevision: initiative.Revision, Status: &initiativeStatus,
+	})
+	if err != nil || patchedInitiative.Status != runtime.InitiativeStatusPaused {
+		t.Fatalf("patched initiative = %#v, %v", patchedInitiative, err)
+	}
+	initiatives, err := client.ListInitiatives(ctx, runtime.InitiativeFilter{
+		Scope: scope, Owner: &owner, ObjectiveID: objective.ID, Statuses: []runtime.InitiativeStatus{runtime.InitiativeStatusPaused}, Limit: 20,
+	})
+	if err != nil || len(initiatives) != 1 || initiatives[0].ID != initiative.ID {
+		t.Fatalf("initiatives = %#v, %v", initiatives, err)
 	}
 
 	runs, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: &owner, Limit: 20})
