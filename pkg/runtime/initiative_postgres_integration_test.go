@@ -19,6 +19,10 @@ func TestPostgresInitiativeRestartAndAtomicActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var migrationName string
+	if err = store.db.QueryRowContext(ctx, `SELECT name FROM `+store.table("schema_migrations")+` WHERE version=14`).Scan(&migrationName); err != nil || migrationName != "durable initiatives" {
+		t.Fatalf("initiative migration=%q err=%v", migrationName, err)
+	}
 	scope := Scope{Kind: "tenant", ID: "restart"}
 	seedInitiativeObjectives(t, store, scope)
 	svc := NewInitiativeService(store, store)
