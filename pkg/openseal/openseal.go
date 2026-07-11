@@ -114,7 +114,11 @@ type (
 	CreateWorkforceChangeSetRequest           = authoring.CreateChangeSetRequest
 	SubmitWorkforceChangeSetEvaluationRequest = authoring.SubmitChangeSetEvaluationRequest
 	ResolveWorkforceChangeSetApprovalRequest  = authoring.ResolveChangeSetApprovalRequest
+	ApplyWorkforceChangeSetRequest            = authoring.ApplyChangeSetRequest
+	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
+	WorkforceAppliedResourceReference         = authoring.AppliedResourceReference
 	WorkforceChangeSetStore                   = authoring.ChangeSetStore
+	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
 
 	RunRecord                          = runtime.RunRecord
 	RetryPolicy                        = runtime.RetryPolicy
@@ -1947,6 +1951,10 @@ func (e *Engine) WorkforceChangeSetsAvailable() bool {
 	return e != nil && e.authoringChanges != nil
 }
 
+func (e *Engine) WorkforceChangeSetApplyAvailable() bool {
+	return e != nil && e.authoringChanges != nil && e.authoringChanges.ApplyAvailable()
+}
+
 func (e *Engine) CreateWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest) (*authoring.ChangeSet, bool, error) {
 	if e == nil || e.authoringChanges == nil {
 		return nil, false, errors.New("workforce change sets are not configured")
@@ -1973,6 +1981,13 @@ func (e *Engine) ResolveWorkforceChangeSetApproval(ctx context.Context, request 
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.ResolveApproval(ctx, request)
+}
+
+func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.ApplyChangeSetRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.Apply(ctx, request)
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
