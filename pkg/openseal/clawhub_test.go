@@ -57,7 +57,7 @@ func TestEngineExposesVersionedGovernedClawHubLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	capability := engine.ClawHubLifecycleCapabilities()
-	if capability.APIVersion != "openseal.clawhub.lifecycle/v1" || len(capability.Operations) != 12 {
+	if capability.APIVersion != "openseal.clawhub.lifecycle/v1" || len(capability.Operations) != 13 {
 		t.Fatalf("lifecycle capability = %#v", capability)
 	}
 	installed, err := engine.InstallClawHubSkill(context.Background(), ClawHubInstallRequest{Reference: ClawHubSkillReference{Owner: "acme", Slug: "research"}})
@@ -117,11 +117,11 @@ func TestRegistryOnlyClawHubEngineAdvertisesReadOnlyLifecycleWithoutWorkspace(t 
 		t.Fatal(err)
 	}
 	capability := engine.ClawHubLifecycleCapabilities()
-	if len(capability.Operations) != 4 {
+	if len(capability.Operations) != 5 {
 		t.Fatalf("registry-only capability = %#v", capability)
 	}
 	for _, operation := range capability.Operations {
-		if operation != ClawHubLifecycleOperation("inspect_versions") && operation != ClawHubLifecycleOperation("inspect_files") &&
+		if operation != ClawHubLifecycleOperation("inspect_catalog") && operation != ClawHubLifecycleOperation("inspect_versions") && operation != ClawHubLifecycleOperation("inspect_files") &&
 			operation != ClawHubLifecycleOperation("inspect_security") && operation != ClawHubLifecycleOperation("verify") {
 			t.Fatalf("registry-only engine advertised mutation %q", operation)
 		}
