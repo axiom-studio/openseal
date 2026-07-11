@@ -20,6 +20,18 @@ func (evaluableWorkforceFixtureGenerator) Generate(context.Context, WorkforceAut
 	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[]},"questions":[]}`), nil
 }
 
+func TestPublicWorkforceObjectivePlacementContract(t *testing.T) {
+	key := WorkforceObjectiveKey("agent", "developer", "ship-feature")
+	placement := WorkforceChangeSetPlacement{
+		Objectives: map[string]WorkforceObjectivePlacement{
+			key: {ID: "objective-live", ExpectedRevision: 3},
+		},
+	}
+	if got := placement.Objectives[key]; got.ID != "objective-live" || got.ExpectedRevision != 3 {
+		t.Fatalf("objective placement = %#v", got)
+	}
+}
+
 func TestEngineExposesDurableWorkforceChangeSetsOnlyWithPersistentSupport(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
