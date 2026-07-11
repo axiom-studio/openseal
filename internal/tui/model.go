@@ -424,8 +424,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.authoringChangeSet = msg.changeSet
-		if msg.changeSet != nil {
+		if msg.changeSet != nil && (msg.changeSet.Status != authoring.ChangeSetEvaluating || strings.TrimSpace(msg.changeSet.CandidateDigest) != "") {
 			m.authoringResult = &msg.changeSet.Result
+		} else {
+			m.authoringResult = nil
 		}
 		return m, m.loadCapabilities()
 	case objectivesLoaded:

@@ -293,6 +293,19 @@ func TestFailedWorkforceGenerationRetriesWithStableIdentity(t *testing.T) {
 	}
 }
 
+func TestEvaluatingWorkforceRefreshDoesNotRenderAnEmptyCandidate(t *testing.T) {
+	m := newModelWithClient(t, &fakeKernelClient{})
+	changeSet := &authoring.ChangeSet{ID: "queued", Status: authoring.ChangeSetEvaluating, Generation: &authoring.ChangeSetGeneration{RunID: "run-queued"}}
+	updated, _ := m.Update(workforceLoaded{changeSet: changeSet})
+	model := updated.(*Model)
+	if model.authoringResult != nil {
+		t.Fatalf("empty evaluating candidate became review result: %#v", model.authoringResult)
+	}
+	if view := model.renderAuthoringContent(80); !strings.Contains(view, "continues in the background") {
+		t.Fatalf("evaluating state not rendered: %s", view)
+	}
+}
+
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
 	f.objectiveKeys = append(f.objectiveKeys, key)
 	f.objectiveCreates = append(f.objectiveCreates, request)
