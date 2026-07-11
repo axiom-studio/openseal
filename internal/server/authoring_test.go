@@ -158,6 +158,10 @@ func TestGovernedWorkforceLifecycleIsContextualExactAndAtomic(t *testing.T) {
 	if bodyOnlyResponse.Code != http.StatusBadRequest {
 		t.Fatalf("body-only idempotency = %d %s", bodyOnlyResponse.Code, bodyOnlyResponse.Body.String())
 	}
+	unconfiguredMutation := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+created.ID+"/evaluations", mustJSON(t, bodyOnly), "evaluation-unconfigured")
+	if unconfiguredMutation.Code != http.StatusForbidden {
+		t.Fatalf("unconfigured lifecycle authority = %d %s", unconfiguredMutation.Code, unconfiguredMutation.Body.String())
+	}
 
 	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{role: "operator", actor: "configured-operator"})
 	reviewCapability := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
