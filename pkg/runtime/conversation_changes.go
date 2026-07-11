@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	conversationChangeCursorVersion = 1
-	defaultConversationChangeLimit  = 100
-	maximumConversationChangeLimit  = 500
-	conversationRunProjectionLimit  = 100
+	conversationChangeCursorVersion  = 1
+	defaultConversationChangeLimit   = 100
+	maximumConversationChangeLimit   = 500
+	conversationRunProjectionLimit   = 100
+	conversationActivityRunBatchSize = 200
 )
 
 type ConversationChangeRequest struct {
@@ -35,8 +36,10 @@ type ConversationChangeSet struct {
 	Messages        []*ChannelMessage           `json:"messages"`
 	Rounds          []*ParticipationRoundResult `json:"rounds"`
 	Runs            []*AgentRun                 `json:"runs"`
+	Activity        []*ActivityEvent            `json:"activity"`
 	Presence        []*ConversationPresence     `json:"presence"`
 	RunsChanged     bool                        `json:"runsChanged"`
+	ActivityChanged bool                        `json:"activityChanged"`
 	PresenceChanged bool                        `json:"presenceChanged"`
 	Cursor          string                      `json:"cursor"`
 	HasChanges      bool                        `json:"hasChanges"`
@@ -50,12 +53,14 @@ type conversationChangeCursor struct {
 	MessageSequence      int64  `json:"messageSequence"`
 	RoundRevision        int64  `json:"roundRevision"`
 	RunDigest            string `json:"runDigest,omitempty"`
+	ActivityDigest       string `json:"activityDigest,omitempty"`
 	PresenceDigest       string `json:"presenceDigest,omitempty"`
 }
 
 type ConversationChangeService struct {
 	conversations *ConversationService
 	portfolio     PortfolioStore
+	activity      RunActivityStore
 	now           func() time.Time
 }
 
@@ -63,9 +68,9 @@ func NewConversationChangeService(conversationStore ConversationStore, portfolio
 	if conversationStore == nil || portfolio == nil {
 		return nil, errors.New("conversation and portfolio stores are required")
 	}
-	return &ConversationChangeService{
-		conversations: NewConversationService(conversationStore), portfolio: portfolio, now: time.Now,
-	}, nil
+	service := &ConversationChangeService{conversations: NewConversationService(conversationStore), portfolio: portfolio, now: time.Now}
+	service.activity, _ = portfolio.(RunActivityStore)
+	return service, nil
 }
 
 func (s *ConversationChangeService) ListChanges(ctx context.Context, req ConversationChangeRequest) (*ConversationChangeSet, error) {
@@ -125,6 +130,19 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	if !runsChanged {
 		projectedRuns = []*AgentRun{}
 	}
+	activity, err := s.listConversationActivity(ctx, runs)
+	if err != nil {
+		return nil, err
+	}
+	activityDigest, err := conversationActivityProjectionDigest(activity)
+	if err != nil {
+		return nil, err
+	}
+	activityChanged := initial || activityDigest != cursor.ActivityDigest
+	projectedActivity := activity
+	if !activityChanged {
+		projectedActivity = []*ActivityEvent{}
+	}
 
 	activeAt := req.ActiveAt
 	if activeAt.IsZero() {
@@ -147,18 +165,18 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	next := conversationChangeCursor{
 		Version: conversationChangeCursorVersion, ConversationID: conversationID,
 		ConversationRevision: conversation.Revision, MessageSequence: nextMessageSequence,
-		RoundRevision: nextRoundRevision, RunDigest: runDigest, PresenceDigest: presenceDigest,
+		RoundRevision: nextRoundRevision, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
 	}
 	encodedCursor, err := encodeConversationChangeCursor(next)
 	if err != nil {
 		return nil, err
 	}
 	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 ||
-		runsChanged || presenceChanged
+		runsChanged || activityChanged || presenceChanged
 	return &ConversationChangeSet{
 		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
-		Runs: cloneAgentRuns(projectedRuns), Presence: cloneConversationPresences(projectedPresence),
-		RunsChanged: runsChanged, PresenceChanged: presenceChanged,
+		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
+		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore,
 	}, nil
 }
@@ -244,6 +262,75 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	result := append(active, terminal...)
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+func (s *ConversationChangeService) listConversationActivity(ctx context.Context, runs []*AgentRun) ([]*ActivityEvent, error) {
+	if s.activity == nil {
+		return []*ActivityEvent{}, nil
+	}
+	runIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		runIDs = append(runIDs, run.ID)
+	}
+	if len(runIDs) == 0 {
+		return []*ActivityEvent{}, nil
+	}
+	byID := make(map[string]*ActivityEvent)
+	for start := 0; start < len(runIDs); start += conversationActivityRunBatchSize {
+		end := min(start+conversationActivityRunBatchSize, len(runIDs))
+		events, err := s.activity.ListActivity(ctx, ActivityFilter{
+			Scope: runs[0].Scope, RunIDs: runIDs[start:end], Descending: true, Limit: conversationRunProjectionLimit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, event := range events {
+			byID[event.ID] = event
+		}
+	}
+	result := make([]*ActivityEvent, 0, len(byID))
+	for _, event := range byID {
+		result = append(result, event)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.After(result[j].CreatedAt)
+		}
+		if result[i].Sequence != result[j].Sequence {
+			return result[i].Sequence > result[j].Sequence
+		}
+		return result[i].ID > result[j].ID
+	})
+	if len(result) > conversationRunProjectionLimit {
+		result = result[:conversationRunProjectionLimit]
+	}
+	return result, nil
+}
+
+func conversationActivityProjectionDigest(events []*ActivityEvent) (string, error) {
+	values := make([]struct {
+		ID       string `json:"id"`
+		Sequence int64  `json:"sequence"`
+	}, 0, len(events))
+	for _, event := range events {
+		values = append(values, struct {
+			ID       string `json:"id"`
+			Sequence int64  `json:"sequence"`
+		}{ID: event.ID, Sequence: event.Sequence})
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return hashBytes(encoded), nil
+}
+
+func cloneConversationActivity(events []*ActivityEvent) []*ActivityEvent {
+	result := make([]*ActivityEvent, 0, len(events))
+	for _, event := range events {
+		result = append(result, cloneActivityEvent(event))
+	}
+	return result
 }
 
 func conversationRunProjectionDigest(runs []*AgentRun) (string, error) {
