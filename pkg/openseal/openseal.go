@@ -106,6 +106,7 @@ type (
 	WorkforceChangeSetStatus                  = authoring.ChangeSetStatus
 	WorkforceChangeSetActor                   = authoring.ChangeSetActor
 	WorkforceChangeSetPlacement               = authoring.ChangeSetPlacement
+	WorkforceObjectivePlacement               = authoring.ObjectivePlacement
 	WorkforceChangeSetPolicyFinding           = authoring.ChangeSetPolicyFinding
 	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
 	WorkforceChangeSetEvaluation              = authoring.ChangeSetEvaluation
@@ -383,6 +384,12 @@ type (
 	ClawHubVersionDetail               = clawhub.VersionDetail
 	ClawHubDownloadedArchive           = clawhub.DownloadedArchive
 )
+
+// WorkforceObjectiveKey returns the canonical placement key for an objective
+// template owned by an agent or team definition.
+func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
+	return authoring.WorkforceObjectiveKey(ownerType, definitionID, templateID)
+}
 
 // PersistentKernelStore is the complete durable control-plane contract for an
 // embedded OpenSeal engine. Enterprise adapters implement this interface so
