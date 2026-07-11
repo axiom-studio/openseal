@@ -38,6 +38,8 @@ type KernelClient interface {
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
 	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
+	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
+	GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error)
 }
 
 type TeamClient interface {
@@ -91,6 +93,24 @@ func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.Capabili
 func (c *KernelHTTPClient) CompileWorkforce(ctx context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
 	var result authoring.CompileResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/authoring/workforce/compile", request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) CreateWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
+	var result authoring.ChangeSet
+	if err := c.do(ctx, http.MethodPost, "/api/v1/authoring/workforce/change-sets", request, idempotencyKey, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) GetWorkforceChangeSet(ctx context.Context, scope capability.ScopeReference, id string) (*authoring.ChangeSet, error) {
+	query := capabilityScopeQuery(scope)
+	var result authoring.ChangeSet
+	path := "/api/v1/authoring/workforce/change-sets/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

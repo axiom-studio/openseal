@@ -49,6 +49,7 @@ const (
 	OperationDeploy     = "deploy"
 	OperationActivate   = "activate"
 	OperationCompile    = "compile"
+	OperationPropose    = "propose"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -169,11 +170,15 @@ func TeamDefinitionsCapability() Capability {
 	}
 }
 
-func WorkforceAuthoringCapability() Capability {
-	return Capability{
+func WorkforceAuthoringCapability(changeSets ...bool) Capability {
+	capability := Capability{
 		ID: WorkforceAuthoringCapabilityID, Version: WorkforceAuthoringCapabilityVersion, Available: true,
 		Operations: []string{OperationCompile},
 	}
+	if len(changeSets) > 0 && changeSets[0] {
+		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
+	}
+	return capability
 }
 
 func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
