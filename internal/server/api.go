@@ -22,6 +22,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
 	s.mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
 	s.mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
+	s.mux.HandleFunc("POST /api/v1/objectives", s.handleCreateObjective)
+	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)
+	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
+	s.mux.HandleFunc("PUT /api/v1/objectives/{id}", s.handleUpdateObjective)
 	s.mux.HandleFunc("POST /api/v1/agent-runs", s.handleCreateAgentRun)
 	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}", s.handleGetAgentRun)
@@ -56,7 +60,7 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
-	capabilities := []kernelapi.Capability{kernelapi.AgentRunsCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.AgentRunsCapability()}
 	if _, ok := s.store.(runtime.ArtifactStore); ok {
 		contentOperations := make([]string, 0, 3)
 		if s.artifactContent != nil {

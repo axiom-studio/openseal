@@ -85,6 +85,7 @@ type (
 	RunKind                            = runtime.RunKind
 	WakeCondition                      = runtime.WakeCondition
 	CreateObjectiveRequest             = runtime.CreateObjectiveRequest
+	CreateObjectiveResult              = runtime.CreateObjectiveResult
 	UpdateObjectiveRequest             = runtime.UpdateObjectiveRequest
 	CreateAgentRunRequest              = runtime.CreateAgentRunRequest
 	AgentRunCommandKind                = runtime.AgentRunCommandKind
@@ -347,6 +348,8 @@ var (
 	ErrInvalidScope                        = runtime.ErrInvalidScope
 	ErrInvalidOwner                        = runtime.ErrInvalidOwner
 	ErrObjectiveNotFound                   = runtime.ErrObjectiveNotFound
+	ErrObjectiveIdempotency                = runtime.ErrObjectiveIdempotency
+	ErrInvalidObjectiveTransition          = runtime.ErrInvalidObjectiveTransition
 	ErrBudgetExhausted                     = runtime.ErrBudgetExhausted
 	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
@@ -1320,6 +1323,10 @@ func BuildGraph(nodes []*executor.NodeDefinition, connections []*executor.Connec
 
 func (e *Engine) CreateObjective(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.Objective, error) {
 	return e.portfolio.CreateObjective(ctx, req)
+}
+
+func (e *Engine) CreateObjectiveIdempotent(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.CreateObjectiveResult, error) {
+	return e.portfolio.CreateObjectiveIdempotent(ctx, req)
 }
 
 func (e *Engine) GetObjective(ctx context.Context, scope runtime.Scope, objectiveID string) (*runtime.Objective, error) {

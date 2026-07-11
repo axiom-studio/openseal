@@ -14,7 +14,11 @@ func (s *MemoryStore) CreateObjective(_ context.Context, objective *Objective) e
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.objectives[portfolioKey(objective.Scope, objective.ID)] = cloneObjective(objective)
+	key := portfolioKey(objective.Scope, objective.ID)
+	if s.objectives[key] != nil {
+		return ErrObjectiveIdempotency
+	}
+	s.objectives[key] = cloneObjective(objective)
 	return nil
 }
 
