@@ -416,6 +416,7 @@ func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
 // authoritative persistence boundary.
 type PersistentKernelStore interface {
 	runtime.KernelStore
+	runtime.InitiativeStore
 	runtime.CollaborationStore
 	runtime.RunDependencyStore
 	runtime.ConversationStore
@@ -2288,7 +2289,7 @@ func (e *Engine) ClawHubLifecycleCapabilities() clawhub.LifecycleCapability {
 	}
 	if e.clawHub == nil {
 		capability.Operations = []clawhub.LifecycleOperation{
-			clawhub.LifecycleInspectVersions, clawhub.LifecycleInspectFiles,
+			clawhub.LifecycleInspectCatalog, clawhub.LifecycleInspectVersions, clawhub.LifecycleInspectFiles,
 			clawhub.LifecycleInspectSecurity, clawhub.LifecycleVerify,
 		}
 	}

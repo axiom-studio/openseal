@@ -7,6 +7,7 @@ const LifecycleAPIVersion = "openseal.clawhub.lifecycle/v1"
 type LifecycleOperation string
 
 const (
+	LifecycleInspectCatalog   LifecycleOperation = "inspect_catalog"
 	LifecycleInspectVersions  LifecycleOperation = "inspect_versions"
 	LifecycleInspectFiles     LifecycleOperation = "inspect_files"
 	LifecycleInspectSecurity  LifecycleOperation = "inspect_security"
@@ -58,7 +59,7 @@ type LifecycleCapability struct {
 
 func CanonicalLifecycleCapability() LifecycleCapability {
 	return LifecycleCapability{APIVersion: LifecycleAPIVersion, Operations: []LifecycleOperation{
-		LifecycleInspectVersions, LifecycleInspectFiles, LifecycleInspectSecurity,
+		LifecycleInspectCatalog, LifecycleInspectVersions, LifecycleInspectFiles, LifecycleInspectSecurity,
 		LifecycleInspectInstalled, LifecycleInstall, LifecycleVerify, LifecycleVerifyInstalled, LifecyclePin, LifecycleUnpin,
 		LifecycleUpdate, LifecycleUpdateAll, LifecycleUninstall,
 	}}
