@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // HostCapabilityState is a non-secret declaration of the environment in which
@@ -24,6 +26,7 @@ type HostCapabilityState struct {
 	ResourceRoots   map[string]string      `json:"resourceRoots,omitempty"`
 	Adapters        map[string]bool        `json:"adapters,omitempty"`
 	Revision        string                 `json:"revision,omitempty"`
+	ResourceStager  ResourceStager         `json:"-"`
 }
 
 type AvailabilityReason struct {
@@ -41,6 +44,8 @@ type ActivatedSkill struct {
 	ConfigurationKey string                 `json:"configurationKey,omitempty"`
 	Configuration    map[string]interface{} `json:"configuration,omitempty"`
 	ResourceRoot     string                 `json:"resourceRoot,omitempty"`
+	ResourceRevision string                 `json:"resourceRevision,omitempty"`
+	ResourceAdapter  string                 `json:"resourceAdapter,omitempty"`
 	Prompt           *PromptModule          `json:"prompt,omitempty"`
 	Actions          []ModelAction          `json:"actions,omitempty"`
 }
@@ -115,6 +120,23 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 		reasons := evaluateAvailability(definition, binding, host)
 		resourceRoot := strings.TrimSpace(host.ResourceRoots[definitionKey(definition.ID, definition.Version)])
+		resourceRevision := ""
+		resourceAdapter := ""
+		if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 {
+			stage, stageErr := host.ResourceStager.StageResources(ctx, ResourceStageRequest{
+				Scope: scope, DeploymentID: deploymentID, BindingID: binding.ID,
+				SkillID: definition.ID, SkillVersion: definition.Version,
+				SourceDigest: definitionSourceDigest(definition), Resources: append([]capability.Resource(nil), definition.Resources...),
+			})
+			if stageErr != nil || stage == nil || !validResourceRoot(host.OperatingSystem, strings.TrimSpace(stage.Root)) ||
+				strings.TrimSpace(stage.Revision) == "" || strings.TrimSpace(stage.Adapter) == "" {
+				reasons = append(reasons, AvailabilityReason{Code: "resource_staging_failed", Requirement: definition.ID, Message: "declared skill resources could not be materialized by the configured host adapter"})
+			} else {
+				resourceRoot = strings.TrimSpace(stage.Root)
+				resourceRevision = strings.TrimSpace(stage.Revision)
+				resourceAdapter = strings.TrimSpace(stage.Adapter)
+			}
+		}
 		prompt := (*PromptModule)(nil)
 		if binding.EnablePrompt && definition.Prompt != nil {
 			prompt = cloneDefinition(definition).Prompt
@@ -148,12 +170,20 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		snapshot.Skills = append(snapshot.Skills, ActivatedSkill{
 			BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID, SkillVersion: definition.Version,
 			SourceDigest: digest, ConfigurationKey: definition.ConfigurationKey, Configuration: cloneMap(binding.Config),
-			ResourceRoot: resourceRoot, Prompt: prompt, Actions: actions,
+			ResourceRoot: resourceRoot, ResourceRevision: resourceRevision, ResourceAdapter: resourceAdapter,
+			Prompt: prompt, Actions: actions,
 		})
 	}
 	sort.Slice(snapshot.Unavailable, func(i, j int) bool { return snapshot.Unavailable[i].BindingID < snapshot.Unavailable[j].BindingID })
 	snapshot.SnapshotID = activationSnapshotDigest(snapshot)
 	return snapshot, nil
+}
+
+func definitionSourceDigest(definition *Definition) string {
+	if definition == nil || definition.Source == nil {
+		return ""
+	}
+	return strings.TrimSpace(definition.Source.Digest)
 }
 
 func evaluateAvailability(definition *Definition, binding *Binding, host HostCapabilityState) []AvailabilityReason {
