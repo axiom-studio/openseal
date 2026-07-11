@@ -17,7 +17,9 @@ import (
 	"github.com/axiom-studio/openseal/internal/workflow"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/axiom-studio/openseal/pkg/trigger"
 	"go.uber.org/zap"
 )
@@ -106,6 +108,18 @@ Options:
 	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServerWithDir(reg, scheduler, store, cfg.WorkflowsDir, sugar)
 	apiServer.SetWorkflows(workflows)
+	if *standaloneOperator && !isLoopbackListenAddress(cfg.API.ListenAddr) {
+		sugar.Fatal("--standalone-operator requires the API listen address to be loopback")
+	}
+	skillsDir := strings.TrimSpace(os.Getenv("OPENSEAL_SKILLS_DIR"))
+	if skillsDir == "" {
+		skillsDir = filepath.Join(filepath.Dir(*configPath), "skills")
+	}
+	clawHubEngine, err := opensealkernel.New(opensealkernel.WithClawHubRegistrySkillsDirectory(clawhub.RegistryURL, clawhub.NewClawHubClient(""), skillsDir, skillsDir))
+	if err != nil {
+		sugar.Fatalf("configure ClawHub lifecycle: %v", err)
+	}
+	apiServer.SetClawHubLifecycle(clawHubEngine, *standaloneOperator)
 	contentStore, contentPath, err := daemon.OpenArtifactContentStore(cfg.Storage, filepath.Dir(*configPath))
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
@@ -141,9 +155,6 @@ Options:
 		apiServer.SetWorkforceAuthoringCompiler(compiler)
 		if workerErr := apiServer.StartWorkforceAuthoringWorker(ctx, scope, ""); workerErr != nil {
 			sugar.Fatalf("start workforce authoring worker: %v", workerErr)
-		}
-		if *standaloneOperator && !isLoopbackListenAddress(cfg.API.ListenAddr) {
-			sugar.Fatal("--standalone-operator requires the API listen address to be loopback")
 		}
 		if *standaloneOperator {
 			apiServer.SetWorkforceLifecycleAuthorizer(server.StandaloneRetryAuthorizer{ActorID: "local-operator"})

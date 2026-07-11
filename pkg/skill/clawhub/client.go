@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://clawhub.ai/api/v1"
+	RegistryURL    = "https://clawhub.ai"
+	defaultBaseURL = RegistryURL + "/api/v1"
 	defaultTimeout = 30 * time.Second
 	maxRetries     = 2
 	envRegistryURL = "CLAWHUB_REGISTRY"
