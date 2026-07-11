@@ -248,6 +248,7 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		Checkpoint      map[string]interface{} `json:"checkpoint,omitempty"`
 		WakeCondition   *WakeCondition         `json:"wakeCondition,omitempty"`
 		Budget          map[string]interface{} `json:"budget,omitempty"`
+		BudgetPolicy    *BudgetPolicy          `json:"budgetPolicy,omitempty"`
 		Policy          map[string]interface{} `json:"policy,omitempty"`
 	}{
 		Scope: req.Scope, Kind: normalizeRunKind(req.Kind), ObjectiveID: req.ObjectiveID,
@@ -255,7 +256,7 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
 		Goal:           req.Goal, Source: req.Source, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: req.AvailableAt, Context: req.Context, Plan: req.Plan, Checkpoint: req.Checkpoint,
-		WakeCondition: req.WakeCondition, Budget: req.Budget, Policy: req.Policy,
+		WakeCondition: req.WakeCondition, Budget: req.Budget, BudgetPolicy: req.BudgetPolicy, Policy: req.Policy,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

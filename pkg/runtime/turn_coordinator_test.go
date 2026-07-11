@@ -179,3 +179,73 @@ func TestTurnCoordinatorRejectsConcurrentLiveWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTurnCoordinatorPausesAndAccountsExhaustedBudget(t *testing.T) {
+	store := NewMemoryStore(100)
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "budget"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded work",
+		BudgetPolicy: &BudgetPolicy{MaxTurns: 1, MaxTotalTokens: 30, MaxCostMicros: 250_000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", Model: "fake",
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusRunning, OutputSummary: "more work remains",
+			Usage: TurnUsage{InputTokens: 10, OutputTokens: 20, Cost: 0.25, DurationMS: 500},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Run.Status != AgentRunStatusPaused || result.Run.BudgetState != BudgetStateExhausted ||
+		result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.InputTokens != 10 ||
+		result.Run.BudgetUsage.OutputTokens != 20 || result.Run.BudgetUsage.CostMicros != 250_000 ||
+		result.Run.BudgetUsage.DurationMS != 500 {
+		t.Fatalf("budgeted run = %#v", result.Run)
+	}
+	if result.Run.Error != "" || result.Turn.NextRunStatus != AgentRunStatusPaused {
+		t.Fatalf("budget exhaustion should pause without masquerading as failure: run=%#v turn=%#v", result.Run, result.Turn)
+	}
+}
+
+func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
+	store := NewMemoryStore(100)
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "budget-recovery"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "recover",
+		BudgetPolicy: &BudgetPolicy{MaxTurns: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewTurnCoordinator(store, store, store)
+	forcedCrash := errors.New("forced crash")
+	coordinator.afterTurnPersisted = func() error { return forcedCrash }
+	runner := TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, Usage: TurnUsage{InputTokens: 7}}, nil
+	})
+	if _, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "first"}, runner); !errors.Is(err, forcedCrash) {
+		t.Fatalf("advance error = %v", err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "recovery"}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Reconciled || result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.InputTokens != 7 {
+		t.Fatalf("reconciled budget = %#v", result.Run.BudgetUsage)
+	}
+	second, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "replay"}, runner)
+	if err == nil || second != nil {
+		t.Fatalf("terminal replay unexpectedly advanced: result=%#v err=%v", second, err)
+	}
+	loaded, err := NewPortfolioService(store).GetAgentRun(ctx, scope, run.ID)
+	if err != nil || loaded.BudgetUsage.Turns != 1 {
+		t.Fatalf("replay usage = %#v, err=%v", loaded, err)
+	}
+}

@@ -37,18 +37,18 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
 		Scope: scope, Kind: runtime.RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID,
-		Goal: "Monitor product feedback", Source: runtime.RunSourceManual,
+		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, BudgetPolicy: &runtime.BudgetPolicy{MaxTurns: 24},
 	}, "stable-request")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Run == nil || created.Run.Revision != 1 {
+	if created.Run == nil || created.Run.Revision != 1 || created.Run.BudgetPolicy == nil || created.Run.BudgetPolicy.MaxTurns != 24 {
 		t.Fatalf("unexpected create result: %#v", created)
 	}
 
 	replayed, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
 		Scope: scope, Kind: runtime.RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID,
-		Goal: "Monitor product feedback", Source: runtime.RunSourceManual,
+		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, BudgetPolicy: &runtime.BudgetPolicy{MaxTurns: 24},
 	}, "stable-request")
 	if err != nil {
 		t.Fatal(err)

@@ -844,8 +844,16 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: source.ConcurrencyKey,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
-		Budget: cloneMap(source.Budget), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Budget: cloneMap(source.Budget), BudgetPolicy: cloneBudgetPolicy(source.BudgetPolicy), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+}
+
+func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
+	if policy == nil {
+		return nil
+	}
+	cloned := *policy
+	return &cloned
 }
 
 func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) *AgentRun {

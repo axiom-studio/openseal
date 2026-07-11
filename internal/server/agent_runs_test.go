@@ -22,6 +22,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 		"concurrencyKey":"channel:engineering",
 		"goal":"Operate the service",
 		"source":"manual",
+		"budgetPolicy":{"maxTurns":12,"maxTotalTokens":50000,"maxCostMicros":2500000},
 		"actor":{"type":"user","id":"7"}
 	}`
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", createBody, "request-one")
@@ -32,7 +33,9 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if err := json.NewDecoder(created.Body).Decode(&createResult); err != nil {
 		t.Fatal(err)
 	}
-	if createResult.Run == nil || createResult.Run.Kind != runtime.RunKindConversation || createResult.Run.ConcurrencyKey != "channel:engineering" || createResult.Event == nil || createResult.Event.EventType != "run.created" {
+	if createResult.Run == nil || createResult.Run.Kind != runtime.RunKindConversation || createResult.Run.ConcurrencyKey != "channel:engineering" ||
+		createResult.Run.BudgetPolicy == nil || createResult.Run.BudgetPolicy.MaxTurns != 12 || createResult.Run.BudgetState != runtime.BudgetStateActive ||
+		createResult.Event == nil || createResult.Event.EventType != "run.created" {
 		t.Fatalf("create result = %#v", createResult)
 	}
 

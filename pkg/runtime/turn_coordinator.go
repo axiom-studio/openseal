@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -162,6 +163,21 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.RunError = outcome.RunError
 		}
 	}
+	if run.BudgetPolicy != nil && finish.Status == AgentTurnStatusCompleted {
+		delta := budgetUsageForTurn(finish.Usage)
+		usage, usageErr := run.BudgetUsage.Add(delta)
+		if usageErr != nil {
+			return nil, usageErr
+		}
+		state, _, usageErr := EvaluateBudget(*run.BudgetPolicy, usage)
+		if usageErr != nil {
+			return nil, usageErr
+		}
+		if state == BudgetStateExhausted {
+			finish.NextRunStatus = AgentRunStatusPaused
+			finish.OutputSummary = "Run paused after reaching its autonomous budget"
+		}
+	}
 	turn, err = c.turns.FinishTurn(ctx, req.Scope, turn.ID, finish)
 	if err != nil {
 		return nil, err
@@ -196,12 +212,18 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		}
 		leaseOwner = workerID
 	}
+	var budgetDelta *BudgetUsage
+	if run.BudgetPolicy != nil {
+		delta := budgetUsageForTurn(turn.Usage)
+		budgetDelta = &delta
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
 		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID,
-		LeaseOwner: leaseOwner,
+		LeaseOwner:       leaseOwner,
+		BudgetUsageDelta: budgetDelta,
 	})
 	if err != nil {
 		return nil, err
@@ -209,7 +231,18 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	return &AdvanceAgentRunResult{Run: updated, Turn: turn, Event: event, Reconciled: reconciled}, nil
 }
 
+func budgetUsageForTurn(usage TurnUsage) BudgetUsage {
+	costMicros := int64(0)
+	if usage.Cost > 0 {
+		costMicros = int64(math.Round(usage.Cost * 1_000_000))
+	}
+	return BudgetUsage{Turns: 1, InputTokens: int64(usage.InputTokens), OutputTokens: int64(usage.OutputTokens), CostMicros: costMicros, DurationMS: usage.DurationMS}
+}
+
 func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
+	if err := outcome.Usage.Validate(); err != nil {
+		return err
+	}
 	if outcome.NextRunStatus == "" {
 		outcome.NextRunStatus = AgentRunStatusRunning
 	}
