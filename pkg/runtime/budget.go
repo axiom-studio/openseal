@@ -200,7 +200,7 @@ func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) e
 			remaining = 0
 		}
 		if dimension.allocation == 0 || dimension.allocation > remaining {
-			return fmt.Errorf("child %s budget %d exceeds parent remaining capacity %d", dimension.name, dimension.allocation, remaining)
+			return fmt.Errorf("%w: child %s budget %d exceeds parent remaining capacity %d", ErrBudgetExhausted, dimension.name, dimension.allocation, remaining)
 		}
 	}
 	return nil
