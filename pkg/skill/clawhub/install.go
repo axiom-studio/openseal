@@ -24,12 +24,16 @@ var (
 	ErrSkillPinned        = errors.New("installed skill is pinned")
 	ErrSkillModified      = errors.New("installed skill has local modifications")
 	ErrVerificationFailed = errors.New("skill verification failed")
+	ErrAmbiguousSkill     = errors.New("installed skill reference is ambiguous")
 )
 
 type LockEntry struct {
 	Version     *string `json:"version"`
 	InstalledAt int64   `json:"installedAt"`
+	Registry    string  `json:"registry,omitempty"`
 	OwnerHandle string  `json:"ownerHandle,omitempty"`
+	Slug        string  `json:"slug,omitempty"`
+	Directory   string  `json:"directory,omitempty"`
 	Pinned      bool    `json:"pinned,omitempty"`
 	PinReason   string  `json:"pinReason,omitempty"`
 }
@@ -59,13 +63,14 @@ type InstallRequest struct {
 }
 
 type InstalledSkill struct {
-	Reference    SkillReference
-	Version      string
-	Directory    string
-	Origin       SkillOrigin
-	Verification *Verification
-	Compilation  *opensealclaw.Compilation
-	Changed      bool
+	SourceIdentity string
+	Reference      SkillReference
+	Version        string
+	Directory      string
+	Origin         SkillOrigin
+	Verification   *Verification
+	Compilation    *opensealclaw.Compilation
+	Changed        bool
 }
 
 type UpdateReport struct {
@@ -118,9 +123,11 @@ func (m *InstallManager) InstallValidated(ctx context.Context, req InstallReques
 }
 
 func (m *InstallManager) install(ctx context.Context, req InstallRequest, validate CompilationValidator) (*InstalledSkill, error) {
-	if strings.TrimSpace(req.Reference.Slug) == "" || req.Version != "" && req.Tag != "" {
+	ref, err := canonicalReference(req.Reference)
+	if err != nil || req.Version != "" && req.Tag != "" {
 		return nil, errors.New("skill reference is required and version and tag are mutually exclusive")
 	}
+	req.Reference = ref
 	if req.SkipVerification && req.Tag != "" {
 		return nil, errors.New("tag resolution requires verification")
 	}
@@ -133,7 +140,8 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 	if err != nil {
 		return nil, err
 	}
-	existing, installed := lock.Skills[req.Reference.Slug]
+	identity := m.identity(req.Reference)
+	existing, installed := lock.Skills[identity]
 	if installed && existing.Pinned {
 		return nil, fmt.Errorf("%w: %s", ErrSkillPinned, req.Reference.String())
 	}
@@ -176,7 +184,11 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 			return nil, fmt.Errorf("validate compiled skill: %w", err)
 		}
 	}
-	target := filepath.Join(m.skillsDir, req.Reference.Slug)
+	targetEntry := LockEntry{Directory: installDirectory(identity, req.Reference.Slug)}
+	if installed {
+		targetEntry = existing
+	}
+	target := m.entryPath(identity, targetEntry)
 	if installed {
 		modified, err := m.isLocallyModified(target)
 		if err != nil {
@@ -190,7 +202,7 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 			if err != nil {
 				return nil, err
 			}
-			return &InstalledSkill{Reference: req.Reference, Version: resolvedVersion, Directory: target, Origin: *origin, Verification: verification, Compilation: bundle, Changed: false}, nil
+			return &InstalledSkill{SourceIdentity: identity, Reference: req.Reference, Version: resolvedVersion, Directory: target, Origin: *origin, Verification: verification, Compilation: bundle, Changed: false}, nil
 		}
 	}
 	now := m.now().UTC()
@@ -219,7 +231,7 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 		return nil, err
 	}
 	versionCopy := resolvedVersion
-	lock.Skills[req.Reference.Slug] = LockEntry{Version: &versionCopy, InstalledAt: now.UnixMilli(), OwnerHandle: req.Reference.Owner}
+	lock.Skills[identity] = LockEntry{Version: &versionCopy, InstalledAt: now.UnixMilli(), Registry: m.registryID, OwnerHandle: req.Reference.Owner, Slug: req.Reference.Slug, Directory: filepath.Base(target)}
 	if err := m.writeLockfile(lock); err != nil {
 		_ = os.RemoveAll(target)
 		if backup != "" {
@@ -230,7 +242,7 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 	if backup != "" {
 		_ = os.RemoveAll(backup)
 	}
-	return &InstalledSkill{Reference: req.Reference, Version: resolvedVersion, Directory: target, Origin: origin, Verification: verification, Compilation: bundle, Changed: true}, nil
+	return &InstalledSkill{SourceIdentity: identity, Reference: req.Reference, Version: resolvedVersion, Directory: target, Origin: origin, Verification: verification, Compilation: bundle, Changed: true}, nil
 }
 
 func (m *InstallManager) Update(ctx context.Context, slug string) (*InstalledSkill, error) {
@@ -241,16 +253,16 @@ func (m *InstallManager) UpdateValidated(ctx context.Context, slug string, valid
 	return m.update(ctx, slug, validate)
 }
 
-func (m *InstallManager) update(ctx context.Context, slug string, validate CompilationValidator) (*InstalledSkill, error) {
+func (m *InstallManager) update(ctx context.Context, reference string, validate CompilationValidator) (*InstalledSkill, error) {
 	lock, err := m.List()
 	if err != nil {
 		return nil, err
 	}
-	entry, ok := lock.Skills[slug]
-	if !ok {
-		return nil, ErrNotFound
+	_, entry, err := m.resolve(lock, reference)
+	if err != nil {
+		return nil, err
 	}
-	return m.install(ctx, InstallRequest{Reference: SkillReference{Owner: entry.OwnerHandle, Slug: slug}}, validate)
+	return m.install(ctx, InstallRequest{Reference: SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug}}, validate)
 }
 
 func (m *InstallManager) UpdateAll(ctx context.Context) UpdateReport {
@@ -259,17 +271,18 @@ func (m *InstallManager) UpdateAll(ctx context.Context) UpdateReport {
 		return UpdateReport{Errors: map[string]string{"lockfile": err.Error()}}
 	}
 	slugs := make([]string, 0, len(lock.Skills))
-	for slug := range lock.Skills {
-		slugs = append(slugs, slug)
+	for identity := range lock.Skills {
+		slugs = append(slugs, identity)
 	}
 	sort.Strings(slugs)
 	report := UpdateReport{Errors: make(map[string]string)}
 	for _, slug := range slugs {
-		if lock.Skills[slug].Pinned {
+		entry := lock.Skills[slug]
+		if entry.Pinned {
 			report.SkippedPinned = append(report.SkippedPinned, slug)
 			continue
 		}
-		installed, err := m.Update(ctx, slug)
+		installed, err := m.install(ctx, InstallRequest{Reference: SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug}}, nil)
 		if err != nil {
 			report.Errors[slug] = err.Error()
 			continue
@@ -286,28 +299,31 @@ func (m *InstallManager) UpdateAll(ctx context.Context) UpdateReport {
 	return report
 }
 
-func (m *InstallManager) VerifyInstalled(ctx context.Context, slug string) (*Verification, error) {
+func (m *InstallManager) VerifyInstalled(ctx context.Context, reference string) (*Verification, error) {
 	lock, err := m.List()
 	if err != nil {
 		return nil, err
 	}
-	entry, ok := lock.Skills[slug]
-	if !ok || entry.Version == nil {
+	identity, entry, err := m.resolve(lock, reference)
+	if err != nil || entry.Version == nil {
+		if err != nil {
+			return nil, err
+		}
 		return nil, ErrNotFound
 	}
-	modified, err := m.isLocallyModified(filepath.Join(m.skillsDir, slug))
+	modified, err := m.isLocallyModified(m.entryPath(identity, entry))
 	if err != nil {
 		return nil, err
 	}
 	if modified {
 		return nil, ErrSkillModified
 	}
-	ref := SkillReference{Owner: entry.OwnerHandle, Slug: slug}
+	ref := SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug}
 	verification, err := m.registry.VerifySkill(ctx, ref, *entry.Version, "")
 	if err != nil {
 		return nil, err
 	}
-	if !verification.OK || verification.Decision != "pass" || verification.Slug != slug || verification.Version != *entry.Version || entry.OwnerHandle != "" && verification.PublisherHandle != entry.OwnerHandle {
+	if !verification.OK || verification.Decision != "pass" || !strings.EqualFold(verification.Slug, entry.Slug) || verification.Version != *entry.Version || entry.OwnerHandle != "" && !strings.EqualFold(verification.PublisherHandle, entry.OwnerHandle) {
 		return nil, ErrVerificationFailed
 	}
 	return verification, nil
@@ -321,8 +337,8 @@ func (m *InstallManager) LoadInstalled() ([]*InstalledSkill, error) {
 		return nil, err
 	}
 	slugs := make([]string, 0, len(lock.Skills))
-	for slug := range lock.Skills {
-		slugs = append(slugs, slug)
+	for identity := range lock.Skills {
+		slugs = append(slugs, identity)
 	}
 	sort.Strings(slugs)
 	result := make([]*InstalledSkill, 0, len(slugs))
@@ -337,55 +353,55 @@ func (m *InstallManager) LoadInstalled() ([]*InstalledSkill, error) {
 	return result, nil
 }
 
-func (m *InstallManager) Pin(slug, reason string) error {
+func (m *InstallManager) Pin(reference, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
 	}
-	entry, ok := lock.Skills[slug]
-	if !ok {
-		return ErrNotFound
+	identity, entry, err := m.resolve(*lock, reference)
+	if err != nil {
+		return err
 	}
 	entry.Pinned = true
 	entry.PinReason = strings.TrimSpace(reason)
-	lock.Skills[slug] = entry
+	lock.Skills[identity] = entry
 	return m.writeLockfile(lock)
 }
 
-func (m *InstallManager) Unpin(slug string) error {
+func (m *InstallManager) Unpin(reference string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
 	}
-	entry, ok := lock.Skills[slug]
-	if !ok {
-		return ErrNotFound
+	identity, entry, err := m.resolve(*lock, reference)
+	if err != nil {
+		return err
 	}
 	entry.Pinned = false
 	entry.PinReason = ""
-	lock.Skills[slug] = entry
+	lock.Skills[identity] = entry
 	return m.writeLockfile(lock)
 }
 
-func (m *InstallManager) Uninstall(slug string, force bool) error {
+func (m *InstallManager) Uninstall(reference string, force bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	lock, err := m.readLockfile()
 	if err != nil {
 		return err
 	}
-	entry, ok := lock.Skills[slug]
-	if !ok {
-		return ErrNotFound
+	identity, entry, err := m.resolve(*lock, reference)
+	if err != nil {
+		return err
 	}
 	if entry.Pinned {
 		return ErrSkillPinned
 	}
-	target := filepath.Join(m.skillsDir, slug)
+	target := m.entryPath(identity, entry)
 	modified, err := m.isLocallyModified(target)
 	if err != nil {
 		return err
@@ -397,7 +413,7 @@ func (m *InstallManager) Uninstall(slug string, force bool) error {
 	if err := os.Rename(target, trash); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	delete(lock.Skills, slug)
+	delete(lock.Skills, identity)
 	if err := m.writeLockfile(lock); err != nil {
 		_ = os.Rename(trash, target)
 		return err
@@ -465,13 +481,13 @@ func (m *InstallManager) stageArchive(ref SkillReference, version string, archiv
 	return stage, compilation, fingerprint, nil
 }
 
-func (m *InstallManager) loadInstalled(slug string, entry LockEntry) (*InstalledSkill, error) {
-	target := filepath.Join(m.skillsDir, slug)
+func (m *InstallManager) loadInstalled(identity string, entry LockEntry) (*InstalledSkill, error) {
+	target := m.entryPath(identity, entry)
 	origin, err := readOrigin(target)
 	if err != nil {
 		return nil, err
 	}
-	if origin == nil || origin.Slug != slug || entry.Version == nil || origin.InstalledVersion != *entry.Version || origin.OwnerHandle != entry.OwnerHandle {
+	if origin == nil || !strings.EqualFold(origin.Registry, entry.Registry) || !strings.EqualFold(origin.Slug, entry.Slug) || entry.Version == nil || origin.InstalledVersion != *entry.Version || !strings.EqualFold(origin.OwnerHandle, entry.OwnerHandle) {
 		return nil, errors.New("lockfile and installed origin do not match")
 	}
 	files, err := readInstalledFiles(target)
@@ -500,12 +516,12 @@ func (m *InstallManager) loadInstalled(slug string, entry LockEntry) (*Installed
 		encoded, _ := json.Marshal(verification)
 		_ = json.Unmarshal(encoded, &trust)
 	}
-	ref := SkillReference{Owner: entry.OwnerHandle, Slug: slug}
+	ref := SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug}
 	compilation, err := opensealclaw.Compile(opensealclaw.Bundle{SkillMD: skillMD, Files: bundleFiles, Source: opensealclaw.Source{Registry: origin.Registry, Publisher: ref.Owner, Reference: ref.String(), Version: origin.InstalledVersion, Trust: trust}})
 	if err != nil {
 		return nil, err
 	}
-	return &InstalledSkill{Reference: ref, Version: origin.InstalledVersion, Directory: target, Origin: *origin, Verification: verification, Compilation: compilation, Changed: false}, nil
+	return &InstalledSkill{SourceIdentity: identity, Reference: ref, Version: origin.InstalledVersion, Directory: target, Origin: *origin, Verification: verification, Compilation: compilation, Changed: false}, nil
 }
 
 func extractArchive(raw []byte, target string) (map[string][]byte, error) {
@@ -586,7 +602,7 @@ func (m *InstallManager) readLockfile() (*Lockfile, error) {
 	path := filepath.Join(m.workspace, ".clawhub", "lock.json")
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return &Lockfile{Version: 1, Skills: make(map[string]LockEntry)}, nil
+		return &Lockfile{Version: 2, Skills: make(map[string]LockEntry)}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -595,8 +611,13 @@ func (m *InstallManager) readLockfile() (*Lockfile, error) {
 	if err := json.Unmarshal(content, &lock); err != nil {
 		return nil, fmt.Errorf("parse ClawHub lockfile: %w", err)
 	}
-	if lock.Version != 1 || lock.Skills == nil {
+	if lock.Skills == nil || lock.Version != 1 && lock.Version != 2 {
 		return nil, errors.New("unsupported ClawHub lockfile")
+	}
+	if lock.Version == 1 {
+		if err := m.migrateLockfile(&lock); err != nil {
+			return nil, err
+		}
 	}
 	return &lock, nil
 }
@@ -617,10 +638,142 @@ func readOrigin(target string) (*SkillOrigin, error) {
 	if err := json.Unmarshal(content, &origin); err != nil {
 		return nil, err
 	}
-	if origin.Version != 1 {
+	if origin.Version != 1 && origin.Version != 2 {
 		return nil, errors.New("unsupported skill origin metadata")
 	}
 	return &origin, nil
+}
+
+func canonicalReference(ref SkillReference) (SkillReference, error) {
+	parsed, err := ParseSkillReference(ref.String())
+	if err != nil {
+		return SkillReference{}, err
+	}
+	parsed.Owner = strings.ToLower(parsed.Owner)
+	parsed.Slug = strings.ToLower(parsed.Slug)
+	return parsed, nil
+}
+
+func (m *InstallManager) identity(ref SkillReference) string {
+	canonical, _ := canonicalReference(ref)
+	return strings.ToLower(m.registryID) + "::" + canonical.String()
+}
+
+func installDirectory(identity, slug string) string {
+	digest := sha256.Sum256([]byte(identity))
+	return slug + "-" + hex.EncodeToString(digest[:8])
+}
+
+func (m *InstallManager) entryPath(identity string, entry LockEntry) string {
+	directory := entry.Directory
+	if directory == "" {
+		directory = installDirectory(identity, entry.Slug)
+	}
+	return filepath.Join(m.skillsDir, filepath.Base(directory))
+}
+
+func (m *InstallManager) resolve(lock Lockfile, reference string) (string, LockEntry, error) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return "", LockEntry{}, ErrNotFound
+	}
+	if ref, err := ParseSkillReference(reference); err == nil && ref.Owner != "" {
+		canonical, _ := canonicalReference(ref)
+		for identity, entry := range lock.Skills {
+			if strings.EqualFold(entry.Registry, m.registryID) && strings.EqualFold(entry.OwnerHandle, canonical.Owner) && strings.EqualFold(entry.Slug, canonical.Slug) {
+				return identity, entry, nil
+			}
+		}
+		return "", LockEntry{}, ErrNotFound
+	}
+	ref, err := ParseSkillReference(reference)
+	if err != nil {
+		return "", LockEntry{}, err
+	}
+	slug := strings.ToLower(ref.Slug)
+	var match string
+	var entry LockEntry
+	for identity, candidate := range lock.Skills {
+		if strings.EqualFold(candidate.Slug, slug) {
+			if match != "" {
+				return "", LockEntry{}, fmt.Errorf("%w: %s matches %s and %s", ErrAmbiguousSkill, reference, match, identity)
+			}
+			match, entry = identity, candidate
+		}
+	}
+	if match == "" {
+		return "", LockEntry{}, ErrNotFound
+	}
+	return match, entry, nil
+}
+
+func (m *InstallManager) migrateLockfile(lock *Lockfile) error {
+	migrated := make(map[string]LockEntry, len(lock.Skills))
+	type move struct {
+		from string
+		to   string
+	}
+	moves := make([]move, 0, len(lock.Skills))
+	for legacySlug, entry := range lock.Skills {
+		legacyPath := filepath.Join(m.skillsDir, filepath.Base(legacySlug))
+		origin, err := readOrigin(legacyPath)
+		if err != nil {
+			return fmt.Errorf("migrate installed skill %s: %w", legacySlug, err)
+		}
+		if origin == nil {
+			return fmt.Errorf("migrate installed skill %s: origin metadata is missing", legacySlug)
+		}
+		entry.Registry, entry.OwnerHandle, entry.Slug = origin.Registry, origin.OwnerHandle, origin.Slug
+		if entry.Registry == "" {
+			entry.Registry = m.registryID
+		}
+		if !strings.EqualFold(strings.TrimRight(entry.Registry, "/"), m.registryID) {
+			return fmt.Errorf("migrate installed skill %s: registry %q does not match manager registry %q", legacySlug, entry.Registry, m.registryID)
+		}
+		entry.Registry = m.registryID
+		if entry.Slug == "" {
+			entry.Slug = legacySlug
+		}
+		ref, err := canonicalReference(SkillReference{Owner: entry.OwnerHandle, Slug: entry.Slug})
+		if err != nil {
+			return fmt.Errorf("migrate installed skill %s: %w", legacySlug, err)
+		}
+		entry.OwnerHandle, entry.Slug = ref.Owner, ref.Slug
+		identity := m.identity(ref)
+		if _, exists := migrated[identity]; exists {
+			return fmt.Errorf("migrate ClawHub lockfile: duplicate identity %s", identity)
+		}
+		entry.Directory = installDirectory(identity, entry.Slug)
+		newPath := filepath.Join(m.skillsDir, entry.Directory)
+		if legacyPath != newPath {
+			if _, err := os.Stat(newPath); err == nil {
+				return fmt.Errorf("migrate ClawHub lockfile: target %s already exists", entry.Directory)
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+			moves = append(moves, move{legacyPath, newPath})
+		}
+		migrated[identity] = entry
+	}
+	moved := 0
+	rollback := func() {
+		for i := moved - 1; i >= 0; i-- {
+			_ = os.Rename(moves[i].to, moves[i].from)
+		}
+	}
+	for _, movement := range moves {
+		if err := os.Rename(movement.from, movement.to); err != nil {
+			rollback()
+			return fmt.Errorf("migrate installed skill directory: %w", err)
+		}
+		moved++
+	}
+	lock.Version, lock.Skills = 2, migrated
+	if err := m.writeLockfile(lock); err != nil {
+		rollback()
+		return err
+	}
+	return nil
 }
 
 func readStoredVerification(target string) (*Verification, error) {
