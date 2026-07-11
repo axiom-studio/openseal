@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
@@ -42,37 +43,10 @@ type EscalationPolicy struct {
 	Recipient     string        `json:"recipient,omitempty"`
 }
 
-type ObjectiveTemplate struct {
-	ID              string                 `json:"id"`
-	Title           string                 `json:"title"`
-	Goal            string                 `json:"goal"`
-	Priority        int                    `json:"priority,omitempty"`
-	Cadence         map[string]interface{} `json:"cadence,omitempty"`
-	EventRules      map[string]interface{} `json:"eventRules,omitempty"`
-	SuccessCriteria map[string]interface{} `json:"successCriteria,omitempty"`
-	Constraints     map[string]interface{} `json:"constraints,omitempty"`
-}
-
-type EvaluationCriterion struct {
-	ID          string  `json:"id"`
-	Description string  `json:"description"`
-	Weight      float64 `json:"weight,omitempty"`
-	Required    bool    `json:"required,omitempty"`
-}
-
-type AmendmentPolicy struct {
-	AgentMayPropose    bool     `json:"agentMayPropose,omitempty"`
-	AllowedFields      []string `json:"allowedFields,omitempty"`
-	RequiresApproval   bool     `json:"requiresApproval,omitempty"`
-	ApproverPrincipals []string `json:"approverPrincipals,omitempty"`
-}
-
-type DefinitionProvenance struct {
-	Source      string `json:"source,omitempty"`
-	Reference   string `json:"reference,omitempty"`
-	CreatedBy   string `json:"createdBy,omitempty"`
-	DerivedFrom string `json:"derivedFrom,omitempty"`
-}
+type ObjectiveTemplate = workforce.ObjectiveTemplate
+type EvaluationCriterion = workforce.EvaluationCriterion
+type AmendmentPolicy = workforce.AmendmentPolicy
+type DefinitionProvenance = workforce.DefinitionProvenance
 
 // AgentDefinition is immutable behavior. It deliberately excludes credentials,
 // placement, health, active runs, and every other tenant-local mutable value.
