@@ -117,10 +117,16 @@ type (
 	SubmitWorkforceChangeSetEvaluationRequest = authoring.SubmitChangeSetEvaluationRequest
 	ResolveWorkforceChangeSetApprovalRequest  = authoring.ResolveChangeSetApprovalRequest
 	ApplyWorkforceChangeSetRequest            = authoring.ApplyChangeSetRequest
+	RetryWorkforceChangeSetGenerationRequest  = authoring.RetryChangeSetGenerationRequest
 	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
 	WorkforceAppliedResourceReference         = authoring.AppliedResourceReference
 	WorkforceChangeSetStore                   = authoring.ChangeSetStore
+	PendingWorkforceChangeSetGenerationStore  = authoring.PendingChangeSetGenerationStore
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
+	WorkforceAuthoringRunStore                = runtime.WorkforceAuthoringRunStore
+	WorkforceAuthoringRunService              = runtime.WorkforceAuthoringRunService
+	WorkforceAuthoringWorkerConfig            = runtime.WorkforceAuthoringWorkerConfig
+	WorkforceAuthoringWorker                  = runtime.WorkforceAuthoringWorker
 
 	RunRecord                          = runtime.RunRecord
 	RetryPolicy                        = runtime.RetryPolicy
@@ -539,8 +545,9 @@ const (
 	RunSourceHandoff   = runtime.RunSourceHandoff
 	RunSourceObjective = runtime.RunSourceObjective
 
-	RunKindAgentWork    = runtime.RunKindAgentWork
-	RunKindConversation = runtime.RunKindConversation
+	RunKindAgentWork          = runtime.RunKindAgentWork
+	RunKindConversation       = runtime.RunKindConversation
+	RunKindWorkforceAuthoring = runtime.RunKindWorkforceAuthoring
 
 	TeamCoordinationDynamic           = kernelteam.CoordinationDynamic
 	TeamCoordinationPeer              = kernelteam.CoordinationPeer
@@ -831,6 +838,7 @@ type Engine struct {
 	teams                         *kernelteam.Registry
 	authoring                     *authoring.Compiler
 	authoringChanges              *authoring.ChangeSetService
+	authoringRuns                 *runtime.WorkforceAuthoringRunService
 	logger                        *zap.SugaredLogger
 }
 
@@ -1270,6 +1278,7 @@ func WithWorkforceAuthoringGenerator(generator authoring.Generator) Option {
 
 func (e *Engine) rebuildAuthoringChangeSets() error {
 	e.authoringChanges = nil
+	e.authoringRuns = nil
 	if e.authoring == nil {
 		return nil
 	}
@@ -1282,6 +1291,13 @@ func (e *Engine) rebuildAuthoringChangeSets() error {
 		return err
 	}
 	e.authoringChanges = service
+	if runStore, ok := e.store.(runtime.WorkforceAuthoringRunStore); ok {
+		runService, err := runtime.NewWorkforceAuthoringRunService(e.authoring, runStore)
+		if err != nil {
+			return err
+		}
+		e.authoringRuns = runService
+	}
 	return nil
 }
 
@@ -1289,6 +1305,18 @@ func (e *Engine) rebuildAuthoringChangeSets() error {
 // adapter used by both standalone OpenSeal and embedding hosts.
 func NewOpenAICompatibleWorkforceGenerator(endpoint, apiKey, model string, client *http.Client) (authoring.Generator, error) {
 	return authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, client)
+}
+
+func NewWorkforceAuthoringRunService(generator authoring.Generator, store runtime.WorkforceAuthoringRunStore) (*runtime.WorkforceAuthoringRunService, error) {
+	compiler, err := authoring.NewCompiler(generator)
+	if err != nil {
+		return nil, err
+	}
+	return runtime.NewWorkforceAuthoringRunService(compiler, store)
+}
+
+func NewWorkforceAuthoringWorker(service *runtime.WorkforceAuthoringRunService, logger *zap.SugaredLogger, config runtime.WorkforceAuthoringWorkerConfig) (*runtime.WorkforceAuthoringWorker, error) {
+	return runtime.NewWorkforceAuthoringWorker(service, logger, config)
 }
 
 func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
@@ -1983,6 +2011,10 @@ func (e *Engine) PrepareWorkforceChangeSet(ctx context.Context, request authorin
 	if e == nil || e.authoringChanges == nil {
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
+	if e.authoringRuns != nil {
+		changeSet, _, replay, err := e.authoringRuns.Prepare(ctx, request)
+		return changeSet, replay, err
+	}
 	return e.authoringChanges.Prepare(ctx, request)
 }
 
@@ -1993,6 +2025,14 @@ func (e *Engine) GeneratePreparedWorkforceChangeSet(ctx context.Context, scope s
 		return nil, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.GeneratePrepared(ctx, scope, id, expectedRevision)
+}
+
+func (e *Engine) RetryWorkforceChangeSetGeneration(ctx context.Context, request authoring.RetryChangeSetGenerationRequest) (*authoring.ChangeSet, error) {
+	if e == nil || e.authoringRuns == nil {
+		return nil, errors.New("durable workforce authoring runs are not configured")
+	}
+	changeSet, _, err := e.authoringRuns.Retry(ctx, request)
+	return changeSet, err
 }
 
 func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string) (*authoring.ChangeSet, error) {
