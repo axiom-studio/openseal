@@ -50,18 +50,18 @@ func (r *Registry) RegisterDefinition(ctx context.Context, definition *Definitio
 	if err != nil {
 		return nil, err
 	}
-	if err := r.store.CreateDefinition(ctx, candidate); err != nil {
+	if err := r.store.CreateTeamDefinition(ctx, candidate); err != nil {
 		return nil, err
 	}
 	return cloneDefinition(candidate), nil
 }
 
 func (r *Registry) GetDefinition(ctx context.Context, id, version string) (*Definition, error) {
-	return r.store.GetDefinition(ctx, id, version)
+	return r.store.GetTeamDefinition(ctx, id, version)
 }
 
 func (r *Registry) ListDefinitionVersions(ctx context.Context, id string) ([]*Definition, error) {
-	return r.store.ListDefinitionVersions(ctx, id)
+	return r.store.ListTeamDefinitionVersions(ctx, id)
 }
 
 func (r *Registry) CreateDeployment(ctx context.Context, deployment *Deployment, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
@@ -82,7 +82,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *Deployment,
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
 		return nil, nil, errors.New("team deployment activation actor is required")
 	}
-	definition, err := r.store.GetDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
+	definition, err := r.store.GetTeamDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,7 +100,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *Deployment,
 		ToVersion: candidate.ActiveVersion, DeploymentRevision: candidate.Revision, Reason: strings.TrimSpace(reason),
 		ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: candidate.CreatedAt,
 	}
-	if err := r.store.CreateDeployment(ctx, candidate, activation); err != nil {
+	if err := r.store.CreateTeamDeployment(ctx, candidate, activation); err != nil {
 		return nil, nil, err
 	}
 	copyActivation := activation
@@ -108,7 +108,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *Deployment,
 }
 
 func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*Deployment, error) {
-	return r.store.GetDeployment(ctx, scope, id)
+	return r.store.GetTeamDeployment(ctx, scope, id)
 }
 
 func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*Deployment, *workforce.DefinitionActivation, error) {
@@ -118,14 +118,14 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	if strings.EqualFold(strings.TrimSpace(actorType), "agent") {
 		return nil, nil, errors.New("agents must activate Team behavior changes through the amendment workflow")
 	}
-	current, err := r.store.GetDeployment(ctx, scope, deploymentID)
+	current, err := r.store.GetTeamDeployment(ctx, scope, deploymentID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if current.Revision != expectedRevision {
 		return nil, nil, ErrRevisionConflict
 	}
-	definition, err := r.store.GetDefinition(ctx, current.DefinitionID, version)
+	definition, err := r.store.GetTeamDefinition(ctx, current.DefinitionID, version)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -148,7 +148,7 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 		FromVersion: current.ActiveVersion, ToVersion: version, DeploymentRevision: updated.Revision,
 		Reason: strings.TrimSpace(reason), ActorType: strings.TrimSpace(actorType), ActorID: strings.TrimSpace(actorID), CreatedAt: updated.UpdatedAt,
 	}
-	if err := r.store.UpdateDeployment(ctx, updated, expectedRevision, activation); err != nil {
+	if err := r.store.UpdateTeamDeployment(ctx, updated, expectedRevision, activation); err != nil {
 		return nil, nil, err
 	}
 	copyActivation := activation
@@ -156,7 +156,7 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 }
 
 func (r *Registry) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
-	return r.store.ListActivations(ctx, scope, deploymentID)
+	return r.store.ListTeamDefinitionActivations(ctx, scope, deploymentID)
 }
 
 func (r *Registry) validateRoster(ctx context.Context, definition *Definition, deployment *Deployment) error {
