@@ -180,6 +180,114 @@ Read references/method.md before monitoring.
 	}
 }
 
+func TestLifecycleReconciliationRollsBackAndCompletesInterruptedMutations(t *testing.T) {
+	registry := &installRegistry{
+		version:      "1.0.0",
+		verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"},
+		archive:      createTestZip(t, map[string]string{"SKILL.md": "---\nname: durable\ndescription: durable skill\n---\nOriginal."}),
+	}
+	workspace := t.TempDir()
+	manager, err := NewInstallManager("https://registry.test", registry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := SkillReference{Owner: "acme", Slug: "durable"}
+	installed, err := manager.Install(context.Background(), InstallRequest{Reference: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := manager.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := manager.identity(ref)
+	original := lock.Skills[identity]
+
+	// Crash after the old directory moved and a replacement became visible,
+	// but before the lockfile commit: restart must restore the old directory.
+	backup := installed.Directory + ".backup-crash"
+	if err := os.Rename(installed.Directory, backup); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(installed.Directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed.Directory, "partial"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newVersion := "2.0.0"
+	desired := original
+	desired.Version = &newVersion
+	if err := manager.writeIntent(lifecycleIntent{Kind: "install", Identity: identity, Target: installed.Directory, Backup: backup, Desired: &desired}); err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := NewInstallManager("https://registry.test", registry, workspace)
+	if err := restarted.ReconcileLifecycle(); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := os.ReadFile(filepath.Join(installed.Directory, "SKILL.md")); err != nil || !bytes.Contains(content, []byte("Original")) {
+		t.Fatalf("rollback content=%q err=%v", content, err)
+	}
+
+	// Crash after the lockfile commit but before old-directory cleanup: restart
+	// must preserve the committed target and remove the leftover backup.
+	backup = installed.Directory + ".backup-committed"
+	if err := os.MkdirAll(backup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	committedEntry := original
+	if err := manager.writeIntent(lifecycleIntent{Kind: "install", Identity: identity, Target: installed.Directory, Backup: backup, Desired: &committedEntry}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.ReconcileLifecycle(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(backup); !os.IsNotExist(err) {
+		t.Fatalf("committed install backup remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installed.Directory, "SKILL.md")); err != nil {
+		t.Fatalf("committed install target removed: %v", err)
+	}
+
+	// Crash after uninstall moved the directory but before committing the
+	// lockfile: restart must put it back.
+	trash := installed.Directory + ".remove-crash"
+	if err := os.Rename(installed.Directory, trash); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.writeIntent(lifecycleIntent{Kind: "uninstall", Identity: identity, Target: installed.Directory, Trash: trash}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.ReconcileLifecycle(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(installed.Directory, "SKILL.md")); err != nil {
+		t.Fatalf("uninstall rollback did not restore target: %v", err)
+	}
+
+	// Crash after the lockfile commit: restart must finish deleting trash.
+	if err := os.Rename(installed.Directory, trash); err != nil {
+		t.Fatal(err)
+	}
+	committedLock, _ := manager.readLockfile()
+	delete(committedLock.Skills, identity)
+	if err := manager.writeLockfile(committedLock); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.writeIntent(lifecycleIntent{Kind: "uninstall", Identity: identity, Target: installed.Directory, Trash: trash}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.ReconcileLifecycle(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(trash); !os.IsNotExist(err) {
+		t.Fatalf("committed uninstall trash remains: %v", err)
+	}
+	if _, err := os.Stat(manager.intentPath()); !os.IsNotExist(err) {
+		t.Fatalf("lifecycle intent remains: %v", err)
+	}
+}
+
 func TestInstallManagerUsesExplicitSkillsDirectory(t *testing.T) {
 	workspace := t.TempDir()
 	skillsDirectory := filepath.Join(t.TempDir(), "mounted-skills")
