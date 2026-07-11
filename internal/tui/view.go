@@ -87,8 +87,13 @@ func (m *Model) renderComposer(width int) string {
 	owner := humanOwner(m.config.Owner)
 	switch m.mode {
 	case modeWorkforceAuthoring:
-		title = "Create Agents and Teams"
-		description = "Describe outcomes, roles, boundaries, and collaboration. Review the exact candidate before activation."
+		if m.authoringResult == nil {
+			title = "Create Agents and Teams"
+			description = "Describe outcomes, roles, boundaries, and collaboration. Review the exact candidate before activation."
+		} else {
+			title = "Refine the workforce"
+			description = "Describe a change. OpenSeal will compile a new immutable candidate and show its governed diff."
+		}
 		owner = "Preview only · compilation never activates state"
 	case modeGuide:
 		title = "Guide selected work"
@@ -213,6 +218,15 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))
 	}
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d Agents · %d roles · %d Team objectives", len(result.Candidate.Agents), roles, objectives)), "")
+	if len(result.Diff) > 0 || len(result.RiskChanges) > 0 {
+		widening := 0
+		for _, change := range result.RiskChanges {
+			if change.Widening {
+				widening++
+			}
+		}
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d field changes · %d risk changes · %d widening", len(result.Diff), len(result.RiskChanges), widening)), "")
+	}
 	for _, agent := range result.Candidate.Agents {
 		lines = append(lines, fmt.Sprintf("• %s  %s · %d concurrent", compact(agent.DisplayName, max(width-28, 18)), agent.Authority.MaximumRisk, agent.Authority.MaxConcurrentRuns))
 	}
@@ -225,7 +239,7 @@ func (m *Model) renderAuthoringContent(width int) string {
 	for _, issue := range result.Validation {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
 	}
-	lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to revise the prompt."))
+	lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	return strings.Join(lines, "\n")
 }
 
