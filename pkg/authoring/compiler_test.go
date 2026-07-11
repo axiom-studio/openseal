@@ -15,6 +15,21 @@ type staticGenerator struct {
 	err     error
 }
 
+type repairingGenerator struct {
+	generated []byte
+	repaired  []byte
+	repairs   int
+}
+
+func (g *repairingGenerator) Generate(context.Context, GenerateRequest) ([]byte, error) {
+	return g.generated, nil
+}
+
+func (g *repairingGenerator) Repair(_ context.Context, _ GenerateRequest, _ []byte, _ error) ([]byte, error) {
+	g.repairs++
+	return g.repaired, nil
+}
+
 func (g staticGenerator) Generate(context.Context, GenerateRequest) ([]byte, error) {
 	return g.payload, g.err
 }
@@ -85,6 +100,23 @@ func TestCompilerRejectsInvalidCompositionAndNonStrictGeneratorOutput(t *testing
 	strict, _ := NewCompiler(staticGenerator{payload: []byte(`{"candidate":{"agents":[]},"hiddenReasoning":"no"}`)})
 	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a team"}); err == nil {
 		t.Fatal("unknown generator output should fail closed")
+	}
+}
+
+func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
+	valid, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	generator := &repairingGenerator{generated: []byte(`{"candidate":{"agents":[]},"unknown":true}`), repaired: valid}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+	})
+	if err != nil || !result.Valid || generator.repairs != 1 {
+		t.Fatalf("repaired result = %#v, repairs = %d, err = %v", result, generator.repairs, err)
+	}
+	generator = &repairingGenerator{generated: []byte(`{"unknown":true}`), repaired: []byte(`{"stillUnknown":true}`)}
+	compiler, _ = NewCompiler(generator)
+	if _, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || generator.repairs != 1 {
+		t.Fatalf("second invalid output should fail after one repair, repairs = %d, err = %v", generator.repairs, err)
 	}
 }
 

@@ -47,18 +47,23 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	if len(payload) == 0 || len(payload) > maximumGenerationBytes {
 		return nil, errors.New("generated workforce candidate must be between 1 byte and 1 MiB")
 	}
-	var generated GenerationResponse
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&generated); err != nil {
-		return nil, fmt.Errorf("decode workforce candidate: %w", err)
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err != nil {
-			return nil, fmt.Errorf("decode workforce candidate trailing data: %w", err)
+	generated, decodeErr := decodeGenerationResponse(payload)
+	if decodeErr != nil {
+		repairer, ok := c.generator.(RepairGenerator)
+		if !ok {
+			return nil, fmt.Errorf("decode workforce candidate: %w", decodeErr)
 		}
-		return nil, errors.New("generated workforce candidate must contain one JSON object")
+		payload, err = repairer.Repair(ctx, request, payload, decodeErr)
+		if err != nil {
+			return nil, fmt.Errorf("repair workforce candidate: %w", err)
+		}
+		if len(payload) == 0 || len(payload) > maximumGenerationBytes {
+			return nil, errors.New("repaired workforce candidate must be between 1 byte and 1 MiB")
+		}
+		generated, decodeErr = decodeGenerationResponse(payload)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode repaired workforce candidate: %w", decodeErr)
+		}
 	}
 	result := &CompileResult{
 		Candidate: generated.Candidate, Assumptions: normalized(generated.Assumptions), Questions: normalized(generated.Questions),
@@ -69,6 +74,23 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
 	return result, nil
+}
+
+func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
+	var generated GenerationResponse
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&generated); err != nil {
+		return GenerationResponse{}, err
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return GenerationResponse{}, err
+		}
+		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
+	}
+	return generated, nil
 }
 
 func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandidate) []ValidationIssue {
