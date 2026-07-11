@@ -113,6 +113,7 @@ type ChangeSetApplyReceipt struct {
 	ID              string                     `json:"id"`
 	IdempotencyKey  string                     `json:"idempotencyKey"`
 	CandidateDigest string                     `json:"candidateDigest"`
+	Reason          string                     `json:"reason"`
 	Resources       []AppliedResourceReference `json:"resources"`
 	Actor           ChangeSetActor             `json:"actor"`
 	AppliedAt       time.Time                  `json:"appliedAt"`
@@ -173,6 +174,7 @@ type ApplyChangeSetRequest struct {
 	ChangeSetID      string                    `json:"changeSetId"`
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	CandidateDigest  string                    `json:"candidateDigest"`
+	Reason           string                    `json:"reason"`
 	Actor            ChangeSetActor            `json:"actor"`
 	IdempotencyKey   string                    `json:"idempotencyKey"`
 }
@@ -291,21 +293,22 @@ func (s *ChangeSetService) ApplyAvailable() bool {
 func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequest) (*ChangeSet, bool, error) {
 	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
 	request.CandidateDigest = strings.TrimSpace(request.CandidateDigest)
+	request.Reason = strings.TrimSpace(request.Reason)
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
 	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
 	store, ok := s.store.(AtomicChangeSetStore)
 	if !ok {
 		return nil, false, errors.New("atomic workforce apply is unavailable")
 	}
-	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" || request.ExpectedRevision < 1 || request.CandidateDigest == "" || request.IdempotencyKey == "" || request.Actor.Type == "" || request.Actor.ID == "" {
-		return nil, false, errors.New("apply scope, change set, revision, candidate digest, actor, and idempotency key are required")
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" || request.ExpectedRevision < 1 || request.CandidateDigest == "" || request.Reason == "" || request.IdempotencyKey == "" || request.Actor.Type == "" || request.Actor.ID == "" {
+		return nil, false, errors.New("apply scope, change set, revision, candidate digest, reason, actor, and idempotency key are required")
 	}
 	current, err := store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
 		return nil, false, err
 	}
 	if current.ApplyReceipt != nil {
-		if current.ApplyReceipt.IdempotencyKey == request.IdempotencyKey && current.ApplyReceipt.CandidateDigest == request.CandidateDigest {
+		if current.ApplyReceipt.IdempotencyKey == request.IdempotencyKey && current.ApplyReceipt.CandidateDigest == request.CandidateDigest && current.ApplyReceipt.Reason == request.Reason && current.ApplyReceipt.Actor == request.Actor {
 			return current, true, nil
 		}
 		return nil, false, ErrChangeSetIdempotency
@@ -322,8 +325,8 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	now := s.now().UTC()
 	next := cloneChangeSet(current)
 	next.Status, next.Revision, next.UpdatedAt = ChangeSetApplied, current.Revision+1, now
-	next.ApplyReceipt = &ChangeSetApplyReceipt{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, CandidateDigest: current.CandidateDigest, Actor: request.Actor, AppliedAt: now}
-	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetApplied, Reason: "workforce_applied", Actor: request.Actor, At: now})
+	next.ApplyReceipt = &ChangeSetApplyReceipt{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, CandidateDigest: current.CandidateDigest, Reason: request.Reason, Actor: request.Actor, AppliedAt: now}
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetApplied, Reason: request.Reason, Actor: request.Actor, At: now})
 	applied, err := store.ApplyChangeSet(ctx, next, current.Revision)
 	if errors.Is(err, ErrChangeSetRevision) {
 		return s.Apply(ctx, request)
