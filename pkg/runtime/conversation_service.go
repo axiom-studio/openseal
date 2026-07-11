@@ -152,6 +152,7 @@ type ConversationStore interface {
 	FindParticipationRoundByIdempotencyKey(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRoundResult, error)
 	ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error)
 	GetConversationCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error)
+	ListConversationCursors(ctx context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error)
 	PutConversationCursor(ctx context.Context, record ConversationCursorRecord) (*ConversationCursor, bool, error)
 	GetConversationPresence(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationPresence, error)
 	PutConversationPresence(ctx context.Context, record ConversationPresenceRecord) (*ConversationPresence, error)
@@ -449,6 +450,16 @@ func (s *ConversationService) ListParticipationRounds(ctx context.Context, filte
 
 func (s *ConversationService) GetCursor(ctx context.Context, scope Scope, conversationID string, participant ConversationParticipant) (*ConversationCursor, error) {
 	return s.store.GetConversationCursor(ctx, scope, conversationID, participant)
+}
+
+// ListCursors returns the durable delivery and read position for every
+// participant that has observed a conversation. The result is ordered by
+// participant identity so API projections remain deterministic across stores.
+func (s *ConversationService) ListCursors(ctx context.Context, scope Scope, conversationID string) ([]*ConversationCursor, error) {
+	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
+		return nil, err
+	}
+	return s.store.ListConversationCursors(ctx, scope, conversationID)
 }
 
 func (s *ConversationService) AdvanceCursor(ctx context.Context, req AdvanceConversationCursorRequest) (*ConversationCursor, bool, error) {

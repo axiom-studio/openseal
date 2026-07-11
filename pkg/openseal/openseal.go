@@ -1708,6 +1708,13 @@ func (e *Engine) GetConversationCursor(ctx context.Context, scope runtime.Scope,
 	return e.conversations.GetCursor(ctx, scope, conversationID, participant)
 }
 
+func (e *Engine) ListConversationCursors(ctx context.Context, scope runtime.Scope, conversationID string) ([]*runtime.ConversationCursor, error) {
+	if e == nil || e.conversations == nil {
+		return nil, errors.New("conversation service is not configured")
+	}
+	return e.conversations.ListCursors(ctx, scope, conversationID)
+}
+
 func (e *Engine) SetConversationPresence(ctx context.Context, request runtime.SetConversationPresenceRequest) (*runtime.ConversationPresence, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
