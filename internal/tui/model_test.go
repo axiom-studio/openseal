@@ -384,6 +384,7 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 			},
 		},
 		Questions: []string{"Which sources are authorized?"},
+		Diff:      []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "candidate"}},
 	}
 	fake := &fakeKernelClient{
 		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(), kernelapi.ObjectivesCapability()),
@@ -405,6 +406,9 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 			t.Fatalf("authoring preview missing %q:\n%s", expected, view)
 		}
 	}
+	if strings.Contains(view, "field changes") {
+		t.Fatalf("create preview was presented as an amendment:\n%s", view)
+	}
 	model.editor.SetValue("Require approval before external outreach")
 	applyCommand(t, model, model.submitWorkforceAuthoring())
 	if len(fake.authoringRequests) != 2 || fake.authoringRequests[1].Mode != authoring.ModeAmend ||
@@ -413,6 +417,9 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	}
 	if model.editor.Value() != "" || !strings.Contains(model.editor.Placeholder, "change") {
 		t.Fatalf("follow-up composer = %q / %q", model.editor.Value(), model.editor.Placeholder)
+	}
+	if !strings.Contains(model.View(), "1 field changes") {
+		t.Fatalf("amendment diff was not rendered:\n%s", model.View())
 	}
 }
 
