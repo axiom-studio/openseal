@@ -80,28 +80,30 @@ func (e *ActivityEvent) Validate() error {
 }
 
 type RunTransitionRequest struct {
-	ExpectedRevision int64
-	Status           AgentRunStatus
-	Summary          string
-	Actor            ActivityActor
-	Severity         ActivitySeverity
-	Visibility       ActivityVisibility
-	Payload          map[string]interface{}
-	Plan             map[string]interface{}
-	Checkpoint       map[string]interface{}
-	WakeCondition    *WakeCondition
-	Output           map[string]interface{}
-	Error            string
-	CorrelationID    string
-	CausationID      string
-	TurnID           string
-	AppliedTurn      int64
-	LeaseOwner       string
-	WakeSignalID     string
-	EventType        string
-	OccurredAt       *time.Time
-	Intervention     *AgentRunIntervention
-	BudgetUsageDelta *BudgetUsage
+	ExpectedRevision          int64
+	Status                    AgentRunStatus
+	Summary                   string
+	Actor                     ActivityActor
+	Severity                  ActivitySeverity
+	Visibility                ActivityVisibility
+	Payload                   map[string]interface{}
+	Plan                      map[string]interface{}
+	Checkpoint                map[string]interface{}
+	WakeCondition             *WakeCondition
+	Output                    map[string]interface{}
+	Error                     string
+	CorrelationID             string
+	CausationID               string
+	TurnID                    string
+	AppliedTurn               int64
+	LeaseOwner                string
+	WakeSignalID              string
+	EventType                 string
+	OccurredAt                *time.Time
+	Intervention              *AgentRunIntervention
+	BudgetUsageDelta          *BudgetUsage
+	BudgetReservation         *BudgetReservation
+	SettleBudgetReservationID string
 }
 
 type AgentRunLeaseGuard struct {
@@ -213,6 +215,43 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		}
 		run.LastAppliedTurn = req.AppliedTurn
 	}
+	if req.BudgetReservation != nil {
+		if run.BudgetPolicy == nil {
+			return nil, nil, errors.New("budget cannot be reserved without a budget policy")
+		}
+		if err := req.BudgetReservation.Validate(); err != nil {
+			return nil, nil, err
+		}
+		if run.BudgetReservations == nil {
+			run.BudgetReservations = make(map[string]BudgetReservation)
+		}
+		if _, exists := run.BudgetReservations[req.BudgetReservation.ID]; exists {
+			return nil, nil, errors.New("budget reservation already exists")
+		}
+		run.BudgetReservations[req.BudgetReservation.ID] = *req.BudgetReservation
+		effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+		if err != nil {
+			return nil, nil, err
+		}
+		exceeded, _, err := BudgetWouldExceed(*run.BudgetPolicy, effective)
+		if err != nil {
+			return nil, nil, err
+		}
+		if exceeded {
+			return nil, nil, ErrBudgetExhausted
+		}
+		state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+		if err != nil {
+			return nil, nil, err
+		}
+		run.BudgetState = state
+	}
+	if req.SettleBudgetReservationID != "" {
+		if _, exists := run.BudgetReservations[req.SettleBudgetReservationID]; !exists {
+			return nil, nil, errors.New("budget reservation does not exist")
+		}
+		delete(run.BudgetReservations, req.SettleBudgetReservationID)
+	}
 	if req.BudgetUsageDelta != nil {
 		if run.BudgetPolicy == nil {
 			return nil, nil, errors.New("budget usage cannot be recorded without a budget policy")
@@ -221,7 +260,11 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		if err != nil {
 			return nil, nil, err
 		}
-		state, _, err := EvaluateBudget(*run.BudgetPolicy, usage)
+		effective, err := EffectiveBudgetUsage(usage, run.BudgetReservations)
+		if err != nil {
+			return nil, nil, err
+		}
+		state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
 		if err != nil {
 			return nil, nil, err
 		}

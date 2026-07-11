@@ -19,6 +19,7 @@ type TurnRunnerBinding struct {
 	ModelProvider     string
 	Model             string
 	InputContextRefs  []string
+	BudgetReservation BudgetUsage
 }
 
 type TurnRunnerResolver interface {
@@ -199,6 +200,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			Scope: current.Scope, RunID: current.ID, WorkerID: workerID, LeaseDuration: p.config.TurnLeaseDuration,
 			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
 			ModelProvider: binding.ModelProvider, Model: binding.Model, InputContextRefs: binding.InputContextRefs,
+			BudgetReservation: binding.BudgetReservation,
 		}, binding.Runner)
 		if result != nil && result.Run != nil {
 			current = result.Run

@@ -77,6 +77,7 @@ type (
 	AgentRunIntervention               = runtime.AgentRunIntervention
 	BudgetPolicy                       = runtime.BudgetPolicy
 	BudgetUsage                        = runtime.BudgetUsage
+	BudgetReservation                  = runtime.BudgetReservation
 	BudgetState                        = runtime.BudgetState
 	AgentRunStatus                     = runtime.AgentRunStatus
 	AgentRunFilter                     = runtime.AgentRunFilter

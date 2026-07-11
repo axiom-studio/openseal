@@ -165,50 +165,51 @@ type AgentRunIntervention struct {
 // AgentRun is the canonical durable workstream. Workflow execution records are
 // subordinate execution details and must not be used as agent-run identity.
 type AgentRun struct {
-	ID                   string                 `json:"id"`
-	Kind                 RunKind                `json:"kind"`
-	Scope                Scope                  `json:"scope"`
-	ObjectiveID          string                 `json:"objectiveId,omitempty"`
-	ParentRunID          string                 `json:"parentRunId,omitempty"`
-	RootRunID            string                 `json:"rootRunId"`
-	Owner                ObjectiveOwner         `json:"owner"`
-	AssignedAgentID      string                 `json:"assignedAgentId,omitempty"`
-	ConcurrencyKey       string                 `json:"concurrencyKey,omitempty"`
-	Goal                 string                 `json:"goal"`
-	Source               RunSource              `json:"source"`
-	Status               AgentRunStatus         `json:"status"`
-	Priority             int                    `json:"priority"`
-	Deadline             *time.Time             `json:"deadline,omitempty"`
-	AvailableAt          time.Time              `json:"availableAt"`
-	QueueEnteredAt       time.Time              `json:"queueEnteredAt"`
-	LeaseOwner           string                 `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt       *time.Time             `json:"leaseExpiresAt,omitempty"`
-	LastClaimedAt        *time.Time             `json:"lastClaimedAt,omitempty"`
-	Attempt              int                    `json:"attempt"`
-	LastWakeSignalID     string                 `json:"lastWakeSignalId,omitempty"`
-	Context              map[string]interface{} `json:"context,omitempty"`
-	Plan                 map[string]interface{} `json:"plan,omitempty"`
-	Checkpoint           map[string]interface{} `json:"checkpoint,omitempty"`
-	WakeCondition        *WakeCondition         `json:"wakeCondition,omitempty"`
-	PausedFrom           AgentRunStatus         `json:"pausedFrom,omitempty"`
-	PausedWakeCondition  *WakeCondition         `json:"pausedWakeCondition,omitempty"`
-	PendingInterventions []AgentRunIntervention `json:"pendingInterventions,omitempty"`
-	Budget               map[string]interface{} `json:"budget,omitempty"`
-	BudgetPolicy         *BudgetPolicy          `json:"budgetPolicy,omitempty"`
-	BudgetUsage          BudgetUsage            `json:"budgetUsage,omitempty"`
-	BudgetState          BudgetState            `json:"budgetState,omitempty"`
-	Policy               map[string]interface{} `json:"policy,omitempty"`
-	Output               map[string]interface{} `json:"output,omitempty"`
-	Error                string                 `json:"error,omitempty"`
-	WorkflowExecution    *int                   `json:"workflowExecutionId,omitempty"`
-	LastAppliedTurn      int64                  `json:"lastAppliedTurn"`
-	Revision             int64                  `json:"revision"`
-	CreatedAt            time.Time              `json:"createdAt"`
-	UpdatedAt            time.Time              `json:"updatedAt"`
-	StartedAt            *time.Time             `json:"startedAt,omitempty"`
-	CompletedAt          *time.Time             `json:"completedAt,omitempty"`
-	IdempotencyKeyHash   string                 `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint  string                 `json:"creationFingerprint,omitempty"`
+	ID                   string                       `json:"id"`
+	Kind                 RunKind                      `json:"kind"`
+	Scope                Scope                        `json:"scope"`
+	ObjectiveID          string                       `json:"objectiveId,omitempty"`
+	ParentRunID          string                       `json:"parentRunId,omitempty"`
+	RootRunID            string                       `json:"rootRunId"`
+	Owner                ObjectiveOwner               `json:"owner"`
+	AssignedAgentID      string                       `json:"assignedAgentId,omitempty"`
+	ConcurrencyKey       string                       `json:"concurrencyKey,omitempty"`
+	Goal                 string                       `json:"goal"`
+	Source               RunSource                    `json:"source"`
+	Status               AgentRunStatus               `json:"status"`
+	Priority             int                          `json:"priority"`
+	Deadline             *time.Time                   `json:"deadline,omitempty"`
+	AvailableAt          time.Time                    `json:"availableAt"`
+	QueueEnteredAt       time.Time                    `json:"queueEnteredAt"`
+	LeaseOwner           string                       `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt       *time.Time                   `json:"leaseExpiresAt,omitempty"`
+	LastClaimedAt        *time.Time                   `json:"lastClaimedAt,omitempty"`
+	Attempt              int                          `json:"attempt"`
+	LastWakeSignalID     string                       `json:"lastWakeSignalId,omitempty"`
+	Context              map[string]interface{}       `json:"context,omitempty"`
+	Plan                 map[string]interface{}       `json:"plan,omitempty"`
+	Checkpoint           map[string]interface{}       `json:"checkpoint,omitempty"`
+	WakeCondition        *WakeCondition               `json:"wakeCondition,omitempty"`
+	PausedFrom           AgentRunStatus               `json:"pausedFrom,omitempty"`
+	PausedWakeCondition  *WakeCondition               `json:"pausedWakeCondition,omitempty"`
+	PendingInterventions []AgentRunIntervention       `json:"pendingInterventions,omitempty"`
+	Budget               map[string]interface{}       `json:"budget,omitempty"`
+	BudgetPolicy         *BudgetPolicy                `json:"budgetPolicy,omitempty"`
+	BudgetUsage          BudgetUsage                  `json:"budgetUsage,omitempty"`
+	BudgetState          BudgetState                  `json:"budgetState,omitempty"`
+	BudgetReservations   map[string]BudgetReservation `json:"budgetReservations,omitempty"`
+	Policy               map[string]interface{}       `json:"policy,omitempty"`
+	Output               map[string]interface{}       `json:"output,omitempty"`
+	Error                string                       `json:"error,omitempty"`
+	WorkflowExecution    *int                         `json:"workflowExecutionId,omitempty"`
+	LastAppliedTurn      int64                        `json:"lastAppliedTurn"`
+	Revision             int64                        `json:"revision"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+	StartedAt            *time.Time                   `json:"startedAt,omitempty"`
+	CompletedAt          *time.Time                   `json:"completedAt,omitempty"`
+	IdempotencyKeyHash   string                       `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint  string                       `json:"creationFingerprint,omitempty"`
 }
 
 func (r *AgentRun) Validate() error {
@@ -237,7 +238,11 @@ func (r *AgentRun) Validate() error {
 		if err := r.BudgetUsage.Validate(); err != nil {
 			return err
 		}
-		state, _, err := EvaluateBudget(*r.BudgetPolicy, r.BudgetUsage)
+		effective, err := EffectiveBudgetUsage(r.BudgetUsage, r.BudgetReservations)
+		if err != nil {
+			return err
+		}
+		state, _, err := EvaluateBudget(*r.BudgetPolicy, effective)
 		if err != nil {
 			return err
 		}

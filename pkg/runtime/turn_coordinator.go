@@ -49,6 +49,7 @@ type AdvanceAgentRunRequest struct {
 	Model             string
 	InputContextRefs  []string
 	PlanRevision      int64
+	BudgetReservation BudgetUsage
 }
 
 type AdvanceAgentRunResult struct {
@@ -125,6 +126,55 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	}
 	if err != nil {
 		return nil, err
+	}
+	if run.BudgetPolicy != nil {
+		if _, reserved := run.BudgetReservations[turn.ID]; !reserved {
+			leaseOwner := ""
+			if run.LeaseOwner != "" {
+				leaseOwner = req.WorkerID
+			}
+			reservationUsage := req.BudgetReservation
+			reservationUsage.Turns = 1
+			if err := reservationUsage.Validate(); err != nil {
+				return nil, err
+			}
+			effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+			if err != nil {
+				return nil, err
+			}
+			projected, err := effective.Add(reservationUsage)
+			if err != nil {
+				return nil, err
+			}
+			exceeded, _, err := BudgetWouldExceed(*run.BudgetPolicy, projected)
+			if err != nil {
+				return nil, err
+			}
+			if exceeded {
+				turn, finishErr := c.turns.FinishTurn(ctx, req.Scope, turn.ID, FinishAgentTurnRequest{
+					ExpectedRevision: turn.Revision, Status: AgentTurnStatusCanceled, WorkerID: req.WorkerID,
+					NextRunStatus: AgentRunStatusPaused, OutputSummary: "Run paused before exceeding its autonomous budget",
+				})
+				if finishErr != nil {
+					return nil, finishErr
+				}
+				result, applyErr := c.applyFinishedTurn(ctx, run, turn, req.WorkerID, false)
+				if applyErr != nil {
+					return nil, applyErr
+				}
+				return result, ErrBudgetExhausted
+			}
+			reservedRun, _, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+				ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
+				Summary: "Reserved capacity for a bounded agent turn", EventType: "budget.reserved",
+				Actor: ActivityActor{Type: "worker", ID: req.WorkerID}, LeaseOwner: leaseOwner,
+				BudgetReservation: &BudgetReservation{ID: turn.ID, Usage: reservationUsage, CreatedAt: c.activity.now()},
+			})
+			if err != nil {
+				return nil, err
+			}
+			run = reservedRun
+		}
 	}
 	outcome, runErr := runner.RunTurn(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
 	executionErr := runErr
@@ -214,21 +264,34 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	}
 	var budgetDelta *BudgetUsage
 	if run.BudgetPolicy != nil {
-		delta := budgetUsageForTurn(turn.Usage)
-		budgetDelta = &delta
+		if _, reserved := run.BudgetReservations[turn.ID]; reserved {
+			delta := budgetUsageForTurn(turn.Usage)
+			budgetDelta = &delta
+		}
 	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
 		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID,
-		LeaseOwner:       leaseOwner,
-		BudgetUsageDelta: budgetDelta,
+		LeaseOwner:                leaseOwner,
+		BudgetUsageDelta:          budgetDelta,
+		SettleBudgetReservationID: budgetReservationID(run, turn),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &AdvanceAgentRunResult{Run: updated, Turn: turn, Event: event, Reconciled: reconciled}, nil
+}
+
+func budgetReservationID(run *AgentRun, turn *AgentTurn) string {
+	if run == nil || turn == nil || run.BudgetPolicy == nil {
+		return ""
+	}
+	if _, reserved := run.BudgetReservations[turn.ID]; !reserved {
+		return ""
+	}
+	return turn.ID
 }
 
 func budgetUsageForTurn(usage TurnUsage) BudgetUsage {

@@ -249,3 +249,29 @@ func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
 		t.Fatalf("replay usage = %#v, err=%v", loaded, err)
 	}
 }
+
+func TestTurnBudgetReservationPreventsKnownOverspend(t *testing.T) {
+	store := NewMemoryStore(100)
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "budget-reservation"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded",
+		BudgetPolicy: &BudgetPolicy{MaxInputTokens: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", BudgetReservation: BudgetUsage{InputTokens: 11},
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		calls++
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted}, nil
+	}))
+	if !errors.Is(err, ErrBudgetExhausted) || result == nil || result.Run.Status != AgentRunStatusPaused || calls != 0 {
+		t.Fatalf("reservation result=%#v err=%v calls=%d", result, err, calls)
+	}
+	if result.Run.BudgetUsage != (BudgetUsage{}) || len(result.Run.BudgetReservations) != 0 || result.Turn.Status != AgentTurnStatusCanceled {
+		t.Fatalf("rejected reservation mutated usage: run=%#v turn=%#v", result.Run, result.Turn)
+	}
+}
