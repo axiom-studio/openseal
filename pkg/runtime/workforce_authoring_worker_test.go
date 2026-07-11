@@ -179,13 +179,27 @@ func TestWorkforceAuthoringTimeoutIsAuditableAndRetryCreatesNewRun(t *testing.T)
 	close(generator.release)
 	retried, retryRun, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
 		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
-		Reason: "retry after provider timeout", Actor: request.Actor,
+		Reason: "retry after provider timeout", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
 	})
 	if err != nil || retried.Status != authoring.ChangeSetEvaluating || retryRun.ID == firstRun.ID || retried.Generation.RunID != retryRun.ID {
 		t.Fatalf("retried=%#v run=%#v err=%v", retried, retryRun, err)
 	}
 	if retried.Generation.Request.InvocationKey != "workforce-change-set:"+changeSet.ID+":1" {
 		t.Fatalf("retry invocation key = %q", retried.Generation.Request.InvocationKey)
+	}
+	replayed, replayRun, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
+		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
+		Reason: "retry after provider timeout", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
+	})
+	if err != nil || replayed.ID != retried.ID || replayRun.ID != retryRun.ID {
+		t.Fatalf("retry replay changeSet=%#v run=%#v err=%v", replayed, replayRun, err)
+	}
+	_, _, err = service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
+		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
+		Reason: "changed reason", Actor: request.Actor, IdempotencyKey: "retry-timeout-1",
+	})
+	if !errors.Is(err, authoring.ErrChangeSetIdempotency) {
+		t.Fatalf("changed retry replay = %v", err)
 	}
 	if worked, err := worker.RunOnce(context.Background()); err != nil || !worked {
 		t.Fatalf("retry worked=%t err=%v", worked, err)

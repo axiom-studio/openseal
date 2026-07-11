@@ -150,12 +150,22 @@ type ChangeSet struct {
 // Run scheduler after Prepare returns; the prompt request does not need to stay
 // connected while generation is in flight.
 type ChangeSetGeneration struct {
-	Request     GenerateRequest `json:"request"`
-	RunID       string          `json:"runId,omitempty"`
-	Attempt     int             `json:"attempt"`
-	FailureCode string          `json:"failureCode,omitempty"`
-	LastError   string          `json:"lastError,omitempty"`
-	CompletedAt *time.Time      `json:"completedAt,omitempty"`
+	Request     GenerateRequest            `json:"request"`
+	RunID       string                     `json:"runId,omitempty"`
+	Attempt     int                        `json:"attempt"`
+	FailureCode string                     `json:"failureCode,omitempty"`
+	LastError   string                     `json:"lastError,omitempty"`
+	CompletedAt *time.Time                 `json:"completedAt,omitempty"`
+	Retries     []ChangeSetGenerationRetry `json:"retries,omitempty"`
+}
+
+type ChangeSetGenerationRetry struct {
+	IdempotencyKey string         `json:"idempotencyKey"`
+	RequestDigest  string         `json:"requestDigest"`
+	Attempt        int            `json:"attempt"`
+	Reason         string         `json:"reason"`
+	Actor          ChangeSetActor `json:"actor"`
+	RequestedAt    time.Time      `json:"requestedAt"`
 }
 
 type RetryChangeSetGenerationRequest struct {
@@ -164,6 +174,7 @@ type RetryChangeSetGenerationRequest struct {
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	Reason           string                    `json:"reason"`
 	Actor            ChangeSetActor            `json:"actor"`
+	IdempotencyKey   string                    `json:"idempotencyKey"`
 }
 
 type SubmitChangeSetEvaluationRequest struct {
@@ -428,13 +439,33 @@ func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryCha
 	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
 	request.Reason = strings.TrimSpace(request.Reason)
 	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
 	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" ||
-		request.ExpectedRevision < 1 || request.Reason == "" || request.Actor.Type == "" || request.Actor.ID == "" {
-		return nil, errors.New("retry scope, change set, revision, reason, and actor are required")
+		request.ExpectedRevision < 1 || request.Reason == "" || request.Actor.Type == "" || request.Actor.ID == "" || request.IdempotencyKey == "" {
+		return nil, errors.New("retry scope, change set, revision, reason, actor, and idempotency key are required")
 	}
 	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
 		return nil, err
+	}
+	retryDigest, err := digestJSON(struct {
+		ChangeSetID string
+		Reason      string
+		Actor       ChangeSetActor
+	}{request.ChangeSetID, request.Reason, request.Actor})
+	if err != nil {
+		return nil, err
+	}
+	if current.Generation != nil {
+		for _, retry := range current.Generation.Retries {
+			if retry.IdempotencyKey != request.IdempotencyKey {
+				continue
+			}
+			if retry.RequestDigest != retryDigest {
+				return nil, ErrChangeSetIdempotency
+			}
+			return current, nil
+		}
 	}
 	if current.Revision != request.ExpectedRevision {
 		return nil, ErrChangeSetRevision
@@ -447,6 +478,10 @@ func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryCha
 	next.Status, next.Revision, next.UpdatedAt = ChangeSetEvaluating, current.Revision+1, now
 	next.Generation.RunID = ""
 	next.Generation.Request.InvocationKey = generationInvocationKey(next.ID, next.Generation.Attempt)
+	next.Generation.Retries = append(next.Generation.Retries, ChangeSetGenerationRetry{
+		IdempotencyKey: request.IdempotencyKey, RequestDigest: retryDigest, Attempt: next.Generation.Attempt,
+		Reason: request.Reason, Actor: request.Actor, RequestedAt: now,
+	})
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetEvaluating, Reason: request.Reason, Actor: request.Actor, At: now})
 	return s.store.UpdateChangeSet(ctx, next, current.Revision)
 }
