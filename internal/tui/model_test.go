@@ -405,6 +405,15 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 			t.Fatalf("authoring preview missing %q:\n%s", expected, view)
 		}
 	}
+	model.editor.SetValue("Require approval before external outreach")
+	applyCommand(t, model, model.submitWorkforceAuthoring())
+	if len(fake.authoringRequests) != 2 || fake.authoringRequests[1].Mode != authoring.ModeAmend ||
+		fake.authoringRequests[1].Existing == nil || fake.authoringRequests[1].Existing.Team.ID != "research" {
+		t.Fatalf("follow-up authoring request = %#v", fake.authoringRequests)
+	}
+	if model.editor.Value() != "" || !strings.Contains(model.editor.Placeholder, "change") {
+		t.Fatalf("follow-up composer = %q / %q", model.editor.Value(), model.editor.Placeholder)
+	}
 }
 
 func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {

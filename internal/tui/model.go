@@ -341,6 +341,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.authoringResult = msg.result
+		m.editor.Reset()
+		m.editor.Placeholder = "Describe what should change…"
 		m.status = "Workforce candidate compiled. Nothing has been activated."
 		m.section = sectionAuthoring
 		m.focusPanelList()
@@ -691,6 +693,11 @@ func (m *Model) submitWorkforceAuthoring() tea.Cmd {
 	m.err = nil
 	m.status = "Compiling a reviewable Agent and Team candidate…"
 	request := authoring.GenerateRequest{Mode: authoring.ModeCreate, Prompt: prompt, Catalog: authoring.CapabilityCatalog{}}
+	if m.authoringResult != nil {
+		request.Mode = authoring.ModeAmend
+		existing := m.authoringResult.Candidate
+		request.Existing = &existing
+	}
 	return func() tea.Msg {
 		result, err := m.client.CompileWorkforce(m.ctx, request)
 		return workforceCompiled{result: result, err: err}
