@@ -177,6 +177,21 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 	}
 	outcome, runErr := runner.RunTurn(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
+	if errors.Is(runErr, ErrTurnHostUnavailable) {
+		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
+		if releaseErr != nil {
+			return nil, releaseErr
+		}
+		requeued, event, transitionErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: AgentRunStatusQueued, LeaseOwner: req.WorkerID,
+			Summary: "Agent turn host unavailable; the bounded turn will retry", EventType: "turn.retry_scheduled",
+			Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+		})
+		if transitionErr != nil {
+			return nil, transitionErr
+		}
+		return &AdvanceAgentRunResult{Run: requeued, Turn: released, Event: event}, runErr
+	}
 	executionErr := runErr
 	finish := FinishAgentTurnRequest{ExpectedRevision: turn.Revision, WorkerID: req.WorkerID}
 	if runErr != nil {

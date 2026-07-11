@@ -8,6 +8,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
+var ErrTurnHostUnavailable = errors.New("turn host is temporarily unavailable")
+
+type retryableTurnHostError struct{ cause error }
+
+func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavailable.Error() }
+func (e retryableTurnHostError) Unwrap() error        { return e.cause }
+func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
+
 const HostedTurnAPIVersion = "openseal.hosted-turn/v1"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
@@ -105,7 +113,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, retryableTurnHostError{cause: err}
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
