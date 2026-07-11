@@ -79,44 +79,69 @@ func (s *SQLiteStore) ApplyChangeSet(ctx context.Context, value *authoring.Chang
 			return nil, err
 		}
 	}
-	teamDefinitionPayload, _ := json.Marshal(application.teamDefinition)
-	if _, err = tx.ExecContext(ctx, `INSERT INTO team_definitions(id,version,digest,created_at,payload) VALUES(?,?,?,?,?)`, application.teamDefinition.ID, application.teamDefinition.Version, application.teamDefinition.Digest, application.teamDefinition.CreatedAt, string(teamDefinitionPayload)); err != nil {
-		return nil, err
-	}
-	if value.Mode == authoring.ModeAmend {
-		var existing string
-		if err = tx.QueryRowContext(ctx, `SELECT payload FROM team_deployments WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, value.Placement.TeamExpectedRevision).Scan(&existing); err != nil {
-			return nil, authoring.ErrChangeSetRevision
+	if application.teamDefinition != nil {
+		teamDefinitionPayload, _ := json.Marshal(application.teamDefinition)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO team_definitions(id,version,digest,created_at,payload) VALUES(?,?,?,?,?)`, application.teamDefinition.ID, application.teamDefinition.Version, application.teamDefinition.Digest, application.teamDefinition.CreatedAt, string(teamDefinitionPayload)); err != nil {
+			return nil, err
 		}
-		var current team.Deployment
-		if json.Unmarshal([]byte(existing), &current) != nil || current.DefinitionID != application.teamDefinition.ID {
-			return nil, authoring.ErrChangeSetRevision
-		}
-		application.teamDeployment.CreatedAt = current.CreatedAt
-		application.teamActivation.FromVersion = current.ActiveVersion
-	}
-	teamDeploymentPayload, _ := json.Marshal(application.teamDeployment)
-	teamActivationPayload, _ := json.Marshal(application.teamActivation)
-	if value.Mode == authoring.ModeCreate {
-		_, err = tx.ExecContext(ctx, `INSERT INTO team_deployments(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?)`, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.DefinitionID, application.teamDeployment.ActiveVersion, application.teamDeployment.Revision, application.teamDeployment.UpdatedAt, string(teamDeploymentPayload))
-	} else {
-		var result sql.Result
-		result, err = tx.ExecContext(ctx, `UPDATE team_deployments SET active_version=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, application.teamDeployment.ActiveVersion, application.teamDeployment.Revision, application.teamDeployment.UpdatedAt, string(teamDeploymentPayload), value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, value.Placement.TeamExpectedRevision)
-		if err == nil {
-			if rows, _ := result.RowsAffected(); rows != 1 {
+		if value.Mode == authoring.ModeAmend {
+			var existing string
+			if err = tx.QueryRowContext(ctx, `SELECT payload FROM team_deployments WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, value.Placement.TeamExpectedRevision).Scan(&existing); err != nil {
 				return nil, authoring.ErrChangeSetRevision
 			}
+			var current team.Deployment
+			if json.Unmarshal([]byte(existing), &current) != nil || current.DefinitionID != application.teamDefinition.ID {
+				return nil, authoring.ErrChangeSetRevision
+			}
+			application.teamDeployment.CreatedAt = current.CreatedAt
+			application.teamActivation.FromVersion = current.ActiveVersion
+		}
+		teamDeploymentPayload, _ := json.Marshal(application.teamDeployment)
+		teamActivationPayload, _ := json.Marshal(application.teamActivation)
+		if value.Mode == authoring.ModeCreate {
+			_, err = tx.ExecContext(ctx, `INSERT INTO team_deployments(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?)`, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.DefinitionID, application.teamDeployment.ActiveVersion, application.teamDeployment.Revision, application.teamDeployment.UpdatedAt, string(teamDeploymentPayload))
+		} else {
+			var result sql.Result
+			result, err = tx.ExecContext(ctx, `UPDATE team_deployments SET active_version=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, application.teamDeployment.ActiveVersion, application.teamDeployment.Revision, application.teamDeployment.UpdatedAt, string(teamDeploymentPayload), value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, value.Placement.TeamExpectedRevision)
+			if err == nil {
+				if rows, _ := result.RowsAffected(); rows != 1 {
+					return nil, authoring.ErrChangeSetRevision
+				}
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO team_definition_activations(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES(?,?,?,?,?,?,?)`, application.teamActivation.ID, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.Revision, application.teamActivation.CreatedAt, string(teamActivationPayload)); err != nil {
+			return nil, err
 		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO team_definition_activations(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES(?,?,?,?,?,?,?)`, application.teamActivation.ID, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.Revision, application.teamActivation.CreatedAt, string(teamActivationPayload)); err != nil {
-		return nil, err
-	}
 	for _, objective := range application.objectives {
-		payload, _ := json.Marshal(objective)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO objectives(id,scope_kind,scope_id,owner_type,owner_id,status,priority,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?,?,?)`, objective.ID, value.Scope.Kind, value.Scope.ID, objective.Owner.Type, objective.Owner.ID, objective.Status, objective.Priority, objective.Revision, objective.UpdatedAt, string(payload)); err != nil {
+		item := objective.value
+		if objective.expectedRevision > 0 {
+			var existing string
+			if err = tx.QueryRowContext(ctx, `SELECT payload FROM objectives WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.Scope.Kind, value.Scope.ID, item.ID, objective.expectedRevision).Scan(&existing); err != nil {
+				return nil, authoring.ErrChangeSetRevision
+			}
+			var current Objective
+			if json.Unmarshal([]byte(existing), &current) != nil {
+				return nil, authoring.ErrChangeSetRevision
+			}
+			item.CreatedAt = current.CreatedAt
+		}
+		payload, _ := json.Marshal(item)
+		if objective.expectedRevision == 0 {
+			_, err = tx.ExecContext(ctx, `INSERT INTO objectives(id,scope_kind,scope_id,owner_type,owner_id,status,priority,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?,?,?)`, item.ID, value.Scope.Kind, value.Scope.ID, item.Owner.Type, item.Owner.ID, item.Status, item.Priority, item.Revision, item.UpdatedAt, string(payload))
+		} else {
+			var update sql.Result
+			update, err = tx.ExecContext(ctx, `UPDATE objectives SET owner_type=?,owner_id=?,status=?,priority=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, item.Owner.Type, item.Owner.ID, item.Status, item.Priority, item.Revision, item.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, item.ID, objective.expectedRevision)
+			if err == nil {
+				if rows, _ := update.RowsAffected(); rows != 1 {
+					return nil, authoring.ErrChangeSetRevision
+				}
+			}
+		}
+		if err != nil {
 			return nil, err
 		}
 	}

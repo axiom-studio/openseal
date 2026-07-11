@@ -3,7 +3,6 @@ package authoring
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -59,8 +58,9 @@ func (s *MemoryChangeSetStore) ApplyChangeSet(_ context.Context, value *ChangeSe
 			return nil, ErrChangeSetRevision
 		}
 	}
-	for k := range objectives {
-		if s.objectives[k].ID != "" {
+	for k, proposed := range objectives {
+		currentObjective, exists := s.objectives[k]
+		if proposed.Revision == 1 && exists || proposed.Revision > 1 && (!exists || currentObjective.Revision+1 != proposed.Revision) {
 			return nil, ErrChangeSetRevision
 		}
 	}
@@ -97,13 +97,14 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 		deployments[changeSetKey(value.Scope, deployment.ID)] = deployment
 		resources = append(resources, deployment)
 		for _, template := range definition.ObjectiveTemplates {
-			ref := AppliedResourceReference{Kind: "objective", ID: value.ID + ":agent:" + definition.ID + ":" + template.ID, Revision: 1}
+			placement := value.Placement.Objectives[WorkforceObjectiveKey("agent", definition.ID, template.ID)]
+			ref := AppliedResourceReference{Kind: "objective", ID: placement.ID, Revision: placement.ExpectedRevision + 1}
 			objectives[changeSetKey(value.Scope, ref.ID)] = ref
 			resources = append(resources, ref)
 		}
 	}
 	if value.Result.Candidate.Team == nil {
-		return nil, nil, nil, nil, errors.New("team definition is required")
+		return resources, definitions, deployments, objectives, nil
 	}
 	team := value.Result.Candidate.Team
 	digest, _ := digestJSON(team)
@@ -117,7 +118,8 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 	deployments[changeSetKey(value.Scope, deployment.ID)] = deployment
 	resources = append(resources, deployment)
 	for _, template := range team.ObjectiveTemplates {
-		ref := AppliedResourceReference{Kind: "objective", ID: value.ID + ":team:" + team.ID + ":" + template.ID, Revision: 1}
+		placement := value.Placement.Objectives[WorkforceObjectiveKey("team", team.ID, template.ID)]
+		ref := AppliedResourceReference{Kind: "objective", ID: placement.ID, Revision: placement.ExpectedRevision + 1}
 		objectives[changeSetKey(value.Scope, ref.ID)] = ref
 		resources = append(resources, ref)
 	}

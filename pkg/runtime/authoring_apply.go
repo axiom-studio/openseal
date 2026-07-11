@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -21,12 +20,17 @@ type workforceApplication struct {
 	teamDefinition   *team.Definition
 	teamDeployment   *team.Deployment
 	teamActivation   workforce.DefinitionActivation
-	objectives       []*Objective
+	objectives       []workforceObjectiveApplication
 	resources        []authoring.AppliedResourceReference
 }
 
+type workforceObjectiveApplication struct {
+	value            *Objective
+	expectedRevision int64
+}
+
 func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceApplication, error) {
-	if value == nil || value.ApplyReceipt == nil || value.Result.Candidate.Team == nil {
+	if value == nil || value.ApplyReceipt == nil {
 		return nil, fmt.Errorf("applied workforce aggregate is incomplete")
 	}
 	now, scope := value.ApplyReceipt.AppliedAt, value.Scope
@@ -57,7 +61,13 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		application.agentDeployments = append(application.agentDeployments, deployment)
 		application.agentActivations = append(application.agentActivations, activation)
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "agent_definition", ID: definition.ID, Version: definition.Version}, authoring.AppliedResourceReference{Kind: "agent_deployment", ID: deployment.ID, Version: definition.Version, Revision: revision})
-		application.objectives = append(application.objectives, materializeObjectives(value, "agent", deployment.ID, definition.ObjectiveTemplates)...)
+		application.objectives = append(application.objectives, materializeObjectives(value, "agent", definition.ID, deployment.ID, definition.ObjectiveTemplates)...)
+	}
+	if value.Result.Candidate.Team == nil {
+		for _, objective := range application.objectives {
+			application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "objective", ID: objective.value.ID, Revision: objective.value.Revision})
+		}
+		return application, nil
 	}
 	definition := cloneJSON(value.Result.Candidate.Team)
 	definition.CreatedAt = now
@@ -78,9 +88,9 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	}
 	application.teamActivation = workforce.DefinitionActivation{ID: value.ApplyReceipt.ID + ":team", Scope: scope, DeploymentID: application.teamDeployment.ID, DefinitionID: definition.ID, ToVersion: definition.Version, DeploymentRevision: revision, Reason: "workforce_change_set:" + value.ID, ActorType: value.ApplyReceipt.Actor.Type, ActorID: value.ApplyReceipt.Actor.ID, CreatedAt: now}
 	application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "team_definition", ID: definition.ID, Version: definition.Version}, authoring.AppliedResourceReference{Kind: "team_deployment", ID: application.teamDeployment.ID, Version: definition.Version, Revision: revision})
-	application.objectives = append(application.objectives, materializeObjectives(value, "team", application.teamDeployment.ID, definition.ObjectiveTemplates)...)
+	application.objectives = append(application.objectives, materializeObjectives(value, "team", definition.ID, application.teamDeployment.ID, definition.ObjectiveTemplates)...)
 	for _, objective := range application.objectives {
-		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "objective", ID: objective.ID, Revision: 1})
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "objective", ID: objective.value.ID, Revision: objective.value.Revision})
 	}
 	sort.Slice(application.resources, func(i, j int) bool {
 		return application.resources[i].Kind+application.resources[i].ID < application.resources[j].Kind+application.resources[j].ID
@@ -88,8 +98,8 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	return application, nil
 }
 
-func materializeObjectives(value *authoring.ChangeSet, ownerType, ownerID string, templates []workforce.ObjectiveTemplate) []*Objective {
-	result := make([]*Objective, 0, len(templates))
+func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate) []workforceObjectiveApplication {
+	result := make([]workforceObjectiveApplication, 0, len(templates))
 	for _, template := range templates {
 		var cadence *ObjectiveCadence
 		if len(template.Cadence) > 0 {
@@ -99,7 +109,13 @@ func materializeObjectives(value *authoring.ChangeSet, ownerType, ownerID string
 				cadence = &decoded
 			}
 		}
-		result = append(result, &Objective{ID: value.ID + ":" + ownerType + ":" + ownerID + ":" + template.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: template.EventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: 1, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt})
+		key := authoring.WorkforceObjectiveKey(ownerType, definitionID, template.ID)
+		placement := value.Placement.Objectives[key]
+		revision := int64(1)
+		if placement.ExpectedRevision > 0 {
+			revision = placement.ExpectedRevision + 1
+		}
+		result = append(result, workforceObjectiveApplication{value: &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: template.EventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}, expectedRevision: placement.ExpectedRevision})
 	}
 	return result
 }
@@ -115,5 +131,3 @@ func cloneJSON[T any](value *T) *T {
 	_ = json.Unmarshal(payload, &result)
 	return &result
 }
-
-var _ = time.Time{}
