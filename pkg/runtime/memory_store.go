@@ -14,6 +14,7 @@ type MemoryStore struct {
 	mu                   sync.RWMutex
 	runs                 map[int]*RunRecord
 	objectives           map[string]*Objective
+	initiatives          map[string]*Initiative
 	agentRuns            map[string]*AgentRun
 	activity             map[string][]*ActivityEvent
 	turns                map[string]map[string]*AgentTurn
@@ -47,6 +48,7 @@ func NewMemoryStore(maxSize int) *MemoryStore {
 	return &MemoryStore{
 		runs:                 make(map[int]*RunRecord),
 		objectives:           make(map[string]*Objective),
+		initiatives:          make(map[string]*Initiative),
 		agentRuns:            make(map[string]*AgentRun),
 		activity:             make(map[string][]*ActivityEvent),
 		turns:                make(map[string]map[string]*AgentTurn),

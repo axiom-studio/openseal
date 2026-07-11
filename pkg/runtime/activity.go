@@ -52,6 +52,7 @@ type ActivityEvent struct {
 	Severity         ActivitySeverity       `json:"severity"`
 	AgentID          string                 `json:"agentId,omitempty"`
 	ObjectiveID      string                 `json:"objectiveId,omitempty"`
+	InitiativeID     string                 `json:"initiativeId,omitempty"`
 	RunID            string                 `json:"runId"`
 	TurnID           string                 `json:"turnId,omitempty"`
 	ParentRunID      string                 `json:"parentRunId,omitempty"`
@@ -73,7 +74,7 @@ func (e *ActivityEvent) Validate() error {
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}
-	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
+	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "" && strings.TrimSpace(e.InitiativeID) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
 		return errors.New("activity subject, type, and summary are required")
 	}
 	return nil
@@ -146,6 +147,9 @@ func activityStreamID(event *ActivityEvent) string {
 	}
 	if event.RunID != "" {
 		return event.RunID
+	}
+	if event.InitiativeID != "" {
+		return "initiative:" + event.InitiativeID
 	}
 	return "objective:" + event.ObjectiveID
 }
