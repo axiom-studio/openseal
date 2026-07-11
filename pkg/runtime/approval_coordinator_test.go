@@ -104,7 +104,8 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expired.Approval.Status != ApprovalStatusExpired || expired.Call.Status != ActionCallStatusDenied || expired.Run.Status != AgentRunStatusQueued {
+	if expired.Approval.Status != ApprovalStatusExpired || expired.Call.Status != ActionCallStatusDenied || expired.Run.Status != AgentRunStatusQueued ||
+		expired.Run.BudgetUsage.Actions != 0 || len(expired.Run.BudgetReservations) != 0 || expired.Run.BudgetState != BudgetStateActive {
 		t.Fatalf("expiry resolution mismatch: %#v", expired)
 	}
 }
@@ -117,6 +118,7 @@ func createApprovalForStore(t *testing.T, store KernelStore, now time.Time) *Act
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+		BudgetPolicy: &BudgetPolicy{MaxActions: 1},
 	})
 	if err != nil {
 		t.Fatal(err)

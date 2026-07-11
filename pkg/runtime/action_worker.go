@@ -239,6 +239,11 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		updatedRun.QueueEnteredAt = now
 		updatedRun.UpdatedAt = now
 		updatedRun.Revision++
+		if updatedRun.BudgetPolicy != nil {
+			if err := settleRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID), BudgetUsage{Actions: 1}); err != nil {
+				return nil, err
+			}
+		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		checkpoint := cloneMap(updatedRun.Checkpoint)
 		if checkpoint == nil {

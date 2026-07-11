@@ -69,6 +69,83 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 	}
 }
 
+func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
+	store := NewMemoryStore(20)
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	catalog, scope := governedActionCatalog(t)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
+		Goal: "deploy once", BudgetPolicy: &BudgetPolicy{MaxActions: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{
+		Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	}))
+	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	ids := []string{"action-one", "proposal-one", "action-two", "proposal-two"}
+	coordinator.newID = func() string {
+		id := ids[0]
+		ids = ids[1:]
+		return id
+	}
+	proposal, err := coordinator.Propose(context.Background(), ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "staging"}, IdempotencyKey: "deploy-one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || persisted.BudgetState != BudgetStateExhausted || len(persisted.BudgetReservations) != 1 || persisted.BudgetUsage.Actions != 0 {
+		t.Fatalf("reserved action budget = %#v, %v", persisted, err)
+	}
+	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+		return map[string]string{"token": "opaque"}, nil
+	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		return map[string]interface{}{"ok": true}, nil
+	}))
+	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	worker.newID = func() string { return "execution-one" }
+	executed, err := worker.RunOnce(context.Background(), scope, "action-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed.Call.ID != proposal.Call.ID || executed.Run.BudgetUsage.Actions != 1 || len(executed.Run.BudgetReservations) != 0 {
+		t.Fatalf("settled action budget = %#v", executed)
+	}
+	claimed, err = store.ClaimNextAgentRun(context.Background(), AgentRunClaim{
+		Scope: scope, WorkerID: "agent-worker", Now: now.Add(3 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("reclaim = %#v, %v", claimed, err)
+	}
+	coordinator.now = func() time.Time { return now.Add(4 * time.Second) }
+	denied, err := coordinator.Propose(context.Background(), ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "staging"}, IdempotencyKey: "deploy-two",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if denied.Call.Status != ActionCallStatusDenied || denied.Event.EventType != "budget.exhausted" {
+		t.Fatalf("second proposal = %#v", denied)
+	}
+	paused, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || paused.Status != AgentRunStatusPaused || paused.BudgetUsage.Actions != 1 || len(paused.BudgetReservations) != 0 {
+		t.Fatalf("paused run = %#v, %v", paused, err)
+	}
+}
+
 func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
 	store := NewMemoryStore(20)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

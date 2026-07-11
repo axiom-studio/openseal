@@ -226,6 +226,87 @@ func addRunBudgetAllocation(run *AgentRun, allocationID string, allocation *Budg
 	return nil
 }
 
+func reserveRunBudget(run *AgentRun, reservation BudgetReservation) error {
+	if run == nil || run.BudgetPolicy == nil {
+		return nil
+	}
+	if err := reservation.Validate(); err != nil {
+		return err
+	}
+	if _, exists := run.BudgetReservations[reservation.ID]; exists {
+		return errors.New("budget reservation already exists")
+	}
+	if run.BudgetReservations == nil {
+		run.BudgetReservations = make(map[string]BudgetReservation)
+	}
+	run.BudgetReservations[reservation.ID] = reservation
+	effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+	if err != nil {
+		delete(run.BudgetReservations, reservation.ID)
+		return err
+	}
+	exceeded, _, err := BudgetWouldExceed(*run.BudgetPolicy, effective)
+	if err != nil || exceeded {
+		delete(run.BudgetReservations, reservation.ID)
+		if err != nil {
+			return err
+		}
+		return ErrBudgetExhausted
+	}
+	state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+	if err != nil {
+		delete(run.BudgetReservations, reservation.ID)
+		return err
+	}
+	run.BudgetState = state
+	return nil
+}
+
+func settleRunBudgetReservation(run *AgentRun, reservationID string, usage BudgetUsage) error {
+	if run == nil || run.BudgetPolicy == nil {
+		return nil
+	}
+	if _, exists := run.BudgetReservations[reservationID]; !exists {
+		return errors.New("budget reservation does not exist")
+	}
+	updated, err := run.BudgetUsage.Add(usage)
+	if err != nil {
+		return err
+	}
+	delete(run.BudgetReservations, reservationID)
+	effective, err := EffectiveBudgetUsage(updated, run.BudgetReservations)
+	if err != nil {
+		return err
+	}
+	state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+	if err != nil {
+		return err
+	}
+	run.BudgetUsage = updated
+	run.BudgetState = state
+	return nil
+}
+
+func releaseRunBudgetReservation(run *AgentRun, reservationID string) error {
+	if run == nil || run.BudgetPolicy == nil {
+		return nil
+	}
+	if _, exists := run.BudgetReservations[reservationID]; !exists {
+		return errors.New("budget reservation does not exist")
+	}
+	delete(run.BudgetReservations, reservationID)
+	effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+	if err != nil {
+		return err
+	}
+	state, _, err := EvaluateBudget(*run.BudgetPolicy, effective)
+	if err != nil {
+		return err
+	}
+	run.BudgetState = state
+	return nil
+}
+
 func validateGroupedBudgetAllocations(parent *AgentRun, allocations []*BudgetPolicy) error {
 	if parent == nil || parent.BudgetPolicy == nil {
 		return nil
