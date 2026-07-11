@@ -222,9 +222,14 @@ func discoverRoot(ctx context.Context, root Root, order int) ([]Candidate, []Dia
 			continue
 		}
 		relative, _ := filepath.Rel(absRoot, directory)
+		sourceMetadata, sourceDiagnostic := installedSourceMetadata(realDirectory, root, relative)
+		if sourceDiagnostic != nil {
+			diagnostics = append(diagnostics, *sourceDiagnostic)
+			continue
+		}
 		compilation, compileErr := skillopenclaw.Compile(skillopenclaw.Bundle{
 			SkillMD: bundle.SkillMD, Files: bundle.Files,
-			Source: skillopenclaw.Source{Reference: string(root.Kind) + ":" + root.ID + ":" + filepath.ToSlash(relative)},
+			Source: sourceMetadata,
 		})
 		if compileErr != nil {
 			diagnostics = append(diagnostics, Diagnostic{Severity: "error", Code: "skill.compile_failed", RootID: root.ID, Path: directory, Message: compileErr.Error()})
@@ -237,6 +242,48 @@ func discoverRoot(ctx context.Context, root Root, order int) ([]Candidate, []Dia
 		})
 	}
 	return result, diagnostics
+}
+
+type installedOrigin struct {
+	Version          int    `json:"version"`
+	Registry         string `json:"registry"`
+	Slug             string `json:"slug"`
+	OwnerHandle      string `json:"ownerHandle"`
+	InstalledVersion string `json:"installedVersion"`
+	Fingerprint      string `json:"fingerprint"`
+	ArchiveSHA256    string `json:"archiveSha256"`
+}
+
+func installedSourceMetadata(directory string, root Root, relative string) (skillopenclaw.Source, *Diagnostic) {
+	fallback := skillopenclaw.Source{Reference: string(root.Kind) + ":" + root.ID + ":" + filepath.ToSlash(relative)}
+	originPath := filepath.Join(directory, ".clawhub", "origin.json")
+	content, err := os.ReadFile(originPath)
+	if os.IsNotExist(err) {
+		return fallback, nil
+	}
+	if err != nil {
+		return fallback, &Diagnostic{Severity: "error", Code: "source.origin_unreadable", RootID: root.ID, Path: originPath, Message: err.Error()}
+	}
+	var origin installedOrigin
+	if err := json.Unmarshal(content, &origin); err != nil || origin.Version != 1 || strings.TrimSpace(origin.Registry) == "" ||
+		strings.TrimSpace(origin.Slug) == "" || strings.TrimSpace(origin.InstalledVersion) == "" {
+		return fallback, &Diagnostic{Severity: "error", Code: "source.origin_invalid", RootID: root.ID, Path: originPath, Message: "installed ClawHub origin metadata is invalid"}
+	}
+	reference := strings.TrimSpace(origin.Slug)
+	if owner := strings.TrimSpace(origin.OwnerHandle); owner != "" {
+		reference = owner + "/" + reference
+	}
+	trust := map[string]interface{}{}
+	if value := strings.TrimSpace(origin.Fingerprint); value != "" {
+		trust["fingerprint"] = value
+	}
+	if value := strings.TrimSpace(origin.ArchiveSHA256); value != "" {
+		trust["archiveSha256"] = value
+	}
+	return skillopenclaw.Source{
+		Registry: strings.TrimSpace(origin.Registry), Publisher: strings.TrimSpace(origin.OwnerHandle),
+		Reference: reference, Version: strings.TrimSpace(origin.InstalledVersion), Trust: trust,
+	}, nil
 }
 
 func candidateDirectories(root string) ([]string, error) {
