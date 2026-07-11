@@ -1381,6 +1381,20 @@ func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace
 	}
 }
 
+// WithClawHubRegistrySkillsDirectory lets an embedding host keep lifecycle
+// metadata in a governed workspace while adopting an existing managed Skills
+// mount. It is the migration-safe variant of WithClawHubRegistry.
+func WithClawHubRegistrySkillsDirectory(registryID string, registry clawhub.Registry, workspace, skillsDirectory string) Option {
+	return func(e *Engine) error {
+		manager, err := clawhub.NewInstallManagerWithSkillsDirectory(registryID, registry, workspace, skillsDirectory)
+		if err != nil {
+			return err
+		}
+		e.clawHub, e.clawHubRegistry = manager, registry
+		return nil
+	}
+}
+
 func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 	return func(e *Engine) error {
 		if authorizer == nil {
