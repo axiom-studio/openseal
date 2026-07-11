@@ -198,6 +198,7 @@ type AgentRun struct {
 	BudgetUsage          BudgetUsage                  `json:"budgetUsage,omitempty"`
 	BudgetState          BudgetState                  `json:"budgetState,omitempty"`
 	BudgetReservations   map[string]BudgetReservation `json:"budgetReservations,omitempty"`
+	BudgetAllocations    map[string]BudgetPolicy      `json:"budgetAllocations,omitempty"`
 	Policy               map[string]interface{}       `json:"policy,omitempty"`
 	Output               map[string]interface{}       `json:"output,omitempty"`
 	Error                string                       `json:"error,omitempty"`
@@ -237,6 +238,14 @@ func (r *AgentRun) Validate() error {
 		}
 		if err := r.BudgetUsage.Validate(); err != nil {
 			return err
+		}
+		for id, allocation := range r.BudgetAllocations {
+			if strings.TrimSpace(id) == "" {
+				return errors.New("run budget allocation id is required")
+			}
+			if err := allocation.Validate(); err != nil {
+				return fmt.Errorf("run budget allocation %s: %w", id, err)
+			}
 		}
 		effective, err := EffectiveBudgetUsage(r.BudgetUsage, r.BudgetReservations)
 		if err != nil {

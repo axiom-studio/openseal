@@ -110,6 +110,7 @@ type AgentRequest struct {
 	ArtifactRequirements []ArtifactRequirement  `json:"artifactRequirements,omitempty"`
 	SharedContext        map[string]interface{} `json:"sharedContext,omitempty"`
 	ConversationRefs     []string               `json:"conversationRefs,omitempty"`
+	BudgetAllocation     *BudgetPolicy          `json:"budgetAllocation,omitempty"`
 	Clarification        string                 `json:"clarification,omitempty"`
 	Response             string                 `json:"response,omitempty"`
 	CompletionSummary    string                 `json:"completionSummary,omitempty"`
@@ -156,6 +157,11 @@ func (r *AgentRequest) Validate() error {
 	if err := validateCredentialFreeContext(r.SharedContext); err != nil {
 		return err
 	}
+	if r.BudgetAllocation != nil {
+		if err := r.BudgetAllocation.Validate(); err != nil {
+			return fmt.Errorf("budget allocation: %w", err)
+		}
+	}
 	if err := validateArtifactRequirements(r.ArtifactRequirements); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
@@ -197,6 +203,7 @@ type CreateAgentRequestRequest struct {
 	ArtifactRequirements []ArtifactRequirement
 	SharedContext        map[string]interface{}
 	ConversationRefs     []string
+	BudgetAllocation     *BudgetPolicy
 	IdempotencyKey       string
 	DependencyGroupID    string
 	DependencyID         string
@@ -214,6 +221,7 @@ type AgentRequestGroupSpec struct {
 	ArtifactRequirements []ArtifactRequirement
 	SharedContext        map[string]interface{}
 	ConversationRefs     []string
+	BudgetAllocation     *BudgetPolicy
 	Required             *bool
 }
 
@@ -382,9 +390,13 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
 		AcceptanceCriteria: cloneMap(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
 		SharedContext: cloneMap(req.SharedContext), ConversationRefs: append([]string(nil), req.ConversationRefs...),
-		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
+		IdempotencyKey:   strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateChildBudgetAllocation(source, request.BudgetAllocation); err != nil {
 		return nil, err
 	}
 	if request.DependencyGroupID != "" {
@@ -448,6 +460,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	dependencySpecs := make([]RunDependencySpec, 0, len(req.Requests))
 	requestInputs := make([]CreateAgentRequestRequest, 0, len(req.Requests))
 	seenDependencies := make(map[string]struct{}, len(req.Requests))
+	allocations := make([]*BudgetPolicy, 0, len(req.Requests))
 	for index, spec := range req.Requests {
 		if spec.Kind != AgentRequestKindRequest {
 			return nil, errors.New("grouped collaboration currently supports request fan-out; handoff transfers must remain singular")
@@ -464,6 +477,10 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if err := validateArtifactRequirements(spec.ArtifactRequirements); err != nil {
 			return nil, fmt.Errorf("%w: request %d: %w", ErrInvalidArtifact, index+1, err)
 		}
+		if err := validateChildBudgetAllocation(source, spec.BudgetAllocation); err != nil {
+			return nil, fmt.Errorf("request %d: %w", index+1, err)
+		}
+		allocations = append(allocations, spec.BudgetAllocation)
 		dependencyID := strings.TrimSpace(spec.DependencyID)
 		if dependencyID == "" {
 			dependencyID = fmt.Sprintf("request-%d", index+1)
@@ -484,8 +501,12 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			SourceRunID: req.SourceRunID, Goal: spec.Goal, Instructions: spec.Instructions, SemanticRole: spec.SemanticRole,
 			AcceptanceCriteria: spec.AcceptanceCriteria, ArtifactRequirements: spec.ArtifactRequirements,
 			SharedContext: spec.SharedContext, ConversationRefs: spec.ConversationRefs,
-			IdempotencyKey: key + ":request:" + dependencyID, DependencyGroupID: groupID, DependencyID: dependencyID,
+			BudgetAllocation: spec.BudgetAllocation,
+			IdempotencyKey:   key + ":request:" + dependencyID, DependencyGroupID: groupID, DependencyID: dependencyID,
 		})
+	}
+	if err := validateGroupedBudgetAllocations(source, allocations); err != nil {
+		return nil, err
 	}
 	group, err := s.dependencies.CreateRunDependencyGroup(ctx, CreateRunDependencyGroupRequest{
 		ID: groupID, Scope: req.Scope, SourceRunID: req.SourceRunID, ExpectedSourceRevision: req.ExpectedSourceRevision,
@@ -597,9 +618,14 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 		updated.ChildRunID = child.ID
 		record.ChildRun = child
-		if groupedDependency == nil {
-			record.SourceRun = acceptedSourceRun(source, updated, now)
-			record.ExpectedSourceRevision = source.Revision
+		record.SourceRun, err = acceptedSourceRun(source, updated, now)
+		if err != nil {
+			return nil, err
+		}
+		record.ExpectedSourceRevision = source.Revision
+		if groupedDependency != nil {
+			record.SourceRun.Status = source.Status
+			record.SourceRun.WakeCondition = cloneWakeCondition(source.WakeCondition)
 		}
 		eventType = "collaboration.accepted"
 		if updated.Kind == AgentRequestKindHandoff {
@@ -839,13 +865,17 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	if request.Kind == AgentRequestKindHandoff {
 		sourceKind = RunSourceHandoff
 	}
-	return &AgentRun{
+	child := &AgentRun{
 		ID: id, Kind: normalizeRunKind(source.Kind), Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
 		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: source.ConcurrencyKey,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
-		Budget: cloneMap(source.Budget), BudgetPolicy: cloneBudgetPolicy(source.BudgetPolicy), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Budget: cloneMap(source.Budget), BudgetPolicy: cloneBudgetPolicy(request.BudgetAllocation), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	if child.BudgetPolicy != nil {
+		child.BudgetState = BudgetStateActive
+	}
+	return child
 }
 
 func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
@@ -856,8 +886,24 @@ func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
 	return &cloned
 }
 
-func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) *AgentRun {
+func cloneWakeCondition(condition *WakeCondition) *WakeCondition {
+	if condition == nil {
+		return nil
+	}
+	cloned := *condition
+	cloned.Predicate = cloneMap(condition.Predicate)
+	if condition.WakeAt != nil {
+		wakeAt := *condition.WakeAt
+		cloned.WakeAt = &wakeAt
+	}
+	return &cloned
+}
+
+func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
+	if err := addRunBudgetAllocation(updated, request.ID, request.BudgetAllocation); err != nil {
+		return nil, err
+	}
 	updated.Revision++
 	updated.UpdatedAt = now
 	updated.LeaseOwner = ""
@@ -871,7 +917,7 @@ func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) *
 		updated.Status = AgentRunStatusWaitingForDependency
 		updated.WakeCondition = &WakeCondition{Type: "agent_request", Reference: request.ID}
 	}
-	return updated
+	return updated, nil
 }
 
 func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now time.Time) *AgentRun {
@@ -1235,7 +1281,15 @@ func validateLocalSchemaReferences(value interface{}) error {
 func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestRequest) bool {
 	return existing.Kind == req.Kind && existing.Requester == req.Requester && existing.Recipient == req.Recipient &&
 		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal) &&
-		existing.DependencyGroupID == strings.TrimSpace(req.DependencyGroupID) && existing.DependencyID == strings.TrimSpace(req.DependencyID)
+		existing.DependencyGroupID == strings.TrimSpace(req.DependencyGroupID) && existing.DependencyID == strings.TrimSpace(req.DependencyID) &&
+		sameBudgetPolicy(existing.BudgetAllocation, req.BudgetAllocation)
+}
+
+func sameBudgetPolicy(left, right *BudgetPolicy) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func stableCollaborationID(scope Scope, key, suffix string) string {
