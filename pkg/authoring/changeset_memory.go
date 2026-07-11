@@ -181,6 +181,22 @@ func (s *MemoryChangeSetStore) UpdateChangeSet(_ context.Context, value *ChangeS
 	return cloneChangeSet(copy), nil
 }
 
+func (s *MemoryChangeSetStore) CompleteChangeSetGeneration(_ context.Context, value *ChangeSet, expectedRevision int64) (*ChangeSet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := changeSetKey(value.Scope, value.ID)
+	current := s.changeSets[key]
+	if current == nil {
+		return nil, ErrChangeSetNotFound
+	}
+	if current.Revision != expectedRevision || current.Status != ChangeSetEvaluating || current.CandidateDigest != "" || value.CandidateDigest == "" {
+		return nil, ErrChangeSetRevision
+	}
+	copy := cloneChangeSet(value)
+	s.changeSets[key] = copy
+	return cloneChangeSet(copy), nil
+}
+
 func changeSetKey(scope capability.ScopeReference, id string) string {
 	return scope.Kind + "\x00" + scope.ID + "\x00" + id
 }

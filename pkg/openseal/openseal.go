@@ -103,6 +103,7 @@ type (
 	WorkforceAuthoringRiskChange              = authoring.RiskChange
 	WorkforceAuthoringFieldDiff               = authoring.FieldDiff
 	WorkforceChangeSet                        = authoring.ChangeSet
+	WorkforceChangeSetGeneration              = authoring.ChangeSetGeneration
 	WorkforceChangeSetStatus                  = authoring.ChangeSetStatus
 	WorkforceChangeSetActor                   = authoring.ChangeSetActor
 	WorkforceChangeSetPlacement               = authoring.ChangeSetPlacement
@@ -1967,6 +1968,24 @@ func (e *Engine) CreateWorkforceChangeSet(ctx context.Context, request authoring
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.Create(ctx, request)
+}
+
+// PrepareWorkforceChangeSet persists a credential-free generation request
+// without waiting for probabilistic compilation.
+func (e *Engine) PrepareWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.Prepare(ctx, request)
+}
+
+// GeneratePreparedWorkforceChangeSet completes one persisted generation intent.
+// Durable hosts invoke this from a leased canonical Run worker.
+func (e *Engine) GeneratePreparedWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string, expectedRevision int64) (*authoring.ChangeSet, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.GeneratePrepared(ctx, scope, id, expectedRevision)
 }
 
 func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string) (*authoring.ChangeSet, error) {

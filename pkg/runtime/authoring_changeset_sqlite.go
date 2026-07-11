@@ -101,4 +101,24 @@ func (s *SQLiteStore) UpdateChangeSet(ctx context.Context, value *authoring.Chan
 	return decodeChangeSet(string(payload))
 }
 
+func (s *SQLiteStore) CompleteChangeSetGeneration(ctx context.Context, value *authoring.ChangeSet, expectedRevision int64) (*authoring.ChangeSet, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE workforce_change_sets SET status = ?, revision = ?, candidate_digest = ?, updated_at = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND status = ? AND candidate_digest = ''`,
+		value.Status, value.Revision, value.CandidateDigest, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetEvaluating)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		if _, err := s.GetChangeSet(ctx, value.Scope, value.ID); err != nil {
+			return nil, err
+		}
+		return nil, authoring.ErrChangeSetRevision
+	}
+	return decodeChangeSet(string(payload))
+}
+
 var _ authoring.ChangeSetStore = (*SQLiteStore)(nil)

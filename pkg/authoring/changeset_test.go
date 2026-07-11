@@ -22,6 +22,55 @@ func (g *sequenceChangeSetGenerator) Generate(context.Context, GenerateRequest) 
 	return payload, nil
 }
 
+func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	generator := &sequenceChangeSetGenerator{payloads: [][]byte{payload}}
+	compiler, _ := NewCompiler(generator)
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	request := CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Actor:   ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "async-create",
+	}
+	prepared, replayed, err := service.Prepare(context.Background(), request)
+	if err != nil || replayed || prepared.Status != ChangeSetEvaluating || prepared.Revision != 1 || prepared.Generation == nil || len(generator.payloads) != 1 {
+		t.Fatalf("prepared=%#v replayed=%t payloads=%d err=%v", prepared, replayed, len(generator.payloads), err)
+	}
+	replay, replayed, err := service.Prepare(context.Background(), request)
+	if err != nil || !replayed || replay.ID != prepared.ID || len(generator.payloads) != 1 {
+		t.Fatalf("replay=%#v replayed=%t payloads=%d err=%v", replay, replayed, len(generator.payloads), err)
+	}
+	completed, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
+	if err != nil || completed.Status != ChangeSetReview || completed.Revision != 2 || completed.CandidateDigest == "" || completed.Generation.CompletedAt == nil || len(generator.payloads) != 0 {
+		t.Fatalf("completed=%#v payloads=%d err=%v", completed, len(generator.payloads), err)
+	}
+	if _, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision); !errors.Is(err, ErrChangeSetRevision) {
+		t.Fatalf("duplicate generation error=%v", err)
+	}
+}
+
+func TestPreparedGenerationFailureIsDurable(t *testing.T) {
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "failed-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
+	if err == nil || failed == nil || failed.Status != ChangeSetFailed || failed.Generation.LastError == "" || failed.Revision != 2 {
+		t.Fatalf("failed=%#v err=%v", failed, err)
+	}
+	restored, getErr := service.Get(context.Background(), prepared.Scope, prepared.ID)
+	if getErr != nil || restored.Status != ChangeSetFailed || restored.Generation.LastError == "" {
+		t.Fatalf("restored=%#v err=%v", restored, getErr)
+	}
+}
+
 func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
