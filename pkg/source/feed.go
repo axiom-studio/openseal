@@ -52,7 +52,6 @@ func SkillDefinition() *skill.Definition {
 				"properties": map[string]interface{}{
 					"url":      map[string]interface{}{"type": "string", "format": "uri", "pattern": `^https://`},
 					"maxItems": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumItems, "default": 25},
-					"cursor":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1000},
 				},
 			},
 			OutputSchema: map[string]interface{}{
