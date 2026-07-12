@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
@@ -233,6 +234,83 @@ func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
 	turns, err := NewAgentTurnService(store, store).ListTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: run.ID})
 	if err != nil || len(turns) != 1 || turns[0].RequestedFork == nil || turns[0].RequestedFork.ForkID != "wave" {
 		t.Fatalf("turns=%#v error=%v", turns, err)
+	}
+}
+
+func TestAgentRunWorkersExecuteJoinAllAndJoinAnyConcurrently(t *testing.T) {
+	for _, mode := range []runbook.JoinMode{runbook.JoinAll, runbook.JoinAny} {
+		t.Run(string(mode), func(t *testing.T) {
+			store := NewMemoryStore(50)
+			scope := Scope{Kind: "tenant", ID: "fork-" + string(mode)}
+			steps := map[string]runbook.Step{
+				"fork": {Kind: runbook.StepFork, Fork: &runbook.ForkStep{Branches: map[string]string{"fast": "fast", "slow": "slow"}, Join: "join"}},
+				"fast": {Kind: runbook.StepTransform, Transform: &runbook.TransformStep{Assignments: map[string]runbook.Value{"/state/fast": runbookLiteral(true)}, Next: "join"}},
+				"slow": {Kind: runbook.StepTransform, Transform: &runbook.TransformStep{Assignments: map[string]runbook.Value{"/state/slow": runbookLiteral(true)}, Next: "join"}},
+				"join": {Kind: runbook.StepJoin, Join: &runbook.JoinStep{Fork: "fork", Mode: mode, Next: "done"}},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"state": {Ref: "/state"}}}},
+			}
+			if mode == runbook.JoinAny {
+				steps["slow"] = runbook.Step{Kind: runbook.StepWait, Wait: &runbook.WaitStep{Duration: time.Hour, Next: "join"}}
+			}
+			definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "concurrent", Version: "1", Name: "Concurrent", Entrypoints: map[string]string{"manual": "fork"}, Steps: steps}
+			runner, err := NewRunbookTurnRunner(definition, "manual")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "concurrent", Source: RunSourceManual,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+				return &TurnRunnerBinding{DefinitionID: "concurrent", DefinitionVersion: "1", Runner: runner}, nil
+			}), nil, AgentRunWorkerConfig{
+				Scope: scope, AssignedAgentID: "agent", Concurrency: 4, MaxTurnsPerClaim: 1,
+				PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pool.Start(ctx)
+			defer pool.Stop()
+			deadline := time.Now().Add(3 * time.Second)
+			var completed *AgentRun
+			for time.Now().Before(deadline) {
+				completed, err = store.GetAgentRun(t.Context(), scope, parent.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if completed.Status == AgentRunStatusCompleted || completed.Status == AgentRunStatusFailed {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if completed == nil || completed.Status != AgentRunStatusCompleted {
+				t.Fatalf("parent=%#v", completed)
+			}
+			state := completed.Output["state"].(map[string]interface{})
+			if state["fast"] != true || mode == runbook.JoinAll && state["slow"] != true {
+				t.Fatalf("state=%#v", state)
+			}
+			children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 10})
+			if err != nil || len(children) != 2 || children[0].ID == children[1].ID {
+				t.Fatalf("children=%#v error=%v", children, err)
+			}
+			if mode == runbook.JoinAny {
+				canceled := 0
+				for _, child := range children {
+					if child.Status == AgentRunStatusCanceled {
+						canceled++
+					}
+				}
+				if canceled != 1 {
+					t.Fatalf("join_any children=%#v", children)
+				}
+			}
+		})
 	}
 }
 

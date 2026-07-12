@@ -199,6 +199,19 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 			_ = loopStep
 		case runbook.StepFork:
 			if state.PendingFork == state.Current {
+				completedFork := state.PendingFork
+				consumed, terminal, consumeErr := r.consumeForkResult(checkpoint, &state, input.Run)
+				if consumeErr != nil {
+					return nil, consumeErr
+				}
+				if terminal != nil {
+					terminal.Decisions = append(decisions, terminal.Decisions...)
+					return terminal, nil
+				}
+				if consumed {
+					decisions = append(decisions, TurnDecision{Summary: "Merged durable results for concurrent fork " + completedFork})
+					continue
+				}
 				return r.proposeFork(checkpoint, state, decisions, input)
 			}
 			state.PendingFork = state.Current
@@ -232,6 +245,73 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 		}
 	}
 	return nil, fmt.Errorf("runbook exceeded %d internal steps in one Turn", maximumRunbookStepsPerTurn)
+}
+
+func (r *RunbookTurnRunner) consumeForkResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, *TurnOutcome, error) {
+	if state == nil || run == nil || state.PendingFork == "" {
+		return false, nil, nil
+	}
+	groupID := stableForkIdentifier(run.ID, state.PendingFork, "group")
+	groups, _ := run.Output["dependencyGroups"].(map[string]interface{})
+	group, _ := groups[groupID].(map[string]interface{})
+	status, _ := group["status"].(string)
+	if status == "" || status == string(RunDependencyGroupWaiting) {
+		return false, nil, nil
+	}
+	if status != string(RunDependencyGroupSatisfied) {
+		message := "concurrent runbook fork " + state.PendingFork + " failed"
+		return false, r.failed(checkpoint, *state, nil, message), nil
+	}
+	dependencies, _ := group["dependencies"].(map[string]interface{})
+	ids := make([]string, 0, len(dependencies))
+	for id := range dependencies {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	forks, _ := checkpoint["forkResults"].(map[string]interface{})
+	if forks == nil {
+		forks = map[string]interface{}{}
+		checkpoint["forkResults"] = forks
+	}
+	results := map[string]interface{}{}
+	for _, id := range ids {
+		dependency, _ := dependencies[id].(map[string]interface{})
+		if dependency["state"] != string(RunDependencyStateSatisfied) {
+			continue
+		}
+		result, _ := dependency["result"].(map[string]interface{})
+		results[id] = cloneMap(result)
+		branchCheckpoint, _ := result["checkpoint"].(map[string]interface{})
+		for _, key := range []string{"state", "steps"} {
+			if branchValues, ok := branchCheckpoint[key].(map[string]interface{}); ok {
+				if err := mergeRunbookBranchValues(checkpoint, key, branchValues); err != nil {
+					return false, nil, fmt.Errorf("fork %s branch %s: %w", state.PendingFork, id, err)
+				}
+			}
+		}
+	}
+	forks[state.PendingFork] = results
+	forkStep := r.definition.Steps[state.PendingFork]
+	joinStep := r.definition.Steps[forkStep.Fork.Join]
+	state.PendingFork = ""
+	state.Current = joinStep.Join.Next
+	encodeRunbookState(checkpoint, *state)
+	return true, nil, nil
+}
+
+func mergeRunbookBranchValues(checkpoint map[string]interface{}, key string, branch map[string]interface{}) error {
+	target, _ := checkpoint[key].(map[string]interface{})
+	if target == nil {
+		target = map[string]interface{}{}
+		checkpoint[key] = target
+	}
+	for name, value := range branch {
+		if current, exists := target[name]; exists && !reflect.DeepEqual(current, value) {
+			return fmt.Errorf("concurrent branches produced conflicting %s value %q", key, name)
+		}
+		target[name] = value
+	}
+	return nil
 }
 
 func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, input TurnExecutionContext) (*TurnOutcome, error) {

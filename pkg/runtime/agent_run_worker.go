@@ -89,6 +89,7 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 type AgentRunWorkerPool struct {
 	config      AgentRunWorkerConfig
 	scheduler   *AgentRunScheduler
+	portfolio   PortfolioStore
 	coordinator *TurnCoordinator
 	wakeService *AgentRunWakeService
 	activity    *RunActivityService
@@ -121,7 +122,7 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 		logger = zap.NewNop().Sugar()
 	}
 	pool := &AgentRunWorkerPool{
-		config: config, scheduler: NewAgentRunScheduler(store), coordinator: NewTurnCoordinator(store, store, store),
+		config: config, scheduler: NewAgentRunScheduler(store), portfolio: store, coordinator: NewTurnCoordinator(store, store, store),
 		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
 		resolver: resolver, logger: logger, wake: make(chan struct{}, 1),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
@@ -250,6 +251,10 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			p.Wake()
 			return
 		}
+		if current != nil && isTerminalAgentRunStatus(current.Status) {
+			p.resolveForkChild(ctx, current)
+			return
+		}
 		if result == nil || current.Status != AgentRunStatusRunning {
 			return
 		}
@@ -263,6 +268,15 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun) {
+	if p.forks == nil || run == nil || run.ParentRunID == "" || run.Checkpoint["forkChild"] == nil {
+		return
+	}
+	if _, err := p.forks.CompleteChild(ctx, run, ActivityActor{Type: "worker", ID: p.poolID}); err != nil && !errors.Is(err, ErrDependencyConflict) {
+		p.logger.Warnw("failed to resolve terminal fork child", "runId", run.ID, "error", err)
+	}
 }
 
 func (p *AgentRunWorkerPool) materializeTurnFork(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
@@ -390,6 +404,23 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			if len(result.Runs) > 0 {
 				p.Wake()
 			}
+			p.reconcileForkChildren(ctx)
 		}
+	}
+}
+
+func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) {
+	if p.forks == nil {
+		return
+	}
+	runs, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: p.config.Scope, Statuses: []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled}, Limit: 100,
+	})
+	if err != nil {
+		p.logger.Warnw("failed to list terminal fork children", "error", err)
+		return
+	}
+	for _, run := range runs {
+		p.resolveForkChild(ctx, run)
 	}
 }
