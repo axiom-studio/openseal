@@ -1739,7 +1739,41 @@ func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunR
 // CreateAgentRunCommand returns both the durable run and its creation event.
 // Idempotent replays return the existing run with a nil event.
 func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
+	if err := e.ValidateAgentRunEntrypoint(ctx, req.Scope, req.AssignedAgentID, req.Entrypoint); err != nil {
+		return nil, err
+	}
 	return runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
+}
+
+// ValidateAgentRunEntrypoint proves that an advertised runbook entrypoint is
+// executable by the Agent's currently active immutable definition. Callers can
+// use it for capability discovery; CreateAgentRunCommand enforces it again at
+// the command boundary so stale UI or model-tool state fails before a Run is
+// persisted.
+func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope runtime.Scope, agentID, entrypoint string) error {
+	entrypoint = strings.TrimSpace(entrypoint)
+	if entrypoint == "" {
+		return nil
+	}
+	if e == nil || e.agents == nil {
+		return fmt.Errorf("validate Agent Run entrypoint: Agent registry is not configured")
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return fmt.Errorf("validate Agent Run entrypoint %q: assigned Agent is required", entrypoint)
+	}
+	deployment, err := e.GetAgentDeployment(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, agentID)
+	if err != nil || deployment == nil {
+		return fmt.Errorf("validate Agent Run entrypoint %q for Agent %s: deployment is unavailable", entrypoint, agentID)
+	}
+	definition, err := e.GetAgentDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil || definition == nil || definition.Runbook == nil {
+		return fmt.Errorf("validate Agent Run entrypoint %q for Agent %s: active runbook is unavailable", entrypoint, agentID)
+	}
+	if _, ok := definition.Runbook.Entrypoints[entrypoint]; !ok {
+		return fmt.Errorf("validate Agent Run entrypoint %q for Agent %s: entrypoint is not defined by the active runbook", entrypoint, agentID)
+	}
+	return nil
 }
 
 func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
