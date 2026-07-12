@@ -10,6 +10,9 @@ import (
 )
 
 type Store interface {
+	CreateCompilation(context.Context, *DefinitionCompilation) error
+	GetCompilation(context.Context, capability.ScopeReference, string) (*DefinitionCompilation, error)
+	ListCompilations(context.Context, capability.ScopeReference, string) ([]*DefinitionCompilation, error)
 	CreateDefinition(context.Context, *AgentDefinition) error
 	GetDefinition(context.Context, string, string) (*AgentDefinition, error)
 	ListDefinitionVersions(context.Context, string) ([]*AgentDefinition, error)
@@ -24,15 +27,50 @@ type Store interface {
 }
 
 type MemoryStore struct {
-	mu          sync.RWMutex
-	definitions map[string]*AgentDefinition
-	deployments map[string]*AgentDeployment
-	activations map[string][]DefinitionActivation
-	amendments  map[string]*DefinitionAmendment
+	mu           sync.RWMutex
+	definitions  map[string]*AgentDefinition
+	deployments  map[string]*AgentDeployment
+	activations  map[string][]DefinitionActivation
+	amendments   map[string]*DefinitionAmendment
+	compilations map[string]*DefinitionCompilation
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{definitions: make(map[string]*AgentDefinition), deployments: make(map[string]*AgentDeployment), activations: make(map[string][]DefinitionActivation), amendments: make(map[string]*DefinitionAmendment)}
+	return &MemoryStore{definitions: make(map[string]*AgentDefinition), deployments: make(map[string]*AgentDeployment), activations: make(map[string][]DefinitionActivation), amendments: make(map[string]*DefinitionAmendment), compilations: make(map[string]*DefinitionCompilation)}
+}
+
+func (s *MemoryStore) CreateCompilation(_ context.Context, compilation *DefinitionCompilation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := compilationKey(compilation.Scope, compilation.ID)
+	if s.compilations[key] != nil {
+		return ErrCompilationImmutable
+	}
+	s.compilations[key] = cloneCompilation(compilation)
+	return nil
+}
+
+func (s *MemoryStore) GetCompilation(_ context.Context, scope capability.ScopeReference, id string) (*DefinitionCompilation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value := s.compilations[compilationKey(scope, id)]
+	if value == nil {
+		return nil, ErrCompilationNotFound
+	}
+	return cloneCompilation(value), nil
+}
+
+func (s *MemoryStore) ListCompilations(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]*DefinitionCompilation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*DefinitionCompilation, 0)
+	for _, value := range s.compilations {
+		if value.Scope == scope && value.DeploymentID == deploymentID {
+			result = append(result, cloneCompilation(value))
+		}
+	}
+	sortCompilations(result)
+	return result, nil
 }
 
 func (s *MemoryStore) CreateAmendment(_ context.Context, amendment *DefinitionAmendment) error {

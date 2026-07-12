@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -53,13 +54,74 @@ func migrateAgentRegistry(db *sql.DB) error {
 			payload TEXT NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, id)
 		);
+		CREATE TABLE IF NOT EXISTS agent_definition_compilations (
+			id TEXT NOT NULL,
+			scope_kind TEXT NOT NULL,
+			scope_id TEXT NOT NULL,
+			deployment_id TEXT NOT NULL,
+			definition_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			payload TEXT NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, id)
+		);
 		CREATE INDEX IF NOT EXISTS idx_agent_definition_versions ON agent_definitions(id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_agent_deployment_activations
 			ON agent_definition_activations(scope_kind, scope_id, deployment_id, deployment_revision);
 		CREATE INDEX IF NOT EXISTS idx_agent_definition_amendments
 			ON agent_definition_amendments(scope_kind, scope_id, deployment_id, status, updated_at);
+		CREATE INDEX IF NOT EXISTS idx_agent_definition_compilations
+			ON agent_definition_compilations(scope_kind, scope_id, deployment_id, created_at DESC, id DESC);
 	`)
 	return err
+}
+
+func (s *SQLiteStore) CreateCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) error {
+	payload, err := json.Marshal(compilation)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_definition_compilations(id, scope_kind, scope_id, deployment_id, definition_id, status, created_at, payload) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, compilation.ID, compilation.Scope.Kind, compilation.Scope.ID, compilation.DeploymentID, compilation.DefinitionID, compilation.Status, compilation.CreatedAt, string(payload))
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
+		return kernelagent.ErrCompilationImmutable
+	}
+	return err
+}
+
+func (s *SQLiteStore) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
+	var payload string
+	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM agent_definition_compilations WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, kernelagent.ErrCompilationNotFound
+		}
+		return nil, err
+	}
+	var compilation kernelagent.DefinitionCompilation
+	if err := json.Unmarshal([]byte(payload), &compilation); err != nil {
+		return nil, err
+	}
+	return &compilation, nil
+}
+
+func (s *SQLiteStore) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_definition_compilations WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY created_at DESC, id DESC`, scope.Kind, scope.ID, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*kernelagent.DefinitionCompilation, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var compilation kernelagent.DefinitionCompilation
+		if err := json.Unmarshal([]byte(payload), &compilation); err != nil {
+			return nil, err
+		}
+		result = append(result, &compilation)
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLiteStore) CreateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment) error {

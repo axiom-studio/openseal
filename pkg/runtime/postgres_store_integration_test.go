@@ -380,6 +380,17 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	if restoredDeployment, err := agentRegistry.GetDeployment(ctx, agentScope, deployment.ID); err != nil || restoredDeployment.ActiveVersion != "2" {
 		t.Fatalf("restored deployment = %#v, %v", restoredDeployment, err)
 	}
+	compilation, err := agentRegistry.RecordCompilation(ctx, &kernelagent.DefinitionCompilation{
+		ID: "operator-source-2", Scope: agentScope, DeploymentID: deployment.ID, DefinitionID: "operator", CandidateVersion: "2",
+		Source:       kernelagent.CompilationSource{Kind: "runbook", ID: "operator-source", Version: "2", Digest: "sha256:source-2"},
+		TargetDigest: "sha256:target-2", Status: kernelagent.CompilationClean,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values, err := replicaRegistry.ListCompilations(ctx, agentScope, deployment.ID); err != nil || len(values) != 1 || values[0].ID != compilation.ID {
+		t.Fatalf("replica compilations = %#v, %v", values, err)
+	}
 
 	skillCatalog := skill.NewCatalogWithStore(primary)
 	skillDefinition := &skill.Definition{ID: "research", Version: "1", Name: "Research", Prompt: &skill.PromptModule{Instructions: "Research with cited evidence."}}

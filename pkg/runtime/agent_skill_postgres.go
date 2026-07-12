@@ -63,6 +63,76 @@ func (s *PostgresStore) migrateAgentAndSkillControlPlane(ctx context.Context, tx
 	return err
 }
 
+func (s *PostgresStore) migrateAgentDefinitionCompilations(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS `+s.table("agent_definition_compilations")+` (
+			id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
+			deployment_id TEXT NOT NULL, definition_id TEXT NOT NULL, status TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, id)
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS agent_definition_compilations_idx ON `+s.table("agent_definition_compilations")+` (scope_kind, scope_id, deployment_id, created_at DESC, id DESC)`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (15, 'agent definition compilations') ON CONFLICT (version) DO NOTHING`)
+	return err
+}
+
+func (s *PostgresStore) CreateCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) error {
+	payload, err := json.Marshal(compilation)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO `+s.table("agent_definition_compilations")+` (id, scope_kind, scope_id, deployment_id, definition_id, status, created_at, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb) ON CONFLICT (scope_kind, scope_id, id) DO NOTHING`, compilation.ID, compilation.Scope.Kind, compilation.Scope.ID, compilation.DeploymentID, compilation.DefinitionID, compilation.Status, compilation.CreatedAt, string(payload))
+	if err != nil {
+		return err
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if rows != 1 {
+		return kernelagent.ErrCompilationImmutable
+	}
+	return nil
+}
+
+func (s *PostgresStore) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
+	var payload string
+	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_definition_compilations")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, kernelagent.ErrCompilationNotFound
+		}
+		return nil, err
+	}
+	var compilation kernelagent.DefinitionCompilation
+	if err := json.Unmarshal([]byte(payload), &compilation); err != nil {
+		return nil, err
+	}
+	return &compilation, nil
+}
+
+func (s *PostgresStore) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_definition_compilations")+` WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY created_at DESC, id DESC`, scope.Kind, scope.ID, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*kernelagent.DefinitionCompilation, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var compilation kernelagent.DefinitionCompilation
+		if err := json.Unmarshal([]byte(payload), &compilation); err != nil {
+			return nil, err
+		}
+		result = append(result, &compilation)
+	}
+	return result, rows.Err()
+}
+
 func (s *PostgresStore) CreateDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {

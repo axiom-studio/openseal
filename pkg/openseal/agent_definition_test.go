@@ -41,6 +41,18 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	if err != nil || len(history) != 2 {
 		t.Fatalf("public activation history = %#v, %v", history, err)
 	}
+	compilation, err := engine.RecordAgentDefinitionCompilation(ctx, &AgentDefinitionCompilation{
+		ID: "marketing-source-1.1.0", Scope: scope, DeploymentID: deployment.ID, DefinitionID: "marketer", CandidateVersion: "1.1.0",
+		Source:       AgentCompilationSource{Kind: "prompt", ID: "marketing-source", Version: "1.1.0", Digest: "sha256:source"},
+		TargetDigest: "sha256:marketer-1.1.0", Status: AgentCompilationClean,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compilations, err := engine.ListAgentDefinitionCompilations(ctx, scope, deployment.ID)
+	if err != nil || len(compilations) != 1 || compilations[0].ID != compilation.ID {
+		t.Fatalf("public compilations = %#v, %v", compilations, err)
+	}
 	candidate := definition("1.2.0")
 	candidate.SystemPrompt = "Create accurate marketing, cite evidence, and follow up respectfully."
 	amendment, err := engine.ProposeAgentDefinitionAmendment(ctx, ProposeAgentAmendmentRequest{
