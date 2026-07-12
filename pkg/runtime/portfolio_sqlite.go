@@ -349,15 +349,7 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Priority != result[j].Priority {
-			return result[i].Priority > result[j].Priority
-		}
-		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
-			return result[i].CreatedAt.Before(result[j].CreatedAt)
-		}
-		return result[i].ID < result[j].ID
-	})
+	sortAgentRuns(result, filter.Order)
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
 }
 
