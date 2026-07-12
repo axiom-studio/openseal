@@ -76,7 +76,7 @@ func TestPublicAgentRequestGroupFacadeJoinsTeamWork(t *testing.T) {
 		Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
 		Requests: []AgentRequestGroupSpec{
 			{DependencyID: "one", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "one"}, Goal: "Research one"},
-			{DependencyID: "two", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "two"}, Goal: "Research two"},
+			{DependencyID: "two", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "two"}, Goal: "Research two"},
 		},
 		IdempotencyKey: "public-group-v1", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
 	})

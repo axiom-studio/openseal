@@ -42,7 +42,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 				Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
 				Requests: []AgentRequestGroupSpec{
 					{DependencyID: "forums", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "forum-researcher"}, Goal: "Analyze forums"},
-					{DependencyID: "reviews", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "review-research"}, Goal: "Analyze product reviews"},
+					{DependencyID: "reviews", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "review-research"}, Goal: "Analyze product reviews"},
 				},
 				IdempotencyKey: "research-wave-1", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
 			}
@@ -180,7 +180,7 @@ func TestGroupedAgentRequestRejectionFailsRequiredFanIn(t *testing.T) {
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"},
 		Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
 		Requests: []AgentRequestGroupSpec{
-			{DependencyID: "required", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"}, Goal: "Review"},
+			{DependencyID: "required", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewers"}, Goal: "Review"},
 		},
 		IdempotencyKey: "reject-v1", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
 	})

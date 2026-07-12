@@ -6,7 +6,28 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
+
+type collaborationTeamStoreStub struct {
+	deployment *kernelteam.Deployment
+}
+
+func (s collaborationTeamStoreStub) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	if s.deployment == nil || s.deployment.Scope != scope || s.deployment.ID != id {
+		return nil, errors.New("Team deployment not found")
+	}
+	return s.deployment, nil
+}
+
+func activeCollaborationTeam(scope Scope, id string, assignments ...kernelteam.RosterAssignment) collaborationTeamStoreStub {
+	return collaborationTeamStoreStub{deployment: &kernelteam.Deployment{
+		ID: id, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+		Roster: assignments, Revision: 1,
+	}}
+}
 
 func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 	t.Parallel()
@@ -180,22 +201,29 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
+	service.teams = activeCollaborationTeam(scope, "gtm", kernelteam.RosterAssignment{ID: "marketer", RoleID: "lead", AgentDeploymentID: "marketing-agent"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, Goal: "Own launch and lead follow-up",
+		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, Goal: "Own launch and lead follow-up", SemanticRole: "lead",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"},
+	}); err == nil || !strings.Contains(err.Error(), "explicit assigned Agent") {
+		t.Fatalf("missing Team assignment error = %v", err)
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"},
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "marketing-agent",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Child.Owner != (ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}) || accepted.Child.AssignedAgentID != "" || accepted.Child.Source != RunSourceHandoff {
+	if accepted.Request.AssignedAgentID != "marketing-agent" || accepted.Child.Owner != (ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}) || accepted.Child.AssignedAgentID != "marketing-agent" || accepted.Child.Source != RunSourceHandoff {
 		t.Fatalf("handoff child = %#v", accepted.Child)
 	}
 	persistedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
@@ -253,6 +281,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
+	service.teams = activeCollaborationTeam(scope, "marketing", kernelteam.RosterAssignment{ID: "editor", RoleID: "publisher", AgentDeploymentID: "marketing-editor"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"},
@@ -268,7 +297,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1, Decision: AgentRequestDecisionAccept,
-		Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"},
+		Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"}, AssignedAgentID: "marketing-editor",
 	})
 	if err != nil {
 		t.Fatal(err)

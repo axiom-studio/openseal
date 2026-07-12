@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -101,6 +103,7 @@ type AgentRequest struct {
 	Recipient            CollaborationParty     `json:"recipient"`
 	SourceRunID          string                 `json:"sourceRunId"`
 	ChildRunID           string                 `json:"childRunId,omitempty"`
+	AssignedAgentID      string                 `json:"assignedAgentId,omitempty"`
 	DependencyGroupID    string                 `json:"dependencyGroupId,omitempty"`
 	DependencyID         string                 `json:"dependencyId,omitempty"`
 	ObjectiveID          string                 `json:"objectiveId,omitempty"`
@@ -255,6 +258,7 @@ type RespondAgentRequestRequest struct {
 	ExpectedRevision int64
 	Decision         AgentRequestDecision
 	Principal        CollaborationParty
+	AssignedAgentID  string
 	Message          string
 }
 
@@ -323,17 +327,24 @@ type CollaborationKernelStore interface {
 	RunDependencyStore
 }
 
+type collaborationTeamStore interface {
+	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+}
+
 type CollaborationService struct {
 	store        CollaborationStore
 	runs         PortfolioStore
 	artifacts    ArtifactStore
 	dependencies *DependencyCoordinator
+	teams        collaborationTeamStore
 	now          func() time.Time
 	newID        func() string
 }
 
 func NewCollaborationService(store CollaborationKernelStore) *CollaborationService {
-	return &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store), now: time.Now, newID: uuid.NewString}
+	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store), now: time.Now, newID: uuid.NewString}
+	service.teams, _ = store.(collaborationTeamStore)
+	return service
 }
 
 func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
@@ -615,8 +626,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			}
 		}
 	case AgentRequestDecisionAccept:
+		assignedAgentID, assignmentErr := s.resolveRequestAssignment(ctx, request, req.AssignedAgentID)
+		if assignmentErr != nil {
+			return nil, assignmentErr
+		}
 		updated.Status = AgentRequestStatusAccepted
 		updated.AcceptedAt = &now
+		updated.AssignedAgentID = assignedAgentID
 		child := buildCollaborationChildRun(source, updated, now, s.newID())
 		if err := child.Validate(); err != nil {
 			return nil, err
@@ -971,10 +987,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	if request.Kind == AgentRequestKindHandoff {
 		owner = ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}
 	}
-	assignedAgent := ""
-	if request.Recipient.Type == OwnerTypeAgent {
-		assignedAgent = request.Recipient.ID
-	}
+	assignedAgent := request.AssignedAgentID
 	context := cloneMap(request.SharedContext)
 	if context == nil {
 		context = make(map[string]interface{})
@@ -999,6 +1012,39 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		child.BudgetState = BudgetStateActive
 	}
 	return child
+}
+
+func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, request *AgentRequest, assignedAgentID string) (string, error) {
+	assignedAgentID = strings.TrimSpace(assignedAgentID)
+	if request.Recipient.Type == OwnerTypeAgent {
+		if assignedAgentID != "" && assignedAgentID != request.Recipient.ID {
+			return "", ErrAgentRequestUnauthorized
+		}
+		return request.Recipient.ID, nil
+	}
+	if assignedAgentID == "" {
+		return "", errors.New("Team request acceptance requires an explicit assigned Agent")
+	}
+	if s.teams == nil {
+		return "", errors.New("Team roster assignment is unavailable")
+	}
+	deployment, err := s.teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}, request.Recipient.ID)
+	if err != nil {
+		return "", err
+	}
+	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
+		return "", errors.New("recipient Team deployment is not active")
+	}
+	for _, assignment := range deployment.Roster {
+		if assignment.AgentDeploymentID != assignedAgentID {
+			continue
+		}
+		if request.SemanticRole != "" && assignment.RoleID != request.SemanticRole {
+			return "", errors.New("assigned Agent does not hold the requested semantic role")
+		}
+		return assignedAgentID, nil
+	}
+	return "", errors.New("assigned Agent is not an active member of the recipient Team")
 }
 
 func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
@@ -1172,7 +1218,7 @@ func collaborationEvent(run *AgentRun, request *AgentRequest, eventType, summary
 		TeamID: teamID, ConversationRefs: append([]string(nil), request.ConversationRefs...),
 		Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Summary: summary, Visibility: ActivityVisibilityTeam,
 		CorrelationID: request.ID, CausationID: request.SourceRunID, CreatedAt: now,
-		Payload: map[string]interface{}{"requestId": request.ID, "kind": request.Kind, "status": request.Status, "recipient": request.Recipient, "semanticRole": request.SemanticRole, "childRunId": request.ChildRunID},
+		Payload: map[string]interface{}{"requestId": request.ID, "kind": request.Kind, "status": request.Status, "recipient": request.Recipient, "semanticRole": request.SemanticRole, "assignedAgentId": request.AssignedAgentID, "childRunId": request.ChildRunID},
 	}
 }
 
