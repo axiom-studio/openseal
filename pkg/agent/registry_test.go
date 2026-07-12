@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
@@ -60,6 +61,24 @@ func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
 	history, err := registry.ListActivations(context.Background(), scope, deployment.ID)
 	if err != nil || len(history) != 3 || history[2].Reason != "evaluation regression" {
 		t.Fatalf("activation history = %#v, %v", history, err)
+	}
+}
+
+func TestAgentDefinitionRequiresValidRunbookSkillDeclarations(t *testing.T) {
+	definition := testDefinition("1.0.0", capability.RiskLevelExternal, 1)
+	definition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "operator-work", Version: "1", Name: "Operator work",
+		Entrypoints: map[string]string{"manual": "inspect"}, Steps: map[string]runbook.Step{
+			"inspect": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "kubernetes", SkillVersion: "1", Action: "inspect", ResultPath: "/steps/inspect", Next: "done"}},
+			"done":    {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
+	if err := definition.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	definition.Runbook.Steps["inspect"].Action.SkillID = "undeclared"
+	if err := definition.Validate(); err == nil || !strings.Contains(err.Error(), "undeclared Skill") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

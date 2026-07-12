@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -65,6 +66,7 @@ type AgentDefinition struct {
 	Escalation          EscalationPolicy       `json:"escalation,omitempty"`
 	ObjectiveTemplates  []ObjectiveTemplate    `json:"objectiveTemplates,omitempty"`
 	Evaluations         []EvaluationCriterion  `json:"evaluations,omitempty"`
+	Runbook             *runbook.Definition    `json:"runbook,omitempty"`
 	Amendments          AmendmentPolicy        `json:"amendments,omitempty"`
 	Provenance          DefinitionProvenance   `json:"provenance,omitempty"`
 	Digest              string                 `json:"digest"`
@@ -99,6 +101,16 @@ func (d *AgentDefinition) Validate() error {
 			return errors.New("agent definition skill requirements require unique skill ids")
 		}
 		seenSkills[requirement.SkillID] = true
+	}
+	if d.Runbook != nil {
+		if diagnostics := runbook.Validate(d.Runbook); len(diagnostics) > 0 {
+			return fmt.Errorf("agent definition runbook %s: %s", diagnostics[0].Path, diagnostics[0].Message)
+		}
+		for stepID, step := range d.Runbook.Steps {
+			if step.Action != nil && !seenSkills[step.Action.SkillID] {
+				return fmt.Errorf("agent definition runbook step %s uses undeclared Skill %s", stepID, step.Action.SkillID)
+			}
+		}
 	}
 	if !isSubset(d.Authority.AllowedSkillIDs, mapKeys(seenSkills)) {
 		return errors.New("authority allowed skills must be declared skill requirements")
