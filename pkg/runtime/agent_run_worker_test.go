@@ -100,6 +100,82 @@ func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
 	}
 }
 
+func TestAgentRunWorkerCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
+	store := NewMemoryStore(50)
+	scope := Scope{Kind: "tenant", ID: "7"}
+	portfolio := NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Build the feature", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collaboration := NewCollaborationService(store)
+	created, err := collaboration.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindHandoff, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, SourceRunID: source.ID,
+		Goal: "Draft the launch follow-up", AcceptanceCriteria: map[string]interface{}{"required": "one follow-up"},
+		IdempotencyKey: "handoff-worker-completion",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := collaboration.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DefinitionID: "marketing", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Launch follow-up ready",
+					RunOutput: map[string]interface{}{"summary": "Publish the evidence-backed launch note"}}, nil
+			})}, nil
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "marketing", Concurrency: 1, MaxTurnsPerClaim: 1,
+		PollInterval: 10 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+	defer pool.Stop()
+	deadline := time.Now().Add(3 * time.Second)
+	var completed *AgentRequest
+	for time.Now().Before(deadline) {
+		completed, err = collaboration.GetAgentRequest(ctx, scope, created.Request.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status == AgentRequestStatusCompleted {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if completed == nil || completed.Status != AgentRequestStatusCompleted || completed.ChildRunID != accepted.Child.ID ||
+		completed.CompletionSummary != "Publish the evidence-backed launch note" || completed.AcceptanceEvidence["runOutput"] == nil {
+		t.Fatalf("completed handoff = %#v", completed)
+	}
+	child, err := portfolio.GetAgentRun(ctx, scope, accepted.Child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != AgentRunStatusCompleted || refreshedSource.Status != AgentRunStatusCompleted ||
+		refreshedSource.Output["handoffRequestId"] != completed.ID {
+		t.Fatalf("source=%#v child=%#v", refreshedSource, child)
+	}
+}
+
 func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	store := NewMemoryStore(20)
 	catalog, scope := governedActionCatalog(t)

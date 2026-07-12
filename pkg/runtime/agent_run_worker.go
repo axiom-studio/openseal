@@ -87,22 +87,23 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 // AgentRunWorkerPool autonomously claims and advances canonical Runs. The
 // durable store is authoritative; the wake channel is only a latency hint.
 type AgentRunWorkerPool struct {
-	config      AgentRunWorkerConfig
-	scheduler   *AgentRunScheduler
-	portfolio   PortfolioStore
-	coordinator *TurnCoordinator
-	wakeService *AgentRunWakeService
-	activity    *RunActivityService
-	actions     *ActionCoordinator
-	forks       *RunForkCoordinator
-	resolver    TurnRunnerResolver
-	logger      *zap.SugaredLogger
-	wake        chan struct{}
-	poolID      string
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	startOnce   sync.Once
-	stopOnce    sync.Once
+	config        AgentRunWorkerConfig
+	scheduler     *AgentRunScheduler
+	portfolio     PortfolioStore
+	coordinator   *TurnCoordinator
+	wakeService   *AgentRunWakeService
+	activity      *RunActivityService
+	actions       *ActionCoordinator
+	forks         *RunForkCoordinator
+	collaboration *CollaborationService
+	resolver      TurnRunnerResolver
+	logger        *zap.SugaredLogger
+	wake          chan struct{}
+	poolID        string
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	startOnce     sync.Once
+	stopOnce      sync.Once
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
@@ -129,6 +130,9 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	}
 	if forkStore, ok := store.(RunForkStore); ok {
 		pool.forks = NewRunForkCoordinator(forkStore)
+	}
+	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
+		pool.collaboration = NewCollaborationService(collaborationStore)
 	}
 	return pool, nil
 }
@@ -263,6 +267,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		}
 		if current != nil && isTerminalAgentRunStatus(current.Status) {
 			p.resolveForkChild(ctx, current)
+			p.resolveCollaborationChild(ctx, current)
 			return
 		}
 		if result == nil || current.Status != AgentRunStatusRunning {
@@ -278,6 +283,51 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {
+	if p.collaboration == nil || run == nil || run.Status != AgentRunStatusCompleted {
+		return
+	}
+	collaboration, ok := run.Context["collaboration"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	requestID, _ := collaboration["requestId"].(string)
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return
+	}
+	request, err := p.collaboration.GetAgentRequest(ctx, run.Scope, requestID)
+	if err != nil || request == nil || request.Status != AgentRequestStatusAccepted || request.ChildRunID != run.ID {
+		if err != nil && !errors.Is(err, ErrAgentRequestNotFound) {
+			p.logger.Warnw("failed to load collaboration request for terminal child", "runId", run.ID, "requestId", requestID, "error", err)
+		}
+		return
+	}
+	if len(request.ArtifactRequirements) > 0 {
+		return
+	}
+	summary, _ := run.Output["summary"].(string)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		summary = "Completed delegated work"
+	}
+	evidence := map[string]interface{}{}
+	if len(request.AcceptanceCriteria) > 0 {
+		evidence["runOutput"] = cloneMap(run.Output)
+		if len(run.Output) == 0 {
+			evidence["runStatus"] = string(run.Status)
+		}
+	}
+	_, err = p.collaboration.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: run.Scope, RequestID: request.ID, ExpectedRevision: request.Revision, ExpectedChildRevision: run.Revision,
+		Principal: request.Recipient, Actor: request.Recipient, Summary: summary, AcceptanceEvidence: evidence,
+		CompletionKey: "terminal-child:" + run.ID,
+	})
+	if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
+		p.logger.Warnw("failed to complete collaboration request from terminal child", "runId", run.ID, "requestId", request.ID, "error", err)
+	}
 }
 
 func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
