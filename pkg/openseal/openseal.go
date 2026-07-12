@@ -170,6 +170,8 @@ type (
 	ObjectiveStatus                    = runtime.ObjectiveStatus
 	ObjectiveCadence                   = runtime.ObjectiveCadence
 	ObjectiveCadenceType               = runtime.ObjectiveCadenceType
+	ObjectiveRunTemplate               = runtime.ObjectiveRunTemplate
+	ObjectiveCapabilityInvocation      = runtime.ObjectiveCapabilityInvocation
 	ObjectiveScheduleResult            = runtime.ObjectiveScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	Initiative                         = runtime.Initiative
@@ -470,6 +472,8 @@ type (
 	ClawHubLifecycleBatchResult        = clawhub.LifecycleBatchResult
 	ClawHubInstalledState              = clawhub.InstalledState
 )
+
+type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
 const (
 	HostedTurnAPIVersion     = runtime.HostedTurnAPIVersion
@@ -924,6 +928,12 @@ const (
 	ArtifactEvidenceTargetAction         = runtime.EvidenceTargetAction
 	ArtifactEvidenceTargetTurn           = runtime.EvidenceTargetTurn
 	ArtifactEvidenceTargetClaim          = runtime.EvidenceTargetClaim
+)
+
+const (
+	SourceMonitorDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
+	SourceMonitorDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
+	SourceMonitorDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
 )
 
 var (

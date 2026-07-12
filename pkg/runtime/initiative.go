@@ -68,12 +68,28 @@ type InitiativeHypothesis struct {
 	Status       HypothesisStatus    `json:"status,omitempty"`
 	UpdatedAt    time.Time           `json:"updatedAt"`
 }
+type SourceMonitorDeduplication string
+
+const (
+	SourceMonitorDeduplicateStableSource           SourceMonitorDeduplication = "stable_source"
+	SourceMonitorDeduplicateContentDigest          SourceMonitorDeduplication = "content_digest"
+	SourceMonitorDeduplicateStableSourceAndContent SourceMonitorDeduplication = "stable_source_and_content"
+)
+
+// SourceMonitorReference makes recurring source work executable without
+// introducing a parallel scheduler. ObjectiveID points at the canonical
+// recurring Objective; its cadence carries the assigned Agent, bounded Run
+// budget, and governed capability invocation. The duplicated capability
+// identity is an immutable projection used for drift detection and inspection.
 type SourceMonitorReference struct {
-	ID              string `json:"id"`
-	SkillID         string `json:"skillId"`
-	ScheduleRef     string `json:"scheduleRef,omitempty"`
-	SourcePolicyRef string `json:"sourcePolicyRef,omitempty"`
-	CheckpointRef   string `json:"checkpointRef,omitempty"`
+	ID              string                     `json:"id"`
+	ObjectiveID     string                     `json:"objectiveId"`
+	AssignedAgentID string                     `json:"assignedAgentId"`
+	SkillID         string                     `json:"skillId"`
+	SkillVersion    string                     `json:"skillVersion"`
+	Action          string                     `json:"action"`
+	SourcePolicyRef string                     `json:"sourcePolicyRef,omitempty"`
+	Deduplication   SourceMonitorDeduplication `json:"deduplication"`
 }
 type InitiativeDeliverable struct {
 	ID            string              `json:"id"`
@@ -195,8 +211,21 @@ func (i *Initiative) Validate() error {
 	}
 	seen = map[string]bool{}
 	for _, m := range i.SourceMonitors {
-		if m.ID == "" || m.SkillID == "" || seen[m.ID] {
-			return errors.New("source monitor ids must be unique and skill refs required")
+		if !validOpaqueIdentifier(m.ID, 128) || !validOpaqueIdentifier(m.ObjectiveID, 128) ||
+			!validOpaqueIdentifier(m.AssignedAgentID, 128) || !validOpaqueIdentifier(m.SkillID, 128) ||
+			strings.TrimSpace(m.SkillVersion) == "" || len(m.SkillVersion) > 128 || !validOpaqueIdentifier(m.Action, 128) || seen[m.ID] {
+			return errors.New("source monitors require unique portable ids, Objective, assigned Agent, and Skill action identity")
+		}
+		if !objectiveSet[m.ObjectiveID] {
+			return errors.New("source monitor objective must belong to initiative")
+		}
+		switch m.Deduplication {
+		case SourceMonitorDeduplicateStableSource, SourceMonitorDeduplicateContentDigest, SourceMonitorDeduplicateStableSourceAndContent:
+		default:
+			return errors.New("source monitor requires an explicit deduplication strategy")
+		}
+		if strings.TrimSpace(m.SourcePolicyRef) == "" || len(m.SourcePolicyRef) > 256 {
+			return errors.New("source monitor requires a source policy reference")
 		}
 		seen[m.ID] = true
 	}
@@ -395,6 +424,9 @@ func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequ
 	if err := s.validateObjectives(ctx, i); err != nil {
 		return nil, nil, err
 	}
+	if err := s.validateSourceMonitors(ctx, i); err != nil {
+		return nil, nil, err
+	}
 	e := initiativeEvent(i, "initiative.created", req.Actor, req.Visibility, "Initiative created")
 	e, err = s.store.CreateInitiativeWithEvent(ctx, i, e)
 	if err != nil {
@@ -510,6 +542,9 @@ func (s *InitiativeService) Update(ctx context.Context, i *Initiative, expected 
 	if err := s.validateObjectives(ctx, next); err != nil {
 		return nil, nil, err
 	}
+	if err := s.validateSourceMonitors(ctx, next); err != nil {
+		return nil, nil, err
+	}
 	e := initiativeEvent(next, "initiative.updated", actor, visibility, "Initiative updated")
 	e, err = s.store.UpdateInitiativeWithEvent(ctx, next, expected, e)
 	if err != nil {
@@ -528,6 +563,37 @@ func (s *InitiativeService) validateObjectives(ctx context.Context, i *Initiativ
 				err = ErrObjectiveNotFound
 			}
 			return fmt.Errorf("initiative objective %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initiative) error {
+	for _, monitor := range i.SourceMonitors {
+		objective, err := s.portfolio.GetObjective(ctx, i.Scope, monitor.ObjectiveID)
+		if err != nil || objective == nil {
+			if err == nil {
+				err = ErrObjectiveNotFound
+			}
+			return fmt.Errorf("source monitor %s objective: %w", monitor.ID, err)
+		}
+		if objective.Owner != i.Owner {
+			return fmt.Errorf("source monitor %s objective owner must match Initiative owner", monitor.ID)
+		}
+		if objective.Cadence == nil || objective.Cadence.RunTemplate == nil || objective.Cadence.RunTemplate.Capability == nil {
+			return fmt.Errorf("source monitor %s objective requires an executable cadence capability", monitor.ID)
+		}
+		cadence, capability := objective.Cadence, objective.Cadence.RunTemplate.Capability
+		if cadence.AssignedAgentID != monitor.AssignedAgentID || capability.SkillID != monitor.SkillID ||
+			capability.SkillVersion != monitor.SkillVersion || capability.Action != monitor.Action {
+			return fmt.Errorf("source monitor %s capability projection does not match its Objective cadence", monitor.ID)
+		}
+		contextValues := objective.Cadence.RunTemplate.Context
+		if contextValues["initiativeId"] != i.ID || contextValues["sourceMonitorId"] != monitor.ID {
+			return fmt.Errorf("source monitor %s Objective run context must identify its Initiative and monitor", monitor.ID)
+		}
+		if objective.Cadence.RunTemplate.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
+			return fmt.Errorf("source monitor %s source policy projection does not match its Objective cadence", monitor.ID)
 		}
 	}
 	return nil
