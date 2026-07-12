@@ -18,6 +18,12 @@ const (
 	EmailCredentialKind = "email-delivery"
 	MaximumRecipients   = 20
 	MaximumArtifactRefs = 20
+
+	// ActionCallIDTransportKey and AttachmentsTransportKey are reserved for
+	// trusted host transport. They are absent from the action schema and must
+	// never be accepted from model-generated arguments.
+	ActionCallIDTransportKey = "_opensealDeliveryActionCallId"
+	AttachmentsTransportKey  = "_opensealEmailAttachments"
 )
 
 // SkillDefinition describes email as an external, approval-governed action.
