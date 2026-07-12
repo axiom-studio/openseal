@@ -151,6 +151,7 @@ func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T)
 			confidence := 1.2
 			a.Evidence[0].Confidence = &confidence
 		}},
+		{name: "invalid content availability", mutate: func(a *Artifact) { a.ContentAvailability = "maybe" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

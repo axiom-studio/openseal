@@ -304,6 +304,8 @@ type (
 	RegisterArtifactRequest            = runtime.RegisterArtifactRequest
 	ArtifactRegistrationResult         = runtime.ArtifactRegistrationResult
 	ArtifactContentStore               = runtime.ArtifactContentStore
+	ArtifactContentInspector           = runtime.ArtifactContentInspector
+	ArtifactContentAvailability        = runtime.ArtifactContentAvailability
 	ArtifactContentResolver            = runtime.ArtifactContentResolver
 	ArtifactContentWrite               = runtime.ArtifactContentWrite
 	ArtifactStoredContent              = runtime.ArtifactStoredContent
@@ -895,10 +897,12 @@ const (
 	AgentAmendmentEvaluationFailed = kernelagent.AmendmentEvaluationFailed
 	AgentAmendmentActivated        = kernelagent.AmendmentActivated
 
-	ArtifactClassPublic       = runtime.ArtifactClassificationPublic
-	ArtifactClassInternal     = runtime.ArtifactClassificationInternal
-	ArtifactClassConfidential = runtime.ArtifactClassificationConfidential
-	ArtifactClassRestricted   = runtime.ArtifactClassificationRestricted
+	ArtifactClassPublic        = runtime.ArtifactClassificationPublic
+	ArtifactClassInternal      = runtime.ArtifactClassificationInternal
+	ArtifactClassConfidential  = runtime.ArtifactClassificationConfidential
+	ArtifactClassRestricted    = runtime.ArtifactClassificationRestricted
+	ArtifactContentAvailable   = runtime.ArtifactContentAvailable
+	ArtifactContentUnavailable = runtime.ArtifactContentUnavailable
 
 	ArtifactEvidenceDerivedFrom = runtime.EvidenceRelationDerivedFrom
 	ArtifactEvidenceSupports    = runtime.EvidenceRelationSupports
