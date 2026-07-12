@@ -134,6 +134,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateAgentAndSkillControlPlane(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateAgentDefinitionCompilations(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.migrateTeamControlPlane(ctx, tx); err != nil {
 		return err
 	}

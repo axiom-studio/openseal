@@ -65,6 +65,10 @@ type (
 	AgentWorkflow                             = types.AgentWorkflow
 	AgentWorkflowBean                         = types.AgentWorkflowBean
 	AgentDefinition                           = kernelagent.AgentDefinition
+	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
+	AgentCompilationSource                    = kernelagent.CompilationSource
+	AgentCompilationDiagnostic                = kernelagent.CompilationDiagnostic
+	AgentCompilationStatus                    = kernelagent.CompilationStatus
 	AgentSkillRequirement                     = kernelagent.SkillRequirement
 	AgentAuthorityPolicy                      = kernelagent.AuthorityPolicy
 	AgentMemoryPolicy                         = kernelagent.MemoryPolicy
@@ -871,11 +875,13 @@ const (
 	SkillSourcePlugin       = skillsource.RootPlugin
 	SkillSourceExtra        = skillsource.RootExtra
 
-	AgentRolloutPending  = kernelagent.RolloutPending
-	AgentRolloutActive   = kernelagent.RolloutActive
-	AgentRolloutDegraded = kernelagent.RolloutDegraded
-	AgentRolloutPaused   = kernelagent.RolloutPaused
-	AgentRolloutRetired  = kernelagent.RolloutRetired
+	AgentRolloutPending    = kernelagent.RolloutPending
+	AgentRolloutActive     = kernelagent.RolloutActive
+	AgentRolloutDegraded   = kernelagent.RolloutDegraded
+	AgentRolloutPaused     = kernelagent.RolloutPaused
+	AgentRolloutRetired    = kernelagent.RolloutRetired
+	AgentCompilationClean  = kernelagent.CompilationClean
+	AgentCompilationFailed = kernelagent.CompilationFailed
 
 	AgentAmendmentEvaluating       = kernelagent.AmendmentEvaluating
 	AgentAmendmentAwaitingApproval = kernelagent.AmendmentAwaitingApproval
@@ -2106,6 +2112,18 @@ func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference,
 
 func (e *Engine) RegisterAgentDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) (*kernelagent.AgentDefinition, error) {
 	return e.agents.RegisterDefinition(ctx, definition)
+}
+
+func (e *Engine) RecordAgentDefinitionCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) (*kernelagent.DefinitionCompilation, error) {
+	return e.agents.RecordCompilation(ctx, compilation)
+}
+
+func (e *Engine) GetAgentDefinitionCompilation(ctx context.Context, scope skill.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
+	return e.agents.GetCompilation(ctx, scope, id)
+}
+
+func (e *Engine) ListAgentDefinitionCompilations(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
+	return e.agents.ListCompilations(ctx, scope, deploymentID)
 }
 
 func (e *Engine) GetAgentDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {

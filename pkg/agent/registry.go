@@ -15,16 +15,58 @@ import (
 )
 
 var (
-	ErrDefinitionNotFound = errors.New("agent definition not found")
-	ErrDeploymentNotFound = errors.New("agent deployment not found")
-	ErrAmendmentNotFound  = errors.New("agent definition amendment not found")
-	ErrRevisionConflict   = errors.New("agent deployment revision conflict")
+	ErrDefinitionNotFound   = errors.New("agent definition not found")
+	ErrDeploymentNotFound   = errors.New("agent deployment not found")
+	ErrAmendmentNotFound    = errors.New("agent definition amendment not found")
+	ErrCompilationNotFound  = errors.New("agent definition compilation not found")
+	ErrCompilationImmutable = errors.New("agent definition compilation is immutable")
+	ErrRevisionConflict     = errors.New("agent deployment revision conflict")
 )
 
 type Registry struct {
 	store Store
 	now   func() time.Time
 	newID func() string
+}
+
+func (r *Registry) RecordCompilation(ctx context.Context, compilation *DefinitionCompilation) (*DefinitionCompilation, error) {
+	if r == nil || r.store == nil {
+		return nil, errors.New("agent registry is not configured")
+	}
+	candidate := cloneCompilation(compilation)
+	if candidate != nil && candidate.CreatedAt.IsZero() {
+		candidate.CreatedAt = r.now().UTC()
+	}
+	if err := candidate.Validate(); err != nil {
+		return nil, err
+	}
+	if err := r.store.CreateCompilation(ctx, candidate); err != nil {
+		if !errors.Is(err, ErrCompilationImmutable) {
+			return nil, err
+		}
+		existing, getErr := r.store.GetCompilation(ctx, candidate.Scope, candidate.ID)
+		if getErr != nil {
+			return nil, err
+		}
+		// CreatedAt is server-authored on first persistence and is not part of
+		// the immutable compiler result used to recognize a safe retry.
+		candidate.CreatedAt = existing.CreatedAt
+		existingJSON, _ := json.Marshal(existing)
+		candidateJSON, _ := json.Marshal(candidate)
+		if string(existingJSON) != string(candidateJSON) {
+			return nil, ErrCompilationImmutable
+		}
+		return existing, nil
+	}
+	return cloneCompilation(candidate), nil
+}
+
+func (r *Registry) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*DefinitionCompilation, error) {
+	return r.store.GetCompilation(ctx, scope, id)
+}
+
+func (r *Registry) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*DefinitionCompilation, error) {
+	return r.store.ListCompilations(ctx, scope, deploymentID)
 }
 
 func NewRegistry() *Registry {
@@ -462,6 +504,9 @@ func deploymentKey(scope capability.ScopeReference, id string) string {
 	return scope.Kind + ":" + scope.ID + ":" + strings.TrimSpace(id)
 }
 func amendmentKey(scope capability.ScopeReference, id string) string {
+	return scope.Kind + ":" + scope.ID + ":" + strings.TrimSpace(id)
+}
+func compilationKey(scope capability.ScopeReference, id string) string {
 	return scope.Kind + ":" + scope.ID + ":" + strings.TrimSpace(id)
 }
 

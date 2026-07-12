@@ -64,6 +64,36 @@ func TestSQLiteAgentDefinitionsDeploymentsAndActivationsSurviveRestart(t *testin
 	}
 }
 
+func TestSQLiteAgentDefinitionCompilationsSurviveRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compilations.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := kernelagent.NewRegistryWithStore(store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	recorded, err := registry.RecordCompilation(context.Background(), &kernelagent.DefinitionCompilation{
+		ID: "candidate-one", Scope: scope, DeploymentID: "agent-39", DefinitionID: "definition-39", CandidateVersion: "legacy-1",
+		Source: kernelagent.CompilationSource{Kind: "visual_graph", ID: "library-7", Version: "1", Digest: "sha256:source"},
+		Status: kernelagent.CompilationFailed, Diagnostics: []kernelagent.CompilationDiagnostic{{Path: "nodes.telegram", Code: "action.unavailable", Message: "Telegram action is unavailable"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	values, err := kernelagent.NewRegistryWithStore(reopened).ListCompilations(context.Background(), scope, "agent-39")
+	if err != nil || len(values) != 1 || values[0].ID != recorded.ID || values[0].Diagnostics[0].NodeID != "" {
+		t.Fatalf("restarted compilations = %#v, %v", values, err)
+	}
+}
+
 func TestSQLiteAgentDeploymentRevisionRaceHasOneWinner(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "race.db"))
 	if err != nil {
