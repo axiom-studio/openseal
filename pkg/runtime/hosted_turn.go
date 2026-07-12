@@ -17,7 +17,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v2"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v3"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
@@ -71,6 +71,8 @@ type HostedTurnRequest struct {
 type HostedTurnResponse struct {
 	APIVersion             string                 `json:"apiVersion"`
 	InvocationID           string                 `json:"invocationId"`
+	ModelProvider          string                 `json:"modelProvider"`
+	Model                  string                 `json:"model"`
 	SkillSelections        []HostedSkillSelection `json:"skillSelections,omitempty"`
 	Decisions              []TurnDecision         `json:"decisions,omitempty"`
 	ProposedActions        []TurnAction           `json:"proposedActions,omitempty"`
@@ -140,6 +142,11 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
 	}
+	response.ModelProvider = strings.TrimSpace(response.ModelProvider)
+	response.Model = strings.TrimSpace(response.Model)
+	if response.ModelProvider == "" || response.Model == "" {
+		return nil, errors.New("turn host must report the actual model provider and model")
+	}
 	if err := response.Usage.Validate(); err != nil {
 		return nil, err
 	}
@@ -198,6 +205,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		}
 	}
 	return &TurnOutcome{
+		ModelProvider: response.ModelProvider, Model: response.Model,
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
 		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
 		OutputSummary: response.OutputSummary, Usage: response.Usage,

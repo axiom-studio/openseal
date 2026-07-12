@@ -140,6 +140,8 @@ type BeginAgentTurnRequest struct {
 type FinishAgentTurnRequest struct {
 	ExpectedRevision       int64
 	Status                 AgentTurnStatus
+	ModelProvider          string
+	Model                  string
 	SkillSelections        []HostedSkillSelection
 	Decisions              []TurnDecision
 	RequestedActions       []TurnAction
@@ -220,6 +222,15 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, ErrTurnLeaseHeld
 	}
 	turn.Status = req.Status
+	req.ModelProvider = strings.TrimSpace(req.ModelProvider)
+	req.Model = strings.TrimSpace(req.Model)
+	if (req.ModelProvider == "") != (req.Model == "") {
+		return nil, errors.New("agent turn model provider and model must be reported together")
+	}
+	if req.ModelProvider != "" {
+		turn.ModelProvider = req.ModelProvider
+		turn.Model = req.Model
+	}
 	if req.NextRunStatus == "" {
 		switch req.Status {
 		case AgentTurnStatusCompleted:

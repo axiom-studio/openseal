@@ -27,6 +27,8 @@ func (f TurnRunnerFunc) RunTurn(ctx context.Context, input TurnExecutionContext)
 }
 
 type TurnOutcome struct {
+	ModelProvider          string
+	Model                  string
 	SkillSelections        []HostedSkillSelection
 	Decisions              []TurnDecision
 	ProposedActions        []TurnAction
@@ -264,6 +266,8 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.OutputSummary = "Bounded agent turn produced an invalid outcome"
 		} else {
 			finish.Status = AgentTurnStatusCompleted
+			finish.ModelProvider = outcome.ModelProvider
+			finish.Model = outcome.Model
 			finish.SkillSelections = outcome.SkillSelections
 			finish.Decisions = outcome.Decisions
 			finish.RequestedActions = outcome.ProposedActions
