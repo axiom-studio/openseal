@@ -35,7 +35,13 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 		Title: "Operate", Goal: "Inspect production health", Status: ObjectiveStatusActive,
 		Budget: &BudgetPolicy{MaxTurns: 10}, Cadence: &ObjectiveCadence{
 			Type: ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "sre",
-			RunBudget: &BudgetPolicy{MaxTurns: 2},
+			RunBudget: &BudgetPolicy{MaxTurns: 2}, RunTemplate: &ObjectiveRunTemplate{
+				Entrypoint: "monitor", Context: map[string]interface{}{
+					"initiativeId": "initiative-health", "sourceMonitorId": "cluster-events",
+				}, Policy: map[string]interface{}{"sourcePolicyRef": "production-read-only"}, Capability: &ObjectiveCapabilityInvocation{
+					SkillID: "kubernetes-events", SkillVersion: "1.0.0", Action: "watch", Inputs: map[string]interface{}{"namespace": "production"},
+				},
+			},
 		},
 		NextEvaluationAt: &due, IdempotencyKey: "operate",
 	})
@@ -55,8 +61,14 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs = %#v, err = %v", runs, err)
 	}
-	if runs[0].Source != RunSourceSchedule || runs[0].Budget == nil || runs[0].Budget.MaxTurns != 2 || runs[0].AssignedAgentID != "sre" {
+	if runs[0].Source != RunSourceSchedule || runs[0].Budget == nil || runs[0].Budget.MaxTurns != 2 || runs[0].AssignedAgentID != "sre" ||
+		runs[0].Entrypoint != "monitor" || runs[0].Context["initiativeId"] != "initiative-health" || runs[0].Context["sourceMonitorId"] != "cluster-events" ||
+		runs[0].Context["scheduledFor"] != due.Format(time.RFC3339Nano) || runs[0].Policy["sourcePolicyRef"] != "production-read-only" {
 		t.Fatalf("run = %#v", runs[0])
+	}
+	invocation, ok := runs[0].Context["capabilityInvocation"].(map[string]interface{})
+	if !ok || invocation["skillId"] != "kubernetes-events" || invocation["skillVersion"] != "1.0.0" || invocation["action"] != "watch" || invocation["inputs"].(map[string]interface{})["namespace"] != "production" {
+		t.Fatalf("scheduled capability invocation = %#v", runs[0].Context["capabilityInvocation"])
 	}
 	loaded, err := portfolio.GetObjective(ctx, objective.Scope, objective.ID)
 	if err != nil {
@@ -70,6 +82,24 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 	blocked, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
 	if err != nil || blocked.Backpressured != 1 || len(runs) != 1 {
 		t.Fatalf("blocked = %#v, err = %v", blocked, err)
+	}
+}
+
+func TestObjectiveCadenceRunTemplateFailsClosedOnSecretsAndReservedContext(t *testing.T) {
+	for name, template := range map[string]*ObjectiveRunTemplate{
+		"secret context":    {Context: map[string]interface{}{"apiKey": "must-not-persist"}},
+		"secret policy":     {Policy: map[string]interface{}{"apiToken": "must-not-persist"}},
+		"scheduledFor":      {Context: map[string]interface{}{"scheduledFor": "invented"}},
+		"capability field":  {Context: map[string]interface{}{"capabilityInvocation": "invented"}},
+		"capability secret": {Capability: &ObjectiveCapabilityInvocation{SkillID: "reader", SkillVersion: "1", Action: "search", Inputs: map[string]interface{}{"apiKey": "must-not-persist"}}},
+		"long entrypoint":   {Entrypoint: string(make([]byte, 129))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cadence := &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, RunTemplate: template}
+			if err := cadence.Validate(); err == nil {
+				t.Fatal("unsafe run template was accepted")
+			}
+		})
 	}
 }
 

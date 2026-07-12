@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -105,11 +106,27 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			continue
 		}
 		scheduledFor := objective.NextEvaluationAt.UTC()
+		contextValues := map[string]interface{}{"scheduledFor": scheduledFor.Format(time.RFC3339Nano)}
+		entrypoint := ""
+		policy := map[string]interface{}(nil)
+		if objective.Cadence.RunTemplate != nil {
+			entrypoint = strings.TrimSpace(objective.Cadence.RunTemplate.Entrypoint)
+			for key, value := range cloneMap(objective.Cadence.RunTemplate.Context) {
+				contextValues[key] = value
+			}
+			policy = cloneMap(objective.Cadence.RunTemplate.Policy)
+			if invocation := objective.Cadence.RunTemplate.Capability; invocation != nil {
+				contextValues["capabilityInvocation"] = map[string]interface{}{
+					"skillId": invocation.SkillID, "skillVersion": invocation.SkillVersion,
+					"action": invocation.Action, "inputs": cloneMap(invocation.Inputs),
+				}
+			}
+		}
 		created, createErr := NewRunCommandService(s.store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: objective.Scope, ObjectiveID: objective.ID, Owner: objective.Owner,
-			AssignedAgentID: objective.Cadence.AssignedAgentID, ConcurrencyKey: "objective:" + objective.ID,
+			AssignedAgentID: objective.Cadence.AssignedAgentID, Entrypoint: entrypoint, ConcurrencyKey: "objective:" + objective.ID,
 			Goal: objective.Goal, Source: RunSourceSchedule, Priority: objective.Priority,
-			Context:        map[string]interface{}{"scheduledFor": scheduledFor.Format(time.RFC3339Nano)},
+			Context: contextValues, Policy: policy,
 			Budget:         objective.Cadence.RunBudget,
 			IdempotencyKey: fmt.Sprintf("objective-schedule:%s:%s", objective.ID, scheduledFor.Format(time.RFC3339Nano)),
 			Actor:          ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: ActivityVisibilityScope,

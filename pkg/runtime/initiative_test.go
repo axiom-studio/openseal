@@ -61,12 +61,7 @@ func TestInitiativeServiceIdempotencyAndActivity(t *testing.T) {
 	store := NewMemoryStore(100)
 	svc := NewInitiativeService(store, store)
 	ctx := context.Background()
-	for _, id := range []string{"objective-a", "objective-b"} {
-		now := time.Now().UTC()
-		if err := store.CreateObjective(ctx, &Objective{ID: id, Scope: Scope{Kind: "tenant", ID: "a"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}, Title: id, Goal: "Verify initiative", Status: ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	seedInitiativeObjectives(t, store, Scope{Kind: "tenant", ID: "a"})
 	req := CreateInitiativeRequest{Initiative: initiativeFixture(Scope{Kind: "tenant", ID: "a"}), IdempotencyKey: "request-1", Actor: ActivityActor{Type: "user", ID: "u1"}}
 	first, event, err := svc.Create(ctx, req)
 	if err != nil || event == nil || event.InitiativeID != first.ID {
@@ -97,6 +92,41 @@ func TestInitiativeRejectsDuplicatedStateAndSecrets(t *testing.T) {
 	i.Policy = map[string]interface{}{"apiKey": "secret"}
 	if err := i.Validate(); err == nil {
 		t.Fatal("expected secret-bearing policy rejection")
+	}
+}
+
+func TestInitiativeSourceMonitorRequiresExecutableDriftFreeObjective(t *testing.T) {
+	ctx := context.Background()
+	for name, mutate := range map[string]func(*Initiative, *Objective){
+		"foreign objective": func(i *Initiative, _ *Objective) { i.SourceMonitors[0].ObjectiveID = "objective-b" },
+		"foreign owner":     func(_ *Initiative, o *Objective) { o.Owner.ID = "another-team" },
+		"no cadence":        func(_ *Initiative, o *Objective) { o.Cadence = nil },
+		"agent drift":       func(i *Initiative, _ *Objective) { i.SourceMonitors[0].AssignedAgentID = "other" },
+		"skill drift":       func(_ *Initiative, o *Objective) { o.Cadence.RunTemplate.Capability.SkillID = "another-skill" },
+		"context drift": func(_ *Initiative, o *Objective) {
+			o.Cadence.RunTemplate.Context["sourceMonitorId"] = "another-monitor"
+		},
+		"policy drift": func(_ *Initiative, o *Objective) { o.Cadence.RunTemplate.Policy["sourcePolicyRef"] = "unapproved" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := NewMemoryStore(20)
+			scope := Scope{Kind: "tenant", ID: "a"}
+			seedInitiativeObjectives(t, store, scope)
+			initiative := initiativeFixture(scope)
+			objective, err := store.GetObjective(ctx, scope, "objective-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(initiative, objective)
+			objective.Revision = 2
+			objective.UpdatedAt = time.Now().UTC()
+			if err := store.UpdateObjective(ctx, objective, 1); err != nil && name != "foreign objective" && name != "agent drift" {
+				t.Fatal(err)
+			}
+			if _, _, err := NewInitiativeService(store, store).Create(ctx, CreateInitiativeRequest{Initiative: initiative}); err == nil {
+				t.Fatal("invalid executable source monitor was accepted")
+			}
+		})
 	}
 }
 
@@ -134,6 +164,7 @@ func TestInitiativeConcurrentIdempotentCreateHasOneWinner(t *testing.T) {
 			svc := NewInitiativeService(store, store)
 			base := initiativeFixture(scope)
 			base.ID = ""
+			base.SourceMonitors = nil
 			const n = 24
 			ids := make(chan string, n)
 			errs := make(chan error, n)
@@ -276,6 +307,7 @@ func TestInitiativeStoreFiltersAndPaginatesInDeterministicOrder(t *testing.T) {
 					i.Status = InitiativeStatusActive
 					i.ObjectiveRefs = []string{"objective-c"}
 					i.Milestones = nil
+					i.SourceMonitors = nil
 				}
 				if err := s.CreateInitiative(context.Background(), i); err != nil {
 					t.Fatal(err)
@@ -298,12 +330,23 @@ func seedInitiativeObjectives(t *testing.T, store PortfolioStore, scope Scope) {
 	t.Helper()
 	for _, id := range []string{"objective-a", "objective-b"} {
 		now := time.Now().UTC()
-		if err := store.CreateObjective(context.Background(), &Objective{ID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}, Title: id, Goal: "Verify initiative", Status: ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+		objective := &Objective{ID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}, Title: id, Goal: "Verify initiative", Status: ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}
+		if id == "objective-a" {
+			objective.Cadence = &ObjectiveCadence{
+				Type: ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "researcher",
+				RunTemplate: &ObjectiveRunTemplate{
+					Entrypoint: "monitor", Context: map[string]interface{}{"initiativeId": "initiative-a", "sourceMonitorId": "monitor-a"},
+					Policy:     map[string]interface{}{"sourcePolicyRef": "approved-forums"},
+					Capability: &ObjectiveCapabilityInvocation{SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", Inputs: map[string]interface{}{"query": "customer pain"}},
+				},
+			}
+		}
+		if err := store.CreateObjective(context.Background(), objective); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 func initiativeFixture(scope Scope) *Initiative {
-	return &Initiative{ID: "initiative-a", Scope: scope, Title: "Launch research", Purpose: "Understand customer needs", Status: InitiativeStatusDraft, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}, TeamRefs: []ResourceReference{{Kind: ResourceKindTeamDeployment, ID: "team-a", Revision: 1}}, ObjectiveRefs: []string{"objective-a", "objective-b"}, RunRefs: []string{"run-a"}, Milestones: []InitiativeMilestone{{ID: "m1", Title: "Evidence review", Status: "pending", ObjectiveRefs: []string{"objective-a"}}}, Hypotheses: []InitiativeHypothesis{{ID: "h1", Statement: "Onboarding is difficult", Confidence: .4, UpdatedAt: time.Now().UTC()}}, SourceMonitors: []SourceMonitorReference{{ID: "monitor-a", SkillID: "forum-reader", ScheduleRef: "schedule-a"}}, Deliverables: []InitiativeDeliverable{{ID: "report", Title: "Cited report", Status: "planned", ArtifactRefs: []ResourceReference{{Kind: ResourceKindArtifact, ID: "report-pdf", Revision: 1}}}}, Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	return &Initiative{ID: "initiative-a", Scope: scope, Title: "Launch research", Purpose: "Understand customer needs", Status: InitiativeStatusDraft, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}, TeamRefs: []ResourceReference{{Kind: ResourceKindTeamDeployment, ID: "team-a", Revision: 1}}, ObjectiveRefs: []string{"objective-a", "objective-b"}, RunRefs: []string{"run-a"}, Milestones: []InitiativeMilestone{{ID: "m1", Title: "Evidence review", Status: "pending", ObjectiveRefs: []string{"objective-a"}}}, Hypotheses: []InitiativeHypothesis{{ID: "h1", Statement: "Onboarding is difficult", Confidence: .4, UpdatedAt: time.Now().UTC()}}, SourceMonitors: []SourceMonitorReference{{ID: "monitor-a", ObjectiveID: "objective-a", AssignedAgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", SourcePolicyRef: "approved-forums", Deduplication: SourceMonitorDeduplicateStableSourceAndContent}}, Deliverables: []InitiativeDeliverable{{ID: "report", Title: "Cited report", Status: "planned", ArtifactRefs: []ResourceReference{{Kind: ResourceKindArtifact, ID: "report-pdf", Revision: 1}}}}, Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 }
