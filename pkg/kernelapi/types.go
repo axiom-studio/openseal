@@ -22,8 +22,8 @@ const (
 	InitiativesCapabilityVersion        = "1"
 	ArtifactsCapabilityID               = "artifacts"
 	ArtifactsCapabilityVersion          = "1"
-	TeamChannelsCapabilityID            = "team-channels"
-	TeamChannelsCapabilityVersion       = "1"
+	ChannelsCapabilityID                = "channels"
+	ChannelsCapabilityVersion           = "2"
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "1"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
@@ -190,7 +190,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), AgentRunsCapability(), TeamChannelsCapability(), TeamDefinitionsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), AgentRunsCapability(), ChannelsCapability(), TeamDefinitionsCapability()},
 	}
 }
 
@@ -210,9 +210,9 @@ func ArtifactCapability(contentOperations ...string) Capability {
 	return capability
 }
 
-func TeamChannelsCapability() Capability {
+func ChannelsCapability() Capability {
 	return Capability{
-		ID: TeamChannelsCapabilityID, Version: TeamChannelsCapabilityVersion, Available: true,
+		ID: ChannelsCapabilityID, Version: ChannelsCapabilityVersion, Available: true,
 		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationCoordinate, OperationRead, OperationPresence, OperationAudit, OperationChanges},
 	}
 }
