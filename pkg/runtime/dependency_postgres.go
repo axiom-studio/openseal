@@ -120,6 +120,11 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 	if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 		return nil, err
 	}
+	for _, target := range record.TargetRuns {
+		if err := s.insertPostgresAgentRunTx(ctx, tx, target); err != nil {
+			return nil, err
+		}
+	}
 	groupPayload, err := json.Marshal(record.Group)
 	if err != nil {
 		return nil, err

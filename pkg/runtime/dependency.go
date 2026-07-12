@@ -154,8 +154,12 @@ type RunDependencyResult struct {
 }
 
 type RunDependencyGroupCreateRecord struct {
-	Group                  *RunDependencyGroup
-	Dependencies           []*RunDependency
+	Group        *RunDependencyGroup
+	Dependencies []*RunDependency
+	// TargetRuns are inserted in the same transaction as the sealed fan-out.
+	// This prevents a fast child from completing before its dependency edge
+	// exists and makes fork materialization safely replayable after crashes.
+	TargetRuns             []*AgentRun
 	SourceRun              *AgentRun
 	ExpectedSourceRevision int64
 	Event                  *ActivityEvent
