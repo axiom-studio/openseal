@@ -84,6 +84,14 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	if len(calls) != 1 || calls[0].ID != persistedID || len(approvals) != 1 || len(events) != 1 || persistedRun.Revision != run.Revision+1 || persistedRun.Status != AgentRunStatusWaitingForApproval {
 		t.Fatalf("durable proposal mismatch: calls=%#v approvals=%#v events=%#v run=%#v", calls, approvals, events, persistedRun)
 	}
+	owned, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}})
+	if err != nil || len(owned) != 1 {
+		t.Fatalf("owner approvals = %#v, err = %v", owned, err)
+	}
+	other, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}})
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other owner approvals = %#v, err = %v", other, err)
+	}
 	if _, err := store.GetActionCall(ctx, Scope{Kind: "tenant", ID: "other"}, persistedID); err != ErrActionNotFound {
 		t.Fatalf("cross-scope action lookup error = %v", err)
 	}

@@ -111,6 +111,11 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
+	if filter.Owner != nil {
+		if err := filter.Owner.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*ApprovalCheckpoint, 0)
@@ -118,6 +123,12 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 		if approval.Scope != filter.Scope || filter.RunID != "" && approval.RunID != filter.RunID ||
 			len(filter.Status) > 0 && !containsApprovalStatus(filter.Status, approval.Status) {
 			continue
+		}
+		if filter.Owner != nil {
+			run := s.agentRuns[portfolioKey(filter.Scope, approval.RunID)]
+			if run == nil || run.Owner != *filter.Owner {
+				continue
+			}
 		}
 		result = append(result, cloneApprovalCheckpoint(approval))
 	}
