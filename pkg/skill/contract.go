@@ -449,9 +449,6 @@ func validateDefinition(definition *Definition) error {
 	if len(definition.Actions) == 0 && definition.Prompt == nil {
 		return errors.New("skill must declare at least one action or prompt module")
 	}
-	if len(definition.Actions) > 0 && strings.TrimSpace(definition.Transport.Kind) == "" {
-		return errors.New("skill transport kind is required")
-	}
 	if definition.Prompt != nil && strings.TrimSpace(definition.Prompt.Instructions) == "" {
 		return errors.New("skill prompt instructions are required")
 	}
@@ -485,6 +482,9 @@ func validateDefinition(definition *Definition) error {
 		transport := definition.Transport
 		if action.Transport != nil {
 			transport = *action.Transport
+		}
+		if strings.TrimSpace(transport.Kind) == "" {
+			return fmt.Errorf("skill action %s requires an action or definition transport", name)
 		}
 		properties, _ := action.InputSchema["properties"].(map[string]interface{})
 		for argument, mapping := range transport.Arguments {
