@@ -32,7 +32,7 @@ func TestLiveGeneratorCompilesRepresentativeMarketingTeam(t *testing.T) {
 		Mode:   ModeCreate,
 		Prompt: "Create a calm three-Agent marketing research Team. It monitors approved Reddit communities for competitor pain points, preserves cited evidence, drafts a weekly report, and prepares replies but requires human approval before posting. Ask about any missing community allowlist or identity policy.",
 		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", CredentialKinds: []string{"reddit-oauth"}, MaximumRisk: capability.RiskLevelExternal},
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}, CredentialKinds: []string{"reddit-oauth"}, MaximumRisk: capability.RiskLevelExternal},
 			"report-artifact": {ID: "report-artifact", MaximumRisk: capability.RiskLevelWrite},
 		}},
 	})

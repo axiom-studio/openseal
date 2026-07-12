@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -127,6 +128,48 @@ func TestSQLiteAtomicWorkforceApplyPersistsWholeAggregateAcrossRestart(t *testin
 	restored, err := restarted.GetChangeSet(context.Background(), value.Scope, value.ID)
 	if err != nil || restored.ApplyReceipt == nil || restored.ApplyReceipt.ID != "receipt" {
 		t.Fatalf("restored=%#v err=%v", restored, err)
+	}
+}
+
+func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	catalog := skill.NewCatalogWithStore(store)
+	if err := catalog.Register(context.Background(), &skill.Definition{
+		ID: "research", Version: "1.0.0", Name: "Research", Prompt: &skill.PromptModule{Instructions: "Preserve cited evidence."},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	value := testApplicableWorkforceChangeSet()
+	value.Result.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "research", PromptRequired: true}}
+	value.Result.Candidate.Agents[0].Authority.AllowedSkillIDs = []string{"research"}
+	value.Generation = &authoring.ChangeSetGeneration{Request: authoring.GenerateRequest{Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		"research": {ID: "research", Version: "1.0.0", PromptAvailable: true, MaximumRisk: capability.RiskLevelRead},
+	}}}}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(value)
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt", IdempotencyKey: "apply", CandidateDigest: value.CandidateDigest, Actor: authoring.ChangeSetActor{Type: "user", ID: "7"}, AppliedAt: value.UpdatedAt.Add(time.Minute)}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	result, err := store.ApplyChangeSet(context.Background(), applied, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts, err := catalog.ListModelPrompts(context.Background(), value.Scope, "agent-live")
+	if err != nil || len(prompts) != 1 || prompts[0].SkillID != "research" {
+		t.Fatalf("prompts=%#v error=%v", prompts, err)
+	}
+	found := false
+	for _, resource := range result.ApplyReceipt.Resources {
+		found = found || resource.Kind == "skill_binding" && resource.ID == "workforce:agent-live:research"
+	}
+	if !found {
+		t.Fatalf("receipt resources=%#v", result.ApplyReceipt.Resources)
 	}
 }
 

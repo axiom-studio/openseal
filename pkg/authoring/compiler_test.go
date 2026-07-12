@@ -47,7 +47,7 @@ func TestCompilerVerifiesPromptGeneratedWorkforceAndCapabilityGaps(t *testing.T)
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Create a GTM team that researches Reddit and follows up with qualified leads.",
 		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", CredentialKinds: []string{"reddit-oauth"}, MaximumRisk: capability.RiskLevelExternal},
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}, CredentialKinds: []string{"reddit-oauth"}, MaximumRisk: capability.RiskLevelExternal},
 		}},
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestCompilerProducesDeterministicAmendmentDiffAndRiskWidening(t *testing.T)
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
 		Mode: ModeAmend, Prompt: "Allow approved public responses and strengthen the research objective.", Existing: &existing,
 		Catalog: CapabilityCatalog{
-			Skills:               map[string]SkillCapability{"reddit-research": {ID: "reddit-research", CredentialKinds: []string{"reddit-oauth"}}},
+			Skills:               map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}, CredentialKinds: []string{"reddit-oauth"}}},
 			AvailableCredentials: map[string]bool{"reddit-oauth": true},
 		},
 	})
@@ -92,7 +92,7 @@ func TestCompilerRejectsInvalidCompositionAndNonStrictGeneratorOutput(t *testing
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a team", Catalog: CapabilityCatalog{
-		Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}},
+		Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}},
 	}})
 	if err != nil || result.Valid || len(result.Validation) == 0 || result.Validation[0].Code != "unknown_role" {
 		t.Fatalf("invalid composition = %#v, err = %v", result, err)
@@ -108,7 +108,7 @@ func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
 	generator := &repairingGenerator{generated: []byte(`{"candidate":{"agents":[]},"unknown":true}`), repaired: valid}
 	compiler, _ := NewCompiler(generator)
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
 	})
 	if err != nil || !result.Valid || generator.repairs != 1 {
 		t.Fatalf("repaired result = %#v, repairs = %d, err = %v", result, generator.repairs, err)

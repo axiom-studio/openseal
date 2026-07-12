@@ -186,6 +186,17 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				missing[key] = MissingRequirement{Kind: "skill", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
 				continue
 			}
+			if requirement.PromptRequired && !capability.PromptAvailable {
+				key := "prompt:" + requirement.SkillID + ":" + definition.ID
+				missing[key] = MissingRequirement{Kind: "prompt", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
+			}
+			availableActions := stringSet(capability.Actions)
+			for _, action := range requirement.RequiredActions {
+				if !availableActions[action] {
+					key := "action:" + requirement.SkillID + "/" + action + ":" + definition.ID
+					missing[key] = MissingRequirement{Kind: "action", ID: requirement.SkillID + "/" + action, RequiredBy: "agent:" + definition.ID}
+				}
+			}
 			for _, credential := range capability.CredentialKinds {
 				if !catalog.AvailableCredentials[credential] {
 					key := "credential:" + credential + ":" + definition.ID
