@@ -13,6 +13,7 @@ import (
 type RunForkStore interface {
 	PortfolioStore
 	RunDependencyStore
+	RunActivityStore
 }
 
 type RunForkBranch struct {
@@ -251,4 +252,99 @@ func (c *RunForkCoordinator) replay(ctx context.Context, source *AgentRun, group
 
 func stableForkIdentifier(runID, forkID, suffix string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal:fork:"+runID+":"+forkID+":"+suffix)).String()
+}
+
+// CompleteChild resolves a branch edge from the child Run's durable terminal
+// state. For join_any it also cancels and resolves every losing child so no
+// second wake or unnecessary background work survives the winner.
+func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *AgentRun, actor ActivityActor) (*RunDependencyResult, error) {
+	if c == nil || c.store == nil || child == nil || !isTerminalAgentRunStatus(child.Status) {
+		return nil, errors.New("terminal fork child is required")
+	}
+	metadata, ok := child.Checkpoint["forkChild"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("Run is not a fork child")
+	}
+	groupID, _ := metadata["groupId"].(string)
+	dependencyID, _ := metadata["dependencyId"].(string)
+	sourceRunID, _ := metadata["sourceRunId"].(string)
+	if groupID == "" || dependencyID == "" || sourceRunID != child.ParentRunID {
+		return nil, ErrInvalidRunDependency
+	}
+	group, err := c.store.GetRunDependencyGroup(ctx, child.Scope, groupID)
+	if err != nil || group == nil {
+		if err == nil {
+			err = ErrDependencyGroupNotFound
+		}
+		return nil, err
+	}
+	edges, err := c.store.ListRunDependencies(ctx, child.Scope, group.ID)
+	if err != nil {
+		return nil, err
+	}
+	var edge *RunDependency
+	for _, candidate := range edges {
+		if candidate.ID == dependencyID && candidate.TargetRunID == child.ID {
+			edge = candidate
+			break
+		}
+	}
+	if edge == nil {
+		return nil, ErrRunDependencyNotFound
+	}
+	state := RunDependencyStateSatisfied
+	errorMessage := ""
+	if child.Status == AgentRunStatusFailed {
+		state, errorMessage = RunDependencyStateFailed, child.Error
+	} else if child.Status == AgentRunStatusCanceled {
+		state, errorMessage = RunDependencyStateCanceled, child.Error
+	}
+	if actor.Type == "" || actor.ID == "" {
+		actor = ActivityActor{Type: "system", ID: "run-fork-coordinator"}
+	}
+	result, err := NewDependencyCoordinator(c.store).ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+		Scope: child.Scope, GroupID: group.ID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision,
+		State: state, Result: map[string]interface{}{
+			"branchId": dependencyID, "checkpoint": cloneMap(child.Checkpoint), "output": cloneMap(child.Output),
+		}, Error: errorMessage, Actor: actor, Visibility: ActivityVisibilityScope,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.Evaluation.Wake && result.Group.Policy.Mode == FanInModeAny && result.Group.Status == RunDependencyGroupSatisfied {
+		if err := c.cancelLosingChildren(ctx, result, child.ID, actor); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *RunDependencyResult, winnerID string, actor ActivityActor) error {
+	activity := NewRunActivityService(c.store, c.store)
+	for _, edge := range winner.Dependencies {
+		if edge.TargetRunID == winnerID || edge.State == RunDependencyStateSatisfied || edge.State == RunDependencyStateFailed || edge.State == RunDependencyStateCanceled {
+			continue
+		}
+		child, err := c.store.GetAgentRun(ctx, edge.Scope, edge.TargetRunID)
+		if err != nil || child == nil {
+			if err == nil {
+				err = ErrRunNotFound
+			}
+			return err
+		}
+		if !isTerminalAgentRunStatus(child.Status) {
+			child, _, err = activity.TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
+				ExpectedRevision: child.Revision, Status: AgentRunStatusCanceled,
+				Error: "canceled after another fork branch satisfied join_any", Actor: actor,
+				EventType: "run.fork_loser_canceled", Summary: "Canceled losing join_any branch", CorrelationID: winner.Group.ID,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		if _, err := c.CompleteChild(ctx, child, actor); err != nil {
+			return err
+		}
+	}
+	return nil
 }
