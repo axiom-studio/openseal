@@ -61,8 +61,13 @@ func (s *ArtifactRetentionService) Sweep(ctx context.Context, scope Scope, offse
 			result.Missing++
 			continue
 		}
-		if err := s.deleter.Delete(ctx, scope, artifact.ContentRef); err != nil {
+		deleted, err := s.deleter.Delete(ctx, scope, artifact.ContentRef)
+		if err != nil {
 			return nil, err
+		}
+		if !deleted {
+			result.Missing++
+			continue
 		}
 		result.Deleted = append(result.Deleted, ArtifactRetentionDeletion{ArtifactID: artifact.ID, Version: artifact.Version, ContentRef: artifact.ContentRef})
 	}

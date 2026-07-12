@@ -146,22 +146,22 @@ func (s *LocalStore) Available(_ context.Context, scope runtime.Scope, contentRe
 	return err == nil, err
 }
 
-func (s *LocalStore) Delete(_ context.Context, scope runtime.Scope, contentRef string) error {
+func (s *LocalStore) Delete(_ context.Context, scope runtime.Scope, contentRef string) (bool, error) {
 	if s == nil || s.root == "" {
-		return errors.New("local artifact store is not configured")
+		return false, errors.New("local artifact store is not configured")
 	}
 	if err := scope.Validate(); err != nil {
-		return err
+		return false, err
 	}
 	hexDigest, err := parseLocalReference(contentRef)
 	if err != nil {
-		return err
+		return false, err
 	}
 	err = os.Remove(filepath.Join(s.scopeDirectory(scope), hexDigest))
 	if os.IsNotExist(err) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 func (s *LocalStore) scopeDirectory(scope runtime.Scope) string {

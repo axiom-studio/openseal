@@ -12,9 +12,10 @@ func (s *retentionContentStore) Available(_ context.Context, _ Scope, ref string
 	return s.available[ref], nil
 }
 
-func (s *retentionContentStore) Delete(_ context.Context, _ Scope, ref string) error {
+func (s *retentionContentStore) Delete(_ context.Context, _ Scope, ref string) (bool, error) {
+	deleted := s.available[ref]
 	delete(s.available, ref)
-	return nil
+	return deleted, nil
 }
 
 func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T) {
