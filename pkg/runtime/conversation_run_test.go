@@ -200,6 +200,76 @@ func TestConversationRunTurnRunnerCompletesAndReplaysCommittedRound(t *testing.T
 	}
 }
 
+func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "agent-channel"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Title: "Release assistant", IdempotencyKey: "release-assistant-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Summarize the release evidence.", "agent-trigger")
+	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduled, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduled.Run.Owner != conversation.Owner || scheduled.Run.AssignedAgentID != conversation.Owner.ID {
+		t.Fatalf("Agent conversation Run identity = %#v", scheduled.Run)
+	}
+	resolverCalls := 0
+	agentTurns := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		resolverCalls++
+		if run.Kind != RunKindAgentWork || run.AssignedAgentID != "agent-42" ||
+			!strings.Contains(run.Goal, "Summarize the release evidence") {
+			t.Fatalf("hosted Agent projection = %#v", run)
+		}
+		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+			if input.Run != run {
+				t.Fatal("bound Agent runner did not receive its projected Run")
+			}
+			return &TurnOutcome{
+				NextRunStatus: AgentRunStatusCompleted,
+				OutputSummary: "Release evidence summarized",
+				RunOutput:     map[string]interface{}{"summary": "The release evidence is healthy."},
+				SkillSelections: []HostedSkillSelection{{
+					SkillRef: "skill:summarize@1", Disposition: HostedSkillApplied, Summary: "Applied summarization",
+				}},
+			}, nil
+		})}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted ||
+		outcome.RunOutput["messageId"] == "" || outcome.RunOutput["replayed"] != false || len(outcome.SkillSelections) != 1 {
+		t.Fatalf("Agent conversation outcome = %#v, %v", outcome, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 || messages[1].Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-42"}) ||
+		messages[1].Content != "The release evidence is healthy." || messages[1].ReplyToMessageID != trigger.ID ||
+		len(messages[1].References) != 1 || messages[1].References[0].Kind != ConversationReferenceRun || messages[1].References[0].ID != scheduled.Run.ID {
+		t.Fatalf("Agent channel messages = %#v, %v", messages, err)
+	}
+	replayed, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || replayed.RunOutput["replayed"] != true || resolverCalls != 2 {
+		t.Fatalf("Agent response replay = %#v, calls=%d, err=%v", replayed, resolverCalls, err)
+	}
+	messages, err = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("Agent response replay duplicated messages: %#v, %v", messages, err)
+	}
+}
+
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
 	store := NewMemoryStore(20)
 	ctx := context.Background()
