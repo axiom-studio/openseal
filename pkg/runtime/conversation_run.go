@@ -369,7 +369,7 @@ func NewConversationRunTurnRunner(
 	}, nil
 }
 
-func (r *ConversationRunTurnRunner) ResolveTurnRunner(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 	if r == nil || r.coordinator == nil || r.conversations == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -378,6 +378,40 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(_ context.Context, run *Ag
 	}
 	if run.Owner.Type == OwnerTypeAgent && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
+	}
+	if run.Owner.Type == OwnerTypeAgent {
+		hostedRun := cloneAgentRun(run)
+		hostedRun.Kind = RunKindAgentWork
+		hostedRun.AssignedAgentID = run.Owner.ID
+		agentBinding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
+		if err != nil {
+			return nil, err
+		}
+		if agentBinding == nil || agentBinding.Runner == nil {
+			return nil, ErrConversationCoordinationUnavailable
+		}
+		boundAgentRunner := agentBinding.Runner
+		return &TurnRunnerBinding{
+			Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				if err := validateConversationRun(input.Run); err != nil {
+					return nil, err
+				}
+				conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
+				triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
+				conversation, err := r.conversations.GetConversation(ctx, input.Run.Scope, conversationID)
+				if err != nil {
+					return nil, err
+				}
+				if conversation.Owner != input.Run.Owner {
+					return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+				}
+				return r.runAgentTurn(ctx, input, conversation, triggerID, boundAgentRunner)
+			}),
+			DefinitionID: agentBinding.DefinitionID, DefinitionVersion: agentBinding.DefinitionVersion,
+			ModelProvider: agentBinding.ModelProvider, Model: agentBinding.Model,
+			InputContextRefs:  append([]string(nil), agentBinding.InputContextRefs...),
+			BudgetReservation: agentBinding.BudgetReservation,
+		}, nil
 	}
 	return &TurnRunnerBinding{
 		Runner: r, DefinitionID: "openseal.conversation-coordinator", DefinitionVersion: "1",
@@ -400,7 +434,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
 	}
 	if conversation.Owner.Type == OwnerTypeAgent {
-		return r.runAgentTurn(ctx, input, conversation, triggerID)
+		return r.runAgentTurn(ctx, input, conversation, triggerID, nil)
 	}
 	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 	result, err := r.coordinator.Coordinate(ctx, ConversationCoordinationRequest{
@@ -434,6 +468,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	input TurnExecutionContext,
 	conversation *Conversation,
 	triggerID string,
+	boundAgentRunner TurnRunner,
 ) (*TurnOutcome, error) {
 	if r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
@@ -457,16 +492,19 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	hostedRun.Kind = RunKindAgentWork
 	hostedRun.Goal = goal
 	hostedRun.AssignedAgentID = conversation.Owner.ID
-	binding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
-	if err != nil {
-		return nil, err
-	}
-	if binding == nil || binding.Runner == nil {
-		return nil, ErrConversationCoordinationUnavailable
+	if boundAgentRunner == nil {
+		binding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
+		if err != nil {
+			return nil, err
+		}
+		if binding == nil || binding.Runner == nil {
+			return nil, ErrConversationCoordinationUnavailable
+		}
+		boundAgentRunner = binding.Runner
 	}
 	hostedInput := input
 	hostedInput.Run = hostedRun
-	outcome, err := binding.Runner.RunTurn(ctx, hostedInput)
+	outcome, err := boundAgentRunner.RunTurn(ctx, hostedInput)
 	if err != nil {
 		return nil, err
 	}

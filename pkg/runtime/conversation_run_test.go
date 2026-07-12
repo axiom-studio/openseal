@@ -227,29 +227,39 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 	resolverCalls := 0
 	agentTurns := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		resolverCalls++
-		if run.Kind != RunKindAgentWork || run.AssignedAgentID != "agent-42" ||
-			!strings.Contains(run.Goal, "Summarize the release evidence") {
+		if run.Kind != RunKindAgentWork || run.AssignedAgentID != "agent-42" {
 			t.Fatalf("hosted Agent projection = %#v", run)
 		}
-		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-			if input.Run != run {
-				t.Fatal("bound Agent runner did not receive its projected Run")
-			}
-			return &TurnOutcome{
-				NextRunStatus: AgentRunStatusCompleted,
-				OutputSummary: "Release evidence summarized",
-				RunOutput:     map[string]interface{}{"summary": "The release evidence is healthy."},
-				SkillSelections: []HostedSkillSelection{{
-					SkillRef: "skill:summarize@1", Disposition: HostedSkillApplied, Summary: "Applied summarization",
-				}},
-			}, nil
-		})}, nil
+		return &TurnRunnerBinding{
+			DefinitionID: "agent-definition", DefinitionVersion: "7", ModelProvider: "host", Model: "agent-model",
+			InputContextRefs: []string{"skill:summarize@1"}, BudgetReservation: BudgetUsage{Turns: 1},
+			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				if input.Run.Kind != RunKindAgentWork || input.Run.AssignedAgentID != run.AssignedAgentID ||
+					!strings.Contains(input.Run.Goal, "Summarize the release evidence") {
+					t.Fatalf("bound Agent runner input = %#v", input.Run)
+				}
+				return &TurnOutcome{
+					NextRunStatus: AgentRunStatusCompleted,
+					OutputSummary: "Release evidence summarized",
+					RunOutput:     map[string]interface{}{"summary": "The release evidence is healthy."},
+					SkillSelections: []HostedSkillSelection{{
+						SkillRef: "skill:summarize@1", Disposition: HostedSkillApplied, Summary: "Applied summarization",
+					}},
+				}, nil
+			}),
+		}, nil
 	})
 	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns})
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil || binding.DefinitionID != "agent-definition" || binding.DefinitionVersion != "7" ||
+		binding.ModelProvider != "host" || binding.Model != "agent-model" || len(binding.InputContextRefs) != 1 ||
+		binding.BudgetReservation.Turns != 1 {
+		t.Fatalf("Agent conversation binding = %#v, %v", binding, err)
+	}
+	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
 	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted ||
 		outcome.RunOutput["messageId"] == "" || outcome.RunOutput["replayed"] != false || len(outcome.SkillSelections) != 1 {
 		t.Fatalf("Agent conversation outcome = %#v, %v", outcome, err)
@@ -260,8 +270,8 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 		len(messages[1].References) != 1 || messages[1].References[0].Kind != ConversationReferenceRun || messages[1].References[0].ID != scheduled.Run.ID {
 		t.Fatalf("Agent channel messages = %#v, %v", messages, err)
 	}
-	replayed, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
-	if err != nil || replayed.RunOutput["replayed"] != true || resolverCalls != 2 {
+	replayed, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || replayed.RunOutput["replayed"] != true || resolverCalls != 1 {
 		t.Fatalf("Agent response replay = %#v, calls=%d, err=%v", replayed, resolverCalls, err)
 	}
 	messages, err = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
