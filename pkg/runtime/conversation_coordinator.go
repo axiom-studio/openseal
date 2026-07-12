@@ -238,6 +238,25 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 		}
 		seen[bindings[index].Participant] = struct{}{}
 	}
+	participantRecent := make([][]*ChannelMessage, len(bindings))
+	participantTriggers := make([]*ChannelMessage, len(bindings))
+	for index, binding := range bindings {
+		viewer := ConversationViewer{Participant: binding.Participant, Roles: append([]string(nil), binding.SemanticRoles...)}
+		visible, err := c.conversations.filterVisibleChannelMessages(ctx, req.Scope, conversation.ID, recent, viewer)
+		if err != nil {
+			return nil, fmt.Errorf("project participant %s channel context: %w", binding.Participant.ID, err)
+		}
+		participantRecent[index] = visible
+		if trigger != nil {
+			projected, err := c.conversations.filterVisibleChannelMessages(ctx, req.Scope, conversation.ID, []*ChannelMessage{trigger}, viewer)
+			if err != nil {
+				return nil, fmt.Errorf("project participant %s trigger: %w", binding.Participant.ID, err)
+			}
+			if len(projected) == 1 {
+				participantTriggers[index] = projected[0]
+			}
+		}
+	}
 
 	proposals := make([]ParticipationProposal, len(bindings))
 	leases := make([]*ConversationPresence, len(bindings))
@@ -257,6 +276,17 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 			defer workers.Done()
 			for index := range jobs {
 				binding := bindings[index]
+				visibleTrigger := participantTriggers[index]
+				visibleRecent := participantRecent[index]
+				if trigger != nil && visibleTrigger == nil {
+					if err := c.markObserved(workerCtx, conversation, binding.Participant, latestConversationSequence(visibleRecent)); err != nil {
+						errs[index] = fmt.Errorf("mark participant %s read: %w", binding.Participant.ID, err)
+						cancel()
+						continue
+					}
+					proposals[index] = ParticipationProposal{Participant: binding.Participant, SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority}
+					continue
+				}
 				presence, presenceErr := c.conversations.SetPresence(workerCtx, SetConversationPresenceRequest{
 					Scope: req.Scope, ConversationID: conversation.ID, Participant: binding.Participant,
 					State: ConversationPresenceWorking, Summary: "Reviewing channel activity", TTL: c.config.PresenceTTL,
@@ -269,8 +299,8 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				leases[index] = presence
 				proposalCtx, proposalCancel := context.WithTimeout(workerCtx, c.config.ProposalTimeout)
 				proposal, proposalErr := c.proposals.ProposeParticipation(proposalCtx, ParticipationProposalContext{
-					Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger),
-					RecentMessages: cloneChannelMessages(recent), Participant: binding.Participant,
+					Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(visibleTrigger),
+					RecentMessages: cloneChannelMessages(visibleRecent), Participant: binding.Participant,
 					SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority,
 				})
 				proposalCancel()
@@ -284,16 +314,16 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				proposal.Participant = binding.Participant
 				proposal.SemanticRoles = append([]string(nil), binding.SemanticRoles...)
 				proposal.Priority = binding.Priority
-				directlyMentioned := participantDirectlyMentioned(trigger, binding.Participant)
+				directlyMentioned := participantDirectlyMentioned(visibleTrigger, binding.Participant)
 				proposal.Signals.DirectlyMentioned = directlyMentioned
-				proposal.Signals.TriggerTargetsOtherParticipant = triggerTargetsSpecificAgent(trigger) && !directlyMentioned
-				proposal.Signals.RoleRelevant = proposal.Signals.RoleRelevant || participantRoleAddressed(trigger, binding.SemanticRoles)
+				proposal.Signals.TriggerTargetsOtherParticipant = triggerTargetsSpecificAgent(visibleTrigger) && !directlyMentioned
+				proposal.Signals.RoleRelevant = proposal.Signals.RoleRelevant || participantRoleAddressed(visibleTrigger, binding.SemanticRoles)
 				if err := validateGeneratedParticipationProposal(proposal); err != nil {
 					errs[index] = fmt.Errorf("participant %s proposal: %w", binding.Participant.ID, err)
 					cancel()
 					continue
 				}
-				if err := c.markObserved(workerCtx, conversation, binding.Participant); err != nil {
+				if err := c.markObserved(workerCtx, conversation, binding.Participant, latestConversationSequence(visibleRecent)); err != nil {
 					errs[index] = fmt.Errorf("mark participant %s read: %w", binding.Participant.ID, err)
 					cancel()
 					continue
@@ -328,13 +358,16 @@ queue:
 	})
 }
 
-func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation *Conversation, participant ConversationParticipant) error {
+func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation *Conversation, participant ConversationParticipant, sequence int64) error {
+	if sequence <= 0 {
+		return nil
+	}
 	for range 2 {
 		cursor, err := c.conversations.GetCursor(ctx, conversation.Scope, conversation.ID, participant)
 		if err != nil {
 			return err
 		}
-		if cursor != nil && cursor.ReadSequence >= conversation.LastSequence && cursor.DeliveredSequence >= conversation.LastSequence {
+		if cursor != nil && cursor.ReadSequence >= sequence && cursor.DeliveredSequence >= sequence {
 			return nil
 		}
 		expectedRevision := int64(0)
@@ -343,13 +376,23 @@ func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation
 		}
 		_, _, err = c.conversations.AdvanceCursor(ctx, AdvanceConversationCursorRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: participant,
-			ExpectedRevision: expectedRevision, DeliveredSequence: conversation.LastSequence, ReadSequence: conversation.LastSequence,
+			ExpectedRevision: expectedRevision, DeliveredSequence: sequence, ReadSequence: sequence,
 		})
 		if !errors.Is(err, ErrConversationCursorConflict) {
 			return err
 		}
 	}
 	return ErrConversationCursorConflict
+}
+
+func latestConversationSequence(messages []*ChannelMessage) int64 {
+	var latest int64
+	for _, message := range messages {
+		if message != nil && message.Sequence > latest {
+			latest = message.Sequence
+		}
+	}
+	return latest
 }
 
 func (c *ConversationCoordinator) releasePresenceLeases(
