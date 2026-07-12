@@ -186,7 +186,7 @@ func (s *PostgresStore) ListSourceObservations(ctx context.Context, filter Sourc
 	if limit > 100 || filter.Offset < 0 {
 		return nil, ErrInvalidSourceObservation
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("source_observations")+` WHERE scope_kind=$1 AND scope_id=$2 AND ($3='' OR initiative_id=$3) AND ($4='' OR monitor_id=$4) AND ($5='' OR run_id=$5) ORDER BY ingested_at DESC,id DESC LIMIT $6 OFFSET $7`, filter.Scope.Kind, filter.Scope.ID, filter.InitiativeID, filter.MonitorID, filter.RunID, limit, filter.Offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("source_observations")+` WHERE scope_kind=$1 AND scope_id=$2 AND ($3='' OR initiative_id=$3) AND ($4='' OR monitor_id=$4) AND ($5='' OR run_id=$5) AND ($6='' OR payload->>'actionCallId'=$6) ORDER BY ingested_at DESC,id DESC LIMIT $7 OFFSET $8`, filter.Scope.Kind, filter.Scope.ID, filter.InitiativeID, filter.MonitorID, filter.RunID, filter.ActionCallID, limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}

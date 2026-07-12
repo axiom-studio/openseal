@@ -40,6 +40,7 @@ type SourceObservation struct {
 	SkillID        string                 `json:"skillId"`
 	SkillVersion   string                 `json:"skillVersion"`
 	Action         string                 `json:"action"`
+	ActionCallID   string                 `json:"actionCallId"`
 	ArtifactRef    *ResourceReference     `json:"artifactRef,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	Fingerprint    string                 `json:"fingerprint"`
@@ -52,6 +53,7 @@ type SourceMonitorCheckpoint struct {
 	Cursor            string    `json:"cursor,omitempty"`
 	LastRunID         string    `json:"lastRunId"`
 	LastObservationID string    `json:"lastObservationId"`
+	LastActionCallID  string    `json:"lastActionCallId"`
 	ObservationCount  int64     `json:"observationCount"`
 	LastSuccessAt     time.Time `json:"lastSuccessAt"`
 	Revision          int64     `json:"revision"`
@@ -63,6 +65,7 @@ type SourceObservationFilter struct {
 	InitiativeID string
 	MonitorID    string
 	RunID        string
+	ActionCallID string
 	Limit        int
 	Offset       int
 }
@@ -90,6 +93,7 @@ type IngestSourceObservationRequest struct {
 	SkillID                    string
 	SkillVersion               string
 	Action                     string
+	ActionCallID               string
 	ArtifactRef                *ResourceReference
 	Metadata                   map[string]interface{}
 	Actor                      ActivityActor
@@ -145,7 +149,7 @@ func (s *SourceMonitorService) Ingest(ctx context.Context, req IngestSourceObser
 		StableSourceID: strings.TrimSpace(req.StableSourceID), SourceURI: strings.TrimSpace(req.SourceURI),
 		ContentDigest: strings.ToLower(strings.TrimSpace(req.ContentDigest)), Summary: strings.TrimSpace(req.Summary),
 		ObservedAt: req.ObservedAt.UTC(), IngestedAt: now, RunID: run.ID, AgentID: req.AgentID,
-		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
+		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, ActionCallID: strings.TrimSpace(req.ActionCallID),
 		ArtifactRef: cloneResourceReference(req.ArtifactRef), Metadata: cloneMap(req.Metadata),
 	}
 	if observation.ObservedAt.IsZero() {
@@ -177,7 +181,7 @@ func (s *SourceMonitorService) Ingest(ctx context.Context, req IngestSourceObser
 	}
 	checkpoint := &SourceMonitorCheckpoint{
 		Scope: req.Scope, InitiativeID: initiative.ID, MonitorID: monitor.ID, Cursor: strings.TrimSpace(req.Cursor),
-		LastRunID: run.ID, LastObservationID: observation.ID, LastSuccessAt: now,
+		LastRunID: run.ID, LastObservationID: observation.ID, LastActionCallID: observation.ActionCallID, LastSuccessAt: now,
 		Revision: req.ExpectedCheckpointRevision + 1, UpdatedAt: now,
 	}
 	visibility := req.Visibility
@@ -214,7 +218,7 @@ func (s *SourceMonitorService) List(ctx context.Context, filter SourceObservatio
 func (o *SourceObservation) Validate() error {
 	if o == nil || o.Scope.Validate() != nil || !validOpaqueIdentifier(o.ID, 128) || !validOpaqueIdentifier(o.InitiativeID, 128) ||
 		!validOpaqueIdentifier(o.MonitorID, 128) || !validOpaqueIdentifier(o.RunID, 128) || !validOpaqueIdentifier(o.AgentID, 128) ||
-		!validOpaqueIdentifier(o.SkillID, 128) || strings.TrimSpace(o.SkillVersion) == "" || !validOpaqueIdentifier(o.Action, 128) {
+		!validOpaqueIdentifier(o.SkillID, 128) || strings.TrimSpace(o.SkillVersion) == "" || !validOpaqueIdentifier(o.Action, 128) || !validOpaqueIdentifier(o.ActionCallID, 128) {
 		return ErrInvalidSourceObservation
 	}
 	if err := validateSHA256Digest(o.DedupeKey); err != nil {

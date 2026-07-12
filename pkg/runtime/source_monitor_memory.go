@@ -81,7 +81,7 @@ func (s *MemoryStore) ListSourceObservations(_ context.Context, filter SourceObs
 	defer s.mu.RUnlock()
 	values := make([]*SourceObservation, 0)
 	for _, value := range s.sourceObservations {
-		if value.Scope != filter.Scope || filter.InitiativeID != "" && value.InitiativeID != filter.InitiativeID || filter.MonitorID != "" && value.MonitorID != filter.MonitorID || filter.RunID != "" && value.RunID != filter.RunID {
+		if value.Scope != filter.Scope || filter.InitiativeID != "" && value.InitiativeID != filter.InitiativeID || filter.MonitorID != "" && value.MonitorID != filter.MonitorID || filter.RunID != "" && value.RunID != filter.RunID || filter.ActionCallID != "" && value.ActionCallID != filter.ActionCallID {
 			continue
 		}
 		values = append(values, cloneSourceObservation(value))
