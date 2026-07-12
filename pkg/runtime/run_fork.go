@@ -1,0 +1,221 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type RunForkStore interface {
+	PortfolioStore
+	RunDependencyStore
+}
+
+type RunForkBranch struct {
+	ID         string                 `json:"id"`
+	Goal       string                 `json:"goal"`
+	Checkpoint map[string]interface{} `json:"checkpoint"`
+	Budget     *BudgetPolicy          `json:"budget,omitempty"`
+}
+
+type CreateRunForkRequest struct {
+	Scope                  Scope
+	SourceRunID            string
+	ExpectedSourceRevision int64
+	WorkerID               string
+	ForkID                 string
+	Policy                 RunDependencyPolicy
+	Branches               []RunForkBranch
+	ContinuationCheckpoint map[string]interface{}
+	Actor                  ActivityActor
+	Visibility             ActivityVisibility
+}
+
+type RunForkResult struct {
+	DependencyGroup *RunDependencyResult `json:"dependencyGroup"`
+	Children        []*AgentRun          `json:"children"`
+}
+
+type RunForkCoordinator struct {
+	store RunForkStore
+	now   func() time.Time
+}
+
+func NewRunForkCoordinator(store RunForkStore) *RunForkCoordinator {
+	return &RunForkCoordinator{store: store, now: time.Now}
+}
+
+// Create atomically seals the complete fan-out, persists every child Run, and
+// suspends the source Run. Stable IDs make a crash after commit replay-safe.
+func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkRequest) (*RunForkResult, error) {
+	if c == nil || c.store == nil {
+		return nil, errors.New("run fork store is not configured")
+	}
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.SourceRunID) == "" || req.ExpectedSourceRevision < 1 || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.ForkID) == "" || len(req.Branches) < 2 {
+		return nil, errors.New("source Run, revision, worker, fork, and at least two branches are required")
+	}
+	if err := req.Policy.Validate(); err != nil {
+		return nil, err
+	}
+	if req.Policy.Mode != FanInModeAll && req.Policy.Mode != FanInModeAny {
+		return nil, errors.New("run forks support all or any fan-in")
+	}
+	if err := ValidateCredentialFreeContext(req.ContinuationCheckpoint); err != nil {
+		return nil, err
+	}
+	source, err := c.store.GetAgentRun(ctx, req.Scope, req.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if source == nil {
+		return nil, ErrRunNotFound
+	}
+	allocations := make([]*BudgetPolicy, len(req.Branches))
+	seen := make(map[string]bool, len(req.Branches))
+	for index, branch := range req.Branches {
+		branch.ID = strings.TrimSpace(branch.ID)
+		if branch.ID == "" || seen[branch.ID] || strings.TrimSpace(branch.Goal) == "" {
+			return nil, errors.New("fork branches require unique IDs and goals")
+		}
+		seen[branch.ID] = true
+		if err := ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
+			return nil, fmt.Errorf("branch %s checkpoint: %w", branch.ID, err)
+		}
+		allocations[index] = branch.Budget
+	}
+	key := "fork:" + source.ID + ":" + req.ForkID
+	existing, err := c.store.FindRunDependencyGroupByIdempotencyKey(ctx, req.Scope, key)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return c.replay(ctx, source, existing, req)
+	}
+	if source.Revision != req.ExpectedSourceRevision {
+		return nil, ErrRevisionConflict
+	}
+	if source.Status != AgentRunStatusRunning || source.LeaseOwner != req.WorkerID {
+		return nil, ErrLeaseLost
+	}
+	if err := validateGroupedBudgetAllocations(source, allocations); err != nil {
+		return nil, err
+	}
+	now := c.now().UTC()
+	groupID := stableForkIdentifier(source.ID, req.ForkID, "group")
+	children := make([]*AgentRun, 0, len(req.Branches))
+	edges := make([]*RunDependency, 0, len(req.Branches))
+	for _, branch := range req.Branches {
+		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
+		child, err := buildAgentRun(ctx, c.store, CreateAgentRunRequest{
+			Kind: source.Kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
+			Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
+			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
+			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: source.Deadline,
+			Context: cloneMap(source.Context), Plan: cloneMap(source.Plan), Checkpoint: cloneMap(branch.Checkpoint),
+			Budget: cloneBudgetPolicy(branch.Budget), Policy: cloneMap(source.Policy),
+		}, childID, now)
+		if err != nil {
+			return nil, err
+		}
+		children = append(children, child)
+		edges = append(edges, &RunDependency{
+			ID: branch.ID, Scope: source.Scope, GroupID: groupID, SourceRunID: source.ID, TargetRunID: child.ID,
+			Kind: RunDependencyKindRun, State: RunDependencyStateRunning, Required: true,
+			Revision: 1, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	sealedAt := now
+	group := &RunDependencyGroup{
+		ID: groupID, Scope: source.Scope, SourceRunID: source.ID, Policy: req.Policy,
+		ExpectedCount: len(edges), Status: RunDependencyGroupWaiting, Revision: 1,
+		CreatedAt: now, UpdatedAt: now, SealedAt: &sealedAt,
+		IdempotencyKey: key,
+	}
+	updatedSource := cloneAgentRun(source)
+	updatedSource.Status = AgentRunStatusWaitingForDependency
+	updatedSource.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: group.ID}
+	updatedSource.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+	updatedSource.Revision++
+	updatedSource.UpdatedAt = now
+	updatedSource.LeaseOwner = ""
+	updatedSource.LeaseExpiresAt = nil
+	visibility := req.Visibility
+	if visibility == "" {
+		visibility = ActivityVisibilityScope
+	}
+	actor := req.Actor
+	if actor.Type == "" || actor.ID == "" {
+		actor = ActivityActor{Type: "worker", ID: req.WorkerID}
+	}
+	event := &ActivityEvent{
+		ID: stableForkIdentifier(source.ID, req.ForkID, "event"), Scope: source.Scope, RunID: source.ID,
+		AgentID: source.AssignedAgentID, ObjectiveID: source.ObjectiveID, TeamID: teamIDForRun(source),
+		EventType: "run.forked", Summary: fmt.Sprintf("Forked %d concurrent child Runs", len(children)),
+		Actor: actor, Visibility: visibility, CorrelationID: group.ID,
+		Payload: map[string]interface{}{"forkId": req.ForkID, "groupId": group.ID, "mode": req.Policy.Mode, "childCount": len(children)}, CreatedAt: now,
+	}
+	result, err := c.store.CreateRunDependencyGroup(ctx, RunDependencyGroupCreateRecord{
+		Group: group, Dependencies: edges, TargetRuns: children, SourceRun: updatedSource,
+		ExpectedSourceRevision: source.Revision, Event: event,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result.Replayed {
+		children = children[:0]
+		for _, edge := range result.Dependencies {
+			child, childErr := c.store.GetAgentRun(ctx, req.Scope, edge.TargetRunID)
+			if childErr != nil {
+				return nil, childErr
+			}
+			children = append(children, child)
+		}
+	}
+	return &RunForkResult{DependencyGroup: result, Children: children}, nil
+}
+
+func (c *RunForkCoordinator) replay(ctx context.Context, source *AgentRun, group *RunDependencyGroup, req CreateRunForkRequest) (*RunForkResult, error) {
+	if group.SourceRunID != source.ID || group.Policy != req.Policy || group.ExpectedCount != len(req.Branches) || group.ID != stableForkIdentifier(source.ID, req.ForkID, "group") {
+		return nil, ErrDependencyConflict
+	}
+	edges, err := c.store.ListRunDependencies(ctx, req.Scope, group.ID)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*RunDependency, len(edges))
+	for _, edge := range edges {
+		byID[edge.ID] = edge
+	}
+	children := make([]*AgentRun, 0, len(req.Branches))
+	for _, branch := range req.Branches {
+		edge := byID[branch.ID]
+		expectedChild := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
+		if edge == nil || edge.Kind != RunDependencyKindRun || edge.TargetRunID != expectedChild {
+			return nil, ErrDependencyConflict
+		}
+		child, childErr := c.store.GetAgentRun(ctx, req.Scope, edge.TargetRunID)
+		if childErr != nil || child == nil {
+			if childErr == nil {
+				childErr = ErrRunNotFound
+			}
+			return nil, childErr
+		}
+		children = append(children, child)
+	}
+	evaluation, err := EvaluateRunDependencies(group, edges)
+	if err != nil {
+		return nil, err
+	}
+	return &RunForkResult{DependencyGroup: &RunDependencyResult{Group: group, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}, Children: children}, nil
+}
+
+func stableForkIdentifier(runID, forkID, suffix string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal:fork:"+runID+":"+forkID+":"+suffix)).String()
+}

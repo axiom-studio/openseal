@@ -396,6 +396,10 @@ type (
 	ApprovalAuthorizerFunc             = runtime.ApprovalAuthorizerFunc
 	ResolveApprovalRequest             = runtime.ResolveApprovalRequest
 	ApprovalResolutionResult           = runtime.ApprovalResolutionResult
+	RunForkBranch                      = runtime.RunForkBranch
+	CreateRunForkRequest               = runtime.CreateRunForkRequest
+	RunForkResult                      = runtime.RunForkResult
+	RunForkCoordinator                 = runtime.RunForkCoordinator
 	ActionWorkerConfig                 = runtime.ActionWorkerConfig
 	DynamicActionWorkerConfig          = runtime.DynamicActionWorkerConfig
 	CredentialResolver                 = runtime.CredentialResolver
@@ -485,6 +489,7 @@ var (
 	ErrTurnHostUnavailable = runtime.ErrTurnHostUnavailable
 	ValidateRunbook        = runbook.Validate
 	NewRunbookTurnRunner   = runtime.NewRunbookTurnRunner
+	NewRunForkCoordinator  = runtime.NewRunForkCoordinator
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -648,6 +653,7 @@ const (
 	RunSourceRequest   = runtime.RunSourceRequest
 	RunSourceHandoff   = runtime.RunSourceHandoff
 	RunSourceObjective = runtime.RunSourceObjective
+	RunSourceFork      = runtime.RunSourceFork
 
 	RunKindAgentWork          = runtime.RunKindAgentWork
 	RunKindConversation       = runtime.RunKindConversation
