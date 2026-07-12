@@ -58,15 +58,15 @@ func TestLocalStoreIsContentAddressedScopedAndRestartSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = opened.Close()
-	if err := restarted.Delete(context.Background(), scope, written.ContentRef); err != nil {
+	if deleted, err := restarted.Delete(context.Background(), scope, written.ContentRef); err != nil || !deleted {
 		t.Fatal(err)
 	}
 	available, err = restarted.Available(context.Background(), scope, written.ContentRef)
 	if err != nil || available {
 		t.Fatalf("deleted content availability = %v, %v", available, err)
 	}
-	if err := restarted.Delete(context.Background(), scope, written.ContentRef); err != nil {
-		t.Fatalf("idempotent delete = %v", err)
+	if deleted, err := restarted.Delete(context.Background(), scope, written.ContentRef); err != nil || deleted {
+		t.Fatalf("idempotent delete = %v, %v", deleted, err)
 	}
 	if _, err := restarted.Open(context.Background(), runtime.Scope{Kind: "local", ID: "other"}, written.ContentRef); err == nil {
 		t.Fatal("cross-scope content lookup succeeded")

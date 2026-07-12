@@ -347,7 +347,7 @@ type ArtifactContentInspector interface {
 // they are due. Deletion must be idempotent so multiple workers and retries
 // remain safe.
 type ArtifactContentDeleter interface {
-	Delete(context.Context, Scope, string) error
+	Delete(context.Context, Scope, string) (bool, error)
 }
 
 // ArtifactContentResolver optionally provides an authorized, short-lived
