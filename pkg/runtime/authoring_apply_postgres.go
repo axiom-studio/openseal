@@ -82,7 +82,7 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 			return nil, err
 		}
 	}
-	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s.table("skill_bindings"), value, a.skillBindings); err != nil {
+	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s.table("skill_bindings"), s.table("skill_definitions"), value, a.skillBindings); err != nil {
 		return nil, err
 	}
 	if a.teamDefinition != nil {
@@ -167,10 +167,10 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	return decodeChangeSet(string(p))
 }
 
-func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, table string, value *authoring.ChangeSet, desired []*capability.Binding) error {
+func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding) error {
 	existing := map[string]*capability.Binding{}
 	if value.Mode == authoring.ModeAmend {
-		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`, value.Scope.Kind, value.Scope.ID)
+		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+bindingTable+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`, value.Scope.Kind, value.Scope.ID)
 		if err != nil {
 			return err
 		}
@@ -192,7 +192,7 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, table 
 	}
 	for _, binding := range desired {
 		var definitionPayload string
-		if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+strings.TrimSuffix(table, "skill_bindings")+`skill_definitions WHERE id=$1 AND version=$2`, binding.SkillID, binding.SkillVersion).Scan(&definitionPayload); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+definitionTable+` WHERE id=$1 AND version=$2`, binding.SkillID, binding.SkillVersion).Scan(&definitionPayload); err != nil {
 			return fmt.Errorf("resolve Skill %s@%s for workforce binding: %w", binding.SkillID, binding.SkillVersion, err)
 		}
 		var definition capability.Definition
@@ -205,11 +205,11 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, table 
 		}
 		payload, _ := json.Marshal(binding)
 		if current == nil {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO `+table+`(scope_kind,scope_id,deployment_id,id,skill_id,skill_version,revision,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload)); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO `+bindingTable+`(scope_kind,scope_id,deployment_id,id,skill_id,skill_version,revision,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload)); err != nil {
 				return err
 			}
 		} else {
-			result, err := tx.ExecContext(ctx, `UPDATE `+table+` SET skill_id=$1,skill_version=$2,revision=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND deployment_id=$7 AND id=$8 AND revision=$9`, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, current.Revision)
+			result, err := tx.ExecContext(ctx, `UPDATE `+bindingTable+` SET skill_id=$1,skill_version=$2,revision=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND deployment_id=$7 AND id=$8 AND revision=$9`, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, current.Revision)
 			if err != nil {
 				return err
 			}
@@ -220,7 +220,7 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, table 
 		}
 	}
 	for _, binding := range existing {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.Revision); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+bindingTable+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.Revision); err != nil {
 			return err
 		}
 	}
