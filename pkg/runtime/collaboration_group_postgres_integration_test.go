@@ -49,7 +49,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 		Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
 		Requests: []AgentRequestGroupSpec{
 			{DependencyID: "reddit", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reddit-researcher"}, Goal: "Analyze Reddit"},
-			{DependencyID: "forums", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "forum-research"}, Goal: "Analyze forums"},
+			{DependencyID: "forums", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "forum-research"}, Goal: "Analyze forums"},
 		},
 		IdempotencyKey: "competitor-wave-1", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
 	}
