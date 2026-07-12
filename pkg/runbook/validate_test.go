@@ -78,4 +78,19 @@ func TestValidateDurableAgentDelegation(t *testing.T) {
 	}
 }
 
+func TestValidateTypedTemplateSegments(t *testing.T) {
+	definition := &Definition{APIVersion: APIVersion, ID: "template", Version: "1", Name: "Template", Entrypoints: map[string]string{"manual": "set"}, Steps: map[string]Step{
+		"set":  {Kind: StepTransform, Transform: &TransformStep{Assignments: map[string]Value{"/state/message": {Template: []TemplateSegment{{Text: "Hello "}, {Ref: "/input/name"}}}}, Next: "done"}},
+		"done": {Kind: StepEnd, End: &EndStep{}},
+	}}
+	if diagnostics := Validate(definition); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+	definition.Steps["set"].Transform.Assignments["/state/message"] = Value{Template: []TemplateSegment{{Text: "bad", Ref: "/input/name"}}}
+	diagnostics := Validate(definition)
+	if len(diagnostics) == 0 || diagnostics[0].Code != "template.segment" {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+}
+
 func value(input Value) *Value { return &input }

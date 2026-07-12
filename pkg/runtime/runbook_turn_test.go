@@ -111,3 +111,13 @@ func TestRunbookTurnWaitsOnceAndResumesFromCheckpoint(t *testing.T) {
 		t.Fatalf("second=%#v", second)
 	}
 }
+
+func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
+	value := runbook.Value{Template: []runbook.TemplateSegment{
+		{Text: "Release "}, {Ref: "/input/version"}, {Text: " has metrics "}, {Ref: "/input/metrics"},
+	}}
+	resolved, err := resolveRunbookValue(map[string]interface{}{"input": map[string]interface{}{"version": "2026.07", "metrics": map[string]interface{}{"leads": float64(12)}}}, value)
+	if err != nil || resolved != `Release 2026.07 has metrics {"leads":12}` {
+		t.Fatalf("resolved=%#v error=%v", resolved, err)
+	}
+}
