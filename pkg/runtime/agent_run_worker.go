@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -308,11 +309,7 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 	if len(request.ArtifactRequirements) > 0 {
 		return
 	}
-	summary, _ := run.Output["summary"].(string)
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		summary = "Completed delegated work"
-	}
+	summary := terminalChildSummary(run.Output)
 	evidence := map[string]interface{}{}
 	if len(request.AcceptanceCriteria) > 0 {
 		evidence["runOutput"] = cloneMap(run.Output)
@@ -328,6 +325,26 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 	if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
 		p.logger.Warnw("failed to complete collaboration request from terminal child", "runId", run.ID, "requestId", request.ID, "error", err)
 	}
+}
+
+func terminalChildSummary(output map[string]interface{}) string {
+	preferred := []string{"summary", "response", "result", "outcome", "followUp"}
+	for _, key := range preferred {
+		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	keys := make([]string, 0, len(output))
+	for key := range output {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "Completed delegated work"
 }
 
 func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {

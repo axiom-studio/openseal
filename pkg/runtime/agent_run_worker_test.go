@@ -132,7 +132,7 @@ func TestAgentRunWorkerCompletesArtifactFreeHandoffFromTerminalChild(t *testing.
 		return &TurnRunnerBinding{DefinitionID: "marketing", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Launch follow-up ready",
-					RunOutput: map[string]interface{}{"summary": "Publish the evidence-backed launch note"}}, nil
+					RunOutput: map[string]interface{}{"followUp": "Publish the evidence-backed launch note"}}, nil
 			})}, nil
 	})
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
