@@ -11,6 +11,12 @@ func TestSourcePolicyAuthorizesExactBoundedSource(t *testing.T) {
 	if decision.PolicyID != policy.ID || decision.PolicyVersion != policy.Version || decision.SourceHost != "www.reddit.com" || decision.PathPrefix != "/r/kubernetes" || decision.MaximumItems != 10 {
 		t.Fatalf("policy decision mismatch: %#v", decision)
 	}
+	if err := decision.Authorize("https://www.reddit.com/r/kubernetes/comments/thread", 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := decision.Authorize("https://old.reddit.com/r/kubernetes/comments/thread", 5); err == nil {
+		t.Fatal("redirect escaped the exact authorized host")
+	}
 }
 
 func TestSourcePolicyFailsClosed(t *testing.T) {
