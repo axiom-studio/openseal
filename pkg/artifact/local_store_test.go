@@ -31,6 +31,14 @@ func TestLocalStoreIsContentAddressedScopedAndRestartSafe(t *testing.T) {
 	if !strings.HasPrefix(written.ContentRef, localReferencePrefix) || written.SizeBytes != int64(len(content)) {
 		t.Fatalf("stored content = %#v", written)
 	}
+	available, err := store.Available(context.Background(), scope, written.ContentRef)
+	if err != nil || !available {
+		t.Fatalf("stored content availability = %v, %v", available, err)
+	}
+	available, err = store.Available(context.Background(), runtime.Scope{Kind: "local", ID: "other"}, written.ContentRef)
+	if err != nil || available {
+		t.Fatalf("cross-scope content availability = %v, %v", available, err)
+	}
 	opened, err := store.Open(context.Background(), scope, written.ContentRef)
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +83,9 @@ func TestLocalStoreRejectsIntegrityFailuresAndUnsafeReferences(t *testing.T) {
 	for _, reference := range []string{"../../secret", "local-sha256:../secret", "https://objects.test/file", "local-sha256:not-hex"} {
 		if _, err := store.Open(context.Background(), scope, reference); err == nil {
 			t.Fatalf("unsafe reference %q was accepted", reference)
+		}
+		if available, err := store.Available(context.Background(), scope, reference); err != nil || available {
+			t.Fatalf("unsafe reference %q availability = %v, %v", reference, available, err)
 		}
 	}
 }

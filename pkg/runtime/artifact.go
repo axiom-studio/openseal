@@ -23,11 +23,18 @@ var (
 
 type ArtifactClassification string
 
+type ArtifactContentAvailability string
+
 const (
 	ArtifactClassificationPublic       ArtifactClassification = "public"
 	ArtifactClassificationInternal     ArtifactClassification = "internal"
 	ArtifactClassificationConfidential ArtifactClassification = "confidential"
 	ArtifactClassificationRestricted   ArtifactClassification = "restricted"
+)
+
+const (
+	ArtifactContentAvailable   ArtifactContentAvailability = "available"
+	ArtifactContentUnavailable ArtifactContentAvailability = "unavailable"
 )
 
 type EvidenceRelation string
@@ -91,23 +98,24 @@ type EvidenceLink struct {
 // ContentRef is an opaque host reference—not a URL, credential, or filesystem
 // path exposed to the model.
 type Artifact struct {
-	ID             string                 `json:"id"`
-	Version        int64                  `json:"version"`
-	Scope          Scope                  `json:"scope"`
-	Name           string                 `json:"name"`
-	Type           string                 `json:"type,omitempty"`
-	MediaType      string                 `json:"mediaType,omitempty"`
-	ContentRef     string                 `json:"contentRef"`
-	Digest         string                 `json:"digest"`
-	SizeBytes      int64                  `json:"sizeBytes"`
-	Classification ArtifactClassification `json:"classification"`
-	Retention      ArtifactRetention      `json:"retention,omitempty"`
-	MetadataSchema map[string]interface{} `json:"metadataSchema,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	Provenance     ArtifactProvenance     `json:"provenance"`
-	Evidence       []EvidenceLink         `json:"evidence,omitempty"`
-	CreatedAt      time.Time              `json:"createdAt"`
-	Fingerprint    string                 `json:"fingerprint"`
+	ID                  string                      `json:"id"`
+	Version             int64                       `json:"version"`
+	Scope               Scope                       `json:"scope"`
+	Name                string                      `json:"name"`
+	Type                string                      `json:"type,omitempty"`
+	MediaType           string                      `json:"mediaType,omitempty"`
+	ContentRef          string                      `json:"contentRef"`
+	ContentAvailability ArtifactContentAvailability `json:"contentAvailability,omitempty"`
+	Digest              string                      `json:"digest"`
+	SizeBytes           int64                       `json:"sizeBytes"`
+	Classification      ArtifactClassification      `json:"classification"`
+	Retention           ArtifactRetention           `json:"retention,omitempty"`
+	MetadataSchema      map[string]interface{}      `json:"metadataSchema,omitempty"`
+	Metadata            map[string]interface{}      `json:"metadata,omitempty"`
+	Provenance          ArtifactProvenance          `json:"provenance"`
+	Evidence            []EvidenceLink              `json:"evidence,omitempty"`
+	CreatedAt           time.Time                   `json:"createdAt"`
+	Fingerprint         string                      `json:"fingerprint"`
 }
 
 func (a *Artifact) Validate() error {
@@ -137,6 +145,9 @@ func (a *Artifact) Validate() error {
 	}
 	if !validArtifactClassification(a.Classification) {
 		return fmt.Errorf("%w: invalid classification %q", ErrInvalidArtifactRecord, a.Classification)
+	}
+	if a.ContentAvailability != "" && a.ContentAvailability != ArtifactContentAvailable && a.ContentAvailability != ArtifactContentUnavailable {
+		return fmt.Errorf("%w: invalid content availability %q", ErrInvalidArtifactRecord, a.ContentAvailability)
 	}
 	if strings.TrimSpace(a.Provenance.Producer.Type) == "" || strings.TrimSpace(a.Provenance.Producer.ID) == "" {
 		return fmt.Errorf("%w: provenance producer is required", ErrInvalidArtifactRecord)
@@ -324,6 +335,13 @@ type ArtifactContentStore interface {
 	Open(context.Context, Scope, string) (io.ReadCloser, error)
 }
 
+// ArtifactContentInspector lets a host truthfully project whether the bytes
+// behind an opaque content reference are currently available without exposing
+// a storage path or credential.
+type ArtifactContentInspector interface {
+	Available(context.Context, Scope, string) (bool, error)
+}
+
 // ArtifactContentResolver optionally provides an authorized, short-lived
 // delivery URL. Resolutions are ephemeral API results and must never be stored
 // in kernel state or model context.
@@ -371,6 +389,7 @@ func artifactFingerprint(artifact *Artifact) (string, error) {
 	copy := cloneArtifact(artifact)
 	copy.Fingerprint = ""
 	copy.CreatedAt = time.Time{}
+	copy.ContentAvailability = ""
 	encoded, err := json.Marshal(copy)
 	if err != nil {
 		return "", err

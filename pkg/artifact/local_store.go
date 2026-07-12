@@ -128,6 +128,24 @@ func (s *LocalStore) Open(_ context.Context, scope runtime.Scope, contentRef str
 	return file, err
 }
 
+func (s *LocalStore) Available(_ context.Context, scope runtime.Scope, contentRef string) (bool, error) {
+	if s == nil || s.root == "" {
+		return false, errors.New("local artifact store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return false, err
+	}
+	hexDigest, err := parseLocalReference(contentRef)
+	if err != nil {
+		return false, nil
+	}
+	_, err = os.Stat(filepath.Join(s.scopeDirectory(scope), hexDigest))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *LocalStore) scopeDirectory(scope runtime.Scope) string {
 	digest := sha256.Sum256([]byte(scope.Kind + "\x00" + scope.ID))
 	return filepath.Join(s.root, hex.EncodeToString(digest[:]))
@@ -172,3 +190,4 @@ func (r *contextReader) Read(buffer []byte) (int, error) {
 }
 
 var _ runtime.ArtifactContentStore = (*LocalStore)(nil)
+var _ runtime.ArtifactContentInspector = (*LocalStore)(nil)
