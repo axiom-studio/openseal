@@ -293,6 +293,12 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 	if message.Historical || message.Intent == MessageIntentSystem || message.ParticipationRoundID != "" {
 		return false
 	}
+	// The owning Agent's reply is the projection of the current conversation
+	// Run, never a new wake. Other Agents may still hand work into this channel.
+	if conversation.Owner.Type == OwnerTypeAgent && message.Sender.Type == ConversationParticipantAgent &&
+		message.Sender.ID == conversation.Owner.ID {
+		return false
+	}
 	switch message.Sender.Type {
 	case ConversationParticipantUser, ConversationParticipantAgent, ConversationParticipantService:
 		return true

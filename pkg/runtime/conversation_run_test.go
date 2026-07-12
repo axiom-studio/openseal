@@ -278,6 +278,14 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 	if err != nil || len(messages) != 2 {
 		t.Fatalf("Agent response replay duplicated messages: %#v, %v", messages, err)
 	}
+	reconciled, err := scheduler.ReconcileScope(ctx, scope)
+	if err != nil || reconciled.Scheduled != 0 || reconciled.Replayed != 1 || reconciled.Skipped != 1 {
+		t.Fatalf("Agent response reconciliation = %#v, %v", reconciled, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation, Owner: &conversation.Owner})
+	if err != nil || len(runs) != 1 || runs[0].ID != scheduled.Run.ID {
+		t.Fatalf("Agent reply scheduled a response loop: %#v, %v", runs, err)
+	}
 }
 
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
