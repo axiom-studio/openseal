@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
@@ -69,6 +70,7 @@ type panelSection int
 
 const (
 	sectionAuthoring panelSection = iota
+	sectionReadiness
 	sectionObjectives
 	sectionInitiatives
 	sectionSkills
@@ -123,11 +125,13 @@ type Model struct {
 	artifactCapability        kernelapi.Capability
 	channelCapability         kernelapi.Capability
 	authoringCapability       kernelapi.Capability
+	agentDefinitionCapability kernelapi.Capability
 	authoringResult           *authoring.CompileResult
 	authoringChangeSet        *authoring.ChangeSet
 	authoringAmendment        bool
 	authoringApprovalSelected int
 	runs                      []*runtime.AgentRun
+	compilations              []*kernelagent.DefinitionCompilation
 	objectives                []*runtime.Objective
 	objectiveSelected         int
 	selectedObjective         string
@@ -195,6 +199,11 @@ type workforceLoaded struct {
 type runsLoaded struct {
 	runs []*runtime.AgentRun
 	err  error
+}
+
+type compilationsLoaded struct {
+	compilations []*kernelagent.DefinitionCompilation
+	err          error
 }
 
 type objectivesLoaded struct {
@@ -358,6 +367,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
+		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
 		m.runCapability = runCapability
 		m.objectiveCapability = objectiveCapability
 		m.initiativeCapability = initiativeCapability
@@ -365,6 +375,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
+		m.agentDefinitionCapability = agentDefinitionCapability
 		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
 			m.authoringApprovalSelected = 0
 		} else {
@@ -391,7 +402,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAuthoring || !authoringCapability.Available {
 			m.authoringCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available {
+		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
+			m.agentDefinitionCapability = kernelapi.Capability{}
+		}
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -428,8 +442,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.artifactCapability.Available {
 			m.section = sectionArtifacts
 			m.focusPanelList()
+		} else if m.agentDefinitionCapability.Available {
+			m.section = sectionReadiness
+			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -556,6 +573,15 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.runs = msg.runs
 		m.restoreSelection()
+		return m, nil
+	case compilationsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.compilations = msg.compilations
 		return m, nil
 	case artifactsLoaded:
 		m.loading = false
@@ -734,7 +760,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -841,6 +867,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "f":
 			if m.authoringCapability.Available {
 				m.section = sectionAuthoring
+			}
+		case "h":
+			if m.agentDefinitionCapability.Available {
+				m.section = sectionReadiness
+				return m, m.loadCompilations()
 			}
 		case "o":
 			if m.objectiveCapability.Available {
@@ -1151,6 +1182,17 @@ func (m *Model) loadRuns() tea.Cmd {
 	}
 }
 
+func (m *Model) loadCompilations() tea.Cmd {
+	if !m.supportsAgentDefinition(kernelapi.OperationListCompilations) || m.config.Owner.Type != runtime.OwnerTypeAgent {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		values, err := m.client.ListAgentDefinitionCompilations(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.config.Owner.ID)
+		return compilationsLoaded{compilations: values, err: err}
+	}
+}
+
 func (m *Model) loadObjectives() tea.Cmd {
 	if !m.supportsObjective(kernelapi.OperationList) {
 		return nil
@@ -1249,6 +1291,9 @@ func (m *Model) loadSelectedConversation() tea.Cmd {
 func (m *Model) loadPanel() tea.Cmd {
 	if m.section == sectionAuthoring && m.authoringChangeSet != nil {
 		return m.loadWorkforceChangeSet()
+	}
+	if m.section == sectionReadiness {
+		return m.loadCompilations()
 	}
 	if m.section == sectionObjectives {
 		return m.loadObjectives()
@@ -1679,6 +1724,10 @@ func (m *Model) poll() tea.Cmd {
 
 func (m *Model) supportsRun(operation string) bool {
 	return m.ready && m.runCapability.Supports(operation)
+}
+
+func (m *Model) supportsAgentDefinition(operation string) bool {
+	return m.ready && m.agentDefinitionCapability.Supports(operation)
 }
 
 func (m *Model) supportsObjective(operation string) bool {
