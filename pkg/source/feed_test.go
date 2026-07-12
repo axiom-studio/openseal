@@ -58,4 +58,8 @@ func TestSourceSkillContractIsTypedAndReadOnly(t *testing.T) {
 		len(action.Permissions) != 1 || action.Permissions[0] != "network:https:read" || action.OutputSchema == nil {
 		t.Fatalf("source Skill contract mismatch: %#v", definition)
 	}
+	properties := action.OutputSchema["properties"].(map[string]interface{})
+	if properties["observationRefs"] == nil || properties["checkpointRevision"] == nil || properties["sourceObservations"] != nil {
+		t.Fatalf("source Skill exposed transient rather than canonical output: %#v", action.OutputSchema)
+	}
 }
