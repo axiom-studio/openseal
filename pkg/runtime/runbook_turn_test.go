@@ -116,8 +116,9 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 	value := runbook.Value{Template: []runbook.TemplateSegment{
 		{Text: "Release "}, {Ref: "/input/version"}, {Text: " has metrics "}, {Ref: "/input/metrics"},
 	}}
+	value.Template = append(value.Template, runbook.TemplateSegment{Text: " optional="}, runbook.TemplateSegment{Ref: "/input/missing"})
 	resolved, err := resolveRunbookValue(map[string]interface{}{"input": map[string]interface{}{"version": "2026.07", "metrics": map[string]interface{}{"leads": float64(12)}}}, value)
-	if err != nil || resolved != `Release 2026.07 has metrics {"leads":12}` {
+	if err != nil || resolved != `Release 2026.07 has metrics {"leads":12} optional=` {
 		t.Fatalf("resolved=%#v error=%v", resolved, err)
 	}
 }
