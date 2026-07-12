@@ -312,6 +312,9 @@ type (
 	ArtifactStoredContent              = runtime.ArtifactStoredContent
 	ArtifactContentResolutionRequest   = runtime.ArtifactContentResolutionRequest
 	ArtifactContentResolution          = runtime.ArtifactContentResolution
+	ArtifactRetentionService           = runtime.ArtifactRetentionService
+	ArtifactRetentionSweepResult       = runtime.ArtifactRetentionSweepResult
+	ArtifactRetentionDeletion          = runtime.ArtifactRetentionDeletion
 	AgentRequest                       = runtime.AgentRequest
 	AgentRequestKind                   = runtime.AgentRequestKind
 	AgentRequestStatus                 = runtime.AgentRequestStatus
@@ -502,11 +505,12 @@ const (
 )
 
 var (
-	NewHostedTurnRunner    = runtime.NewHostedTurnRunner
-	ErrTurnHostUnavailable = runtime.ErrTurnHostUnavailable
-	ValidateRunbook        = runbook.Validate
-	NewRunbookTurnRunner   = runtime.NewRunbookTurnRunner
-	NewRunForkCoordinator  = runtime.NewRunForkCoordinator
+	NewHostedTurnRunner         = runtime.NewHostedTurnRunner
+	NewArtifactRetentionService = runtime.NewArtifactRetentionService
+	ErrTurnHostUnavailable      = runtime.ErrTurnHostUnavailable
+	ValidateRunbook             = runbook.Validate
+	NewRunbookTurnRunner        = runtime.NewRunbookTurnRunner
+	NewRunForkCoordinator       = runtime.NewRunForkCoordinator
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
