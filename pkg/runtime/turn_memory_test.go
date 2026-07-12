@@ -64,13 +64,14 @@ func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
 	first := listed[0]
 	finished, err := turns.FinishTurn(ctx, scope, first.ID, FinishAgentTurnRequest{
 		ExpectedRevision: first.Revision, Status: AgentTurnStatusCompleted, WorkerID: first.LeaseOwner,
+		ModelProvider: "openai-compatible", Model: "actual-model",
 		Decisions:              []TurnDecision{{Summary: "Continue", Rationale: "Evidence supports it"}},
 		ContinuationCheckpoint: map[string]interface{}{"step": float64(2)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.Revision != 2 || finished.CompletedAt == nil || finished.ContinuationCheckpoint["step"] != float64(2) {
+	if finished.Revision != 2 || finished.CompletedAt == nil || finished.ContinuationCheckpoint["step"] != float64(2) || finished.ModelProvider != "openai-compatible" || finished.Model != "actual-model" {
 		t.Fatalf("turn did not finish durably: %#v", finished)
 	}
 	if _, err := turns.FinishTurn(ctx, scope, first.ID, FinishAgentTurnRequest{
