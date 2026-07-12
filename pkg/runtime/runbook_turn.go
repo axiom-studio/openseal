@@ -511,7 +511,10 @@ func resolveRunbookValue(root map[string]interface{}, value runbook.Value) (inte
 			}
 			resolved, err := getRunbookPointer(root, segment.Ref)
 			if err != nil {
-				return nil, err
+				// Embedded templates preserve ordinary shell/UI interpolation
+				// semantics: an absent optional value contributes an empty string.
+				// Exact Ref values remain strict and fail above.
+				continue
 			}
 			switch typed := resolved.(type) {
 			case string:
