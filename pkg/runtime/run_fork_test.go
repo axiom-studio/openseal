@@ -89,4 +89,29 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 	if err == nil {
 		t.Fatal("budgeted fork accepted implicit unbounded child allocations")
 	}
+	children, listErr := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if listErr != nil || len(children) != 0 {
+		t.Fatalf("implicit allocation created children=%#v error=%v", children, listErr)
+	}
+	request := CreateRunForkRequest{
+		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "worker", ForkID: "bounded",
+		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{
+			{ID: "a", Goal: "A", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 6}},
+			{ID: "b", Goal: "B", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 6}},
+		},
+	}
+	if _, err = NewRunForkCoordinator(store).Create(t.Context(), request); err == nil {
+		t.Fatal("fork accepted child allocations beyond the parent ceiling")
+	}
+	children, listErr = store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if listErr != nil || len(children) != 0 {
+		t.Fatalf("excessive allocation created children=%#v error=%v", children, listErr)
+	}
+	request.Branches[0].Budget.MaxTurns = 4
+	request.Branches[1].Budget.MaxTurns = 4
+	created, err := NewRunForkCoordinator(store).Create(t.Context(), request)
+	if err != nil || len(created.Children) != 2 || len(created.DependencyGroup.Source.BudgetAllocations) != 2 {
+		t.Fatalf("bounded fork=%#v error=%v", created, err)
+	}
 }
