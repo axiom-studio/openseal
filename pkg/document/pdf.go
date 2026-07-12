@@ -74,6 +74,7 @@ func SkillDefinition() *skill.Definition {
 					"body":            map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 500000},
 					"filename":        map[string]interface{}{"type": "string", "pattern": `^[^/\\]{1,240}\.pdf$`},
 					"requirementName": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
+					"sources":         map[string]interface{}{"type": "array", "maxItems": 100, "items": map[string]interface{}{"type": "string", "format": "uri"}},
 				},
 			},
 			OutputSchema: map[string]interface{}{
