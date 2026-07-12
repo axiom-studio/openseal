@@ -144,6 +144,9 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 			credentials[credential.Name] = reference
 		}
 		maximumRisk := skillCapability.MaximumRisk
+		if maximumRisk == "" && requirement.PromptRequired && len(allowed) == 0 {
+			maximumRisk = capability.RiskLevelRead
+		}
 		if workforceRiskRank(definition.Authority.MaximumRisk) < workforceRiskRank(maximumRisk) {
 			maximumRisk = definition.Authority.MaximumRisk
 		}

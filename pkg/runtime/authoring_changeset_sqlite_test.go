@@ -147,7 +147,7 @@ func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	value.Result.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "research", PromptRequired: true}}
 	value.Result.Candidate.Agents[0].Authority.AllowedSkillIDs = []string{"research"}
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
-		"research": {ID: "research", Version: "1.0.0", PromptAvailable: true, MaximumRisk: capability.RiskLevelRead},
+		"research": {ID: "research", Version: "1.0.0", PromptAvailable: true},
 	}}
 	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
 		t.Fatal(err)
