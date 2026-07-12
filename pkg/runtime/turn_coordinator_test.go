@@ -129,7 +129,7 @@ func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
 		if calls == 1 {
 			return nil, retryableTurnHostError{cause: errors.New("connection reset")}
 		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done"}, nil
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done", ModelProvider: "failover-host", Model: "selected-model"}, nil
 	})
 	first, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
@@ -157,7 +157,7 @@ func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
 		t.Fatalf("completion=%#v calls=%d err=%v", second, calls, err)
 	}
 	turns, err := NewAgentTurnService(store, store).ListTurns(ctx, AgentTurnFilter{Scope: scope, RunID: run.ID, Limit: 10})
-	if err != nil || len(turns) != 1 || turns[0].ID != turnID {
+	if err != nil || len(turns) != 1 || turns[0].ID != turnID || turns[0].ModelProvider != "failover-host" || turns[0].Model != "selected-model" {
 		t.Fatalf("turns=%#v err=%v", turns, err)
 	}
 }
