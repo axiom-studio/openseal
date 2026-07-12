@@ -21,7 +21,7 @@ import (
 
 const (
 	SkillID      = "openseal.source"
-	SkillVersion = "1.0.0"
+	SkillVersion = "1.0.1"
 	ObserveFeed  = "observe_feed"
 	MaximumItems = 100
 )
