@@ -106,6 +106,53 @@ func (s *SQLiteStore) IngestSourceObservation(ctx context.Context, observation *
 	return cloneSourceObservation(observation), cloneSourceMonitorCheckpoint(next), persistedEvent, false, nil
 }
 
+func (s *SQLiteStore) AdvanceSourceMonitorCheckpoint(ctx context.Context, checkpoint *SourceMonitorCheckpoint, expected int64, event *ActivityEvent) (*SourceMonitorCheckpoint, *ActivityEvent, bool, error) {
+	if checkpoint == nil || event == nil || event.Validate() != nil {
+		return nil, nil, false, ErrInvalidSourceObservation
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, nil, false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	current, err := getSQLiteSourceMonitorCheckpoint(ctx, conn, checkpoint.Scope, checkpoint.InitiativeID, checkpoint.MonitorID)
+	if err != nil && !errors.Is(err, ErrSourceObservationNotFound) {
+		return nil, nil, false, err
+	}
+	if current != nil && current.LastActionCallID == checkpoint.LastActionCallID {
+		if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return nil, nil, false, err
+		}
+		committed = true
+		return current, nil, true, nil
+	}
+	if currentObservationRevision(current) != expected {
+		return nil, nil, false, ErrSourceMonitorCheckpoint
+	}
+	next := checkpointWithoutObservationChange(checkpoint, current, expected)
+	if err = upsertSQLiteSourceMonitorCheckpoint(ctx, conn, next, expected); err != nil {
+		return nil, nil, false, err
+	}
+	persisted, err := insertSQLiteActivityConn(ctx, conn, event)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, nil, false, err
+	}
+	committed = true
+	return next, persisted, false, nil
+}
+
 func upsertSQLiteSourceMonitorCheckpoint(ctx context.Context, conn *sql.Conn, checkpoint *SourceMonitorCheckpoint, expected int64) error {
 	payload, err := json.Marshal(checkpoint)
 	if err != nil {

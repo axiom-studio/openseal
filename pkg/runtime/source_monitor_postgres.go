@@ -100,6 +100,46 @@ func (s *PostgresStore) IngestSourceObservation(ctx context.Context, observation
 	return cloneSourceObservation(observation), cloneSourceMonitorCheckpoint(next), persistedEvent, false, nil
 }
 
+func (s *PostgresStore) AdvanceSourceMonitorCheckpoint(ctx context.Context, checkpoint *SourceMonitorCheckpoint, expected int64, event *ActivityEvent) (*SourceMonitorCheckpoint, *ActivityEvent, bool, error) {
+	if checkpoint == nil || event == nil || event.Validate() != nil {
+		return nil, nil, false, ErrInvalidSourceObservation
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer tx.Rollback()
+	lockKey := "openseal:source-monitor:" + checkpoint.Scope.Kind + ":" + checkpoint.Scope.ID + ":" + checkpoint.InitiativeID + ":" + checkpoint.MonitorID
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+		return nil, nil, false, err
+	}
+	current, err := s.getPostgresSourceMonitorCheckpointTx(ctx, tx, checkpoint.Scope, checkpoint.InitiativeID, checkpoint.MonitorID, true)
+	if err != nil && !errors.Is(err, ErrSourceObservationNotFound) {
+		return nil, nil, false, err
+	}
+	if current != nil && current.LastActionCallID == checkpoint.LastActionCallID {
+		if err = tx.Commit(); err != nil {
+			return nil, nil, false, err
+		}
+		return current, nil, true, nil
+	}
+	if currentObservationRevision(current) != expected {
+		return nil, nil, false, ErrSourceMonitorCheckpoint
+	}
+	next := checkpointWithoutObservationChange(checkpoint, current, expected)
+	if err = s.upsertPostgresSourceMonitorCheckpointTx(ctx, tx, next, expected); err != nil {
+		return nil, nil, false, err
+	}
+	persisted, err := s.insertPostgresActivityTx(ctx, tx, event)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, nil, false, err
+	}
+	return next, persisted, false, nil
+}
+
 func (s *PostgresStore) upsertPostgresSourceMonitorCheckpointTx(ctx context.Context, tx *sql.Tx, checkpoint *SourceMonitorCheckpoint, expected int64) error {
 	payload, err := json.Marshal(checkpoint)
 	if err != nil {

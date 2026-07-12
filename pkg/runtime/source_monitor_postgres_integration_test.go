@@ -63,6 +63,34 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 	if succeeded == 0 || succeeded+conflicted != 2 {
 		t.Fatalf("succeeded=%d replayed=%d conflicted=%d", succeeded, replayed, conflicted)
 	}
+	noChangeRequest := checkpointRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 1, "cursor-1", "no-change-postgres")
+	type checkpointOutcome struct {
+		result *SourceMonitorCheckpointResult
+		err    error
+	}
+	checkpointResults := make(chan checkpointOutcome, 2)
+	go func() {
+		result, checkpointErr := firstService.AdvanceCheckpoint(ctx, noChangeRequest)
+		checkpointResults <- checkpointOutcome{result, checkpointErr}
+	}()
+	go func() {
+		result, checkpointErr := secondService.AdvanceCheckpoint(ctx, noChangeRequest)
+		checkpointResults <- checkpointOutcome{result, checkpointErr}
+	}()
+	checkpointSucceeded, checkpointReplayed := 0, 0
+	for range 2 {
+		value := <-checkpointResults
+		if value.err != nil {
+			t.Fatal(value.err)
+		}
+		checkpointSucceeded++
+		if value.result.Replayed {
+			checkpointReplayed++
+		}
+	}
+	if checkpointSucceeded != 2 || checkpointReplayed != 1 {
+		t.Fatalf("checkpoint succeeded=%d replayed=%d", checkpointSucceeded, checkpointReplayed)
+	}
 	primary.Close()
 	primary, err = NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
@@ -70,7 +98,7 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 	}
 	checkpoint, err := primary.GetSourceMonitorCheckpoint(ctx, scope, initiative.ID, "monitor-a")
 	observations, listErr := primary.ListSourceObservations(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-a"})
-	if err != nil || listErr != nil || checkpoint.ObservationCount != 1 || len(observations) != 1 {
+	if err != nil || listErr != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 1 || checkpoint.LastActionCallID != "no-change-postgres" || len(observations) != 1 {
 		t.Fatalf("checkpoint=%#v observations=%#v err=%v listErr=%v", checkpoint, observations, err, listErr)
 	}
 }
