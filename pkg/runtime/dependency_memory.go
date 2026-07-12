@@ -38,6 +38,12 @@ func (s *MemoryStore) CreateRunDependencyGroup(_ context.Context, record RunDepe
 	if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 {
 		return nil, ErrRevisionConflict
 	}
+	for _, target := range record.TargetRuns {
+		key := portfolioKey(target.Scope, target.ID)
+		if s.agentRuns[key] != nil {
+			return nil, ErrRunIdempotency
+		}
+	}
 	s.dependencyGroups[groupKey] = cloneRunDependencyGroup(record.Group)
 	s.dependencies[groupKey] = make(map[string]*RunDependency, len(record.Dependencies))
 	for _, edge := range record.Dependencies {
@@ -48,6 +54,9 @@ func (s *MemoryStore) CreateRunDependencyGroup(_ context.Context, record RunDepe
 	}
 	if record.Group.IdempotencyKey != "" {
 		s.dependencyGroupKeys[dependencyGroupIdempotencyStoreKey(record.Group.Scope, record.Group.IdempotencyKey)] = record.Group.ID
+	}
+	for _, target := range record.TargetRuns {
+		s.agentRuns[portfolioKey(target.Scope, target.ID)] = cloneAgentRun(target)
 	}
 	s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
 	persisted := cloneActivityEvent(appendMemoryActivityLocked(s, record.Event))
@@ -164,6 +173,27 @@ func validateRunDependencyGroupCreateRecord(record RunDependencyGroupCreateRecor
 	}
 	if _, err := EvaluateRunDependencies(record.Group, record.Dependencies); err != nil {
 		return err
+	}
+	targets := make(map[string]*AgentRun, len(record.TargetRuns))
+	for _, target := range record.TargetRuns {
+		if target == nil || target.Validate() != nil || target.Scope != record.Group.Scope || target.ParentRunID != record.Group.SourceRunID || target.RootRunID != record.SourceRun.RootRunID || target.Status != AgentRunStatusQueued {
+			return ErrInvalidRunDependency
+		}
+		if targets[target.ID] != nil {
+			return ErrDependencyConflict
+		}
+		targets[target.ID] = target
+	}
+	for _, edge := range record.Dependencies {
+		if edge.Kind == RunDependencyKindRun && len(targets) > 0 {
+			if targets[edge.TargetRunID] == nil {
+				return ErrInvalidRunDependency
+			}
+			delete(targets, edge.TargetRunID)
+		}
+	}
+	if len(targets) != 0 {
+		return ErrInvalidRunDependency
 	}
 	return nil
 }

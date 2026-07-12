@@ -102,6 +102,11 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 	if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 		return nil, err
 	}
+	for _, target := range record.TargetRuns {
+		if err := insertSQLiteAgentRunConn(ctx, conn, target); err != nil {
+			return nil, err
+		}
+	}
 	groupPayload, err := json.Marshal(record.Group)
 	if err != nil {
 		return nil, err
