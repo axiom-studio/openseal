@@ -24,6 +24,7 @@ type StepKind string
 
 const (
 	StepAction     StepKind = "action"
+	StepDelegate   StepKind = "delegate"
 	StepDecision   StepKind = "decision"
 	StepTransform  StepKind = "transform"
 	StepWait       StepKind = "wait"
@@ -38,6 +39,7 @@ type Step struct {
 	Kind       StepKind        `json:"kind"`
 	Name       string          `json:"name,omitempty"`
 	Action     *ActionStep     `json:"action,omitempty"`
+	Delegate   *DelegateStep   `json:"delegate,omitempty"`
 	Decision   *DecisionStep   `json:"decision,omitempty"`
 	Transform  *TransformStep  `json:"transform,omitempty"`
 	Wait       *WaitStep       `json:"wait,omitempty"`
@@ -55,6 +57,18 @@ type ActionStep struct {
 	Arguments    map[string]Value `json:"arguments,omitempty"`
 	ResultPath   string           `json:"resultPath"`
 	Next         string           `json:"next"`
+}
+
+// DelegateStep assigns a bounded child Run to another first-class Agent. The
+// parent waits on durable child lineage and resumes with the child's terminal
+// output; credentials and private memory are never copied implicitly.
+type DelegateStep struct {
+	AgentID    Value            `json:"agentId"`
+	Goal       Value            `json:"goal"`
+	Context    map[string]Value `json:"context,omitempty"`
+	ResultPath string           `json:"resultPath"`
+	Timeout    time.Duration    `json:"timeout,omitempty"`
+	Next       string           `json:"next"`
 }
 
 type DecisionStep struct {

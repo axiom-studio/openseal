@@ -57,36 +57,37 @@ func (u TurnUsage) Validate() error {
 // operator-facing decisions and references, never private model chain-of-thought
 // or resolved secret values.
 type AgentTurn struct {
-	ID                     string                 `json:"id"`
-	Scope                  Scope                  `json:"scope"`
-	RunID                  string                 `json:"runId"`
-	Sequence               int64                  `json:"sequence"`
-	Status                 AgentTurnStatus        `json:"status"`
-	DefinitionID           string                 `json:"definitionId,omitempty"`
-	DefinitionVersion      string                 `json:"definitionVersion,omitempty"`
-	ModelProvider          string                 `json:"modelProvider,omitempty"`
-	Model                  string                 `json:"model,omitempty"`
-	InputContextRefs       []string               `json:"inputContextRefs,omitempty"`
-	PlanRevision           int64                  `json:"planRevision,omitempty"`
-	SkillSelections        []HostedSkillSelection `json:"skillSelections,omitempty"`
-	Decisions              []TurnDecision         `json:"decisions,omitempty"`
-	RequestedActions       []TurnAction           `json:"requestedActions,omitempty"`
-	RequestedFork          *TurnForkProposal      `json:"requestedFork,omitempty"`
-	OutputSummary          string                 `json:"outputSummary,omitempty"`
-	Usage                  TurnUsage              `json:"usage,omitempty"`
-	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
-	NextRunStatus          AgentRunStatus         `json:"nextRunStatus,omitempty"`
-	WakeCondition          *WakeCondition         `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{} `json:"runOutput,omitempty"`
-	RunError               string                 `json:"runError,omitempty"`
-	Error                  string                 `json:"error,omitempty"`
-	LeaseOwner             string                 `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt         *time.Time             `json:"leaseExpiresAt,omitempty"`
-	Revision               int64                  `json:"revision"`
-	CreatedAt              time.Time              `json:"createdAt"`
-	UpdatedAt              time.Time              `json:"updatedAt"`
-	StartedAt              time.Time              `json:"startedAt"`
-	CompletedAt            *time.Time             `json:"completedAt,omitempty"`
+	ID                     string                  `json:"id"`
+	Scope                  Scope                   `json:"scope"`
+	RunID                  string                  `json:"runId"`
+	Sequence               int64                   `json:"sequence"`
+	Status                 AgentTurnStatus         `json:"status"`
+	DefinitionID           string                  `json:"definitionId,omitempty"`
+	DefinitionVersion      string                  `json:"definitionVersion,omitempty"`
+	ModelProvider          string                  `json:"modelProvider,omitempty"`
+	Model                  string                  `json:"model,omitempty"`
+	InputContextRefs       []string                `json:"inputContextRefs,omitempty"`
+	PlanRevision           int64                   `json:"planRevision,omitempty"`
+	SkillSelections        []HostedSkillSelection  `json:"skillSelections,omitempty"`
+	Decisions              []TurnDecision          `json:"decisions,omitempty"`
+	RequestedActions       []TurnAction            `json:"requestedActions,omitempty"`
+	RequestedFork          *TurnForkProposal       `json:"requestedFork,omitempty"`
+	RequestedDelegation    *TurnDelegationProposal `json:"requestedDelegation,omitempty"`
+	OutputSummary          string                  `json:"outputSummary,omitempty"`
+	Usage                  TurnUsage               `json:"usage,omitempty"`
+	ContinuationCheckpoint map[string]interface{}  `json:"continuationCheckpoint,omitempty"`
+	NextRunStatus          AgentRunStatus          `json:"nextRunStatus,omitempty"`
+	WakeCondition          *WakeCondition          `json:"wakeCondition,omitempty"`
+	RunOutput              map[string]interface{}  `json:"runOutput,omitempty"`
+	RunError               string                  `json:"runError,omitempty"`
+	Error                  string                  `json:"error,omitempty"`
+	LeaseOwner             string                  `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt         *time.Time              `json:"leaseExpiresAt,omitempty"`
+	Revision               int64                   `json:"revision"`
+	CreatedAt              time.Time               `json:"createdAt"`
+	UpdatedAt              time.Time               `json:"updatedAt"`
+	StartedAt              time.Time               `json:"startedAt"`
+	CompletedAt            *time.Time              `json:"completedAt,omitempty"`
 }
 
 func (t *AgentTurn) Validate() error {
@@ -143,6 +144,7 @@ type FinishAgentTurnRequest struct {
 	Decisions              []TurnDecision
 	RequestedActions       []TurnAction
 	RequestedFork          *TurnForkProposal
+	RequestedDelegation    *TurnDelegationProposal
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
@@ -235,6 +237,7 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	turn.Decisions = req.Decisions
 	turn.RequestedActions = req.RequestedActions
 	turn.RequestedFork = req.RequestedFork
+	turn.RequestedDelegation = req.RequestedDelegation
 	turn.OutputSummary = req.OutputSummary
 	turn.Usage = req.Usage
 	turn.ContinuationCheckpoint = req.ContinuationCheckpoint

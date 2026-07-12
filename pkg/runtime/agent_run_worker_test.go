@@ -314,6 +314,73 @@ func TestAgentRunWorkersExecuteJoinAllAndJoinAnyConcurrently(t *testing.T) {
 	}
 }
 
+func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
+	store := NewMemoryStore(50)
+	scope := Scope{Kind: "tenant", ID: "delegation"}
+	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "parent", Version: "1", Name: "Parent", Entrypoints: map[string]string{"manual": "delegate"}, Steps: map[string]runbook.Step{
+		"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
+			AgentID: runbookLiteral("specialist"), Goal: runbookLiteral("Analyze the release"),
+			Context: map[string]runbook.Value{"release": runbookLiteral("2026.07")}, ResultPath: "/steps/delegate", Timeout: time.Minute, Next: "done",
+		}},
+		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"answer": {Ref: "/steps/delegate/answer"}}}},
+	}}
+	parentRunner, err := NewRunbookTurnRunner(definition, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager", Goal: "delegate", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		if run.AssignedAgentID == "manager" {
+			return &TurnRunnerBinding{DefinitionID: "manager", DefinitionVersion: "1", Runner: parentRunner}, nil
+		}
+		if run.AssignedAgentID != "specialist" || run.Context["release"] != "2026.07" || run.Goal != "Analyze the release" {
+			return nil, fmt.Errorf("delegated child mismatch: %#v", run)
+		}
+		return &TurnRunnerBinding{DefinitionID: "specialist", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Analysis complete", RunOutput: map[string]interface{}{"answer": "ship"}}, nil
+		})}, nil
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, Concurrency: 2, MaxTurnsPerClaim: 1,
+		PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+	defer pool.Stop()
+	deadline := time.Now().Add(3 * time.Second)
+	var completed *AgentRun
+	for time.Now().Before(deadline) {
+		completed, err = store.GetAgentRun(t.Context(), scope, parent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status == AgentRunStatusCompleted || completed.Status == AgentRunStatusFailed {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if completed == nil || completed.Status != AgentRunStatusCompleted || completed.Output["answer"] != "ship" {
+		t.Fatalf("parent=%#v", completed)
+	}
+	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 10})
+	if err != nil || len(children) != 1 || children[0].AssignedAgentID != "specialist" || children[0].Source != RunSourceFork || children[0].Status != AgentRunStatusCompleted {
+		t.Fatalf("children=%#v error=%v", children, err)
+	}
+	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: parent.ID})
+	if err != nil || len(turns) != 2 || turns[0].RequestedDelegation == nil || turns[0].RequestedDelegation.AssignedAgentID != "specialist" {
+		t.Fatalf("turns=%#v error=%v", turns, err)
+	}
+}
+
 func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
 	store := NewMemoryStore(20)
 	ctx := context.Background()

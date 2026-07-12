@@ -39,6 +39,7 @@ type (
 	RunbookStep              = runbook.Step
 	RunbookStepKind          = runbook.StepKind
 	RunbookActionStep        = runbook.ActionStep
+	RunbookDelegateStep      = runbook.DelegateStep
 	RunbookDecisionStep      = runbook.DecisionStep
 	RunbookDecisionCase      = runbook.DecisionCase
 	RunbookTransformStep     = runbook.TransformStep
@@ -398,6 +399,7 @@ type (
 	ApprovalResolutionResult           = runtime.ApprovalResolutionResult
 	RunForkBranch                      = runtime.RunForkBranch
 	TurnForkProposal                   = runtime.TurnForkProposal
+	TurnDelegationProposal             = runtime.TurnDelegationProposal
 	CreateRunForkRequest               = runtime.CreateRunForkRequest
 	RunForkResult                      = runtime.RunForkResult
 	RunForkCoordinator                 = runtime.RunForkCoordinator
@@ -461,6 +463,7 @@ const (
 	HostedSkillNotApplied    = runtime.HostedSkillNotApplied
 	RunbookAPIVersion        = runbook.APIVersion
 	RunbookStepAction        = runbook.StepAction
+	RunbookStepDelegate      = runbook.StepDelegate
 	RunbookStepDecision      = runbook.StepDecision
 	RunbookStepTransform     = runbook.StepTransform
 	RunbookStepWait          = runbook.StepWait

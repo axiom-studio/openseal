@@ -31,6 +31,7 @@ type TurnOutcome struct {
 	Decisions              []TurnDecision
 	ProposedActions        []TurnAction
 	ProposedFork           *TurnForkProposal
+	ProposedDelegation     *TurnDelegationProposal
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
@@ -267,6 +268,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.Decisions = outcome.Decisions
 			finish.RequestedActions = outcome.ProposedActions
 			finish.RequestedFork = outcome.ProposedFork
+			finish.RequestedDelegation = outcome.ProposedDelegation
 			finish.OutputSummary = outcome.OutputSummary
 			finish.Usage = outcome.Usage
 			finish.ContinuationCheckpoint = outcome.ContinuationCheckpoint
@@ -388,6 +390,9 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if turn.RequestedFork != nil {
 		activityPayload["requestedFork"] = turn.RequestedFork
 	}
+	if turn.RequestedDelegation != nil {
+		activityPayload["requestedDelegation"] = turn.RequestedDelegation
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
@@ -434,8 +439,26 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 	if isWaitingRunStatus(outcome.NextRunStatus) && outcome.WakeCondition == nil {
 		return fmt.Errorf("next run status %s requires a wake condition", outcome.NextRunStatus)
 	}
-	if len(outcome.ProposedActions) > 0 && outcome.ProposedFork != nil {
-		return errors.New("a bounded Turn cannot propose actions and a fork together")
+	proposalCount := 0
+	if len(outcome.ProposedActions) > 0 {
+		proposalCount++
+	}
+	if outcome.ProposedFork != nil {
+		proposalCount++
+	}
+	if outcome.ProposedDelegation != nil {
+		proposalCount++
+	}
+	if proposalCount > 1 {
+		return errors.New("a bounded Turn can propose only one action, fork, or delegation")
+	}
+	if outcome.ProposedDelegation != nil {
+		if err := outcome.ProposedDelegation.Validate(); err != nil {
+			return err
+		}
+		if outcome.NextRunStatus != AgentRunStatusRunning {
+			return errors.New("a proposed delegation must leave the source Run running until materialized")
+		}
 	}
 	if outcome.ProposedFork != nil {
 		if err := outcome.ProposedFork.Validate(); err != nil {

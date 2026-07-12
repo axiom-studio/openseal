@@ -56,4 +56,26 @@ func TestValidateReturnsPathSpecificDiagnostics(t *testing.T) {
 	}
 }
 
+func TestValidateDurableAgentDelegation(t *testing.T) {
+	definition := &Definition{APIVersion: APIVersion, ID: "delegate", Version: "1", Name: "Delegate", Entrypoints: map[string]string{"manual": "specialist"}, Steps: map[string]Step{
+		"specialist": {Kind: StepDelegate, Delegate: &DelegateStep{
+			AgentID: literal("marketing"), Goal: ref("/input/goal"), Context: map[string]Value{"release": ref("/input/release")},
+			ResultPath: "/steps/specialist", Next: "done",
+		}},
+		"done": {Kind: StepEnd, End: &EndStep{Outputs: map[string]Value{"result": ref("/steps/specialist")}}},
+	}}
+	if diagnostics := Validate(definition); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+	definition.Steps["specialist"] = Step{Kind: StepDelegate, Delegate: &DelegateStep{ResultPath: "bad", Next: "missing"}}
+	diagnostics := Validate(definition)
+	codes := map[string]bool{}
+	for _, diagnostic := range diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["value.source"] || !codes["pointer.invalid"] || !codes["step.reference_unknown"] {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+}
+
 func value(input Value) *Value { return &input }
