@@ -5,6 +5,7 @@ package runbook
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -63,13 +64,41 @@ type ActionStep struct {
 // parent waits on durable child lineage and resumes with the child's terminal
 // output; credentials and private memory are never copied implicitly.
 type DelegateStep struct {
-	AgentID    Value            `json:"agentId"`
-	Goal       Value            `json:"goal"`
-	Context    map[string]Value `json:"context,omitempty"`
-	Mode       DelegateMode     `json:"mode,omitempty"`
-	ResultPath string           `json:"resultPath"`
-	Timeout    time.Duration    `json:"timeout,omitempty"`
-	Next       string           `json:"next"`
+	AgentID    Value             `json:"agentId"`
+	Goal       Value             `json:"goal"`
+	Context    map[string]Value  `json:"context,omitempty"`
+	Mode       DelegateMode      `json:"mode,omitempty"`
+	ResultPath string            `json:"resultPath"`
+	Timeout    time.Duration     `json:"timeout,omitempty"`
+	Budget     *BudgetAllocation `json:"budget,omitempty"`
+	Next       string            `json:"next"`
+}
+
+// BudgetAllocation is the explicit portable ceiling granted to one child Run.
+// It deliberately mirrors the provider-neutral runtime dimensions while
+// remaining independent of runtime orchestration packages.
+type BudgetAllocation struct {
+	MaxTurns        int64 `json:"maxTurns,omitempty"`
+	MaxInputTokens  int64 `json:"maxInputTokens,omitempty"`
+	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
+	MaxTotalTokens  int64 `json:"maxTotalTokens,omitempty"`
+	MaxCostMicros   int64 `json:"maxCostMicros,omitempty"`
+	MaxDurationMS   int64 `json:"maxDurationMs,omitempty"`
+	MaxActions      int64 `json:"maxActions,omitempty"`
+	WarningPermille int64 `json:"warningPermille,omitempty"`
+}
+
+func (b BudgetAllocation) Validate() error {
+	if b.MaxTurns < 0 || b.MaxInputTokens < 0 || b.MaxOutputTokens < 0 || b.MaxTotalTokens < 0 || b.MaxCostMicros < 0 || b.MaxDurationMS < 0 || b.MaxActions < 0 {
+		return errors.New("budget allocation limits cannot be negative")
+	}
+	if b.WarningPermille < 0 || b.WarningPermille > 1000 {
+		return errors.New("budget allocation warning threshold must be between 0 and 1000 permille")
+	}
+	if b.MaxTurns == 0 && b.MaxInputTokens == 0 && b.MaxOutputTokens == 0 && b.MaxTotalTokens == 0 && b.MaxCostMicros == 0 && b.MaxDurationMS == 0 && b.MaxActions == 0 {
+		return errors.New("budget allocation requires at least one finite limit")
+	}
+	return nil
 }
 
 type DelegateMode string
@@ -101,8 +130,9 @@ type WaitStep struct {
 }
 
 type ForkStep struct {
-	Branches map[string]string `json:"branches"`
-	Join     string            `json:"join"`
+	Branches      map[string]string           `json:"branches"`
+	BranchBudgets map[string]BudgetAllocation `json:"branchBudgets,omitempty"`
+	Join          string                      `json:"join"`
 }
 
 type JoinMode string

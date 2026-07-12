@@ -78,6 +78,33 @@ func TestValidateDurableAgentDelegation(t *testing.T) {
 	}
 }
 
+func TestValidateExplicitChildBudgets(t *testing.T) {
+	definition := &Definition{APIVersion: APIVersion, ID: "budgeted", Version: "1", Name: "Budgeted", Entrypoints: map[string]string{"manual": "delegate"}, Steps: map[string]Step{
+		"delegate": {Kind: StepDelegate, Delegate: &DelegateStep{AgentID: literal("agent"), Goal: literal("work"), ResultPath: "/steps/delegate", Budget: &BudgetAllocation{MaxTurns: 2}, Next: "fork"}},
+		"fork":     {Kind: StepFork, Fork: &ForkStep{Branches: map[string]string{"a": "a", "b": "b"}, BranchBudgets: map[string]BudgetAllocation{"a": {MaxActions: 1}, "b": {MaxDurationMS: 1000}}, Join: "join"}},
+		"a":        {Kind: StepTransform, Transform: &TransformStep{Assignments: map[string]Value{"/state/a": literal(true)}, Next: "join"}},
+		"b":        {Kind: StepTransform, Transform: &TransformStep{Assignments: map[string]Value{"/state/b": literal(true)}, Next: "join"}},
+		"join":     {Kind: StepJoin, Join: &JoinStep{Fork: "fork", Mode: JoinAll, Next: "done"}},
+		"done":     {Kind: StepEnd, End: &EndStep{}},
+	}}
+	if diagnostics := Validate(definition); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+	definition.Steps["delegate"].Delegate.Budget = &BudgetAllocation{}
+	delete(definition.Steps["fork"].Fork.BranchBudgets, "b")
+	definition.Steps["fork"].Fork.BranchBudgets["unknown"] = BudgetAllocation{MaxTurns: -1}
+	diagnostics := Validate(definition)
+	codes := map[string]bool{}
+	for _, diagnostic := range diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	for _, code := range []string{"delegate.budget", "fork.budget_required", "fork.budget_unknown_branch"} {
+		if !codes[code] {
+			t.Fatalf("missing %s in %#v", code, diagnostics)
+		}
+	}
+}
+
 func TestValidateTypedTemplateSegments(t *testing.T) {
 	definition := &Definition{APIVersion: APIVersion, ID: "template", Version: "1", Name: "Template", Entrypoints: map[string]string{"manual": "set"}, Steps: map[string]Step{
 		"set":  {Kind: StepTransform, Transform: &TransformStep{Assignments: map[string]Value{"/state/message": {Template: []TemplateSegment{{Text: "Hello "}, {Ref: "/input/name"}}}}, Next: "done"}},

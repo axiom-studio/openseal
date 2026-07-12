@@ -320,7 +320,8 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "parent", Version: "1", Name: "Parent", Entrypoints: map[string]string{"manual": "delegate"}, Steps: map[string]runbook.Step{
 		"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
 			AgentID: runbookLiteral("specialist"), Goal: runbookLiteral("Analyze the release"),
-			Context: map[string]runbook.Value{"release": runbookLiteral("2026.07")}, Mode: runbook.DelegateReason, ResultPath: "/steps/delegate", Timeout: time.Minute, Next: "done",
+			Context: map[string]runbook.Value{"release": runbookLiteral("2026.07")}, Mode: runbook.DelegateReason, ResultPath: "/steps/delegate", Timeout: time.Minute,
+			Budget: &runbook.BudgetAllocation{MaxTurns: 2, MaxDurationMS: 60000}, Next: "done",
 		}},
 		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"answer": {Ref: "/steps/delegate/answer"}}}},
 	}}
@@ -330,6 +331,7 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	}
 	parent, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager", Goal: "delegate", Source: RunSourceManual,
+		Budget: &BudgetPolicy{MaxTurns: 6, MaxDurationMS: 180000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -374,6 +376,9 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 10})
 	if err != nil || len(children) != 1 || children[0].AssignedAgentID != "specialist" || children[0].Source != RunSourceFork || children[0].Status != AgentRunStatusCompleted {
 		t.Fatalf("children=%#v error=%v", children, err)
+	}
+	if children[0].Budget == nil || children[0].Budget.MaxTurns != 2 || children[0].Budget.MaxDurationMS != 60000 || len(completed.BudgetAllocations) != 1 {
+		t.Fatalf("budgeted parent=%#v children=%#v", completed, children)
 	}
 	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: parent.ID})
 	if err != nil || len(turns) != 2 || turns[0].RequestedDelegation == nil || turns[0].RequestedDelegation.AssignedAgentID != "specialist" {
