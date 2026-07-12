@@ -129,8 +129,14 @@ type EndStep struct {
 // Value is either a literal JSON value or a JSON Pointer into the durable
 // runbook context. Exactly one source must be present.
 type Value struct {
-	Literal json.RawMessage `json:"literal,omitempty"`
-	Ref     string          `json:"ref,omitempty"`
+	Literal  json.RawMessage   `json:"literal,omitempty"`
+	Ref      string            `json:"ref,omitempty"`
+	Template []TemplateSegment `json:"template,omitempty"`
+}
+
+type TemplateSegment struct {
+	Text string `json:"text,omitempty"`
+	Ref  string `json:"ref,omitempty"`
 }
 
 type PredicateOperator string

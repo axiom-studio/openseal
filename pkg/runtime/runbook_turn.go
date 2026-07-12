@@ -501,6 +501,32 @@ func resolveRunbookValue(root map[string]interface{}, value runbook.Value) (inte
 	if value.Ref != "" {
 		return getRunbookPointer(root, value.Ref)
 	}
+	if len(value.Template) > 0 {
+		var builder strings.Builder
+		for _, segment := range value.Template {
+			if segment.Text != "" {
+				builder.WriteString(segment.Text)
+				continue
+			}
+			resolved, err := getRunbookPointer(root, segment.Ref)
+			if err != nil {
+				return nil, err
+			}
+			switch typed := resolved.(type) {
+			case string:
+				builder.WriteString(typed)
+			case nil:
+				builder.WriteString("null")
+			default:
+				encoded, encodeErr := json.Marshal(typed)
+				if encodeErr != nil {
+					return nil, encodeErr
+				}
+				builder.Write(encoded)
+			}
+		}
+		return builder.String(), nil
+	}
 	var result interface{}
 	if err := json.Unmarshal(value.Literal, &result); err != nil {
 		return nil, err

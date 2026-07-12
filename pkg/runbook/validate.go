@@ -303,8 +303,15 @@ func stepPayloadMatchesKind(step Step) bool {
 func (v *validator) validateValue(path string, value Value) {
 	hasLiteral := len(value.Literal) > 0
 	hasRef := strings.TrimSpace(value.Ref) != ""
-	if hasLiteral == hasRef {
-		v.add(path, "value.source", "exactly one literal or ref is required")
+	hasTemplate := len(value.Template) > 0
+	sources := 0
+	for _, present := range []bool{hasLiteral, hasRef, hasTemplate} {
+		if present {
+			sources++
+		}
+	}
+	if sources != 1 {
+		v.add(path, "value.source", "exactly one literal, ref, or template is required")
 		return
 	}
 	if hasLiteral && !json.Valid(value.Literal) {
@@ -312,6 +319,18 @@ func (v *validator) validateValue(path string, value Value) {
 	}
 	if hasRef {
 		v.validatePointer(path+".ref", value.Ref)
+	}
+	if hasTemplate {
+		for index, segment := range value.Template {
+			segmentPath := fmt.Sprintf("%s.template[%d]", path, index)
+			if (segment.Text == "") == (strings.TrimSpace(segment.Ref) == "") {
+				v.add(segmentPath, "template.segment", "template segment requires exactly one text or ref")
+				continue
+			}
+			if segment.Ref != "" {
+				v.validatePointer(segmentPath+".ref", segment.Ref)
+			}
+		}
 	}
 }
 

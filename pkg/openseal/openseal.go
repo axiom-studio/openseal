@@ -51,6 +51,7 @@ type (
 	RunbookLoopReturnStep    = runbook.LoopReturnStep
 	RunbookEndStep           = runbook.EndStep
 	RunbookValue             = runbook.Value
+	RunbookTemplateSegment   = runbook.TemplateSegment
 	RunbookPredicate         = runbook.Predicate
 	RunbookPredicateOperator = runbook.PredicateOperator
 	RunbookDiagnostic        = runbook.Diagnostic
