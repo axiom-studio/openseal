@@ -177,7 +177,21 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter ApprovalFilter
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("approval_checkpoints")+` WHERE scope_kind = $1 AND scope_id = $2 ORDER BY created_at, id`, filter.Scope.Kind, filter.Scope.ID)
+	query := `SELECT a.payload FROM ` + s.table("approval_checkpoints") + ` a`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	if filter.Owner != nil {
+		if err := filter.Owner.Validate(); err != nil {
+			return nil, err
+		}
+		query += ` JOIN ` + s.table("agent_runs") + ` r ON r.scope_kind = a.scope_kind AND r.scope_id = a.scope_id AND r.id = a.run_id`
+	}
+	query += ` WHERE a.scope_kind = $1 AND a.scope_id = $2`
+	if filter.Owner != nil {
+		query += ` AND r.payload->'owner'->>'type' = $3 AND r.payload->'owner'->>'id' = $4`
+		args = append(args, filter.Owner.Type, filter.Owner.ID)
+	}
+	query += ` ORDER BY a.created_at, a.id`
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

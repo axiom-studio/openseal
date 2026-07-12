@@ -241,8 +241,21 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM approval_checkpoints
-		WHERE scope_kind = ? AND scope_id = ? ORDER BY created_at ASC, id ASC`, filter.Scope.Kind, filter.Scope.ID)
+	query := `SELECT a.payload FROM approval_checkpoints a`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	if filter.Owner != nil {
+		if err := filter.Owner.Validate(); err != nil {
+			return nil, err
+		}
+		query += ` JOIN agent_runs r ON r.scope_kind = a.scope_kind AND r.scope_id = a.scope_id AND r.id = a.run_id`
+	}
+	query += ` WHERE a.scope_kind = ? AND a.scope_id = ?`
+	if filter.Owner != nil {
+		query += ` AND json_extract(r.payload, '$.owner.type') = ? AND json_extract(r.payload, '$.owner.id') = ?`
+		args = append(args, filter.Owner.Type, filter.Owner.ID)
+	}
+	query += ` ORDER BY a.created_at ASC, a.id ASC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
