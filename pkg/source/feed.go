@@ -138,7 +138,7 @@ func ParseFeedSince(data []byte, feedURL string, maxItems int, cursor string) (*
 	}
 	feedTitle := cleanText(document.Title)
 	cursor = strings.TrimSpace(cursor)
-	result := &FeedResult{NextCursor: cursor}
+	result := &FeedResult{Observations: make([]FeedObservation, 0), NextCursor: cursor}
 	if document.Channel != nil {
 		feedTitle = cleanText(document.Channel.Title)
 		for _, item := range document.Channel.Items {
