@@ -120,6 +120,7 @@ type (
 	WorkforceDefinitionActivation             = workforce.DefinitionActivation
 	WorkforceAuthoringMode                    = authoring.Mode
 	WorkforceSkillCapability                  = authoring.SkillCapability
+	WorkforceSkillCredential                  = authoring.SkillCredential
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
