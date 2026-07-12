@@ -53,6 +53,7 @@ type (
 	RunbookPredicate         = runbook.Predicate
 	RunbookPredicateOperator = runbook.PredicateOperator
 	RunbookDiagnostic        = runbook.Diagnostic
+	RunbookTurnRunner        = runtime.RunbookTurnRunner
 
 	AgentNodeDefinition                       = types.AgentNodeDefinition
 	AgentConnection                           = types.AgentConnection
@@ -483,6 +484,7 @@ var (
 	NewHostedTurnRunner    = runtime.NewHostedTurnRunner
 	ErrTurnHostUnavailable = runtime.ErrTurnHostUnavailable
 	ValidateRunbook        = runbook.Validate
+	NewRunbookTurnRunner   = runtime.NewRunbookTurnRunner
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
