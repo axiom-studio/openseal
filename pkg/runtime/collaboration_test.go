@@ -201,7 +201,9 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
-	service.teams = activeCollaborationTeam(scope, "gtm", kernelteam.RosterAssignment{ID: "marketer", RoleID: "lead", AgentDeploymentID: "marketing-agent"})
+	service.teams = activeCollaborationTeam(scope, "gtm",
+		kernelteam.RosterAssignment{ID: "marketer", RoleID: "lead", AgentDeploymentID: "marketing-agent"},
+		kernelteam.RosterAssignment{ID: "marketer-two", RoleID: "lead", AgentDeploymentID: "marketing-agent-two"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
@@ -297,10 +299,13 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1, Decision: AgentRequestDecisionAccept,
-		Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"}, AssignedAgentID: "marketing-editor",
+		Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if accepted.Request.AssignedAgentID != "marketing-editor" || accepted.Child.AssignedAgentID != "marketing-editor" {
+		t.Fatalf("automatic unique-role assignment = %#v", accepted)
 	}
 	for _, artifact := range []*Artifact{
 		{

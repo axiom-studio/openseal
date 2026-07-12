@@ -1023,9 +1023,6 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 		}
 		return request.Recipient.ID, nil
 	}
-	if assignedAgentID == "" {
-		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent", ErrAgentRequestAssignment)
-	}
 	if s.teams == nil {
 		return "", fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
 	}
@@ -1036,16 +1033,27 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
 		return "", fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
 	}
+	eligible := make([]kernelteam.RosterAssignment, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
-		if assignment.AgentDeploymentID != assignedAgentID {
-			continue
+		if request.SemanticRole == "" || assignment.RoleID == request.SemanticRole {
+			eligible = append(eligible, assignment)
 		}
-		if request.SemanticRole != "" && assignment.RoleID != request.SemanticRole {
-			return "", fmt.Errorf("%w: assigned Agent does not hold the requested semantic role", ErrAgentRequestAssignment)
-		}
-		return assignedAgentID, nil
 	}
-	return "", fmt.Errorf("%w: assigned Agent is not an active member of the recipient Team", ErrAgentRequestAssignment)
+	if assignedAgentID == "" {
+		if len(eligible) == 1 {
+			return eligible[0].AgentDeploymentID, nil
+		}
+		if len(eligible) == 0 {
+			return "", fmt.Errorf("%w: recipient Team has no Agent for semantic role %q", ErrAgentRequestAssignment, request.SemanticRole)
+		}
+		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent because %d roster members are eligible", ErrAgentRequestAssignment, len(eligible))
+	}
+	for _, assignment := range eligible {
+		if assignment.AgentDeploymentID == assignedAgentID {
+			return assignedAgentID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: assigned Agent is not an eligible member of the recipient Team", ErrAgentRequestAssignment)
 }
 
 func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
