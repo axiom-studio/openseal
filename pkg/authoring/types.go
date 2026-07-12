@@ -30,9 +30,10 @@ type SkillCapability struct {
 }
 
 type SkillCredential struct {
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Actions []string `json:"actions,omitempty"`
+	Name     string   `json:"name"`
+	Kind     string   `json:"kind"`
+	Actions  []string `json:"actions,omitempty"`
+	Optional bool     `json:"optional,omitempty"`
 }
 
 type CapabilityCatalog struct {

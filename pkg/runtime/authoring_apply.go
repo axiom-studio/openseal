@@ -136,6 +136,9 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 			}
 			reference := value.Placement.CredentialReferences[definition.ID][credential.Kind]
 			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+				if credential.Optional {
+					continue
+				}
 				return nil, fmt.Errorf("Agent %s Skill %s requires opaque credential %s of kind %s", definition.ID, requirement.SkillID, credential.Name, credential.Kind)
 			}
 			credentials[credential.Name] = reference
