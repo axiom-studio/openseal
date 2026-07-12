@@ -147,6 +147,64 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	}
 }
 
+func TestConversationCoordinatorNeverExposesTargetedMessageToOtherAgents(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := NewConversationService(NewMemoryStore(100))
+	scope := Scope{Kind: "tenant", ID: "private"}
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, Title: "Launch", IdempotencyKey: "private-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	developer := ConversationParticipant{Type: ConversationParticipantAgent, ID: "developer"}
+	marketing := ConversationParticipant{Type: ConversationParticipantAgent, ID: "marketing"}
+	question, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
+		Content: "Is the private security review complete?", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{developer}},
+		RequiresResponse: true, IdempotencyKey: "private-question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{{Participant: developer, SemanticRoles: []string{"developer"}}, {Participant: marketing, SemanticRoles: []string{"marketing"}}}, nil
+	})
+	var calls atomic.Int32
+	provider := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		calls.Add(1)
+		if input.Participant != developer || input.Trigger == nil || input.Trigger.ID != question.Message.ID || len(input.RecentMessages) != 1 {
+			t.Fatalf("provider received unauthorized context: %#v", input)
+		}
+		return ParticipationProposal{WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Yes. Security reviewer Alice signed artifact report-17.",
+			Audience:         ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{developer}},
+			ReplyToMessageID: question.Message.ID, ResolvesMessageID: question.Message.ID,
+			Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true}}, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, provider, DefaultConversationCoordinatorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{Scope: scope, ConversationID: conversation.ID,
+		ExpectedRevision: question.Conversation.Revision, TriggerMessageID: question.Message.ID, IdempotencyKey: "private-round"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 || len(round.Messages) != 1 || round.Messages[0].Sender != developer || len(round.Round.Proposals) != 2 || round.Round.Proposals[1].Participant != marketing || round.Round.Proposals[1].WantsToSpeak {
+		t.Fatalf("calls=%d messages=%#v arbitration=%#v proposals=%#v", calls.Load(), round.Messages, round.Round.Arbitration, round.Round.Proposals)
+	}
+	developerCursor, err := service.GetCursor(ctx, scope, conversation.ID, developer)
+	if err != nil || developerCursor == nil || developerCursor.ReadSequence != question.Message.Sequence {
+		t.Fatalf("developer cursor=%#v err=%v", developerCursor, err)
+	}
+	marketingCursor, err := service.GetCursor(ctx, scope, conversation.ID, marketing)
+	if err != nil || marketingCursor != nil {
+		t.Fatalf("marketing cursor=%#v err=%v", marketingCursor, err)
+	}
+}
+
 func TestConversationCoordinatorFailsClosedWithoutCommittingPartialRound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
