@@ -473,3 +473,71 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 		t.Fatalf("source=%#v result=%#v", refreshedSource, result)
 	}
 }
+
+func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "artifact-delegation"}
+	portfolio := NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship the release", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Create the launch report",
+		ArtifactRequirements: []ArtifactRequirement{{Name: "launch-report", Type: "report", Required: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewArtifactCatalog(store).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+		ID: "launch-report", Version: 1, Scope: scope, Name: "launch-report.pdf", Type: "report", MediaType: "application/pdf",
+		ContentRef: "artifact-store:launch-report", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		SizeBytes: 4096, Classification: ArtifactClassificationInternal,
+		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning,
+		Summary: "Creating report", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedChild, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
+		Summary: "Report created", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+		Output: map[string]interface{}{
+			"summary":      "Delivered the launch report.",
+			"artifactRefs": []interface{}{map[string]interface{}{"id": "launch-report", "version": 1, "requirementName": "launch-report"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := service.ResolveTerminalAgentRequestChild(ctx, completedChild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Request.Status != AgentRequestStatusCompleted || len(resolved.Request.Artifacts) != 1 ||
+		resolved.Request.Artifacts[0].ID != "launch-report" || resolved.Request.Artifacts[0].ContentRef != "artifact-store:launch-report" ||
+		resolved.Source.Status != AgentRunStatusQueued {
+		t.Fatalf("artifact-bearing resolution = %#v", resolved)
+	}
+}
