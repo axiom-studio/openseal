@@ -146,6 +146,24 @@ func (s *LocalStore) Available(_ context.Context, scope runtime.Scope, contentRe
 	return err == nil, err
 }
 
+func (s *LocalStore) Delete(_ context.Context, scope runtime.Scope, contentRef string) error {
+	if s == nil || s.root == "" {
+		return errors.New("local artifact store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	hexDigest, err := parseLocalReference(contentRef)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(filepath.Join(s.scopeDirectory(scope), hexDigest))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 func (s *LocalStore) scopeDirectory(scope runtime.Scope) string {
 	digest := sha256.Sum256([]byte(scope.Kind + "\x00" + scope.ID))
 	return filepath.Join(s.root, hex.EncodeToString(digest[:]))
@@ -191,3 +209,4 @@ func (r *contextReader) Read(buffer []byte) (int, error) {
 
 var _ runtime.ArtifactContentStore = (*LocalStore)(nil)
 var _ runtime.ArtifactContentInspector = (*LocalStore)(nil)
+var _ runtime.ArtifactContentDeleter = (*LocalStore)(nil)
