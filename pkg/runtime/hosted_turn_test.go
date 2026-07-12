@@ -39,7 +39,7 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		t.Fatal(err)
 	}
 	outcome, err := runner.RunTurn(context.Background(), TurnExecutionContext{
-		Run:  &AgentRun{ID: "run-2", Scope: Scope{Kind: "tenant", ID: "1"}, AssignedAgentID: "agent-3", Goal: "Analyze launch feedback", Checkpoint: map[string]interface{}{"cursor": "next"}},
+		Run:  &AgentRun{ID: "run-2", Scope: Scope{Kind: "tenant", ID: "1"}, AssignedAgentID: "agent-3", Goal: "Analyze launch feedback", Context: map[string]interface{}{"source": "https://example.test/evidence"}, Checkpoint: map[string]interface{}{"cursor": "next"}},
 		Turn: &AgentTurn{ID: "turn-7"},
 	})
 	if err != nil {
@@ -47,6 +47,9 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	}
 	if host.request.InvocationID != "turn-7" || host.request.TurnID != "turn-7" || host.request.RunID != "run-2" || host.request.Goal != "Analyze launch feedback" {
 		t.Fatalf("host request = %#v", host.request)
+	}
+	if host.request.InputContext["source"] != "https://example.test/evidence" {
+		t.Fatalf("input context = %#v", host.request.InputContext)
 	}
 	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || host.request.SkillPrompts[0].Reference != "skill:summarize@1.0.0" || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" || outcome.ModelProvider != "openai-compatible" || outcome.Model != "deepseek-v4-flash" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)

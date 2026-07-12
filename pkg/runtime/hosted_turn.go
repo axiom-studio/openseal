@@ -17,7 +17,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v3"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v4"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
@@ -59,6 +59,7 @@ type HostedTurnRequest struct {
 	DefinitionID           string                   `json:"definitionId"`
 	DefinitionVersion      string                   `json:"definitionVersion"`
 	Goal                   string                   `json:"goal"`
+	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
@@ -125,7 +126,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
 		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
-		Goal: input.Run.Goal, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
+		Goal: input.Run.Goal, InputContext: cloneMap(input.Run.Context), SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
