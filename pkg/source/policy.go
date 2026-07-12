@@ -16,6 +16,10 @@ var policyHostname = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])
 // injected after action-schema validation and must never be model writable.
 const PolicyDecisionTransportKey = "_opensealSourcePolicyDecision"
 
+// CursorTransportKey carries the durable monitor cursor after action-schema
+// validation. Models and user-authored Skill inputs cannot set it.
+const CursorTransportKey = "_opensealSourceCursor"
+
 // Policy is a portable, credential-free outbound source policy. An embedding
 // host owns storage, tenancy, authorization, rate limiting, and audit; OpenSeal
 // owns deterministic validation and URL decisions.
