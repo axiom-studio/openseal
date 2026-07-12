@@ -55,6 +55,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}", s.handleGetAgentRun)
 	s.mux.HandleFunc("POST /api/v1/agent-runs/{id}/commands", s.handleCommandAgentRun)
+	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/compilations", s.handleListAgentDefinitionCompilations)
 	s.mux.HandleFunc("POST /api/v1/artifacts", s.handleRegisterArtifact)
 	s.mux.HandleFunc("GET /api/v1/artifacts", s.handleListArtifacts)
 	s.mux.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
@@ -110,6 +111,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ChannelsCapability())
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
+		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability())
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
 			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability())
 		}

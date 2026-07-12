@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -43,6 +44,7 @@ type KernelClient interface {
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
 	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
+	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
 	GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error)
@@ -112,6 +114,16 @@ func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.Capabili
 	var document kernelapi.CapabilityDocument
 	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities", nil, "", &document)
 	return document, err
+}
+
+func (c *KernelHTTPClient) ListAgentDefinitionCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
+	query := capabilityScopeQuery(scope)
+	var values []*kernelagent.DefinitionCompilation
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/compilations?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &values); err != nil {
+		return nil, err
+	}
+	return values, nil
 }
 
 func (c *KernelHTTPClient) WorkforceChangeSetCapabilities(ctx context.Context, scope capability.ScopeReference, id string) (kernelapi.CapabilityDocument, error) {

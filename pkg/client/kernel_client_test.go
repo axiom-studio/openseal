@@ -49,7 +49,6 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !initiativeCapability.Supports(kernelapi.OperationPatch) {
 		t.Fatalf("initiative capabilities: %#v", document)
 	}
-
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	objective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
@@ -147,6 +146,43 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 	if loaded.Revision != paused.Run.Revision {
 		t.Fatalf("loaded revision = %d, want %d", loaded.Revision, paused.Run.Revision)
+	}
+}
+
+func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	ctx := context.Background()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	document, err := client.Capabilities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitionCapability, ok := document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
+	if !ok || !definitionCapability.Supports(kernelapi.OperationListCompilations) {
+		t.Fatalf("Agent definition capabilities = %#v", document)
+	}
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	registry := kernelagent.NewRegistryWithStore(store)
+	definition, err := registry.RegisterDefinition(ctx, &kernelagent.AgentDefinition{ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Research", SystemPrompt: "Research safely.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: "researcher", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.RecordCompilation(ctx, &kernelagent.DefinitionCompilation{ID: "researcher-1", Scope: scope, DeploymentID: "researcher", DefinitionID: definition.ID, CandidateVersion: "1", Source: kernelagent.CompilationSource{Kind: "prompt", ID: "source", Version: "1", Digest: "sha256:source"}, TargetDigest: definition.Digest, Status: kernelagent.CompilationClean}); err != nil {
+		t.Fatal(err)
+	}
+	compilations, err := client.ListAgentDefinitionCompilations(ctx, scope, "researcher")
+	if err != nil || len(compilations) != 1 || compilations[0].ID != "researcher-1" {
+		t.Fatalf("Agent compilations = %#v, %v", compilations, err)
 	}
 }
 

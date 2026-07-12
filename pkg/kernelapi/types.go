@@ -30,36 +30,39 @@ const (
 	WorkforceAuthoringCapabilityVersion = "2"
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
+	AgentDefinitionsCapabilityID        = "agent-definitions"
+	AgentDefinitionsCapabilityVersion   = "1"
 )
 
 const (
-	OperationCreate     = "create"
-	OperationGet        = "get"
-	OperationList       = "list"
-	OperationPause      = "pause"
-	OperationResume     = "resume"
-	OperationCancel     = "cancel"
-	OperationIntervene  = "intervene"
-	OperationUpdate     = "update"
-	OperationRegister   = "register"
-	OperationUpload     = "upload"
-	OperationDownload   = "download"
-	OperationResolve    = "resolve"
-	OperationPost       = "post"
-	OperationCoordinate = "coordinate"
-	OperationRead       = "read"
-	OperationPresence   = "presence"
-	OperationAudit      = "audit"
-	OperationChanges    = "changes"
-	OperationDeploy     = "deploy"
-	OperationActivate   = "activate"
-	OperationCompile    = "compile"
-	OperationPropose    = "propose"
-	OperationEvaluate   = "evaluate"
-	OperationApprove    = "approve"
-	OperationApply      = "apply"
-	OperationRetry      = "retry"
-	OperationPatch      = "patch"
+	OperationCreate           = "create"
+	OperationGet              = "get"
+	OperationList             = "list"
+	OperationPause            = "pause"
+	OperationResume           = "resume"
+	OperationCancel           = "cancel"
+	OperationIntervene        = "intervene"
+	OperationUpdate           = "update"
+	OperationRegister         = "register"
+	OperationUpload           = "upload"
+	OperationDownload         = "download"
+	OperationResolve          = "resolve"
+	OperationPost             = "post"
+	OperationCoordinate       = "coordinate"
+	OperationRead             = "read"
+	OperationPresence         = "presence"
+	OperationAudit            = "audit"
+	OperationChanges          = "changes"
+	OperationDeploy           = "deploy"
+	OperationActivate         = "activate"
+	OperationCompile          = "compile"
+	OperationPropose          = "propose"
+	OperationEvaluate         = "evaluate"
+	OperationApprove          = "approve"
+	OperationApply            = "apply"
+	OperationRetry            = "retry"
+	OperationPatch            = "patch"
+	OperationListCompilations = "list_compilations"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -190,8 +193,12 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), AgentRunsCapability(), ChannelsCapability(), TeamDefinitionsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(), TeamDefinitionsCapability()},
 	}
+}
+
+func AgentDefinitionsCapability() Capability {
+	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationListCompilations}}
 }
 
 func ArtifactCapability(contentOperations ...string) Capability {

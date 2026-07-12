@@ -182,6 +182,8 @@ func (m *Model) renderPanel(width int) string {
 	var content string
 	if m.section == sectionAuthoring {
 		content = m.renderAuthoringContent(width)
+	} else if m.section == sectionReadiness {
+		content = m.renderReadinessContent(width)
 	} else if m.section == sectionObjectives {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionInitiatives {
@@ -199,10 +201,19 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 6)
+	tabs := make([]string, 0, 8)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.agentDefinitionCapability.Available {
+		label := "h Runtime"
+		if m.section == sectionReadiness {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -264,6 +275,32 @@ func (m *Model) renderPanelTabs() string {
 		tabs = append(tabs, label)
 	}
 	return strings.Join(tabs, "  ")
+}
+
+func (m *Model) renderReadinessContent(width int) string {
+	title := headerStyle.Render("Native runtime readiness")
+	if m.loading && len(m.compilations) == 0 {
+		return title + "\n\n" + mutedStyle.Render("Loading immutable compilation evidence…")
+	}
+	if len(m.compilations) == 0 {
+		return title + "\n\n" + mutedStyle.Render("No compilation record exists for this Agent. Runtime readiness is unverified.")
+	}
+	latest := m.compilations[0]
+	lines := []string{title, ""}
+	if latest.Status == "clean" {
+		lines = append(lines, lipgloss.NewStyle().Foreground(success).Bold(true).Render("READY")+"  Behavior compiled to the native Agent runtime.")
+	} else {
+		lines = append(lines, lipgloss.NewStyle().Foreground(danger).Bold(true).Render("NEEDS ATTENTION")+"  This candidate was not activated because behavior could not be preserved.")
+		for _, diagnostic := range latest.Diagnostics {
+			location := diagnostic.Path
+			if diagnostic.NodeID != "" {
+				location = "Node " + diagnostic.NodeID + " · " + location
+			}
+			lines = append(lines, "", "• "+compact(diagnostic.Message, max(width-10, 24)), mutedStyle.Render("  "+location+" · "+diagnostic.Code))
+		}
+	}
+	lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Candidate %s · source %s %s · %d immutable record(s)", compact(latest.CandidateVersion, 20), latest.Source.Kind, latest.Source.Version, len(m.compilations))))
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderAuthoringContent(width int) string {

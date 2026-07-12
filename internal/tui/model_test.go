@@ -29,6 +29,7 @@ import (
 type fakeKernelClient struct {
 	document          kernelapi.CapabilityDocument
 	runs              []*runtime.AgentRun
+	compilations      []*kernelagent.DefinitionCompilation
 	createErrors      []error
 	createKeys        []string
 	createRequests    []kernelapi.CreateAgentRunRequest
@@ -459,6 +460,10 @@ func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.C
 
 func (f *fakeKernelClient) ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
 	return f.runs, nil
+}
+
+func (f *fakeKernelClient) ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error) {
+	return f.compilations, nil
 }
 
 func (f *fakeKernelClient) GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error) {
@@ -1161,6 +1166,26 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 
 func newTestModel(t *testing.T, fake *fakeKernelClient) *Model {
 	return newModelWithClient(t, fake)
+}
+
+func TestRuntimeReadinessRendersLatestCompilationTruth(t *testing.T) {
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability()),
+		compilations: []*kernelagent.DefinitionCompilation{{
+			ID: "failed", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, DeploymentID: "operator", DefinitionID: "operator", CandidateVersion: "source-2",
+			Source: kernelagent.CompilationSource{Kind: "visual_graph", ID: "source", Version: "2", Digest: testDigest("source")}, Status: kernelagent.CompilationFailed,
+			Diagnostics: []kernelagent.CompilationDiagnostic{{NodeID: "reddit", Path: "nodes.reddit", Code: "action.unavailable", Message: "Reddit action is unavailable"}}, CreatedAt: time.Now(),
+		}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionReadiness
+	view := model.View()
+	for _, expected := range []string{"Native runtime readiness", "NEEDS ATTENTION", "Reddit action is unavailable", "Node reddit", "candidate was not activated"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("readiness view missing %q:\n%s", expected, view)
+		}
+	}
 }
 
 func newModelWithClient(t *testing.T, kernelClient client.KernelClient) *Model {
