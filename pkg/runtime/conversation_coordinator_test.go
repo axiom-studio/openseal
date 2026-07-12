@@ -175,7 +175,7 @@ func TestConversationCoordinatorNeverExposesTargetedMessageToOtherAgents(t *test
 	var calls atomic.Int32
 	provider := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
 		calls.Add(1)
-		if input.Participant != developer || input.Trigger == nil || input.Trigger.ID != question.Message.ID || len(input.RecentMessages) != 1 {
+		if input.Participant != developer || input.Trigger == nil || input.Trigger.ID != question.Message.ID || len(input.RecentMessages) != 1 || len(input.OpenMessages) != 1 || input.OpenMessages[0].ID != question.Message.ID {
 			t.Fatalf("provider received unauthorized context: %#v", input)
 		}
 		return ParticipationProposal{WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Yes. Security reviewer Alice signed artifact report-17.",
@@ -202,6 +202,20 @@ func TestConversationCoordinatorNeverExposesTargetedMessageToOtherAgents(t *test
 	marketingCursor, err := service.GetCursor(ctx, scope, conversation.ID, marketing)
 	if err != nil || marketingCursor != nil {
 		t.Fatalf("marketing cursor=%#v err=%v", marketingCursor, err)
+	}
+}
+
+func TestOpenConversationMessagesTracksDurableResolution(t *testing.T) {
+	question := &ChannelMessage{ID: "question", Intent: MessageIntentQuestion, RequiresResponse: true, Sequence: 1}
+	proposal := &ChannelMessage{ID: "proposal", Intent: MessageIntentProposal, RequiresResponse: true, Sequence: 2}
+	answer := &ChannelMessage{ID: "answer", Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, Sequence: 3}
+	open := openConversationMessages([]*ChannelMessage{question, proposal, answer})
+	if len(open) != 1 || open[0].ID != proposal.ID {
+		t.Fatalf("open messages=%#v", open)
+	}
+	unlinked := ParticipationProposal{WantsToSpeak: true, Intent: MessageIntentAnswer, Signals: ParticipationSignals{AnswersOpenQuestion: true, ResolvesOpenWork: true}}
+	if proposalTargetsOpenMessage(unlinked, open, MessageIntentQuestion, false) || proposalTargetsOpenMessage(unlinked, open, "", true) {
+		t.Fatal("unlinked model claims must not resolve durable open work")
 	}
 }
 
