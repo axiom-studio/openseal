@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -220,7 +221,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		updatedCall.CompletedAt = &completedAt
 		if executionErr == nil {
 			updatedCall.Status = ActionCallStatusSucceeded
-			updatedCall.Output = cloneMap(output)
+			updatedCall.Output = sanitizeActionOutput(output, credentials)
 			updatedCall.Error = ""
 		} else {
 			updatedCall.Status = ActionCallStatusFailed
@@ -249,7 +250,16 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		if checkpoint == nil {
 			checkpoint = make(map[string]interface{})
 		}
-		checkpoint["lastAction"] = map[string]interface{}{"actionCallId": call.ID, "status": updatedCall.Status}
+		lastAction := map[string]interface{}{
+			"actionCallId": call.ID, "skillId": call.SkillID, "skillVersion": call.SkillVersion,
+			"action": call.Action, "status": updatedCall.Status,
+		}
+		if updatedCall.Status == ActionCallStatusSucceeded {
+			lastAction["result"] = boundedActionResult(updatedCall.Output)
+		} else if updatedCall.Error != "" {
+			lastAction["error"] = updatedCall.Error
+		}
+		checkpoint["lastAction"] = lastAction
 		updatedRun.Checkpoint = checkpoint
 	}
 	event := &ActivityEvent{
@@ -295,6 +305,61 @@ func sanitizeActionError(err error, credentials map[string]string) string {
 		message = message[:1024]
 	}
 	return message
+}
+
+// sanitizeActionOutput prevents an endpoint that echoes an injected credential
+// from persisting or returning that secret to a later model turn. Credential
+// values are ephemeral and are never part of the canonical action arguments.
+func sanitizeActionOutput(output map[string]interface{}, credentials map[string]string) map[string]interface{} {
+	if output == nil {
+		return nil
+	}
+	redact := func(value string) string {
+		for _, secret := range credentials {
+			if secret != "" {
+				value = strings.ReplaceAll(value, secret, "[REDACTED]")
+			}
+		}
+		return value
+	}
+	var sanitize func(interface{}) interface{}
+	sanitize = func(value interface{}) interface{} {
+		switch typed := value.(type) {
+		case string:
+			return redact(typed)
+		case map[string]interface{}:
+			result := make(map[string]interface{}, len(typed))
+			for key, child := range typed {
+				result[key] = sanitize(child)
+			}
+			return result
+		case []interface{}:
+			result := make([]interface{}, len(typed))
+			for index, child := range typed {
+				result[index] = sanitize(child)
+			}
+			return result
+		default:
+			return typed
+		}
+	}
+	return sanitize(output).(map[string]interface{})
+}
+
+const maximumCheckpointActionResultBytes = 64 << 10
+
+func boundedActionResult(output map[string]interface{}) interface{} {
+	if output == nil {
+		return map[string]interface{}{}
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil || len(encoded) > maximumCheckpointActionResultBytes {
+		return map[string]interface{}{
+			"available": false, "reason": "result exceeds the model checkpoint limit",
+			"sizeBytes": len(encoded),
+		}
+	}
+	return cloneMap(output)
 }
 
 func cloneCredentialReferences(input map[string]skill.CredentialReference) map[string]skill.CredentialReference {

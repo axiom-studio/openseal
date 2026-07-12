@@ -43,7 +43,10 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 				if input.Credentials["token"] != "resolved-super-secret" || input.Arguments["environment"] != "production" {
 					t.Fatalf("dispatch input mismatch: %#v", input)
 				}
-				return map[string]interface{}{"deploymentId": "deploy-123", "status": "healthy"}, nil
+				return map[string]interface{}{
+					"deploymentId": "deploy-123", "status": "healthy",
+					"nested": map[string]interface{}{"echo": "Bearer resolved-super-secret"},
+				}, nil
 			}))
 			worker.now = func() time.Time { return now.Add(2 * time.Second) }
 			worker.newID = func() string { return "execution-event" }
@@ -54,8 +57,16 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 			if result.Call.Status != ActionCallStatusSucceeded || result.Call.Attempt != 1 || result.Call.Output["deploymentId"] != "deploy-123" || result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil {
 				t.Fatalf("execution result mismatch: %#v", result)
 			}
-			if result.Run.Checkpoint["lastAction"].(map[string]interface{})["actionCallId"] != proposal.Call.ID {
+			lastAction := result.Run.Checkpoint["lastAction"].(map[string]interface{})
+			if lastAction["actionCallId"] != proposal.Call.ID || lastAction["skillId"] != "release" ||
+				lastAction["result"].(map[string]interface{})["deploymentId"] != "deploy-123" {
 				t.Fatalf("run checkpoint missing action reference: %#v", result.Run.Checkpoint)
+			}
+			callJSON, _ := json.Marshal(result.Call)
+			checkpointJSON, _ := json.Marshal(result.Run.Checkpoint)
+			if strings.Contains(string(callJSON), "resolved-super-secret") || strings.Contains(string(checkpointJSON), "resolved-super-secret") ||
+				!strings.Contains(string(callJSON), "[REDACTED]") || !strings.Contains(string(checkpointJSON), "[REDACTED]") {
+				t.Fatalf("action output was not safely projected: call=%s checkpoint=%s", callJSON, checkpointJSON)
 			}
 			eventJSON, _ := json.Marshal(result.Event)
 			if strings.Contains(string(eventJSON), "resolved-super-secret") || strings.Contains(string(eventJSON), "deploy-123") {
