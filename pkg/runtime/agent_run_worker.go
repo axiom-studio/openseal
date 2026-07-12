@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -287,64 +286,13 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 }
 
 func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {
-	if p.collaboration == nil || run == nil || run.Status != AgentRunStatusCompleted {
+	if p.collaboration == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return
 	}
-	collaboration, ok := run.Context["collaboration"].(map[string]interface{})
-	if !ok {
-		return
-	}
-	requestID, _ := collaboration["requestId"].(string)
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return
-	}
-	request, err := p.collaboration.GetAgentRequest(ctx, run.Scope, requestID)
-	if err != nil || request == nil || request.Status != AgentRequestStatusAccepted || request.ChildRunID != run.ID {
-		if err != nil && !errors.Is(err, ErrAgentRequestNotFound) {
-			p.logger.Warnw("failed to load collaboration request for terminal child", "runId", run.ID, "requestId", requestID, "error", err)
-		}
-		return
-	}
-	if len(request.ArtifactRequirements) > 0 {
-		return
-	}
-	summary := terminalChildSummary(run.Output)
-	evidence := map[string]interface{}{}
-	if len(request.AcceptanceCriteria) > 0 {
-		evidence["runOutput"] = cloneMap(run.Output)
-		if len(run.Output) == 0 {
-			evidence["runStatus"] = string(run.Status)
-		}
-	}
-	_, err = p.collaboration.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
-		Scope: run.Scope, RequestID: request.ID, ExpectedRevision: request.Revision, ExpectedChildRevision: run.Revision,
-		Principal: request.Recipient, Actor: request.Recipient, Summary: summary, AcceptanceEvidence: evidence,
-		CompletionKey: "terminal-child:" + run.ID,
-	})
+	_, err := p.collaboration.ResolveTerminalAgentRequestChild(ctx, run)
 	if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
-		p.logger.Warnw("failed to complete collaboration request from terminal child", "runId", run.ID, "requestId", request.ID, "error", err)
+		p.logger.Warnw("failed to resolve collaboration request from terminal child", "runId", run.ID, "error", err)
 	}
-}
-
-func terminalChildSummary(output map[string]interface{}) string {
-	preferred := []string{"summary", "response", "result", "outcome", "followUp"}
-	for _, key := range preferred {
-		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	keys := make([]string, 0, len(output))
-	for key := range output {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return "Completed delegated work"
 }
 
 func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {

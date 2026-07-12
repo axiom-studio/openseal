@@ -38,6 +38,7 @@ const (
 	AgentRequestStatusClarificationRequested AgentRequestStatus = "clarification_requested"
 	AgentRequestStatusAccepted               AgentRequestStatus = "accepted"
 	AgentRequestStatusCompleted              AgentRequestStatus = "completed"
+	AgentRequestStatusFailed                 AgentRequestStatus = "failed"
 	AgentRequestStatusRejected               AgentRequestStatus = "rejected"
 	AgentRequestStatusCanceled               AgentRequestStatus = "canceled"
 )
@@ -114,6 +115,7 @@ type AgentRequest struct {
 	Clarification        string                 `json:"clarification,omitempty"`
 	Response             string                 `json:"response,omitempty"`
 	CompletionSummary    string                 `json:"completionSummary,omitempty"`
+	ResolutionReason     string                 `json:"resolutionReason,omitempty"`
 	AcceptanceEvidence   map[string]interface{} `json:"acceptanceEvidence,omitempty"`
 	Artifacts            []ArtifactReference    `json:"artifacts,omitempty"`
 	IdempotencyKey       string                 `json:"idempotencyKey,omitempty"`
@@ -171,6 +173,9 @@ func (r *AgentRequest) Validate() error {
 		}
 	} else if len(r.Artifacts) > 0 || len(r.AcceptanceEvidence) > 0 || strings.TrimSpace(r.CompletionSummary) != "" {
 		return errors.New("completion output is only valid for a completed agent request")
+	}
+	if r.Status != AgentRequestStatusFailed && r.Status != AgentRequestStatusCanceled && strings.TrimSpace(r.ResolutionReason) != "" {
+		return errors.New("resolution reason is only valid for a failed or canceled agent request")
 	}
 	if err := validateCredentialFreeContext(r.AcceptanceEvidence); err != nil {
 		return err
@@ -794,6 +799,124 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	}, nil
 }
 
+// ResolveTerminalAgentRequestChild closes the collaboration lifecycle from an
+// authoritative terminal child Run. Artifact-bearing requests remain accepted
+// until their required immutable artifacts are explicitly supplied.
+func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Context, child *AgentRun) (*AgentRequestResult, error) {
+	if s == nil || s.store == nil || s.runs == nil || child == nil {
+		return nil, errors.New("collaboration service and child run are required")
+	}
+	collaboration, ok := child.Context["collaboration"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+	requestID, _ := collaboration["requestId"].(string)
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, nil
+	}
+	request, err := s.GetAgentRequest(ctx, child.Scope, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if request.ChildRunID != child.ID {
+		return nil, ErrInvalidAgentRequestState
+	}
+	if request.Status == AgentRequestStatusCompleted || request.Status == AgentRequestStatusFailed || request.Status == AgentRequestStatusCanceled {
+		return &AgentRequestResult{Request: request, Child: child}, nil
+	}
+	if request.Status != AgentRequestStatusAccepted {
+		return nil, ErrInvalidAgentRequestState
+	}
+	if child.Status == AgentRunStatusCompleted {
+		if len(request.ArtifactRequirements) > 0 {
+			return &AgentRequestResult{Request: request, Child: child}, nil
+		}
+		evidence := map[string]interface{}{}
+		if len(request.AcceptanceCriteria) > 0 {
+			evidence["runOutput"] = cloneMap(child.Output)
+			if len(child.Output) == 0 {
+				evidence["runStatus"] = string(child.Status)
+			}
+		}
+		return s.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+			Scope: child.Scope, RequestID: request.ID, ExpectedRevision: request.Revision, ExpectedChildRevision: child.Revision,
+			Principal: request.Recipient, Actor: request.Recipient, Summary: terminalChildSummary(child.Output),
+			AcceptanceEvidence: evidence, CompletionKey: "terminal-child:" + child.ID,
+		})
+	}
+	if child.Status != AgentRunStatusFailed && child.Status != AgentRunStatusCanceled {
+		return nil, ErrInvalidAgentRequestState
+	}
+	now := s.now()
+	updated := cloneAgentRequest(request)
+	updated.Status = AgentRequestStatusFailed
+	if child.Status == AgentRunStatusCanceled {
+		updated.Status = AgentRequestStatusCanceled
+	}
+	updated.ResolutionReason = strings.TrimSpace(child.Error)
+	if updated.ResolutionReason == "" {
+		updated.ResolutionReason = "delegated child run " + string(child.Status)
+	}
+	updated.Revision++
+	updated.UpdatedAt = now
+	updated.ResolvedAt = &now
+	record := AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
+	source, err := s.runs.GetAgentRun(ctx, child.Scope, request.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if source == nil {
+		return nil, ErrRunNotFound
+	}
+	if request.DependencyGroupID != "" {
+		edge, edgeErr := s.groupedRequestDependency(ctx, request, source, true)
+		if edgeErr != nil {
+			return nil, edgeErr
+		}
+		state := RunDependencyStateFailed
+		if child.Status == AgentRunStatusCanceled {
+			state = RunDependencyStateCanceled
+		}
+		record.DependencyResolution = &RunDependencyResolutionRecord{
+			Scope: request.Scope, GroupID: request.DependencyGroupID, DependencyID: request.DependencyID,
+			ExpectedDependencyRevision: edge.Revision, State: state, Error: updated.ResolutionReason,
+			Actor:      ActivityActor{Type: string(request.Recipient.Type), ID: request.Recipient.ID},
+			Visibility: ActivityVisibilityTeam, OccurredAt: now,
+		}
+	} else {
+		record.SourceRun, err = failedCollaborationSourceRun(source, updated, now)
+		if err != nil {
+			return nil, err
+		}
+		record.ExpectedSourceRevision = source.Revision
+	}
+	eventType := "collaboration.failed"
+	if request.Kind == AgentRequestKindHandoff {
+		eventType = "handoff.failed"
+	}
+	if child.Status == AgentRunStatusCanceled {
+		eventType = "collaboration.canceled"
+		if request.Kind == AgentRequestKindHandoff {
+			eventType = "handoff.canceled"
+		}
+	}
+	summary := fmt.Sprintf("%s %s ended delegated work: %s", request.Recipient.Type, request.Recipient.ID, updated.ResolutionReason)
+	record.SourceEvent = collaborationEvent(source, updated, eventType, summary, request.Recipient, now)
+	record.ChildEvent = collaborationEvent(child, updated, eventType, summary, request.Recipient, now)
+	events, err := s.store.RespondAgentRequest(ctx, record)
+	if err != nil {
+		return nil, err
+	}
+	if record.DependencyResolution != nil {
+		record.SourceRun, err = s.runs.GetAgentRun(ctx, child.Scope, request.SourceRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &AgentRequestResult{Request: updated, Source: record.SourceRun, Child: child, Events: events}, nil
+}
+
 func (s *CollaborationService) groupedRequestDependency(ctx context.Context, request *AgentRequest, source *AgentRun, allowTerminalGroup bool) (*RunDependency, error) {
 	if request == nil || source == nil || request.DependencyGroupID == "" || request.DependencyID == "" {
 		return nil, ErrInvalidAgentRequestState
@@ -956,6 +1079,29 @@ func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, no
 	return updated, nil
 }
 
+func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
+	updated := cloneAgentRun(source)
+	if request.Kind == AgentRequestKindRequest {
+		if updated.Status != AgentRunStatusWaitingForDependency || updated.WakeCondition == nil ||
+			updated.WakeCondition.Type != "agent_request" || updated.WakeCondition.Reference != request.ID {
+			return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
+		}
+		updated.Status = AgentRunStatusQueued
+		updated.AvailableAt = now
+		updated.QueueEnteredAt = now
+		updated.WakeCondition = nil
+		updated.LastWakeSignalID = "agent_request:" + request.ID + ":" + fmt.Sprint(request.Revision)
+	} else if updated.Status != AgentRunStatusCompleted {
+		return nil, fmt.Errorf("%w: handoff source run is not completed", ErrInvalidAgentRequestState)
+	}
+	updated.Revision++
+	updated.UpdatedAt = now
+	updated.LeaseOwner = ""
+	updated.LeaseExpiresAt = nil
+	updated.Output = collaborationResolutionOutput(updated.Output, request)
+	return updated, nil
+}
+
 func collaborationCompletionOutput(existing map[string]interface{}, request *AgentRequest) map[string]interface{} {
 	result := cloneMap(existing)
 	if result == nil {
@@ -974,6 +1120,45 @@ func collaborationCompletionOutput(existing map[string]interface{}, request *Age
 	}
 	result["collaborationResults"] = results
 	return result
+}
+
+func collaborationResolutionOutput(existing map[string]interface{}, request *AgentRequest) map[string]interface{} {
+	result := cloneMap(existing)
+	if result == nil {
+		result = make(map[string]interface{})
+	}
+	results := make(map[string]interface{})
+	if current, ok := result["collaborationResults"].(map[string]interface{}); ok {
+		for key, value := range current {
+			results[key] = value
+		}
+	}
+	results[request.ID] = map[string]interface{}{
+		"requestId": request.ID, "kind": request.Kind, "childRunId": request.ChildRunID,
+		"status": request.Status, "reason": request.ResolutionReason,
+	}
+	result["collaborationResults"] = results
+	return result
+}
+
+func terminalChildSummary(output map[string]interface{}) string {
+	preferred := []string{"summary", "response", "result", "outcome", "followUp"}
+	for _, key := range preferred {
+		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	keys := make([]string, 0, len(output))
+	for key := range output {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if value, ok := output[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "Completed delegated work"
 }
 
 func collaborationEvent(run *AgentRun, request *AgentRequest, eventType, summary string, actor CollaborationParty, now time.Time) *ActivityEvent {
@@ -1313,7 +1498,7 @@ func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequest
 
 func validAgentRequestStatus(status AgentRequestStatus) bool {
 	switch status {
-	case AgentRequestStatusPending, AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompleted, AgentRequestStatusRejected, AgentRequestStatusCanceled:
+	case AgentRequestStatusPending, AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompleted, AgentRequestStatusFailed, AgentRequestStatusRejected, AgentRequestStatusCanceled:
 		return true
 	default:
 		return false

@@ -377,3 +377,65 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 		t.Fatalf("restored request = %#v, %v", restored, err)
 	}
 }
+
+func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "acme"}
+	portfolio := NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Build the feature", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Publish the launch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning,
+		Summary: "Delegated run started", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "provider exhausted retries",
+		Summary: "Delegated run failed", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := service.ResolveTerminalAgentRequestChild(ctx, failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Request.Status != AgentRequestStatusFailed || resolved.Request.ResolutionReason != "provider exhausted retries" {
+		t.Fatalf("resolved request = %#v", resolved.Request)
+	}
+	refreshedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, _ := refreshedSource.Output["collaborationResults"].(map[string]interface{})
+	result, _ := results[created.Request.ID].(map[string]interface{})
+	if refreshedSource.Status != AgentRunStatusCompleted || result["status"] != string(AgentRequestStatusFailed) ||
+		result["reason"] != "provider exhausted retries" {
+		t.Fatalf("source=%#v result=%#v", refreshedSource, result)
+	}
+}

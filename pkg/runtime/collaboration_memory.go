@@ -293,18 +293,20 @@ func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error
 	if err := record.SourceEvent.Validate(); err != nil {
 		return err
 	}
-	if record.SourceRun != nil || record.ChildRun != nil {
-		if record.ChildRun == nil || record.ChildEvent == nil {
-			return errors.New("accepted agent request requires child run and child event")
+	if record.SourceRun != nil {
+		if err := record.SourceRun.Validate(); err != nil {
+			return err
 		}
-		if record.SourceRun != nil {
-			if err := record.SourceRun.Validate(); err != nil {
-				return err
-			}
+	}
+	if record.ChildRun != nil {
+		if record.ChildEvent == nil {
+			return errors.New("new accepted child run requires a child event")
 		}
 		if err := record.ChildRun.Validate(); err != nil {
 			return err
 		}
+	}
+	if record.ChildEvent != nil {
 		if err := record.ChildEvent.Validate(); err != nil {
 			return err
 		}
