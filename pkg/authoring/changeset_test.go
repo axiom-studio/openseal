@@ -384,6 +384,36 @@ func TestChangeSetEvaluationCanMakeCandidateReadyOrRejectIt(t *testing.T) {
 	}
 }
 
+func TestPendingChangeSetEvaluationsAreDurableScopedAndLeaveAfterDecision(t *testing.T) {
+	store := NewMemoryChangeSetStore()
+	now := time.Now().UTC()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	for _, value := range []*ChangeSet{
+		{ID: "review", Scope: scope, CandidateDigest: "candidate", Status: ChangeSetReview, Revision: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "blocked", Scope: scope, CandidateDigest: "blocked", Status: ChangeSetBlocked, Revision: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "other", Scope: capability.ScopeReference{Kind: "tenant", ID: "two"}, CandidateDigest: "other", Status: ChangeSetReview, Revision: 1, CreatedAt: now, UpdatedAt: now},
+	} {
+		if _, _, err := store.CreateChangeSet(context.Background(), value, "create-"+value.ID, "digest-"+value.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &ChangeSetService{store: store, now: func() time.Time { return now.Add(time.Minute) }}
+	pending, err := service.ListPendingEvaluations(context.Background(), scope, 10)
+	if err != nil || len(pending) != 1 || pending[0].ID != "review" {
+		t.Fatalf("pending=%#v err=%v", pending, err)
+	}
+	if _, _, err = service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: "review", ExpectedRevision: 1, CandidateDigest: "candidate", Allowed: true,
+		Actor: ChangeSetActor{Type: "workload", ID: "atlas"}, IdempotencyKey: "evaluation",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = service.ListPendingEvaluations(context.Background(), scope, 10)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending after decision=%#v err=%v", pending, err)
+	}
+}
+
 func TestChangeSetApprovalsRequireDistinctPrincipalsAndAreAuditable(t *testing.T) {
 	store := NewMemoryChangeSetStore()
 	now := time.Now().UTC()

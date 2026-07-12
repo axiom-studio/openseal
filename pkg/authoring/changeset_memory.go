@@ -222,6 +222,30 @@ func (s *MemoryChangeSetStore) ListPendingChangeSetGenerations(_ context.Context
 	return values, nil
 }
 
+func (s *MemoryChangeSetStore) ListPendingChangeSetEvaluations(_ context.Context, scope capability.ScopeReference, limit int) ([]*ChangeSet, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 100
+	}
+	values := make([]*ChangeSet, 0)
+	for _, value := range s.changeSets {
+		if value.Scope == scope && value.Status == ChangeSetReview {
+			values = append(values, cloneChangeSet(value))
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
+			return values[i].ID < values[j].ID
+		}
+		return values[i].UpdatedAt.Before(values[j].UpdatedAt)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
+}
+
 func changeSetKey(scope capability.ScopeReference, id string) string {
 	return scope.Kind + "\x00" + scope.ID + "\x00" + id
 }

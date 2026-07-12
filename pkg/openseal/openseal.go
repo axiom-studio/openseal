@@ -2289,6 +2289,15 @@ func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeRef
 	return e.authoringChanges.Get(ctx, scope, id)
 }
 
+// ListPendingWorkforceChangeSetEvaluations exposes the durable recovery index
+// for trusted host policy workers. It is not a user-facing catalog operation.
+func (e *Engine) ListPendingWorkforceChangeSetEvaluations(ctx context.Context, scope skill.ScopeReference, limit int) ([]*authoring.ChangeSet, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, errors.New("workforce change sets are unavailable")
+	}
+	return e.authoringChanges.ListPendingEvaluations(ctx, scope, limit)
+}
+
 func (e *Engine) SubmitWorkforceChangeSetEvaluation(ctx context.Context, request authoring.SubmitChangeSetEvaluationRequest) (*authoring.ChangeSet, bool, error) {
 	if e == nil || e.authoringChanges == nil {
 		return nil, false, errors.New("workforce change sets are not configured")

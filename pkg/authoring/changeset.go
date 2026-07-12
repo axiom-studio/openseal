@@ -246,6 +246,14 @@ type PendingChangeSetGenerationStore interface {
 	ListPendingChangeSetGenerations(context.Context, capability.ScopeReference, int) ([]*ChangeSet, error)
 }
 
+// PendingChangeSetEvaluationStore is the durable recovery index used by hosts
+// that delegate policy evaluation to an external authority. Notifications may
+// be lossy; ChangeSets in review remain the source of truth until an evaluation
+// advances their lifecycle.
+type PendingChangeSetEvaluationStore interface {
+	ListPendingChangeSetEvaluations(context.Context, capability.ScopeReference, int) ([]*ChangeSet, error)
+}
+
 var (
 	ErrChangeSetNotFound    = errors.New("workforce change set not found")
 	ErrChangeSetIdempotency = errors.New("workforce change set idempotency conflict")
@@ -433,6 +441,17 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 
 func (s *ChangeSetService) Get(ctx context.Context, scope capability.ScopeReference, id string) (*ChangeSet, error) {
 	return s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
+}
+
+func (s *ChangeSetService) ListPendingEvaluations(ctx context.Context, scope capability.ScopeReference, limit int) ([]*ChangeSet, error) {
+	if strings.TrimSpace(scope.Kind) == "" || strings.TrimSpace(scope.ID) == "" {
+		return nil, errors.New("workforce evaluation scope is required")
+	}
+	store, ok := s.store.(PendingChangeSetEvaluationStore)
+	if !ok {
+		return nil, errors.New("workforce evaluation recovery is unavailable")
+	}
+	return store.ListPendingChangeSetEvaluations(ctx, scope, limit)
 }
 
 // RetryGeneration explicitly requeues a failed model attempt. The previous
