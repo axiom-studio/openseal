@@ -71,6 +71,7 @@ type ParticipationProposalContext struct {
 	Conversation   *Conversation
 	Trigger        *ChannelMessage
 	RecentMessages []*ChannelMessage
+	OpenMessages   []*ChannelMessage
 	Participant    ConversationParticipant
 	SemanticRoles  []string
 	Priority       int
@@ -240,6 +241,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	}
 	participantRecent := make([][]*ChannelMessage, len(bindings))
 	participantTriggers := make([]*ChannelMessage, len(bindings))
+	participantOpen := make([][]*ChannelMessage, len(bindings))
 	for index, binding := range bindings {
 		viewer := ConversationViewer{Participant: binding.Participant, Roles: append([]string(nil), binding.SemanticRoles...)}
 		visible, err := c.conversations.filterVisibleChannelMessages(ctx, req.Scope, conversation.ID, recent, viewer)
@@ -247,6 +249,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 			return nil, fmt.Errorf("project participant %s channel context: %w", binding.Participant.ID, err)
 		}
 		participantRecent[index] = visible
+		participantOpen[index] = openConversationMessages(visible)
 		if trigger != nil {
 			projected, err := c.conversations.filterVisibleChannelMessages(ctx, req.Scope, conversation.ID, []*ChannelMessage{trigger}, viewer)
 			if err != nil {
@@ -278,6 +281,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				binding := bindings[index]
 				visibleTrigger := participantTriggers[index]
 				visibleRecent := participantRecent[index]
+				visibleOpen := participantOpen[index]
 				if trigger != nil && visibleTrigger == nil {
 					if err := c.markObserved(workerCtx, conversation, binding.Participant, latestConversationSequence(visibleRecent)); err != nil {
 						errs[index] = fmt.Errorf("mark participant %s read: %w", binding.Participant.ID, err)
@@ -301,6 +305,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				proposal, proposalErr := c.proposals.ProposeParticipation(proposalCtx, ParticipationProposalContext{
 					Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(visibleTrigger),
 					RecentMessages: cloneChannelMessages(visibleRecent), Participant: binding.Participant,
+					OpenMessages:  cloneChannelMessages(visibleOpen),
 					SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority,
 				})
 				proposalCancel()
@@ -318,6 +323,8 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				proposal.Signals.DirectlyMentioned = directlyMentioned
 				proposal.Signals.TriggerTargetsOtherParticipant = triggerTargetsSpecificAgent(visibleTrigger) && !directlyMentioned
 				proposal.Signals.RoleRelevant = proposal.Signals.RoleRelevant || participantRoleAddressed(visibleTrigger, binding.SemanticRoles)
+				proposal.Signals.AnswersOpenQuestion = proposal.Signals.AnswersOpenQuestion && proposalTargetsOpenMessage(proposal, visibleOpen, MessageIntentQuestion, false)
+				proposal.Signals.ResolvesOpenWork = proposal.Signals.ResolvesOpenWork && proposalTargetsOpenMessage(proposal, visibleOpen, "", true)
 				if err := validateGeneratedParticipationProposal(proposal); err != nil {
 					errs[index] = fmt.Errorf("participant %s proposal: %w", binding.Participant.ID, err)
 					cancel()
@@ -393,6 +400,45 @@ func latestConversationSequence(messages []*ChannelMessage) int64 {
 		}
 	}
 	return latest
+}
+
+func openConversationMessages(messages []*ChannelMessage) []*ChannelMessage {
+	closed := make(map[string]bool)
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		for _, id := range []string{message.ResolvesMessageID, message.SupersedesMessageID} {
+			if id != "" {
+				closed[id] = true
+			}
+		}
+	}
+	open := make([]*ChannelMessage, 0)
+	for _, message := range messages {
+		if message != nil && message.RequiresResponse && !closed[message.ID] {
+			open = append(open, cloneChannelMessage(message))
+		}
+	}
+	return open
+}
+
+func proposalTargetsOpenMessage(proposal ParticipationProposal, open []*ChannelMessage, intent ConversationMessageIntent, requireResolution bool) bool {
+	targets := []string{proposal.ReplyToMessageID, proposal.ResolvesMessageID}
+	if requireResolution {
+		targets = []string{proposal.ResolvesMessageID}
+	}
+	for _, target := range targets {
+		if target == "" {
+			continue
+		}
+		for _, message := range open {
+			if message != nil && message.ID == target && (intent == "" || message.Intent == intent) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *ConversationCoordinator) releasePresenceLeases(
