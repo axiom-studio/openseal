@@ -475,6 +475,15 @@ type (
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
+type (
+	SourceObservation              = runtime.SourceObservation
+	SourceMonitorCheckpoint        = runtime.SourceMonitorCheckpoint
+	SourceObservationFilter        = runtime.SourceObservationFilter
+	SourceMonitorStore             = runtime.SourceMonitorStore
+	IngestSourceObservationRequest = runtime.IngestSourceObservationRequest
+	SourceObservationIngestResult  = runtime.SourceObservationIngestResult
+)
+
 const (
 	HostedTurnAPIVersion     = runtime.HostedTurnAPIVersion
 	HostedSkillApplied       = runtime.HostedSkillApplied
@@ -533,6 +542,8 @@ type PersistentKernelStore interface {
 	runtime.RunDependencyStore
 	runtime.ConversationStore
 	runtime.ArtifactStore
+	runtime.InitiativeStore
+	runtime.SourceMonitorStore
 	kernelagent.Store
 	kernelteam.Store
 	skill.CatalogStore
@@ -548,6 +559,10 @@ var (
 	ErrInvalidAgentRun                     = runtime.ErrInvalidAgentRun
 	ErrInvalidRunCommand                   = runtime.ErrInvalidRunCommand
 	ErrInvalidScope                        = runtime.ErrInvalidScope
+	ErrSourceObservationNotFound           = runtime.ErrSourceObservationNotFound
+	ErrSourceObservationConflict           = runtime.ErrSourceObservationConflict
+	ErrSourceMonitorCheckpoint             = runtime.ErrSourceMonitorCheckpoint
+	ErrInvalidSourceObservation            = runtime.ErrInvalidSourceObservation
 	ErrInvalidOwner                        = runtime.ErrInvalidOwner
 	ErrInitiativeNotFound                  = runtime.ErrInitiativeNotFound
 	ErrInitiativeConflict                  = runtime.ErrInitiativeConflict
@@ -952,6 +967,7 @@ type Engine struct {
 	scheduler                     *runtime.Scheduler
 	portfolio                     *runtime.PortfolioService
 	initiatives                   *runtime.InitiativeService
+	sourceMonitors                *runtime.SourceMonitorService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
 	conversations                 *runtime.ConversationService
@@ -1055,6 +1071,7 @@ func New(opts ...Option) (*Engine, error) {
 		scheduler:           runtime.NewScheduler(pool, store),
 		portfolio:           runtime.NewPortfolioService(store),
 		initiatives:         runtime.NewInitiativeService(store, store),
+		sourceMonitors:      runtime.NewSourceMonitorService(store, store, store, store),
 		activity:            runtime.NewRunActivityService(store, store),
 		dependencies:        runtime.NewDependencyCoordinator(store),
 		conversations:       runtime.NewConversationService(store),
@@ -1215,8 +1232,15 @@ func WithStore(store runtime.KernelStore) Option {
 		e.portfolio = runtime.NewPortfolioService(store)
 		if initiativeStore, ok := store.(runtime.InitiativeStore); ok {
 			e.initiatives = runtime.NewInitiativeService(initiativeStore, store)
+			if sourceMonitorStore, supported := store.(runtime.SourceMonitorStore); supported {
+				artifactStore, _ := store.(runtime.ArtifactStore)
+				e.sourceMonitors = runtime.NewSourceMonitorService(sourceMonitorStore, initiativeStore, store, artifactStore)
+			} else {
+				e.sourceMonitors = nil
+			}
 		} else {
 			e.initiatives = nil
+			e.sourceMonitors = nil
 		}
 		e.activity = runtime.NewRunActivityService(store, store)
 		if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
@@ -1740,6 +1764,27 @@ func (e *Engine) UpdateInitiative(ctx context.Context, scope runtime.Scope, init
 		return nil, nil, errors.New("initiative capability is unavailable")
 	}
 	return e.initiatives.Patch(ctx, scope, initiativeID, req)
+}
+
+func (e *Engine) IngestSourceObservation(ctx context.Context, req runtime.IngestSourceObservationRequest) (*runtime.SourceObservationIngestResult, error) {
+	if e.sourceMonitors == nil {
+		return nil, errors.New("source monitor capability is unavailable")
+	}
+	return e.sourceMonitors.Ingest(ctx, req)
+}
+
+func (e *Engine) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
+	if e.sourceMonitors == nil {
+		return nil, errors.New("source monitor capability is unavailable")
+	}
+	return e.sourceMonitors.GetCheckpoint(ctx, scope, initiativeID, monitorID)
+}
+
+func (e *Engine) ListSourceObservations(ctx context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
+	if e.sourceMonitors == nil {
+		return nil, errors.New("source monitor capability is unavailable")
+	}
+	return e.sourceMonitors.List(ctx, filter)
 }
 
 func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.ObjectiveScheduleResult, error) {

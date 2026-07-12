@@ -71,6 +71,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateInitiatives(db); err != nil {
 		return err
 	}
+	if err := migrateSourceMonitors(db); err != nil {
+		return err
+	}
 	if err := migrateAgentRegistry(db); err != nil {
 		return err
 	}
