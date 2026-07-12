@@ -205,12 +205,14 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		if err == nil {
 			err = errors.New("turn runner resolver returned no runner")
 		}
-		_, _, transitionErr := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+		failed, _, transitionErr := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, Error: err.Error(), LeaseOwner: workerID,
 			Summary: "Agent run failed during runner resolution", Actor: ActivityActor{Type: "worker", ID: workerID},
 		})
 		if transitionErr != nil {
 			p.logger.Errorw("failed to persist runner resolution failure", "runId", run.ID, "error", transitionErr)
+		} else {
+			p.resolveCollaborationChild(ctx, failed)
 		}
 		return
 	}
@@ -404,7 +406,7 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	if run == nil {
 		return
 	}
-	_, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: workerID,
 		Error: "governed action materialization failed", Summary: "Agent action proposal could not be governed",
 		EventType: "action.materialization_failed", Actor: ActivityActor{Type: "worker", ID: workerID},
@@ -412,6 +414,8 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	})
 	if err != nil {
 		p.logger.Errorw("failed to persist action materialization failure", "runId", run.ID, "error", err)
+	} else {
+		p.resolveCollaborationChild(ctx, failed)
 	}
 }
 
