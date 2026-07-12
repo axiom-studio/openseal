@@ -26,6 +26,9 @@ func TestPlainTextPDFRendererIsDeterministicAndPaged(t *testing.T) {
 	if definition.ID != SkillID || definition.Actions[RenderPDF].EmittedArtifactTypes[0] != "report" {
 		t.Fatalf("skill definition=%#v", definition)
 	}
+	if definition.Transport.Kind != "tool" || definition.Transport.Endpoint != SkillID {
+		t.Fatalf("transport = %#v, want tool transport targeting %q", definition.Transport, SkillID)
+	}
 }
 
 func TestPlainTextPDFRendererFailsExplicitlyForUnsupportedUnicode(t *testing.T) {
