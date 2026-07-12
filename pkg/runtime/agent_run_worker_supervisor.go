@@ -78,11 +78,23 @@ type AgentRunWorkerSupervisor struct {
 	source   WorkerScopeSource
 	config   DynamicAgentRunWorkerConfig
 	logger   *zap.SugaredLogger
+	actions  *ActionCoordinator
 
 	mu     sync.RWMutex
 	pools  map[string]*AgentRunWorkerPool
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// SetActionCoordinator supplies the shared governed action lifecycle to every
+// scope pool created by this supervisor.
+func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *ActionCoordinator) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.actions = actions
+	for _, pool := range s.pools {
+		pool.SetActionCoordinator(actions)
+	}
 }
 
 func NewAgentRunWorkerSupervisor(
@@ -214,6 +226,7 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 			s.logger.Warnw("failed to create agent run worker pool", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 			continue
 		}
+		pool.SetActionCoordinator(s.actions)
 		s.pools[key] = pool
 		pool.Start(ctx)
 		s.logger.Infow("started agent run worker scope", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)

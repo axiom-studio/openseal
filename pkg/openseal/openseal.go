@@ -1561,6 +1561,7 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 		if err != nil {
 			return err
 		}
+		pool.SetActionCoordinator(e.actions)
 		e.agentPools = append(e.agentPools, pool)
 	}
 	return nil
@@ -1573,6 +1574,7 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 		if err != nil {
 			return err
 		}
+		supervisor.SetActionCoordinator(e.actions)
 		e.agentSupervisors = append(e.agentSupervisors, supervisor)
 	}
 	return nil

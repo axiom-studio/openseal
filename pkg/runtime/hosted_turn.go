@@ -152,6 +152,12 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, errors.New("turn host proposed an unauthorized capability")
 		}
 	}
+	if len(response.ProposedActions) > 1 {
+		return nil, errors.New("a bounded hosted Turn can propose at most one action")
+	}
+	if len(response.ProposedActions) == 1 && response.NextRunStatus != AgentRunStatusRunning {
+		return nil, errors.New("a hosted Turn proposing an action must remain running until governance materializes it")
+	}
 	allowedSkillRefs := make(map[string]struct{}, len(request.SkillPrompts))
 	for _, prompt := range request.SkillPrompts {
 		allowedSkillRefs["skill:"+prompt.SkillID+"@"+prompt.Version] = struct{}{}

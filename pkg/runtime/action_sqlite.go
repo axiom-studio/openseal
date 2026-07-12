@@ -190,7 +190,7 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		return nil, err
 	}
 	committed = true
-	return &ActionProposalResult{Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval), Event: event, Created: true}, nil
+	return &ActionProposalResult{Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval), Run: cloneAgentRun(proposal.Run), Event: event, Created: true}, nil
 }
 
 func (s *SQLiteStore) GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error) {

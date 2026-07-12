@@ -130,7 +130,7 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &ActionProposalResult{Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval), Event: event, Created: true}, nil
+	return &ActionProposalResult{Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval), Run: cloneAgentRun(proposal.Run), Event: event, Created: true}, nil
 }
 
 func (s *PostgresStore) GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error) {
