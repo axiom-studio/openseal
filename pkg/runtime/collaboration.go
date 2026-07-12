@@ -847,7 +847,19 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 	}
 	if child.Status == AgentRunStatusCompleted {
 		if len(request.ArtifactRequirements) > 0 {
-			return &AgentRequestResult{Request: request, Child: child}, nil
+			artifacts, present, err := terminalChildArtifactReferences(child.Output)
+			if err != nil {
+				return nil, err
+			}
+			if !present {
+				return &AgentRequestResult{Request: request, Child: child}, nil
+			}
+			evidence := map[string]interface{}{"runOutput": cloneMap(child.Output)}
+			return s.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+				Scope: child.Scope, RequestID: request.ID, ExpectedRevision: request.Revision, ExpectedChildRevision: child.Revision,
+				Principal: request.Recipient, Actor: request.Recipient, Summary: terminalChildSummary(child.Output),
+				AcceptanceEvidence: evidence, Artifacts: artifacts, CompletionKey: "terminal-child:" + child.ID,
+			})
 		}
 		evidence := map[string]interface{}{}
 		if len(request.AcceptanceCriteria) > 0 {
@@ -932,6 +944,33 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 		}
 	}
 	return &AgentRequestResult{Request: updated, Source: record.SourceRun, Child: child, Events: events}, nil
+}
+
+func terminalChildArtifactReferences(output map[string]interface{}) ([]ArtifactReference, bool, error) {
+	if len(output) == 0 {
+		return nil, false, nil
+	}
+	raw, present := output["artifactRefs"]
+	if !present {
+		raw, present = output["artifacts"]
+	}
+	if !present {
+		return nil, false, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, true, fmt.Errorf("encode terminal child artifact references: %w", err)
+	}
+	var references []ArtifactReference
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&references); err != nil {
+		return nil, true, fmt.Errorf("decode terminal child artifact references: %w", err)
+	}
+	if len(references) == 0 {
+		return nil, true, errors.New("terminal child artifact references cannot be empty")
+	}
+	return references, true, nil
 }
 
 func (s *CollaborationService) groupedRequestDependency(ctx context.Context, request *AgentRequest, source *AgentRun, allowTerminalGroup bool) (*RunDependency, error) {
