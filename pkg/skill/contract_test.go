@@ -183,6 +183,20 @@ func TestMaterializeTransportArgumentsKeepsCredentialsOutOfEnvelope(t *testing.T
 	}
 }
 
+func TestDefinitionAllowsDistinctPerActionTransports(t *testing.T) {
+	definition := &Definition{ID: "builtin", Version: "1", Name: "Builtin", Actions: map[string]Action{
+		"fetch":    {Name: "fetch", Description: "Fetch URL", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}, Risk: RiskLevelRead, SideEffect: SideEffectRead, Idempotency: IdempotencySupported, Transport: &TransportReference{Kind: "tool", Endpoint: "fetch-url"}},
+		"download": {Name: "download", Description: "Download file", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}, Risk: RiskLevelRead, SideEffect: SideEffectRead, Idempotency: IdempotencySupported, Transport: &TransportReference{Kind: "tool", Endpoint: "download-file"}},
+	}}
+	if err := validateDefinition(definition); err != nil {
+		t.Fatal(err)
+	}
+	definition.Actions["download"] = Action{Name: "download", Description: "Download file", InputSchema: map[string]interface{}{"type": "object"}, Risk: RiskLevelRead, SideEffect: SideEffectRead, Idempotency: IdempotencySupported}
+	if err := validateDefinition(definition); err == nil || !strings.Contains(err.Error(), "requires an action or definition transport") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func testSkillDefinition() *Definition {
 	return &Definition{
 		ID: "release", Version: "1.0.0", Name: "Release", Description: "Release software",
