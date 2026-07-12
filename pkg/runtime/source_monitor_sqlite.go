@@ -198,6 +198,10 @@ func (s *SQLiteStore) ListSourceObservations(ctx context.Context, filter SourceO
 			args = append(args, selector.value)
 		}
 	}
+	if filter.ActionCallID != "" {
+		query += " AND json_extract(payload,'$.actionCallId')=?"
+		args = append(args, filter.ActionCallID)
+	}
 	query += ` ORDER BY ingested_at DESC,id DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, filter.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)

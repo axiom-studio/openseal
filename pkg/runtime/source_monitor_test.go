@@ -154,5 +154,5 @@ func seedExecutableMonitorInitiative(t *testing.T, store KernelStore, scope Scop
 
 func sourceObservationRequest(scope Scope, initiativeID, monitorID, runID string, expected int64, cursor, stableSourceID, summary string) IngestSourceObservationRequest {
 	digest := sha256.Sum256([]byte(summary))
-	return IngestSourceObservationRequest{Scope: scope, InitiativeID: initiativeID, MonitorID: monitorID, ExpectedCheckpointRevision: expected, Cursor: cursor, StableSourceID: stableSourceID, SourceURI: "https://forum.example/threads/" + stableSourceID, ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: summary, ObservedAt: time.Now().UTC(), RunID: runID, AgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", Metadata: map[string]interface{}{"confidence": .8}}
+	return IngestSourceObservationRequest{Scope: scope, InitiativeID: initiativeID, MonitorID: monitorID, ExpectedCheckpointRevision: expected, Cursor: cursor, StableSourceID: stableSourceID, SourceURI: "https://forum.example/threads/" + stableSourceID, ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: summary, ObservedAt: time.Now().UTC(), RunID: runID, AgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", ActionCallID: "action-" + cursor, Metadata: map[string]interface{}{"confidence": .8}}
 }
