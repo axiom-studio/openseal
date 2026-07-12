@@ -295,6 +295,7 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, work
 		Branches: []RunForkBranch{{
 			ID: "delegate", Goal: proposal.Goal, AssignedAgentID: proposal.AssignedAgentID,
 			Context: proposal.Context, Checkpoint: proposal.Checkpoint, Budget: proposal.Budget, Timeout: proposal.Timeout,
+			Mode: proposal.Mode,
 		}},
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		Actor:                  ActivityActor{Type: "worker", ID: workerID},

@@ -7,8 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/google/uuid"
 )
+
+const DelegationModeContextKey = "openseal.delegationMode"
 
 type RunForkStore interface {
 	PortfolioStore
@@ -24,6 +27,7 @@ type RunForkBranch struct {
 	Checkpoint      map[string]interface{} `json:"checkpoint"`
 	Budget          *BudgetPolicy          `json:"budget,omitempty"`
 	Timeout         time.Duration          `json:"timeout,omitempty"`
+	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
 }
 
 // TurnForkProposal is a proposal-only durable Turn output. The worker
@@ -43,6 +47,7 @@ type TurnDelegationProposal struct {
 	Checkpoint      map[string]interface{} `json:"checkpoint"`
 	Budget          *BudgetPolicy          `json:"budget,omitempty"`
 	Timeout         time.Duration          `json:"timeout,omitempty"`
+	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
 }
 
 func (p *TurnDelegationProposal) Validate() error {
@@ -57,6 +62,9 @@ func (p *TurnDelegationProposal) Validate() error {
 	}
 	if p.Budget != nil {
 		return p.Budget.Validate()
+	}
+	if p.Mode != "" && p.Mode != runbook.DelegateBehavior && p.Mode != runbook.DelegateReason {
+		return errors.New("delegation mode must be behavior or reason")
 	}
 	return nil
 }
@@ -157,6 +165,9 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		if branch.Timeout < 0 {
 			return nil, fmt.Errorf("branch %s timeout cannot be negative", branch.ID)
 		}
+		if branch.Mode != "" && branch.Mode != runbook.DelegateBehavior && branch.Mode != runbook.DelegateReason {
+			return nil, fmt.Errorf("branch %s delegation mode is invalid", branch.ID)
+		}
 		allocations[index] = branch.Budget
 	}
 	key := "fork:" + source.ID + ":" + req.ForkID
@@ -189,6 +200,12 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			assignedAgentID = source.AssignedAgentID
 			childContext = cloneMap(source.Context)
 			childPlan = cloneMap(source.Plan)
+		}
+		if branch.Mode != "" {
+			if childContext == nil {
+				childContext = map[string]interface{}{}
+			}
+			childContext[DelegationModeContextKey] = string(branch.Mode)
 		}
 		childCheckpoint := cloneMap(branch.Checkpoint)
 		if childCheckpoint == nil {

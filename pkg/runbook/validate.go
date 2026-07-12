@@ -182,6 +182,9 @@ func (v *validator) validateStep(path, id string, step Step) {
 			v.validateValue(path+".delegate.context."+key, value)
 		}
 		v.validatePointer(path+".delegate.resultPath", step.Delegate.ResultPath)
+		if step.Delegate.Mode != "" && step.Delegate.Mode != DelegateBehavior && step.Delegate.Mode != DelegateReason {
+			v.add(path+".delegate.mode", "delegate.mode", "delegation mode must be behavior or reason")
+		}
 		if step.Delegate.Timeout < 0 {
 			v.add(path+".delegate.timeout", "delegate.timeout", "timeout cannot be negative")
 		}

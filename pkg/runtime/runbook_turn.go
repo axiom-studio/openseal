@@ -421,6 +421,7 @@ func (r *RunbookTurnRunner) proposeDelegation(checkpoint map[string]interface{},
 		ProposedDelegation: &TurnDelegationProposal{
 			StepID: state.Current, AssignedAgentID: strings.TrimSpace(agentID), Goal: strings.TrimSpace(goal),
 			Context: delegatedContext, Checkpoint: map[string]interface{}{}, Timeout: step.Delegate.Timeout,
+			Mode: step.Delegate.Mode,
 		},
 		OutputSummary:          "Requested durable Agent delegation " + state.Current,
 		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
