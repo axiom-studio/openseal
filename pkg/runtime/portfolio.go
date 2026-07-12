@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -308,8 +309,34 @@ type AgentRunFilter struct {
 	RootRunID       string
 	AssignedAgentID string
 	Statuses        []AgentRunStatus
+	Order           AgentRunOrder
 	Limit           int
 	Offset          int
+}
+
+type AgentRunOrder string
+
+const (
+	AgentRunOrderScheduler   AgentRunOrder = "scheduler"
+	AgentRunOrderCreatedDesc AgentRunOrder = "created_desc"
+)
+
+func sortAgentRuns(runs []*AgentRun, order AgentRunOrder) {
+	sort.Slice(runs, func(i, j int) bool {
+		if order == AgentRunOrderCreatedDesc {
+			if !runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+				return runs[i].CreatedAt.After(runs[j].CreatedAt)
+			}
+			return runs[i].ID > runs[j].ID
+		}
+		if runs[i].Priority != runs[j].Priority {
+			return runs[i].Priority > runs[j].Priority
+		}
+		if !runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+			return runs[i].CreatedAt.Before(runs[j].CreatedAt)
+		}
+		return runs[i].ID < runs[j].ID
+	})
 }
 
 type AgentRunOwnerSummary struct {
@@ -768,6 +795,9 @@ func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFil
 	}
 	if filter.Kind != "" && !validRunKind(filter.Kind) {
 		return nil, fmt.Errorf("%w: unsupported run kind %q", ErrInvalidAgentRun, filter.Kind)
+	}
+	if filter.Order != "" && filter.Order != AgentRunOrderScheduler && filter.Order != AgentRunOrderCreatedDesc {
+		return nil, fmt.Errorf("%w: unsupported run order %q", ErrInvalidAgentRun, filter.Order)
 	}
 	if filter.Owner != nil {
 		if err := filter.Owner.Validate(); err != nil {

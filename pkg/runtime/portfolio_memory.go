@@ -152,15 +152,7 @@ func (s *MemoryStore) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([
 		}
 		result = append(result, cloneAgentRun(run))
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Priority != result[j].Priority {
-			return result[i].Priority > result[j].Priority
-		}
-		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
-			return result[i].CreatedAt.Before(result[j].CreatedAt)
-		}
-		return result[i].ID < result[j].ID
-	})
+	sortAgentRuns(result, filter.Order)
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
 }
 

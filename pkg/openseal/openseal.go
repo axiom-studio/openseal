@@ -166,6 +166,7 @@ type (
 	BudgetState                        = runtime.BudgetState
 	AgentRunStatus                     = runtime.AgentRunStatus
 	AgentRunFilter                     = runtime.AgentRunFilter
+	AgentRunOrder                      = runtime.AgentRunOrder
 	AgentRunOwnerSummary               = runtime.AgentRunOwnerSummary
 	RunSource                          = runtime.RunSource
 	RunKind                            = runtime.RunKind
@@ -621,6 +622,8 @@ const (
 	TeamAmendmentActivated            = kernelteam.AmendmentActivated
 
 	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
+	AgentRunOrderScheduler             = runtime.AgentRunOrderScheduler
+	AgentRunOrderCreatedDesc           = runtime.AgentRunOrderCreatedDesc
 	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning
 	AgentRunStatusRunning              = runtime.AgentRunStatusRunning
 	AgentRunStatusPaused               = runtime.AgentRunStatusPaused
