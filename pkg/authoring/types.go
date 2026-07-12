@@ -24,7 +24,15 @@ type SkillCapability struct {
 	Description     string               `json:"description,omitempty"`
 	Actions         []string             `json:"actions,omitempty"`
 	CredentialKinds []string             `json:"credentialKinds,omitempty"`
+	Credentials     []SkillCredential    `json:"credentials,omitempty"`
+	PromptAvailable bool                 `json:"promptAvailable,omitempty"`
 	MaximumRisk     capability.RiskLevel `json:"maximumRisk,omitempty"`
+}
+
+type SkillCredential struct {
+	Name    string   `json:"name"`
+	Kind    string   `json:"kind"`
+	Actions []string `json:"actions,omitempty"`
 }
 
 type CapabilityCatalog struct {

@@ -30,7 +30,7 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	service, _ := NewChangeSetService(compiler, store)
 	request := CreateChangeSetRequest{
 		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
-		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
 		Actor:   ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "async-create",
 	}
 	prepared, replayed, err := service.Prepare(context.Background(), request)
@@ -139,7 +139,7 @@ func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	store := NewMemoryChangeSetStore()
 	service, _ := NewChangeSetService(compiler, store)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Placement: ChangeSetPlacement{TeamDeploymentID: "marketing-live", AgentDeploymentIDs: map[string]string{"community-researcher": "researcher-live"}, Environment: "production"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}}, Placement: ChangeSetPlacement{TeamDeploymentID: "marketing-live", AgentDeploymentIDs: map[string]string{"community-researcher": "researcher-live"}, Environment: "production"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestAtomicMemoryApplyRejectsIncompletePlacementWithoutPartialState(t *testi
 	store := NewMemoryChangeSetStore()
 	service, _ := NewChangeSetService(compiler, store)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	created, _, _ := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	created, _, _ := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
 	ready, _, _ := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
 	_, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
 	if err == nil || len(store.definitions) != 0 || len(store.deployments) != 0 {
@@ -216,7 +216,7 @@ func TestChangeSetCanonicalizesDefinitionIdentityPerScopeBeforeApproval(t *testi
 	service, _ := NewChangeSetService(compiler, store)
 	create := func(scopeID, key string) *ChangeSet {
 		scope := capability.ScopeReference{Kind: "tenant", ID: scopeID}
-		value, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Placement: ChangeSetPlacement{TeamDeploymentID: "team-live", AgentDeploymentIDs: map[string]string{"community-researcher": "agent-live"}, Environment: "test"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: key})
+		value, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}}, Placement: ChangeSetPlacement{TeamDeploymentID: "team-live", AgentDeploymentIDs: map[string]string{"community-researcher": "agent-live"}, Environment: "test"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: key})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,7 +240,7 @@ func TestAtomicMemoryApplySupportsAgentWithoutTeam(t *testing.T) {
 	store := NewMemoryChangeSetStore()
 	service, _ := NewChangeSetService(compiler, store)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "agent only", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}}, Placement: ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"community-researcher": "agent-live"}, Environment: "test"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "agent only", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}}, Placement: ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"community-researcher": "agent-live"}, Environment: "test"}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
 	if err != nil || !created.Result.Valid {
 		t.Fatalf("created=%#v err=%v", created, err)
 	}
@@ -270,7 +270,7 @@ func TestChangeSetServicePersistsIdempotentImmutableCreateAndRefineLineage(t *te
 	}
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	request := CreateChangeSetRequest{
-		Scope: scope, Prompt: "Create a marketing research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Scope: scope, Prompt: "Create a marketing research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
 		Placement: ChangeSetPlacement{TeamDeploymentID: "marketing", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}},
 		Actor:     ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-marketing",
 	}
@@ -288,7 +288,7 @@ func TestChangeSetServicePersistsIdempotentImmutableCreateAndRefineLineage(t *te
 	}
 
 	refined, replayed, err := service.Create(context.Background(), CreateChangeSetRequest{
-		Scope: scope, ParentID: created.ID, Prompt: "Allow reviewed outreach", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Scope: scope, ParentID: created.ID, Prompt: "Allow reviewed outreach", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
 		Placement: created.Placement, Actor: request.Actor, IdempotencyKey: "refine-marketing",
 	})
 	if err != nil || replayed || refined.Mode != ModeAmend || refined.ParentID != created.ID || refined.Status != ChangeSetReview || len(refined.Result.RiskChanges) == 0 {
@@ -320,7 +320,7 @@ func TestChangeSetEvaluationIsScopedIdempotentAuditableAndPolicyDerived(t *testi
 	}
 	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{
 		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create team",
-		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research"}}},
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
 		Actor:   ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create",
 	})
 	if err != nil || created.Status != ChangeSetReview {

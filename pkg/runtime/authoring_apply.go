@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -17,6 +19,7 @@ type workforceApplication struct {
 	agentDefinitions []*agent.AgentDefinition
 	agentDeployments []*agent.AgentDeployment
 	agentActivations []workforce.DefinitionActivation
+	skillBindings    []*capability.Binding
 	teamDefinition   *team.Definition
 	teamDeployment   *team.Deployment
 	teamActivation   workforce.DefinitionActivation
@@ -61,6 +64,14 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		application.agentDeployments = append(application.agentDeployments, deployment)
 		application.agentActivations = append(application.agentActivations, activation)
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "agent_definition", ID: definition.ID, Version: definition.Version}, authoring.AppliedResourceReference{Kind: "agent_deployment", ID: deployment.ID, Version: definition.Version, Revision: revision})
+		bindings, err := materializeWorkforceSkillBindings(value, definition, deployment.ID)
+		if err != nil {
+			return nil, err
+		}
+		application.skillBindings = append(application.skillBindings, bindings...)
+		for _, binding := range bindings {
+			application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "skill_binding", ID: binding.ID, Version: binding.SkillVersion, Revision: binding.Revision})
+		}
 		application.objectives = append(application.objectives, materializeObjectives(value, "agent", definition.ID, deployment.ID, definition.ObjectiveTemplates)...)
 	}
 	if value.Result.Candidate.Team == nil {
@@ -96,6 +107,109 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		return application.resources[i].Kind+application.resources[i].ID < application.resources[j].Kind+application.resources[j].ID
 	})
 	return application, nil
+}
+
+func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *agent.AgentDefinition, deploymentID string) ([]*capability.Binding, error) {
+	bindings := make([]*capability.Binding, 0, len(definition.SkillRequirements))
+	for _, requirement := range definition.SkillRequirements {
+		skillCapability, ok := value.Generation.Request.Catalog.Skills[requirement.SkillID]
+		if !ok || strings.TrimSpace(skillCapability.Version) == "" {
+			return nil, fmt.Errorf("Skill %s has no immutable catalog version", requirement.SkillID)
+		}
+		allowed := append([]string(nil), requirement.RequiredActions...)
+		sort.Strings(allowed)
+		allowedSet := map[string]bool{}
+		for _, action := range allowed {
+			allowedSet[action] = true
+		}
+		credentials := map[string]capability.CredentialReference{}
+		for _, credential := range skillCapability.Credentials {
+			needed := false
+			for _, action := range credential.Actions {
+				if allowedSet[action] {
+					needed = true
+					break
+				}
+			}
+			if !needed {
+				continue
+			}
+			reference := value.Placement.CredentialReferences[definition.ID][credential.Kind]
+			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+				return nil, fmt.Errorf("Agent %s Skill %s requires opaque credential %s of kind %s", definition.ID, requirement.SkillID, credential.Name, credential.Kind)
+			}
+			credentials[credential.Name] = reference
+		}
+		maximumRisk := skillCapability.MaximumRisk
+		if workforceRiskRank(definition.Authority.MaximumRisk) < workforceRiskRank(maximumRisk) {
+			maximumRisk = definition.Authority.MaximumRisk
+		}
+		bindings = append(bindings, &capability.Binding{
+			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
+			SkillID: requirement.SkillID, SkillVersion: skillCapability.Version, AllowedActions: allowed,
+			EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
+		})
+	}
+	return bindings, nil
+}
+
+func workforceRiskRank(risk capability.RiskLevel) int {
+	switch risk {
+	case capability.RiskLevelRead:
+		return 1
+	case capability.RiskLevelWrite:
+		return 2
+	case capability.RiskLevelExternal:
+		return 3
+	case capability.RiskLevelProduction:
+		return 4
+	case capability.RiskLevelDestructive:
+		return 5
+	default:
+		return 0
+	}
+}
+
+func validateWorkforceBindingDefinition(binding *capability.Binding, definition *capability.Definition) error {
+	if binding == nil || definition == nil || definition.ID != binding.SkillID || definition.Version != binding.SkillVersion {
+		return fmt.Errorf("Skill binding %s does not match an installed immutable Skill definition", binding.ID)
+	}
+	if binding.EnablePrompt && definition.Prompt == nil {
+		return fmt.Errorf("Skill binding %s requires a prompt the Skill does not define", binding.ID)
+	}
+	for _, actionName := range binding.AllowedActions {
+		action, ok := definition.Actions[actionName]
+		if !ok || workforceRiskRank(action.Risk) > workforceRiskRank(binding.MaximumRisk) {
+			return fmt.Errorf("Skill binding %s cannot authorize action %s", binding.ID, actionName)
+		}
+		for _, requirement := range action.Credentials {
+			reference, exists := binding.Credentials[requirement.Name]
+			if requirement.Optional && !exists {
+				continue
+			}
+			if !exists || reference.Kind != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
+				return fmt.Errorf("Skill binding %s is missing credential %s", binding.ID, requirement.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func synchronizeWorkforceSkillBindingResources(application *workforceApplication) {
+	if application == nil {
+		return
+	}
+	bindings := map[string]*capability.Binding{}
+	for _, binding := range application.skillBindings {
+		bindings[binding.ID] = binding
+	}
+	for index := range application.resources {
+		resource := &application.resources[index]
+		if resource.Kind == "skill_binding" && bindings[resource.ID] != nil {
+			resource.Version = bindings[resource.ID].SkillVersion
+			resource.Revision = bindings[resource.ID].Revision
+		}
+	}
 }
 
 func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate) []workforceObjectiveApplication {
