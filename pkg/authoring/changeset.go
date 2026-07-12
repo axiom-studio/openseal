@@ -131,6 +131,7 @@ type ChangeSet struct {
 	PromptDigest        string                      `json:"promptDigest"`
 	CandidateDigest     string                      `json:"candidateDigest"`
 	Result              CompileResult               `json:"result"`
+	Catalog             CapabilityCatalog           `json:"catalog"`
 	Placement           ChangeSetPlacement          `json:"placement"`
 	RequiredCredentials map[string][]string         `json:"requiredCredentials,omitempty"`
 	Status              ChangeSetStatus             `json:"status"`
@@ -315,7 +316,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	changeSet := &ChangeSet{
 		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), CandidateDigest: candidateDigest,
-		Result: *result, Placement: clonePlacement(request.Placement), RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog), Status: status, Actor: request.Actor,
+		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement), RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog), Status: status, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: "candidate_compiled", Actor: request.Actor, At: now}}
@@ -354,7 +355,7 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	now := s.now().UTC()
 	changeSet := &ChangeSet{
 		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
-		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), Placement: clonePlacement(request.Placement),
+		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement),
 		Status: ChangeSetEvaluating, Actor: request.Actor, Generation: &ChangeSetGeneration{Request: compileRequest},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -402,7 +403,7 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate, existing)
 	result.Validation = validateCandidate(&result.Candidate, existing)
-	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Generation.Request.Catalog)
+	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
@@ -417,7 +418,7 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	}
 	changeSet.CandidateDigest = candidateDigest
 	changeSet.Result = *result
-	changeSet.RequiredCredentials = requiredCredentials(result.Candidate, changeSet.Generation.Request.Catalog)
+	changeSet.RequiredCredentials = requiredCredentials(result.Candidate, changeSet.Catalog)
 	changeSet.Status = status
 	changeSet.Revision++
 	changeSet.UpdatedAt = now
@@ -972,5 +973,12 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 			copy.Objectives[key] = placement
 		}
 	}
+	return copy
+}
+
+func cloneCapabilityCatalog(value CapabilityCatalog) CapabilityCatalog {
+	payload, _ := json.Marshal(value)
+	var copy CapabilityCatalog
+	_ = json.Unmarshal(payload, &copy)
 	return copy
 }

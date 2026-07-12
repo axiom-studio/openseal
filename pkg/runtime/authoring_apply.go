@@ -112,7 +112,7 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *agent.AgentDefinition, deploymentID string) ([]*capability.Binding, error) {
 	bindings := make([]*capability.Binding, 0, len(definition.SkillRequirements))
 	for _, requirement := range definition.SkillRequirements {
-		skillCapability, ok := value.Generation.Request.Catalog.Skills[requirement.SkillID]
+		skillCapability, ok := value.Catalog.Skills[requirement.SkillID]
 		if !ok || strings.TrimSpace(skillCapability.Version) == "" {
 			return nil, fmt.Errorf("Skill %s has no immutable catalog version", requirement.SkillID)
 		}
