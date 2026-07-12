@@ -41,18 +41,6 @@ type FeedResult struct {
 }
 
 func SkillDefinition() *skill.Definition {
-	observation := map[string]interface{}{
-		"type": "object", "additionalProperties": false,
-		"required": []interface{}{"stableSourceId", "sourceUri", "contentDigest", "summary", "observedAt"},
-		"properties": map[string]interface{}{
-			"stableSourceId": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1000},
-			"sourceUri":      map[string]interface{}{"type": "string", "format": "uri"},
-			"contentDigest":  map[string]interface{}{"type": "string", "pattern": `^sha256:[a-f0-9]{64}$`},
-			"summary":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 4000},
-			"observedAt":     map[string]interface{}{"type": "string", "format": "date-time"},
-			"metadata":       map[string]interface{}{"type": "object"},
-		},
-	}
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Source observer",
 		Description: "Observe permitted RSS or Atom sources and emit provenance-linked evidence.",
@@ -68,10 +56,14 @@ func SkillDefinition() *skill.Definition {
 			},
 			OutputSchema: map[string]interface{}{
 				"type": "object", "additionalProperties": false,
-				"required": []interface{}{"sourceObservations", "nextCursor"},
+				"required": []interface{}{"observationRefs", "observationCount", "checkpointRevision"},
 				"properties": map[string]interface{}{
-					"sourceObservations": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": MaximumItems, "items": observation},
-					"nextCursor":         map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1000},
+					"observationRefs": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": MaximumItems, "items": map[string]interface{}{
+						"type": "object", "additionalProperties": false, "required": []interface{}{"id", "replayed"},
+						"properties": map[string]interface{}{"id": map[string]interface{}{"type": "string", "minLength": 1}, "replayed": map[string]interface{}{"type": "boolean"}},
+					}},
+					"observationCount":   map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumItems},
+					"checkpointRevision": map[string]interface{}{"type": "integer", "minimum": 1},
 				},
 			},
 			SideEffect: skill.SideEffectRead, Risk: skill.RiskLevelRead,
