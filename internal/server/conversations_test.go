@@ -153,7 +153,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 		t.Fatalf("invalid status = %d, body = %s", invalid.Code, invalid.Body.String())
 	}
 	capabilities := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
-	for _, expected := range []string{`"team-channels"`, `"coordinate"`, `"presence"`, `"audit"`, `"changes"`} {
+	for _, expected := range []string{`"channels"`, `"coordinate"`, `"presence"`, `"audit"`, `"changes"`} {
 		if !strings.Contains(capabilities.Body.String(), expected) {
 			t.Fatalf("capabilities missing %s: %s", expected, capabilities.Body.String())
 		}

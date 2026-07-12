@@ -107,7 +107,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
 	}
 	if _, ok := s.store.(runtime.ConversationStore); ok {
-		capabilities = append(capabilities, kernelapi.TeamChannelsCapability())
+		capabilities = append(capabilities, kernelapi.ChannelsCapability())
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
