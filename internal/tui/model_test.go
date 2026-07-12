@@ -27,39 +27,41 @@ import (
 )
 
 type fakeKernelClient struct {
-	document          kernelapi.CapabilityDocument
-	runs              []*runtime.AgentRun
-	compilations      []*kernelagent.DefinitionCompilation
-	createErrors      []error
-	createKeys        []string
-	createRequests    []kernelapi.CreateAgentRunRequest
-	objectives        []*runtime.Objective
-	objectiveKeys     []string
-	objectiveCreates  []kernelapi.CreateObjectiveRequest
-	objectiveUpdates  []kernelapi.UpdateObjectiveRequest
-	initiatives       []*runtime.Initiative
-	initiativeKeys    []string
-	initiativeCreates []kernelapi.CreateInitiativeRequest
-	initiativeUpdates []kernelapi.UpdateInitiativeRequest
-	commands          []kernelapi.AgentRunCommandRequest
-	artifacts         []*runtime.Artifact
-	downloadBody      string
-	downloadCalls     int
-	authoringResult   *authoring.CompileResult
-	authoringRequests []authoring.GenerateRequest
-	authoringErrors   []error
-	changeSets        []*authoring.ChangeSet
-	changeSetRequests []authoring.CreateChangeSetRequest
-	changeSetKeys     []string
-	changeSetErrors   []error
-	approvalRequests  []authoring.ResolveChangeSetApprovalRequest
-	approvalKeys      []string
-	applyRequests     []authoring.ApplyChangeSetRequest
-	applyKeys         []string
-	retryRequests     []authoring.RetryChangeSetGenerationRequest
-	retryKeys         []string
-	governanceResults []*authoring.ChangeSet
-	governanceErrors  []error
+	document            kernelapi.CapabilityDocument
+	runs                []*runtime.AgentRun
+	compilations        []*kernelagent.DefinitionCompilation
+	createErrors        []error
+	createKeys          []string
+	createRequests      []kernelapi.CreateAgentRunRequest
+	objectives          []*runtime.Objective
+	objectiveKeys       []string
+	objectiveCreates    []kernelapi.CreateObjectiveRequest
+	objectiveUpdates    []kernelapi.UpdateObjectiveRequest
+	initiatives         []*runtime.Initiative
+	monitorCheckpoints  map[string]*runtime.SourceMonitorCheckpoint
+	monitorObservations map[string][]*runtime.SourceObservation
+	initiativeKeys      []string
+	initiativeCreates   []kernelapi.CreateInitiativeRequest
+	initiativeUpdates   []kernelapi.UpdateInitiativeRequest
+	commands            []kernelapi.AgentRunCommandRequest
+	artifacts           []*runtime.Artifact
+	downloadBody        string
+	downloadCalls       int
+	authoringResult     *authoring.CompileResult
+	authoringRequests   []authoring.GenerateRequest
+	authoringErrors     []error
+	changeSets          []*authoring.ChangeSet
+	changeSetRequests   []authoring.CreateChangeSetRequest
+	changeSetKeys       []string
+	changeSetErrors     []error
+	approvalRequests    []authoring.ResolveChangeSetApprovalRequest
+	approvalKeys        []string
+	applyRequests       []authoring.ApplyChangeSetRequest
+	applyKeys           []string
+	retryRequests       []authoring.RetryChangeSetGenerationRequest
+	retryKeys           []string
+	governanceResults   []*authoring.ChangeSet
+	governanceErrors    []error
 }
 
 type fakeChannelKernelClient struct {
@@ -413,6 +415,16 @@ func (f *fakeKernelClient) CreateInitiative(_ context.Context, request kernelapi
 
 func (f *fakeKernelClient) ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
 	return f.initiatives, nil
+}
+func (f *fakeKernelClient) ListSourceObservations(_ context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
+	return f.monitorObservations[sourceMonitorStatusKey(filter.InitiativeID, filter.MonitorID)], nil
+}
+func (f *fakeKernelClient) GetSourceMonitorCheckpoint(_ context.Context, _ runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
+	checkpoint := f.monitorCheckpoints[sourceMonitorStatusKey(initiativeID, monitorID)]
+	if checkpoint == nil {
+		return nil, runtime.ErrSourceObservationNotFound
+	}
+	return checkpoint, nil
 }
 func (f *fakeKernelClient) GetInitiative(_ context.Context, _ runtime.Scope, id string) (*runtime.Initiative, error) {
 	for _, initiative := range f.initiatives {
@@ -839,6 +851,40 @@ func TestInitiativePortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *test
 	last := fake.initiativeUpdates[len(fake.initiativeUpdates)-1]
 	if last.ObjectiveRefs == nil || len(*last.ObjectiveRefs) != 2 || (*last.ObjectiveRefs)[1] != second.ID {
 		t.Fatalf("linked objectives=%#v", last.ObjectiveRefs)
+	}
+}
+
+func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	initiative := &runtime.Initiative{
+		ID: "initiative-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
+		Title: "Market research", Purpose: "Monitor governed sources", Status: runtime.InitiativeStatusActive, Revision: 3,
+		SourceMonitors: []runtime.SourceMonitorReference{{
+			ID: "reddit-kubernetes", ObjectiveID: "objective-research", AssignedAgentID: "researcher",
+			SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
+			SourcePolicyRef: "public-reddit-research@2026-07-13", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
+		}},
+	}
+	key := sourceMonitorStatusKey(initiative.ID, "reddit-kubernetes")
+	fake := &fakeKernelClient{
+		document: kernelapi.Capabilities(), initiatives: []*runtime.Initiative{initiative},
+		monitorCheckpoints: map[string]*runtime.SourceMonitorCheckpoint{key: {
+			Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes", LastRunID: "run-live-123",
+			ObservationCount: 5, LastSuccessAt: time.Now().Add(-time.Minute), Revision: 2,
+		}},
+		monitorObservations: map[string][]*runtime.SourceObservation{key: {{
+			ID: "observation-1", Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes",
+			Summary: "Operators want simpler upgrades", SourceURI: "https://www.reddit.com/r/kubernetes/comments/example",
+		}}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionInitiatives
+	view := model.View()
+	for _, expected := range []string{"reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Operators want simpler upgrades"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
+		}
 	}
 }
 

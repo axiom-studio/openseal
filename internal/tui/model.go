@@ -121,6 +121,7 @@ type Model struct {
 	runCapability             kernelapi.Capability
 	objectiveCapability       kernelapi.Capability
 	initiativeCapability      kernelapi.Capability
+	sourceMonitorCapability   kernelapi.Capability
 	clawHubCapability         kernelapi.Capability
 	artifactCapability        kernelapi.Capability
 	channelCapability         kernelapi.Capability
@@ -138,6 +139,7 @@ type Model struct {
 	initiatives               []*runtime.Initiative
 	initiativeSelected        int
 	selectedInitiative        string
+	sourceMonitorStatuses     map[string]sourceMonitorStatus
 	clawHubSkills             []clawhub.InstalledState
 	clawHubSelected           int
 	selectedClawHub           string
@@ -224,6 +226,16 @@ type objectiveUpdated struct {
 type initiativesLoaded struct {
 	initiatives []*runtime.Initiative
 	err         error
+}
+
+type sourceMonitorStatus struct {
+	checkpoint   *runtime.SourceMonitorCheckpoint
+	observations []*runtime.SourceObservation
+	err          error
+}
+
+type sourceMonitorsLoaded struct {
+	statuses map[string]sourceMonitorStatus
 }
 type initiativeCreated struct {
 	initiative *runtime.Initiative
@@ -363,6 +375,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
+		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
@@ -371,6 +384,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.runCapability = runCapability
 		m.objectiveCapability = objectiveCapability
 		m.initiativeCapability = initiativeCapability
+		m.sourceMonitorCapability = sourceMonitorCapability
 		m.clawHubCapability = clawHubCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
@@ -528,6 +542,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err, m.initiatives = nil, msg.initiatives
 		m.restoreInitiativeSelection()
+		return m, m.loadSourceMonitors()
+	case sourceMonitorsLoaded:
+		m.sourceMonitorStatuses = msg.statuses
 		return m, nil
 	case clawHubSkillsLoaded:
 		m.loading = false
@@ -1215,6 +1232,41 @@ func (m *Model) loadInitiatives() tea.Cmd {
 	}
 }
 
+func (m *Model) loadSourceMonitors() tea.Cmd {
+	if !m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) || !m.supportsSourceMonitor(kernelapi.OperationListObservations) {
+		return nil
+	}
+	initiatives := append([]*runtime.Initiative(nil), m.initiatives...)
+	return func() tea.Msg {
+		statuses := make(map[string]sourceMonitorStatus)
+		for _, initiative := range initiatives {
+			if initiative == nil {
+				continue
+			}
+			for _, monitor := range initiative.SourceMonitors {
+				key := sourceMonitorStatusKey(initiative.ID, monitor.ID)
+				checkpoint, checkpointErr := m.client.GetSourceMonitorCheckpoint(m.ctx, initiative.Scope, initiative.ID, monitor.ID)
+				observations, observationsErr := m.client.ListSourceObservations(m.ctx, runtime.SourceObservationFilter{
+					Scope: initiative.Scope, InitiativeID: initiative.ID, MonitorID: monitor.ID, Limit: 5,
+				})
+				status := sourceMonitorStatus{checkpoint: checkpoint, observations: observations}
+				if checkpointErr != nil && !errors.Is(checkpointErr, runtime.ErrSourceObservationNotFound) {
+					status.err = checkpointErr
+				}
+				if observationsErr != nil {
+					status.err = observationsErr
+				}
+				statuses[key] = status
+			}
+		}
+		return sourceMonitorsLoaded{statuses: statuses}
+	}
+}
+
+func sourceMonitorStatusKey(initiativeID, monitorID string) string {
+	return initiativeID + "\x00" + monitorID
+}
+
 func (m *Model) loadClawHubSkills() tea.Cmd {
 	if !m.supportsClawHub(clawhub.LifecycleInspectInstalled) {
 		return nil
@@ -1736,6 +1788,10 @@ func (m *Model) supportsObjective(operation string) bool {
 
 func (m *Model) supportsInitiative(operation string) bool {
 	return m.ready && m.initiativeCapability.Supports(operation)
+}
+
+func (m *Model) supportsSourceMonitor(operation string) bool {
+	return m.ready && m.sourceMonitorCapability.Supports(operation)
 }
 
 func (m *Model) supportsClawHub(operation clawhub.LifecycleOperation) bool {

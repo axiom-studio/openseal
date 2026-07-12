@@ -486,6 +486,31 @@ func (m *Model) renderInitiativesContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("Selected"), compact(initiative.Purpose, max(width-8, 24)))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(initiative.ObjectiveRefs), len(initiative.Milestones), len(initiative.SourceMonitors), len(initiative.Deliverables))))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", initiative.Revision, relativeTime(initiative.UpdatedAt))))
+		if len(initiative.SourceMonitors) > 0 {
+			lines = append(lines, "", mutedStyle.Render("Source monitors"))
+			for _, monitor := range initiative.SourceMonitors {
+				lines = append(lines, compact(fmt.Sprintf("%s · %s@%s %s", monitor.ID, monitor.SkillID, monitor.SkillVersion, monitor.Action), max(width-4, 24)))
+				details := fmt.Sprintf("Agent %s · %s", monitor.AssignedAgentID, monitor.Deduplication)
+				lines = append(lines, mutedStyle.Render(compact(details, max(width-6, 24))))
+				if monitor.SourcePolicyRef != "" {
+					lines = append(lines, mutedStyle.Render(compact("Policy · "+monitor.SourcePolicyRef, max(width-6, 24))))
+				}
+				if status, ok := m.sourceMonitorStatuses[sourceMonitorStatusKey(initiative.ID, monitor.ID)]; ok {
+					if status.err != nil {
+						lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("Status unavailable · "+status.err.Error(), max(width-6, 24))))
+					} else if status.checkpoint == nil {
+						lines = append(lines, mutedStyle.Render("Awaiting first successful Run"))
+					} else {
+						lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Last success %s · %d evidence · Run %s", relativeTime(status.checkpoint.LastSuccessAt), status.checkpoint.ObservationCount, status.checkpoint.LastRunID), max(width-6, 24))))
+						for _, observation := range status.observations[:min(3, len(status.observations))] {
+							lines = append(lines, mutedStyle.Render(compact("  • "+observation.Summary+" · "+observation.SourceURI, max(width-6, 24))))
+						}
+					}
+				} else if m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) {
+					lines = append(lines, mutedStyle.Render("Refreshing durable status…"))
+				}
+			}
+		}
 		actions := []string{}
 		if m.supportsInitiative(kernelapi.OperationPatch) {
 			actions = append(actions, "Enter amend", "p pause/resume", "l link selected objective")
