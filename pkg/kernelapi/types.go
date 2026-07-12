@@ -20,6 +20,8 @@ const (
 	ObjectivesCapabilityVersion         = "1"
 	InitiativesCapabilityID             = "initiatives"
 	InitiativesCapabilityVersion        = "1"
+	SourceMonitorsCapabilityID          = "source-monitors"
+	SourceMonitorsCapabilityVersion     = "1"
 	ArtifactsCapabilityID               = "artifacts"
 	ArtifactsCapabilityVersion          = "1"
 	ChannelsCapabilityID                = "channels"
@@ -63,6 +65,8 @@ const (
 	OperationRetry            = "retry"
 	OperationPatch            = "patch"
 	OperationListCompilations = "list_compilations"
+	OperationListObservations = "list-observations"
+	OperationGetCheckpoint    = "get-checkpoint"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -182,6 +186,10 @@ func InitiativesCapability() Capability {
 	}
 }
 
+func SourceMonitorsCapability() Capability {
+	return Capability{ID: SourceMonitorsCapabilityID, Version: SourceMonitorsCapabilityVersion, Available: true, Operations: []string{OperationListObservations, OperationGetCheckpoint}}
+}
+
 func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capability {
 	operations := make([]string, 0, len(lifecycle.Operations))
 	for _, operation := range lifecycle.Operations {
@@ -193,7 +201,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(), TeamDefinitionsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(), TeamDefinitionsCapability()},
 	}
 }
 

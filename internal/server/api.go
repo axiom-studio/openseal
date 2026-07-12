@@ -39,6 +39,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/initiatives", s.handleListInitiatives)
 	s.mux.HandleFunc("GET /api/v1/initiatives/{id}", s.handleGetInitiative)
 	s.mux.HandleFunc("PATCH /api/v1/initiatives/{id}", s.handlePatchInitiative)
+	s.mux.HandleFunc("GET /api/v1/initiatives/{id}/source-monitors/{monitorId}/observations", s.handleListSourceObservations)
+	s.mux.HandleFunc("GET /api/v1/initiatives/{id}/source-monitors/{monitorId}/checkpoint", s.handleGetSourceMonitorCheckpoint)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}", s.handleInspectClawHub)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/versions", s.handleListClawHubVersions)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/file", s.handleGetClawHubFile)
@@ -96,6 +98,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.AgentRunsCapability()}
 	if _, ok := s.store.(runtime.InitiativeStore); ok {
 		capabilities = append(capabilities, kernelapi.InitiativesCapability())
+	}
+	if _, ok := s.store.(runtime.SourceMonitorStore); ok {
+		capabilities = append(capabilities, kernelapi.SourceMonitorsCapability())
 	}
 	if _, ok := s.store.(runtime.ArtifactStore); ok {
 		contentOperations := make([]string, 0, 3)
