@@ -528,6 +528,10 @@ var (
 	ErrObjectiveIdempotency                = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition          = runtime.ErrInvalidObjectiveTransition
 	ErrBudgetExhausted                     = runtime.ErrBudgetExhausted
+	ErrActionNotFound                      = runtime.ErrActionNotFound
+	ErrApprovalNotFound                    = runtime.ErrApprovalNotFound
+	ErrApprovalResolved                    = runtime.ErrApprovalResolved
+	ErrActionIdempotencyConflict           = runtime.ErrIdempotencyConflict
 	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
