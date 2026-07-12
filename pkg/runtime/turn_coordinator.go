@@ -30,6 +30,7 @@ type TurnOutcome struct {
 	SkillSelections        []HostedSkillSelection
 	Decisions              []TurnDecision
 	ProposedActions        []TurnAction
+	ProposedFork           *TurnForkProposal
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
@@ -265,6 +266,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.SkillSelections = outcome.SkillSelections
 			finish.Decisions = outcome.Decisions
 			finish.RequestedActions = outcome.ProposedActions
+			finish.RequestedFork = outcome.ProposedFork
 			finish.OutputSummary = outcome.OutputSummary
 			finish.Usage = outcome.Usage
 			finish.ContinuationCheckpoint = outcome.ContinuationCheckpoint
@@ -383,6 +385,9 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if len(turn.RequestedActions) > 0 {
 		activityPayload["requestedActions"] = append([]TurnAction(nil), turn.RequestedActions...)
 	}
+	if turn.RequestedFork != nil {
+		activityPayload["requestedFork"] = turn.RequestedFork
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
@@ -428,6 +433,17 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 	}
 	if isWaitingRunStatus(outcome.NextRunStatus) && outcome.WakeCondition == nil {
 		return fmt.Errorf("next run status %s requires a wake condition", outcome.NextRunStatus)
+	}
+	if len(outcome.ProposedActions) > 0 && outcome.ProposedFork != nil {
+		return errors.New("a bounded Turn cannot propose actions and a fork together")
+	}
+	if outcome.ProposedFork != nil {
+		if err := outcome.ProposedFork.Validate(); err != nil {
+			return err
+		}
+		if outcome.NextRunStatus != AgentRunStatusRunning {
+			return errors.New("a proposed fork must leave the source Run running until materialized")
+		}
 	}
 	return nil
 }

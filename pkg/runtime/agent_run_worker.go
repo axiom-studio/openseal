@@ -93,6 +93,7 @@ type AgentRunWorkerPool struct {
 	wakeService *AgentRunWakeService
 	activity    *RunActivityService
 	actions     *ActionCoordinator
+	forks       *RunForkCoordinator
 	resolver    TurnRunnerResolver
 	logger      *zap.SugaredLogger
 	wake        chan struct{}
@@ -119,12 +120,16 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &AgentRunWorkerPool{
+	pool := &AgentRunWorkerPool{
 		config: config, scheduler: NewAgentRunScheduler(store), coordinator: NewTurnCoordinator(store, store, store),
 		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
 		resolver: resolver, logger: logger, wake: make(chan struct{}, 1),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
-	}, nil
+	}
+	if forkStore, ok := store.(RunForkStore); ok {
+		pool.forks = NewRunForkCoordinator(forkStore)
+	}
+	return pool, nil
 }
 
 func (p *AgentRunWorkerPool) Start(ctx context.Context) {
@@ -235,6 +240,16 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			current = materialized
 			return
 		}
+		if result != nil && result.Turn != nil && result.Turn.RequestedFork != nil {
+			materialized, materializeErr := p.materializeTurnFork(ctx, workerID, current, result.Turn)
+			if materializeErr != nil {
+				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
+				return
+			}
+			current = materialized
+			p.Wake()
+			return
+		}
 		if result == nil || current.Status != AgentRunStatusRunning {
 			return
 		}
@@ -248,6 +263,28 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) materializeTurnFork(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
+	if p.forks == nil {
+		return nil, errors.New("durable fork materialization is unavailable")
+	}
+	if run == nil || turn == nil || turn.RequestedFork == nil || len(turn.RequestedActions) != 0 {
+		return nil, errors.New("a bounded Turn must request exactly one fork without actions")
+	}
+	result, err := p.forks.Create(ctx, CreateRunForkRequest{
+		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
+		ForkID: turn.RequestedFork.ForkID, Policy: turn.RequestedFork.Policy, Branches: turn.RequestedFork.Branches,
+		ContinuationCheckpoint: turn.ContinuationCheckpoint,
+		Actor:                  ActivityActor{Type: "worker", ID: workerID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.DependencyGroup == nil || result.DependencyGroup.Source == nil {
+		return nil, errors.New("fork materialization returned no durable source Run")
+	}
+	return result.DependencyGroup.Source, nil
 }
 
 func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {

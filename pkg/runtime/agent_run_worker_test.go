@@ -172,6 +172,70 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	}
 }
 
+func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
+	store := NewMemoryStore(20)
+	scope := Scope{Kind: "tenant", ID: "fork-worker"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "fork", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			if run.ParentRunID != "" {
+				due := time.Now().Add(time.Hour)
+				return &TurnOutcome{NextRunStatus: AgentRunStatusSleeping, WakeCondition: &WakeCondition{Type: "timer", WakeAt: &due}, OutputSummary: "branch parked"}, nil
+			}
+			return &TurnOutcome{
+				NextRunStatus: AgentRunStatusRunning, OutputSummary: "fork proposed", ContinuationCheckpoint: map[string]interface{}{"fork": "pending"},
+				ProposedFork: &TurnForkProposal{
+					ForkID: "wave", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+					Branches: []RunForkBranch{{ID: "a", Goal: "A", Checkpoint: map[string]interface{}{"branch": "a"}}, {ID: "b", Goal: "B", Checkpoint: map[string]interface{}{"branch": "b"}}},
+				},
+			}, nil
+		})}, nil
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "agent", Concurrency: 1, MaxTurnsPerClaim: 1,
+		PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+	defer pool.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	var waiting *AgentRun
+	for time.Now().Before(deadline) {
+		waiting, err = store.GetAgentRun(t.Context(), scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting.Status == AgentRunStatusWaitingForDependency {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if waiting == nil || waiting.Status != AgentRunStatusWaitingForDependency || waiting.WakeCondition == nil || waiting.Checkpoint["fork"] != "pending" {
+		t.Fatalf("source=%#v", waiting)
+	}
+	group, err := NewDependencyCoordinator(store).GetRunDependencyGroup(t.Context(), scope, waiting.WakeCondition.Reference)
+	if err != nil || group.ExpectedCount != 2 || group.Policy.Mode != FanInModeAll {
+		t.Fatalf("group=%#v error=%v", group, err)
+	}
+	edges, err := NewDependencyCoordinator(store).ListRunDependencies(t.Context(), scope, group.ID)
+	if err != nil || len(edges) != 2 {
+		t.Fatalf("edges=%#v error=%v", edges, err)
+	}
+	turns, err := NewAgentTurnService(store, store).ListTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: run.ID})
+	if err != nil || len(turns) != 1 || turns[0].RequestedFork == nil || turns[0].RequestedFork.ForkID != "wave" {
+		t.Fatalf("turns=%#v error=%v", turns, err)
+	}
+}
+
 func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
 	store := NewMemoryStore(20)
 	ctx := context.Background()

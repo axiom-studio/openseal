@@ -39,19 +39,16 @@ func NewRunbookTurnRunner(definition *runbook.Definition, entrypoint string) (*R
 type runbookExecutionState struct {
 	Current       string                 `json:"current"`
 	PendingAction string                 `json:"pendingAction,omitempty"`
+	PendingFork   string                 `json:"pendingFork,omitempty"`
+	BranchFork    string                 `json:"branchFork,omitempty"`
+	BranchID      string                 `json:"branchId,omitempty"`
+	BranchJoin    string                 `json:"branchJoin,omitempty"`
 	Waiting       string                 `json:"waiting,omitempty"`
 	Loops         map[string]runbookLoop `json:"loops,omitempty"`
-	Forks         []runbookFork          `json:"forks,omitempty"`
 }
 type runbookLoop struct {
 	Items []interface{} `json:"items"`
 	Index int           `json:"index"`
-}
-type runbookFork struct {
-	ID       string   `json:"id"`
-	Branches []string `json:"branches"`
-	Index    int      `json:"index"`
-	Join     string   `json:"join"`
 }
 
 func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
@@ -201,37 +198,24 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 			state.Current = step.LoopReturn.ForEach
 			_ = loopStep
 		case runbook.StepFork:
-			names := make([]string, 0, len(step.Fork.Branches))
-			for name := range step.Fork.Branches {
-				names = append(names, name)
+			if state.PendingFork == state.Current {
+				return r.proposeFork(checkpoint, state, decisions, input)
 			}
-			sort.Strings(names)
-			branches := make([]string, 0, len(names))
-			for _, name := range names {
-				branches = append(branches, step.Fork.Branches[name])
-			}
-			state.Forks = append(state.Forks, runbookFork{ID: state.Current, Branches: branches, Join: step.Fork.Join})
-			state.Current = branches[0]
+			state.PendingFork = state.Current
+			return r.proposeFork(checkpoint, state, decisions, input)
 		case runbook.StepJoin:
-			if step.Join.Mode != runbook.JoinAll {
-				return nil, fmt.Errorf("runbook join_any %q requires concurrent branch workers and is not available", state.Current)
+			if state.BranchJoin == state.Current {
+				encodeRunbookState(checkpoint, state)
+				return &TurnOutcome{
+					Decisions: decisions, OutputSummary: "Completed concurrent runbook branch " + state.BranchID,
+					ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusCompleted,
+					RunOutput: map[string]interface{}{"branchId": state.BranchID, "forkId": state.BranchFork},
+				}, nil
 			}
-			if len(state.Forks) == 0 {
-				return nil, fmt.Errorf("runbook join %q has no active fork", state.Current)
+			if state.PendingFork != "" {
+				return nil, fmt.Errorf("runbook join %q resumed without durable fork results", state.Current)
 			}
-			index := len(state.Forks) - 1
-			frame := state.Forks[index]
-			if frame.ID != step.Join.Fork || frame.Join != state.Current {
-				return nil, fmt.Errorf("runbook join %q does not match active fork", state.Current)
-			}
-			frame.Index++
-			if frame.Index < len(frame.Branches) {
-				state.Forks[index] = frame
-				state.Current = frame.Branches[frame.Index]
-			} else {
-				state.Forks = state.Forks[:index]
-				state.Current = step.Join.Next
-			}
+			return nil, fmt.Errorf("runbook join %q has no active concurrent fork", state.Current)
 		case runbook.StepEnd:
 			outputs := map[string]interface{}{}
 			for name, value := range step.End.Outputs {
@@ -248,6 +232,58 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 		}
 	}
 	return nil, fmt.Errorf("runbook exceeded %d internal steps in one Turn", maximumRunbookStepsPerTurn)
+}
+
+func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, input TurnExecutionContext) (*TurnOutcome, error) {
+	step := r.definition.Steps[state.Current]
+	if step.Fork == nil {
+		return nil, fmt.Errorf("runbook fork %q is missing its definition", state.Current)
+	}
+	join, ok := r.definition.Steps[step.Fork.Join]
+	if !ok || join.Join == nil || join.Join.Fork != state.Current {
+		return nil, fmt.Errorf("runbook fork %q has no matching join", state.Current)
+	}
+	mode := FanInModeAll
+	failure := DependencyFailureFailFast
+	if join.Join.Mode == runbook.JoinAny {
+		mode = FanInModeAny
+		failure = DependencyFailureWait
+	}
+	names := make([]string, 0, len(step.Fork.Branches))
+	for name := range step.Fork.Branches {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	branches := make([]RunForkBranch, 0, len(names))
+	groupID := stableForkIdentifier(input.Run.ID, state.Current, "group")
+	for _, name := range names {
+		branchCheckpoint := cloneMap(checkpoint)
+		delete(branchCheckpoint, "lastAction")
+		delete(branchCheckpoint, "lastFork")
+		childState := state
+		childState.Current = step.Fork.Branches[name]
+		childState.PendingFork = ""
+		childState.BranchFork = state.Current
+		childState.BranchID = name
+		childState.BranchJoin = step.Fork.Join
+		encodeRunbookState(branchCheckpoint, childState)
+		branchCheckpoint["forkChild"] = map[string]interface{}{
+			"sourceRunId": input.Run.ID, "groupId": groupID, "dependencyId": name,
+			"forkId": state.Current, "joinId": step.Fork.Join,
+		}
+		branches = append(branches, RunForkBranch{
+			ID: name, Goal: fmt.Sprintf("Execute branch %s of runbook fork %s", name, state.Current), Checkpoint: branchCheckpoint,
+		})
+	}
+	encodeRunbookState(checkpoint, state)
+	decisions = append(decisions, TurnDecision{Summary: fmt.Sprintf("Forked %d concurrent runbook branches at %s", len(branches), state.Current)})
+	return &TurnOutcome{
+		Decisions: decisions, ProposedFork: &TurnForkProposal{
+			ForkID: state.Current, Policy: RunDependencyPolicy{Mode: mode, FailureMode: failure}, Branches: branches,
+		},
+		OutputSummary:          "Requested durable concurrent runbook fork " + state.Current,
+		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
+	}, nil
 }
 
 func (r *RunbookTurnRunner) failed(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, message string) *TurnOutcome {

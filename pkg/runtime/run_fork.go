@@ -22,6 +22,39 @@ type RunForkBranch struct {
 	Budget     *BudgetPolicy          `json:"budget,omitempty"`
 }
 
+// TurnForkProposal is a proposal-only durable Turn output. The worker
+// materializes it into a sealed dependency group and child Runs only after the
+// Turn and continuation checkpoint have committed.
+type TurnForkProposal struct {
+	ForkID   string              `json:"forkId"`
+	Policy   RunDependencyPolicy `json:"policy"`
+	Branches []RunForkBranch     `json:"branches"`
+}
+
+func (p *TurnForkProposal) Validate() error {
+	if p == nil || strings.TrimSpace(p.ForkID) == "" || len(p.Branches) < 2 {
+		return errors.New("fork proposal requires an ID and at least two branches")
+	}
+	if err := p.Policy.Validate(); err != nil {
+		return err
+	}
+	if p.Policy.Mode != FanInModeAll && p.Policy.Mode != FanInModeAny {
+		return errors.New("fork proposal supports all or any fan-in")
+	}
+	seen := make(map[string]bool, len(p.Branches))
+	for _, branch := range p.Branches {
+		id := strings.TrimSpace(branch.ID)
+		if id == "" || seen[id] || strings.TrimSpace(branch.Goal) == "" {
+			return errors.New("fork proposal branches require unique IDs and goals")
+		}
+		seen[id] = true
+		if err := ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
+			return fmt.Errorf("fork branch %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
 type CreateRunForkRequest struct {
 	Scope                  Scope
 	SourceRunID            string

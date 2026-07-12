@@ -397,6 +397,7 @@ type (
 	ResolveApprovalRequest             = runtime.ResolveApprovalRequest
 	ApprovalResolutionResult           = runtime.ApprovalResolutionResult
 	RunForkBranch                      = runtime.RunForkBranch
+	TurnForkProposal                   = runtime.TurnForkProposal
 	CreateRunForkRequest               = runtime.CreateRunForkRequest
 	RunForkResult                      = runtime.RunForkResult
 	RunForkCoordinator                 = runtime.RunForkCoordinator
