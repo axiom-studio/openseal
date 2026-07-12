@@ -49,7 +49,7 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	}
 }
 
-func TestRunbookTurnRunsDecisionForkJoinAndBoundedForEach(t *testing.T) {
+func TestRunbookTurnProposesConcurrentForkAndRunsBoundedForEach(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "deterministic", Version: "1", Name: "Deterministic", Entrypoints: map[string]string{"manual": "choose"}, Steps: map[string]runbook.Step{
 		"choose": {Kind: runbook.StepDecision, Decision: &runbook.DecisionStep{Cases: []runbook.DecisionCase{{When: runbook.Predicate{Operator: runbook.PredicateTruthy, Left: runbookRef("/input/parallel")}, Next: "fork"}}, Default: "loop"}},
 		"fork":   {Kind: runbook.StepFork, Fork: &runbook.ForkStep{Branches: map[string]string{"a": "a", "b": "b"}, Join: "join"}},
@@ -66,16 +66,21 @@ func TestRunbookTurnRunsDecisionForkJoinAndBoundedForEach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := outcome.RunOutput["state"].(map[string]interface{})
-	if outcome.NextRunStatus != AgentRunStatusCompleted || state["a"] != true || state["b"] != true {
+	if outcome.NextRunStatus != AgentRunStatusRunning || outcome.ProposedFork == nil || outcome.ProposedFork.Policy.Mode != FanInModeAll || len(outcome.ProposedFork.Branches) != 2 {
 		t.Fatalf("parallel=%#v", outcome)
+	}
+	for index, branch := range outcome.ProposedFork.Branches {
+		child, err := parallel.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "child", Checkpoint: branch.Checkpoint}, Turn: &AgentTurn{ID: "branch", Sequence: 1}})
+		if err != nil || child.NextRunStatus != AgentRunStatusCompleted || child.RunOutput["branchId"] != branch.ID {
+			t.Fatalf("branch %d=%#v error=%v", index, child, err)
+		}
 	}
 	loop, _ := NewRunbookTurnRunner(definition, "manual")
 	outcome, err = loop.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "loop", Context: map[string]interface{}{"parallel": false, "items": []interface{}{"one", "two"}}}, Turn: &AgentTurn{ID: "turn", Sequence: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	state = outcome.RunOutput["state"].(map[string]interface{})
+	state := outcome.RunOutput["state"].(map[string]interface{})
 	if state["last"] != "two" {
 		t.Fatalf("loop=%#v", outcome)
 	}
