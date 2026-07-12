@@ -476,12 +476,14 @@ type (
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
 type (
-	SourceObservation              = runtime.SourceObservation
-	SourceMonitorCheckpoint        = runtime.SourceMonitorCheckpoint
-	SourceObservationFilter        = runtime.SourceObservationFilter
-	SourceMonitorStore             = runtime.SourceMonitorStore
-	IngestSourceObservationRequest = runtime.IngestSourceObservationRequest
-	SourceObservationIngestResult  = runtime.SourceObservationIngestResult
+	SourceObservation                     = runtime.SourceObservation
+	SourceMonitorCheckpoint               = runtime.SourceMonitorCheckpoint
+	SourceObservationFilter               = runtime.SourceObservationFilter
+	SourceMonitorStore                    = runtime.SourceMonitorStore
+	IngestSourceObservationRequest        = runtime.IngestSourceObservationRequest
+	SourceObservationIngestResult         = runtime.SourceObservationIngestResult
+	AdvanceSourceMonitorCheckpointRequest = runtime.AdvanceSourceMonitorCheckpointRequest
+	SourceMonitorCheckpointResult         = runtime.SourceMonitorCheckpointResult
 )
 
 const (
@@ -1771,6 +1773,13 @@ func (e *Engine) IngestSourceObservation(ctx context.Context, req runtime.Ingest
 		return nil, errors.New("source monitor capability is unavailable")
 	}
 	return e.sourceMonitors.Ingest(ctx, req)
+}
+
+func (e *Engine) AdvanceSourceMonitorCheckpoint(ctx context.Context, req runtime.AdvanceSourceMonitorCheckpointRequest) (*runtime.SourceMonitorCheckpointResult, error) {
+	if e.sourceMonitors == nil {
+		return nil, errors.New("source monitor capability is unavailable")
+	}
+	return e.sourceMonitors.AdvanceCheckpoint(ctx, req)
 }
 
 func (e *Engine) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {

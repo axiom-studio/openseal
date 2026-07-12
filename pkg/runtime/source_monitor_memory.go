@@ -56,6 +56,43 @@ func (s *MemoryStore) IngestSourceObservation(_ context.Context, observation *So
 	return cloneSourceObservation(observation), cloneSourceMonitorCheckpoint(next), cloneActivityEvent(persisted), false, nil
 }
 
+func (s *MemoryStore) AdvanceSourceMonitorCheckpoint(_ context.Context, checkpoint *SourceMonitorCheckpoint, expected int64, event *ActivityEvent) (*SourceMonitorCheckpoint, *ActivityEvent, bool, error) {
+	if checkpoint == nil || event == nil || event.Validate() != nil {
+		return nil, nil, false, ErrInvalidSourceObservation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := sourceMonitorCheckpointKey(checkpoint.Scope, checkpoint.InitiativeID, checkpoint.MonitorID)
+	current := s.sourceMonitorCheckpoints[key]
+	if current != nil && current.LastActionCallID == checkpoint.LastActionCallID {
+		return cloneSourceMonitorCheckpoint(current), nil, true, nil
+	}
+	if currentObservationRevision(current) != expected {
+		return nil, nil, false, ErrSourceMonitorCheckpoint
+	}
+	next := checkpointWithoutObservationChange(checkpoint, current, expected)
+	s.sourceMonitorCheckpoints[key] = next
+	persisted := appendMemoryActivityLocked(s, event)
+	return cloneSourceMonitorCheckpoint(next), cloneActivityEvent(persisted), false, nil
+}
+
+func currentObservationRevision(checkpoint *SourceMonitorCheckpoint) int64 {
+	if checkpoint == nil {
+		return 0
+	}
+	return checkpoint.Revision
+}
+
+func checkpointWithoutObservationChange(checkpoint, current *SourceMonitorCheckpoint, expected int64) *SourceMonitorCheckpoint {
+	next := cloneSourceMonitorCheckpoint(checkpoint)
+	next.Revision = expected + 1
+	if current != nil {
+		next.LastObservationID = current.LastObservationID
+		next.ObservationCount = current.ObservationCount
+	}
+	return next
+}
+
 func currentObservationCount(checkpoint *SourceMonitorCheckpoint) int64 {
 	if checkpoint == nil {
 		return 0

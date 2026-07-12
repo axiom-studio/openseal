@@ -72,6 +72,7 @@ type SourceObservationFilter struct {
 
 type SourceMonitorStore interface {
 	IngestSourceObservation(context.Context, *SourceObservation, *SourceMonitorCheckpoint, int64, *ActivityEvent) (*SourceObservation, *SourceMonitorCheckpoint, *ActivityEvent, bool, error)
+	AdvanceSourceMonitorCheckpoint(context.Context, *SourceMonitorCheckpoint, int64, *ActivityEvent) (*SourceMonitorCheckpoint, *ActivityEvent, bool, error)
 	GetSourceObservation(context.Context, Scope, string) (*SourceObservation, error)
 	ListSourceObservations(context.Context, SourceObservationFilter) ([]*SourceObservation, error)
 	GetSourceMonitorCheckpoint(context.Context, Scope, string, string) (*SourceMonitorCheckpoint, error)
@@ -105,6 +106,28 @@ type SourceObservationIngestResult struct {
 	Checkpoint  *SourceMonitorCheckpoint `json:"checkpoint"`
 	Event       *ActivityEvent           `json:"event,omitempty"`
 	Replayed    bool                     `json:"replayed"`
+}
+
+type AdvanceSourceMonitorCheckpointRequest struct {
+	Scope                      Scope
+	InitiativeID               string
+	MonitorID                  string
+	ExpectedCheckpointRevision int64
+	Cursor                     string
+	RunID                      string
+	AgentID                    string
+	SkillID                    string
+	SkillVersion               string
+	Action                     string
+	ActionCallID               string
+	Actor                      ActivityActor
+	Visibility                 ActivityVisibility
+}
+
+type SourceMonitorCheckpointResult struct {
+	Checkpoint *SourceMonitorCheckpoint `json:"checkpoint"`
+	Event      *ActivityEvent           `json:"event,omitempty"`
+	Replayed   bool                     `json:"replayed"`
 }
 
 type SourceMonitorService struct {
@@ -205,6 +228,60 @@ func (s *SourceMonitorService) Ingest(ctx context.Context, req IngestSourceObser
 		return nil, err
 	}
 	return &SourceObservationIngestResult{Observation: stored, Checkpoint: next, Event: persistedEvent, Replayed: replayed}, nil
+}
+
+func (s *SourceMonitorService) AdvanceCheckpoint(ctx context.Context, req AdvanceSourceMonitorCheckpointRequest) (*SourceMonitorCheckpointResult, error) {
+	if s == nil || s.store == nil || s.initiatives == nil || s.portfolio == nil {
+		return nil, errors.New("source monitor service is not configured")
+	}
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	initiative, err := s.initiatives.GetInitiative(ctx, req.Scope, strings.TrimSpace(req.InitiativeID))
+	if err != nil {
+		return nil, err
+	}
+	monitor, ok := initiativeSourceMonitor(initiative, req.MonitorID)
+	if !ok {
+		return nil, fmt.Errorf("%w: source monitor does not belong to Initiative", ErrInvalidSourceObservation)
+	}
+	run, err := s.portfolio.GetAgentRun(ctx, req.Scope, strings.TrimSpace(req.RunID))
+	if err != nil {
+		return nil, err
+	}
+	if run.ObjectiveID != monitor.ObjectiveID || run.AssignedAgentID != monitor.AssignedAgentID || req.AgentID != monitor.AssignedAgentID ||
+		run.Context["initiativeId"] != initiative.ID || run.Context["sourceMonitorId"] != monitor.ID ||
+		req.SkillID != monitor.SkillID || req.SkillVersion != monitor.SkillVersion || req.Action != monitor.Action || !validOpaqueIdentifier(strings.TrimSpace(req.ActionCallID), 128) {
+		return nil, fmt.Errorf("%w: checkpoint provenance does not match monitor execution", ErrInvalidSourceObservation)
+	}
+	now := s.now().UTC()
+	checkpoint := &SourceMonitorCheckpoint{
+		Scope: req.Scope, InitiativeID: initiative.ID, MonitorID: monitor.ID, Cursor: strings.TrimSpace(req.Cursor),
+		LastRunID: run.ID, LastActionCallID: strings.TrimSpace(req.ActionCallID), LastSuccessAt: now,
+		Revision: req.ExpectedCheckpointRevision + 1, UpdatedAt: now,
+	}
+	visibility := req.Visibility
+	if visibility == "" {
+		visibility = ActivityVisibilityScope
+	}
+	actor := req.Actor
+	if actor.Type == "" {
+		actor = ActivityActor{Type: "agent", ID: run.AssignedAgentID}
+	}
+	event := &ActivityEvent{
+		ID: uuid.NewString(), Scope: req.Scope, InitiativeID: initiative.ID, RunID: run.ID, ObjectiveID: run.ObjectiveID,
+		AgentID: run.AssignedAgentID, EventType: "source_monitor.checkpoint_advanced", Severity: ActivitySeverityInfo,
+		Actor: actor, Visibility: visibility, Summary: "Source monitor completed with no new evidence",
+		Payload: map[string]interface{}{"monitorId": monitor.ID, "cursor": checkpoint.Cursor, "actionCallId": checkpoint.LastActionCallID}, CreatedAt: now,
+	}
+	if initiative.Owner.Type == OwnerTypeTeam {
+		event.TeamID = initiative.Owner.ID
+	}
+	next, persisted, replayed, err := s.store.AdvanceSourceMonitorCheckpoint(ctx, checkpoint, req.ExpectedCheckpointRevision, event)
+	if err != nil {
+		return nil, err
+	}
+	return &SourceMonitorCheckpointResult{Checkpoint: next, Event: persisted, Replayed: replayed}, nil
 }
 
 func (s *SourceMonitorService) GetCheckpoint(ctx context.Context, scope Scope, initiativeID, monitorID string) (*SourceMonitorCheckpoint, error) {
