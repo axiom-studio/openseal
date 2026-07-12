@@ -176,6 +176,7 @@ type ActionProposalRecord struct {
 type ActionProposalResult struct {
 	Call     *ActionCall
 	Approval *ApprovalCheckpoint
+	Run      *AgentRun
 	Event    *ActivityEvent
 	Created  bool
 }

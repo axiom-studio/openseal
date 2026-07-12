@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
@@ -94,6 +96,79 @@ func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
 				t.Fatalf("unexpected durable turn history: %#v", turns)
 			}
 		})
+	}
+}
+
+func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
+	store := NewMemoryStore(20)
+	catalog, scope := governedActionCatalog(t)
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
+		Goal: "deploy staging", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelActions, err := catalog.ListModelActions(t.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DeploymentID: "release-agent", DefinitionID: "release-agent", DefinitionVersion: "1", ModelActions: modelActions,
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{
+					NextRunStatus: AgentRunStatusRunning, OutputSummary: "Proposed staging deployment",
+					ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{
+						"deploy": map[string]interface{}{"environment": "staging"},
+					}},
+					ProposedActions: []TurnAction{{
+						Type: "skill_action", Capability: "release.deploy", Summary: "Deploy release to staging", InputRef: "/actionInputs/deploy",
+					}},
+				}, nil
+			}),
+		}, nil
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "release-agent", Concurrency: 1, MaxTurnsPerClaim: 1,
+		PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.SetActionCoordinator(NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "staging is allowed"}, nil
+	})))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+	defer pool.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	var waiting *AgentRun
+	for time.Now().Before(deadline) {
+		waiting, err = store.GetAgentRun(t.Context(), scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting.Status == AgentRunStatusWaitingForDependency {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if waiting == nil || waiting.Status != AgentRunStatusWaitingForDependency || waiting.WakeCondition == nil {
+		t.Fatalf("run did not wait on governed action: %#v", waiting)
+	}
+	calls, err := store.ListActionCalls(t.Context(), ActionFilter{Scope: scope, RunID: run.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0].Status != ActionCallStatusReady || calls[0].SkillID != "release" ||
+		calls[0].Action != "deploy" || calls[0].Arguments["environment"] != "staging" || calls[0].IdempotencyKey == "" {
+		t.Fatalf("governed action mismatch: %#v", calls)
+	}
+	turns, err := NewAgentTurnService(store, store).ListTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: run.ID})
+	if err != nil || len(turns) != 1 || turns[0].RequestedActions[0].Capability != "release.deploy" {
+		t.Fatalf("durable proposal Turn mismatch: %#v, %v", turns, err)
 	}
 }
 

@@ -59,7 +59,7 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ActionProposalResult{
 		Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval),
-		Event: cloneActivityEvent(event), Created: true,
+		Run: cloneAgentRun(proposal.Run), Event: cloneActivityEvent(event), Created: true,
 	}, nil
 }
 

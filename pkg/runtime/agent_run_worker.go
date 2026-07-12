@@ -8,16 +8,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
 type TurnRunnerBinding struct {
 	Runner            TurnRunner
+	DeploymentID      string
 	DefinitionID      string
 	DefinitionVersion string
 	ModelProvider     string
 	Model             string
+	ModelActions      []capability.ModelAction
 	InputContextRefs  []string
 	BudgetReservation BudgetUsage
 }
@@ -89,6 +92,7 @@ type AgentRunWorkerPool struct {
 	coordinator *TurnCoordinator
 	wakeService *AgentRunWakeService
 	activity    *RunActivityService
+	actions     *ActionCoordinator
 	resolver    TurnRunnerResolver
 	logger      *zap.SugaredLogger
 	wake        chan struct{}
@@ -97,6 +101,12 @@ type AgentRunWorkerPool struct {
 	wg          sync.WaitGroup
 	startOnce   sync.Once
 	stopOnce    sync.Once
+}
+
+// SetActionCoordinator enables atomic materialization of one proposal-only
+// hosted action into the governed ActionCall lifecycle after its Turn commits.
+func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
+	p.actions = actions
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
@@ -216,6 +226,15 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		if advanceErr != nil {
 			p.logger.Warnw("agent turn returned an error", "runId", run.ID, "error", advanceErr)
 		}
+		if result != nil && result.Turn != nil && len(result.Turn.RequestedActions) > 0 {
+			materialized, materializeErr := p.materializeTurnAction(ctx, workerID, current, result.Turn, binding)
+			if materializeErr != nil {
+				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
+				return
+			}
+			current = materialized
+			return
+		}
 		if result == nil || current.Status != AgentRunStatusRunning {
 			return
 		}
@@ -229,6 +248,66 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
+	if p.actions == nil {
+		return nil, errors.New("governed action materialization is unavailable")
+	}
+	if run == nil || turn == nil || binding == nil || len(turn.RequestedActions) != 1 {
+		return nil, errors.New("a bounded Turn must request exactly one action at a time")
+	}
+	request := turn.RequestedActions[0]
+	if request.Type != "skill_action" || strings.TrimSpace(request.Capability) == "" || strings.TrimSpace(request.Summary) == "" {
+		return nil, errors.New("requested action requires type skill_action, capability, and summary")
+	}
+	var selected *capability.ModelAction
+	for index := range binding.ModelActions {
+		if binding.ModelActions[index].Name == request.Capability {
+			selected = &binding.ModelActions[index]
+			break
+		}
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("requested capability %q is not authorized", request.Capability)
+	}
+	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, request.InputRef)
+	if err != nil {
+		return nil, err
+	}
+	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = fmt.Sprintf("turn:%s:action:0", turn.ID)
+	}
+	proposal, err := p.actions.Propose(ctx, ProposeActionRequest{
+		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: binding.DeploymentID,
+		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
+		IdempotencyKey: idempotencyKey, Summary: request.Summary,
+		Actor: ActivityActor{Type: "worker", ID: workerID}, ContinuationCheckpoint: turn.ContinuationCheckpoint,
+		CausationID: turn.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if proposal == nil || proposal.Run == nil {
+		return nil, errors.New("governed action proposal returned no durable Run")
+	}
+	return proposal.Run, nil
+}
+
+func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, cause error) {
+	if run == nil {
+		return
+	}
+	_, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: workerID,
+		Error: "governed action materialization failed", Summary: "Agent action proposal could not be governed",
+		EventType: "action.materialization_failed", Actor: ActivityActor{Type: "worker", ID: workerID},
+		TurnID: turn.ID, CausationID: turn.ID, Payload: map[string]interface{}{"reason": cause.Error()},
+	})
+	if err != nil {
+		p.logger.Errorw("failed to persist action materialization failure", "runId", run.ID, "error", err)
+	}
 }
 
 func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel context.CancelFunc, workerID string, run *AgentRun, done chan<- error) {

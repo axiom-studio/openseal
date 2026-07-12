@@ -75,6 +75,36 @@ func TestHostedTurnRunnerRejectsUnauthorizedActionProposal(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerRequiresOneRunningActionProposal(t *testing.T) {
+	for name, actions := range map[string][]TurnAction{
+		"terminal": {{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy", InputRef: "/inputs/deploy"}},
+		"multiple": {
+			{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy", InputRef: "/inputs/deploy"},
+			{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy again", InputRef: "/inputs/deploy"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			host := &recordingTurnHost{response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+				ProposedActions: actions,
+			}}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+				Actions: []capability.ModelAction{{Name: "release.deploy", SkillID: "release", Version: "1", Action: "deploy"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+				Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Deploy"}, Turn: &AgentTurn{ID: "turn"},
+			})
+			if err == nil {
+				t.Fatal("invalid action proposal lifecycle was accepted")
+			}
+		})
+	}
+}
+
 func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusCompleted,
