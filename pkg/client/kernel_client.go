@@ -40,6 +40,8 @@ type KernelClient interface {
 	ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error)
 	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
 	PatchInitiative(context.Context, runtime.Scope, string, kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error)
+	ListSourceObservations(context.Context, runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error)
+	GetSourceMonitorCheckpoint(context.Context, runtime.Scope, string, string) (*runtime.SourceMonitorCheckpoint, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
@@ -284,6 +286,35 @@ func (c *KernelHTTPClient) PatchInitiative(ctx context.Context, scope runtime.Sc
 		return nil, err
 	}
 	return &initiative, nil
+}
+
+func (c *KernelHTTPClient) ListSourceObservations(ctx context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
+	query := scopeQuery(filter.Scope)
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var observations []*runtime.SourceObservation
+	path := sourceMonitorPath(filter.InitiativeID, filter.MonitorID, "observations") + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &observations); err != nil {
+		return nil, err
+	}
+	return observations, nil
+}
+
+func (c *KernelHTTPClient) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
+	var checkpoint runtime.SourceMonitorCheckpoint
+	path := sourceMonitorPath(initiativeID, monitorID, "checkpoint") + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &checkpoint); err != nil {
+		return nil, err
+	}
+	return &checkpoint, nil
+}
+
+func sourceMonitorPath(initiativeID, monitorID, suffix string) string {
+	return "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "/source-monitors/" + url.PathEscape(strings.TrimSpace(monitorID)) + "/" + suffix
 }
 
 func clawHubPath(kind, reference, action string) string {
