@@ -14,6 +14,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
@@ -27,13 +28,31 @@ import (
 
 // Re-export key types so consumers only import this package.
 type (
-	NodeDefinition       = executor.NodeDefinition
-	ConnectionDefinition = executor.ConnectionDefinition
-	ExecutionResult      = executor.ExecutionResult
-	NodeResult           = executor.NodeResult
-	Registry             = executor.Registry
-	StepExecutor         = executor.StepExecutor
-	ExecutionGraph       = executor.ExecutionGraph
+	NodeDefinition           = executor.NodeDefinition
+	ConnectionDefinition     = executor.ConnectionDefinition
+	ExecutionResult          = executor.ExecutionResult
+	NodeResult               = executor.NodeResult
+	Registry                 = executor.Registry
+	StepExecutor             = executor.StepExecutor
+	ExecutionGraph           = executor.ExecutionGraph
+	RunbookDefinition        = runbook.Definition
+	RunbookStep              = runbook.Step
+	RunbookStepKind          = runbook.StepKind
+	RunbookActionStep        = runbook.ActionStep
+	RunbookDecisionStep      = runbook.DecisionStep
+	RunbookDecisionCase      = runbook.DecisionCase
+	RunbookTransformStep     = runbook.TransformStep
+	RunbookWaitStep          = runbook.WaitStep
+	RunbookForkStep          = runbook.ForkStep
+	RunbookJoinStep          = runbook.JoinStep
+	RunbookJoinMode          = runbook.JoinMode
+	RunbookForEachStep       = runbook.ForEachStep
+	RunbookLoopReturnStep    = runbook.LoopReturnStep
+	RunbookEndStep           = runbook.EndStep
+	RunbookValue             = runbook.Value
+	RunbookPredicate         = runbook.Predicate
+	RunbookPredicateOperator = runbook.PredicateOperator
+	RunbookDiagnostic        = runbook.Diagnostic
 
 	AgentNodeDefinition                       = types.AgentNodeDefinition
 	AgentConnection                           = types.AgentConnection
@@ -434,11 +453,24 @@ const (
 	HostedTurnAPIVersion  = runtime.HostedTurnAPIVersion
 	HostedSkillApplied    = runtime.HostedSkillApplied
 	HostedSkillNotApplied = runtime.HostedSkillNotApplied
+	RunbookAPIVersion     = runbook.APIVersion
+	RunbookStepAction     = runbook.StepAction
+	RunbookStepDecision   = runbook.StepDecision
+	RunbookStepTransform  = runbook.StepTransform
+	RunbookStepWait       = runbook.StepWait
+	RunbookStepFork       = runbook.StepFork
+	RunbookStepJoin       = runbook.StepJoin
+	RunbookStepForEach    = runbook.StepForEach
+	RunbookStepLoopReturn = runbook.StepLoopReturn
+	RunbookStepEnd        = runbook.StepEnd
+	RunbookJoinAll        = runbook.JoinAll
+	RunbookJoinAny        = runbook.JoinAny
 )
 
 var (
 	NewHostedTurnRunner    = runtime.NewHostedTurnRunner
 	ErrTurnHostUnavailable = runtime.ErrTurnHostUnavailable
+	ValidateRunbook        = runbook.Validate
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
