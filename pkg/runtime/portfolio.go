@@ -201,6 +201,7 @@ type AgentRun struct {
 	RootRunID            string                       `json:"rootRunId"`
 	Owner                ObjectiveOwner               `json:"owner"`
 	AssignedAgentID      string                       `json:"assignedAgentId,omitempty"`
+	Entrypoint           string                       `json:"entrypoint,omitempty"`
 	ConcurrencyKey       string                       `json:"concurrencyKey,omitempty"`
 	Goal                 string                       `json:"goal"`
 	Source               RunSource                    `json:"source"`
@@ -455,6 +456,7 @@ type CreateAgentRunRequest struct {
 	ParentRunID     string
 	Owner           ObjectiveOwner
 	AssignedAgentID string
+	Entrypoint      string
 	ConcurrencyKey  string
 	Goal            string
 	Source          RunSource
@@ -738,7 +740,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 	run := &AgentRun{
 		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
-		AssignedAgentID: req.AssignedAgentID, ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
+		AssignedAgentID: req.AssignedAgentID, Entrypoint: strings.TrimSpace(req.Entrypoint), ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
 		Goal: req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,

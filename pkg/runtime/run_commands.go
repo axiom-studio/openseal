@@ -237,6 +237,7 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		ParentRunID     string                 `json:"parentRunId,omitempty"`
 		Owner           ObjectiveOwner         `json:"owner"`
 		AssignedAgentID string                 `json:"assignedAgentId,omitempty"`
+		Entrypoint      string                 `json:"entrypoint,omitempty"`
 		ConcurrencyKey  string                 `json:"concurrencyKey,omitempty"`
 		Goal            string                 `json:"goal"`
 		Source          RunSource              `json:"source"`
@@ -251,7 +252,7 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		Policy          map[string]interface{} `json:"policy,omitempty"`
 	}{
 		Scope: req.Scope, Kind: normalizeRunKind(req.Kind), ObjectiveID: req.ObjectiveID,
-		ParentRunID: req.ParentRunID, Owner: req.Owner, AssignedAgentID: req.AssignedAgentID,
+		ParentRunID: req.ParentRunID, Owner: req.Owner, AssignedAgentID: req.AssignedAgentID, Entrypoint: strings.TrimSpace(req.Entrypoint),
 		ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
 		Goal:           req.Goal, Source: req.Source, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: req.AvailableAt, Context: req.Context, Plan: req.Plan, Checkpoint: req.Checkpoint,
