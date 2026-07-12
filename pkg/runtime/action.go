@@ -174,11 +174,11 @@ type ActionProposalRecord struct {
 }
 
 type ActionProposalResult struct {
-	Call     *ActionCall
-	Approval *ApprovalCheckpoint
-	Run      *AgentRun
-	Event    *ActivityEvent
-	Created  bool
+	Call     *ActionCall         `json:"call"`
+	Approval *ApprovalCheckpoint `json:"approval,omitempty"`
+	Run      *AgentRun           `json:"run"`
+	Event    *ActivityEvent      `json:"event,omitempty"`
+	Created  bool                `json:"created"`
 }
 
 type ApprovalResolutionRecord struct {
@@ -192,11 +192,11 @@ type ApprovalResolutionRecord struct {
 }
 
 type ApprovalResolutionResult struct {
-	Approval *ApprovalCheckpoint
-	Call     *ActionCall
-	Run      *AgentRun
-	Event    *ActivityEvent
-	Resolved bool
+	Approval *ApprovalCheckpoint `json:"approval"`
+	Call     *ActionCall         `json:"call"`
+	Run      *AgentRun           `json:"run"`
+	Event    *ActivityEvent      `json:"event,omitempty"`
+	Resolved bool                `json:"resolved"`
 }
 
 type ActionFilter struct {
