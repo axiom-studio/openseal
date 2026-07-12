@@ -732,6 +732,7 @@ const (
 	AgentRequestStatusClarificationRequested = runtime.AgentRequestStatusClarificationRequested
 	AgentRequestStatusAccepted               = runtime.AgentRequestStatusAccepted
 	AgentRequestStatusCompleted              = runtime.AgentRequestStatusCompleted
+	AgentRequestStatusFailed                 = runtime.AgentRequestStatusFailed
 	AgentRequestStatusRejected               = runtime.AgentRequestStatusRejected
 	AgentRequestStatusCanceled               = runtime.AgentRequestStatusCanceled
 
