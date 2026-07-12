@@ -142,8 +142,10 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
 	}
-	response.ModelProvider = strings.TrimSpace(response.ModelProvider)
-	response.Model = strings.TrimSpace(response.Model)
+	response.ModelProvider, response.Model, err = normalizeModelIdentity(response.ModelProvider, response.Model)
+	if err != nil {
+		return nil, err
+	}
 	if response.ModelProvider == "" || response.Model == "" {
 		return nil, errors.New("turn host must report the actual model provider and model")
 	}
