@@ -48,6 +48,15 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err = NewInitiativeService(store, store).Create(ctx, CreateInitiativeRequest{Initiative: &Initiative{
+		ID: "initiative-health", Scope: objective.Scope, Owner: objective.Owner, Title: "Production health", Purpose: "Coordinate production monitoring",
+		Status: InitiativeStatusActive, ObjectiveRefs: []string{objective.ID}, SourceMonitors: []SourceMonitorReference{{
+			ID: "cluster-events", ObjectiveID: objective.ID, AssignedAgentID: "sre", SkillID: "kubernetes-events", SkillVersion: "1.0.0", Action: "watch",
+			SourcePolicyRef: "production-read-only", Deduplication: SourceMonitorDeduplicateStableSourceAndContent,
+		}},
+	}, Actor: ActivityActor{Type: "user", ID: "operator"}}); err != nil {
+		t.Fatal(err)
+	}
 	scheduler := NewObjectiveScheduler(store)
 	scheduler.now = func() time.Time { return now }
 	result, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
@@ -82,6 +91,44 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 	blocked, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
 	if err != nil || blocked.Backpressured != 1 || len(runs) != 1 {
 		t.Fatalf("blocked = %#v, err = %v", blocked, err)
+	}
+}
+
+func TestObjectiveSchedulerDefersPausedInitiativeMonitor(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(10)
+	now := time.Date(2026, 7, 11, 6, 0, 0, 0, time.UTC)
+	due := now.Add(-time.Minute)
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: Scope{Kind: "tenant", ID: "paused-monitor"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"},
+		Title: "Monitor sources", Goal: "Collect evidence", Status: ObjectiveStatusActive, NextEvaluationAt: &due,
+		Cadence: &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "analyst", RunTemplate: &ObjectiveRunTemplate{
+			Context: map[string]interface{}{"initiativeId": "initiative-paused", "sourceMonitorId": "forum"},
+			Policy:  map[string]interface{}{"sourcePolicyRef": "approved@1"}, Capability: &ObjectiveCapabilityInvocation{SkillID: "source", SkillVersion: "1", Action: "observe"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = NewInitiativeService(store, store).Create(ctx, CreateInitiativeRequest{Initiative: &Initiative{
+		ID: "initiative-paused", Scope: objective.Scope, Owner: objective.Owner, Title: "Research", Purpose: "Collect evidence", Status: InitiativeStatusPaused,
+		ObjectiveRefs: []string{objective.ID}, SourceMonitors: []SourceMonitorReference{{ID: "forum", ObjectiveID: objective.ID, AssignedAgentID: "analyst", SkillID: "source", SkillVersion: "1", Action: "observe", SourcePolicyRef: "approved@1", Deduplication: SourceMonitorDeduplicateStableSourceAndContent}},
+	}, Actor: ActivityActor{Type: "user", ID: "operator"}}); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewObjectiveScheduler(store)
+	scheduler.now = func() time.Time { return now }
+	result, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
+	if err != nil || result.Suspended != 1 || result.Scheduled != 0 {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("runs = %#v, err = %v", runs, err)
+	}
+	loaded, err := store.GetObjective(ctx, objective.Scope, objective.ID)
+	if err != nil || loaded.NextEvaluationAt == nil || !loaded.NextEvaluationAt.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("deferred objective = %#v, err = %v", loaded, err)
 	}
 }
 

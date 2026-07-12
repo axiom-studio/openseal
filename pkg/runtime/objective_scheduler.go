@@ -14,6 +14,7 @@ type ObjectiveScheduleResult struct {
 	Scheduled     int `json:"scheduled"`
 	Replayed      int `json:"replayed"`
 	Backpressured int `json:"backpressured"`
+	Suspended     int `json:"suspended"`
 	Initialized   int `json:"initialized"`
 }
 
@@ -24,14 +25,16 @@ type ObjectiveScheduler struct {
 		RunCommandStore
 		ObjectiveScopeStore
 	}
-	now func() time.Time
+	initiatives InitiativeStore
+	now         func() time.Time
 }
 
 func NewObjectiveScheduler(store interface {
 	RunCommandStore
 	ObjectiveScopeStore
 }) *ObjectiveScheduler {
-	return &ObjectiveScheduler{store: store, now: time.Now}
+	initiatives, _ := any(store).(InitiativeStore)
+	return &ObjectiveScheduler{store: store, initiatives: initiatives, now: time.Now}
 }
 
 func (s *ObjectiveScheduler) ReconcileAll(ctx context.Context, limitPerScope int) (*ObjectiveScheduleResult, error) {
@@ -52,6 +55,7 @@ func (s *ObjectiveScheduler) ReconcileAll(ctx context.Context, limitPerScope int
 		total.Scheduled += result.Scheduled
 		total.Replayed += result.Replayed
 		total.Backpressured += result.Backpressured
+		total.Suspended += result.Suspended
 		total.Initialized += result.Initialized
 	}
 	return total, nil
@@ -95,6 +99,17 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			continue
 		}
 		if objective.NextEvaluationAt.After(now) {
+			continue
+		}
+		active, monitorErr := s.monitorInitiativeActive(ctx, objective)
+		if monitorErr != nil {
+			return result, monitorErr
+		}
+		if !active {
+			if deferErr := s.deferObjective(ctx, objective, now); deferErr != nil && !errors.Is(deferErr, ErrRevisionConflict) {
+				return result, deferErr
+			}
+			result.Suspended++
 			continue
 		}
 		backpressured, pressureErr := s.backpressured(ctx, objective)
@@ -158,6 +173,53 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 		}
 	}
 	return result, nil
+}
+
+func (s *ObjectiveScheduler) monitorInitiativeActive(ctx context.Context, objective *Objective) (bool, error) {
+	if objective == nil || objective.Cadence == nil || objective.Cadence.RunTemplate == nil {
+		return true, nil
+	}
+	contextValues := objective.Cadence.RunTemplate.Context
+	monitorID, hasMonitor := contextValues["sourceMonitorId"].(string)
+	monitorID = strings.TrimSpace(monitorID)
+	if !hasMonitor || monitorID == "" {
+		return true, nil
+	}
+	initiativeID, ok := contextValues["initiativeId"].(string)
+	initiativeID = strings.TrimSpace(initiativeID)
+	if !ok || initiativeID == "" {
+		return false, fmt.Errorf("objective %s source monitor %s has no initiative provenance", objective.ID, monitorID)
+	}
+	if s.initiatives == nil {
+		return false, fmt.Errorf("objective %s source monitor cannot run without Initiative persistence", objective.ID)
+	}
+	initiative, err := s.initiatives.GetInitiative(ctx, objective.Scope, initiativeID)
+	if err != nil {
+		return false, fmt.Errorf("objective %s source monitor initiative: %w", objective.ID, err)
+	}
+	monitor, found := initiativeSourceMonitor(initiative, monitorID)
+	if !found || monitor.ObjectiveID != objective.ID || monitor.AssignedAgentID != objective.Cadence.AssignedAgentID {
+		return false, fmt.Errorf("objective %s source monitor provenance has drifted", objective.ID)
+	}
+	if invocation := objective.Cadence.RunTemplate.Capability; invocation == nil || monitor.SkillID != invocation.SkillID || monitor.SkillVersion != invocation.SkillVersion || monitor.Action != invocation.Action {
+		return false, fmt.Errorf("objective %s source monitor capability has drifted", objective.ID)
+	}
+	if policyRef, _ := objective.Cadence.RunTemplate.Policy["sourcePolicyRef"].(string); monitor.SourcePolicyRef != strings.TrimSpace(policyRef) {
+		return false, fmt.Errorf("objective %s source monitor policy has drifted", objective.ID)
+	}
+	return initiative.Status == InitiativeStatusActive, nil
+}
+
+func (s *ObjectiveScheduler) deferObjective(ctx context.Context, objective *Objective, now time.Time) error {
+	next, err := objective.Cadence.Next(now)
+	if err != nil {
+		return fmt.Errorf("objective %s cadence: %w", objective.ID, err)
+	}
+	_, err = NewPortfolioService(s.store).UpdateObjective(ctx, objective.Scope, objective.ID, UpdateObjectiveRequest{
+		ExpectedRevision: objective.Revision, NextEvaluationAt: &next,
+		Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Summary: "Source monitor schedule deferred while Initiative is not active",
+	})
+	return err
 }
 
 func (s *ObjectiveScheduler) backpressured(ctx context.Context, objective *Objective) (bool, error) {
