@@ -40,6 +40,7 @@ type (
 	RunbookStepKind          = runbook.StepKind
 	RunbookActionStep        = runbook.ActionStep
 	RunbookDelegateStep      = runbook.DelegateStep
+	RunbookBudgetAllocation  = runbook.BudgetAllocation
 	RunbookDelegateMode      = runbook.DelegateMode
 	RunbookDecisionStep      = runbook.DecisionStep
 	RunbookDecisionCase      = runbook.DecisionCase

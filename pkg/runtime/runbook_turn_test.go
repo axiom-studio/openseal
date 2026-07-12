@@ -52,7 +52,7 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 func TestRunbookTurnProposesConcurrentForkAndRunsBoundedForEach(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "deterministic", Version: "1", Name: "Deterministic", Entrypoints: map[string]string{"manual": "choose"}, Steps: map[string]runbook.Step{
 		"choose": {Kind: runbook.StepDecision, Decision: &runbook.DecisionStep{Cases: []runbook.DecisionCase{{When: runbook.Predicate{Operator: runbook.PredicateTruthy, Left: runbookRef("/input/parallel")}, Next: "fork"}}, Default: "loop"}},
-		"fork":   {Kind: runbook.StepFork, Fork: &runbook.ForkStep{Branches: map[string]string{"a": "a", "b": "b"}, Join: "join"}},
+		"fork":   {Kind: runbook.StepFork, Fork: &runbook.ForkStep{Branches: map[string]string{"a": "a", "b": "b"}, BranchBudgets: map[string]runbook.BudgetAllocation{"a": {MaxTurns: 2}, "b": {MaxActions: 3}}, Join: "join"}},
 		"a":      {Kind: runbook.StepTransform, Transform: &runbook.TransformStep{Assignments: map[string]runbook.Value{"/state/a": runbookLiteral(true)}, Next: "join"}},
 		"b":      {Kind: runbook.StepTransform, Transform: &runbook.TransformStep{Assignments: map[string]runbook.Value{"/state/b": runbookLiteral(true)}, Next: "join"}},
 		"join":   {Kind: runbook.StepJoin, Join: &runbook.JoinStep{Fork: "fork", Mode: runbook.JoinAll, Next: "done"}},
@@ -68,6 +68,9 @@ func TestRunbookTurnProposesConcurrentForkAndRunsBoundedForEach(t *testing.T) {
 	}
 	if outcome.NextRunStatus != AgentRunStatusRunning || outcome.ProposedFork == nil || outcome.ProposedFork.Policy.Mode != FanInModeAll || len(outcome.ProposedFork.Branches) != 2 {
 		t.Fatalf("parallel=%#v", outcome)
+	}
+	if outcome.ProposedFork.Branches[0].Budget == nil || outcome.ProposedFork.Branches[0].Budget.MaxTurns != 2 || outcome.ProposedFork.Branches[1].Budget == nil || outcome.ProposedFork.Branches[1].Budget.MaxActions != 3 {
+		t.Fatalf("branch budgets=%#v", outcome.ProposedFork.Branches)
 	}
 	for index, branch := range outcome.ProposedFork.Branches {
 		child, err := parallel.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "child", Checkpoint: branch.Checkpoint}, Turn: &AgentTurn{ID: "branch", Sequence: 1}})

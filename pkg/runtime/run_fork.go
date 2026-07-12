@@ -247,6 +247,11 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		IdempotencyKey: key,
 	}
 	updatedSource := cloneAgentRun(source)
+	for index, child := range children {
+		if err := addRunBudgetAllocation(updatedSource, child.ID, req.Branches[index].Budget); err != nil {
+			return nil, err
+		}
+	}
 	updatedSource.Status = AgentRunStatusWaitingForDependency
 	updatedSource.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: group.ID}
 	updatedSource.Checkpoint = cloneMap(req.ContinuationCheckpoint)

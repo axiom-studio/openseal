@@ -372,6 +372,7 @@ func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state
 		}
 		branches = append(branches, RunForkBranch{
 			ID: name, Goal: fmt.Sprintf("Execute branch %s of runbook fork %s", name, state.Current), Checkpoint: branchCheckpoint,
+			Budget: runbookBudgetPolicy(step.Fork.BranchBudgets, name),
 		})
 	}
 	encodeRunbookState(checkpoint, state)
@@ -421,11 +422,31 @@ func (r *RunbookTurnRunner) proposeDelegation(checkpoint map[string]interface{},
 		ProposedDelegation: &TurnDelegationProposal{
 			StepID: state.Current, AssignedAgentID: strings.TrimSpace(agentID), Goal: strings.TrimSpace(goal),
 			Context: delegatedContext, Checkpoint: map[string]interface{}{}, Timeout: step.Delegate.Timeout,
-			Mode: step.Delegate.Mode,
+			Mode: step.Delegate.Mode, Budget: runbookBudgetPolicyValue(step.Delegate.Budget),
 		},
 		OutputSummary:          "Requested durable Agent delegation " + state.Current,
 		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
 	}, nil
+}
+
+func runbookBudgetPolicy(budgets map[string]runbook.BudgetAllocation, name string) *BudgetPolicy {
+	budget, ok := budgets[name]
+	if !ok {
+		return nil
+	}
+	return runbookBudgetPolicyValue(&budget)
+}
+
+func runbookBudgetPolicyValue(budget *runbook.BudgetAllocation) *BudgetPolicy {
+	if budget == nil {
+		return nil
+	}
+	return &BudgetPolicy{
+		MaxTurns: budget.MaxTurns, MaxInputTokens: budget.MaxInputTokens,
+		MaxOutputTokens: budget.MaxOutputTokens, MaxTotalTokens: budget.MaxTotalTokens,
+		MaxCostMicros: budget.MaxCostMicros, MaxDurationMS: budget.MaxDurationMS,
+		MaxActions: budget.MaxActions, WarningPermille: budget.WarningPermille,
+	}
 }
 
 func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, *TurnOutcome, error) {

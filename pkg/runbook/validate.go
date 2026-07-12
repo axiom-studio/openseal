@@ -188,6 +188,11 @@ func (v *validator) validateStep(path, id string, step Step) {
 		if step.Delegate.Timeout < 0 {
 			v.add(path+".delegate.timeout", "delegate.timeout", "timeout cannot be negative")
 		}
+		if step.Delegate.Budget != nil {
+			if err := step.Delegate.Budget.Validate(); err != nil {
+				v.add(path+".delegate.budget", "delegate.budget", "%v", err)
+			}
+		}
 		v.requireStep(path+".delegate.next", step.Delegate.Next)
 	case StepDecision:
 		if step.Decision == nil {
@@ -227,6 +232,23 @@ func (v *validator) validateStep(path, id string, step Step) {
 	case StepFork:
 		if step.Fork == nil {
 			return
+		}
+		if len(step.Fork.BranchBudgets) > 0 {
+			for name := range step.Fork.Branches {
+				budget, ok := step.Fork.BranchBudgets[name]
+				if !ok {
+					v.add(path+".fork.branchBudgets."+name, "fork.budget_required", "branch %q requires an explicit budget allocation", name)
+					continue
+				}
+				if err := budget.Validate(); err != nil {
+					v.add(path+".fork.branchBudgets."+name, "fork.budget", "%v", err)
+				}
+			}
+			for name := range step.Fork.BranchBudgets {
+				if _, ok := step.Fork.Branches[name]; !ok {
+					v.add(path+".fork.branchBudgets."+name, "fork.budget_unknown_branch", "budget references unknown branch %q", name)
+				}
+			}
 		}
 		if len(step.Fork.Branches) < 2 {
 			v.add(path+".fork.branches", "fork.branches", "a fork requires at least two named branches")
