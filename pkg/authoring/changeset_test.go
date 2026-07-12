@@ -45,6 +45,9 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	if err != nil || completed.Status != ChangeSetReview || completed.Revision != 2 || completed.CandidateDigest == "" || completed.Generation.CompletedAt == nil || len(generator.payloads) != 0 {
 		t.Fatalf("completed=%#v payloads=%d err=%v", completed, len(generator.payloads), err)
 	}
+	if completed.Placement.Environment != "default" || completed.Placement.TeamDeploymentID != "tenant/one/gtm-research:live" || completed.Placement.AgentDeploymentIDs["tenant/one/community-researcher"] != "tenant/one/community-researcher:live" {
+		t.Fatalf("default placement=%#v", completed.Placement)
+	}
 	if _, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision); !errors.Is(err, ErrChangeSetRevision) {
 		t.Fatalf("duplicate generation error=%v", err)
 	}
@@ -194,7 +197,7 @@ func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	}
 }
 
-func TestAtomicMemoryApplyRejectsIncompletePlacementWithoutPartialState(t *testing.T) {
+func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
 	store := NewMemoryChangeSetStore()
@@ -202,9 +205,9 @@ func TestAtomicMemoryApplyRejectsIncompletePlacementWithoutPartialState(t *testi
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	created, _, _ := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}}, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
 	ready, _, _ := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: 1, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
-	_, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
-	if err == nil || len(store.definitions) != 0 || len(store.deployments) != 0 {
-		t.Fatalf("err=%v definitions=%d deployments=%d", err, len(store.definitions), len(store.deployments))
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	if err != nil || applied.Placement.Environment != "default" || len(store.definitions) != 2 || len(store.deployments) != 2 {
+		t.Fatalf("applied=%#v err=%v definitions=%d deployments=%d", applied, err, len(store.definitions), len(store.deployments))
 	}
 }
 

@@ -648,6 +648,17 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		credentials[canonicalIdentity(scope, id)] = value
 	}
 	placement.CredentialReferences = credentials
+	if strings.TrimSpace(placement.Environment) == "" {
+		placement.Environment = "default"
+	}
+	for _, definition := range candidate.Agents {
+		if definition != nil && strings.TrimSpace(placement.AgentDeploymentIDs[definition.ID]) == "" {
+			placement.AgentDeploymentIDs[definition.ID] = definition.ID + ":live"
+		}
+	}
+	if candidate.Team != nil && strings.TrimSpace(placement.TeamDeploymentID) == "" {
+		placement.TeamDeploymentID = candidate.Team.ID + ":live"
+	}
 	if placement.Objectives == nil {
 		placement.Objectives = map[string]ObjectivePlacement{}
 	}
