@@ -38,6 +38,29 @@ type PolicyDecision struct {
 	MaximumItems  int    `json:"maximumItems"`
 }
 
+// Authorize constrains host execution and redirects to the exact source scope
+// selected by the control-plane policy decision.
+func (d PolicyDecision) Authorize(rawURL string, requestedItems int) error {
+	if strings.TrimSpace(d.PolicyID) == "" || strings.TrimSpace(d.PolicyVersion) == "" ||
+		validatePolicyHost(strings.ToLower(strings.TrimSpace(d.SourceHost))) != nil ||
+		validatePathPrefix(d.PathPrefix) != nil || d.MaximumItems < 1 || d.MaximumItems > MaximumItems {
+		return errors.New("source policy decision is invalid")
+	}
+	target, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || target.Scheme != "https" || target.User != nil || target.Fragment != "" ||
+		strings.ToLower(target.Hostname()) != strings.ToLower(d.SourceHost) ||
+		(target.Port() != "" && target.Port() != "443") {
+		return errors.New("source URL is outside the authorized policy decision")
+	}
+	if requestedItems < 1 || requestedItems > d.MaximumItems {
+		return errors.New("source request exceeds the authorized policy decision")
+	}
+	if _, allowed := authorizedPathPrefix([]string{d.PathPrefix}, target.EscapedPath()); !allowed {
+		return errors.New("source URL path is outside the authorized policy decision")
+	}
+	return nil
+}
+
 func (p Policy) Validate() error {
 	if strings.TrimSpace(p.ID) == "" || len(p.ID) > 128 || strings.TrimSpace(p.Version) == "" || len(p.Version) > 128 {
 		return errors.New("source policy id and version are required")
