@@ -128,6 +128,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateInitiatives(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateSourceMonitors(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.migrateActivityAndTurns(ctx, tx); err != nil {
 		return err
 	}
