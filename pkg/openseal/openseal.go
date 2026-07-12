@@ -554,6 +554,7 @@ var (
 	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
+	ErrAgentRequestAssignment              = runtime.ErrAgentRequestAssignment
 	ErrAgentRequestIdempotency             = runtime.ErrAgentRequestIdempotency
 	ErrUnsafeSharedContext                 = runtime.ErrUnsafeSharedContext
 	ErrInvalidArtifact                     = runtime.ErrInvalidArtifact

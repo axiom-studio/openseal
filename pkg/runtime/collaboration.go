@@ -21,6 +21,7 @@ var (
 	ErrAgentRequestNotFound     = errors.New("agent request not found")
 	ErrInvalidAgentRequestState = errors.New("invalid agent request state")
 	ErrAgentRequestUnauthorized = errors.New("agent request principal is not authorized")
+	ErrAgentRequestAssignment   = errors.New("agent request assignment is invalid")
 	ErrAgentRequestIdempotency  = errors.New("agent request idempotency conflict")
 	ErrUnsafeSharedContext      = errors.New("shared context cannot contain credentials or secrets")
 	ErrInvalidArtifact          = errors.New("invalid artifact contract")
@@ -1018,33 +1019,33 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 	assignedAgentID = strings.TrimSpace(assignedAgentID)
 	if request.Recipient.Type == OwnerTypeAgent {
 		if assignedAgentID != "" && assignedAgentID != request.Recipient.ID {
-			return "", ErrAgentRequestUnauthorized
+			return "", fmt.Errorf("%w: assigned Agent does not match the recipient", ErrAgentRequestAssignment)
 		}
 		return request.Recipient.ID, nil
 	}
 	if assignedAgentID == "" {
-		return "", errors.New("Team request acceptance requires an explicit assigned Agent")
+		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent", ErrAgentRequestAssignment)
 	}
 	if s.teams == nil {
-		return "", errors.New("Team roster assignment is unavailable")
+		return "", fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
 	}
 	deployment, err := s.teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}, request.Recipient.ID)
 	if err != nil {
 		return "", err
 	}
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
-		return "", errors.New("recipient Team deployment is not active")
+		return "", fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
 	}
 	for _, assignment := range deployment.Roster {
 		if assignment.AgentDeploymentID != assignedAgentID {
 			continue
 		}
 		if request.SemanticRole != "" && assignment.RoleID != request.SemanticRole {
-			return "", errors.New("assigned Agent does not hold the requested semantic role")
+			return "", fmt.Errorf("%w: assigned Agent does not hold the requested semantic role", ErrAgentRequestAssignment)
 		}
 		return assignedAgentID, nil
 	}
-	return "", errors.New("assigned Agent is not an active member of the recipient Team")
+	return "", fmt.Errorf("%w: assigned Agent is not an active member of the recipient Team", ErrAgentRequestAssignment)
 }
 
 func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
