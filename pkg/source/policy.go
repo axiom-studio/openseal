@@ -12,6 +12,10 @@ import (
 
 var policyHostname = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
+// PolicyDecisionTransportKey is reserved for a trusted host adapter. It is
+// injected after action-schema validation and must never be model writable.
+const PolicyDecisionTransportKey = "_opensealSourcePolicyDecision"
+
 // Policy is a portable, credential-free outbound source policy. An embedding
 // host owns storage, tenancy, authorization, rate limiting, and audit; OpenSeal
 // owns deterministic validation and URL decisions.
