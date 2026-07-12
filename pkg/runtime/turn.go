@@ -222,10 +222,9 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, ErrTurnLeaseHeld
 	}
 	turn.Status = req.Status
-	req.ModelProvider = strings.TrimSpace(req.ModelProvider)
-	req.Model = strings.TrimSpace(req.Model)
-	if (req.ModelProvider == "") != (req.Model == "") {
-		return nil, errors.New("agent turn model provider and model must be reported together")
+	req.ModelProvider, req.Model, err = normalizeModelIdentity(req.ModelProvider, req.Model)
+	if err != nil {
+		return nil, err
 	}
 	if req.ModelProvider != "" {
 		turn.ModelProvider = req.ModelProvider
@@ -266,6 +265,17 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, err
 	}
 	return turn, nil
+}
+
+func normalizeModelIdentity(provider, model string) (string, string, error) {
+	provider, model = strings.TrimSpace(provider), strings.TrimSpace(model)
+	if (provider == "") != (model == "") {
+		return "", "", errors.New("agent turn model provider and model must be reported together")
+	}
+	if len(provider) > 256 || len(model) > 256 || strings.ContainsAny(provider, "\r\n\x00") || strings.ContainsAny(model, "\r\n\x00") {
+		return "", "", errors.New("agent turn model identity cannot exceed 256 characters or contain control delimiters")
+	}
+	return provider, model, nil
 }
 
 func (s *AgentTurnService) RenewTurn(ctx context.Context, scope Scope, turnID, workerID string, leaseDuration time.Duration) (*AgentTurn, error) {
