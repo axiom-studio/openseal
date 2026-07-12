@@ -137,7 +137,7 @@ func (v *validator) pathReaches(start, target string, match func(string) bool) b
 func (v *validator) validateStep(path, id string, step Step) {
 	count := 0
 	for _, present := range []bool{
-		step.Action != nil, step.Decision != nil, step.Transform != nil, step.Wait != nil,
+		step.Action != nil, step.Delegate != nil, step.Decision != nil, step.Transform != nil, step.Wait != nil,
 		step.Fork != nil, step.Join != nil, step.ForEach != nil, step.LoopReturn != nil, step.End != nil,
 	} {
 		if present {
@@ -147,7 +147,7 @@ func (v *validator) validateStep(path, id string, step Step) {
 	if count != 1 {
 		v.add(path, "step.payload", "a step must contain exactly one typed payload")
 	}
-	validKind := step.Kind == StepAction || step.Kind == StepDecision || step.Kind == StepTransform || step.Kind == StepWait ||
+	validKind := step.Kind == StepAction || step.Kind == StepDelegate || step.Kind == StepDecision || step.Kind == StepTransform || step.Kind == StepWait ||
 		step.Kind == StepFork || step.Kind == StepJoin || step.Kind == StepForEach || step.Kind == StepLoopReturn || step.Kind == StepEnd
 	if !validKind {
 		v.add(path+".kind", "step.kind_unsupported", "unsupported step kind %q", step.Kind)
@@ -169,6 +169,23 @@ func (v *validator) validateStep(path, id string, step Step) {
 			v.validateValue(path+".action.arguments."+key, value)
 		}
 		v.requireStep(path+".action.next", step.Action.Next)
+	case StepDelegate:
+		if step.Delegate == nil {
+			return
+		}
+		v.validateValue(path+".delegate.agentId", step.Delegate.AgentID)
+		v.validateValue(path+".delegate.goal", step.Delegate.Goal)
+		for key, value := range step.Delegate.Context {
+			if strings.TrimSpace(key) == "" {
+				v.add(path+".delegate.context", "delegate.context_key", "context keys cannot be empty")
+			}
+			v.validateValue(path+".delegate.context."+key, value)
+		}
+		v.validatePointer(path+".delegate.resultPath", step.Delegate.ResultPath)
+		if step.Delegate.Timeout < 0 {
+			v.add(path+".delegate.timeout", "delegate.timeout", "timeout cannot be negative")
+		}
+		v.requireStep(path+".delegate.next", step.Delegate.Next)
 	case StepDecision:
 		if step.Decision == nil {
 			return
@@ -260,6 +277,8 @@ func stepPayloadMatchesKind(step Step) bool {
 	switch step.Kind {
 	case StepAction:
 		return step.Action != nil
+	case StepDelegate:
+		return step.Delegate != nil
 	case StepDecision:
 		return step.Decision != nil
 	case StepTransform:
@@ -361,6 +380,10 @@ func (v *validator) successors(id string) []string {
 	case StepAction:
 		if step.Action != nil {
 			return []string{step.Action.Next}
+		}
+	case StepDelegate:
+		if step.Delegate != nil {
+			return []string{step.Delegate.Next}
 		}
 	case StepDecision:
 		if step.Decision != nil {

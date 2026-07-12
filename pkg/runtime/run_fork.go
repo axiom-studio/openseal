@@ -17,10 +17,13 @@ type RunForkStore interface {
 }
 
 type RunForkBranch struct {
-	ID         string                 `json:"id"`
-	Goal       string                 `json:"goal"`
-	Checkpoint map[string]interface{} `json:"checkpoint"`
-	Budget     *BudgetPolicy          `json:"budget,omitempty"`
+	ID              string                 `json:"id"`
+	Goal            string                 `json:"goal"`
+	AssignedAgentID string                 `json:"assignedAgentId,omitempty"`
+	Context         map[string]interface{} `json:"context,omitempty"`
+	Checkpoint      map[string]interface{} `json:"checkpoint"`
+	Budget          *BudgetPolicy          `json:"budget,omitempty"`
+	Timeout         time.Duration          `json:"timeout,omitempty"`
 }
 
 // TurnForkProposal is a proposal-only durable Turn output. The worker
@@ -30,6 +33,32 @@ type TurnForkProposal struct {
 	ForkID   string              `json:"forkId"`
 	Policy   RunDependencyPolicy `json:"policy"`
 	Branches []RunForkBranch     `json:"branches"`
+}
+
+type TurnDelegationProposal struct {
+	StepID          string                 `json:"stepId"`
+	AssignedAgentID string                 `json:"assignedAgentId"`
+	Goal            string                 `json:"goal"`
+	Context         map[string]interface{} `json:"context,omitempty"`
+	Checkpoint      map[string]interface{} `json:"checkpoint"`
+	Budget          *BudgetPolicy          `json:"budget,omitempty"`
+	Timeout         time.Duration          `json:"timeout,omitempty"`
+}
+
+func (p *TurnDelegationProposal) Validate() error {
+	if p == nil || strings.TrimSpace(p.StepID) == "" || strings.TrimSpace(p.AssignedAgentID) == "" || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
+		return errors.New("delegation proposal requires step, assigned Agent, goal, and non-negative timeout")
+	}
+	if err := ValidateCredentialFreeContext(p.Context); err != nil {
+		return err
+	}
+	if err := ValidateCredentialFreeContext(p.Checkpoint); err != nil {
+		return err
+	}
+	if p.Budget != nil {
+		return p.Budget.Validate()
+	}
+	return nil
 }
 
 func (p *TurnForkProposal) Validate() error {
@@ -92,8 +121,8 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.SourceRunID) == "" || req.ExpectedSourceRevision < 1 || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.ForkID) == "" || len(req.Branches) < 2 {
-		return nil, errors.New("source Run, revision, worker, fork, and at least two branches are required")
+	if strings.TrimSpace(req.SourceRunID) == "" || req.ExpectedSourceRevision < 1 || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.ForkID) == "" || len(req.Branches) < 1 {
+		return nil, errors.New("source Run, revision, worker, fork, and at least one branch are required")
 	}
 	if err := req.Policy.Validate(); err != nil {
 		return nil, err
@@ -122,6 +151,12 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		if err := ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
 			return nil, fmt.Errorf("branch %s checkpoint: %w", branch.ID, err)
 		}
+		if err := ValidateCredentialFreeContext(branch.Context); err != nil {
+			return nil, fmt.Errorf("branch %s context: %w", branch.ID, err)
+		}
+		if branch.Timeout < 0 {
+			return nil, fmt.Errorf("branch %s timeout cannot be negative", branch.ID)
+		}
 		allocations[index] = branch.Budget
 	}
 	key := "fork:" + source.ID + ":" + req.ForkID
@@ -147,12 +182,34 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	edges := make([]*RunDependency, 0, len(req.Branches))
 	for _, branch := range req.Branches {
 		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
+		assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
+		childContext := cloneMap(branch.Context)
+		var childPlan map[string]interface{}
+		if assignedAgentID == "" {
+			assignedAgentID = source.AssignedAgentID
+			childContext = cloneMap(source.Context)
+			childPlan = cloneMap(source.Plan)
+		}
+		childCheckpoint := cloneMap(branch.Checkpoint)
+		if childCheckpoint == nil {
+			childCheckpoint = map[string]interface{}{}
+		}
+		childCheckpoint["forkChild"] = map[string]interface{}{
+			"sourceRunId": source.ID, "groupId": groupID, "dependencyId": branch.ID, "forkId": req.ForkID,
+		}
+		deadline := source.Deadline
+		if branch.Timeout > 0 {
+			candidate := now.Add(branch.Timeout)
+			if deadline == nil || candidate.Before(*deadline) {
+				deadline = &candidate
+			}
+		}
 		child, err := buildAgentRun(ctx, c.store, CreateAgentRunRequest{
 			Kind: source.Kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
-			Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
+			Owner: source.Owner, AssignedAgentID: assignedAgentID,
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
-			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: source.Deadline,
-			Context: cloneMap(source.Context), Plan: cloneMap(source.Plan), Checkpoint: cloneMap(branch.Checkpoint),
+			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
+			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,
 			Budget: cloneBudgetPolicy(branch.Budget), Policy: cloneMap(source.Policy),
 		}, childID, now)
 		if err != nil {

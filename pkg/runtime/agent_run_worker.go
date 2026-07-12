@@ -251,6 +251,16 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			p.Wake()
 			return
 		}
+		if result != nil && result.Turn != nil && result.Turn.RequestedDelegation != nil {
+			materialized, materializeErr := p.materializeTurnDelegation(ctx, workerID, current, result.Turn)
+			if materializeErr != nil {
+				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
+				return
+			}
+			current = materialized
+			p.Wake()
+			return
+		}
 		if current != nil && isTerminalAgentRunStatus(current.Status) {
 			p.resolveForkChild(ctx, current)
 			return
@@ -268,6 +278,34 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
+	if p.forks == nil {
+		return nil, errors.New("durable delegation materialization is unavailable")
+	}
+	if run == nil || turn == nil || turn.RequestedDelegation == nil || len(turn.RequestedActions) != 0 || turn.RequestedFork != nil {
+		return nil, errors.New("a bounded Turn must request exactly one delegation")
+	}
+	proposal := turn.RequestedDelegation
+	result, err := p.forks.Create(ctx, CreateRunForkRequest{
+		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
+		ForkID: proposal.StepID,
+		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{{
+			ID: "delegate", Goal: proposal.Goal, AssignedAgentID: proposal.AssignedAgentID,
+			Context: proposal.Context, Checkpoint: proposal.Checkpoint, Budget: proposal.Budget, Timeout: proposal.Timeout,
+		}},
+		ContinuationCheckpoint: turn.ContinuationCheckpoint,
+		Actor:                  ActivityActor{Type: "worker", ID: workerID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.DependencyGroup == nil || result.DependencyGroup.Source == nil {
+		return nil, errors.New("delegation materialization returned no durable source Run")
+	}
+	return result.DependencyGroup.Source, nil
 }
 
 func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun) {

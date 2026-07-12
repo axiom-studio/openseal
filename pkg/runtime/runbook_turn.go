@@ -37,14 +37,15 @@ func NewRunbookTurnRunner(definition *runbook.Definition, entrypoint string) (*R
 }
 
 type runbookExecutionState struct {
-	Current       string                 `json:"current"`
-	PendingAction string                 `json:"pendingAction,omitempty"`
-	PendingFork   string                 `json:"pendingFork,omitempty"`
-	BranchFork    string                 `json:"branchFork,omitempty"`
-	BranchID      string                 `json:"branchId,omitempty"`
-	BranchJoin    string                 `json:"branchJoin,omitempty"`
-	Waiting       string                 `json:"waiting,omitempty"`
-	Loops         map[string]runbookLoop `json:"loops,omitempty"`
+	Current           string                 `json:"current"`
+	PendingAction     string                 `json:"pendingAction,omitempty"`
+	PendingFork       string                 `json:"pendingFork,omitempty"`
+	PendingDelegation string                 `json:"pendingDelegation,omitempty"`
+	BranchFork        string                 `json:"branchFork,omitempty"`
+	BranchID          string                 `json:"branchId,omitempty"`
+	BranchJoin        string                 `json:"branchJoin,omitempty"`
+	Waiting           string                 `json:"waiting,omitempty"`
+	Loops             map[string]runbookLoop `json:"loops,omitempty"`
 }
 type runbookLoop struct {
 	Items []interface{} `json:"items"`
@@ -136,6 +137,24 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 			state.PendingAction = state.Current
 			encodeRunbookState(checkpoint, state)
 			return &TurnOutcome{Decisions: decisions, ProposedActions: []TurnAction{{Type: "skill_action", Capability: step.Action.SkillID + "." + step.Action.Action, Summary: "Execute " + step.Action.SkillID + "." + step.Action.Action, IdempotencyKey: "runbook:" + r.definition.ID + ":" + input.Run.ID + ":" + state.Current + ":" + strconv.FormatInt(input.Turn.Sequence, 10), InputRef: inputPointer}}, OutputSummary: "Requested governed runbook action " + state.Current, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning}, nil
+		case runbook.StepDelegate:
+			if state.PendingDelegation == state.Current {
+				consumed, terminal, consumeErr := r.consumeDelegationResult(checkpoint, &state, input.Run)
+				if consumeErr != nil {
+					return nil, consumeErr
+				}
+				if terminal != nil {
+					terminal.Decisions = append(decisions, terminal.Decisions...)
+					return terminal, nil
+				}
+				if consumed {
+					decisions = append(decisions, TurnDecision{Summary: "Applied delegated Agent result for " + state.Current})
+					continue
+				}
+				return r.proposeDelegation(checkpoint, state, decisions, input)
+			}
+			state.PendingDelegation = state.Current
+			return r.proposeDelegation(checkpoint, state, decisions, input)
 		case runbook.StepWait:
 			if state.Waiting == state.Current {
 				state.Waiting = ""
@@ -364,6 +383,78 @@ func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state
 		OutputSummary:          "Requested durable concurrent runbook fork " + state.Current,
 		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
 	}, nil
+}
+
+func (r *RunbookTurnRunner) proposeDelegation(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, input TurnExecutionContext) (*TurnOutcome, error) {
+	step := r.definition.Steps[state.Current]
+	if step.Delegate == nil {
+		return nil, fmt.Errorf("runbook delegation %q is missing its definition", state.Current)
+	}
+	agentValue, err := resolveRunbookValue(checkpoint, step.Delegate.AgentID)
+	if err != nil {
+		return nil, stepError(state.Current, err)
+	}
+	agentID, ok := agentValue.(string)
+	if !ok || strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("runbook delegation %q Agent ID must resolve to a string", state.Current)
+	}
+	goalValue, err := resolveRunbookValue(checkpoint, step.Delegate.Goal)
+	if err != nil {
+		return nil, stepError(state.Current, err)
+	}
+	goal, ok := goalValue.(string)
+	if !ok || strings.TrimSpace(goal) == "" {
+		return nil, fmt.Errorf("runbook delegation %q goal must resolve to a string", state.Current)
+	}
+	delegatedContext := make(map[string]interface{}, len(step.Delegate.Context))
+	for key, value := range step.Delegate.Context {
+		resolved, resolveErr := resolveRunbookValue(checkpoint, value)
+		if resolveErr != nil {
+			return nil, stepError(state.Current, resolveErr)
+		}
+		delegatedContext[key] = resolved
+	}
+	encodeRunbookState(checkpoint, state)
+	decisions = append(decisions, TurnDecision{Summary: "Delegated runbook step " + state.Current + " to Agent " + agentID})
+	return &TurnOutcome{
+		Decisions: decisions,
+		ProposedDelegation: &TurnDelegationProposal{
+			StepID: state.Current, AssignedAgentID: strings.TrimSpace(agentID), Goal: strings.TrimSpace(goal),
+			Context: delegatedContext, Checkpoint: map[string]interface{}{}, Timeout: step.Delegate.Timeout,
+		},
+		OutputSummary:          "Requested durable Agent delegation " + state.Current,
+		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
+	}, nil
+}
+
+func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, *TurnOutcome, error) {
+	if state == nil || run == nil || state.PendingDelegation == "" {
+		return false, nil, nil
+	}
+	stepID := state.PendingDelegation
+	groupID := stableForkIdentifier(run.ID, stepID, "group")
+	groups, _ := run.Output["dependencyGroups"].(map[string]interface{})
+	group, _ := groups[groupID].(map[string]interface{})
+	status, _ := group["status"].(string)
+	if status == "" || status == string(RunDependencyGroupWaiting) {
+		return false, nil, nil
+	}
+	if status != string(RunDependencyGroupSatisfied) {
+		message := "delegated Agent step " + stepID + " failed"
+		return false, r.failed(checkpoint, *state, nil, message), nil
+	}
+	dependencies, _ := group["dependencies"].(map[string]interface{})
+	dependency, _ := dependencies["delegate"].(map[string]interface{})
+	result, _ := dependency["result"].(map[string]interface{})
+	output, _ := result["output"].(map[string]interface{})
+	step := r.definition.Steps[stepID]
+	if err := setRunbookPointer(checkpoint, step.Delegate.ResultPath, cloneMap(output)); err != nil {
+		return false, nil, stepError(stepID, err)
+	}
+	state.PendingDelegation = ""
+	state.Current = step.Delegate.Next
+	encodeRunbookState(checkpoint, *state)
+	return true, nil, nil
 }
 
 func (r *RunbookTurnRunner) failed(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, message string) *TurnOutcome {
