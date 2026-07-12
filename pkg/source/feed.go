@@ -21,7 +21,7 @@ import (
 
 const (
 	SkillID      = "openseal.source"
-	SkillVersion = "1.0.1"
+	SkillVersion = "1.0.2"
 	ObserveFeed  = "observe_feed"
 	MaximumItems = 100
 )
@@ -52,17 +52,18 @@ func SkillDefinition() *skill.Definition {
 				"properties": map[string]interface{}{
 					"url":      map[string]interface{}{"type": "string", "format": "uri", "pattern": `^https://`},
 					"maxItems": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumItems, "default": 25},
+					"cursor":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1000},
 				},
 			},
 			OutputSchema: map[string]interface{}{
 				"type": "object", "additionalProperties": false,
 				"required": []interface{}{"observationRefs", "observationCount", "checkpointRevision"},
 				"properties": map[string]interface{}{
-					"observationRefs": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": MaximumItems, "items": map[string]interface{}{
+					"observationRefs": map[string]interface{}{"type": "array", "minItems": 0, "maxItems": MaximumItems, "items": map[string]interface{}{
 						"type": "object", "additionalProperties": false, "required": []interface{}{"id", "replayed"},
 						"properties": map[string]interface{}{"id": map[string]interface{}{"type": "string", "minLength": 1}, "replayed": map[string]interface{}{"type": "boolean"}},
 					}},
-					"observationCount":   map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumItems},
+					"observationCount":   map[string]interface{}{"type": "integer", "minimum": 0, "maximum": MaximumItems},
 					"checkpointRevision": map[string]interface{}{"type": "integer", "minimum": 1},
 				},
 			},
@@ -118,6 +119,13 @@ var tags = regexp.MustCompile(`<[^>]*>`)
 // ParseFeed normalizes RSS 2.0 and Atom entries. The caller must enforce
 // network policy and response-size limits before passing bytes here.
 func ParseFeed(data []byte, feedURL string, maxItems int) (*FeedResult, error) {
+	return ParseFeedSince(data, feedURL, maxItems, "")
+}
+
+// ParseFeedSince returns entries newer than cursor when it is still present in
+// the bounded feed. If the cursor has fallen out of the feed window, entries
+// are returned normally and durable deduplication remains authoritative.
+func ParseFeedSince(data []byte, feedURL string, maxItems int, cursor string) (*FeedResult, error) {
 	if maxItems < 1 || maxItems > MaximumItems {
 		return nil, fmt.Errorf("maxItems must be between 1 and %d", MaximumItems)
 	}
@@ -130,12 +138,16 @@ func ParseFeed(data []byte, feedURL string, maxItems int) (*FeedResult, error) {
 		return nil, fmt.Errorf("parse RSS or Atom feed: %w", err)
 	}
 	feedTitle := cleanText(document.Title)
-	result := &FeedResult{}
+	cursor = strings.TrimSpace(cursor)
+	result := &FeedResult{NextCursor: cursor}
 	if document.Channel != nil {
 		feedTitle = cleanText(document.Channel.Title)
 		for _, item := range document.Channel.Items {
 			observation, observationErr := normalizeEntry(base, feedTitle, item.GUID, item.Link, item.Title, item.Description, item.Published)
 			if observationErr == nil {
+				if cursor != "" && observation.StableSourceID == cursor {
+					break
+				}
 				result.Observations = append(result.Observations, observation)
 			}
 			if len(result.Observations) == maxItems {
@@ -161,6 +173,9 @@ func ParseFeed(data []byte, feedURL string, maxItems int) (*FeedResult, error) {
 			}
 			observation, observationErr := normalizeEntry(base, feedTitle, item.ID, link, item.Title, summary, published)
 			if observationErr == nil {
+				if cursor != "" && observation.StableSourceID == cursor {
+					break
+				}
 				result.Observations = append(result.Observations, observation)
 			}
 			if len(result.Observations) == maxItems {
@@ -168,10 +183,12 @@ func ParseFeed(data []byte, feedURL string, maxItems int) (*FeedResult, error) {
 			}
 		}
 	}
-	if len(result.Observations) == 0 {
+	if len(result.Observations) == 0 && cursor == "" {
 		return nil, errors.New("feed contained no valid observable entries")
 	}
-	result.NextCursor = result.Observations[0].StableSourceID
+	if len(result.Observations) > 0 {
+		result.NextCursor = result.Observations[0].StableSourceID
+	}
 	return result, nil
 }
 

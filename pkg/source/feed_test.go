@@ -48,6 +48,18 @@ func TestParseFeedFailsClosed(t *testing.T) {
 	}
 }
 
+func TestParseFeedSinceReturnsTruthfulEmptyDelta(t *testing.T) {
+	feed := `<feed xmlns="http://www.w3.org/2005/Atom"><title>Forum</title><entry><id>newest</id><title>Newest</title><updated>2026-07-13T02:01:00Z</updated><link href="https://forum.example/newest"/></entry><entry><id>older</id><title>Older</title><updated>2026-07-13T02:00:00Z</updated><link href="https://forum.example/older"/></entry></feed>`
+	empty, err := ParseFeedSince([]byte(feed), "https://forum.example/feed", 10, "newest")
+	if err != nil || len(empty.Observations) != 0 || empty.NextCursor != "newest" {
+		t.Fatalf("empty delta=%#v err=%v", empty, err)
+	}
+	delta, err := ParseFeedSince([]byte(feed), "https://forum.example/feed", 10, "older")
+	if err != nil || len(delta.Observations) != 1 || delta.Observations[0].StableSourceID != "newest" || delta.NextCursor != "newest" {
+		t.Fatalf("delta=%#v err=%v", delta, err)
+	}
+}
+
 func TestSourceSkillContractIsTypedAndReadOnly(t *testing.T) {
 	definition := SkillDefinition()
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
