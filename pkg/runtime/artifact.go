@@ -207,18 +207,19 @@ func (l EvidenceLink) Validate() error {
 }
 
 type ArtifactFilter struct {
-	Scope             Scope
-	ID                string
-	Owner             *ObjectiveOwner
-	Types             []string
-	MediaTypes        []string
-	Classifications   []ArtifactClassification
-	ProducerRunID     string
-	ProducerRequestID string
-	EvidenceTarget    string
-	LatestOnly        bool
-	Limit             int
-	Offset            int
+	Scope              Scope
+	ID                 string
+	Owner              *ObjectiveOwner
+	Types              []string
+	MediaTypes         []string
+	Classifications    []ArtifactClassification
+	ProducerRunID      string
+	ProducerRequestID  string
+	EvidenceTarget     string
+	RetentionDueBefore *time.Time
+	LatestOnly         bool
+	Limit              int
+	Offset             int
 }
 
 type ArtifactStore interface {
@@ -340,6 +341,13 @@ type ArtifactContentStore interface {
 // a storage path or credential.
 type ArtifactContentInspector interface {
 	Available(context.Context, Scope, string) (bool, error)
+}
+
+// ArtifactContentDeleter removes bytes after portable retention policy says
+// they are due. Deletion must be idempotent so multiple workers and retries
+// remain safe.
+type ArtifactContentDeleter interface {
+	Delete(context.Context, Scope, string) error
 }
 
 // ArtifactContentResolver optionally provides an authorized, short-lived
@@ -522,6 +530,9 @@ func matchesArtifactFilter(artifact *Artifact, filter ArtifactFilter) bool {
 		if !found {
 			return false
 		}
+	}
+	if filter.RetentionDueBefore != nil && (artifact.Retention.ExpiresAt == nil || artifact.Retention.ExpiresAt.After(*filter.RetentionDueBefore)) {
+		return false
 	}
 	return true
 }

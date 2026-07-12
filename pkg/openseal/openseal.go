@@ -305,6 +305,7 @@ type (
 	ArtifactRegistrationResult         = runtime.ArtifactRegistrationResult
 	ArtifactContentStore               = runtime.ArtifactContentStore
 	ArtifactContentInspector           = runtime.ArtifactContentInspector
+	ArtifactContentDeleter             = runtime.ArtifactContentDeleter
 	ArtifactContentAvailability        = runtime.ArtifactContentAvailability
 	ArtifactContentResolver            = runtime.ArtifactContentResolver
 	ArtifactContentWrite               = runtime.ArtifactContentWrite
