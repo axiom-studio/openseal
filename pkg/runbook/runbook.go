@@ -66,10 +66,18 @@ type DelegateStep struct {
 	AgentID    Value            `json:"agentId"`
 	Goal       Value            `json:"goal"`
 	Context    map[string]Value `json:"context,omitempty"`
+	Mode       DelegateMode     `json:"mode,omitempty"`
 	ResultPath string           `json:"resultPath"`
 	Timeout    time.Duration    `json:"timeout,omitempty"`
 	Next       string           `json:"next"`
 }
+
+type DelegateMode string
+
+const (
+	DelegateBehavior DelegateMode = "behavior"
+	DelegateReason   DelegateMode = "reason"
+)
 
 type DecisionStep struct {
 	Cases   []DecisionCase `json:"cases"`

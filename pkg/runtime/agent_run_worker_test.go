@@ -320,7 +320,7 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "parent", Version: "1", Name: "Parent", Entrypoints: map[string]string{"manual": "delegate"}, Steps: map[string]runbook.Step{
 		"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
 			AgentID: runbookLiteral("specialist"), Goal: runbookLiteral("Analyze the release"),
-			Context: map[string]runbook.Value{"release": runbookLiteral("2026.07")}, ResultPath: "/steps/delegate", Timeout: time.Minute, Next: "done",
+			Context: map[string]runbook.Value{"release": runbookLiteral("2026.07")}, Mode: runbook.DelegateReason, ResultPath: "/steps/delegate", Timeout: time.Minute, Next: "done",
 		}},
 		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"answer": {Ref: "/steps/delegate/answer"}}}},
 	}}
@@ -338,7 +338,7 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 		if run.AssignedAgentID == "manager" {
 			return &TurnRunnerBinding{DefinitionID: "manager", DefinitionVersion: "1", Runner: parentRunner}, nil
 		}
-		if run.AssignedAgentID != "specialist" || run.Context["release"] != "2026.07" || run.Goal != "Analyze the release" {
+		if run.AssignedAgentID != "specialist" || run.Context["release"] != "2026.07" || run.Context[DelegationModeContextKey] != string(runbook.DelegateReason) || run.Goal != "Analyze the release" {
 			return nil, fmt.Errorf("delegated child mismatch: %#v", run)
 		}
 		return &TurnRunnerBinding{DefinitionID: "specialist", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {

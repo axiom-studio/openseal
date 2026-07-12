@@ -40,6 +40,7 @@ type (
 	RunbookStepKind          = runbook.StepKind
 	RunbookActionStep        = runbook.ActionStep
 	RunbookDelegateStep      = runbook.DelegateStep
+	RunbookDelegateMode      = runbook.DelegateMode
 	RunbookDecisionStep      = runbook.DecisionStep
 	RunbookDecisionCase      = runbook.DecisionCase
 	RunbookTransformStep     = runbook.TransformStep
@@ -465,6 +466,8 @@ const (
 	RunbookAPIVersion        = runbook.APIVersion
 	RunbookStepAction        = runbook.StepAction
 	RunbookStepDelegate      = runbook.StepDelegate
+	RunbookDelegateBehavior  = runbook.DelegateBehavior
+	RunbookDelegateReason    = runbook.DelegateReason
 	RunbookStepDecision      = runbook.StepDecision
 	RunbookStepTransform     = runbook.StepTransform
 	RunbookStepWait          = runbook.StepWait
@@ -650,15 +653,16 @@ const (
 	ObjectiveCadenceDaily    = runtime.ObjectiveCadenceDaily
 	ObjectiveCadenceWeekly   = runtime.ObjectiveCadenceWeekly
 
-	RunSourceManual    = runtime.RunSourceManual
-	RunSourceChat      = runtime.RunSourceChat
-	RunSourceSchedule  = runtime.RunSourceSchedule
-	RunSourceEvent     = runtime.RunSourceEvent
-	RunSourceWebhook   = runtime.RunSourceWebhook
-	RunSourceRequest   = runtime.RunSourceRequest
-	RunSourceHandoff   = runtime.RunSourceHandoff
-	RunSourceObjective = runtime.RunSourceObjective
-	RunSourceFork      = runtime.RunSourceFork
+	RunSourceManual          = runtime.RunSourceManual
+	RunSourceChat            = runtime.RunSourceChat
+	RunSourceSchedule        = runtime.RunSourceSchedule
+	RunSourceEvent           = runtime.RunSourceEvent
+	RunSourceWebhook         = runtime.RunSourceWebhook
+	RunSourceRequest         = runtime.RunSourceRequest
+	RunSourceHandoff         = runtime.RunSourceHandoff
+	RunSourceObjective       = runtime.RunSourceObjective
+	RunSourceFork            = runtime.RunSourceFork
+	DelegationModeContextKey = runtime.DelegationModeContextKey
 
 	RunKindAgentWork          = runtime.RunKindAgentWork
 	RunKindConversation       = runtime.RunKindConversation
