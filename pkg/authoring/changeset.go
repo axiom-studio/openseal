@@ -88,13 +88,15 @@ type ChangeSetLifecycleEvent struct {
 type ChangeSetPlacement struct {
 	TeamDeploymentID   string            `json:"teamDeploymentId"`
 	AgentDeploymentIDs map[string]string `json:"agentDeploymentIds"`
+	InitiativeID       string            `json:"initiativeId,omitempty"`
 	// Expected revisions are mandatory for amendments and make stale placement
-	// fail before any definition, deployment, or objective is written.
-	TeamExpectedRevision   int64                                                `json:"teamExpectedRevision,omitempty"`
-	AgentExpectedRevisions map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
-	CredentialReferences   map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
-	Objectives             map[string]ObjectivePlacement                        `json:"objectives,omitempty"`
-	Environment            string                                               `json:"environment,omitempty"`
+	// fail before any definition, deployment, Objective, or Initiative is written.
+	TeamExpectedRevision       int64                                                `json:"teamExpectedRevision,omitempty"`
+	AgentExpectedRevisions     map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
+	InitiativeExpectedRevision int64                                                `json:"initiativeExpectedRevision,omitempty"`
+	CredentialReferences       map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
+	Objectives                 map[string]ObjectivePlacement                        `json:"objectives,omitempty"`
+	Environment                string                                               `json:"environment,omitempty"`
 }
 
 type ObjectivePlacement struct {
@@ -607,6 +609,14 @@ func validateApplyPlacement(value *ChangeSet) error {
 	if value.Mode == ModeAmend && value.Result.Candidate.Team != nil && value.Placement.TeamExpectedRevision < 1 {
 		return errors.New("amended Team placement requires an expected revision")
 	}
+	if value.Result.Candidate.Initiative != nil {
+		if strings.TrimSpace(value.Placement.InitiativeID) == "" {
+			return errors.New("Initiative placement is required")
+		}
+		if value.Mode == ModeAmend && value.Placement.InitiativeExpectedRevision < 1 {
+			return errors.New("amended Initiative placement requires an expected revision")
+		}
+	}
 	for key, objective := range value.Placement.Objectives {
 		if strings.TrimSpace(objective.ID) == "" || objective.ExpectedRevision < 0 {
 			return fmt.Errorf("objective %s placement is invalid", key)
@@ -740,11 +750,19 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	}
 	for _, definition := range candidate.Agents {
 		if definition != nil && strings.TrimSpace(placement.AgentDeploymentIDs[definition.ID]) == "" {
-			placement.AgentDeploymentIDs[definition.ID] = definition.ID + ":live"
+			placement.AgentDeploymentIDs[definition.ID] = "agent:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + definition.ID)[:32]
 		}
 	}
 	if candidate.Team != nil && strings.TrimSpace(placement.TeamDeploymentID) == "" {
-		placement.TeamDeploymentID = candidate.Team.ID + ":live"
+		placement.TeamDeploymentID = "team:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Team.ID)[:32]
+	}
+	if candidate.Initiative != nil {
+		if strings.TrimSpace(placement.InitiativeID) == "" {
+			placement.InitiativeID = "initiative:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Initiative.ID)[:32]
+		}
+		if existing != nil && existing.Initiative != nil && placement.InitiativeExpectedRevision < 1 {
+			placement.InitiativeExpectedRevision = 1
+		}
 	}
 	if placement.Objectives == nil {
 		placement.Objectives = map[string]ObjectivePlacement{}
@@ -769,7 +787,7 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 			key := WorkforceObjectiveKey(ownerType, definitionID, template.ID)
 			p := placement.Objectives[key]
 			if p.ID == "" {
-				p.ID = "objective:" + key
+				p.ID = "objective:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + key)[:32]
 			}
 			if existingKeys[key] && p.ExpectedRevision < 1 {
 				p.ExpectedRevision = 1
@@ -1042,7 +1060,11 @@ func digestString(value string) string {
 }
 
 func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
-	copy := ChangeSetPlacement{TeamDeploymentID: value.TeamDeploymentID, TeamExpectedRevision: value.TeamExpectedRevision, Environment: value.Environment}
+	copy := ChangeSetPlacement{
+		TeamDeploymentID: value.TeamDeploymentID, InitiativeID: value.InitiativeID,
+		TeamExpectedRevision: value.TeamExpectedRevision, InitiativeExpectedRevision: value.InitiativeExpectedRevision,
+		Environment: value.Environment,
+	}
 	if value.AgentDeploymentIDs != nil {
 		copy.AgentDeploymentIDs = make(map[string]string, len(value.AgentDeploymentIDs))
 		for definitionID, deploymentID := range value.AgentDeploymentIDs {

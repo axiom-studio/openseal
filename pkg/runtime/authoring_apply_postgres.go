@@ -151,6 +151,9 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 			return nil, err
 		}
 	}
+	if err = applyPostgresWorkforceInitiative(ctx, tx, s.table("initiatives"), a.initiative, a.initiativeExpectedRevision); err != nil {
+		return nil, err
+	}
 	synchronizeWorkforceSkillBindingResources(a)
 	value.ApplyReceipt.Resources = a.resources
 	p, _ := json.Marshal(value)
@@ -165,6 +168,44 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		return nil, err
 	}
 	return decodeChangeSet(string(p))
+}
+
+func applyPostgresWorkforceInitiative(ctx context.Context, tx *sql.Tx, table string, initiative *Initiative, expectedRevision int64) error {
+	if initiative == nil {
+		return nil
+	}
+	if expectedRevision > 0 {
+		var payload []byte
+		if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`, initiative.Scope.Kind, initiative.Scope.ID, initiative.ID, expectedRevision).Scan(&payload); err != nil {
+			return authoring.ErrChangeSetRevision
+		}
+		var current Initiative
+		if json.Unmarshal(payload, &current) != nil {
+			return authoring.ErrChangeSetRevision
+		}
+		initiative.CreatedAt = current.CreatedAt
+		initiative.IdempotencyKeyHash = current.IdempotencyKeyHash
+		initiative.CreationFingerprint = current.CreationFingerprint
+	}
+	if err := initiative.Validate(); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(initiative)
+	if err != nil {
+		return err
+	}
+	if expectedRevision == 0 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO `+table+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, initiative.ID, initiative.Scope.Kind, initiative.Scope.ID, initiative.Owner.Type, initiative.Owner.ID, initiative.Status, initiative.Revision, initiative.UpdatedAt, initiative.IdempotencyKeyHash, string(payload))
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE `+table+` SET owner_type=$1,owner_id=$2,status=$3,revision=$4,updated_at=$5,idempotency_key_hash=$6,payload=$7::jsonb WHERE scope_kind=$8 AND scope_id=$9 AND id=$10 AND revision=$11`, initiative.Owner.Type, initiative.Owner.ID, initiative.Status, initiative.Revision, initiative.UpdatedAt, initiative.IdempotencyKeyHash, string(payload), initiative.Scope.Kind, initiative.Scope.ID, initiative.ID, expectedRevision)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return authoring.ErrChangeSetRevision
+	}
+	return nil
 }
 
 func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding) error {

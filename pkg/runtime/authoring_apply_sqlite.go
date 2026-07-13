@@ -167,6 +167,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 			return nil, err
 		}
 	}
+	if err = applySQLiteWorkforceInitiative(ctx, tx, application.initiative, application.initiativeExpectedRevision); err != nil {
+		return nil, err
+	}
 	synchronizeWorkforceSkillBindingResources(application)
 	value.ApplyReceipt.Resources = application.resources
 	payload, _ := json.Marshal(value)
@@ -181,6 +184,44 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		return nil, err
 	}
 	return decodeChangeSet(string(payload))
+}
+
+func applySQLiteWorkforceInitiative(ctx context.Context, tx *sql.Tx, initiative *Initiative, expectedRevision int64) error {
+	if initiative == nil {
+		return nil
+	}
+	if expectedRevision > 0 {
+		var payload string
+		if err := tx.QueryRowContext(ctx, `SELECT payload FROM initiatives WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, initiative.Scope.Kind, initiative.Scope.ID, initiative.ID, expectedRevision).Scan(&payload); err != nil {
+			return authoring.ErrChangeSetRevision
+		}
+		var current Initiative
+		if json.Unmarshal([]byte(payload), &current) != nil {
+			return authoring.ErrChangeSetRevision
+		}
+		initiative.CreatedAt = current.CreatedAt
+		initiative.IdempotencyKeyHash = current.IdempotencyKeyHash
+		initiative.CreationFingerprint = current.CreationFingerprint
+	}
+	if err := initiative.Validate(); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(initiative)
+	if err != nil {
+		return err
+	}
+	if expectedRevision == 0 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO initiatives(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload) VALUES(?,?,?,?,?,?,?,?,?,?)`, initiative.ID, initiative.Scope.Kind, initiative.Scope.ID, initiative.Owner.Type, initiative.Owner.ID, initiative.Status, initiative.Revision, initiative.UpdatedAt, initiative.IdempotencyKeyHash, string(payload))
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE initiatives SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,idempotency_key_hash=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, initiative.Owner.Type, initiative.Owner.ID, initiative.Status, initiative.Revision, initiative.UpdatedAt, initiative.IdempotencyKeyHash, string(payload), initiative.Scope.Kind, initiative.Scope.ID, initiative.ID, expectedRevision)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return authoring.ErrChangeSetRevision
+	}
+	return nil
 }
 
 func applySQLiteWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, desired []*capability.Binding) error {
