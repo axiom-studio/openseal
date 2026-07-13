@@ -71,6 +71,10 @@ type Action struct {
 	EmittedArtifactTypes []string                `json:"emittedArtifactTypes,omitempty"`
 	EmittedEventTypes    []string                `json:"emittedEventTypes,omitempty"`
 	Transport            *TransportReference     `json:"transport,omitempty"`
+	// SemanticArguments maps portable roles such as "target", "body", or
+	// "artifact" to exact input-schema property names. Product surfaces use
+	// these roles to compose actions without guessing connector-specific fields.
+	SemanticArguments map[string]string `json:"semanticArguments,omitempty"`
 }
 
 type TransportReference struct {
@@ -185,14 +189,25 @@ type Binding struct {
 }
 
 type ModelAction struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	SkillID     string                 `json:"skillId"`
-	Version     string                 `json:"version"`
-	Action      string                 `json:"action"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
-	Risk        RiskLevel              `json:"risk"`
-	SideEffect  SideEffect             `json:"sideEffect"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description"`
+	BindingID         string                 `json:"bindingId"`
+	BindingRevision   int64                  `json:"bindingRevision"`
+	SkillID           string                 `json:"skillId"`
+	Version           string                 `json:"version"`
+	Action            string                 `json:"action"`
+	InputSchema       map[string]interface{} `json:"inputSchema"`
+	SemanticArguments map[string]string      `json:"semanticArguments,omitempty"`
+	Risk              RiskLevel              `json:"risk"`
+	SideEffect        SideEffect             `json:"sideEffect"`
+}
+
+// BindingReference selects one exact, versioned binding. Persisting this
+// reference on an ActionCall prevents execution from drifting to another
+// account, credential set, configuration, or policy revision.
+type BindingReference struct {
+	ID       string `json:"id"`
+	Revision int64  `json:"revision"`
 }
 
 type ModelPrompt struct {

@@ -73,12 +73,14 @@ type OutreachIdentity struct {
 // message. Argument mappings prove which action inputs carry the immutable
 // thread target and reviewed body while allowing connector-specific schemas.
 type OutreachCapability struct {
-	SkillID        string                 `json:"skillId"`
-	SkillVersion   string                 `json:"skillVersion"`
-	Action         string                 `json:"action"`
-	Arguments      map[string]interface{} `json:"arguments"`
-	TargetArgument string                 `json:"targetArgument"`
-	BodyArgument   string                 `json:"bodyArgument"`
+	BindingID       string                 `json:"bindingId,omitempty"`
+	BindingRevision int64                  `json:"bindingRevision,omitempty"`
+	SkillID         string                 `json:"skillId"`
+	SkillVersion    string                 `json:"skillVersion"`
+	Action          string                 `json:"action"`
+	Arguments       map[string]interface{} `json:"arguments"`
+	TargetArgument  string                 `json:"targetArgument"`
+	BodyArgument    string                 `json:"bodyArgument"`
 }
 
 type OutreachReceipt struct {
@@ -248,6 +250,9 @@ func (c *OutreachCapability) Validate(targetURI, body string) error {
 		!validOpaqueIdentifier(c.Action, 128) || !validOpaqueIdentifier(c.TargetArgument, 128) || !validOpaqueIdentifier(c.BodyArgument, 128) ||
 		c.TargetArgument == c.BodyArgument || c.Arguments == nil {
 		return errors.New("outreach capability Skill identity and distinct target/body mappings are required")
+	}
+	if (strings.TrimSpace(c.BindingID) == "") != (c.BindingRevision == 0) || c.BindingRevision < 0 {
+		return errors.New("outreach capability binding id and revision must be provided together")
 	}
 	if c.Arguments[c.TargetArgument] != targetURI || c.Arguments[c.BodyArgument] != body {
 		return errors.New("outreach capability arguments do not preserve the reviewed target and body")

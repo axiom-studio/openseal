@@ -57,7 +57,8 @@ func (r *CapabilityInvocationTurnRunner) RunTurn(_ context.Context, input TurnEx
 		checkpoint = map[string]interface{}{}
 	}
 	if last, resumed := checkpoint["lastAction"].(map[string]interface{}); resumed {
-		if last["skillId"] != selected.SkillID || last["skillVersion"] != selected.Version || last["action"] != selected.Action {
+		if (selected.BindingID != "" && (last["bindingId"] != selected.BindingID || fmt.Sprint(last["bindingRevision"]) != fmt.Sprint(selected.BindingRevision))) ||
+			last["skillId"] != selected.SkillID || last["skillVersion"] != selected.Version || last["action"] != selected.Action {
 			return nil, errors.New("durable action result does not match the typed capability invocation")
 		}
 		status, _ := last["status"].(string)
@@ -81,6 +82,7 @@ func (r *CapabilityInvocationTurnRunner) RunTurn(_ context.Context, input TurnEx
 		Decisions: []TurnDecision{{Summary: "Selected the exact capability declared by the durable Run template"}},
 		ProposedActions: []TurnAction{{
 			Type: "skill_action", Capability: selected.Name, Summary: "Execute governed " + selected.Name,
+			BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 			IdempotencyKey: "capability-invocation:" + input.Run.ID, InputRef: "/capabilityActionInputs/requested",
 		}},
 		OutputSummary:          "Requested governed capability " + selected.Name,

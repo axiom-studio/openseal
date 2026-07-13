@@ -36,6 +36,9 @@ func TestCatalogProducesModelSafeScopedActions(t *testing.T) {
 	if len(actions) != 1 || actions[0].Name != "release.deploy" {
 		t.Fatalf("unexpected model actions: %#v", actions)
 	}
+	if actions[0].BindingID != binding.ID || actions[0].BindingRevision != binding.Revision || actions[0].SemanticArguments["target"] != "environment" {
+		t.Fatalf("action did not preserve its exact secret-safe binding projection: %#v", actions[0])
+	}
 	encoded, err := json.Marshal(actions)
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +52,35 @@ func TestCatalogProducesModelSafeScopedActions(t *testing.T) {
 	}
 	if len(other) != 0 {
 		t.Fatalf("cross-scope actions leaked: %#v", other)
+	}
+}
+
+func TestCatalogResolvesAnExactBindingAndRejectsStaleSelection(t *testing.T) {
+	catalog := NewCatalog()
+	definition := testSkillDefinition()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	for _, id := range []string{"primary", "secondary"} {
+		if err := catalog.Bind(context.Background(), &Binding{
+			ID: id, Scope: scope, DeploymentID: "operator", SkillID: definition.ID, SkillVersion: definition.Version,
+			AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
+			Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: id + "-credential"}}, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	actions, err := catalog.ListModelActions(context.Background(), scope, "operator")
+	if err != nil || len(actions) != 2 {
+		t.Fatalf("actions = %#v, %v", actions, err)
+	}
+	selected, err := catalog.Resolve(context.Background(), scope, "operator", definition.ID, definition.Version, "deploy", BindingReference{ID: "secondary", Revision: 1})
+	if err != nil || selected.Binding.ID != "secondary" {
+		t.Fatalf("selected = %#v, %v", selected, err)
+	}
+	if _, err := catalog.Resolve(context.Background(), scope, "operator", definition.ID, definition.Version, "deploy", BindingReference{ID: "secondary", Revision: 2}); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale selection error = %v", err)
 	}
 }
 
@@ -205,7 +237,8 @@ func testSkillDefinition() *Definition {
 			"deploy": {
 				Name: "deploy", Description: "Deploy a revision", SideEffect: SideEffectExternal,
 				Risk: RiskLevelProduction, Idempotency: IdempotencyRequired,
-				Credentials: []CredentialRequirement{{Name: "git", Kind: "git-token"}},
+				Credentials:       []CredentialRequirement{{Name: "git", Kind: "git-token"}},
+				SemanticArguments: map[string]string{"target": "environment", "artifact": "revision"},
 				InputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
 					"properties": map[string]interface{}{

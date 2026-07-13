@@ -39,6 +39,8 @@ type ActionCall struct {
 	RunID            string                               `json:"runId"`
 	TurnID           string                               `json:"turnId,omitempty"`
 	DeploymentID     string                               `json:"deploymentId"`
+	BindingID        string                               `json:"bindingId"`
+	BindingRevision  int64                                `json:"bindingRevision"`
 	SkillID          string                               `json:"skillId"`
 	SkillVersion     string                               `json:"skillVersion"`
 	Action           string                               `json:"action"`
@@ -76,6 +78,9 @@ func (c *ActionCall) Validate() error {
 		strings.TrimSpace(c.SkillID) == "" || strings.TrimSpace(c.SkillVersion) == "" || strings.TrimSpace(c.Action) == "" {
 		return errors.New("action identity, run, deployment, skill, version, and action are required")
 	}
+	if (strings.TrimSpace(c.BindingID) == "") != (c.BindingRevision == 0) || c.BindingRevision < 0 {
+		return errors.New("action binding id and revision must be provided together")
+	}
 	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
 		return errors.New("action call lifecycle metadata is invalid")
 	}
@@ -93,14 +98,16 @@ func ComputeActionInvocationDigest(call *ActionCall) string {
 		return ""
 	}
 	canonical := struct {
-		DeploymentID   string                               `json:"deploymentId"`
-		SkillID        string                               `json:"skillId"`
-		SkillVersion   string                               `json:"skillVersion"`
-		Action         string                               `json:"action"`
-		Arguments      map[string]interface{}               `json:"arguments,omitempty"`
-		CredentialRefs map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
-		EvidenceRefs   []string                             `json:"evidenceRefs,omitempty"`
-	}{call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs, call.EvidenceRefs}
+		DeploymentID    string                               `json:"deploymentId"`
+		BindingID       string                               `json:"bindingId"`
+		BindingRevision int64                                `json:"bindingRevision"`
+		SkillID         string                               `json:"skillId"`
+		SkillVersion    string                               `json:"skillVersion"`
+		Action          string                               `json:"action"`
+		Arguments       map[string]interface{}               `json:"arguments,omitempty"`
+		CredentialRefs  map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+		EvidenceRefs    []string                             `json:"evidenceRefs,omitempty"`
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs, call.EvidenceRefs}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""

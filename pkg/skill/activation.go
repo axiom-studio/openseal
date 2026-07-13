@@ -187,8 +187,10 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		for _, name := range binding.AllowedActions {
 			action := definition.Actions[name]
 			actions = append(actions, ModelAction{
-				Name: definition.ID + "." + name, Description: action.Description, SkillID: definition.ID,
-				Version: definition.Version, Action: name, InputSchema: cloneMap(action.InputSchema), Risk: action.Risk, SideEffect: action.SideEffect,
+				Name: definition.ID + "." + name, Description: action.Description,
+				BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
+				Version: definition.Version, Action: name, InputSchema: cloneMap(action.InputSchema),
+				SemanticArguments: cloneStringMap(action.SemanticArguments), Risk: action.Risk, SideEffect: action.SideEffect,
 			})
 		}
 		sort.Slice(actions, func(i, j int) bool { return actions[i].Name < actions[j].Name })

@@ -45,7 +45,7 @@ func (f ActionPolicyEvaluatorFunc) EvaluateAction(ctx context.Context, input Act
 }
 
 type ActionCatalog interface {
-	Resolve(context.Context, skill.ScopeReference, string, string, string, string) (*skill.BoundAction, error)
+	Resolve(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundAction, error)
 	ValidateInput(context.Context, *skill.BoundAction, map[string]interface{}) error
 }
 
@@ -55,6 +55,8 @@ type ProposeActionRequest struct {
 	TurnID                 string
 	WorkerID               string
 	DeploymentID           string
+	BindingID              string
+	BindingRevision        int64
 	SkillID                string
 	SkillVersion           string
 	Action                 string
@@ -109,7 +111,11 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		}
 		lease = &AgentRunLeaseGuard{WorkerID: req.WorkerID, Now: now}
 	}
-	bound, err := c.catalog.Resolve(ctx, skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, req.DeploymentID, req.SkillID, req.SkillVersion, req.Action)
+	selection := []skill.BindingReference(nil)
+	if req.BindingID != "" || req.BindingRevision != 0 {
+		selection = append(selection, skill.BindingReference{ID: req.BindingID, Revision: req.BindingRevision})
+	}
+	bound, err := c.catalog.Resolve(ctx, skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, req.DeploymentID, req.SkillID, req.SkillVersion, req.Action, selection...)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +139,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	callID := c.newID()
 	call := &ActionCall{
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
+		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(req.Arguments, bound.Action.InputSchema),
 		CredentialRefs: boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
