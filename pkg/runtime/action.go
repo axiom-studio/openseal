@@ -47,6 +47,7 @@ type ActionCall struct {
 	SideEffect       skill.SideEffect                     `json:"sideEffect"`
 	Arguments        map[string]interface{}               `json:"arguments,omitempty"`
 	CredentialRefs   map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+	EvidenceRefs     []string                             `json:"evidenceRefs,omitempty"`
 	IdempotencyKey   string                               `json:"idempotencyKey,omitempty"`
 	InvocationDigest string                               `json:"invocationDigest,omitempty"`
 	ApprovalID       string                               `json:"approvalId,omitempty"`
@@ -81,6 +82,9 @@ func (c *ActionCall) Validate() error {
 	if c.IdempotencyKey != "" && c.InvocationDigest == "" {
 		return errors.New("idempotent action calls require an invocation digest")
 	}
+	if err := uniqueIDs(c.EvidenceRefs, "action evidence"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -95,7 +99,8 @@ func ComputeActionInvocationDigest(call *ActionCall) string {
 		Action         string                               `json:"action"`
 		Arguments      map[string]interface{}               `json:"arguments,omitempty"`
 		CredentialRefs map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
-	}{call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs}
+		EvidenceRefs   []string                             `json:"evidenceRefs,omitempty"`
+	}{call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs, call.EvidenceRefs}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""

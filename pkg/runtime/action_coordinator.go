@@ -135,7 +135,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(req.Arguments, bound.Action.InputSchema),
-		CredentialRefs: boundCredentialReferences(bound), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		CredentialRefs: boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		MaxAttempts: max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)

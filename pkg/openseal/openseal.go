@@ -201,6 +201,22 @@ type (
 	InitiativeSourceMonitorReference   = runtime.SourceMonitorReference
 	InitiativeDeliverable              = runtime.InitiativeDeliverable
 	InitiativeDeliverableStatus        = runtime.DeliverableStatus
+	OutreachThread                     = runtime.OutreachThread
+	OutreachThreadStatus               = runtime.OutreachThreadStatus
+	OutreachIdentity                   = runtime.OutreachIdentity
+	OutreachMessage                    = runtime.OutreachMessage
+	OutreachMessageDirection           = runtime.OutreachMessageDirection
+	OutreachMessageIntent              = runtime.OutreachMessageIntent
+	OutreachMessageStatus              = runtime.OutreachMessageStatus
+	OutreachCapability                 = runtime.OutreachCapability
+	OutreachReceipt                    = runtime.OutreachReceipt
+	OutreachThreadFilter               = runtime.OutreachThreadFilter
+	OutreachStore                      = runtime.OutreachStore
+	OutreachActionReader               = runtime.OutreachActionReader
+	CreateOutreachThreadRequest        = runtime.CreateOutreachThreadRequest
+	LinkOutreachActionRequest          = runtime.LinkOutreachActionRequest
+	RecordOutreachDeliveryRequest      = runtime.RecordOutreachDeliveryRequest
+	ResolveOutreachMessageRequest      = runtime.ResolveOutreachMessageRequest
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
 	BudgetPolicy                       = runtime.BudgetPolicy
@@ -843,6 +859,23 @@ const (
 	InitiativeSourceDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
 	InitiativeSourceDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
 	InitiativeSourceDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
+	OutreachThreadOpen                                = runtime.OutreachThreadOpen
+	OutreachThreadClosed                              = runtime.OutreachThreadClosed
+	OutreachThreadCanceled                            = runtime.OutreachThreadCanceled
+	OutreachMessageOutbound                           = runtime.OutreachMessageOutbound
+	OutreachMessageInbound                            = runtime.OutreachMessageInbound
+	OutreachIntentClarify                             = runtime.OutreachIntentClarify
+	OutreachIntentRequestFeedback                     = runtime.OutreachIntentRequestFeedback
+	OutreachIntentAnswer                              = runtime.OutreachIntentAnswer
+	OutreachIntentFollowUp                            = runtime.OutreachIntentFollowUp
+	OutreachMessageDraft                              = runtime.OutreachMessageDraft
+	OutreachMessagePendingApproval                    = runtime.OutreachMessagePendingApproval
+	OutreachMessageReady                              = runtime.OutreachMessageReady
+	OutreachMessageDelivered                          = runtime.OutreachMessageDelivered
+	OutreachMessageReceived                           = runtime.OutreachMessageReceived
+	OutreachMessageDeclined                           = runtime.OutreachMessageDeclined
+	OutreachMessageFailed                             = runtime.OutreachMessageFailed
+	OutreachMessageCanceled                           = runtime.OutreachMessageCanceled
 
 	RunSourceManual          = runtime.RunSourceManual
 	RunSourceChat            = runtime.RunSourceChat
@@ -1118,6 +1151,10 @@ var (
 	ErrSkillSourceArtifactImmutable  = sourceartifact.ErrImmutable
 	ErrSkillSourceReferenceConflict  = sourceartifact.ErrReferenceConflict
 	ErrSkillSourceOriginAmbiguous    = sourceartifact.ErrAmbiguousOrigin
+	ErrOutreachThreadNotFound        = runtime.ErrOutreachThreadNotFound
+	ErrOutreachThreadConflict        = runtime.ErrOutreachThreadConflict
+	ErrOutreachThreadIdempotency     = runtime.ErrOutreachThreadIdempotency
+	ErrInvalidOutreachThread         = runtime.ErrInvalidOutreachThread
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -1130,6 +1167,7 @@ type Engine struct {
 	portfolio                     *runtime.PortfolioService
 	initiatives                   *runtime.InitiativeService
 	sourceMonitors                *runtime.SourceMonitorService
+	outreach                      *runtime.OutreachService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
 	conversations                 *runtime.ConversationService
@@ -1236,6 +1274,7 @@ func New(opts ...Option) (*Engine, error) {
 		portfolio:           runtime.NewPortfolioService(store),
 		initiatives:         runtime.NewInitiativeService(store, store),
 		sourceMonitors:      runtime.NewSourceMonitorService(store, store, store, store),
+		outreach:            runtime.NewOutreachService(store, store, store, store),
 		activity:            runtime.NewRunActivityService(store, store),
 		dependencies:        runtime.NewDependencyCoordinator(store),
 		conversations:       runtime.NewConversationService(store),
@@ -1399,12 +1438,24 @@ func WithStore(store runtime.KernelStore) Option {
 			if sourceMonitorStore, supported := store.(runtime.SourceMonitorStore); supported {
 				artifactStore, _ := store.(runtime.ArtifactStore)
 				e.sourceMonitors = runtime.NewSourceMonitorService(sourceMonitorStore, initiativeStore, store, artifactStore)
+				if outreachStore, outreachSupported := store.(runtime.OutreachStore); outreachSupported {
+					actionReader, actionsSupported := store.(runtime.OutreachActionReader)
+					if actionsSupported {
+						e.outreach = runtime.NewOutreachService(outreachStore, initiativeStore, sourceMonitorStore, actionReader)
+					} else {
+						e.outreach = nil
+					}
+				} else {
+					e.outreach = nil
+				}
 			} else {
 				e.sourceMonitors = nil
+				e.outreach = nil
 			}
 		} else {
 			e.initiatives = nil
 			e.sourceMonitors = nil
+			e.outreach = nil
 		}
 		e.activity = runtime.NewRunActivityService(store, store)
 		if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
@@ -1999,6 +2050,48 @@ func (e *Engine) ListSourceObservations(ctx context.Context, filter runtime.Sour
 		return nil, errors.New("source monitor capability is unavailable")
 	}
 	return e.sourceMonitors.List(ctx, filter)
+}
+
+func (e *Engine) CreateOutreachThread(ctx context.Context, req runtime.CreateOutreachThreadRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {
+	if e.outreach == nil {
+		return nil, nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.Create(ctx, req)
+}
+
+func (e *Engine) GetOutreachThread(ctx context.Context, scope runtime.Scope, id string) (*runtime.OutreachThread, error) {
+	if e.outreach == nil {
+		return nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.Get(ctx, scope, id)
+}
+
+func (e *Engine) ListOutreachThreads(ctx context.Context, filter runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error) {
+	if e.outreach == nil {
+		return nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.List(ctx, filter)
+}
+
+func (e *Engine) LinkOutreachAction(ctx context.Context, scope runtime.Scope, id string, req runtime.LinkOutreachActionRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {
+	if e.outreach == nil {
+		return nil, nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.LinkAction(ctx, scope, id, req)
+}
+
+func (e *Engine) RecordOutreachDelivery(ctx context.Context, scope runtime.Scope, id string, req runtime.RecordOutreachDeliveryRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {
+	if e.outreach == nil {
+		return nil, nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.RecordDelivery(ctx, scope, id, req)
+}
+
+func (e *Engine) ResolveOutreachMessage(ctx context.Context, scope runtime.Scope, id string, req runtime.ResolveOutreachMessageRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {
+	if e.outreach == nil {
+		return nil, nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.ResolveMessage(ctx, scope, id, req)
 }
 
 func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.ObjectiveScheduleResult, error) {
