@@ -42,6 +42,7 @@ type ActivityProjection struct {
 	Visibility       ActivityVisibility     `json:"visibility"`
 	AgentID          string                 `json:"agentId,omitempty"`
 	ObjectiveID      string                 `json:"objectiveId,omitempty"`
+	InitiativeID     string                 `json:"initiativeId,omitempty"`
 	RunID            string                 `json:"runId,omitempty"`
 	TurnID           string                 `json:"turnId,omitempty"`
 	ParentRunID      string                 `json:"parentRunId,omitempty"`
@@ -127,7 +128,7 @@ func (s *RunActivityService) ListActivityFeed(ctx context.Context, request Activ
 func projectActivityEvent(event *ActivityEvent, includeDetails bool) ActivityProjection {
 	projection := ActivityProjection{
 		ID: event.ID, Sequence: event.Sequence, EventType: event.EventType, Category: activityCategory(event.EventType),
-		Severity: event.Severity, Visibility: event.Visibility, AgentID: event.AgentID, ObjectiveID: event.ObjectiveID,
+		Severity: event.Severity, Visibility: event.Visibility, AgentID: event.AgentID, ObjectiveID: event.ObjectiveID, InitiativeID: event.InitiativeID,
 		RunID: event.RunID, TurnID: event.TurnID, ParentRunID: event.ParentRunID, TeamID: event.TeamID,
 		Actor: event.Actor, Summary: event.Summary, CreatedAt: event.CreatedAt,
 		DetailAvailable: len(event.Payload) > 0 || len(event.ConversationRefs) > 0 || event.CorrelationID != "" || event.CausationID != "",

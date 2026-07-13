@@ -19,6 +19,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
+	"github.com/axiom-studio/openseal/pkg/source"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -135,6 +136,7 @@ type Model struct {
 	objectiveCapability         kernelapi.Capability
 	initiativeCapability        kernelapi.Capability
 	sourceMonitorCapability     kernelapi.Capability
+	activityCapability          kernelapi.Capability
 	clawHubCapability           kernelapi.Capability
 	artifactCapability          kernelapi.Capability
 	channelCapability           kernelapi.Capability
@@ -287,9 +289,12 @@ type initiativesLoaded struct {
 }
 
 type sourceMonitorStatus struct {
-	checkpoint   *runtime.SourceMonitorCheckpoint
-	observations []*runtime.SourceObservation
-	err          error
+	checkpoint         *runtime.SourceMonitorCheckpoint
+	observations       []*runtime.SourceObservation
+	policyDecision     *source.PolicyDecision
+	policyAuthorizedAt time.Time
+	policyErr          error
+	err                error
 }
 
 type sourceMonitorsLoaded struct {
@@ -436,6 +441,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
 		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
+		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
@@ -447,6 +453,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectiveCapability = objectiveCapability
 		m.initiativeCapability = initiativeCapability
 		m.sourceMonitorCapability = sourceMonitorCapability
+		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
@@ -471,6 +478,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !hasInitiatives || !initiativeCapability.Available {
 			m.initiativeCapability = kernelapi.Capability{}
+		}
+		if !hasActivity || !activityCapability.Available {
+			m.activityCapability = kernelapi.Capability{}
 		}
 		if !hasClawHub || !clawHubCapability.Available || m.clawHubClient == nil {
 			m.clawHubCapability = kernelapi.Capability{}
@@ -1550,10 +1560,62 @@ func (m *Model) loadSourceMonitors() tea.Cmd {
 				if observationsErr != nil {
 					status.err = observationsErr
 				}
+				if checkpoint != nil && strings.TrimSpace(checkpoint.LastRunID) != "" && m.activityCapability.Supports(kernelapi.OperationList) {
+					page, activityErr := m.client.ListActivity(m.ctx, runtime.ActivityFeedRequest{
+						Scope: initiative.Scope, RunID: checkpoint.LastRunID, EventTypes: []string{"source_policy.authorized"}, Limit: 25, IncludeDetails: true,
+					})
+					if activityErr != nil {
+						status.policyErr = activityErr
+					} else {
+						status.policyDecision, status.policyAuthorizedAt = sourcePolicyDecisionForMonitor(page, monitor.ID)
+					}
+				}
 				statuses[key] = status
 			}
 		}
 		return sourceMonitorsLoaded{statuses: statuses}
+	}
+}
+
+func sourcePolicyDecisionForMonitor(page *runtime.ActivityFeedPage, monitorID string) (*source.PolicyDecision, time.Time) {
+	if page == nil {
+		return nil, time.Time{}
+	}
+	for _, event := range page.Items {
+		if event.EventType != "source_policy.authorized" || stringPayload(event.Payload, "monitorId") != monitorID {
+			continue
+		}
+		maximumItems, ok := integerPayload(event.Payload, "maximumItems")
+		if !ok {
+			continue
+		}
+		decision := &source.PolicyDecision{
+			PolicyID: stringPayload(event.Payload, "policyId"), PolicyVersion: stringPayload(event.Payload, "policyVersion"),
+			SourceHost: stringPayload(event.Payload, "sourceHost"), PathPrefix: stringPayload(event.Payload, "pathPrefix"), MaximumItems: maximumItems,
+		}
+		if decision.PolicyID == "" || decision.PolicyVersion == "" || decision.SourceHost == "" || decision.PathPrefix == "" || decision.MaximumItems < 1 {
+			continue
+		}
+		return decision, event.CreatedAt
+	}
+	return nil, time.Time{}
+}
+
+func stringPayload(payload map[string]interface{}, key string) string {
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func integerPayload(payload map[string]interface{}, key string) (int, bool) {
+	switch value := payload[key].(type) {
+	case int:
+		return value, true
+	case int64:
+		return int(value), int64(int(value)) == value
+	case float64:
+		return int(value), value == float64(int(value))
+	default:
+		return 0, false
 	}
 }
 

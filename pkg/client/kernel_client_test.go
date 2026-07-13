@@ -49,6 +49,10 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !initiativeCapability.Supports(kernelapi.OperationPatch) {
 		t.Fatalf("initiative capabilities: %#v", document)
 	}
+	activityCapability, ok := document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
+	if !ok || !activityCapability.Supports(kernelapi.OperationList) {
+		t.Fatalf("activity capabilities: %#v", document)
+	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	objective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
@@ -70,6 +74,29 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 	if created.Run == nil || created.Run.Revision != 1 || created.Run.Budget == nil || created.Run.Budget.MaxTurns != 24 {
 		t.Fatalf("unexpected create result: %#v", created)
+	}
+	if err := store.CreateInitiative(ctx, &runtime.Initiative{
+		ID: "initiative-client", Scope: scope, Owner: owner, Title: "Client research", Purpose: "Collect evidence", Status: runtime.InitiativeStatusActive,
+		ObjectiveRefs: []string{objective.ID}, Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.NewRunActivityService(store, store).AppendActivity(ctx, &runtime.ActivityEvent{
+		ID: "source-policy-client", Scope: scope, InitiativeID: "initiative-client", RunID: created.Run.ID,
+		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo,
+		Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"}, Summary: "Source access authorized by policy",
+		Payload:    map[string]interface{}{"monitorId": "monitor-client", "sourceHost": "www.reddit.com", "maximumItems": 5},
+		Visibility: runtime.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	activity, err := client.ListActivity(ctx, runtime.ActivityFeedRequest{
+		Scope: scope, RunID: created.Run.ID, EventTypes: []string{"source_policy.authorized"},
+		Severities: []runtime.ActivitySeverity{runtime.ActivitySeverityInfo}, Visibilities: []runtime.ActivityVisibility{runtime.ActivityVisibilityScope},
+		Limit: 5, IncludeDetails: true,
+	})
+	if err != nil || len(activity.Items) == 0 || activity.Items[0].InitiativeID != "initiative-client" || activity.Items[0].Payload["sourceHost"] != "www.reddit.com" {
+		t.Fatalf("activity = %#v, %v", activity, err)
 	}
 
 	replayed, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{

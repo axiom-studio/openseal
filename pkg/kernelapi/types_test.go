@@ -39,6 +39,18 @@ func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	}
 }
 
+func TestActivityCapabilityIsReadOnlyAndSelectorBounded(t *testing.T) {
+	capability := ActivityCapability()
+	if capability.ID != ActivityCapabilityID || capability.Version != ActivityCapabilityVersion || !capability.Supports(OperationList) {
+		t.Fatalf("activity capability = %#v", capability)
+	}
+	for _, operation := range []string{OperationCreate, OperationUpdate, OperationStream} {
+		if capability.Supports(operation) {
+			t.Fatalf("activity capability advertised mutation %q: %#v", operation, capability.Operations)
+		}
+	}
+}
+
 func TestAgentRequestsAdvertisePortableCollaborationLifecycle(t *testing.T) {
 	capability := AgentRequestsCapability()
 	if capability.ID != AgentRequestsCapabilityID || capability.Version != AgentRequestsCapabilityVersion {
