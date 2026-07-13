@@ -545,6 +545,44 @@ func TestChangeSetApprovalRejectionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestChangeSetApprovalSeparationGroupRequiresDifferentPrincipals(t *testing.T) {
+	store := NewMemoryChangeSetStore()
+	now := time.Now().UTC()
+	evaluation := ChangeSetEvaluation{ID: "evaluation", CandidateDigest: "candidate", Allowed: true,
+		ApprovalRequirements: []ChangeSetApprovalRequirement{
+			{PolicyID: "production", Role: "tenant:admin", Count: 1, SeparationGroup: "production-release"},
+			{PolicyID: "production", Role: "role-group:security-reviewer", Count: 1, SeparationGroup: "production-release"},
+		}}
+	value := &ChangeSet{ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, CandidateDigest: "candidate",
+		Status: ChangeSetAwaitingApproval, Evaluations: []ChangeSetEvaluation{evaluation}, Revision: 2, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	service := &ChangeSetService{store: store, now: func() time.Time { return now.Add(time.Minute) }}
+	first, _, err := service.ResolveApproval(context.Background(), ResolveChangeSetApprovalRequest{
+		Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: 2, EvaluationID: evaluation.ID,
+		PolicyID: "production", Role: "tenant:admin", Approved: true,
+		Actor: ChangeSetActor{Type: "user", ID: "alice"}, IdempotencyKey: "alice-admin",
+	})
+	if err != nil || first.Status != ChangeSetAwaitingApproval {
+		t.Fatalf("first approval = %#v err=%v", first, err)
+	}
+	samePrincipal := ResolveChangeSetApprovalRequest{
+		Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: 3, EvaluationID: evaluation.ID,
+		PolicyID: "production", Role: "role-group:security-reviewer", Approved: true,
+		Actor: ChangeSetActor{Type: "user", ID: "alice"}, IdempotencyKey: "alice-security",
+	}
+	if _, _, err = service.ResolveApproval(context.Background(), samePrincipal); !errors.Is(err, ErrChangeSetTransition) {
+		t.Fatalf("same principal separation approval = %v", err)
+	}
+	samePrincipal.Actor.ID = "bob"
+	samePrincipal.IdempotencyKey = "bob-security"
+	ready, _, err := service.ResolveApproval(context.Background(), samePrincipal)
+	if err != nil || ready.Status != ChangeSetReady || len(ready.ApprovalDecisions) != 2 {
+		t.Fatalf("separated approval = %#v err=%v", ready, err)
+	}
+}
+
 func jsonMarshal(value interface{}) ([]byte, error) {
 	return json.Marshal(value)
 }
