@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	Version                             = "1"
+	APIVersion                          = "agent-kernel/v1"
 	AgentRunsCapabilityID               = "agent-runs"
 	AgentRunsCapabilityVersion          = "1"
 	ObjectivesCapabilityID              = "objectives"
@@ -75,7 +75,7 @@ const (
 // CapabilityDocument is the authoritative product surface advertised by an
 // OpenSeal server. Clients must not infer operations that are absent here.
 type CapabilityDocument struct {
-	Version      string       `json:"version"`
+	APIVersion   string       `json:"apiVersion"`
 	Capabilities []Capability `json:"capabilities"`
 }
 
@@ -213,10 +213,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return CapabilityDocument{
-		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability()},
-	}
+	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability())
 }
 
 func AgentDefinitionsCapability() Capability {
@@ -284,7 +281,7 @@ func WorkforceAuthoringCapability(changeSets ...bool) Capability {
 }
 
 func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
-	return CapabilityDocument{Version: Version, Capabilities: append([]Capability(nil), capabilities...)}
+	return CapabilityDocument{APIVersion: APIVersion, Capabilities: append([]Capability(nil), capabilities...)}
 }
 
 // CreateAgentRunRequest is the public request body for canonical durable work.

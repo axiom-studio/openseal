@@ -367,8 +367,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.ready = false
 			return m, nil
 		}
-		if msg.document.Version != kernelapi.Version {
-			m.unavailable = fmt.Sprintf("Server contract v%s is not supported by this TUI (requires v%s).", msg.document.Version, kernelapi.Version)
+		if msg.document.APIVersion != kernelapi.APIVersion {
+			m.unavailable = fmt.Sprintf("Server contract %s is not supported by this TUI (requires %s).", msg.document.APIVersion, kernelapi.APIVersion)
 			m.ready = false
 			return m, nil
 		}

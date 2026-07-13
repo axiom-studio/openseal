@@ -1,9 +1,23 @@
 package kernelapi
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	document := Capabilities()
+	if document.APIVersion != APIVersion {
+		t.Fatalf("capability API version = %q", document.APIVersion)
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"apiVersion":"agent-kernel/v1"`) || strings.Contains(string(encoded), `"version":"1","capabilities"`) {
+		t.Fatalf("capability document envelope = %s", encoded)
+	}
 	capability, ok := document.Find(AgentRunsCapabilityID, AgentRunsCapabilityVersion)
 	if !ok {
 		t.Fatal("agent run capability was not advertised")
