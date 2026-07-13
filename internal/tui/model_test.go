@@ -751,6 +751,29 @@ func TestPromptFirstAgentRequestCreationUsesSelectedRunAndIdempotency(t *testing
 	}
 }
 
+func TestAgentRequestComposerRejectsTerminalSourceWork(t *testing.T) {
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.AgentRequestsCapability()),
+		runs:     []*runtime.AgentRun{testRun("finished-source", runtime.AgentRunStatusCompleted, 5)},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section, model.focus = sectionRequests, focusPanel
+	view := model.View()
+	if strings.Contains(view, "n request from selected Work") {
+		t.Fatalf("terminal source advertised request creation:\n%s", view)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if model.mode == modeRequestCreate {
+		t.Fatalf("terminal source opened request composer")
+	}
+	model.mode = modeRequestCreate
+	model.editor.SetValue("agent:marketing\nPrepare a follow-up")
+	if command := model.submitAgentRequestCreation(); command != nil || len(fake.agentRequestCreates) != 0 || !strings.Contains(model.status, "Start or resume active work") {
+		t.Fatalf("terminal submission command=%v creates=%#v status=%q", command, fake.agentRequestCreates, model.status)
+	}
+}
+
 func TestAgentRequestPromptRejectsAmbiguousRecipients(t *testing.T) {
 	for _, prompt := range []string{"researcher\nDo work", "user:alice\nDo work", "agent:researcher", "agent:\nDo work"} {
 		if _, _, _, err := parseAgentRequestPrompt(prompt); err == nil {

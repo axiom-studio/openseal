@@ -1097,7 +1097,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedConversation()
 			}
 		case "n":
-			if m.section == sectionRequests && m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil {
+			if m.section == sectionRequests && m.canCreateAgentRequestFromSelectedRun() {
 				m.mode = modeRequestCreate
 				m.editor.Reset()
 				m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
@@ -1706,6 +1706,10 @@ func (m *Model) submitAgentRequestCreation() tea.Cmd {
 	source := m.selectedRun()
 	prompt := strings.TrimSpace(m.editor.Value())
 	if source == nil || m.busy || !m.supportsAgentRequest(kernelapi.OperationCreate) {
+		return nil
+	}
+	if !runtime.CanStartAgentRequestFromRun(source) {
+		m.status = "Start or resume active work before requesting collaboration from it."
 		return nil
 	}
 	kind, recipient, goal, err := parseAgentRequestPrompt(prompt)
@@ -2756,7 +2760,7 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeRequestComplete
 		m.editor.Placeholder = "Summarize the completed outcome…"
 		m.focusComposerEditor()
-	case m.section == sectionRequests && m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil:
+	case m.section == sectionRequests && m.canCreateAgentRequestFromSelectedRun():
 		m.mode = modeRequestCreate
 		m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
 		m.focusComposerEditor()
@@ -2798,7 +2802,7 @@ func (m *Model) resetComposerMode() {
 		return
 	}
 	if m.section == sectionRequests {
-		if m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil {
+		if m.canCreateAgentRequestFromSelectedRun() {
 			m.mode = modeRequestCreate
 			m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
 		} else {
@@ -2814,6 +2818,10 @@ func (m *Model) resetComposerMode() {
 	}
 	m.mode = modeCreate
 	m.editor.Placeholder = "Describe the outcome you want…"
+}
+
+func (m *Model) canCreateAgentRequestFromSelectedRun() bool {
+	return m.supportsAgentRequest(kernelapi.OperationCreate) && runtime.CanStartAgentRequestFromRun(m.selectedRun())
 }
 
 func agentRequestDecisionLabel(decision runtime.AgentRequestDecision) string {

@@ -52,8 +52,8 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	request.IdempotencyKey = "second-launch-copy"
 	request.Recipient.ID = "marketing-two"
 	request.BudgetAllocation = &BudgetPolicy{MaxTurns: 7, MaxTotalTokens: 300, MaxCostMicros: 200_000}
-	if _, err := service.CreateAgentRequest(ctx, request); err == nil || !strings.Contains(err.Error(), "exceeds parent remaining capacity") {
-		t.Fatalf("sequential over-allocation error = %v", err)
+	if _, err := service.CreateAgentRequest(ctx, request); err == nil || !strings.Contains(err.Error(), "source run cannot start collaboration") {
+		t.Fatalf("unsafe sequential fan-out error = %v", err)
 	}
 }
 

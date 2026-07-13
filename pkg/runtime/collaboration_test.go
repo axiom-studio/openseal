@@ -238,6 +238,97 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	}
 }
 
+func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		run  *AgentRun
+		want bool
+	}{
+		{name: "queued", run: &AgentRun{Status: AgentRunStatusQueued}, want: true},
+		{name: "planning", run: &AgentRun{Status: AgentRunStatusPlanning}, want: true},
+		{name: "running", run: &AgentRun{Status: AgentRunStatusRunning}, want: true},
+		{name: "already waiting", run: &AgentRun{Status: AgentRunStatusRunning, WakeCondition: &WakeCondition{Type: "event"}}},
+		{name: "paused", run: &AgentRun{Status: AgentRunStatusPaused}},
+		{name: "completed", run: &AgentRun{Status: AgentRunStatusCompleted}},
+		{name: "failed", run: &AgentRun{Status: AgentRunStatusFailed}},
+		{name: "canceled", run: &AgentRun{Status: AgentRunStatusCanceled}},
+		{name: "missing run"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := CanStartAgentRequestFromRun(test.run); got != test.want {
+				t.Fatalf("CanStartAgentRequestFromRun() = %t, want %t", got, test.want)
+			}
+		})
+	}
+
+	store := NewMemoryStore(100)
+	portfolio := NewPortfolioService(store)
+	activity := NewRunActivityService(store, store)
+	service := NewCollaborationService(store)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "acme"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}
+	recipient := CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}
+
+	terminal, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Already shipped", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, _, err = activity.TransitionRun(ctx, scope, terminal.ID, RunTransitionRequest{ExpectedRevision: terminal.Revision, Status: AgentRunStatusRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, _, err = activity.TransitionRun(ctx, scope, terminal.ID, RunTransitionRequest{ExpectedRevision: terminal.Revision, Status: AgentRunStatusCompleted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []AgentRequestKind{AgentRequestKindRequest, AgentRequestKindHandoff} {
+		_, createErr := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+			Scope: scope, Kind: kind, SourceRunID: terminal.ID,
+			Requester: CollaborationParty(owner), Recipient: recipient, Goal: "Start follow-up",
+		})
+		if !errors.Is(createErr, ErrInvalidAgentRequestState) || !strings.Contains(createErr.Error(), "completed") {
+			t.Fatalf("create %s from terminal source error = %v", kind, createErr)
+		}
+	}
+
+	active, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Ship next release", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: active.ID,
+		Requester: CollaborationParty(owner), Recipient: recipient, Goal: "Prepare the release brief",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, _, err = activity.TransitionRun(ctx, scope, active.ID, RunTransitionRequest{ExpectedRevision: active.Revision, Status: AgentRunStatusRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = activity.TransitionRun(ctx, scope, active.ID, RunTransitionRequest{ExpectedRevision: active.Revision, Status: AgentRunStatusCompleted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: recipient,
+	})
+	if !errors.Is(err, ErrInvalidAgentRequestState) || !strings.Contains(err.Error(), "completed") {
+		t.Fatalf("accept after source completion error = %v", err)
+	}
+	restored, err := service.GetAgentRequest(ctx, scope, created.Request.ID)
+	if err != nil || restored.Status != AgentRequestStatusPending || restored.ChildRunID != "" {
+		t.Fatalf("request mutated after rejected acceptance: %#v, %v", restored, err)
+	}
+}
+
 func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryStore(10)
