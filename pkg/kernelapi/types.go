@@ -34,6 +34,8 @@ const (
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
 	AgentDefinitionsCapabilityVersion   = "2"
+	AgentRequestsCapabilityID           = "agent-requests"
+	AgentRequestsCapabilityVersion      = "1"
 )
 
 const (
@@ -49,6 +51,8 @@ const (
 	OperationUpload            = "upload"
 	OperationDownload          = "download"
 	OperationResolve           = "resolve"
+	OperationRespond           = "respond"
+	OperationComplete          = "complete"
 	OperationPost              = "post"
 	OperationCoordinate        = "coordinate"
 	OperationRead              = "read"
@@ -226,6 +230,15 @@ func Capabilities() CapabilityDocument {
 
 func AgentDefinitionsCapability() Capability {
 	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationListCompilations}}
+}
+
+// AgentRequestsCapability describes the portable collaboration lifecycle used
+// by Agents and Teams to request work, hand it off, and return a durable result.
+func AgentRequestsCapability() Capability {
+	return Capability{
+		ID: AgentRequestsCapabilityID, Version: AgentRequestsCapabilityVersion, Available: true,
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationRespond, OperationComplete},
+	}
 }
 
 func ArtifactCapability(contentOperations ...string) Capability {

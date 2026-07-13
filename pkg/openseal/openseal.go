@@ -513,6 +513,8 @@ const (
 	KernelOperationUpload                   = kernelapi.OperationUpload
 	KernelOperationDownload                 = kernelapi.OperationDownload
 	KernelOperationResolve                  = kernelapi.OperationResolve
+	KernelOperationRespond                  = kernelapi.OperationRespond
+	KernelOperationComplete                 = kernelapi.OperationComplete
 	KernelOperationPropose                  = kernelapi.OperationPropose
 	KernelOperationEvaluate                 = kernelapi.OperationEvaluate
 	KernelOperationApprove                  = kernelapi.OperationApprove
@@ -573,6 +575,10 @@ func SourceMonitorsCapability() KernelCapability {
 
 func AgentDefinitionsCapability() KernelCapability {
 	return kernelapi.AgentDefinitionsCapability()
+}
+
+func AgentRequestsCapability() KernelCapability {
+	return kernelapi.AgentRequestsCapability()
 }
 
 func ArtifactsCapability(contentOperations ...string) KernelCapability {

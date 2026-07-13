@@ -39,6 +39,21 @@ func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	}
 }
 
+func TestAgentRequestsAdvertisePortableCollaborationLifecycle(t *testing.T) {
+	capability := AgentRequestsCapability()
+	if capability.ID != AgentRequestsCapabilityID || capability.Version != AgentRequestsCapabilityVersion {
+		t.Fatalf("agent request capability identity = %#v", capability)
+	}
+	for _, operation := range []string{OperationCreate, OperationGet, OperationList, OperationRespond, OperationComplete} {
+		if !capability.Supports(operation) {
+			t.Fatalf("agent request operation %q not advertised: %#v", operation, capability.Operations)
+		}
+	}
+	if capability.Supports(OperationResolve) || capability.Supports("delete") {
+		t.Fatalf("unsupported agent request operation advertised: %#v", capability.Operations)
+	}
+}
+
 func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *testing.T) {
 	capability := ArtifactCapability()
 	if !capability.Supports(OperationRegister) || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {
