@@ -126,6 +126,12 @@ type (
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
+	WorkforceInitiativeBlueprint              = authoring.InitiativeBlueprint
+	WorkforceInitiativeOwnerReference         = authoring.InitiativeOwnerReference
+	WorkforceInitiativeMilestoneBlueprint     = authoring.InitiativeMilestoneBlueprint
+	WorkforceInitiativeHypothesisBlueprint    = authoring.InitiativeHypothesisBlueprint
+	WorkforceInitiativeSourceMonitorBlueprint = authoring.InitiativeSourceMonitorBlueprint
+	WorkforceInitiativeDeliverableBlueprint   = authoring.InitiativeDeliverableBlueprint
 	WorkforceAuthoringRequest                 = authoring.GenerateRequest
 	WorkforceAuthoringGenerator               = authoring.Generator
 	WorkforceAuthoringResult                  = authoring.CompileResult
@@ -777,16 +783,21 @@ func NewSkillSourceWatcher(catalog *skillsource.Catalog, roots []skillsource.Roo
 }
 
 const (
-	WorkforceAuthoringCreate           = authoring.ModeCreate
-	WorkforceAuthoringAmend            = authoring.ModeAmend
-	WorkforceChangeSetBlocked          = authoring.ChangeSetBlocked
-	WorkforceChangeSetReview           = authoring.ChangeSetReview
-	WorkforceChangeSetEvaluating       = authoring.ChangeSetEvaluating
-	WorkforceChangeSetAwaitingApproval = authoring.ChangeSetAwaitingApproval
-	WorkforceChangeSetReady            = authoring.ChangeSetReady
-	WorkforceChangeSetApplied          = authoring.ChangeSetApplied
-	WorkforceChangeSetRejected         = authoring.ChangeSetRejected
-	WorkforceChangeSetFailed           = authoring.ChangeSetFailed
+	WorkforceAuthoringCreate                             = authoring.ModeCreate
+	WorkforceAuthoringAmend                              = authoring.ModeAmend
+	WorkforceChangeSetBlocked                            = authoring.ChangeSetBlocked
+	WorkforceChangeSetReview                             = authoring.ChangeSetReview
+	WorkforceChangeSetEvaluating                         = authoring.ChangeSetEvaluating
+	WorkforceChangeSetAwaitingApproval                   = authoring.ChangeSetAwaitingApproval
+	WorkforceChangeSetReady                              = authoring.ChangeSetReady
+	WorkforceChangeSetApplied                            = authoring.ChangeSetApplied
+	WorkforceChangeSetRejected                           = authoring.ChangeSetRejected
+	WorkforceChangeSetFailed                             = authoring.ChangeSetFailed
+	WorkforceInitiativeOwnerAgent                        = authoring.InitiativeOwnerAgent
+	WorkforceInitiativeOwnerTeam                         = authoring.InitiativeOwnerTeam
+	WorkforceInitiativeDeduplicateStableSource           = authoring.InitiativeDeduplicateStableSource
+	WorkforceInitiativeDeduplicateContentDigest          = authoring.InitiativeDeduplicateContentDigest
+	WorkforceInitiativeDeduplicateStableSourceAndContent = authoring.InitiativeDeduplicateStableSourceAndContent
 
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
