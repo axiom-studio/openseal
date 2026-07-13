@@ -104,6 +104,11 @@ type Capability struct {
 	Context    *CapabilityContext `json:"context,omitempty"`
 }
 
+type SkillActionList struct {
+	DeploymentID string                   `json:"deploymentId"`
+	Actions      []capability.ModelAction `json:"actions"`
+}
+
 // ChannelCapabilityFeatures describes the optional channel services wired by
 // a host. The version and operation vocabulary are canonical; each host
 // advertises only the portable or enterprise adapters it has actually wired.

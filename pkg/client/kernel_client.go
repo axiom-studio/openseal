@@ -56,6 +56,7 @@ type KernelClient interface {
 	GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
 	ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error)
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
+	ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
 	GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error)
@@ -135,6 +136,27 @@ func (c *KernelHTTPClient) ListAgentDefinitionCompilations(ctx context.Context, 
 		return nil, err
 	}
 	return values, nil
+}
+
+// ListAgentSkillActions returns the exact, secret-safe Skill bindings an Agent
+// may present to a model or operator. Semantic roles let callers select by
+// portable intent instead of guessing action-specific argument names.
+func (c *KernelHTTPClient) ListAgentSkillActions(ctx context.Context, scope capability.ScopeReference, deploymentID string, semanticRoles []string, sideEffect capability.SideEffect) (*kernelapi.SkillActionList, error) {
+	query := capabilityScopeQuery(scope)
+	for _, role := range semanticRoles {
+		if role = strings.TrimSpace(role); role != "" {
+			query.Add("semanticRole", role)
+		}
+	}
+	if sideEffect != "" {
+		query.Set("sideEffect", string(sideEffect))
+	}
+	var result kernelapi.SkillActionList
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-actions?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (c *KernelHTTPClient) WorkforceChangeSetCapabilities(ctx context.Context, scope capability.ScopeReference, id string) (kernelapi.CapabilityDocument, error) {

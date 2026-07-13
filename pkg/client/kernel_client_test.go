@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"go.uber.org/zap"
@@ -210,6 +211,49 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 	compilations, err := client.ListAgentDefinitionCompilations(ctx, scope, "researcher")
 	if err != nil || len(compilations) != 1 || compilations[0].ID != "researcher-1" {
 		t.Fatalf("Agent compilations = %#v, %v", compilations, err)
+	}
+}
+
+func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "skills.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	catalog := skill.NewCatalogWithStore(store)
+	definition := &skill.Definition{
+		ID: "community", Version: "1", Name: "Community", Transport: skill.TransportReference{Kind: "remote-node"},
+		Actions: map[string]skill.Action{"reply": {
+			Name: "reply", Description: "Reply to a community thread", Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal,
+			Idempotency: skill.IdempotencyRequired, SemanticArguments: map[string]string{"target": "thread", "body": "message"},
+			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"thread": map[string]interface{}{"type": "string"}, "message": map[string]interface{}{"type": "string"},
+			}, "required": []interface{}{"thread", "message"}},
+		}},
+	}
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(context.Background(), &skill.Binding{
+		ID: "community-account", Scope: scope, DeploymentID: "researcher", SkillID: definition.ID, SkillVersion: definition.Version,
+		AllowedActions: []string{"reply"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+
+	result, err := NewKernelHTTPClient(httpServer.URL, httpServer.Client()).ListAgentSkillActions(
+		context.Background(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "researcher", []string{"target", "body"}, capability.SideEffectExternal,
+	)
+	if err != nil || result.DeploymentID != "researcher" || len(result.Actions) != 1 {
+		t.Fatalf("actions = %#v, %v", result, err)
+	}
+	action := result.Actions[0]
+	if action.BindingID != "community-account" || action.BindingRevision != 1 || action.SemanticArguments["target"] != "thread" {
+		t.Fatalf("action = %#v", action)
 	}
 }
 
