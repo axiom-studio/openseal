@@ -486,6 +486,8 @@ type (
 	AdvanceSourceMonitorCheckpointRequest = runtime.AdvanceSourceMonitorCheckpointRequest
 	SourceMonitorCheckpointResult         = runtime.SourceMonitorCheckpointResult
 	KernelCapability                      = kernelapi.Capability
+	KernelCapabilityContext               = kernelapi.CapabilityContext
+	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
 )
 
