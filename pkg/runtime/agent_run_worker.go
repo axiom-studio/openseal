@@ -402,10 +402,14 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	}
 	var selected *capability.ModelAction
 	for index := range binding.ModelActions {
-		if binding.ModelActions[index].Name == request.Capability {
-			selected = &binding.ModelActions[index]
-			break
+		candidate := &binding.ModelActions[index]
+		if candidate.Name != request.Capability || (request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision)) {
+			continue
 		}
+		if selected != nil {
+			return nil, fmt.Errorf("requested capability %q is ambiguous without an exact binding", request.Capability)
+		}
+		selected = candidate
 	}
 	if selected == nil {
 		return nil, fmt.Errorf("requested capability %q is not authorized", request.Capability)
@@ -420,6 +424,7 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	}
 	proposal, err := p.actions.Propose(ctx, ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: binding.DeploymentID,
+		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 		IdempotencyKey: idempotencyKey, Summary: request.Summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),

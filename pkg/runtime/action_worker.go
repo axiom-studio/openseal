@@ -14,7 +14,7 @@ import (
 )
 
 type ActionExecutionCatalog interface {
-	Resolve(context.Context, skill.ScopeReference, string, string, string, string) (*skill.BoundAction, error)
+	Resolve(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundAction, error)
 	ValidateInput(context.Context, *skill.BoundAction, map[string]interface{}) error
 	ValidateOutput(context.Context, *skill.BoundAction, map[string]interface{}) error
 }
@@ -85,7 +85,11 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		return nil, err
 	}
 	executionCtx, stopLease := w.holdActionLease(ctx, call, workerID, leaseDuration)
-	bound, executionErr := w.catalog.Resolve(executionCtx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action)
+	selection := []skill.BindingReference(nil)
+	if call.BindingID != "" || call.BindingRevision != 0 {
+		selection = append(selection, skill.BindingReference{ID: call.BindingID, Revision: call.BindingRevision})
+	}
+	bound, executionErr := w.catalog.Resolve(executionCtx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 	if executionErr == nil {
 		executionErr = w.catalog.ValidateInput(executionCtx, bound, call.Arguments)
 	}
@@ -251,7 +255,8 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 			checkpoint = make(map[string]interface{})
 		}
 		lastAction := map[string]interface{}{
-			"actionCallId": call.ID, "skillId": call.SkillID, "skillVersion": call.SkillVersion,
+			"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision,
+			"skillId": call.SkillID, "skillVersion": call.SkillVersion,
 			"action": call.Action, "status": updatedCall.Status,
 		}
 		if updatedCall.Status == ActionCallStatusSucceeded {
@@ -266,7 +271,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		ID: w.newID(), Scope: call.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
 		AgentID: call.DeploymentID, ObjectiveID: sourceRun.ObjectiveID, TeamID: teamIDForRun(sourceRun), RunID: call.RunID, TurnID: call.TurnID, Actor: ActivityActor{Type: "worker", ID: workerID},
 		Summary: summary, Visibility: ActivityVisibilityScope, CausationID: call.ID, CreatedAt: now,
-		Payload: map[string]interface{}{"actionCallId": call.ID, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
+		Payload: map[string]interface{}{"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
 	}
 	return w.store.PersistActionExecution(ctx, ActionExecutionRecord{
 		Call: updatedCall, ExpectedCallRevision: call.Revision, Run: updatedRun, ExpectedRunRevision: expectedRunRevision,

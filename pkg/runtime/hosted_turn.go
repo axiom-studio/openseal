@@ -330,6 +330,12 @@ func cloneHostedModelActions(values []capability.ModelAction) []capability.Model
 	for index, value := range values {
 		result[index] = value
 		result[index].InputSchema = cloneMap(value.InputSchema)
+		if value.SemanticArguments != nil {
+			result[index].SemanticArguments = make(map[string]string, len(value.SemanticArguments))
+			for role, argument := range value.SemanticArguments {
+				result[index].SemanticArguments[role] = argument
+			}
+		}
 	}
 	return result
 }

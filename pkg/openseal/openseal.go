@@ -403,6 +403,7 @@ type (
 	SkillDefinition                    = skill.Definition
 	SkillAction                        = skill.Action
 	SkillBinding                       = skill.Binding
+	SkillBindingReference              = skill.BindingReference
 	SkillScope                         = skill.ScopeReference
 	SkillRiskLevel                     = skill.RiskLevel
 	SkillSideEffect                    = skill.SideEffect
@@ -2593,6 +2594,10 @@ func (e *Engine) ResolveSkillPrompt(ctx context.Context, scope skill.ScopeRefere
 
 func (e *Engine) ResolveSkillAction(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string) (*skill.BoundAction, error) {
 	return e.skills.Resolve(ctx, scope, deploymentID, skillID, version, action)
+}
+
+func (e *Engine) ResolveExactSkillAction(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string, binding skill.BindingReference) (*skill.BoundAction, error) {
+	return e.skills.Resolve(ctx, scope, deploymentID, skillID, version, action, binding)
 }
 
 func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {

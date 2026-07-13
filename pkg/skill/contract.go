@@ -28,6 +28,7 @@ type ScopeReference = capability.ScopeReference
 type ModelAction = capability.ModelAction
 type ModelPrompt = capability.ModelPrompt
 type BoundAction = capability.BoundAction
+type BindingReference = capability.BindingReference
 
 const (
 	RiskLevelRead        = capability.RiskLevelRead
@@ -177,8 +178,10 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 			action := definition.Actions[name]
 			result = append(result, ModelAction{
 				Name: definition.ID + "." + name, Description: action.Description,
+				BindingID: binding.ID, BindingRevision: binding.Revision,
 				SkillID: definition.ID, Version: definition.Version, Action: name,
-				InputSchema: cloneMap(action.InputSchema), Risk: action.Risk, SideEffect: action.SideEffect,
+				InputSchema: cloneMap(action.InputSchema), SemanticArguments: cloneStringMap(action.SemanticArguments),
+				Risk: action.Risk, SideEffect: action.SideEffect,
 			})
 		}
 	}
@@ -244,9 +247,12 @@ func (c *Catalog) ResolvePrompt(ctx context.Context, scope ScopeReference, deplo
 	return nil, errors.New("bound skill prompt not found")
 }
 
-func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentID, skillID, version, actionName string) (*BoundAction, error) {
+func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentID, skillID, version, actionName string, selected ...BindingReference) (*BoundAction, error) {
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
 		return nil, err
+	}
+	if len(selected) > 1 || (len(selected) == 1 && (strings.TrimSpace(selected[0].ID) == "" || selected[0].Revision < 1)) {
+		return nil, errors.New("an exact binding id and revision are required")
 	}
 	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
 	if err != nil {
@@ -255,6 +261,9 @@ func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentI
 	for _, binding := range bindings {
 		if binding.Disabled || binding.SkillID != skillID || binding.SkillVersion != version ||
 			!containsString(binding.AllowedActions, actionName) {
+			continue
+		}
+		if len(selected) == 1 && (binding.ID != selected[0].ID || binding.Revision != selected[0].Revision) {
 			continue
 		}
 		definition, err := c.definitionFor(ctx, skillID, version)
@@ -266,6 +275,9 @@ func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentI
 		}
 		copy := cloneDefinition(definition)
 		return &BoundAction{Definition: copy, Action: copy.Actions[actionName], Binding: cloneBinding(binding)}, nil
+	}
+	if len(selected) == 1 {
+		return nil, errors.New("selected skill binding is unavailable or stale")
 	}
 	return nil, errors.New("bound skill action not found")
 }
@@ -492,6 +504,16 @@ func validateDefinition(definition *Definition) error {
 			return fmt.Errorf("skill action %s requires an action or definition transport", name)
 		}
 		properties, _ := action.InputSchema["properties"].(map[string]interface{})
+		seenSemanticArguments := make(map[string]bool, len(action.SemanticArguments))
+		for role, argument := range action.SemanticArguments {
+			if !validSemanticRole(role) || strings.TrimSpace(argument) == "" || seenSemanticArguments[argument] {
+				return fmt.Errorf("skill action %s has invalid or duplicate semantic argument %q", name, role)
+			}
+			if _, ok := properties[argument]; !ok {
+				return fmt.Errorf("skill action %s semantic argument %s references unknown input %s", name, role, argument)
+			}
+			seenSemanticArguments[argument] = true
+		}
 		for argument, mapping := range transport.Arguments {
 			if strings.TrimSpace(argument) == "" || (mapping.SourceArgument == "" && mapping.Literal == nil) || (mapping.SourceArgument != "" && mapping.Literal != nil) {
 				return fmt.Errorf("skill action %s has invalid transport argument mapping %q", name, argument)
@@ -633,4 +655,28 @@ func containsString(values []string, expected string) bool {
 		}
 	}
 	return false
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
+}
+
+func validSemanticRole(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
 }

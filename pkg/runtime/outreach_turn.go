@@ -106,6 +106,7 @@ func (r *OutreachTurnRunner) RunTurn(ctx context.Context, input TurnExecutionCon
 		Decisions: []TurnDecision{{Summary: "Selected the reviewed outreach action and immutable source evidence", EvidenceRefs: []string{thread.SourceObservationID}}},
 		ProposedActions: []TurnAction{{
 			Type: "skill_action", Capability: selected.Name, Summary: "Deliver reviewed outreach message",
+			BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 			IdempotencyKey: "outreach:" + thread.ID + ":" + message.ID, InputRef: "/outreachActionInputs/reviewed",
 			EvidenceRefs: []string{thread.SourceObservationID},
 		}},
@@ -116,7 +117,8 @@ func (r *OutreachTurnRunner) RunTurn(ctx context.Context, input TurnExecutionCon
 
 func (r *OutreachTurnRunner) consumeAction(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage, selected *capability.ModelAction, checkpoint map[string]interface{}, last map[string]interface{}) (*TurnOutcome, error) {
 	actionID, _ := last["actionCallId"].(string)
-	if strings.TrimSpace(actionID) == "" || last["skillId"] != selected.SkillID || last["skillVersion"] != selected.Version || last["action"] != selected.Action {
+	if strings.TrimSpace(actionID) == "" || (selected.BindingID != "" && (last["bindingId"] != selected.BindingID || fmt.Sprint(last["bindingRevision"]) != fmt.Sprint(selected.BindingRevision))) ||
+		last["skillId"] != selected.SkillID || last["skillVersion"] != selected.Version || last["action"] != selected.Action {
 		return nil, errors.New("durable action result does not match the reviewed outreach capability")
 	}
 	status, _ := last["status"].(string)
@@ -152,7 +154,8 @@ func selectOutreachAction(actions []capability.ModelAction, requested *OutreachC
 	var selected *capability.ModelAction
 	for index := range actions {
 		candidate := &actions[index]
-		if candidate.SkillID == requested.SkillID && candidate.Version == requested.SkillVersion && candidate.Action == requested.Action {
+		if candidate.SkillID == requested.SkillID && candidate.Version == requested.SkillVersion && candidate.Action == requested.Action &&
+			(requested.BindingID == "" || (candidate.BindingID == requested.BindingID && candidate.BindingRevision == requested.BindingRevision)) {
 			if selected != nil {
 				return nil, errors.New("outreach capability matches multiple authorized actions")
 			}
