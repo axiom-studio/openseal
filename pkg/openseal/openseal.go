@@ -175,6 +175,8 @@ type (
 	ObjectiveRunTemplate               = runtime.ObjectiveRunTemplate
 	ObjectiveCapabilityInvocation      = runtime.ObjectiveCapabilityInvocation
 	ObjectiveScheduleResult            = runtime.ObjectiveScheduleResult
+	ObjectiveScheduleState             = runtime.ObjectiveScheduleState
+	ObjectiveScheduleCondition         = runtime.ObjectiveScheduleCondition
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	Initiative                         = runtime.Initiative
 	InitiativeStatus                   = runtime.InitiativeStatus
@@ -788,15 +790,18 @@ const (
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
 
-	ObjectiveStatusDraft     = runtime.ObjectiveStatusDraft
-	ObjectiveStatusActive    = runtime.ObjectiveStatusActive
-	ObjectiveStatusPaused    = runtime.ObjectiveStatusPaused
-	ObjectiveStatusSatisfied = runtime.ObjectiveStatusSatisfied
-	ObjectiveStatusFailed    = runtime.ObjectiveStatusFailed
-	ObjectiveStatusRetired   = runtime.ObjectiveStatusRetired
-	ObjectiveCadenceInterval = runtime.ObjectiveCadenceInterval
-	ObjectiveCadenceDaily    = runtime.ObjectiveCadenceDaily
-	ObjectiveCadenceWeekly   = runtime.ObjectiveCadenceWeekly
+	ObjectiveStatusDraft             = runtime.ObjectiveStatusDraft
+	ObjectiveStatusActive            = runtime.ObjectiveStatusActive
+	ObjectiveStatusPaused            = runtime.ObjectiveStatusPaused
+	ObjectiveStatusSatisfied         = runtime.ObjectiveStatusSatisfied
+	ObjectiveStatusFailed            = runtime.ObjectiveStatusFailed
+	ObjectiveStatusRetired           = runtime.ObjectiveStatusRetired
+	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
+	ObjectiveCadenceDaily            = runtime.ObjectiveCadenceDaily
+	ObjectiveCadenceWeekly           = runtime.ObjectiveCadenceWeekly
+	ObjectiveScheduleBackpressured   = runtime.ObjectiveScheduleBackpressured
+	ObjectiveScheduleSuspended       = runtime.ObjectiveScheduleSuspended
+	ObjectiveScheduleBudgetExhausted = runtime.ObjectiveScheduleBudgetExhausted
 
 	RunSourceManual          = runtime.RunSourceManual
 	RunSourceChat            = runtime.RunSourceChat

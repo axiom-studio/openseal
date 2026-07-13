@@ -16,6 +16,14 @@ func TestPublicFacadeExposesCanonicalActivityCapability(t *testing.T) {
 	}
 }
 
+func TestPublicFacadeExposesObjectiveScheduleConditions(t *testing.T) {
+	condition := ObjectiveScheduleCondition{State: ObjectiveScheduleBudgetExhausted, Reason: "Objective budget cannot allocate another Run", Since: time.Now(), UpdatedAt: time.Now()}
+	objective := Objective{ScheduleCondition: &condition}
+	if objective.ScheduleCondition.State != ObjectiveScheduleBudgetExhausted {
+		t.Fatalf("schedule condition = %#v", objective.ScheduleCondition)
+	}
+}
+
 func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := runtime.NewSQLiteStore(path)
