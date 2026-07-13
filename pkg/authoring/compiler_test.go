@@ -121,6 +121,23 @@ func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
 	}
 }
 
+func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
+	invalid := marketingCandidate("1", capability.RiskLevelRead)
+	invalid.Assignments[0].RoleID = "invented-role"
+	generated, _ := json.Marshal(GenerationResponse{Candidate: invalid, Questions: []string{"Would you prefer another role?"}})
+	repaired, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead), Assumptions: []string{"Used the declared researcher role."}})
+	generator := &repairingGenerator{generated: generated, repaired: repaired}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || !result.Valid || generator.repairs != 1 || len(result.Validation) != 0 || len(result.Questions) != 0 || len(result.Assumptions) != 1 {
+		t.Fatalf("contract-repaired result = %#v, repairs = %d, err = %v", result, generator.repairs, err)
+	}
+}
+
 func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testing.T) {
 	candidate := researchInitiativeCandidate()
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
