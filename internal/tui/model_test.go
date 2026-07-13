@@ -1394,6 +1394,26 @@ func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
 	}
 }
 
+func TestRunViewProjectsCanonicalParentLineage(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.runCapability = kernelapi.AgentRunsCapability()
+	child := testRun("child-run", runtime.AgentRunStatusCompleted, 4)
+	child.ParentRunID = "parent-run"
+	model.runs = []*runtime.AgentRun{child}
+	model.section = sectionRuns
+
+	view := model.renderRunsContent(100)
+	if !strings.Contains(view, "Parent Run parent-run") {
+		t.Fatalf("parent lineage missing:\n%s", view)
+	}
+
+	child.ParentRunID = ""
+	if view = model.renderRunsContent(100); strings.Contains(view, "Parent Run") {
+		t.Fatalf("root Run rendered false parent lineage:\n%s", view)
+	}
+}
+
 func TestContractMismatchFailsClosed(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.CapabilityDocument{APIVersion: "agent-kernel/v99"}}
 	model := newTestModel(t, fake)
