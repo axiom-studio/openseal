@@ -32,6 +32,13 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	}
 }
 
+func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
+	capability := AgentDefinitionsCapability()
+	if capability.Version != "2" || !capability.Supports("list-compilations") || capability.Supports("list_compilations") {
+		t.Fatalf("agent definition capability = %#v", capability)
+	}
+}
+
 func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *testing.T) {
 	capability := ArtifactCapability()
 	if !capability.Supports(OperationRegister) || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {
