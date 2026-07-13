@@ -27,7 +27,7 @@ const (
 	ChannelsCapabilityID                = "channels"
 	ChannelsCapabilityVersion           = "4"
 	TeamDefinitionsCapabilityID         = "team-definitions"
-	TeamDefinitionsCapabilityVersion    = "1"
+	TeamDefinitionsCapabilityVersion    = "2"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
 	WorkforceAuthoringCapabilityVersion = "2"
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
@@ -37,39 +37,43 @@ const (
 )
 
 const (
-	OperationCreate           = "create"
-	OperationGet              = "get"
-	OperationList             = "list"
-	OperationPause            = "pause"
-	OperationResume           = "resume"
-	OperationCancel           = "cancel"
-	OperationIntervene        = "intervene"
-	OperationUpdate           = "update"
-	OperationRegister         = "register"
-	OperationUpload           = "upload"
-	OperationDownload         = "download"
-	OperationResolve          = "resolve"
-	OperationPost             = "post"
-	OperationCoordinate       = "coordinate"
-	OperationRead             = "read"
-	OperationPresence         = "presence"
-	OperationAudit            = "audit"
-	OperationChanges          = "changes"
-	OperationReceipts         = "receipts"
-	OperationCoordinateAuto   = "coordinate-automatically"
-	OperationStream           = "stream"
-	OperationDeploy           = "deploy"
-	OperationActivate         = "activate"
-	OperationCompile          = "compile"
-	OperationPropose          = "propose"
-	OperationEvaluate         = "evaluate"
-	OperationApprove          = "approve"
-	OperationApply            = "apply"
-	OperationRetry            = "retry"
-	OperationPatch            = "patch"
-	OperationListCompilations = "list-compilations"
-	OperationListObservations = "list-observations"
-	OperationGetCheckpoint    = "get-checkpoint"
+	OperationCreate            = "create"
+	OperationGet               = "get"
+	OperationList              = "list"
+	OperationPause             = "pause"
+	OperationResume            = "resume"
+	OperationCancel            = "cancel"
+	OperationIntervene         = "intervene"
+	OperationUpdate            = "update"
+	OperationRegister          = "register"
+	OperationUpload            = "upload"
+	OperationDownload          = "download"
+	OperationResolve           = "resolve"
+	OperationPost              = "post"
+	OperationCoordinate        = "coordinate"
+	OperationRead              = "read"
+	OperationPresence          = "presence"
+	OperationAudit             = "audit"
+	OperationChanges           = "changes"
+	OperationReceipts          = "receipts"
+	OperationCoordinateAuto    = "coordinate-automatically"
+	OperationStream            = "stream"
+	OperationDeploy            = "deploy"
+	OperationActivate          = "activate"
+	OperationCompile           = "compile"
+	OperationPropose           = "propose"
+	OperationEvaluate          = "evaluate"
+	OperationApprove           = "approve"
+	OperationApply             = "apply"
+	OperationRetry             = "retry"
+	OperationPatch             = "patch"
+	OperationListCompilations  = "list-compilations"
+	OperationListObservations  = "list-observations"
+	OperationGetCheckpoint     = "get-checkpoint"
+	OperationProposeAmendment  = "propose-amendment"
+	OperationEvaluateAmendment = "evaluate-amendment"
+	OperationResolveAmendment  = "resolve-amendment"
+	OperationActivateAmendment = "activate-amendment"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -96,6 +100,10 @@ type ChannelCapabilityFeatures struct {
 	Receipts              bool
 	Changes               bool
 	Streaming             bool
+}
+
+type TeamDefinitionCapabilityFeatures struct {
+	Amendments bool
 }
 
 // CapabilityContext is server-authored authorization state for one explicitly
@@ -213,7 +221,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability())
+	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 func AgentDefinitionsCapability() Capability {
@@ -259,11 +267,15 @@ func ChannelsCapability(features ChannelCapabilityFeatures) Capability {
 	return capability
 }
 
-func TeamDefinitionsCapability() Capability {
-	return Capability{
+func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Capability {
+	capability := Capability{
 		ID: TeamDefinitionsCapabilityID, Version: TeamDefinitionsCapabilityVersion, Available: true,
 		Operations: []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate},
 	}
+	if features.Amendments {
+		capability.Operations = append(capability.Operations, OperationProposeAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment)
+	}
+	return capability
 }
 
 func WorkforceAuthoringCapability(changeSets ...bool) Capability {

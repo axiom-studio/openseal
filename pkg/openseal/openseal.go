@@ -490,6 +490,7 @@ type (
 	KernelCapabilityContext               = kernelapi.CapabilityContext
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
+	TeamDefinitionCapabilityFeatures      = kernelapi.TeamDefinitionCapabilityFeatures
 )
 
 const (
@@ -578,8 +579,8 @@ func ArtifactsCapability(contentOperations ...string) KernelCapability {
 	return kernelapi.ArtifactCapability(contentOperations...)
 }
 
-func TeamDefinitionsCapability() KernelCapability {
-	return kernelapi.TeamDefinitionsCapability()
+func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) KernelCapability {
+	return kernelapi.TeamDefinitionsCapability(features)
 }
 
 func WorkforceAuthoringCapability(changeSets ...bool) KernelCapability {
