@@ -16,6 +16,7 @@ type Store interface {
 	ListTeamDefinitionVersions(context.Context, string) ([]*Definition, error)
 	CreateTeamDeployment(context.Context, *Deployment, workforce.DefinitionActivation) error
 	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*Deployment, error)
+	ListTeamDeployments(context.Context, capability.ScopeReference) ([]*Deployment, error)
 	UpdateTeamDeployment(context.Context, *Deployment, int64, workforce.DefinitionActivation) error
 	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
 	CreateTeamAmendment(context.Context, *DefinitionAmendment) error
@@ -153,6 +154,24 @@ func (s *MemoryStore) GetTeamDeployment(_ context.Context, scope capability.Scop
 		return nil, ErrDeploymentNotFound
 	}
 	return cloneDeployment(value), nil
+}
+
+func (s *MemoryStore) ListTeamDeployments(_ context.Context, scope capability.ScopeReference) ([]*Deployment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*Deployment, 0)
+	for _, value := range s.deployments {
+		if value.Scope == scope {
+			result = append(result, cloneDeployment(value))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+	return result, nil
 }
 
 func (s *MemoryStore) UpdateTeamDeployment(_ context.Context, deployment *Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {

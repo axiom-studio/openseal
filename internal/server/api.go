@@ -93,6 +93,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/team-definitions", s.handleRegisterTeamDefinition)
 	s.mux.HandleFunc("GET /api/v1/team-definitions/{id}", s.handleGetTeamDefinition)
 	s.mux.HandleFunc("POST /api/v1/team-deployments", s.handleCreateTeamDeployment)
+	s.mux.HandleFunc("GET /api/v1/team-deployments", s.handleListTeamDeployments)
 	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}", s.handleGetTeamDeployment)
 	s.mux.HandleFunc("PUT /api/v1/team-deployments/{id}", s.handleUpdateTeamDeployment)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/activations", s.handleActivateTeamDefinition)

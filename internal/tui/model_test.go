@@ -648,6 +648,10 @@ func (f *fakeKernelClient) GetTeamDeployment(context.Context, capability.ScopeRe
 	return nil, errors.New("not implemented by test client")
 }
 
+func (f *fakeKernelClient) ListTeamDeployments(context.Context, capability.ScopeReference) (*kernelapi.TeamDeploymentList, error) {
+	return &kernelapi.TeamDeploymentList{}, nil
+}
+
 func (f *fakeKernelClient) ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error) {
 	return nil, errors.New("not implemented by test client")
 }

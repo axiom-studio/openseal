@@ -214,6 +214,27 @@ func (s *SQLiteStore) GetTeamDeployment(ctx context.Context, scope capability.Sc
 	return &deployment, nil
 }
 
+func (s *SQLiteStore) ListTeamDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelteam.Deployment, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM team_deployments WHERE scope_kind = ? AND scope_id = ? ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*kernelteam.Deployment, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var deployment kernelteam.Deployment
+		if err := json.Unmarshal([]byte(payload), &deployment); err != nil {
+			return nil, err
+		}
+		result = append(result, &deployment)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLiteStore) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := teamRegistryPayloads(deployment, activation)
 	if err != nil {

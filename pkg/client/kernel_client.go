@@ -86,6 +86,7 @@ type TeamClient interface {
 	ListTeamDefinitionVersions(context.Context, string) ([]*kernelteam.Definition, error)
 	CreateTeamDeployment(context.Context, kernelapi.CreateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error)
 	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+	ListTeamDeployments(context.Context, capability.ScopeReference) (*kernelapi.TeamDeploymentList, error)
 	UpdateTeamDeployment(context.Context, string, kernelapi.UpdateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error)
 	ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error)
 	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
@@ -653,6 +654,15 @@ func (c *KernelHTTPClient) GetTeamDeployment(ctx context.Context, scope capabili
 	var result kernelteam.Deployment
 	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListTeamDeployments(ctx context.Context, scope capability.ScopeReference) (*kernelapi.TeamDeploymentList, error) {
+	query := url.Values{"scopeKind": []string{scope.Kind}, "scopeId": []string{scope.ID}}
+	var result kernelapi.TeamDeploymentList
+	if err := c.do(ctx, http.MethodGet, "/api/v1/team-deployments?"+query.Encode(), nil, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

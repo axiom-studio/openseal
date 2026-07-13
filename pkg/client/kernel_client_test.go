@@ -368,6 +368,10 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	if err != nil || created.Activation.ToVersion != "1" {
 		t.Fatalf("created Team = %#v, err = %v", created, err)
 	}
+	listed, err := client.ListTeamDeployments(ctx, scope)
+	if err != nil || len(listed.Deployments) != 1 || listed.Deployments[0].ID != created.Deployment.ID {
+		t.Fatalf("listed Teams = %#v, err = %v", listed, err)
+	}
 	proposed := *created.Deployment
 	proposed.Status = kernelteam.DeploymentPaused
 	proposed.Roster = append([]kernelteam.RosterAssignment(nil), created.Deployment.Roster...)
