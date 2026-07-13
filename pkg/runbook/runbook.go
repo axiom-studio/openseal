@@ -78,6 +78,7 @@ type DelegateStep struct {
 // It deliberately mirrors the provider-neutral runtime dimensions while
 // remaining independent of runtime orchestration packages.
 type BudgetAllocation struct {
+	MaxAttempts     int64 `json:"maxAttempts,omitempty"`
 	MaxTurns        int64 `json:"maxTurns,omitempty"`
 	MaxInputTokens  int64 `json:"maxInputTokens,omitempty"`
 	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
@@ -89,13 +90,13 @@ type BudgetAllocation struct {
 }
 
 func (b BudgetAllocation) Validate() error {
-	if b.MaxTurns < 0 || b.MaxInputTokens < 0 || b.MaxOutputTokens < 0 || b.MaxTotalTokens < 0 || b.MaxCostMicros < 0 || b.MaxDurationMS < 0 || b.MaxActions < 0 {
+	if b.MaxAttempts < 0 || b.MaxTurns < 0 || b.MaxInputTokens < 0 || b.MaxOutputTokens < 0 || b.MaxTotalTokens < 0 || b.MaxCostMicros < 0 || b.MaxDurationMS < 0 || b.MaxActions < 0 {
 		return errors.New("budget allocation limits cannot be negative")
 	}
 	if b.WarningPermille < 0 || b.WarningPermille > 1000 {
 		return errors.New("budget allocation warning threshold must be between 0 and 1000 permille")
 	}
-	if b.MaxTurns == 0 && b.MaxInputTokens == 0 && b.MaxOutputTokens == 0 && b.MaxTotalTokens == 0 && b.MaxCostMicros == 0 && b.MaxDurationMS == 0 && b.MaxActions == 0 {
+	if b.MaxAttempts == 0 && b.MaxTurns == 0 && b.MaxInputTokens == 0 && b.MaxOutputTokens == 0 && b.MaxTotalTokens == 0 && b.MaxCostMicros == 0 && b.MaxDurationMS == 0 && b.MaxActions == 0 {
 		return errors.New("budget allocation requires at least one finite limit")
 	}
 	return nil

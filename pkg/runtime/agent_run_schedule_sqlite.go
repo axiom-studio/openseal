@@ -81,16 +81,8 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 		return nil, nil
 	}
 	previousRevision := selected.Revision
-	expires := claim.Now.Add(claim.LeaseDuration)
-	selected.Status = AgentRunStatusRunning
-	selected.LeaseOwner = claim.WorkerID
-	selected.LeaseExpiresAt = &expires
-	selected.LastClaimedAt = &claim.Now
-	selected.Attempt++
-	selected.Revision++
-	selected.UpdatedAt = claim.Now
-	if selected.StartedAt == nil {
-		selected.StartedAt = &claim.Now
+	if err := applyAgentRunClaim(selected, claim); err != nil {
+		return nil, err
 	}
 	payload, err := json.Marshal(selected)
 	if err != nil {

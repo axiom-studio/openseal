@@ -118,6 +118,44 @@ func agentRunEligible(run *AgentRun, claim AgentRunClaim) bool {
 	}
 }
 
+// applyAgentRunClaim records the durable cost of acquiring autonomous
+// execution authority. A lease-expiry reclaim is a new attempt even when it
+// resumes an existing Turn, so process restarts cannot reset this ceiling.
+func applyAgentRunClaim(run *AgentRun, claim AgentRunClaim) error {
+	expires := claim.Now.Add(claim.LeaseDuration)
+	run.Status = AgentRunStatusRunning
+	run.LeaseOwner = claim.WorkerID
+	run.LeaseExpiresAt = &expires
+	run.LastClaimedAt = &claim.Now
+	run.Attempt++
+	if run.Budget != nil {
+		usage, err := run.BudgetUsage.Add(BudgetUsage{Attempts: 1})
+		if err != nil {
+			return err
+		}
+		effective, err := EffectiveBudgetUsage(usage, run.BudgetReservations)
+		if err != nil {
+			return err
+		}
+		state, _, err := EvaluateBudget(*run.Budget, effective)
+		if err != nil {
+			return err
+		}
+		run.BudgetUsage = usage
+		run.BudgetState = state
+	}
+	run.Revision++
+	run.UpdatedAt = claim.Now
+	if run.StartedAt == nil {
+		run.StartedAt = &claim.Now
+	}
+	return nil
+}
+
+func runAttemptBudgetExceeded(run *AgentRun) bool {
+	return run != nil && run.Budget != nil && run.Budget.MaxAttempts > 0 && run.BudgetUsage.Attempts > run.Budget.MaxAttempts
+}
+
 func agentRunEffectivePriority(run *AgentRun, now time.Time, agingInterval time.Duration) int64 {
 	if agingInterval <= 0 {
 		agingInterval = time.Minute

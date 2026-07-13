@@ -6,13 +6,13 @@ import (
 )
 
 func TestEvaluateBudgetUsesWarningAndExhaustedStates(t *testing.T) {
-	policy := BudgetPolicy{MaxTurns: 10, MaxTotalTokens: 100, WarningPermille: 750}
-	state, reasons, err := EvaluateBudget(policy, BudgetUsage{Turns: 7, InputTokens: 50, OutputTokens: 25})
+	policy := BudgetPolicy{MaxAttempts: 4, MaxTurns: 10, MaxTotalTokens: 100, WarningPermille: 750}
+	state, reasons, err := EvaluateBudget(policy, BudgetUsage{Attempts: 2, Turns: 7, InputTokens: 50, OutputTokens: 25})
 	if err != nil || state != BudgetStateWarning || len(reasons) != 1 {
 		t.Fatalf("warning evaluation = %q %#v %v", state, reasons, err)
 	}
-	state, reasons, err = EvaluateBudget(policy, BudgetUsage{Turns: 10, InputTokens: 50, OutputTokens: 50})
-	if err != nil || state != BudgetStateExhausted || len(reasons) != 2 {
+	state, reasons, err = EvaluateBudget(policy, BudgetUsage{Attempts: 4, Turns: 10, InputTokens: 50, OutputTokens: 50})
+	if err != nil || state != BudgetStateExhausted || len(reasons) != 3 {
 		t.Fatalf("exhausted evaluation = %q %#v %v", state, reasons, err)
 	}
 }
@@ -23,6 +23,9 @@ func TestBudgetRejectsInvalidPolicyAndUsage(t *testing.T) {
 	}
 	if _, _, err := EvaluateBudget(BudgetPolicy{}, BudgetUsage{CostMicros: -1}); err == nil {
 		t.Fatal("negative usage was accepted")
+	}
+	if _, _, err := EvaluateBudget(BudgetPolicy{MaxAttempts: -1}, BudgetUsage{}); err == nil {
+		t.Fatal("negative attempt policy was accepted")
 	}
 }
 

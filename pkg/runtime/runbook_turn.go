@@ -442,7 +442,8 @@ func runbookBudgetPolicyValue(budget *runbook.BudgetAllocation) *BudgetPolicy {
 		return nil
 	}
 	return &BudgetPolicy{
-		MaxTurns: budget.MaxTurns, MaxInputTokens: budget.MaxInputTokens,
+		MaxAttempts: budget.MaxAttempts,
+		MaxTurns:    budget.MaxTurns, MaxInputTokens: budget.MaxInputTokens,
 		MaxOutputTokens: budget.MaxOutputTokens, MaxTotalTokens: budget.MaxTotalTokens,
 		MaxCostMicros: budget.MaxCostMicros, MaxDurationMS: budget.MaxDurationMS,
 		MaxActions: budget.MaxActions, WarningPermille: budget.WarningPermille,

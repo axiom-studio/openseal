@@ -82,9 +82,6 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	if c == nil || c.portfolio == nil || c.activity == nil || c.turns == nil {
 		return nil, errors.New("turn coordinator is not configured")
 	}
-	if runner == nil {
-		return nil, errors.New("turn runner is required")
-	}
 	if strings.TrimSpace(req.WorkerID) == "" {
 		return nil, errors.New("worker id is required")
 	}
@@ -116,6 +113,23 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	}
 	if len(pending) > 0 && terminalAgentTurnStatus(pending[0].Status) {
 		return c.applyFinishedTurn(ctx, run, pending[0], req.WorkerID, true)
+	}
+	if runAttemptBudgetExceeded(run) {
+		paused, event, pauseErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: AgentRunStatusPaused, LeaseOwner: req.WorkerID,
+			Summary: "Run paused before exceeding its autonomous attempt budget", EventType: "budget.exhausted",
+			Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+			Payload: map[string]interface{}{
+				"dimension": "attempts", "used": run.BudgetUsage.Attempts, "limit": run.Budget.MaxAttempts,
+			},
+		})
+		if pauseErr != nil {
+			return nil, pauseErr
+		}
+		return &AdvanceAgentRunResult{Run: paused, Event: event}, ErrBudgetExhausted
+	}
+	if runner == nil {
+		return nil, errors.New("turn runner is required")
 	}
 
 	var turn *AgentTurn
@@ -182,9 +196,38 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 	}
 	executionCtx, cancelExecution := context.WithCancel(ctx)
+	durationDeadline := false
+	if run.Budget != nil && run.Budget.MaxDurationMS > 0 {
+		remainingMS := run.Budget.MaxDurationMS - run.BudgetUsage.DurationMS
+		for id, reservation := range run.BudgetReservations {
+			if id != turn.ID {
+				remainingMS -= reservation.Usage.DurationMS
+			}
+		}
+		if remainingMS <= 0 {
+			cancelExecution()
+			finished, finishErr := c.turns.FinishTurn(ctx, req.Scope, turn.ID, FinishAgentTurnRequest{
+				ExpectedRevision: turn.Revision, Status: AgentTurnStatusCanceled, WorkerID: req.WorkerID,
+				NextRunStatus: AgentRunStatusPaused, OutputSummary: "Run paused before exceeding its autonomous duration budget",
+			})
+			if finishErr != nil {
+				return nil, finishErr
+			}
+			result, applyErr := c.applyFinishedTurn(ctx, run, finished, req.WorkerID, false)
+			if applyErr != nil {
+				return nil, applyErr
+			}
+			return result, ErrBudgetExhausted
+		}
+		cancelExecution()
+		executionCtx, cancelExecution = context.WithTimeout(ctx, time.Duration(remainingMS)*time.Millisecond)
+		durationDeadline = true
+	}
 	heartbeatDone := make(chan turnLeaseHeartbeatResult, 1)
 	go c.heartbeatTurnLease(executionCtx, cancelExecution, req.Scope, turn, req.WorkerID, req.LeaseDuration, heartbeatDone)
+	executionStarted := time.Now()
 	outcome, runErr := runner.RunTurn(executionCtx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
+	executionDurationMS := time.Since(executionStarted).Milliseconds()
 	cancelExecution()
 	heartbeat := <-heartbeatDone
 	if heartbeat.turn != nil {
@@ -243,12 +286,19 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	}
 	executionErr := runErr
 	finish := FinishAgentTurnRequest{ExpectedRevision: turn.Revision, WorkerID: req.WorkerID}
-	if runErr != nil {
+	if durationDeadline && errors.Is(runErr, context.DeadlineExceeded) {
+		executionErr = ErrBudgetExhausted
+		finish.Status = AgentTurnStatusCanceled
+		finish.NextRunStatus = AgentRunStatusPaused
+		finish.OutputSummary = "Run paused after reaching its autonomous duration budget"
+		finish.Usage.DurationMS = executionDurationMS
+	} else if runErr != nil {
 		finish.Status = AgentTurnStatusFailed
 		finish.Error = runErr.Error()
 		finish.NextRunStatus = AgentRunStatusFailed
 		finish.RunError = runErr.Error()
 		finish.OutputSummary = "Bounded agent turn failed"
+		finish.Usage.DurationMS = executionDurationMS
 	} else if outcome == nil {
 		executionErr = errors.New("turn runner returned no outcome")
 		finish.Status = AgentTurnStatusFailed
@@ -257,6 +307,9 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		finish.RunError = finish.Error
 		finish.OutputSummary = "Bounded agent turn failed"
 	} else {
+		if outcome.Usage.DurationMS < executionDurationMS {
+			outcome.Usage.DurationMS = executionDurationMS
+		}
 		if err := validateTurnOutcome(run.Status, outcome); err != nil {
 			executionErr = err
 			finish.Status = AgentTurnStatusFailed
@@ -397,9 +450,15 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if turn.RequestedDelegation != nil {
 		activityPayload["requestedDelegation"] = turn.RequestedDelegation
 	}
+	eventType := ""
+	if turn.NextRunStatus == AgentRunStatusPaused && turnExhaustsBudget(run, turn) {
+		eventType = "budget.exhausted"
+		activityPayload["budgetState"] = BudgetStateExhausted
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
-		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
+		EventType: eventType,
+		Actor:     ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
 		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,
@@ -410,6 +469,28 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		return nil, err
 	}
 	return &AdvanceAgentRunResult{Run: updated, Turn: turn, Event: event, Reconciled: reconciled}, nil
+}
+
+func turnExhaustsBudget(run *AgentRun, turn *AgentTurn) bool {
+	if run == nil || turn == nil || run.Budget == nil {
+		return false
+	}
+	usage, err := run.BudgetUsage.Add(budgetUsageForTurn(turn.Usage))
+	if err != nil {
+		return false
+	}
+	reservations := make(map[string]BudgetReservation, len(run.BudgetReservations))
+	for id, reservation := range run.BudgetReservations {
+		if id != turn.ID {
+			reservations[id] = reservation
+		}
+	}
+	effective, err := EffectiveBudgetUsage(usage, reservations)
+	if err != nil {
+		return false
+	}
+	state, _, err := EvaluateBudget(*run.Budget, effective)
+	return err == nil && state == BudgetStateExhausted
 }
 
 func budgetReservationID(run *AgentRun, turn *AgentTurn) string {

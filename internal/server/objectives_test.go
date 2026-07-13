@@ -14,7 +14,7 @@ import (
 func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
-	body := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"gtm"},"title":"Launch","goal":"Create demand","status":"active","budget":{"maxTurns":10,"maxTotalTokens":1000}}`
+	body := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"gtm"},"title":"Launch","goal":"Create demand","status":"active","budget":{"maxAttempts":5,"maxTurns":10,"maxTotalTokens":1000,"maxDurationMs":120000}}`
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", body, "launch-objective")
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create = %d %s", created.Code, created.Body.String())
@@ -23,7 +23,7 @@ func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
 	if err := json.NewDecoder(created.Body).Decode(&objective); err != nil {
 		t.Fatal(err)
 	}
-	if objective.Budget == nil || objective.Budget.MaxTurns != 10 || objective.Status != runtime.ObjectiveStatusActive {
+	if objective.Budget == nil || objective.Budget.MaxAttempts != 5 || objective.Budget.MaxTurns != 10 || objective.Budget.MaxDurationMS != 120000 || objective.Status != runtime.ObjectiveStatusActive {
 		t.Fatalf("objective = %#v", objective)
 	}
 	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", body, "launch-objective")
@@ -35,7 +35,7 @@ func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
 	if conflict.Code != http.StatusConflict {
 		t.Fatalf("conflict = %d %s", conflict.Code, conflict.Body.String())
 	}
-	runBody := `{"scope":{"kind":"tenant","id":"one"},"objectiveId":"` + objective.ID + `","owner":{"type":"team","id":"gtm"},"assignedAgentId":"marketer","goal":"Draft launch","source":"objective","budget":{"maxTurns":4,"maxTotalTokens":400}}`
+	runBody := `{"scope":{"kind":"tenant","id":"one"},"objectiveId":"` + objective.ID + `","owner":{"type":"team","id":"gtm"},"assignedAgentId":"marketer","goal":"Draft launch","source":"objective","budget":{"maxAttempts":2,"maxTurns":4,"maxTotalTokens":400,"maxDurationMs":60000}}`
 	runResponse := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", runBody, "launch-run")
 	if runResponse.Code != http.StatusCreated {
 		t.Fatalf("run = %d %s", runResponse.Code, runResponse.Body.String())

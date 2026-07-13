@@ -200,6 +200,19 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
 	})
+	if runAttemptBudgetExceeded(run) {
+		result, err := p.coordinator.Advance(ctx, AdvanceAgentRunRequest{
+			Scope: run.Scope, RunID: run.ID, WorkerID: workerID, LeaseDuration: p.config.TurnLeaseDuration,
+		}, nil)
+		if err != nil && !errors.Is(err, ErrBudgetExhausted) {
+			p.logger.Errorw("failed to enforce agent run attempt budget", "runId", run.ID, "error", err)
+		}
+		if result != nil && result.Run != nil && isTerminalAgentRunStatus(result.Run.Status) {
+			p.resolveForkChild(ctx, result.Run)
+			p.resolveCollaborationChild(ctx, result.Run)
+		}
+		return
+	}
 	binding, err := p.resolver.ResolveTurnRunner(ctx, cloneAgentRun(run))
 	if err != nil || binding == nil || binding.Runner == nil {
 		if err == nil {
