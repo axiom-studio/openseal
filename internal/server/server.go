@@ -31,6 +31,7 @@ type Server struct {
 	authoringScope     runtime.Scope
 	authoringMu        sync.Mutex
 	workforceAuthority WorkforceLifecycleAuthorizer
+	actionApprovalAuth runtime.ApprovalAuthorizer
 	workflowsDir       string
 	workflows          map[string]*WorkflowEntry
 	muWorkflows        sync.RWMutex
@@ -177,6 +178,12 @@ func (s *Server) StartWorkforceAuthoringWorker(ctx context.Context, scope runtim
 // OpenSeal never manufactures a local approver or policy evaluator.
 func (s *Server) SetWorkforceLifecycleAuthorizer(authorizer WorkforceLifecycleAuthorizer) {
 	s.workforceAuthority = authorizer
+}
+
+// SetActionApprovalAuthorizer enables resolution of durable action approval
+// checkpoints. Read-only approval inspection remains available without it.
+func (s *Server) SetActionApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) {
+	s.actionApprovalAuth = authorizer
 }
 
 // ListenAndServe starts the server on the given address.

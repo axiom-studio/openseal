@@ -55,17 +55,21 @@ func TestAgentRequestsAdvertisePortableCollaborationLifecycle(t *testing.T) {
 }
 
 func TestActionApprovalsAdvertiseGovernedDecisionLifecycle(t *testing.T) {
-	capability := ActionApprovalsCapability()
+	capability := ActionApprovalsCapability(ActionApprovalCapabilityFeatures{})
 	if capability.ID != ActionApprovalsCapabilityID || capability.Version != ActionApprovalsCapabilityVersion {
 		t.Fatalf("action approval capability identity = %#v", capability)
 	}
-	for _, operation := range []string{OperationGet, OperationList, OperationResolve} {
+	for _, operation := range []string{OperationGet, OperationList} {
 		if !capability.Supports(operation) {
 			t.Fatalf("action approval operation %q not advertised: %#v", operation, capability.Operations)
 		}
 	}
-	if capability.Supports(OperationCreate) || capability.Supports(OperationApprove) {
+	if capability.Supports(OperationResolve) || capability.Supports(OperationCreate) || capability.Supports(OperationApprove) {
 		t.Fatalf("unsupported action approval operation advertised: %#v", capability.Operations)
+	}
+	governed := ActionApprovalsCapability(ActionApprovalCapabilityFeatures{Resolution: true})
+	if !governed.Supports(OperationResolve) {
+		t.Fatalf("configured approval resolution not advertised: %#v", governed.Operations)
 	}
 }
 

@@ -264,6 +264,18 @@ func (f *fakeKernelClient) CompleteAgentRequest(context.Context, runtime.Scope, 
 	return nil, errors.New("agent requests are not configured in this test")
 }
 
+func (f *fakeKernelClient) ListActionApprovals(context.Context, runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+	return nil, errors.New("action approvals are not configured in this test")
+}
+
+func (f *fakeKernelClient) GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error) {
+	return nil, errors.New("action approvals are not configured in this test")
+}
+
+func (f *fakeKernelClient) ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error) {
+	return nil, errors.New("action approvals are not configured in this test")
+}
+
 func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
 	f.authoringRequests = append(f.authoringRequests, request)
 	if len(f.authoringErrors) > 0 {

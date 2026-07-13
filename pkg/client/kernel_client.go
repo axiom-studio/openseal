@@ -51,6 +51,9 @@ type KernelClient interface {
 	GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error)
 	RespondAgentRequest(context.Context, runtime.Scope, string, kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error)
 	CompleteAgentRequest(context.Context, runtime.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
+	ListActionApprovals(context.Context, runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error)
+	GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
+	ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error)
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
@@ -506,6 +509,47 @@ func (c *KernelHTTPClient) RespondAgentRequest(ctx context.Context, scope runtim
 func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope runtime.Scope, requestID string, request kernelapi.CompleteAgentRequestRequest, idempotencyKey string) (*runtime.AgentRequestResult, error) {
 	var result runtime.AgentRequestResult
 	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/completions?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListActionApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+	query := scopeQuery(filter.Scope)
+	setIfPresent(query, "runId", filter.RunID)
+	if filter.Owner != nil {
+		query.Set("ownerType", string(filter.Owner.Type))
+		query.Set("ownerId", filter.Owner.ID)
+	}
+	for _, status := range filter.Status {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var approvals []*runtime.ApprovalCheckpoint
+	if err := c.do(ctx, http.MethodGet, "/api/v1/action-approvals?"+query.Encode(), nil, "", &approvals); err != nil {
+		return nil, err
+	}
+	return approvals, nil
+}
+
+func (c *KernelHTTPClient) GetActionApproval(ctx context.Context, scope runtime.Scope, approvalID string) (*runtime.ApprovalCheckpoint, error) {
+	var approval runtime.ApprovalCheckpoint
+	path := "/api/v1/action-approvals/" + url.PathEscape(strings.TrimSpace(approvalID)) + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &approval); err != nil {
+		return nil, err
+	}
+	return &approval, nil
+}
+
+func (c *KernelHTTPClient) ResolveActionApproval(ctx context.Context, scope runtime.Scope, approvalID string, request kernelapi.ResolveActionApprovalRequest, idempotencyKey string) (*runtime.ApprovalResolutionResult, error) {
+	var result runtime.ApprovalResolutionResult
+	path := "/api/v1/action-approvals/" + url.PathEscape(strings.TrimSpace(approvalID)) + "/decisions?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
