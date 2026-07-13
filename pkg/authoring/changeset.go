@@ -90,8 +90,8 @@ type ChangeSetPlacement struct {
 	TeamDeploymentID   string            `json:"teamDeploymentId"`
 	AgentDeploymentIDs map[string]string `json:"agentDeploymentIds"`
 	InitiativeID       string            `json:"initiativeId,omitempty"`
-	// Expected revisions are mandatory for amendments and make stale placement
-	// fail before any definition, deployment, Objective, or Initiative is written.
+	// Expected revisions select compare-and-swap updates per resource. Zero means
+	// create, allowing one amendment to preserve existing resources and add new ones.
 	TeamExpectedRevision       int64                                                `json:"teamExpectedRevision,omitempty"`
 	AgentExpectedRevisions     map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
 	InitiativeExpectedRevision int64                                                `json:"initiativeExpectedRevision,omitempty"`
@@ -295,6 +295,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		mode = ModeAmend
 		candidate := parent.Result.Candidate
 		existing = &candidate
+		inheritParentPlacement(&request.Placement, parent)
 	}
 	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
 	requestDigest, err := digestChangeSetRequest(request, mode, existing)
@@ -309,7 +310,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		return nil, false, err
 	}
 	canonicalizeCandidateScope(&result.Candidate, request.Scope)
-	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate, existing)
+	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
 	result.Validation = validateCandidate(&result.Candidate, existing)
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
@@ -354,6 +355,7 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		mode = ModeAmend
 		candidate := parent.Result.Candidate
 		existing = &candidate
+		inheritParentPlacement(&request.Placement, parent)
 	}
 	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
 	requestDigest, err := digestChangeSetRequest(request, mode, existing)
@@ -412,7 +414,7 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	}
 	existing := changeSet.Generation.Request.Existing
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
-	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate, existing)
+	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
 	result.Validation = validateCandidate(&result.Candidate, existing)
 	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
@@ -727,7 +729,7 @@ func canonicalizeBlueprintObjectiveRefs(refs []string, ids map[string]string) {
 	}
 }
 
-func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.ScopeReference, candidate *WorkforceCandidate, existing *WorkforceCandidate) {
+func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.ScopeReference, candidate *WorkforceCandidate) {
 	stringsByAgent := map[string]string{}
 	for id, value := range placement.AgentDeploymentIDs {
 		stringsByAgent[canonicalIdentity(scope, id)] = value
@@ -758,27 +760,9 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		if strings.TrimSpace(placement.InitiativeID) == "" {
 			placement.InitiativeID = "initiative:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Initiative.ID)[:32]
 		}
-		if existing != nil && existing.Initiative != nil && placement.InitiativeExpectedRevision < 1 {
-			placement.InitiativeExpectedRevision = 1
-		}
 	}
 	if placement.Objectives == nil {
 		placement.Objectives = map[string]ObjectivePlacement{}
-	}
-	existingKeys := map[string]bool{}
-	if existing != nil {
-		for _, definition := range existing.Agents {
-			if definition != nil {
-				for _, template := range definition.ObjectiveTemplates {
-					existingKeys[WorkforceObjectiveKey("agent", definition.ID, template.ID)] = true
-				}
-			}
-		}
-		if existing.Team != nil {
-			for _, template := range existing.Team.ObjectiveTemplates {
-				existingKeys[WorkforceObjectiveKey("team", existing.Team.ID, template.ID)] = true
-			}
-		}
 	}
 	add := func(ownerType, definitionID string, templates []workforce.ObjectiveTemplate) {
 		for _, template := range templates {
@@ -786,9 +770,6 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 			p := placement.Objectives[key]
 			if p.ID == "" {
 				p.ID = "objective:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + key)[:32]
-			}
-			if existingKeys[key] && p.ExpectedRevision < 1 {
-				p.ExpectedRevision = 1
 			}
 			placement.Objectives[key] = p
 		}
@@ -800,6 +781,112 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	}
 	if candidate.Team != nil {
 		add("team", candidate.Team.ID, candidate.Team.ObjectiveTemplates)
+	}
+}
+
+// inheritParentPlacement preserves stable resource identity across refinements.
+// Candidate presence is not evidence that a resource exists: only an immutable
+// apply receipt may introduce a new expected revision. Positive revisions already
+// carried by the parent remain authoritative across an unapplied refinement chain.
+func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
+	if parent == nil {
+		return
+	}
+	parentPlacement := clonePlacement(parent.Placement)
+	inheritAppliedRevisions(&parentPlacement, parent)
+
+	if placement.AgentDeploymentIDs == nil {
+		placement.AgentDeploymentIDs = map[string]string{}
+	}
+	if placement.AgentExpectedRevisions == nil {
+		placement.AgentExpectedRevisions = map[string]int64{}
+	}
+	for definitionID, deploymentID := range parentPlacement.AgentDeploymentIDs {
+		currentID := strings.TrimSpace(placement.AgentDeploymentIDs[definitionID])
+		if currentID == "" {
+			placement.AgentDeploymentIDs[definitionID] = deploymentID
+			currentID = deploymentID
+		}
+		if currentID == deploymentID && placement.AgentExpectedRevisions[definitionID] < 1 && parentPlacement.AgentExpectedRevisions[definitionID] > 0 {
+			placement.AgentExpectedRevisions[definitionID] = parentPlacement.AgentExpectedRevisions[definitionID]
+		}
+	}
+	currentTeamID := strings.TrimSpace(placement.TeamDeploymentID)
+	if currentTeamID == "" {
+		placement.TeamDeploymentID = parentPlacement.TeamDeploymentID
+		currentTeamID = parentPlacement.TeamDeploymentID
+	}
+	if currentTeamID == parentPlacement.TeamDeploymentID && placement.TeamExpectedRevision < 1 && parentPlacement.TeamExpectedRevision > 0 {
+		placement.TeamExpectedRevision = parentPlacement.TeamExpectedRevision
+	}
+	currentInitiativeID := strings.TrimSpace(placement.InitiativeID)
+	if currentInitiativeID == "" {
+		placement.InitiativeID = parentPlacement.InitiativeID
+		currentInitiativeID = parentPlacement.InitiativeID
+	}
+	if currentInitiativeID == parentPlacement.InitiativeID && placement.InitiativeExpectedRevision < 1 && parentPlacement.InitiativeExpectedRevision > 0 {
+		placement.InitiativeExpectedRevision = parentPlacement.InitiativeExpectedRevision
+	}
+	if strings.TrimSpace(placement.Environment) == "" {
+		placement.Environment = parentPlacement.Environment
+	}
+	if placement.Objectives == nil {
+		placement.Objectives = map[string]ObjectivePlacement{}
+	}
+	for key, inherited := range parentPlacement.Objectives {
+		current := placement.Objectives[key]
+		if strings.TrimSpace(current.ID) == "" {
+			current.ID = inherited.ID
+		}
+		if current.ID == inherited.ID && current.ExpectedRevision < 1 && inherited.ExpectedRevision > 0 {
+			current.ExpectedRevision = inherited.ExpectedRevision
+		}
+		placement.Objectives[key] = current
+	}
+	if placement.CredentialReferences == nil {
+		placement.CredentialReferences = map[string]map[string]capability.CredentialReference{}
+	}
+	for definitionID, inherited := range parentPlacement.CredentialReferences {
+		if placement.CredentialReferences[definitionID] == nil {
+			placement.CredentialReferences[definitionID] = map[string]capability.CredentialReference{}
+		}
+		for kind, reference := range inherited {
+			if _, exists := placement.CredentialReferences[definitionID][kind]; !exists {
+				placement.CredentialReferences[definitionID][kind] = reference
+			}
+		}
+	}
+}
+
+func inheritAppliedRevisions(placement *ChangeSetPlacement, parent *ChangeSet) {
+	if parent.ApplyReceipt == nil {
+		return
+	}
+	resources := map[string]int64{}
+	for _, resource := range parent.ApplyReceipt.Resources {
+		if resource.Revision > 0 {
+			resources[resource.Kind+"\x00"+resource.ID] = resource.Revision
+		}
+	}
+	if placement.AgentExpectedRevisions == nil {
+		placement.AgentExpectedRevisions = map[string]int64{}
+	}
+	for definitionID, deploymentID := range placement.AgentDeploymentIDs {
+		if revision := resources["agent_deployment\x00"+deploymentID]; revision > 0 {
+			placement.AgentExpectedRevisions[definitionID] = revision
+		}
+	}
+	if revision := resources["team_deployment\x00"+placement.TeamDeploymentID]; revision > 0 {
+		placement.TeamExpectedRevision = revision
+	}
+	if revision := resources["initiative\x00"+placement.InitiativeID]; revision > 0 {
+		placement.InitiativeExpectedRevision = revision
+	}
+	for key, objective := range placement.Objectives {
+		if revision := resources["objective\x00"+objective.ID]; revision > 0 {
+			objective.ExpectedRevision = revision
+			placement.Objectives[key] = objective
+		}
 	}
 }
 
