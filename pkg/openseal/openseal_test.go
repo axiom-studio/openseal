@@ -9,6 +9,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
+func TestPublicFacadeExposesCanonicalActivityCapability(t *testing.T) {
+	capability := ActivityCapability()
+	if capability.ID != ActivityCapabilityID || capability.Version != ActivityCapabilityVersion || !capability.Supports(KernelOperationList) {
+		t.Fatalf("activity capability = %#v", capability)
+	}
+}
+
 func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := runtime.NewSQLiteStore(path)
