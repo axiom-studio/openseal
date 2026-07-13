@@ -194,3 +194,35 @@ Prepare publishing guidance using the authenticated account policy.
 		}
 	}
 }
+
+func TestCompileRegistryDisplayNameWithCanonicalSourceIdentity(t *testing.T) {
+	source := []byte(`---
+name: Reddit Keyword Search API
+description: Search Reddit with an authenticated registry skill.
+metadata:
+  openclaw:
+    primaryEnv: REDDIT_TOKEN
+---
+Search Reddit for the requested topic.
+`)
+	compilation, err := Compile(Bundle{SkillMD: source, Source: Source{Reference: "@justoneapi/justoneapi-reddit-search", Version: "1.0.0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compilation.Definition.ID != "justoneapi-reddit-search" || compilation.Definition.Name != "Reddit Keyword Search API" || compilation.Parsed.Name != "Reddit Keyword Search API" || compilation.Parsed.CanonicalName != "justoneapi-reddit-search" {
+		t.Fatalf("normalized identity = %#v", compilation.Definition)
+	}
+	if len(compilation.Diagnostics) == 0 || compilation.Diagnostics[0].Code != "identity.normalized" {
+		t.Fatalf("normalization diagnostics = %#v", compilation.Diagnostics)
+	}
+	exported, err := ExportBundle(compilation)
+	if err != nil || string(exported.SkillMD) != string(source) {
+		t.Fatalf("source artifact was not preserved: %v", err)
+	}
+	if _, err := Compile(Bundle{SkillMD: source}); err == nil {
+		t.Fatal("standalone invalid identity should remain rejected")
+	}
+	if _, err := Compile(Bundle{SkillMD: source, Source: Source{Reference: "@owner/Invalid Slug"}}); err == nil {
+		t.Fatal("invalid canonical registry identity should fail closed")
+	}
+}

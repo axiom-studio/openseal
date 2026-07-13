@@ -24,7 +24,18 @@ type ParseResult struct {
 }
 
 func ParseSkillMDWithWarnings(content []byte) (*ParseResult, error) {
-	skill, err := ParseSkillMD(content)
+	return parseSkillMDWithWarnings(content, "")
+}
+
+// ParseSkillMDWithCanonicalName preserves the source-authored display name
+// while allowing a trusted registry adapter to supply its verified slug as
+// the portable capability identity. Standalone parsing remains strict.
+func ParseSkillMDWithCanonicalName(content []byte, canonicalName string) (*ParseResult, error) {
+	return parseSkillMDWithWarnings(content, canonicalName)
+}
+
+func parseSkillMDWithWarnings(content []byte, canonicalName string) (*ParseResult, error) {
+	skill, err := parseSkillMD(content, canonicalName)
 	if err != nil {
 		return nil, err
 	}
@@ -34,6 +45,10 @@ func ParseSkillMDWithWarnings(content []byte) (*ParseResult, error) {
 }
 
 func ParseSkillMD(content []byte) (*ParsedSkill, error) {
+	return parseSkillMD(content, "")
+}
+
+func parseSkillMD(content []byte, canonicalName string) (*ParsedSkill, error) {
 	if len(content) == 0 {
 		return nil, fmt.Errorf("empty content")
 	}
@@ -47,7 +62,11 @@ func ParseSkillMD(content []byte) (*ParsedSkill, error) {
 	}
 	name := stringValue(frontmatter, "name")
 	description := stringValue(frontmatter, "description")
-	if err := validateIdentity(name, description); err != nil {
+	identity := name
+	if err := validateName(name); err != nil && strings.TrimSpace(canonicalName) != "" {
+		identity = strings.TrimSpace(canonicalName)
+	}
+	if err := validateIdentity(identity, description); err != nil {
 		return nil, err
 	}
 	metadata, err := parseMetadata(frontmatter["metadata"])
@@ -67,7 +86,7 @@ func ParseSkillMD(content []byte) (*ParsedSkill, error) {
 		return nil, err
 	}
 	return &ParsedSkill{
-		Name: name, Description: description, License: stringValue(frontmatter, "license"),
+		Name: name, CanonicalName: identity, Description: description, License: stringValue(frontmatter, "license"),
 		Compatibility: stringValue(frontmatter, "compatibility"), AllowedTools: strings.Fields(stringValue(frontmatter, "allowed-tools")),
 		Version: version, Homepage: homepage, Metadata: metadata, Frontmatter: cloneMap(frontmatter),
 		Invocation: InvocationPolicy{
@@ -83,7 +102,11 @@ func ValidateSkillMD(parsed *ParsedSkill) []ValidationError {
 		return []ValidationError{{Field: "skill", Message: "skill is required"}}
 	}
 	var result []ValidationError
-	if err := validateName(parsed.Name); err != nil {
+	identity := parsed.CanonicalName
+	if identity == "" {
+		identity = parsed.Name
+	}
+	if err := validateName(identity); err != nil {
 		result = append(result, ValidationError{Field: "name", Message: err.Error()})
 	}
 	if parsed.Description == "" || len(parsed.Description) > 1024 {

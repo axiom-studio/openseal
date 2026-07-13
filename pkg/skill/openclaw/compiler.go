@@ -50,7 +50,8 @@ type Compilation struct {
 }
 
 func Compile(bundle Bundle) (*Compilation, error) {
-	parsedResult, err := skillmd.ParseSkillMDWithWarnings(bundle.SkillMD)
+	canonicalName := canonicalSourceName(bundle.Source.Reference)
+	parsedResult, err := skillmd.ParseSkillMDWithCanonicalName(bundle.SkillMD, canonicalName)
 	if err != nil {
 		return nil, fmt.Errorf("parse SKILL.md: %w", err)
 	}
@@ -60,6 +61,9 @@ func Compile(bundle Bundle) (*Compilation, error) {
 	for _, warning := range parsedResult.Warnings {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "warning", Code: "source.warning", Path: "SKILL.md", Message: warning})
 	}
+	if parsed.Name != parsed.CanonicalName {
+		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "identity.normalized", Path: "SKILL.md", Message: fmt.Sprintf("source display name %q compiled with canonical registry identity %q", parsed.Name, parsed.CanonicalName)})
+	}
 	if expected := strings.TrimSpace(bundle.Source.ExpectedName); expected != "" {
 		if expected != parsed.Name {
 			return nil, fmt.Errorf("expected skill name %q does not match SKILL.md name %q", expected, parsed.Name)
@@ -67,7 +71,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 	}
 
 	definition := &capability.Definition{
-		ID: parsed.Name, Version: resolvedVersion(parsed, bundle.Source.Version, digest), Name: parsed.Name,
+		ID: parsed.CanonicalName, Version: resolvedVersion(parsed, bundle.Source.Version, digest), Name: parsed.Name,
 		Description: parsed.Description, Icon: parsed.Metadata.Emoji, ConfigurationKey: parsed.Metadata.SkillKey,
 		Actions: map[string]capability.Action{},
 		Prompt: &capability.PromptModule{
@@ -124,6 +128,14 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "resources.indexed", Message: fmt.Sprintf("indexed %d supporting resources for progressive disclosure", len(bundle.Files))})
 	}
 	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest, Artifact: cloneBundle(bundle)}, nil
+}
+
+func canonicalSourceName(reference string) string {
+	reference = strings.TrimSpace(strings.TrimPrefix(reference, "@"))
+	if separator := strings.LastIndex(reference, "/"); separator >= 0 {
+		reference = reference[separator+1:]
+	}
+	return reference
 }
 
 func compilePromptCredentials(primaryEnv string) []capability.CredentialRequirement {

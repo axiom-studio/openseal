@@ -2,6 +2,7 @@ package skillmd
 
 type ParsedSkill struct {
 	Name            string
+	CanonicalName   string
 	Description     string
 	License         string
 	Compatibility   string
