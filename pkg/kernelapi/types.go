@@ -29,7 +29,7 @@ const (
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "2"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion = "2"
+	WorkforceAuthoringCapabilityVersion = "3"
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
