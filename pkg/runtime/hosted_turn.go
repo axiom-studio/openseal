@@ -17,7 +17,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v5"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v6"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
@@ -76,6 +76,7 @@ type HostedTurnRequest struct {
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
 	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
+	DependencyResults      map[string]interface{}   `json:"dependencyResults,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
 	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
 	ModelProvider          string                   `json:"modelProvider,omitempty"`
@@ -141,6 +142,10 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if err != nil {
 		return nil, err
 	}
+	dependencyResults, err := projectHostedDependencyResults(input.Run)
+	if err != nil {
+		return nil, err
+	}
 	request := HostedTurnRequest{
 		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
 		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
@@ -149,6 +154,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
 		Budget:                 budget,
+		DependencyResults:      dependencyResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
@@ -255,6 +261,28 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 	}, nil
+}
+
+// projectHostedDependencyResults exposes only the durable fan-in projection,
+// not the Run's general output. Child results are the explicit cross-Agent
+// return channel and must remain credential-free before becoming model input.
+func projectHostedDependencyResults(run *AgentRun) (map[string]interface{}, error) {
+	if run == nil || run.Output == nil {
+		return nil, nil
+	}
+	raw, exists := run.Output["dependencyGroups"]
+	if !exists || raw == nil {
+		return nil, nil
+	}
+	groups, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("project hosted dependency results: durable dependencyGroups output is invalid")
+	}
+	projected := cloneMap(groups)
+	if err := ValidateCredentialFreeContext(projected); err != nil {
+		return nil, fmt.Errorf("project hosted dependency results: %w", err)
+	}
+	return projected, nil
 }
 
 func projectHostedRunBudget(run *AgentRun) (*HostedRunBudget, error) {
