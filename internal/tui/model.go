@@ -101,6 +101,7 @@ const (
 	modeWorkforceReject
 	modeWorkforceApply
 	modeWorkforceRetry
+	modeRequestCreate
 	modeRequestAccept
 	modeRequestReject
 	modeRequestClarify
@@ -191,6 +192,9 @@ type Model struct {
 	pendingMessageKey           string
 	pendingMessageContent       string
 	pendingMessageChannelID     string
+	pendingAgentRequestKey      string
+	pendingAgentRequestPrompt   string
+	pendingAgentRequestSourceID string
 	pendingRequestCompletionKey string
 	pendingRequestCompletionID  string
 	pendingApprovalKey          string
@@ -228,6 +232,11 @@ type runsLoaded struct {
 type agentRequestsLoaded struct {
 	requests []*runtime.AgentRequest
 	err      error
+}
+
+type agentRequestCreated struct {
+	result *runtime.AgentRequestResult
+	err    error
 }
 
 type agentRequestResponded struct {
@@ -666,6 +675,23 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentRequests = msg.requests
 		m.restoreAgentRequestSelection()
 		return m, nil
+	case agentRequestCreated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Request creation failed. The draft and retry identity are preserved."
+			return m, m.loadAgentRequests()
+		}
+		m.err = nil
+		m.pendingAgentRequestKey, m.pendingAgentRequestPrompt, m.pendingAgentRequestSourceID = "", "", ""
+		m.editor.Reset()
+		if msg.result != nil && msg.result.Request != nil {
+			m.selectedAgentRequest = msg.result.Request.ID
+		}
+		m.status = "Collaboration request created with durable Run lineage."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, tea.Batch(m.loadAgentRequests(), m.loadRuns())
 	case agentRequestResponded:
 		m.busy = false
 		if msg.err != nil {
@@ -986,6 +1012,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitWorkforceApply()
 			case modeWorkforceRetry:
 				return m, m.submitWorkforceRetry()
+			case modeRequestCreate:
+				return m, m.submitAgentRequestCreation()
 			case modeRequestAccept:
 				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionAccept)
 			case modeRequestReject:
@@ -1069,7 +1097,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedConversation()
 			}
 		case "n":
-			if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationCreate) {
+			if m.section == sectionRequests && m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil {
+				m.mode = modeRequestCreate
+				m.editor.Reset()
+				m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
+				m.focusComposerEditor()
+			} else if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationCreate) {
 				m.mode = modeChannelCreate
 				m.editor.Reset()
 				m.editor.Placeholder = "Name the Team channel…"
@@ -1638,6 +1671,61 @@ func (m *Model) submitAgentRequestResponse(decision runtime.AgentRequestDecision
 		result, err := m.client.RespondAgentRequest(m.ctx, request.Scope, request.ID, payload)
 		return agentRequestResponded{result: result, action: action, err: err}
 	}
+}
+
+func (m *Model) submitAgentRequestCreation() tea.Cmd {
+	source := m.selectedRun()
+	prompt := strings.TrimSpace(m.editor.Value())
+	if source == nil || m.busy || !m.supportsAgentRequest(kernelapi.OperationCreate) {
+		return nil
+	}
+	kind, recipient, goal, err := parseAgentRequestPrompt(prompt)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	if m.pendingAgentRequestKey == "" || m.pendingAgentRequestPrompt != prompt || m.pendingAgentRequestSourceID != source.ID {
+		m.pendingAgentRequestKey, m.pendingAgentRequestPrompt, m.pendingAgentRequestSourceID = uuid.NewString(), prompt, source.ID
+	}
+	key := m.pendingAgentRequestKey
+	m.busy, m.err, m.status = true, nil, "Creating a durable collaboration request…"
+	payload := kernelapi.CreateAgentRequestRequest{
+		Scope: m.config.Scope, Kind: kind, Requester: m.localCollaborationParty(), Recipient: recipient,
+		SourceRunID: source.ID, Goal: goal, IdempotencyKey: key,
+	}
+	return func() tea.Msg {
+		result, createErr := m.client.CreateAgentRequest(m.ctx, payload, key)
+		return agentRequestCreated{result: result, err: createErr}
+	}
+}
+
+func parseAgentRequestPrompt(prompt string) (runtime.AgentRequestKind, runtime.CollaborationParty, string, error) {
+	lines := strings.Split(strings.TrimSpace(prompt), "\n")
+	if len(lines) < 2 {
+		return "", runtime.CollaborationParty{}, "", errors.New("Put the recipient on the first line and the requested outcome below it.")
+	}
+	directive := strings.Fields(strings.TrimSpace(lines[0]))
+	kind := runtime.AgentRequestKindRequest
+	if len(directive) == 2 && strings.EqualFold(directive[0], string(runtime.AgentRequestKindHandoff)) {
+		kind = runtime.AgentRequestKindHandoff
+		directive = directive[1:]
+	}
+	if len(directive) != 1 {
+		return "", runtime.CollaborationParty{}, "", errors.New("Use agent:<id>, team:<id>, or handoff agent:<id> on the first line.")
+	}
+	identity := strings.SplitN(strings.TrimSpace(directive[0]), ":", 2)
+	if len(identity) != 2 {
+		return "", runtime.CollaborationParty{}, "", errors.New("Use agent:<id> or team:<id> for the recipient.")
+	}
+	recipient := runtime.CollaborationParty{Type: runtime.OwnerType(strings.ToLower(strings.TrimSpace(identity[0]))), ID: strings.TrimSpace(identity[1])}
+	if err := recipient.Validate(); err != nil {
+		return "", runtime.CollaborationParty{}, "", fmt.Errorf("recipient: %w", err)
+	}
+	goal := strings.TrimSpace(strings.Join(lines[1:], "\n"))
+	if goal == "" {
+		return "", runtime.CollaborationParty{}, "", errors.New("Describe the requested outcome below the recipient.")
+	}
+	return kind, recipient, goal, nil
 }
 
 func (m *Model) submitAgentRequestCompletion() tea.Cmd {
@@ -2639,6 +2727,10 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeRequestComplete
 		m.editor.Placeholder = "Summarize the completed outcome…"
 		m.focusComposerEditor()
+	case m.section == sectionRequests && m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil:
+		m.mode = modeRequestCreate
+		m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
+		m.focusComposerEditor()
 	case m.section == sectionApprovals && m.canResolveSelectedActionApproval():
 		m.mode = modeApprovalApprove
 		m.editor.Placeholder = "Record why this exact action is safe to approve…"
@@ -2677,8 +2769,13 @@ func (m *Model) resetComposerMode() {
 		return
 	}
 	if m.section == sectionRequests {
-		m.mode = modeCreate
-		m.editor.Placeholder = "Select a request to inspect its available actions."
+		if m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil {
+			m.mode = modeRequestCreate
+			m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
+		} else {
+			m.mode = modeCreate
+			m.editor.Placeholder = "Select a request to inspect its available actions."
+		}
 		return
 	}
 	if m.section == sectionApprovals {

@@ -31,6 +31,8 @@ type fakeKernelClient struct {
 	runs                []*runtime.AgentRun
 	agentRequests       []*runtime.AgentRequest
 	agentRequestFilters []runtime.AgentRequestFilter
+	agentRequestCreates []kernelapi.CreateAgentRequestRequest
+	agentRequestKeys    []string
 	agentResponses      []kernelapi.RespondAgentRequestRequest
 	agentCompletions    []kernelapi.CompleteAgentRequestRequest
 	agentCompletionKeys []string
@@ -253,8 +255,16 @@ func (f *fakeKernelClient) WorkforceChangeSetCapabilities(context.Context, capab
 	return f.document, nil
 }
 
-func (f *fakeKernelClient) CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*runtime.AgentRequestResult, error) {
-	return nil, errors.New("agent requests are not configured in this test")
+func (f *fakeKernelClient) CreateAgentRequest(_ context.Context, request kernelapi.CreateAgentRequestRequest, key string) (*runtime.AgentRequestResult, error) {
+	f.agentRequestCreates = append(f.agentRequestCreates, request)
+	f.agentRequestKeys = append(f.agentRequestKeys, key)
+	created := &runtime.AgentRequest{
+		ID: "created-request", Scope: request.Scope, Kind: request.Kind, Status: runtime.AgentRequestStatusPending,
+		Requester: request.Requester, Recipient: request.Recipient, SourceRunID: request.SourceRunID, Goal: request.Goal,
+		IdempotencyKey: key, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	f.agentRequests = append([]*runtime.AgentRequest{created}, f.agentRequests...)
+	return &runtime.AgentRequestResult{Request: created}, nil
 }
 
 func (f *fakeKernelClient) ListAgentRequests(_ context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
@@ -710,6 +720,41 @@ func TestAgentRequestsAreAFirstClassCapabilityGatedProjection(t *testing.T) {
 	for _, expected := range []string{"R Requests", "Collaboration requests", "Review the cited report", "from agent:researcher", "y accept", "? clarify", "x reject"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("request view missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestPromptFirstAgentRequestCreationUsesSelectedRunAndIdempotency(t *testing.T) {
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.AgentRequestsCapability()),
+		runs:     []*runtime.AgentRun{testRun("source-run", runtime.AgentRunStatusRunning, 4)},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section, model.focus = sectionRequests, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if model.mode != modeRequestCreate || model.focus != focusComposer {
+		t.Fatalf("request composer not prepared: mode=%v focus=%v", model.mode, model.focus)
+	}
+	model.editor.SetValue("handoff team:marketing\nPublish a cited release brief and coordinate approved follow-up")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.agentRequestCreates) != 1 || len(fake.agentRequestKeys) != 1 || fake.agentRequestKeys[0] == "" {
+		t.Fatalf("creates=%#v keys=%#v", fake.agentRequestCreates, fake.agentRequestKeys)
+	}
+	created := fake.agentRequestCreates[0]
+	if created.Kind != runtime.AgentRequestKindHandoff || created.SourceRunID != "source-run" || created.Requester != (runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "operator"}) || created.Recipient != (runtime.CollaborationParty{Type: runtime.OwnerTypeTeam, ID: "marketing"}) || created.IdempotencyKey != fake.agentRequestKeys[0] || !strings.Contains(created.Goal, "cited release brief") {
+		t.Fatalf("create request=%#v", created)
+	}
+	if model.selectedAgentRequest != "created-request" || !strings.Contains(model.View(), "Publish a cited release brief") {
+		t.Fatalf("created request was not selected:\n%s", model.View())
+	}
+}
+
+func TestAgentRequestPromptRejectsAmbiguousRecipients(t *testing.T) {
+	for _, prompt := range []string{"researcher\nDo work", "user:alice\nDo work", "agent:researcher", "agent:\nDo work"} {
+		if _, _, _, err := parseAgentRequestPrompt(prompt); err == nil {
+			t.Fatalf("parseAgentRequestPrompt(%q) unexpectedly succeeded", prompt)
 		}
 	}
 }
