@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 const maximumGenerationBytes = 1 << 20
@@ -131,6 +133,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		if err := definition.Validate(); err != nil {
 			issues = append(issues, issue(path, "invalid_agent", err.Error()))
 		}
+		issues = append(issues, validateObjectiveTemplateCadences(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
 	if candidate.Team == nil {
 		if len(candidate.Agents) == 0 {
@@ -148,6 +151,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 	if err := candidate.Team.Validate(); err != nil {
 		issues = append(issues, issue("team", "invalid_team", err.Error()))
 	}
+	issues = append(issues, validateObjectiveTemplateCadences("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
 	roles := make(map[string]int, len(candidate.Team.Roles))
 	roleDefinitions := make(map[string]map[string]bool, len(candidate.Team.Roles))
 	for _, role := range candidate.Team.Roles {
@@ -236,6 +240,7 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 		}
 	}
 	if candidate.Initiative != nil {
+		objectives := candidateObjectiveTemplates(candidate)
 		for _, monitor := range candidate.Initiative.SourceMonitors {
 			available, ok := catalog.Skills[monitor.SkillID]
 			requiredBy := "initiative:" + candidate.Initiative.ID + "/monitor:" + monitor.ID
@@ -256,6 +261,9 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 			if !policyAvailable || policy.Reference != monitor.SourcePolicyRef {
 				key := "source_policy:" + monitor.SourcePolicyRef + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: "source_policy", ID: monitor.SourcePolicyRef, RequiredBy: requiredBy}
+			} else if !sourceMonitorWithinPolicy(objectives[monitor.ObjectiveRef], policy) {
+				key := "source_scope:" + monitor.SourcePolicyRef + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: "source_scope", ID: monitor.SourcePolicyRef, RequiredBy: requiredBy}
 			}
 		}
 	}
@@ -273,6 +281,55 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 		return result[i].Kind < result[j].Kind
 	})
 	return result
+}
+
+func sourceMonitorWithinPolicy(template *workforce.ObjectiveTemplate, policy SourcePolicyCapability) bool {
+	if template == nil || policy.MaximumItems < 1 {
+		return false
+	}
+	runTemplate, _ := template.Cadence["runTemplate"].(map[string]interface{})
+	capability, _ := runTemplate["capability"].(map[string]interface{})
+	inputs, _ := capability["inputs"].(map[string]interface{})
+	rawURL, _ := inputs["url"].(string)
+	maximumItems, ok := jsonInteger(inputs["maxItems"])
+	if !ok || maximumItems < 1 || maximumItems > int64(policy.MaximumItems) {
+		return false
+	}
+	target, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || target.Scheme != "https" || target.User != nil || target.Fragment != "" || target.Hostname() == "" || target.Port() != "" && target.Port() != "443" {
+		return false
+	}
+	for _, source := range policy.Sources {
+		if !strings.EqualFold(strings.TrimSpace(source.Host), target.Hostname()) {
+			continue
+		}
+		if len(source.PathPrefixes) == 0 {
+			return true
+		}
+		for _, prefix := range source.PathPrefixes {
+			if strings.HasPrefix(target.EscapedPath(), strings.TrimSpace(prefix)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func jsonInteger(value interface{}) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		integer := int64(typed)
+		return integer, float64(integer) == typed
+	case json.Number:
+		integer, err := typed.Int64()
+		return integer, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func riskChanges(existing *WorkforceCandidate, candidate *WorkforceCandidate) []RiskChange {

@@ -67,6 +67,9 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"When a Team owns the Initiative, put the monitor Objective template on the Team",
 		"Questions are blocking requests for information, not suggestions or confirmations",
 		"Put non-blocking choices and safe defaults in assumptions, never questions",
+		"An executable cadence is exactly one of",
+		"runBudget is an object with non-negative",
+		"maxItems\":<positive integer no larger than policy maximumItems>",
 	} {
 		if !strings.Contains(authoringSystemPrompt, expected) {
 			t.Fatalf("authoring schema missing %q", expected)
