@@ -547,6 +547,8 @@ const (
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion
 	ActivityCapabilityID                    = kernelapi.ActivityCapabilityID
 	ActivityCapabilityVersion               = kernelapi.ActivityCapabilityVersion
+	SkillActionsCapabilityID                = kernelapi.SkillActionsCapabilityID
+	SkillActionsCapabilityVersion           = kernelapi.SkillActionsCapabilityVersion
 	KernelOperationList                     = kernelapi.OperationList
 	ChannelOperationCreate                  = kernelapi.OperationCreate
 	ChannelOperationGet                     = kernelapi.OperationGet
@@ -626,6 +628,10 @@ func SourceMonitorsCapability() KernelCapability {
 
 func OutreachLifecycleCapability() KernelCapability {
 	return kernelapi.OutreachCapability()
+}
+
+func SkillActionsCapability() KernelCapability {
+	return kernelapi.SkillActionsCapability()
 }
 
 func ActivityCapability() KernelCapability {
