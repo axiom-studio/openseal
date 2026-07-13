@@ -292,7 +292,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if usageErr != nil {
 			return nil, usageErr
 		}
-		if state == BudgetStateExhausted {
+		if state == BudgetStateExhausted && !isTerminalAgentRunStatus(finish.NextRunStatus) {
 			finish.NextRunStatus = AgentRunStatusPaused
 			finish.OutputSummary = "Run paused after reaching its autonomous budget"
 		}
