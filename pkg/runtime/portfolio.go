@@ -70,27 +70,47 @@ const (
 	ObjectiveStatusRetired   ObjectiveStatus = "retired"
 )
 
+type ObjectiveScheduleState string
+
+const (
+	ObjectiveScheduleBackpressured   ObjectiveScheduleState = "backpressured"
+	ObjectiveScheduleSuspended       ObjectiveScheduleState = "suspended"
+	ObjectiveScheduleBudgetExhausted ObjectiveScheduleState = "budget_exhausted"
+)
+
+// ObjectiveScheduleCondition is server-authored operational state for a
+// recurring Objective. It explains why a due occurrence was not projected
+// into a Run without changing the user's lifecycle status or overloading the
+// human-authored progress summary.
+type ObjectiveScheduleCondition struct {
+	State     ObjectiveScheduleState `json:"state"`
+	Reason    string                 `json:"reason"`
+	Since     time.Time              `json:"since"`
+	UpdatedAt time.Time              `json:"updatedAt"`
+}
+
 type Objective struct {
-	ID                  string                  `json:"id"`
-	Scope               Scope                   `json:"scope"`
-	Owner               ObjectiveOwner          `json:"owner"`
-	Title               string                  `json:"title"`
-	Goal                string                  `json:"goal"`
-	Status              ObjectiveStatus         `json:"status"`
-	Priority            int                     `json:"priority"`
-	Cadence             *ObjectiveCadence       `json:"cadence,omitempty"`
-	EventRules          map[string]interface{}  `json:"eventRules,omitempty"`
-	Budget              *BudgetPolicy           `json:"budget,omitempty"`
-	BudgetAllocations   map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
-	Constraints         map[string]interface{}  `json:"constraints,omitempty"`
-	SuccessCriteria     map[string]interface{}  `json:"successCriteria,omitempty"`
-	ProgressSummary     string                  `json:"progressSummary,omitempty"`
-	NextEvaluationAt    *time.Time              `json:"nextEvaluationAt,omitempty"`
-	Revision            int64                   `json:"revision"`
-	CreatedAt           time.Time               `json:"createdAt"`
-	UpdatedAt           time.Time               `json:"updatedAt"`
-	IdempotencyKeyHash  string                  `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint string                  `json:"creationFingerprint,omitempty"`
+	ID                  string                      `json:"id"`
+	Scope               Scope                       `json:"scope"`
+	Owner               ObjectiveOwner              `json:"owner"`
+	Title               string                      `json:"title"`
+	Goal                string                      `json:"goal"`
+	Status              ObjectiveStatus             `json:"status"`
+	Priority            int                         `json:"priority"`
+	Cadence             *ObjectiveCadence           `json:"cadence,omitempty"`
+	EventRules          map[string]interface{}      `json:"eventRules,omitempty"`
+	Budget              *BudgetPolicy               `json:"budget,omitempty"`
+	BudgetAllocations   map[string]BudgetPolicy     `json:"budgetAllocations,omitempty"`
+	Constraints         map[string]interface{}      `json:"constraints,omitempty"`
+	SuccessCriteria     map[string]interface{}      `json:"successCriteria,omitempty"`
+	ProgressSummary     string                      `json:"progressSummary,omitempty"`
+	NextEvaluationAt    *time.Time                  `json:"nextEvaluationAt,omitempty"`
+	ScheduleCondition   *ObjectiveScheduleCondition `json:"scheduleCondition,omitempty"`
+	Revision            int64                       `json:"revision"`
+	CreatedAt           time.Time                   `json:"createdAt"`
+	UpdatedAt           time.Time                   `json:"updatedAt"`
+	IdempotencyKeyHash  string                      `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string                      `json:"creationFingerprint,omitempty"`
 }
 
 func (o *Objective) Validate() error {
@@ -114,6 +134,17 @@ func (o *Objective) Validate() error {
 	}
 	if err := o.Cadence.Validate(); err != nil {
 		return err
+	}
+	if o.ScheduleCondition != nil {
+		if o.Cadence == nil || strings.TrimSpace(o.ScheduleCondition.Reason) == "" || len(o.ScheduleCondition.Reason) > 512 ||
+			o.ScheduleCondition.Since.IsZero() || o.ScheduleCondition.UpdatedAt.IsZero() || o.ScheduleCondition.UpdatedAt.Before(o.ScheduleCondition.Since) {
+			return errors.New("objective schedule condition requires cadence, reason, and valid timestamps")
+		}
+		switch o.ScheduleCondition.State {
+		case ObjectiveScheduleBackpressured, ObjectiveScheduleSuspended, ObjectiveScheduleBudgetExhausted:
+		default:
+			return errors.New("objective schedule condition state is invalid")
+		}
 	}
 	if o.Budget != nil {
 		if err := o.Budget.Validate(); err != nil {
@@ -432,21 +463,23 @@ type CreateObjectiveRequest struct {
 }
 
 type UpdateObjectiveRequest struct {
-	ExpectedRevision int64
-	Title            *string
-	Goal             *string
-	Status           *ObjectiveStatus
-	Priority         *int
-	Cadence          *ObjectiveCadence
-	EventRules       map[string]interface{}
-	Budget           *BudgetPolicy
-	Constraints      map[string]interface{}
-	SuccessCriteria  map[string]interface{}
-	ProgressSummary  *string
-	NextEvaluationAt *time.Time
-	Actor            ActivityActor
-	Visibility       ActivityVisibility
-	Summary          string
+	ExpectedRevision       int64
+	Title                  *string
+	Goal                   *string
+	Status                 *ObjectiveStatus
+	Priority               *int
+	Cadence                *ObjectiveCadence
+	EventRules             map[string]interface{}
+	Budget                 *BudgetPolicy
+	Constraints            map[string]interface{}
+	SuccessCriteria        map[string]interface{}
+	ProgressSummary        *string
+	NextEvaluationAt       *time.Time
+	ScheduleCondition      *ObjectiveScheduleCondition
+	ClearScheduleCondition bool
+	Actor                  ActivityActor
+	Visibility             ActivityVisibility
+	Summary                string
 }
 
 type CreateAgentRunRequest struct {
@@ -838,6 +871,9 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	}
 	if req.Status != nil {
 		objective.Status = *req.Status
+		if *req.Status != ObjectiveStatusActive {
+			objective.ScheduleCondition = nil
+		}
 	}
 	if req.Priority != nil {
 		objective.Priority = *req.Priority
@@ -862,6 +898,12 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	}
 	if req.NextEvaluationAt != nil {
 		objective.NextEvaluationAt = req.NextEvaluationAt
+	}
+	if req.ClearScheduleCondition {
+		objective.ScheduleCondition = nil
+	} else if req.ScheduleCondition != nil {
+		condition := *req.ScheduleCondition
+		objective.ScheduleCondition = &condition
 	}
 }
 

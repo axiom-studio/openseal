@@ -2527,6 +2527,15 @@ func (m *Model) selectedObjectiveRecord() *runtime.Objective {
 	return m.objectives[m.objectiveSelected]
 }
 
+func (m *Model) objectiveRecord(objectiveID string) *runtime.Objective {
+	for _, objective := range m.objectives {
+		if objective != nil && objective.ID == objectiveID {
+			return objective
+		}
+	}
+	return nil
+}
+
 func (m *Model) restoreObjectiveSelection() {
 	if len(m.objectives) == 0 {
 		m.objectiveSelected = 0
