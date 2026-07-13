@@ -300,8 +300,13 @@ func TestAtomicMemoryApplyCreatesResourcesForRecoveredUnappliedAmendment(t *test
 		Scope: scope, ParentID: rejected.ID, Prompt: "recover unchanged", Catalog: catalog, Placement: rejected.Placement,
 		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "recover",
 	})
-	if err != nil || recovered.Status != ChangeSetReview || recovered.Mode != ModeAmend || len(recovered.Placement.AgentExpectedRevisions) != 0 || recovered.Placement.TeamExpectedRevision != 0 {
+	if err != nil || recovered.Status != ChangeSetReview || recovered.Mode != ModeAmend || len(recovered.Placement.AgentExpectedRevisions) != 0 || recovered.Placement.TeamExpectedRevision != 0 || recovered.Placement.InitiativeExpectedRevision != 0 {
 		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	for key, objective := range recovered.Placement.Objectives {
+		if objective.ExpectedRevision != 0 {
+			t.Fatalf("unapplied parent objective %q inherited revision %d", key, objective.ExpectedRevision)
+		}
 	}
 	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
 		Scope: scope, ChangeSetID: recovered.ID, ExpectedRevision: recovered.Revision, CandidateDigest: recovered.CandidateDigest,
@@ -321,6 +326,58 @@ func TestAtomicMemoryApplyCreatesResourcesForRecoveredUnappliedAmendment(t *test
 		if deployment.Revision != 1 {
 			t.Fatalf("recovered deployment=%#v", deployment)
 		}
+	}
+}
+
+func TestAmendmentPlacementRevisionsComeOnlyFromAppliedReceipt(t *testing.T) {
+	const (
+		agentDefinitionID = "tenant/one/researcher"
+	)
+	objectiveKey := WorkforceObjectiveKey("agent", agentDefinitionID, "monitor")
+	parent := &ChangeSet{Placement: ChangeSetPlacement{
+		AgentDeploymentIDs: map[string]string{agentDefinitionID: "agent-live"},
+		TeamDeploymentID:   "team-live",
+		InitiativeID:       "initiative-live",
+		Environment:        "production",
+		Objectives:         map[string]ObjectivePlacement{objectiveKey: {ID: "objective-live"}},
+	}}
+
+	unapplied := ChangeSetPlacement{}
+	inheritParentPlacement(&unapplied, parent)
+	if unapplied.AgentDeploymentIDs[agentDefinitionID] != "agent-live" || unapplied.TeamDeploymentID != "team-live" || unapplied.InitiativeID != "initiative-live" || unapplied.Environment != "production" {
+		t.Fatalf("stable placement was not inherited: %#v", unapplied)
+	}
+	if len(unapplied.AgentExpectedRevisions) != 0 || unapplied.TeamExpectedRevision != 0 || unapplied.InitiativeExpectedRevision != 0 || unapplied.Objectives[objectiveKey].ExpectedRevision != 0 {
+		t.Fatalf("unapplied candidate invented persistence revisions: %#v", unapplied)
+	}
+
+	parent.ApplyReceipt = &ChangeSetApplyReceipt{Resources: []AppliedResourceReference{
+		{Kind: "agent_deployment", ID: "agent-live", Revision: 3},
+		{Kind: "team_deployment", ID: "team-live", Revision: 4},
+		{Kind: "objective", ID: "objective-live", Revision: 5},
+		{Kind: "initiative", ID: "initiative-live", Revision: 6},
+	}}
+	applied := ChangeSetPlacement{}
+	inheritParentPlacement(&applied, parent)
+	if applied.AgentExpectedRevisions[agentDefinitionID] != 3 || applied.TeamExpectedRevision != 4 || applied.Objectives[objectiveKey].ExpectedRevision != 5 || applied.InitiativeExpectedRevision != 6 {
+		t.Fatalf("applied receipt revisions were not inherited exactly: %#v", applied)
+	}
+	retargeted := ChangeSetPlacement{
+		AgentDeploymentIDs: map[string]string{agentDefinitionID: "agent-new"},
+		TeamDeploymentID:   "team-new",
+		InitiativeID:       "initiative-new",
+		Objectives:         map[string]ObjectivePlacement{objectiveKey: {ID: "objective-new"}},
+	}
+	inheritParentPlacement(&retargeted, parent)
+	if retargeted.AgentExpectedRevisions[agentDefinitionID] != 0 || retargeted.TeamExpectedRevision != 0 || retargeted.Objectives[objectiveKey].ExpectedRevision != 0 || retargeted.InitiativeExpectedRevision != 0 {
+		t.Fatalf("retargeted resources inherited old resource revisions: %#v", retargeted)
+	}
+
+	refined := &ChangeSet{Placement: applied}
+	grandchild := ChangeSetPlacement{}
+	inheritParentPlacement(&grandchild, refined)
+	if grandchild.AgentExpectedRevisions[agentDefinitionID] != 3 || grandchild.TeamExpectedRevision != 4 || grandchild.Objectives[objectiveKey].ExpectedRevision != 5 || grandchild.InitiativeExpectedRevision != 6 {
+		t.Fatalf("applied lineage revisions were not preserved: %#v", grandchild)
 	}
 }
 
@@ -400,9 +457,9 @@ func TestChangeSetCanonicalizesInitiativeSymbolicReferencesWithDefinitions(t *te
 		t.Fatalf("canonical monitor cadence assigned Agent = %q", assigned)
 	}
 	placement := ChangeSetPlacement{}
-	canonicalizePlacement(&placement, scope, &candidate, nil)
+	canonicalizePlacement(&placement, scope, &candidate)
 	firstInitiativeID := placement.InitiativeID
-	canonicalizePlacement(&placement, scope, &candidate, nil)
+	canonicalizePlacement(&placement, scope, &candidate)
 	if placement.InitiativeID == "" || placement.InitiativeID != firstInitiativeID || strings.Contains(placement.InitiativeID, "/") {
 		t.Fatalf("portable deterministic Initiative placement = %#v", placement)
 	}
