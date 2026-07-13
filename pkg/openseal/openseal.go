@@ -14,6 +14,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -484,40 +485,62 @@ type (
 	SourceObservationIngestResult         = runtime.SourceObservationIngestResult
 	AdvanceSourceMonitorCheckpointRequest = runtime.AdvanceSourceMonitorCheckpointRequest
 	SourceMonitorCheckpointResult         = runtime.SourceMonitorCheckpointResult
+	KernelCapability                      = kernelapi.Capability
+	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
 )
 
 const (
-	HostedTurnAPIVersion     = runtime.HostedTurnAPIVersion
-	HostedSkillApplied       = runtime.HostedSkillApplied
-	HostedSkillNotApplied    = runtime.HostedSkillNotApplied
-	RunbookAPIVersion        = runbook.APIVersion
-	RunbookStepAction        = runbook.StepAction
-	RunbookStepDelegate      = runbook.StepDelegate
-	RunbookDelegateBehavior  = runbook.DelegateBehavior
-	RunbookDelegateReason    = runbook.DelegateReason
-	RunbookStepDecision      = runbook.StepDecision
-	RunbookStepTransform     = runbook.StepTransform
-	RunbookStepWait          = runbook.StepWait
-	RunbookStepFork          = runbook.StepFork
-	RunbookStepJoin          = runbook.StepJoin
-	RunbookStepForEach       = runbook.StepForEach
-	RunbookStepLoopReturn    = runbook.StepLoopReturn
-	RunbookStepEnd           = runbook.StepEnd
-	RunbookJoinAll           = runbook.JoinAll
-	RunbookJoinAny           = runbook.JoinAny
-	RunbookPredicateEqual    = runbook.PredicateEqual
-	RunbookPredicateNotEqual = runbook.PredicateNotEqual
-	RunbookPredicateExists   = runbook.PredicateExists
-	RunbookPredicateTruthy   = runbook.PredicateTruthy
-	RunbookPredicateGreater  = runbook.PredicateGreater
-	RunbookPredicateAtLeast  = runbook.PredicateAtLeast
-	RunbookPredicateLess     = runbook.PredicateLess
-	RunbookPredicateAtMost   = runbook.PredicateAtMost
-	RunbookPredicateContains = runbook.PredicateContains
-	RunbookPredicateAll      = runbook.PredicateAll
-	RunbookPredicateAny      = runbook.PredicateAny
-	RunbookPredicateNot      = runbook.PredicateNot
+	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
+	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
+	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion
+	ChannelOperationCreate                  = kernelapi.OperationCreate
+	ChannelOperationGet                     = kernelapi.OperationGet
+	ChannelOperationList                    = kernelapi.OperationList
+	ChannelOperationPost                    = kernelapi.OperationPost
+	ChannelOperationRead                    = kernelapi.OperationRead
+	ChannelOperationPresence                = kernelapi.OperationPresence
+	ChannelOperationAudit                   = kernelapi.OperationAudit
+	ChannelOperationCoordinate              = kernelapi.OperationCoordinate
+	ChannelOperationCoordinateAutomatically = kernelapi.OperationCoordinateAuto
+	ChannelOperationReceipts                = kernelapi.OperationReceipts
+	ChannelOperationChanges                 = kernelapi.OperationChanges
+	ChannelOperationStream                  = kernelapi.OperationStream
+	HostedSkillApplied                      = runtime.HostedSkillApplied
+	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
+	RunbookAPIVersion                       = runbook.APIVersion
+	RunbookStepAction                       = runbook.StepAction
+	RunbookStepDelegate                     = runbook.StepDelegate
+	RunbookDelegateBehavior                 = runbook.DelegateBehavior
+	RunbookDelegateReason                   = runbook.DelegateReason
+	RunbookStepDecision                     = runbook.StepDecision
+	RunbookStepTransform                    = runbook.StepTransform
+	RunbookStepWait                         = runbook.StepWait
+	RunbookStepFork                         = runbook.StepFork
+	RunbookStepJoin                         = runbook.StepJoin
+	RunbookStepForEach                      = runbook.StepForEach
+	RunbookStepLoopReturn                   = runbook.StepLoopReturn
+	RunbookStepEnd                          = runbook.StepEnd
+	RunbookJoinAll                          = runbook.JoinAll
+	RunbookJoinAny                          = runbook.JoinAny
+	RunbookPredicateEqual                   = runbook.PredicateEqual
+	RunbookPredicateNotEqual                = runbook.PredicateNotEqual
+	RunbookPredicateExists                  = runbook.PredicateExists
+	RunbookPredicateTruthy                  = runbook.PredicateTruthy
+	RunbookPredicateGreater                 = runbook.PredicateGreater
+	RunbookPredicateAtLeast                 = runbook.PredicateAtLeast
+	RunbookPredicateLess                    = runbook.PredicateLess
+	RunbookPredicateAtMost                  = runbook.PredicateAtMost
+	RunbookPredicateContains                = runbook.PredicateContains
+	RunbookPredicateAll                     = runbook.PredicateAll
+	RunbookPredicateAny                     = runbook.PredicateAny
+	RunbookPredicateNot                     = runbook.PredicateNot
 )
+
+// ChannelCapability returns the canonical versioned descriptor for the
+// channel services an embedding host has actually wired.
+func ChannelCapability(features ChannelCapabilityFeatures) KernelCapability {
+	return kernelapi.ChannelsCapability(features)
+}
 
 var (
 	NewHostedTurnRunner         = runtime.NewHostedTurnRunner

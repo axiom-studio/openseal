@@ -25,7 +25,7 @@ const (
 	ArtifactsCapabilityID               = "artifacts"
 	ArtifactsCapabilityVersion          = "1"
 	ChannelsCapabilityID                = "channels"
-	ChannelsCapabilityVersion           = "2"
+	ChannelsCapabilityVersion           = "4"
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "1"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
@@ -55,6 +55,9 @@ const (
 	OperationPresence         = "presence"
 	OperationAudit            = "audit"
 	OperationChanges          = "changes"
+	OperationReceipts         = "receipts"
+	OperationCoordinateAuto   = "coordinate-automatically"
+	OperationStream           = "stream"
 	OperationDeploy           = "deploy"
 	OperationActivate         = "activate"
 	OperationCompile          = "compile"
@@ -82,6 +85,17 @@ type Capability struct {
 	Available  bool               `json:"available"`
 	Operations []string           `json:"operations"`
 	Context    *CapabilityContext `json:"context,omitempty"`
+}
+
+// ChannelCapabilityFeatures describes the optional channel services wired by
+// a host. The version and operation vocabulary are canonical; each host
+// advertises only the portable or enterprise adapters it has actually wired.
+type ChannelCapabilityFeatures struct {
+	Coordination          bool
+	AutomaticCoordination bool
+	Receipts              bool
+	Changes               bool
+	Streaming             bool
 }
 
 // CapabilityContext is server-authored authorization state for one explicitly
@@ -201,7 +215,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Version:      Version,
-		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(), TeamDefinitionsCapability()},
+		Capabilities: []Capability{ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability()},
 	}
 }
 
@@ -225,11 +239,27 @@ func ArtifactCapability(contentOperations ...string) Capability {
 	return capability
 }
 
-func ChannelsCapability() Capability {
-	return Capability{
+func ChannelsCapability(features ChannelCapabilityFeatures) Capability {
+	capability := Capability{
 		ID: ChannelsCapabilityID, Version: ChannelsCapabilityVersion, Available: true,
-		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationCoordinate, OperationRead, OperationPresence, OperationAudit, OperationChanges},
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationRead, OperationPresence, OperationAudit},
 	}
+	if features.Coordination {
+		capability.Operations = append(capability.Operations, OperationCoordinate)
+	}
+	if features.AutomaticCoordination {
+		capability.Operations = append(capability.Operations, OperationCoordinateAuto)
+	}
+	if features.Receipts {
+		capability.Operations = append(capability.Operations, OperationReceipts)
+	}
+	if features.Changes {
+		capability.Operations = append(capability.Operations, OperationChanges)
+	}
+	if features.Streaming {
+		capability.Operations = append(capability.Operations, OperationStream)
+	}
+	return capability
 }
 
 func TeamDefinitionsCapability() Capability {

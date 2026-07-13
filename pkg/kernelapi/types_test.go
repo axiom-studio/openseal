@@ -28,6 +28,33 @@ func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *test
 	}
 }
 
+func TestChannelCapabilityAdvertisesOnlyConfiguredFeatures(t *testing.T) {
+	portable := ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true})
+	for _, operation := range []string{OperationCreate, OperationPost, OperationRead, OperationPresence, OperationAudit, OperationCoordinate, OperationChanges} {
+		if !portable.Supports(operation) {
+			t.Fatalf("portable channel operation %q not advertised: %#v", operation, portable.Operations)
+		}
+	}
+	for _, operation := range []string{OperationReceipts, OperationCoordinateAuto, OperationStream} {
+		if portable.Supports(operation) {
+			t.Fatalf("unconfigured channel operation %q advertised: %#v", operation, portable.Operations)
+		}
+	}
+
+	enterprise := ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, AutomaticCoordination: true, Receipts: true, Streaming: true})
+	for _, operation := range []string{OperationCoordinate, OperationCoordinateAuto, OperationReceipts, OperationStream} {
+		if !enterprise.Supports(operation) {
+			t.Fatalf("configured channel operation %q not advertised: %#v", operation, enterprise.Operations)
+		}
+	}
+	if enterprise.Version != ChannelsCapabilityVersion {
+		t.Fatalf("channel capability version = %q", enterprise.Version)
+	}
+	if ChannelsCapabilityVersion != "4" {
+		t.Fatalf("canonical channel capability version = %q", ChannelsCapabilityVersion)
+	}
+}
+
 func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	capability := TeamDefinitionsCapability()
 	for _, operation := range []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate} {
