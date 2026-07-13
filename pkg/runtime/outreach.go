@@ -340,6 +340,23 @@ type ResolveOutreachMessageRequest struct {
 	Visibility       ActivityVisibility
 }
 
+// ReconcileOutreachActionRequest projects one authoritative ActionCall into
+// its evidence-linked outreach message. Receipt is required only after the
+// action succeeds; connector adapters normalize provider output before this
+// boundary.
+type ReconcileOutreachActionRequest struct {
+	MessageID    string
+	ActionCallID string
+	Receipt      *OutreachReceipt
+	Actor        ActivityActor
+	Visibility   ActivityVisibility
+}
+
+type ReconcileOutreachActionResult struct {
+	Thread *OutreachThread
+	Events []*ActivityEvent
+}
+
 type OutreachService struct {
 	store       OutreachStore
 	initiatives InitiativeStore
@@ -453,8 +470,11 @@ func (s *OutreachService) LinkAction(ctx context.Context, scope Scope, id string
 		!sameCredentialFreeValue(call.Arguments, capability.Arguments) || !outreachContainsString(call.EvidenceRefs, thread.SourceObservationID) || call.ApprovalID != strings.TrimSpace(req.ApprovalID) {
 		return nil, nil, errors.New("outreach action identity, arguments, evidence, policy disposition, or idempotency does not match the reviewed message")
 	}
-	if call.Status != ActionCallStatusReady && call.Status != ActionCallStatusWaitingApproval {
-		return nil, nil, errors.New("outreach action is not ready or awaiting approval")
+	switch call.Status {
+	case ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusRunning,
+		ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled:
+	default:
+		return nil, nil, errors.New("outreach action is not in a reconcilable lifecycle state")
 	}
 	if call.ApprovalID != "" {
 		approval, approvalErr := s.actions.GetApproval(ctx, scope, call.ApprovalID)
@@ -475,6 +495,102 @@ func (s *OutreachService) LinkAction(ctx context.Context, scope Scope, id string
 		message.UpdatedAt = now
 		return typeName, summary, nil
 	})
+}
+
+// ReconcileAction is the idempotent projection boundary between the generic
+// governed ActionCall lifecycle and an OutreachThread. It can be called after
+// proposal, approval, execution, or process restart; the ActionCall remains
+// authoritative and a replay never dispatches another provider request.
+func (s *OutreachService) ReconcileAction(ctx context.Context, scope Scope, id string, req ReconcileOutreachActionRequest) (*ReconcileOutreachActionResult, error) {
+	if s == nil || s.store == nil || s.actions == nil {
+		return nil, errors.New("outreach action reconciliation is not configured")
+	}
+	call, err := s.actions.GetActionCall(ctx, scope, strings.TrimSpace(req.ActionCallID))
+	if err != nil || call == nil {
+		if err == nil {
+			err = ErrActionNotFound
+		}
+		return nil, fmt.Errorf("resolve outreach action: %w", err)
+	}
+	thread, err := s.store.GetOutreachThread(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	message := findOutreachMessage(thread, req.MessageID)
+	if message == nil {
+		return nil, errors.New("outreach message not found")
+	}
+	result := &ReconcileOutreachActionResult{Thread: thread}
+	if message.Status == OutreachMessageDelivered {
+		if message.ActionCallID != call.ID || req.Receipt == nil || !sameOutreachReceipt(message.Receipt, req.Receipt) {
+			return nil, errors.New("delivered outreach message does not match the reconciled action and receipt")
+		}
+		return result, nil
+	}
+	if message.Status == OutreachMessageDraft {
+		linked, event, linkErr := s.LinkAction(ctx, scope, id, LinkOutreachActionRequest{
+			ExpectedRevision: thread.Revision, MessageID: message.ID, RunID: call.RunID, ActionCallID: call.ID,
+			ApprovalID: call.ApprovalID, Actor: req.Actor, Visibility: req.Visibility,
+		})
+		if linkErr != nil {
+			return nil, linkErr
+		}
+		thread, message, result.Thread = linked, findOutreachMessage(linked, message.ID), linked
+		if event != nil {
+			result.Events = append(result.Events, event)
+		}
+	} else if message.ActionCallID != call.ID || message.RunID != call.RunID {
+		return nil, errors.New("outreach message is linked to a different governed action")
+	}
+
+	terminalStatus, outcome := OutreachMessageStatus(""), ""
+	switch call.Status {
+	case ActionCallStatusDenied:
+		terminalStatus, outcome = OutreachMessageDeclined, firstNonEmpty(call.Error, "governed outreach action was denied")
+	case ActionCallStatusFailed:
+		terminalStatus, outcome = OutreachMessageFailed, firstNonEmpty(call.Error, "governed outreach action failed")
+	case ActionCallStatusCanceled:
+		terminalStatus, outcome = OutreachMessageCanceled, firstNonEmpty(call.Error, "governed outreach action was canceled")
+	case ActionCallStatusSucceeded:
+		if req.Receipt == nil {
+			return nil, errors.New("succeeded outreach action requires a normalized provider receipt")
+		}
+		delivered, event, deliveryErr := s.RecordDelivery(ctx, scope, id, RecordOutreachDeliveryRequest{
+			ExpectedRevision: thread.Revision, MessageID: message.ID, ActionCallID: call.ID, Receipt: *req.Receipt,
+			Actor: req.Actor, Visibility: req.Visibility,
+		})
+		if deliveryErr != nil {
+			return nil, deliveryErr
+		}
+		result.Thread = delivered
+		if event != nil {
+			result.Events = append(result.Events, event)
+		}
+		return result, nil
+	default:
+		return result, nil
+	}
+	resolved, event, resolveErr := s.ResolveMessage(ctx, scope, id, ResolveOutreachMessageRequest{
+		ExpectedRevision: thread.Revision, MessageID: message.ID, Status: terminalStatus, Outcome: outcome,
+		Actor: req.Actor, Visibility: req.Visibility,
+	})
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	result.Thread = resolved
+	if event != nil {
+		result.Events = append(result.Events, event)
+	}
+	return result, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func outreachContainsString(values []string, expected string) bool {

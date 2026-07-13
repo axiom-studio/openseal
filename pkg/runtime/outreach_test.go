@@ -72,13 +72,13 @@ func TestOutreachLifecyclePreservesEvidenceIdentityApprovalAndReceipt(t *testing
 	actionReader.approval.Status = ApprovalStatusApproved
 	digest := sha256.Sum256([]byte(body))
 	receipt := OutreachReceipt{Provider: "forum", ExternalID: "reply-99", ExternalURI: "https://forum.example/threads/thread-7#reply-99", Digest: "sha256:" + hex.EncodeToString(digest[:]), DeliveredAt: service.now()}
-	delivered, deliveryEvent, err := service.RecordDelivery(context.Background(), scope, created.ID, RecordOutreachDeliveryRequest{ExpectedRevision: 2, MessageID: "message-1", ActionCallID: "action-reply", Receipt: receipt, Actor: ActivityActor{Type: "worker", ID: "action-worker"}})
-	if err != nil || delivered.Messages[0].Status != OutreachMessageDelivered || deliveryEvent.EventType != "outreach.message_delivered" || delivered.Revision != 3 {
-		t.Fatalf("delivered=%#v event=%#v err=%v", delivered, deliveryEvent, err)
+	reconciled, err := service.ReconcileAction(context.Background(), scope, created.ID, ReconcileOutreachActionRequest{MessageID: "message-1", ActionCallID: "action-reply", Receipt: &receipt, Actor: ActivityActor{Type: "worker", ID: "action-worker"}})
+	if err != nil || reconciled.Thread.Messages[0].Status != OutreachMessageDelivered || len(reconciled.Events) != 1 || reconciled.Events[0].EventType != "outreach.message_delivered" || reconciled.Thread.Revision != 3 {
+		t.Fatalf("reconciled=%#v err=%v", reconciled, err)
 	}
-	replayedDelivery, deliveryReplayEvent, err := service.RecordDelivery(context.Background(), scope, created.ID, RecordOutreachDeliveryRequest{ExpectedRevision: 2, MessageID: "message-1", ActionCallID: "action-reply", Receipt: receipt})
-	if err != nil || deliveryReplayEvent != nil || replayedDelivery.Revision != 3 {
-		t.Fatalf("delivery replay=%#v event=%#v err=%v", replayedDelivery, deliveryReplayEvent, err)
+	replayedReconciliation, err := service.ReconcileAction(context.Background(), scope, created.ID, ReconcileOutreachActionRequest{MessageID: "message-1", ActionCallID: "action-reply", Receipt: &receipt})
+	if err != nil || len(replayedReconciliation.Events) != 0 || replayedReconciliation.Thread.Revision != 3 {
+		t.Fatalf("delivery replay=%#v err=%v", replayedReconciliation, err)
 	}
 	if _, err := service.Get(context.Background(), Scope{Kind: "tenant", ID: "foreign"}, created.ID); err != ErrOutreachThreadNotFound {
 		t.Fatalf("cross-tenant get=%v", err)

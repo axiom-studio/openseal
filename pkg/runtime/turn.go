@@ -32,11 +32,12 @@ type TurnDecision struct {
 }
 
 type TurnAction struct {
-	Type           string `json:"type"`
-	Capability     string `json:"capability,omitempty"`
-	Summary        string `json:"summary"`
-	IdempotencyKey string `json:"idempotencyKey,omitempty"`
-	InputRef       string `json:"inputRef,omitempty"`
+	Type           string   `json:"type"`
+	Capability     string   `json:"capability,omitempty"`
+	Summary        string   `json:"summary"`
+	IdempotencyKey string   `json:"idempotencyKey,omitempty"`
+	InputRef       string   `json:"inputRef,omitempty"`
+	EvidenceRefs   []string `json:"evidenceRefs,omitempty"`
 }
 
 type TurnUsage struct {
