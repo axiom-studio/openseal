@@ -175,6 +175,37 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_policy" || result.MissingRequirements[0].ID != "approved-communities" {
 		t.Fatalf("missing source policy = %#v, err = %v", result, err)
 	}
+
+	outOfScope := researchInitiativeCandidate()
+	monitorTemplate := &outOfScope.Team.ObjectiveTemplates[0]
+	monitorTemplate.Cadence["runTemplate"].(map[string]interface{})["capability"].(map[string]interface{})["inputs"] = map[string]interface{}{
+		"url": "https://attacker.example/feed", "maxItems": float64(5),
+	}
+	outOfScopePayload, _ := json.Marshal(GenerationResponse{Candidate: outOfScope})
+	compiler, _ = NewCompiler(staticGenerator{payload: outOfScopePayload})
+	catalog.SourcePolicies["approved-communities"] = SourcePolicyCapability{Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5}
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_scope" {
+		t.Fatalf("out-of-policy monitor source = %#v, err = %v", result, err)
+	}
+}
+
+func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
+		ID: "weekly", Title: "Weekly", Goal: "Report weekly", Priority: 1,
+		Cadence: map[string]interface{}{"assignedAgentId": candidate.Agents[0].ID, "interval": float64(604800000000000)},
+	}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "invalid_objective_cadence") {
+		t.Fatalf("non-executable cadence = %#v, err = %v", result, err)
+	}
 }
 
 func hasValidationCode(issues []ValidationIssue, code string) bool {
@@ -202,7 +233,7 @@ func researchInitiativeCandidate() WorkforceCandidate {
 					"entrypoint": "monitor",
 					"context":    map[string]interface{}{"initiativeId": "market-intelligence", "sourceMonitorId": "community-listening"},
 					"policy":     map[string]interface{}{"sourcePolicyRef": "approved-communities"},
-					"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"query": "agent runtime pain points"}},
+					"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"url": "https://community.example/feed", "maxItems": float64(5)}},
 				},
 			},
 		},
