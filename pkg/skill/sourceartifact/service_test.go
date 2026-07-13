@@ -115,8 +115,12 @@ func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t 
 	if _, err := reopened.ImportSourceArtifact(ctx, stored, &sourceartifact.Reference{
 		Scope: scope, Digest: stored.Digest, ID: "catalog:research", Kind: "catalog", CreatedAt: time.Now().UTC(),
 		Origin: sourceartifact.Origin{Registry: "https://untrusted.example"},
-	}); !errors.Is(err, sourceartifact.ErrReferenceConflict) {
-		t.Fatalf("provenance mutation error=%v", err)
+	}); err != nil {
+		t.Fatalf("retention owner provenance refresh error=%v", err)
+	}
+	refreshed, err := restarted.ExportOpenClawForReference(ctx, scope, compilation.SourceDigest, "catalog:research")
+	if err != nil || refreshed.Source.Registry != "https://untrusted.example" {
+		t.Fatalf("refreshed reference origin=%#v err=%v", refreshed.Source, err)
 	}
 	corrupt := sourceartifact.CloneArtifact(stored)
 	corrupt.Files[1].Content[0] ^= 0xff

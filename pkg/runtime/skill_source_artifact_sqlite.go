@@ -104,12 +104,10 @@ func (s *SQLiteStore) ImportSourceArtifact(ctx context.Context, artifact *source
 			if _, err := conn.ExecContext(ctx, `UPDATE skill_source_artifact_references SET digest=?,kind=?,created_at=?,expires_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, reference.Digest, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
 				return false, err
 			}
-		} else if existing.Origin.IsZero() && !reference.Origin.IsZero() {
+		} else if !sourceartifact.EquivalentReferences(&existing, reference) {
 			if _, err := conn.ExecContext(ctx, `UPDATE skill_source_artifact_references SET kind=?,created_at=?,expires_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
 				return false, err
 			}
-		} else if !sourceartifact.EquivalentReferences(&existing, reference) {
-			return false, sourceartifact.ErrReferenceConflict
 		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
