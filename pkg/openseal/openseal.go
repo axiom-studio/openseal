@@ -23,7 +23,6 @@ import (
 	skillsource "github.com/axiom-studio/openseal/pkg/skill/source"
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/types"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"go.uber.org/zap"
 )
@@ -61,12 +60,6 @@ type (
 	RunbookDiagnostic        = runbook.Diagnostic
 	RunbookTurnRunner        = runtime.RunbookTurnRunner
 
-	AgentNodeDefinition                       = types.AgentNodeDefinition
-	AgentConnection                           = types.AgentConnection
-	AgentLibraryBean                          = types.AgentLibraryBean
-	AgentInstanceBean                         = types.AgentInstanceBean
-	AgentWorkflow                             = types.AgentWorkflow
-	AgentWorkflowBean                         = types.AgentWorkflowBean
 	AgentDefinition                           = kernelagent.AgentDefinition
 	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
 	AgentCompilationSource                    = kernelagent.CompilationSource
