@@ -22,6 +22,8 @@ const (
 	InitiativesCapabilityVersion        = "1"
 	SourceMonitorsCapabilityID          = "source-monitors"
 	SourceMonitorsCapabilityVersion     = "1"
+	OutreachCapabilityID                = "outreach"
+	OutreachCapabilityVersion           = "1"
 	ArtifactsCapabilityID               = "artifacts"
 	ArtifactsCapabilityVersion          = "1"
 	ChannelsCapabilityID                = "channels"
@@ -78,6 +80,7 @@ const (
 	OperationListCompilations  = "list-compilations"
 	OperationListObservations  = "list-observations"
 	OperationGetCheckpoint     = "get-checkpoint"
+	OperationDeliver           = "deliver"
 	OperationProposeAmendment  = "propose-amendment"
 	OperationEvaluateAmendment = "evaluate-amendment"
 	OperationResolveAmendment  = "resolve-amendment"
@@ -231,6 +234,10 @@ func SourceMonitorsCapability() Capability {
 	return Capability{ID: SourceMonitorsCapabilityID, Version: SourceMonitorsCapabilityVersion, Available: true, Operations: []string{OperationListObservations, OperationGetCheckpoint}}
 }
 
+func OutreachCapability() Capability {
+	return Capability{ID: OutreachCapabilityID, Version: OutreachCapabilityVersion, Available: true, Operations: []string{OperationCreate, OperationGet, OperationList, OperationDeliver}}
+}
+
 func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capability {
 	operations := make([]string, 0, len(lifecycle.Operations))
 	for _, operation := range lifecycle.Operations {
@@ -240,7 +247,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.

@@ -39,6 +39,23 @@ func TestWorkforceAuthoringVersionDeclaresInitiativeCompositionContract(t *testi
 	}
 }
 
+func TestOutreachAdvertisesReviewedDeliveryLifecycle(t *testing.T) {
+	capability, ok := Capabilities().Find(OutreachCapabilityID, OutreachCapabilityVersion)
+	if !ok {
+		t.Fatal("outreach capability was not advertised")
+	}
+	for _, operation := range []string{OperationCreate, OperationGet, OperationList, OperationDeliver} {
+		if !capability.Supports(operation) {
+			t.Fatalf("outreach operation %q not advertised: %#v", operation, capability.Operations)
+		}
+	}
+	for _, unsupported := range []string{OperationUpdate, OperationPost, "delete"} {
+		if capability.Supports(unsupported) {
+			t.Fatalf("unsupported outreach operation %q advertised", unsupported)
+		}
+	}
+}
+
 func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	capability := AgentDefinitionsCapability()
 	if capability.Version != "2" || !capability.Supports("list-compilations") || capability.Supports("list_compilations") {

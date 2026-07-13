@@ -569,6 +569,7 @@ const (
 	KernelOperationApprove                  = kernelapi.OperationApprove
 	KernelOperationApply                    = kernelapi.OperationApply
 	KernelOperationRetry                    = kernelapi.OperationRetry
+	KernelOperationDeliver                  = kernelapi.OperationDeliver
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
 	RunbookAPIVersion                       = runbook.APIVersion
@@ -620,6 +621,10 @@ func InitiativesCapability() KernelCapability {
 
 func SourceMonitorsCapability() KernelCapability {
 	return kernelapi.SourceMonitorsCapability()
+}
+
+func OutreachCapabilityDocument() KernelCapability {
+	return kernelapi.OutreachCapability()
 }
 
 func ActivityCapability() KernelCapability {
