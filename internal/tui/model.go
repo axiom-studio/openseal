@@ -1403,11 +1403,40 @@ func (m *Model) loadRuns() tea.Cmd {
 		return nil
 	}
 	m.loading = true
+	owner := m.config.Owner
 	return func() tea.Msg {
-		runs, err := m.client.ListAgentRuns(m.ctx, runtime.AgentRunFilter{
+		owned, err := m.client.ListAgentRuns(m.ctx, runtime.AgentRunFilter{
 			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
 		})
-		return runsLoaded{runs: runs, err: err}
+		if err != nil {
+			return runsLoaded{err: err}
+		}
+		if owner.Type != runtime.OwnerTypeAgent {
+			return runsLoaded{runs: owned}
+		}
+		assigned, err := m.client.ListAgentRuns(m.ctx, runtime.AgentRunFilter{
+			Scope: m.config.Scope, AssignedAgentID: owner.ID, Limit: 100,
+		})
+		if err != nil {
+			return runsLoaded{err: err}
+		}
+		byID := make(map[string]*runtime.AgentRun, len(owned)+len(assigned))
+		for _, run := range append(owned, assigned...) {
+			if run != nil {
+				byID[run.ID] = run
+			}
+		}
+		runs := make([]*runtime.AgentRun, 0, len(byID))
+		for _, run := range byID {
+			runs = append(runs, run)
+		}
+		sort.Slice(runs, func(i, j int) bool {
+			if runs[i].UpdatedAt.Equal(runs[j].UpdatedAt) {
+				return runs[i].ID < runs[j].ID
+			}
+			return runs[i].UpdatedAt.After(runs[j].UpdatedAt)
+		})
+		return runsLoaded{runs: runs}
 	}
 }
 

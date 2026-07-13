@@ -1491,6 +1491,148 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 	}
 }
 
+func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *testing.T) {
+	store := runtime.NewMemoryStore(100)
+	scope := runtime.Scope{Kind: "tenant", ID: "one"}
+	source, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
+		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship the release", Source: runtime.RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+
+	developerConfig := DefaultConfig()
+	developerConfig.Endpoint, developerConfig.Scope = httpServer.URL, scope
+	developerConfig.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}
+	developerConfig.PollInterval = -1
+	developer, err := NewModel(t.Context(), httpClient, developerConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	developer.width, developer.height = 120, 36
+	applyCommand(t, developer, developer.loadCapabilities())
+	if developer.selectedRun() == nil || developer.selectedRun().ID != source.ID {
+		t.Fatalf("developer source Run not loaded: %#v", developer.runs)
+	}
+	developer.section, developer.mode = sectionRequests, modeRequestCreate
+	developer.focusComposerEditor()
+	developer.editor.SetValue("agent:marketing\nTurn the release into a reviewed launch brief")
+	applyCommand(t, developer, developer.submitAgentRequestCreation())
+	if developer.selectedAgentRequestRecord() == nil || developer.selectedAgentRequestRecord().Status != runtime.AgentRequestStatusPending {
+		t.Fatalf("HTTP request was not created: %#v", developer.agentRequests)
+	}
+	requestID := developer.selectedAgentRequestRecord().ID
+
+	marketingConfig := developerConfig
+	marketingConfig.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "marketing"}
+	marketing, err := NewModel(t.Context(), httpClient, marketingConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marketing.width, marketing.height = 120, 36
+	applyCommand(t, marketing, marketing.loadCapabilities())
+	marketing.section = sectionRequests
+	if marketing.selectedAgentRequestRecord() == nil || marketing.selectedAgentRequestRecord().ID != requestID || !strings.Contains(marketing.View(), "Turn the release into a reviewed launch brief") {
+		t.Fatalf("recipient did not discover HTTP request:\n%s", marketing.View())
+	}
+	marketing.mode = modeRequestAccept
+	marketing.focusComposerEditor()
+	marketing.editor.SetValue("I will produce the brief")
+	applyCommand(t, marketing, marketing.submitAgentRequestResponse(runtime.AgentRequestDecisionAccept))
+	accepted := marketing.selectedAgentRequestRecord()
+	if accepted == nil || accepted.Status != runtime.AgentRequestStatusAccepted || accepted.ChildRunID == "" || marketing.selectedRun() == nil || marketing.selectedRun().ID != accepted.ChildRunID {
+		t.Fatalf("HTTP request was not accepted with child work: request=%#v runs=%#v", accepted, marketing.runs)
+	}
+	marketing.mode = modeRequestComplete
+	marketing.focusComposerEditor()
+	marketing.editor.SetValue("Reviewed launch brief delivered")
+	applyCommand(t, marketing, marketing.submitAgentRequestCompletion())
+	completed := marketing.selectedAgentRequestRecord()
+	if completed == nil || completed.Status != runtime.AgentRequestStatusCompleted || completed.CompletionSummary != "Reviewed launch brief delivered" {
+		t.Fatalf("HTTP request was not completed: %#v", completed)
+	}
+	restoredSource, err := httpClient.GetAgentRun(t.Context(), scope, source.ID)
+	if err != nil || restoredSource.Status != runtime.AgentRunStatusQueued || restoredSource.WakeCondition != nil {
+		t.Fatalf("source Run did not wake: %#v, %v", restoredSource, err)
+	}
+}
+
+func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T) {
+	store := runtime.NewMemoryStore(100)
+	scope := runtime.Scope{Kind: "tenant", ID: "one"}
+	now := time.Now().UTC()
+	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
+		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
+		Goal: "Publish the release", Source: runtime.RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := &runtime.ApprovalCheckpoint{
+		ID: "approval-publish", Scope: scope, RunID: run.ID, ActionCallID: "call-publish", Status: runtime.ApprovalStatusPending,
+		Risk: "production", Summary: "Publish release announcement", PolicyReason: "External publication requires review",
+		ProposedAction:    map[string]interface{}{"skillId": "publisher", "skillVersion": "1", "action": "publish"},
+		EligibleApprovers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	call := &runtime.ActionCall{
+		ID: "call-publish", Scope: scope, RunID: run.ID, DeploymentID: "operator", SkillID: "publisher", SkillVersion: "1", Action: "publish",
+		Status: runtime.ActionCallStatusWaitingApproval, Risk: "production", SideEffect: "external", IdempotencyKey: "publish-release",
+		ApprovalID: approval.ID, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	call.InvocationDigest = runtime.ComputeActionInvocationDigest(call)
+	waitingRun := *run
+	waitingRun.Status = runtime.AgentRunStatusWaitingForApproval
+	waitingRun.WakeCondition = &runtime.WakeCondition{Type: "approval", Reference: approval.ID}
+	waitingRun.Revision++
+	waitingRun.UpdatedAt = now
+	if _, err := store.CreateActionProposal(t.Context(), runtime.ActionProposalRecord{
+		Call: call, Approval: approval, Run: &waitingRun, ExpectedRunRevision: run.Revision,
+		Event: &runtime.ActivityEvent{ID: "event-approval", Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api.SetActionApprovalAuthorizer(runtime.ApprovalAuthorizerFunc(func(_ context.Context, principal runtime.ApprovalPrincipal, checkpoint *runtime.ApprovalCheckpoint) error {
+		if principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || checkpoint.ID != approval.ID {
+			return errors.New("not authorized")
+		}
+		return nil
+	}))
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	config := DefaultConfig()
+	config.Endpoint, config.Scope = httpServer.URL, scope
+	config.PollInterval = -1
+	model, err := NewModel(t.Context(), httpClient, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.width, model.height = 120, 36
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionApprovals
+	if model.selectedActionApprovalRecord() == nil || !model.canResolveSelectedActionApproval() || !strings.Contains(model.View(), "External publication requires review") {
+		t.Fatalf("governed approval was not projected:\n%s", model.View())
+	}
+	model.mode = modeApprovalApprove
+	model.focusComposerEditor()
+	model.editor.SetValue("Release evidence and publication window reviewed")
+	applyCommand(t, model, model.submitActionApproval(true))
+	resolved := model.selectedActionApprovalRecord()
+	if resolved == nil || resolved.Status != runtime.ApprovalStatusApproved || resolved.DecisionBy == nil || resolved.DecisionBy.ID != "local" {
+		t.Fatalf("HTTP approval was not resolved: %#v", resolved)
+	}
+	restoredRun, err := httpClient.GetAgentRun(t.Context(), scope, run.ID)
+	if err != nil || restoredRun.Status != runtime.AgentRunStatusWaitingForDependency || restoredRun.WakeCondition == nil || restoredRun.WakeCondition.Reference != call.ID {
+		t.Fatalf("approved Run was not resumed for action execution: %#v, %v", restoredRun, err)
+	}
+}
+
 func newTestModel(t *testing.T, fake *fakeKernelClient) *Model {
 	return newModelWithClient(t, fake)
 }
