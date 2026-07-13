@@ -8,8 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 )
 
 type facadeClawHubRegistry struct {
@@ -217,6 +222,68 @@ func TestEngineInstallsAndRestoresCompiledClawHubSkill(t *testing.T) {
 	restored, err := restarted.GetSkillDefinition(context.Background(), "research", definitionVersion)
 	if err != nil || restored == nil || restored.Source.Digest != definition.Source.Digest {
 		t.Fatalf("restart restore = %#v, %v", restored, err)
+	}
+}
+
+func TestEngineClawHubLifecycleRetainsExportsRestoresAndReleasesSourceArtifact(t *testing.T) {
+	ctx := context.Background()
+	registry := &facadeClawHubRegistry{archive: facadeSkillZip(t)}
+	workspace := t.TempDir()
+	database := filepath.Join(t.TempDir(), "kernel.db")
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	store, err := NewSQLiteStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(
+		WithPersistentStore(store),
+		WithClawHubRegistry("https://registry.test", registry, workspace),
+		WithClawHubSourceArtifactScope(scope),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := engine.InstallClawHubSkill(ctx, ClawHubInstallRequest{Reference: ClawHubSkillReference{Owner: "acme", Slug: "research"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := engine.ExportOpenClawSkillSource(ctx, scope, installed.Compilation.SourceDigest)
+	if err != nil || !bytes.Equal(exported.SkillMD, installed.Compilation.Artifact.SkillMD) {
+		t.Fatalf("installed source export=%#v err=%v", exported, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewSQLiteStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restarted, err := New(
+		WithPersistentStore(reopened),
+		WithClawHubRegistry("https://registry.test", registry, workspace),
+		WithClawHubSourceArtifactScope(scope),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := restarted.ExportOpenClawSkillSource(ctx, scope, installed.Compilation.SourceDigest)
+	if err != nil || !reflect.DeepEqual(restored, exported) {
+		t.Fatalf("restart source export equal=%t err=%v", reflect.DeepEqual(restored, exported), err)
+	}
+	if _, err := restarted.ExportOpenClawSkillSource(ctx, SkillScope{Kind: "tenant", ID: "two"}, installed.Compilation.SourceDigest); !errors.Is(err, sourceartifact.ErrNotFound) {
+		t.Fatalf("cross-tenant source export error=%v", err)
+	}
+	if _, err := restarted.UninstallClawHubSkill("acme/research", false); err != nil {
+		t.Fatal(err)
+	}
+	report, err := restarted.GarbageCollectSkillSourceArtifacts(ctx, time.Now().UTC().Add(time.Hour), 0, 10)
+	if err != nil || report.DeletedArtifacts != 0 {
+		t.Fatalf("uninstall source GC=%#v err=%v", report, err)
+	}
+	if _, err := restarted.ExportOpenClawSkillSource(ctx, scope, installed.Compilation.SourceDigest); err != nil {
+		t.Fatalf("catalog definition lost retained source after uninstall: %v", err)
 	}
 }
 

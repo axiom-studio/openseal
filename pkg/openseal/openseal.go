@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 	skillsource "github.com/axiom-studio/openseal/pkg/skill/source"
+	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/types"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -437,6 +438,14 @@ type (
 	OpenClawSkillBundle                = skillopenclaw.Bundle
 	OpenClawSkillDiagnostic            = skillopenclaw.Diagnostic
 	OpenClawSkillCompilation           = skillopenclaw.Compilation
+	SkillSourceArtifact                = sourceartifact.Artifact
+	SkillSourceArtifactFile            = sourceartifact.File
+	SkillSourceArtifactOrigin          = sourceartifact.Origin
+	SkillSourceArtifactReference       = sourceartifact.Reference
+	SkillSourceArtifactKey             = sourceartifact.Key
+	SkillSourceArtifactStore           = sourceartifact.Store
+	SkillSourceArtifactImportRequest   = sourceartifact.ImportOpenClawRequest
+	SkillSourceArtifactGCReport        = sourceartifact.GarbageCollectionReport
 	SkillSourceRootKind                = skillsource.RootKind
 	SkillSourceRoot                    = skillsource.Root
 	SkillSourceCandidate               = skillsource.Candidate
@@ -473,6 +482,8 @@ type (
 	ClawHubLifecycleBatchResult        = clawhub.LifecycleBatchResult
 	ClawHubInstalledState              = clawhub.InstalledState
 )
+
+const SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
@@ -635,6 +646,7 @@ type PersistentKernelStore interface {
 	kernelagent.Store
 	kernelteam.Store
 	skill.CatalogStore
+	sourceartifact.Store
 }
 
 var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
@@ -727,6 +739,11 @@ func ConversationMessageFingerprint(content string) string {
 // applies OpenSeal's versioned schema migrations.
 func NewPostgresStore(ctx context.Context, dsn string, options ...runtime.PostgresStoreOption) (*runtime.PostgresStore, error) {
 	return runtime.NewPostgresStore(ctx, dsn, options...)
+}
+
+// NewSQLiteStore opens the standalone durable kernel store.
+func NewSQLiteStore(path string) (*runtime.SQLiteStore, error) {
+	return runtime.NewSQLiteStore(path)
 }
 
 func WithPostgresSchema(schema string) runtime.PostgresStoreOption {
@@ -1044,6 +1061,9 @@ var (
 	ErrWorkforceChangeSetIdempotency = authoring.ErrChangeSetIdempotency
 	ErrWorkforceChangeSetRevision    = authoring.ErrChangeSetRevision
 	ErrWorkforceChangeSetTransition  = authoring.ErrChangeSetTransition
+	ErrSkillSourceArtifactNotFound   = sourceartifact.ErrNotFound
+	ErrSkillSourceArtifactImmutable  = sourceartifact.ErrImmutable
+	ErrSkillSourceReferenceConflict  = sourceartifact.ErrReferenceConflict
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -1080,6 +1100,8 @@ type Engine struct {
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
 	clawHubRegistry               clawhub.Registry
+	skillSources                  *sourceartifact.Service
+	clawHubSourceScope            skill.ScopeReference
 	agentPoolSpecs                []agentRunWorkerSpec
 	agentPools                    []*runtime.AgentRunWorkerPool
 	agentSupervisorSpecs          []agentRunWorkerSupervisorSpec
@@ -1366,6 +1388,35 @@ func WithStore(store runtime.KernelStore) Option {
 		if skillStore, ok := store.(skill.CatalogStore); ok {
 			e.skills = skill.NewCatalogWithStore(skillStore)
 		}
+		if sourceStore, ok := store.(sourceartifact.Store); ok {
+			e.skillSources, _ = sourceartifact.NewService(sourceStore)
+		}
+		return nil
+	}
+}
+
+// WithSkillSourceArtifactStore configures immutable source persistence
+// independently from runtime state. Hosts may use this for governed blob or
+// filesystem adapters while retaining the same portable Engine API.
+func WithSkillSourceArtifactStore(store sourceartifact.Store) Option {
+	return func(e *Engine) error {
+		service, err := sourceartifact.NewService(store)
+		if err != nil {
+			return err
+		}
+		e.skillSources = service
+		return nil
+	}
+}
+
+// WithClawHubSourceArtifactScope makes verified lifecycle operations retain
+// source bytes under one host-authorized scope. Discovery remains read-only.
+func WithClawHubSourceArtifactScope(scope skill.ScopeReference) Option {
+	return func(e *Engine) error {
+		if strings.TrimSpace(scope.Kind) == "" || strings.TrimSpace(scope.ID) == "" {
+			return errors.New("ClawHub source artifact scope is required")
+		}
+		e.clawHubSourceScope = scope
 		return nil
 	}
 }
@@ -1703,6 +1754,20 @@ func (e *Engine) activateInstalledSkill(ctx context.Context, installed *clawhub.
 	definition := installed.Compilation.Definition
 	if err := e.validateClawHubCompilation(installed.Compilation); err != nil {
 		return err
+	}
+	if e.skillSources != nil && e.clawHubSourceScope.Kind != "" {
+		if _, _, err := e.skillSources.ImportOpenClaw(ctx, sourceartifact.ImportOpenClawRequest{
+			Scope: e.clawHubSourceScope, Compilation: installed.Compilation,
+			ReferenceID: "clawhub.installation:" + installed.SourceIdentity, ReferenceKind: "installation",
+		}); err != nil {
+			return fmt.Errorf("retain installed skill source artifact: %w", err)
+		}
+		if _, _, err := e.skillSources.ImportOpenClaw(ctx, sourceartifact.ImportOpenClawRequest{
+			Scope: e.clawHubSourceScope, Compilation: installed.Compilation,
+			ReferenceID: "skill.definition:" + definition.ID + "@" + definition.Version, ReferenceKind: "definition",
+		}); err != nil {
+			return fmt.Errorf("retain registered skill definition source artifact: %w", err)
+		}
 	}
 	existing, err := e.skills.GetDefinition(ctx, definition.ID, definition.Version)
 	if err != nil {
@@ -2277,6 +2342,41 @@ func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at t
 
 func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition) error {
 	return e.skills.Register(ctx, definition)
+}
+
+func (e *Engine) ImportOpenClawSkillSource(ctx context.Context, request sourceartifact.ImportOpenClawRequest) (*sourceartifact.Artifact, bool, error) {
+	if e == nil || e.skillSources == nil {
+		return nil, false, errors.New("skill source artifact store is unavailable")
+	}
+	return e.skillSources.ImportOpenClaw(ctx, request)
+}
+
+func (e *Engine) ExportOpenClawSkillSource(ctx context.Context, scope skill.ScopeReference, digest string) (skillopenclaw.Bundle, error) {
+	if e == nil || e.skillSources == nil {
+		return skillopenclaw.Bundle{}, errors.New("skill source artifact store is unavailable")
+	}
+	return e.skillSources.ExportOpenClaw(ctx, scope, digest)
+}
+
+func (e *Engine) GetSkillSourceArtifact(ctx context.Context, scope skill.ScopeReference, digest string) (*sourceartifact.Artifact, error) {
+	if e == nil || e.skillSources == nil {
+		return nil, errors.New("skill source artifact store is unavailable")
+	}
+	return e.skillSources.Get(ctx, scope, digest)
+}
+
+func (e *Engine) SkillSourceContentProvider() (skill.ResourceContentProvider, error) {
+	if e == nil || e.skillSources == nil {
+		return nil, errors.New("skill source artifact store is unavailable")
+	}
+	return e.skillSources, nil
+}
+
+func (e *Engine) GarbageCollectSkillSourceArtifacts(ctx context.Context, now time.Time, unreferencedGrace time.Duration, limit int) (*sourceartifact.GarbageCollectionReport, error) {
+	if e == nil || e.skillSources == nil {
+		return nil, errors.New("skill source artifact store is unavailable")
+	}
+	return e.skillSources.GarbageCollect(ctx, now, unreferencedGrace, limit)
 }
 
 func (e *Engine) GetSkillDefinition(ctx context.Context, skillID, version string) (*skill.Definition, error) {
@@ -2877,8 +2977,29 @@ func (e *Engine) UninstallClawHubSkill(reference string, force bool) (*clawhub.L
 	if err != nil {
 		return nil, err
 	}
+	retainedDigest := ""
+	if e.skillSources != nil && e.clawHubSourceScope.Kind != "" {
+		installed, err := e.clawHub.LoadInstalled()
+		if err != nil {
+			return nil, fmt.Errorf("load retained skill source before uninstall: %w", err)
+		}
+		for _, item := range installed {
+			if item != nil && item.SourceIdentity == identity && item.Compilation != nil {
+				retainedDigest = item.Compilation.SourceDigest
+				break
+			}
+		}
+		if retainedDigest == "" {
+			return nil, errors.New("installed skill source artifact could not be resolved")
+		}
+	}
 	if err := e.clawHub.Uninstall(reference, force); err != nil {
 		return nil, err
+	}
+	if retainedDigest != "" {
+		if err := e.skillSources.Release(context.Background(), e.clawHubSourceScope, retainedDigest, "clawhub.installation:"+identity); err != nil {
+			return nil, fmt.Errorf("release uninstalled skill source artifact: %w", err)
+		}
 	}
 	result := &clawhub.LifecycleResult{
 		APIVersion: clawhub.LifecycleAPIVersion, Operation: clawhub.LifecycleUninstall,

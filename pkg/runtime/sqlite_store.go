@@ -83,6 +83,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateSkillCatalog(db); err != nil {
 		return err
 	}
+	if err := migrateSkillSourceArtifacts(db); err != nil {
+		return err
+	}
 	return migrateAuthoringChangeSets(db)
 }
 
