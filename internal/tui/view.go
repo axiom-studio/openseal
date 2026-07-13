@@ -88,7 +88,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -164,6 +164,34 @@ func (m *Model) renderComposer(width int) string {
 		title = "Confirm Skill removal"
 		description = "Type REMOVE exactly. OpenSeal will preserve modified or pinned installations."
 		owner = "Governed uninstall · no force fallback"
+	case modeRequestAccept:
+		title = "Accept collaboration request"
+		description = "Accept this exact revision and create traceable child work for the recipient."
+		owner = "Recipient decision · durable run lineage"
+	case modeRequestReject:
+		title = "Reject collaboration request"
+		description = "Record why this request cannot proceed. The requesting work will receive the decision."
+		owner = "Recipient decision · permanent audit"
+	case modeRequestClarify:
+		title = "Request clarification"
+		description = "Ask one focused question before deciding whether to accept the work."
+		owner = "Recipient question · requesting work resumes"
+	case modeRequestProvideClarification:
+		title = "Provide clarification"
+		description = "Answer the recipient's question without creating a separate conversation state."
+		owner = "Requester response · same durable request"
+	case modeRequestComplete:
+		title = "Complete collaboration request"
+		description = "Summarize the completed outcome. OpenSeal will atomically complete child work and resume its requester."
+		owner = "Revision-bound completion · idempotent retry"
+	case modeApprovalApprove:
+		title = "Approve governed action"
+		description = "Record why this exact proposed action is safe. The decision resumes its waiting Run."
+		owner = "Eligible principal · permanent decision"
+	case modeApprovalReject:
+		title = "Reject governed action"
+		description = "Record why this exact proposed action must not execute."
+		owner = "Eligible principal · permanent decision"
 	}
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
@@ -193,6 +221,10 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderClawHubSkillsContent(width)
 	} else if m.section == sectionChannels {
 		content = m.renderChannelsContent(width)
+	} else if m.section == sectionRequests {
+		content = m.renderAgentRequestsContent(width)
+	} else if m.section == sectionApprovals {
+		content = m.renderActionApprovalsContent(width)
 	} else if m.section == sectionArtifacts {
 		content = m.renderArtifactsContent(width)
 	} else {
@@ -202,7 +234,7 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 8)
+	tabs := make([]string, 0, 10)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
@@ -251,6 +283,24 @@ func (m *Model) renderPanelTabs() string {
 	if m.runCapability.Available {
 		label := "w Work"
 		if m.section == sectionRuns {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.requestCapability.Available {
+		label := "R Requests"
+		if m.section == sectionRequests {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.approvalCapability.Available {
+		label := "A Approvals"
+		if m.section == sectionApprovals {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -637,6 +687,153 @@ func (m *Model) renderRunsContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("↑/↓ select · n new · r refresh · Tab compose"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderAgentRequestsContent(width int) string {
+	title := headerStyle.Render("Collaboration requests")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.agentRequests) == 0 {
+		lines = append(lines, mutedStyle.Render("No incoming or outgoing requests for this Agent or Team."))
+	} else {
+		visible := max(3, min(len(m.agentRequests), max(m.height-21, 5)))
+		start := max(0, min(m.agentRequestSelected-visible/2, len(m.agentRequests)-visible))
+		local := m.localCollaborationParty()
+		for index := start; index < min(len(m.agentRequests), start+visible); index++ {
+			request := m.agentRequests[index]
+			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+			if index == m.agentRequestSelected {
+				prefix, style = "› ", selectedStyle
+			}
+			direction, peer := "to", request.Recipient
+			if request.Recipient == local {
+				direction, peer = "from", request.Requester
+			}
+			line := fmt.Sprintf("%s%-10s %s %s:%s · %s", prefix, humanAgentRequestStatus(request.Status), direction, peer.Type, compact(peer.ID, 14), compact(request.Goal, max(width-38, 18)))
+			lines = append(lines, style.Render(compact(line, max(width-4, 28))))
+		}
+	}
+	if request := m.selectedAgentRequestRecord(); request != nil {
+		lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("%s · revision %d · updated %s", request.Kind, request.Revision, relativeTime(request.UpdatedAt))))
+		lines = append(lines, compact(request.Goal, max(width-8, 24)))
+		if request.Instructions != "" {
+			lines = append(lines, mutedStyle.Render(compact(request.Instructions, max(width-8, 24))))
+		}
+		lineage := "Source Run " + compact(request.SourceRunID, 14)
+		if request.ChildRunID != "" {
+			lineage += " · child " + compact(request.ChildRunID, 14)
+		}
+		if request.SemanticRole != "" {
+			lineage += " · role " + request.SemanticRole
+		}
+		lines = append(lines, mutedStyle.Render(compact(lineage, max(width-8, 24))))
+		if request.Clarification != "" {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Question · "+compact(request.Clarification, max(width-18, 24))))
+		}
+		if request.Response != "" {
+			lines = append(lines, mutedStyle.Render("Response · "+compact(request.Response, max(width-18, 24))))
+		}
+		if request.CompletionSummary != "" {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Render("Completed · "+compact(request.CompletionSummary, max(width-20, 24))))
+		}
+		if request.ResolutionReason != "" {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(request.ResolutionReason, max(width-8, 24))))
+		}
+		if len(request.AcceptanceCriteria) > 0 || len(request.ArtifactRequirements) > 0 {
+			required := 0
+			for _, requirement := range request.ArtifactRequirements {
+				if requirement.Required {
+					required++
+				}
+			}
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Evidence contract · %d acceptance field(s) · %d required artifact(s)", len(request.AcceptanceCriteria), required)))
+		}
+		actions := make([]string, 0, 5)
+		if m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
+			actions = append(actions, "y accept", "? clarify", "x reject")
+		}
+		if m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification) {
+			actions = append(actions, "M answer clarification")
+		}
+		if m.canCompleteSelectedAgentRequest() {
+			actions = append(actions, "Enter complete")
+		} else if request.Status == runtime.AgentRequestStatusAccepted && request.Recipient == m.localCollaborationParty() && (len(request.AcceptanceCriteria) > 0 || hasRequiredArtifact(request.ArtifactRequirements)) {
+			lines = append(lines, mutedStyle.Render("Completion remains with the child Run until its required evidence and artifacts are registered."))
+		}
+		if len(actions) > 0 {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
+		}
+	}
+	if m.focus == focusPanel {
+		lines = append(lines, "", mutedStyle.Render("↑/↓ select · r refresh · R requests"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderActionApprovalsContent(width int) string {
+	title := headerStyle.Render("Action approvals")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.actionApprovals) == 0 {
+		lines = append(lines, mutedStyle.Render("No governed action checkpoints for this Agent or Team."))
+	} else {
+		visible := max(3, min(len(m.actionApprovals), max(m.height-21, 5)))
+		start := max(0, min(m.actionApprovalSelected-visible/2, len(m.actionApprovals)-visible))
+		for index := start; index < min(len(m.actionApprovals), start+visible); index++ {
+			approval := m.actionApprovals[index]
+			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+			if index == m.actionApprovalSelected {
+				prefix, style = "› ", selectedStyle
+			}
+			line := fmt.Sprintf("%s%-10s %-10s %s", prefix, approval.Status, approval.Risk, compact(approval.Summary, max(width-28, 20)))
+			lines = append(lines, style.Render(compact(line, max(width-4, 28))))
+		}
+	}
+	if approval := m.selectedActionApprovalRecord(); approval != nil {
+		lines = append(lines, "", compact(approval.Summary, max(width-8, 24)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Run %s · action %s · revision %d", compact(approval.RunID, 14), compact(approval.ActionCallID, 14), approval.Revision)))
+		if skillID, ok := approval.ProposedAction["skillId"].(string); ok {
+			action, _ := approval.ProposedAction["action"].(string)
+			version, _ := approval.ProposedAction["skillVersion"].(string)
+			lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Proposed · %s@%s / %s", skillID, version, action), max(width-8, 24))))
+		}
+		if approval.PolicyReason != "" {
+			lines = append(lines, "", mutedStyle.Render("Policy"), compact(approval.PolicyReason, max(width-8, 24)))
+		}
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d evidence reference(s) · expires %s", len(approval.EvidenceRefs), approval.ExpiresAt.Format(time.RFC3339))))
+		if approval.DecisionBy != nil {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Decision · %s:%s · %s", approval.DecisionBy.Type, approval.DecisionBy.ID, compact(approval.DecisionReason, max(width-28, 18)))))
+		}
+		if m.canResolveSelectedActionApproval() {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("y approve  ·  x reject"))
+		} else if approval.Status == runtime.ApprovalStatusPending && m.supportsActionApproval(kernelapi.OperationResolve) {
+			lines = append(lines, "", mutedStyle.Render("This local principal is not an eligible approver."))
+		}
+	}
+	if m.focus == focusPanel {
+		lines = append(lines, "", mutedStyle.Render("↑/↓ select · r refresh · A approvals"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func hasRequiredArtifact(requirements []runtime.ArtifactRequirement) bool {
+	for _, requirement := range requirements {
+		if requirement.Required {
+			return true
+		}
+	}
+	return false
+}
+
+func humanAgentRequestStatus(status runtime.AgentRequestStatus) string {
+	if status == runtime.AgentRequestStatusClarificationRequested {
+		return "clarify"
+	}
+	return strings.ReplaceAll(string(status), "_", " ")
 }
 
 type tuiDeliveryArtifact struct {

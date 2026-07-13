@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,6 +76,8 @@ const (
 	sectionInitiatives
 	sectionSkills
 	sectionRuns
+	sectionRequests
+	sectionApprovals
 	sectionArtifacts
 	sectionChannels
 )
@@ -98,81 +101,100 @@ const (
 	modeWorkforceReject
 	modeWorkforceApply
 	modeWorkforceRetry
+	modeRequestAccept
+	modeRequestReject
+	modeRequestClarify
+	modeRequestProvideClarification
+	modeRequestComplete
+	modeApprovalApprove
+	modeApprovalReject
 )
 
 type Model struct {
-	ctx                       context.Context
-	client                    client.KernelClient
-	conversationClient        client.ConversationClient
-	clawHubClient             client.ClawHubClient
-	config                    Config
-	editor                    textarea.Model
-	focus                     focusArea
-	section                   panelSection
-	mode                      editorMode
-	width                     int
-	height                    int
-	loading                   bool
-	busy                      bool
-	ready                     bool
-	unavailable               string
-	err                       error
-	status                    string
-	runCapability             kernelapi.Capability
-	objectiveCapability       kernelapi.Capability
-	initiativeCapability      kernelapi.Capability
-	sourceMonitorCapability   kernelapi.Capability
-	clawHubCapability         kernelapi.Capability
-	artifactCapability        kernelapi.Capability
-	channelCapability         kernelapi.Capability
-	authoringCapability       kernelapi.Capability
-	agentDefinitionCapability kernelapi.Capability
-	authoringResult           *authoring.CompileResult
-	authoringChangeSet        *authoring.ChangeSet
-	authoringAmendment        bool
-	authoringApprovalSelected int
-	runs                      []*runtime.AgentRun
-	compilations              []*kernelagent.DefinitionCompilation
-	objectives                []*runtime.Objective
-	objectiveSelected         int
-	selectedObjective         string
-	initiatives               []*runtime.Initiative
-	initiativeSelected        int
-	selectedInitiative        string
-	sourceMonitorStatuses     map[string]sourceMonitorStatus
-	clawHubSkills             []clawhub.InstalledState
-	clawHubSelected           int
-	selectedClawHub           string
-	selected                  int
-	selectedID                string
-	artifacts                 []*runtime.Artifact
-	artifactSelected          int
-	selectedArtifact          string
-	artifactExpanded          bool
-	conversations             []*runtime.Conversation
-	conversationSelected      int
-	selectedConversation      string
-	channelMessages           []*runtime.ChannelMessage
-	channelRounds             []*runtime.ParticipationRoundResult
-	channelPresence           []*runtime.ConversationPresence
-	channelAuditExpanded      bool
-	pendingKey                string
-	pendingGoal               string
-	pendingAuthoringKey       string
-	pendingAuthoringPrompt    string
-	pendingAuthoringParentID  string
-	pendingGovernanceKey      string
-	pendingGovernanceIntent   string
-	pendingObjectiveKey       string
-	pendingObjectivePrompt    string
-	pendingInitiativeKey      string
-	pendingInitiativePrompt   string
-	pendingClawHubPrompt      string
-	pendingConversationKey    string
-	pendingConversationTitle  string
-	pendingMessageKey         string
-	pendingMessageContent     string
-	pendingMessageChannelID   string
+	ctx                         context.Context
+	client                      client.KernelClient
+	conversationClient          client.ConversationClient
+	clawHubClient               client.ClawHubClient
+	config                      Config
+	editor                      textarea.Model
+	focus                       focusArea
+	section                     panelSection
+	mode                        editorMode
+	width                       int
+	height                      int
+	loading                     bool
+	busy                        bool
+	ready                       bool
+	unavailable                 string
+	err                         error
+	status                      string
+	runCapability               kernelapi.Capability
+	requestCapability           kernelapi.Capability
+	approvalCapability          kernelapi.Capability
+	objectiveCapability         kernelapi.Capability
+	initiativeCapability        kernelapi.Capability
+	sourceMonitorCapability     kernelapi.Capability
+	clawHubCapability           kernelapi.Capability
+	artifactCapability          kernelapi.Capability
+	channelCapability           kernelapi.Capability
+	authoringCapability         kernelapi.Capability
+	agentDefinitionCapability   kernelapi.Capability
+	authoringResult             *authoring.CompileResult
+	authoringChangeSet          *authoring.ChangeSet
+	authoringAmendment          bool
+	authoringApprovalSelected   int
+	runs                        []*runtime.AgentRun
+	agentRequests               []*runtime.AgentRequest
+	agentRequestSelected        int
+	selectedAgentRequest        string
+	actionApprovals             []*runtime.ApprovalCheckpoint
+	actionApprovalSelected      int
+	selectedActionApproval      string
+	compilations                []*kernelagent.DefinitionCompilation
+	objectives                  []*runtime.Objective
+	objectiveSelected           int
+	selectedObjective           string
+	initiatives                 []*runtime.Initiative
+	initiativeSelected          int
+	selectedInitiative          string
+	sourceMonitorStatuses       map[string]sourceMonitorStatus
+	clawHubSkills               []clawhub.InstalledState
+	clawHubSelected             int
+	selectedClawHub             string
+	selected                    int
+	selectedID                  string
+	artifacts                   []*runtime.Artifact
+	artifactSelected            int
+	selectedArtifact            string
+	artifactExpanded            bool
+	conversations               []*runtime.Conversation
+	conversationSelected        int
+	selectedConversation        string
+	channelMessages             []*runtime.ChannelMessage
+	channelRounds               []*runtime.ParticipationRoundResult
+	channelPresence             []*runtime.ConversationPresence
+	channelAuditExpanded        bool
+	pendingKey                  string
+	pendingGoal                 string
+	pendingAuthoringKey         string
+	pendingAuthoringPrompt      string
+	pendingAuthoringParentID    string
+	pendingGovernanceKey        string
+	pendingGovernanceIntent     string
+	pendingObjectiveKey         string
+	pendingObjectivePrompt      string
+	pendingInitiativeKey        string
+	pendingInitiativePrompt     string
+	pendingClawHubPrompt        string
+	pendingConversationKey      string
+	pendingConversationTitle    string
+	pendingMessageKey           string
+	pendingMessageContent       string
+	pendingMessageChannelID     string
+	pendingRequestCompletionKey string
+	pendingRequestCompletionID  string
+	pendingApprovalKey          string
+	pendingApprovalIntent       string
 }
 
 type capabilitiesLoaded struct {
@@ -201,6 +223,33 @@ type workforceLoaded struct {
 type runsLoaded struct {
 	runs []*runtime.AgentRun
 	err  error
+}
+
+type agentRequestsLoaded struct {
+	requests []*runtime.AgentRequest
+	err      error
+}
+
+type agentRequestResponded struct {
+	result *runtime.AgentRequestResult
+	action string
+	err    error
+}
+
+type agentRequestCompleted struct {
+	result *runtime.AgentRequestResult
+	err    error
+}
+
+type actionApprovalsLoaded struct {
+	approvals []*runtime.ApprovalCheckpoint
+	err       error
+}
+
+type actionApprovalResolved struct {
+	result *runtime.ApprovalResolutionResult
+	action string
+	err    error
 }
 
 type compilationsLoaded struct {
@@ -373,6 +422,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+		requestCapability, hasRequests := msg.document.Find(kernelapi.AgentRequestsCapabilityID, kernelapi.AgentRequestsCapabilityVersion)
+		approvalCapability, hasApprovals := msg.document.Find(kernelapi.ActionApprovalsCapabilityID, kernelapi.ActionApprovalsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
 		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
@@ -382,6 +433,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
 		m.runCapability = runCapability
+		m.requestCapability = requestCapability
+		m.approvalCapability = approvalCapability
 		m.objectiveCapability = objectiveCapability
 		m.initiativeCapability = initiativeCapability
 		m.sourceMonitorCapability = sourceMonitorCapability
@@ -397,6 +450,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
+		}
+		if !hasRequests || !requestCapability.Available {
+			m.requestCapability = kernelapi.Capability{}
+		}
+		if !hasApprovals || !approvalCapability.Available {
+			m.approvalCapability = kernelapi.Capability{}
 		}
 		if !hasObjectives || !objectiveCapability.Available {
 			m.objectiveCapability = kernelapi.Capability{}
@@ -419,8 +478,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
 			m.agentDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.runCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
-			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
+			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
@@ -450,6 +509,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if !m.objectiveCapability.Available && m.runCapability.Available {
 			m.section = sectionRuns
 			m.mode = modeCreate
+		} else if m.requestCapability.Available {
+			m.section = sectionRequests
+			m.focusPanelList()
+		} else if m.approvalCapability.Available {
+			m.section = sectionApprovals
+			m.focusPanelList()
 		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.channelCapability.Available {
 			m.section = sectionChannels
 			m.focusPanelList()
@@ -460,7 +525,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionReadiness
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -591,6 +656,76 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.runs = msg.runs
 		m.restoreSelection()
 		return m, nil
+	case agentRequestsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.agentRequests = msg.requests
+		m.restoreAgentRequestSelection()
+		return m, nil
+	case agentRequestResponded:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. The response draft is preserved for retry."
+			return m, m.loadAgentRequests()
+		}
+		m.err = nil
+		m.editor.Reset()
+		if msg.result != nil && msg.result.Request != nil {
+			m.selectedAgentRequest = msg.result.Request.ID
+		}
+		m.status = msg.action + " recorded in the durable collaboration audit."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, tea.Batch(m.loadAgentRequests(), m.loadRuns())
+	case agentRequestCompleted:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Request completion failed. The summary and retry identity are preserved."
+			return m, m.loadAgentRequests()
+		}
+		m.err = nil
+		m.pendingRequestCompletionKey, m.pendingRequestCompletionID = "", ""
+		m.editor.Reset()
+		if msg.result != nil && msg.result.Request != nil {
+			m.selectedAgentRequest = msg.result.Request.ID
+		}
+		m.status = "Completion recorded and the requesting work was resumed."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, tea.Batch(m.loadAgentRequests(), m.loadRuns(), m.loadArtifacts())
+	case actionApprovalsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.actionApprovals = msg.approvals
+		m.restoreActionApprovalSelection()
+		return m, nil
+	case actionApprovalResolved:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. The reason and retry identity are preserved."
+			return m, m.loadActionApprovals()
+		}
+		m.err = nil
+		m.pendingApprovalKey, m.pendingApprovalIntent = "", ""
+		m.editor.Reset()
+		if msg.result != nil && msg.result.Approval != nil {
+			m.selectedActionApproval = msg.result.Approval.ID
+		}
+		m.status = msg.action + " recorded. The governed work was resumed."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, tea.Batch(m.loadActionApprovals(), m.loadRuns())
 	case compilationsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -777,7 +912,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -851,6 +986,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitWorkforceApply()
 			case modeWorkforceRetry:
 				return m, m.submitWorkforceRetry()
+			case modeRequestAccept:
+				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionAccept)
+			case modeRequestReject:
+				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionReject)
+			case modeRequestClarify:
+				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionRequestClarification)
+			case modeRequestProvideClarification:
+				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionProvideClarification)
+			case modeRequestComplete:
+				return m, m.submitAgentRequestCompletion()
+			case modeApprovalApprove:
+				return m, m.submitActionApproval(true)
+			case modeApprovalReject:
+				return m, m.submitActionApproval(false)
 			default:
 				return m, m.submitRun()
 			}
@@ -880,6 +1029,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
+			}
+		case "R":
+			if m.requestCapability.Available {
+				m.section = sectionRequests
+			}
+		case "A":
+			if m.approvalCapability.Available {
+				m.section = sectionApprovals
 			}
 		case "f":
 			if m.authoringCapability.Available {
@@ -965,6 +1122,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "x":
 			if m.section == sectionRuns {
 				return m, m.commandSelected(runtime.AgentRunCommandCancel, "")
+			} else if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionReject) {
+				m.prepareRequestComposer(modeRequestReject, "Explain why this request cannot be accepted…")
+			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
+				m.prepareRequestComposer(modeApprovalReject, "Explain why this action must not proceed…")
 			} else if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
 			} else if m.section == sectionSkills && m.selectedClawHubRecord() != nil && m.supportsClawHub(clawhub.LifecycleUninstall) {
@@ -976,6 +1137,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceApprove, "Record why this requirement is satisfied…")
+			} else if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
+				placeholder := "Optionally record a concise acceptance note…"
+				if request := m.selectedAgentRequestRecord(); request != nil && request.Recipient.Type == runtime.OwnerTypeTeam {
+					placeholder = "First line: assigned Agent ID\nOptional remaining lines: acceptance note"
+				}
+				m.prepareRequestComposer(modeRequestAccept, placeholder)
+			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
+				m.prepareRequestComposer(modeApprovalApprove, "Record why this exact action is safe to approve…")
+			}
+		case "?":
+			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionRequestClarification) {
+				m.prepareRequestComposer(modeRequestClarify, "Ask the requester for the missing information…")
+			}
+		case "M":
+			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification) {
+				m.prepareRequestComposer(modeRequestProvideClarification, "Provide the clarification requested by the recipient…")
 			}
 		case "g":
 			if m.section == sectionRuns {
@@ -999,6 +1176,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the amended Initiative purpose…"
 				m.focusComposerEditor()
+			} else if m.section == sectionRequests && m.canCompleteSelectedAgentRequest() {
+				m.prepareRequestComposer(modeRequestComplete, "Summarize the completed outcome…")
 			} else if m.section == sectionArtifacts && m.selectedArtifactRecord() != nil {
 				m.artifactExpanded = !m.artifactExpanded
 			} else if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationAudit) && len(m.channelRounds) > 0 {
@@ -1199,6 +1378,59 @@ func (m *Model) loadRuns() tea.Cmd {
 	}
 }
 
+func (m *Model) loadAgentRequests() tea.Cmd {
+	if !m.supportsAgentRequest(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	party := m.localCollaborationParty()
+	return func() tea.Msg {
+		outgoing, err := m.client.ListAgentRequests(m.ctx, runtime.AgentRequestFilter{
+			Scope: m.config.Scope, Requester: &party, Limit: 100,
+		})
+		if err != nil {
+			return agentRequestsLoaded{err: err}
+		}
+		incoming, err := m.client.ListAgentRequests(m.ctx, runtime.AgentRequestFilter{
+			Scope: m.config.Scope, Recipient: &party, Limit: 100,
+		})
+		if err != nil {
+			return agentRequestsLoaded{err: err}
+		}
+		byID := make(map[string]*runtime.AgentRequest, len(outgoing)+len(incoming))
+		for _, request := range append(outgoing, incoming...) {
+			if request != nil {
+				byID[request.ID] = request
+			}
+		}
+		requests := make([]*runtime.AgentRequest, 0, len(byID))
+		for _, request := range byID {
+			requests = append(requests, request)
+		}
+		sort.Slice(requests, func(i, j int) bool {
+			if requests[i].UpdatedAt.Equal(requests[j].UpdatedAt) {
+				return requests[i].ID < requests[j].ID
+			}
+			return requests[i].UpdatedAt.After(requests[j].UpdatedAt)
+		})
+		return agentRequestsLoaded{requests: requests}
+	}
+}
+
+func (m *Model) loadActionApprovals() tea.Cmd {
+	if !m.supportsActionApproval(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	owner := m.config.Owner
+	return func() tea.Msg {
+		approvals, err := m.client.ListActionApprovals(m.ctx, runtime.ApprovalFilter{
+			Scope: m.config.Scope, Owner: &owner, Limit: 100,
+		})
+		return actionApprovalsLoaded{approvals: approvals, err: err}
+	}
+}
+
 func (m *Model) loadCompilations() tea.Cmd {
 	if !m.supportsAgentDefinition(kernelapi.OperationListCompilations) || m.config.Owner.Type != runtime.OwnerTypeAgent {
 		return nil
@@ -1356,6 +1588,12 @@ func (m *Model) loadPanel() tea.Cmd {
 	if m.section == sectionSkills {
 		return m.loadClawHubSkills()
 	}
+	if m.section == sectionRequests {
+		return m.loadAgentRequests()
+	}
+	if m.section == sectionApprovals {
+		return m.loadActionApprovals()
+	}
 	if m.section == sectionChannels {
 		return m.loadConversations()
 	}
@@ -1363,6 +1601,102 @@ func (m *Model) loadPanel() tea.Cmd {
 		return m.loadArtifacts()
 	}
 	return m.loadRuns()
+}
+
+func (m *Model) submitAgentRequestResponse(decision runtime.AgentRequestDecision) tea.Cmd {
+	request := m.selectedAgentRequestRecord()
+	if request == nil || m.busy || !m.canRespondToSelectedRequest(decision) {
+		return nil
+	}
+	message := strings.TrimSpace(m.editor.Value())
+	assignedAgentID := ""
+	if decision == runtime.AgentRequestDecisionAccept && request.Recipient.Type == runtime.OwnerTypeTeam {
+		lines := strings.Split(message, "\n")
+		assignedAgentID = strings.TrimSpace(lines[0])
+		if assignedAgentID == "" {
+			m.status = "Name the Team Agent that will own this accepted work."
+			return nil
+		}
+		message = strings.TrimSpace(strings.Join(lines[1:], "\n"))
+	}
+	if (decision == runtime.AgentRequestDecisionReject || decision == runtime.AgentRequestDecisionRequestClarification || decision == runtime.AgentRequestDecisionProvideClarification) && message == "" {
+		m.status = "Record a concise reason or clarification before submitting."
+		return nil
+	}
+	principal := request.Recipient
+	if decision == runtime.AgentRequestDecisionProvideClarification {
+		principal = request.Requester
+	}
+	m.busy, m.err = true, nil
+	action := agentRequestDecisionLabel(decision)
+	m.status = action + "…"
+	payload := kernelapi.RespondAgentRequestRequest{
+		ExpectedRevision: request.Revision, Decision: decision, Principal: principal,
+		AssignedAgentID: assignedAgentID, Message: message,
+	}
+	return func() tea.Msg {
+		result, err := m.client.RespondAgentRequest(m.ctx, request.Scope, request.ID, payload)
+		return agentRequestResponded{result: result, action: action, err: err}
+	}
+}
+
+func (m *Model) submitAgentRequestCompletion() tea.Cmd {
+	request := m.selectedAgentRequestRecord()
+	summary := strings.TrimSpace(m.editor.Value())
+	if request == nil || m.busy || !m.canCompleteSelectedAgentRequest() {
+		return nil
+	}
+	if summary == "" {
+		m.status = "Summarize the completed outcome before submitting."
+		return nil
+	}
+	if m.pendingRequestCompletionKey == "" || m.pendingRequestCompletionID != request.ID {
+		m.pendingRequestCompletionKey, m.pendingRequestCompletionID = uuid.NewString(), request.ID
+	}
+	m.busy, m.err, m.status = true, nil, "Recording completion and resuming requesting work…"
+	key := m.pendingRequestCompletionKey
+	return func() tea.Msg {
+		child, err := m.client.GetAgentRun(m.ctx, request.Scope, request.ChildRunID)
+		if err != nil {
+			return agentRequestCompleted{err: err}
+		}
+		payload := kernelapi.CompleteAgentRequestRequest{
+			ExpectedRevision: request.Revision, ExpectedChildRevision: child.Revision,
+			Principal: request.Recipient, Actor: request.Recipient, Summary: summary, IdempotencyKey: key,
+		}
+		result, err := m.client.CompleteAgentRequest(m.ctx, request.Scope, request.ID, payload, key)
+		return agentRequestCompleted{result: result, err: err}
+	}
+}
+
+func (m *Model) submitActionApproval(approve bool) tea.Cmd {
+	approval := m.selectedActionApprovalRecord()
+	reason := strings.TrimSpace(m.editor.Value())
+	if approval == nil || m.busy || !m.canResolveSelectedActionApproval() {
+		return nil
+	}
+	if reason == "" {
+		m.status = "Record a reason for this permanent decision."
+		return nil
+	}
+	action := "Rejecting action"
+	if approve {
+		action = "Approving action"
+	}
+	intent := fmt.Sprintf("%s\x00%d\x00%t\x00%s", approval.ID, approval.Revision, approve, reason)
+	if m.pendingApprovalKey == "" || m.pendingApprovalIntent != intent {
+		m.pendingApprovalKey, m.pendingApprovalIntent = uuid.NewString(), intent
+	}
+	m.busy, m.err, m.status = true, nil, action+"…"
+	key := m.pendingApprovalKey
+	payload := kernelapi.ResolveActionApprovalRequest{
+		ExpectedRevision: approval.Revision, DecisionID: key, Approve: approve,
+		Principal: m.localApprovalPrincipal(), Reason: reason,
+	}
+	return func() tea.Msg {
+		result, err := m.client.ResolveActionApproval(m.ctx, approval.Scope, approval.ID, payload, key)
+		return actionApprovalResolved{result: result, action: action, err: err}
+	}
 }
 
 func (m *Model) submitObjective() tea.Cmd {
@@ -1778,6 +2112,14 @@ func (m *Model) supportsRun(operation string) bool {
 	return m.ready && m.runCapability.Supports(operation)
 }
 
+func (m *Model) supportsAgentRequest(operation string) bool {
+	return m.ready && m.requestCapability.Supports(operation)
+}
+
+func (m *Model) supportsActionApproval(operation string) bool {
+	return m.ready && m.approvalCapability.Supports(operation)
+}
+
 func (m *Model) supportsAgentDefinition(operation string) bool {
 	return m.ready && m.agentDefinitionCapability.Supports(operation)
 }
@@ -1875,6 +2217,124 @@ func (m *Model) selectedRun() *runtime.AgentRun {
 		return nil
 	}
 	return m.runs[m.selected]
+}
+
+func (m *Model) selectedAgentRequestRecord() *runtime.AgentRequest {
+	if m.agentRequestSelected < 0 || m.agentRequestSelected >= len(m.agentRequests) {
+		return nil
+	}
+	return m.agentRequests[m.agentRequestSelected]
+}
+
+func (m *Model) restoreAgentRequestSelection() {
+	if len(m.agentRequests) == 0 {
+		m.agentRequestSelected, m.selectedAgentRequest = 0, ""
+		return
+	}
+	for index, request := range m.agentRequests {
+		if request.ID == m.selectedAgentRequest {
+			m.agentRequestSelected = index
+			return
+		}
+	}
+	m.agentRequestSelected = min(m.agentRequestSelected, len(m.agentRequests)-1)
+	m.selectedAgentRequest = m.agentRequests[m.agentRequestSelected].ID
+}
+
+func (m *Model) moveAgentRequestSelection(delta int) {
+	if len(m.agentRequests) == 0 {
+		return
+	}
+	m.agentRequestSelected = max(0, min(len(m.agentRequests)-1, m.agentRequestSelected+delta))
+	m.selectedAgentRequest = m.agentRequests[m.agentRequestSelected].ID
+}
+
+func (m *Model) selectedActionApprovalRecord() *runtime.ApprovalCheckpoint {
+	if m.actionApprovalSelected < 0 || m.actionApprovalSelected >= len(m.actionApprovals) {
+		return nil
+	}
+	return m.actionApprovals[m.actionApprovalSelected]
+}
+
+func (m *Model) restoreActionApprovalSelection() {
+	if len(m.actionApprovals) == 0 {
+		m.actionApprovalSelected, m.selectedActionApproval = 0, ""
+		return
+	}
+	for index, approval := range m.actionApprovals {
+		if approval.ID == m.selectedActionApproval {
+			m.actionApprovalSelected = index
+			return
+		}
+	}
+	m.actionApprovalSelected = min(m.actionApprovalSelected, len(m.actionApprovals)-1)
+	m.selectedActionApproval = m.actionApprovals[m.actionApprovalSelected].ID
+}
+
+func (m *Model) moveActionApprovalSelection(delta int) {
+	if len(m.actionApprovals) == 0 {
+		return
+	}
+	m.actionApprovalSelected = max(0, min(len(m.actionApprovals)-1, m.actionApprovalSelected+delta))
+	m.selectedActionApproval = m.actionApprovals[m.actionApprovalSelected].ID
+}
+
+func (m *Model) canRespondToSelectedRequest(decision runtime.AgentRequestDecision) bool {
+	request := m.selectedAgentRequestRecord()
+	if request == nil || !m.supportsAgentRequest(kernelapi.OperationRespond) {
+		return false
+	}
+	local := m.localCollaborationParty()
+	switch decision {
+	case runtime.AgentRequestDecisionProvideClarification:
+		return request.Status == runtime.AgentRequestStatusClarificationRequested && request.Requester == local
+	case runtime.AgentRequestDecisionAccept, runtime.AgentRequestDecisionReject, runtime.AgentRequestDecisionRequestClarification:
+		return request.Status == runtime.AgentRequestStatusPending && request.Recipient == local
+	default:
+		return false
+	}
+}
+
+func (m *Model) canCompleteSelectedAgentRequest() bool {
+	request := m.selectedAgentRequestRecord()
+	if request == nil || !m.supportsAgentRequest(kernelapi.OperationComplete) || request.Status != runtime.AgentRequestStatusAccepted || request.Recipient != m.localCollaborationParty() || request.ChildRunID == "" {
+		return false
+	}
+	if len(request.AcceptanceCriteria) > 0 {
+		return false
+	}
+	for _, requirement := range request.ArtifactRequirements {
+		if requirement.Required {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Model) canResolveSelectedActionApproval() bool {
+	approval := m.selectedActionApprovalRecord()
+	if approval == nil || approval.Status != runtime.ApprovalStatusPending || !m.supportsActionApproval(kernelapi.OperationResolve) {
+		return false
+	}
+	principal := m.localApprovalPrincipal()
+	for _, eligible := range approval.EligibleApprovers {
+		if eligible == principal {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) localCollaborationParty() runtime.CollaborationParty {
+	return runtime.CollaborationParty{Type: m.config.Owner.Type, ID: m.config.Owner.ID}
+}
+
+func (m *Model) localApprovalPrincipal() runtime.ApprovalPrincipal {
+	principal := runtime.ApprovalPrincipal{Type: strings.TrimSpace(m.config.Actor.Type), ID: strings.TrimSpace(m.config.Actor.ID)}
+	if principal.Type == "" || principal.ID == "" {
+		principal = runtime.ApprovalPrincipal{Type: string(m.config.Owner.Type), ID: m.config.Owner.ID}
+	}
+	return principal
 }
 
 func (m *Model) selectedObjectiveRecord() *runtime.Objective {
@@ -1983,6 +2443,14 @@ func (m *Model) movePanelSelection(delta int) {
 	}
 	if m.section == sectionSkills {
 		m.moveClawHubSelection(delta)
+		return
+	}
+	if m.section == sectionRequests {
+		m.moveAgentRequestSelection(delta)
+		return
+	}
+	if m.section == sectionApprovals {
+		m.moveActionApprovalSelection(delta)
 		return
 	}
 	if m.section == sectionChannels {
@@ -2130,6 +2598,13 @@ func (m *Model) prepareWorkforceGovernanceComposer(mode editorMode, placeholder 
 	m.focusComposerEditor()
 }
 
+func (m *Model) prepareRequestComposer(mode editorMode, placeholder string) {
+	m.mode = mode
+	m.editor.Reset()
+	m.editor.Placeholder = placeholder
+	m.focusComposerEditor()
+}
+
 func (m *Model) prepareComposerForSection() {
 	switch {
 	case m.section == sectionAuthoring && m.supportsWorkforceAuthoring():
@@ -2155,6 +2630,18 @@ func (m *Model) prepareComposerForSection() {
 	case m.section == sectionChannels && m.supportsChannel(kernelapi.OperationCreate):
 		m.mode = modeChannelCreate
 		m.editor.Placeholder = "Name the Team channel…"
+		m.focusComposerEditor()
+	case m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification):
+		m.mode = modeRequestProvideClarification
+		m.editor.Placeholder = "Provide the clarification requested by the recipient…"
+		m.focusComposerEditor()
+	case m.section == sectionRequests && m.canCompleteSelectedAgentRequest():
+		m.mode = modeRequestComplete
+		m.editor.Placeholder = "Summarize the completed outcome…"
+		m.focusComposerEditor()
+	case m.section == sectionApprovals && m.canResolveSelectedActionApproval():
+		m.mode = modeApprovalApprove
+		m.editor.Placeholder = "Record why this exact action is safe to approve…"
 		m.focusComposerEditor()
 	case m.supportsRun(kernelapi.OperationCreate):
 		m.mode = modeCreate
@@ -2189,8 +2676,33 @@ func (m *Model) resetComposerMode() {
 		m.editor.Placeholder = "Share an update or ask a question…"
 		return
 	}
+	if m.section == sectionRequests {
+		m.mode = modeCreate
+		m.editor.Placeholder = "Select a request to inspect its available actions."
+		return
+	}
+	if m.section == sectionApprovals {
+		m.mode = modeCreate
+		m.editor.Placeholder = "Select an approval to inspect its policy and evidence."
+		return
+	}
 	m.mode = modeCreate
 	m.editor.Placeholder = "Describe the outcome you want…"
+}
+
+func agentRequestDecisionLabel(decision runtime.AgentRequestDecision) string {
+	switch decision {
+	case runtime.AgentRequestDecisionAccept:
+		return "Accepting request"
+	case runtime.AgentRequestDecisionReject:
+		return "Rejecting request"
+	case runtime.AgentRequestDecisionRequestClarification:
+		return "Requesting clarification"
+	case runtime.AgentRequestDecisionProvideClarification:
+		return "Providing clarification"
+	default:
+		return "Updating request"
+	}
 }
 
 func objectiveTitle(prompt string) string {
