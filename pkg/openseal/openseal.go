@@ -581,6 +581,10 @@ func AgentRequestsCapability() KernelCapability {
 	return kernelapi.AgentRequestsCapability()
 }
 
+func ActionApprovalsCapability() KernelCapability {
+	return kernelapi.ActionApprovalsCapability()
+}
+
 func ArtifactsCapability(contentOperations ...string) KernelCapability {
 	return kernelapi.ArtifactCapability(contentOperations...)
 }
