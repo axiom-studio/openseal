@@ -32,6 +32,25 @@ func TestPublicWorkforceObjectivePlacementContract(t *testing.T) {
 	}
 }
 
+func TestPublicWorkforceInitiativeAuthoringContract(t *testing.T) {
+	candidate := WorkforceCandidate{Initiative: &WorkforceInitiativeBlueprint{
+		ID: "research", Title: "Research", Purpose: "Understand users",
+		Owner:         WorkforceInitiativeOwnerReference{Type: WorkforceInitiativeOwnerTeam, DefinitionID: "research-team"},
+		ObjectiveRefs: []string{WorkforceObjectiveKey("team", "research-team", "monitor")},
+		Milestones:    []WorkforceInitiativeMilestoneBlueprint{{ID: "baseline", Title: "Baseline"}},
+		Hypotheses:    []WorkforceInitiativeHypothesisBlueprint{{ID: "friction", Statement: "Setup is difficult", Confidence: 0.5}},
+		SourceMonitors: []WorkforceInitiativeSourceMonitorBlueprint{{
+			ID: "community", ObjectiveRef: WorkforceObjectiveKey("team", "research-team", "monitor"), AssignedAgentDefinitionID: "researcher",
+			SkillID: "source", SkillVersion: "1", Action: "observe", SourcePolicyRef: "approved", Deduplication: WorkforceInitiativeDeduplicateStableSourceAndContent,
+		}},
+		Deliverables: []WorkforceInitiativeDeliverableBlueprint{{ID: "report", Title: "Cited report"}},
+	}}
+	placement := WorkforceChangeSetPlacement{InitiativeID: "initiative-live", InitiativeExpectedRevision: 2}
+	if candidate.Initiative.Owner.DefinitionID != "research-team" || placement.InitiativeID != "initiative-live" || placement.InitiativeExpectedRevision != 2 {
+		t.Fatalf("public Initiative contract candidate=%#v placement=%#v", candidate, placement)
+	}
+}
+
 func TestEngineExposesDurableWorkforceChangeSetsOnlyWithPersistentSupport(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
