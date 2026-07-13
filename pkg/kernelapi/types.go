@@ -33,7 +33,7 @@ const (
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
-	AgentDefinitionsCapabilityVersion   = "1"
+	AgentDefinitionsCapabilityVersion   = "2"
 )
 
 const (
@@ -67,7 +67,7 @@ const (
 	OperationApply            = "apply"
 	OperationRetry            = "retry"
 	OperationPatch            = "patch"
-	OperationListCompilations = "list_compilations"
+	OperationListCompilations = "list-compilations"
 	OperationListObservations = "list-observations"
 	OperationGetCheckpoint    = "get-checkpoint"
 )
