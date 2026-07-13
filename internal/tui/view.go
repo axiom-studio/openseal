@@ -88,7 +88,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -168,6 +168,13 @@ func (m *Model) renderComposer(width int) string {
 		title = "Accept collaboration request"
 		description = "Accept this exact revision and create traceable child work for the recipient."
 		owner = "Recipient decision · durable run lineage"
+	case modeRequestCreate:
+		title = "Request collaboration"
+		description = "Choose an Agent or Team, then describe the outcome. OpenSeal links it to the selected durable Run."
+		owner = "Request or handoff · credential-free shared context"
+		if run := m.selectedRun(); run != nil {
+			owner = "From selected Run · " + compact(run.Goal, 44)
+		}
 	case modeRequestReject:
 		title = "Reject collaboration request"
 		description = "Record why this request cannot proceed. The requesting work will receive the decision."
@@ -767,7 +774,11 @@ func (m *Model) renderAgentRequestsContent(width int) string {
 		}
 	}
 	if m.focus == focusPanel {
-		lines = append(lines, "", mutedStyle.Render("↑/↓ select · r refresh · R requests"))
+		actions := []string{"↑/↓ select", "r refresh", "R requests"}
+		if m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil {
+			actions = append(actions, "n request from selected Work")
+		}
+		lines = append(lines, "", mutedStyle.Render(strings.Join(actions, " · ")))
 	}
 	return strings.Join(lines, "\n")
 }
