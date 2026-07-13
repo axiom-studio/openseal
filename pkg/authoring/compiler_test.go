@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 type staticGenerator struct {
@@ -118,6 +119,86 @@ func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
 	if _, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || generator.repairs != 1 {
 		t.Fatalf("second invalid output should fail after one repair, repairs = %d, err = %v", generator.repairs, err)
 	}
+}
+
+func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}},
+	}}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a continuing market research initiative", Catalog: catalog})
+	if err != nil || !result.Valid || len(result.Validation) != 0 || len(result.MissingRequirements) != 0 {
+		t.Fatalf("valid Initiative compile = %#v, err = %v", result, err)
+	}
+
+	wrongOwner := researchInitiativeCandidate()
+	wrongOwner.Initiative.SourceMonitors[0].ObjectiveRef = WorkforceObjectiveKey(InitiativeOwnerAgent, "community-researcher", "collect")
+	wrongOwnerPayload, _ := json.Marshal(GenerationResponse{Candidate: wrongOwner})
+	compiler, _ = NewCompiler(staticGenerator{payload: wrongOwnerPayload})
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "source_monitor_owner_mismatch") {
+		t.Fatalf("wrong monitor owner = %#v, err = %v", result, err)
+	}
+
+	compiler, _ = NewCompiler(staticGenerator{payload: payload})
+	catalog.Skills["community-source"] = SkillCapability{ID: "community-source", Version: "2.0.0", Actions: []string{"observe"}}
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "version" || result.MissingRequirements[0].ID != "community-source@1.2.3" {
+		t.Fatalf("monitor version mismatch = %#v, err = %v", result, err)
+	}
+}
+
+func hasValidationCode(issues []ValidationIssue, code string) bool {
+	for _, value := range issues {
+		if value.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func researchInitiativeCandidate() WorkforceCandidate {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	agentDefinition := candidate.Agents[0]
+	agentDefinition.SkillRequirements = []agent.SkillRequirement{{SkillID: "community-source", VersionConstraint: "1.2.3", RequiredActions: []string{"observe"}}}
+	agentDefinition.Authority.AllowedSkillIDs = []string{"community-source"}
+	agentDefinition.ObjectiveTemplates = []workforce.ObjectiveTemplate{{ID: "collect", Title: "Collect evidence", Goal: "Collect permitted community evidence", Priority: 1}}
+	candidate.Team.ObjectiveTemplates = []workforce.ObjectiveTemplate{
+		{
+			ID: "monitor", Title: "Monitor communities", Goal: "Monitor approved sources over time", Priority: 1,
+			Cadence: map[string]interface{}{
+				"type": "interval", "intervalSeconds": float64(3600), "assignedAgentId": "community-researcher", "maximumConcurrent": float64(1),
+				"runBudget": map[string]interface{}{"maxTurns": float64(2), "maxActions": float64(1), "maxDurationMs": float64(60000)},
+				"runTemplate": map[string]interface{}{
+					"entrypoint": "monitor",
+					"context":    map[string]interface{}{"initiativeId": "market-intelligence", "sourceMonitorId": "community-listening"},
+					"policy":     map[string]interface{}{"sourcePolicyRef": "approved-communities"},
+					"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"query": "agent runtime pain points"}},
+				},
+			},
+		},
+		{ID: "report", Title: "Publish report", Goal: "Synthesize a cited report", Priority: 2},
+	}
+	candidate.Initiative = &InitiativeBlueprint{
+		ID: "market-intelligence", Title: "Market intelligence", Purpose: "Continuously understand user pain points",
+		Owner: InitiativeOwnerReference{Type: InitiativeOwnerTeam, DefinitionID: candidate.Team.ID},
+		ObjectiveRefs: []string{
+			WorkforceObjectiveKey(InitiativeOwnerAgent, agentDefinition.ID, "collect"),
+			WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor"),
+			WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "report"),
+		},
+		Milestones: []InitiativeMilestoneBlueprint{{ID: "baseline", Title: "Establish baseline", ObjectiveRefs: []string{WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor")}}},
+		Hypotheses: []InitiativeHypothesisBlueprint{{ID: "setup-friction", Statement: "Setup friction is a leading adoption barrier", Confidence: 0.5}},
+		SourceMonitors: []InitiativeSourceMonitorBlueprint{{
+			ID: "community-listening", ObjectiveRef: WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor"), AssignedAgentDefinitionID: agentDefinition.ID,
+			SkillID: "community-source", SkillVersion: "1.2.3", Action: "observe", SourcePolicyRef: "approved-communities", Deduplication: InitiativeDeduplicateStableSourceAndContent,
+		}},
+		Deliverables: []InitiativeDeliverableBlueprint{{ID: "monthly-report", Title: "Monthly cited report", ObjectiveRefs: []string{WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "report")}}},
+		Policy:       map[string]interface{}{"outreachApproval": "required"},
+	}
+	return candidate
 }
 
 func marketingCandidate(version string, risk capability.RiskLevel) WorkforceCandidate {

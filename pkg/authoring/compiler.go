@@ -117,6 +117,10 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		if len(candidate.Assignments) > 0 {
 			issues = append(issues, issue("assignments", "team_required", "Assignments require a Team definition"))
 		}
+		issues = append(issues, validateInitiativeBlueprint(candidate, agents)...)
+		if existing != nil && existing.Initiative != nil && (candidate.Initiative == nil || candidate.Initiative.ID != existing.Initiative.ID) {
+			issues = append(issues, issue("initiative.id", "invalid_amendment_identity", "Amended Initiative must keep its id"))
+		}
 		return issues
 	}
 	if err := candidate.Team.Validate(); err != nil {
@@ -170,6 +174,10 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 			}
 		}
 	}
+	issues = append(issues, validateInitiativeBlueprint(candidate, agents)...)
+	if existing != nil && existing.Initiative != nil && (candidate.Initiative == nil || candidate.Initiative.ID != existing.Initiative.ID) {
+		issues = append(issues, issue("initiative.id", "invalid_amendment_identity", "Amended Initiative must keep its id"))
+	}
 	return issues
 }
 
@@ -202,6 +210,25 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 					key := "credential:" + credential + ":" + definition.ID
 					missing[key] = MissingRequirement{Kind: "credential", ID: credential, RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID}
 				}
+			}
+		}
+	}
+	if candidate.Initiative != nil {
+		for _, monitor := range candidate.Initiative.SourceMonitors {
+			available, ok := catalog.Skills[monitor.SkillID]
+			requiredBy := "initiative:" + candidate.Initiative.ID + "/monitor:" + monitor.ID
+			if !ok {
+				key := "skill:" + monitor.SkillID + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: "skill", ID: monitor.SkillID, RequiredBy: requiredBy}
+				continue
+			}
+			if available.Version != monitor.SkillVersion {
+				key := "version:" + monitor.SkillID + "@" + monitor.SkillVersion + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: "version", ID: monitor.SkillID + "@" + monitor.SkillVersion, RequiredBy: requiredBy}
+			}
+			if !stringSet(available.Actions)[monitor.Action] {
+				key := "action:" + monitor.SkillID + "/" + monitor.Action + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: "action", ID: monitor.SkillID + "/" + monitor.Action, RequiredBy: requiredBy}
 			}
 		}
 	}

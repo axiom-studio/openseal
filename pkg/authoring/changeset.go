@@ -629,24 +629,92 @@ func canonicalIdentity(scope capability.ScopeReference, id string) string {
 
 func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.ScopeReference) {
 	ids := map[string]string{}
+	objectiveIDs := map[string]string{}
 	for _, definition := range candidate.Agents {
 		if definition != nil {
 			old := definition.ID
-			definition.ID = canonicalIdentity(scope, old)
-			ids[old] = definition.ID
+			qualified := canonicalIdentity(scope, old)
+			ids[old] = qualified
+			for _, template := range definition.ObjectiveTemplates {
+				objectiveIDs[WorkforceObjectiveKey(InitiativeOwnerAgent, old, template.ID)] = WorkforceObjectiveKey(InitiativeOwnerAgent, qualified, template.ID)
+			}
 		}
 	}
+	teamID := ""
+	if candidate.Team != nil {
+		teamID = candidate.Team.ID
+		qualified := canonicalIdentity(scope, teamID)
+		for _, template := range candidate.Team.ObjectiveTemplates {
+			objectiveIDs[WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, template.ID)] = WorkforceObjectiveKey(InitiativeOwnerTeam, qualified, template.ID)
+		}
+	}
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		definition.ID = ids[definition.ID]
+		canonicalizeObjectiveTemplateAgents(definition.ObjectiveTemplates, ids)
+	}
 	for i := range candidate.Assignments {
-		candidate.Assignments[i].AgentDefinitionID = ids[candidate.Assignments[i].AgentDefinitionID]
+		if qualified := ids[candidate.Assignments[i].AgentDefinitionID]; qualified != "" {
+			candidate.Assignments[i].AgentDefinitionID = qualified
+		}
 	}
 	if candidate.Team != nil {
-		candidate.Team.ID = canonicalIdentity(scope, candidate.Team.ID)
+		candidate.Team.ID = canonicalIdentity(scope, teamID)
 		for i := range candidate.Team.Roles {
 			for j, id := range candidate.Team.Roles[i].RequiredDefinitionIDs {
 				if qualified := ids[id]; qualified != "" {
 					candidate.Team.Roles[i].RequiredDefinitionIDs[j] = qualified
 				}
 			}
+		}
+		canonicalizeObjectiveTemplateAgents(candidate.Team.ObjectiveTemplates, ids)
+	}
+	if candidate.Initiative != nil {
+		blueprint := candidate.Initiative
+		switch blueprint.Owner.Type {
+		case InitiativeOwnerAgent:
+			if qualified := ids[blueprint.Owner.DefinitionID]; qualified != "" {
+				blueprint.Owner.DefinitionID = qualified
+			}
+		case InitiativeOwnerTeam:
+			if candidate.Team != nil && blueprint.Owner.DefinitionID == teamID {
+				blueprint.Owner.DefinitionID = candidate.Team.ID
+			}
+		}
+		canonicalizeBlueprintObjectiveRefs(blueprint.ObjectiveRefs, objectiveIDs)
+		for index := range blueprint.Milestones {
+			canonicalizeBlueprintObjectiveRefs(blueprint.Milestones[index].ObjectiveRefs, objectiveIDs)
+		}
+		for index := range blueprint.Deliverables {
+			canonicalizeBlueprintObjectiveRefs(blueprint.Deliverables[index].ObjectiveRefs, objectiveIDs)
+		}
+		for index := range blueprint.SourceMonitors {
+			monitor := &blueprint.SourceMonitors[index]
+			if qualified := objectiveIDs[monitor.ObjectiveRef]; qualified != "" {
+				monitor.ObjectiveRef = qualified
+			}
+			if qualified := ids[monitor.AssignedAgentDefinitionID]; qualified != "" {
+				monitor.AssignedAgentDefinitionID = qualified
+			}
+		}
+	}
+}
+
+func canonicalizeObjectiveTemplateAgents(templates []workforce.ObjectiveTemplate, ids map[string]string) {
+	for index := range templates {
+		assigned, _ := templates[index].Cadence["assignedAgentId"].(string)
+		if qualified := ids[assigned]; qualified != "" {
+			templates[index].Cadence["assignedAgentId"] = qualified
+		}
+	}
+}
+
+func canonicalizeBlueprintObjectiveRefs(refs []string, ids map[string]string) {
+	for index, reference := range refs {
+		if qualified := ids[reference]; qualified != "" {
+			refs[index] = qualified
 		}
 	}
 }

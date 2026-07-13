@@ -52,6 +52,7 @@ type WorkforceCandidate struct {
 	Agents      []*agent.AgentDefinition `json:"agents"`
 	Team        *team.Definition         `json:"team,omitempty"`
 	Assignments []Assignment             `json:"assignments,omitempty"`
+	Initiative  *InitiativeBlueprint     `json:"initiative,omitempty"`
 }
 
 type GenerateRequest struct {
