@@ -197,6 +197,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	}
 	executionCtx, cancelExecution := context.WithCancel(ctx)
 	durationDeadline := false
+	durationDeadlineChargeMS := int64(0)
 	if run.Budget != nil && run.Budget.MaxDurationMS > 0 {
 		remainingMS := run.Budget.MaxDurationMS - run.BudgetUsage.DurationMS
 		for id, reservation := range run.BudgetReservations {
@@ -222,12 +223,17 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		cancelExecution()
 		executionCtx, cancelExecution = context.WithTimeout(ctx, time.Duration(remainingMS)*time.Millisecond)
 		durationDeadline = true
+		durationDeadlineChargeMS = remainingMS
 	}
 	heartbeatDone := make(chan turnLeaseHeartbeatResult, 1)
 	go c.heartbeatTurnLease(executionCtx, cancelExecution, req.Scope, turn, req.WorkerID, req.LeaseDuration, heartbeatDone)
 	executionStarted := time.Now()
 	outcome, runErr := runner.RunTurn(executionCtx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
 	executionDurationMS := time.Since(executionStarted).Milliseconds()
+	durationExpired := durationDeadline && errors.Is(executionCtx.Err(), context.DeadlineExceeded)
+	if durationExpired && executionDurationMS < durationDeadlineChargeMS {
+		executionDurationMS = durationDeadlineChargeMS
+	}
 	cancelExecution()
 	heartbeat := <-heartbeatDone
 	if heartbeat.turn != nil {
@@ -257,7 +263,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 		return &AdvanceAgentRunResult{Run: run, Turn: released}, heartbeat.err
 	}
-	if errors.Is(runErr, ErrTurnHostUnavailable) {
+	if errors.Is(runErr, ErrTurnHostUnavailable) && !durationExpired {
 		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
 		if releaseErr != nil {
 			return nil, releaseErr
@@ -286,7 +292,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	}
 	executionErr := runErr
 	finish := FinishAgentTurnRequest{ExpectedRevision: turn.Revision, WorkerID: req.WorkerID}
-	if durationDeadline && errors.Is(runErr, context.DeadlineExceeded) {
+	if durationExpired {
 		executionErr = ErrBudgetExhausted
 		finish.Status = AgentTurnStatusCanceled
 		finish.NextRunStatus = AgentRunStatusPaused
