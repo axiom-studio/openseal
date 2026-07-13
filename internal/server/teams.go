@@ -103,6 +103,25 @@ func (s *Server) handleGetTeamDeployment(w http.ResponseWriter, r *http.Request)
 	s.respondJSON(w, http.StatusOK, deployment)
 }
 
+func (s *Server) handleListTeamDeployments(w http.ResponseWriter, r *http.Request) {
+	registry, err := s.teamRegistry()
+	if err != nil {
+		s.respondError(w, http.StatusNotImplemented, err.Error())
+		return
+	}
+	scope, err := scopeFromQuery(r)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	deployments, err := registry.ListDeployments(r.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID})
+	if err != nil {
+		s.respondTeamError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, kernelapi.TeamDeploymentList{Deployments: deployments})
+}
+
 func (s *Server) handleUpdateTeamDeployment(w http.ResponseWriter, r *http.Request) {
 	registry, err := s.teamRegistry()
 	if err != nil {

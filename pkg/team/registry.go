@@ -112,6 +112,10 @@ func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeRefe
 	return r.store.GetTeamDeployment(ctx, scope, id)
 }
 
+func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*Deployment, error) {
+	return r.store.ListTeamDeployments(ctx, scope)
+}
+
 // UpdateDeployment atomically reconciles a Team's active immutable definition,
 // composition, restrictions, and operating state. This prevents role changes
 // from requiring an impossible ordering between definition activation and

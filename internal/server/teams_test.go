@@ -67,6 +67,15 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"toVersion":"1"`) {
 		t.Fatalf("deployment create = %d %s", created.Code, created.Body.String())
 	}
+	listed := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/team-deployments?scopeKind=workspace&scopeId=local", "", "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"deployments":[`) ||
+		!strings.Contains(listed.Body.String(), `"id":"research-team-one"`) {
+		t.Fatalf("deployment list = %d %s", listed.Code, listed.Body.String())
+	}
+	foreignList := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/team-deployments?scopeKind=workspace&scopeId=other", "", "")
+	if foreignList.Code != http.StatusOK || strings.Contains(foreignList.Body.String(), `research-team-one`) {
+		t.Fatalf("cross-scope deployment list = %d %s", foreignList.Code, foreignList.Body.String())
+	}
 	deployment.Revision = 1
 	deployment.Status = kernelteam.DeploymentPaused
 	deployment.Roster[0].DisplayName = "Evidence lead"

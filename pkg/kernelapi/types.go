@@ -192,6 +192,10 @@ type TeamDeploymentResult struct {
 	Activation *workforce.DefinitionActivation `json:"activation"`
 }
 
+type TeamDeploymentList struct {
+	Deployments []*kernelteam.Deployment `json:"deployments"`
+}
+
 func (d CapabilityDocument) Find(id, version string) (Capability, bool) {
 	for _, candidate := range d.Capabilities {
 		if candidate.ID == id && candidate.Version == version {
