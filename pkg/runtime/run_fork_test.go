@@ -115,3 +115,44 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 		t.Fatalf("bounded fork=%#v error=%v", created, err)
 	}
 }
+
+func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(t *testing.T) {
+	store := NewMemoryStore(20)
+	scope := Scope{Kind: "tenant", ID: "7"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "lead", Goal: "Coordinate research", Source: RunSourceManual,
+		Context: map[string]interface{}{"initiativeId": "initiative-1", "vaultBindingRef": "source-only", "privateBrief": "lead-only"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := CreateRunForkRequest{
+		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "worker", ForkID: "research-wave",
+		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{
+			{ID: "forums", AssignedAgentID: "researcher-a", Goal: "Research forums", Context: map[string]interface{}{"product": "A"}, Checkpoint: map[string]interface{}{}},
+			{ID: "reviews", AssignedAgentID: "researcher-b", Goal: "Research reviews", Context: map[string]interface{}{"product": "B"}, Checkpoint: map[string]interface{}{}},
+		},
+		ContinuationCheckpoint: map[string]interface{}{},
+	}
+	drift := request
+	drift.ForkID = "drifted-wave"
+	drift.Branches = append([]RunForkBranch(nil), request.Branches...)
+	drift.Branches[0].Context = map[string]interface{}{"initiativeId": "another-initiative"}
+	if _, err = NewRunForkCoordinator(store).Create(t.Context(), drift); err == nil {
+		t.Fatal("fork replaced authoritative Initiative lineage")
+	}
+	created, err := NewRunForkCoordinator(store).Create(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range created.Children {
+		if child.Context["initiativeId"] != "initiative-1" || child.Context["product"] == nil || child.Context["vaultBindingRef"] != nil || child.Context["privateBrief"] != nil {
+			t.Fatalf("child context = %#v", child.Context)
+		}
+	}
+}

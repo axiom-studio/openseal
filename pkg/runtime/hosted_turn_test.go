@@ -111,6 +111,121 @@ func TestHostedTurnRunnerRequiresOneRunningActionProposal(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
+	tests := []struct {
+		name       string
+		response   *HostedTurnResponse
+		assertions func(*testing.T, *TurnOutcome)
+	}{
+		{
+			name: "delegation",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model", OutputSummary: "Delegate analysis",
+				ProposedDelegation: &TurnDelegationProposal{
+					StepID: "analyze-findings", AssignedAgentID: "analyst", Goal: "Analyze the collected evidence",
+					Context: map[string]interface{}{"initiativeId": "research-1"}, Checkpoint: map[string]interface{}{},
+					Budget: &BudgetPolicy{MaxTurns: 4},
+				},
+			},
+			assertions: func(t *testing.T, outcome *TurnOutcome) {
+				if outcome.ProposedDelegation == nil || outcome.ProposedDelegation.AssignedAgentID != "analyst" || outcome.ProposedFork != nil {
+					t.Fatalf("outcome = %#v", outcome)
+				}
+			},
+		},
+		{
+			name: "fork",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model", OutputSummary: "Split research",
+				ProposedFork: &TurnForkProposal{
+					ForkID: "compare-products", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+					Branches: []RunForkBranch{
+						{ID: "product-a", AssignedAgentID: "researcher-a", Goal: "Analyze product A", Context: map[string]interface{}{"initiativeId": "research-1"}, Checkpoint: map[string]interface{}{}},
+						{ID: "product-b", AssignedAgentID: "researcher-b", Goal: "Analyze product B", Context: map[string]interface{}{"initiativeId": "research-1"}, Checkpoint: map[string]interface{}{}},
+					},
+				},
+			},
+			assertions: func(t *testing.T, outcome *TurnOutcome) {
+				if outcome.ProposedFork == nil || len(outcome.ProposedFork.Branches) != 2 || outcome.ProposedDelegation != nil {
+					t.Fatalf("outcome = %#v", outcome)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host := &recordingTurnHost{response: test.response}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "lead", DefinitionID: "lead-definition", DefinitionVersion: "1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+				Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Coordinate research"}, Turn: &AgentTurn{ID: "turn"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.assertions(t, outcome)
+		})
+	}
+}
+
+func TestHostedTurnRunnerRejectsInvalidWorkProposals(t *testing.T) {
+	validFork := &TurnForkProposal{
+		ForkID: "compare", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{
+			{ID: "a", AssignedAgentID: "agent-a", Goal: "Analyze A", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}},
+			{ID: "b", AssignedAgentID: "agent-b", Goal: "Analyze B", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}},
+		},
+	}
+	validDelegation := &TurnDelegationProposal{StepID: "review", AssignedAgentID: "reviewer", Goal: "Review", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}}
+	for name, mutate := range map[string]func(*HostedTurnResponse){
+		"terminal fork": func(response *HostedTurnResponse) {
+			response.NextRunStatus, response.ProposedFork = AgentRunStatusCompleted, validFork
+		},
+		"fork and delegation": func(response *HostedTurnResponse) {
+			response.ProposedFork, response.ProposedDelegation = validFork, validDelegation
+		},
+		"action and fork": func(response *HostedTurnResponse) {
+			response.ProposedFork = validFork
+			response.ProposedActions = []TurnAction{{Type: "skill_action", Capability: "research.read", Summary: "Read", InputRef: "/actionInputs/read"}}
+		},
+		"unsafe branch context": func(response *HostedTurnResponse) {
+			fork := *validFork
+			fork.Branches = append([]RunForkBranch(nil), validFork.Branches...)
+			fork.Branches[0].Context = map[string]interface{}{"apiToken": "secret"}
+			response.ProposedFork = &fork
+		},
+		"malformed delegate id": func(response *HostedTurnResponse) {
+			delegation := *validDelegation
+			delegation.AssignedAgentID = "../../agent"
+			response.ProposedDelegation = &delegation
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model",
+			}
+			mutate(response)
+			host := &recordingTurnHost{response: response}
+			actions := []capability.ModelAction(nil)
+			if len(response.ProposedActions) > 0 {
+				actions = []capability.ModelAction{{Name: "research.read", SkillID: "research", Version: "1", Action: "read"}}
+			}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "lead", DefinitionID: "lead-definition", DefinitionVersion: "1", Actions: actions})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Coordinate"}, Turn: &AgentTurn{ID: "turn"}}); err == nil {
+				t.Fatal("invalid hosted work proposal was accepted")
+			}
+		})
+	}
+}
+
 func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusCompleted,
