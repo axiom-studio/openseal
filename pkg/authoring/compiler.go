@@ -11,7 +11,9 @@ import (
 	"io"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -101,6 +103,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 }
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
+	payload = normalizeGeneratedDurations(payload)
 	var generated GenerationResponse
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
@@ -115,6 +118,77 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
 	return generated, nil
+}
+
+// normalizeGeneratedDurations accepts unambiguous human duration strings only
+// at the portable schema's duration fields. Providers commonly emit values such
+// as "24h" or "30d" despite an integer nanosecond contract. The canonical
+// candidate remains numeric, while every other field still passes through the
+// strict decoder unchanged and therefore fails closed on a type mismatch.
+func normalizeGeneratedDurations(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return payload
+	}
+	root, ok := document.(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	candidate, _ := root["candidate"].(map[string]interface{})
+	agents, _ := candidate["agents"].([]interface{})
+	for _, rawAgent := range agents {
+		agentDefinition, _ := rawAgent.(map[string]interface{})
+		normalizeDurationField(agentDefinition, "memory", "retention")
+		normalizeDurationField(agentDefinition, "escalation", "afterDuration")
+	}
+	teamDefinition, _ := candidate["team"].(map[string]interface{})
+	normalizeDurationField(teamDefinition, "sharedContext", "retention")
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
+}
+
+func normalizeDurationField(parent map[string]interface{}, objectKey, fieldKey string) {
+	object, _ := parent[objectKey].(map[string]interface{})
+	raw, ok := object[fieldKey].(string)
+	if !ok {
+		return
+	}
+	duration, err := parseGeneratedDuration(raw)
+	if err == nil {
+		object[fieldKey] = duration.Nanoseconds()
+	}
+}
+
+func parseGeneratedDuration(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if duration, err := time.ParseDuration(raw); err == nil {
+		return duration, nil
+	}
+	if len(raw) < 2 {
+		return 0, errors.New("invalid duration")
+	}
+	unit := 24 * time.Hour
+	switch raw[len(raw)-1] {
+	case 'd':
+	case 'w':
+		unit *= 7
+	default:
+		return 0, errors.New("invalid duration")
+	}
+	count, err := strconv.ParseInt(raw[:len(raw)-1], 10, 64)
+	if err != nil || count > int64((1<<63-1)/unit) || count < int64((-1<<63)/unit) {
+		return 0, errors.New("invalid duration")
+	}
+	return time.Duration(count) * unit, nil
 }
 
 func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandidate) []ValidationIssue {

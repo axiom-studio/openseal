@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -118,6 +119,33 @@ func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
 	compiler, _ = NewCompiler(generator)
 	if _, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || generator.repairs != 1 {
 		t.Fatalf("second invalid output should fail after one repair, repairs = %d, err = %v", generator.repairs, err)
+	}
+}
+
+func TestCompilerNormalizesOnlyDeclaredHumanDurationFields(t *testing.T) {
+	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":"1","displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1},"memory":{"retention":"30d","maximumBytes":1024},"escalation":{"afterDuration":"2h"}}],"team":{"id":"workers","version":"1","displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{"mode":"dynamic"},"sharedContext":{"retention":"2w","maximumBytes":2048},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker","displayName":"Worker"}]}}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"})
+	if err != nil || !result.Valid {
+		t.Fatalf("normalized duration compile = %#v, err = %v", result, err)
+	}
+	if got := result.Candidate.Agents[0].Memory.Retention; got != 30*24*time.Hour {
+		t.Fatalf("agent retention = %s", got)
+	}
+	if got := result.Candidate.Agents[0].Escalation.AfterDuration; got != 2*time.Hour {
+		t.Fatalf("escalation duration = %s", got)
+	}
+	if got := result.Candidate.Team.SharedContext.Retention; got != 14*24*time.Hour {
+		t.Fatalf("team retention = %s", got)
+	}
+
+	strict, _ := NewCompiler(staticGenerator{payload: []byte(`{"candidate":{"agents":[]},"questions":"tomorrow"}`)})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
+		t.Fatal("normalization must not coerce undeclared fields")
+	}
+	invalid, _ := NewCompiler(staticGenerator{payload: []byte(`{"candidate":{"agents":[{"memory":{"retention":"someday"}}]}}`)})
+	if _, err := invalid.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
+		t.Fatal("ambiguous duration must fail closed")
 	}
 }
 
