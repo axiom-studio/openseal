@@ -46,7 +46,10 @@ func TestPublicWorkforceInitiativeAuthoringContract(t *testing.T) {
 		Deliverables: []WorkforceInitiativeDeliverableBlueprint{{ID: "report", Title: "Cited report"}},
 	}}
 	placement := WorkforceChangeSetPlacement{InitiativeID: "initiative-live", InitiativeExpectedRevision: 2}
-	if candidate.Initiative.Owner.DefinitionID != "research-team" || placement.InitiativeID != "initiative-live" || placement.InitiativeExpectedRevision != 2 {
+	catalog := WorkforceCapabilityCatalog{SourcePolicies: map[string]WorkforceSourcePolicyCapability{
+		"approved@1": {Reference: "approved@1", Sources: []WorkforceSourcePolicySourceCapability{{Host: "community.example", PathPrefixes: []string{"/forum"}}}},
+	}}
+	if candidate.Initiative.Owner.DefinitionID != "research-team" || placement.InitiativeID != "initiative-live" || placement.InitiativeExpectedRevision != 2 || catalog.SourcePolicies["approved@1"].Sources[0].Host != "community.example" {
 		t.Fatalf("public Initiative contract candidate=%#v placement=%#v", candidate, placement)
 	}
 }

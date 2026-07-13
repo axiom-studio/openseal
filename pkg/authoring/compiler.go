@@ -230,6 +230,11 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				key := "action:" + monitor.SkillID + "/" + monitor.Action + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: "action", ID: monitor.SkillID + "/" + monitor.Action, RequiredBy: requiredBy}
 			}
+			policy, policyAvailable := catalog.SourcePolicies[monitor.SourcePolicyRef]
+			if !policyAvailable || policy.Reference != monitor.SourcePolicyRef {
+				key := "source_policy:" + monitor.SourcePolicyRef + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: "source_policy", ID: monitor.SourcePolicyRef, RequiredBy: requiredBy}
+			}
 		}
 	}
 	result := make([]MissingRequirement, 0, len(missing))

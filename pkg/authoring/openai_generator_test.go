@@ -62,6 +62,7 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"Objective references use exactly agent:<agentDefinitionId>:<objectiveTemplateId> or team:<teamDefinitionId>:<objectiveTemplateId>",
 		"Every source monitor Objective must be owned by the Initiative owner",
 		"Never invent source allowlists, public identities, outbound destinations, credentials, or approval authority",
+		"sourcePolicyRef must name an exact supplied catalog.sourcePolicies key",
 	} {
 		if !strings.Contains(authoringSystemPrompt, expected) {
 			t.Fatalf("authoring schema missing %q", expected)

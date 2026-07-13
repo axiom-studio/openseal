@@ -36,9 +36,26 @@ type SkillCredential struct {
 	Optional bool     `json:"optional,omitempty"`
 }
 
+// SourcePolicyCapability is the credential-free authoring projection of a
+// host-governed source policy. Hosts retain policy storage and enforcement;
+// planners can select only references and source scopes that actually exist.
+type SourcePolicyCapability struct {
+	Reference      string                         `json:"reference"`
+	Sources        []SourcePolicySourceCapability `json:"sources"`
+	MaximumItems   int                            `json:"maximumItems,omitempty"`
+	RetentionDays  int                            `json:"retentionDays,omitempty"`
+	ApprovalPolicy string                         `json:"approvalPolicy,omitempty"`
+}
+
+type SourcePolicySourceCapability struct {
+	Host         string   `json:"host"`
+	PathPrefixes []string `json:"pathPrefixes,omitempty"`
+}
+
 type CapabilityCatalog struct {
-	Skills               map[string]SkillCapability `json:"skills,omitempty"`
-	AvailableCredentials map[string]bool            `json:"availableCredentials,omitempty"`
+	Skills               map[string]SkillCapability        `json:"skills,omitempty"`
+	AvailableCredentials map[string]bool                   `json:"availableCredentials,omitempty"`
+	SourcePolicies       map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
 }
 
 type Assignment struct {

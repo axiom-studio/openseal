@@ -127,6 +127,8 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
 		"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}},
+	}, SourcePolicies: map[string]SourcePolicyCapability{
+		"approved-communities": {Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5},
 	}}
 	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a continuing market research initiative", Catalog: catalog})
 	if err != nil || !result.Valid || len(result.Validation) != 0 || len(result.MissingRequirements) != 0 {
@@ -147,6 +149,14 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
 	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "version" || result.MissingRequirements[0].ID != "community-source@1.2.3" {
 		t.Fatalf("monitor version mismatch = %#v, err = %v", result, err)
+	}
+
+	compiler, _ = NewCompiler(staticGenerator{payload: payload})
+	catalog.Skills["community-source"] = SkillCapability{ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}}
+	delete(catalog.SourcePolicies, "approved-communities")
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_policy" || result.MissingRequirements[0].ID != "approved-communities" {
+		t.Fatalf("missing source policy = %#v, err = %v", result, err)
 	}
 }
 

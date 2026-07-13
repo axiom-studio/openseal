@@ -221,6 +221,8 @@ func TestAtomicMemoryApplyComposesInitiativeWithPortableDefaultPlacement(t *test
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
 		"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}},
+	}, SourcePolicies: map[string]SourcePolicyCapability{
+		"approved-communities": {Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5},
 	}}
 	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "Create a continuing research Initiative", Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-initiative"})
 	if err != nil || !created.Result.Valid || created.Result.Candidate.Initiative == nil {
