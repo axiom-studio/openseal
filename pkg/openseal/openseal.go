@@ -2075,6 +2075,14 @@ func (e *Engine) ListSourceObservations(ctx context.Context, filter runtime.Sour
 	return e.sourceMonitors.List(ctx, filter)
 }
 
+func (e *Engine) GetSourceObservation(ctx context.Context, scope runtime.Scope, id string) (*runtime.SourceObservation, error) {
+	store, ok := e.store.(runtime.SourceMonitorStore)
+	if !ok {
+		return nil, errors.New("source observation capability is unavailable")
+	}
+	return store.GetSourceObservation(ctx, scope, id)
+}
+
 func (e *Engine) CreateOutreachThread(ctx context.Context, req runtime.CreateOutreachThreadRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {
 	if e.outreach == nil {
 		return nil, nil, errors.New("outreach capability is unavailable")
