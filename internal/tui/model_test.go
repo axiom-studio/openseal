@@ -568,7 +568,7 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 		Available: true, Operations: []string{kernelapi.OperationCreate, kernelapi.OperationList},
 	}
 	fake := &fakeKernelClient{
-		document: kernelapi.CapabilityDocument{Version: kernelapi.Version, Capabilities: []kernelapi.Capability{limited}},
+		document: kernelapi.CapabilityDocument{APIVersion: kernelapi.APIVersion, Capabilities: []kernelapi.Capability{limited}},
 		runs:     []*runtime.AgentRun{testRun("run-1", runtime.AgentRunStatusQueued, 1)},
 	}
 	model := newTestModel(t, fake)
@@ -998,7 +998,7 @@ func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
 }
 
 func TestContractMismatchFailsClosed(t *testing.T) {
-	fake := &fakeKernelClient{document: kernelapi.CapabilityDocument{Version: "99"}}
+	fake := &fakeKernelClient{document: kernelapi.CapabilityDocument{APIVersion: "agent-kernel/v99"}}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	if model.ready || !strings.Contains(model.View(), "Capability unavailable") {

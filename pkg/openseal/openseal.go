@@ -486,6 +486,7 @@ type (
 	AdvanceSourceMonitorCheckpointRequest = runtime.AdvanceSourceMonitorCheckpointRequest
 	SourceMonitorCheckpointResult         = runtime.SourceMonitorCheckpointResult
 	KernelCapability                      = kernelapi.Capability
+	KernelCapabilityDocument              = kernelapi.CapabilityDocument
 	KernelCapabilityContext               = kernelapi.CapabilityContext
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
@@ -493,6 +494,7 @@ type (
 
 const (
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
+	KernelAPIVersion                        = kernelapi.APIVersion
 	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion
 	ChannelOperationCreate                  = kernelapi.OperationCreate
@@ -542,6 +544,12 @@ const (
 // channel services an embedding host has actually wired.
 func ChannelCapability(features ChannelCapabilityFeatures) KernelCapability {
 	return kernelapi.ChannelsCapability(features)
+}
+
+// NewKernelCapabilityDocument composes the exact capability envelope consumed
+// by OpenSeal's TUI and embedding-host user interfaces.
+func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabilityDocument {
+	return kernelapi.NewCapabilityDocument(capabilities...)
 }
 
 var (
