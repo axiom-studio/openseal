@@ -285,3 +285,43 @@ func TestPostgresAtomicWorkforceApplyHasOneReplicaWinner(t *testing.T) {
 		t.Fatalf("Initiative=%#v err=%v", initiative, err)
 	}
 }
+
+func TestPostgresAtomicWorkforceAmendCreatesResourcesAfterUnappliedParent(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	schema := "openseal_recovered_apply_" + uuid.NewString()[:8]
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_ = store.Close()
+	})
+	parent := testApplicableWorkforceChangeSet()
+	parent.ID = "rejected-parent"
+	parent.Status = authoring.ChangeSetRejected
+	if _, _, err = store.CreateChangeSet(ctx, parent, "parent", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	recovered := testApplicableWorkforceChangeSet()
+	recovered.ID, recovered.ParentID, recovered.Mode = "recovered", parent.ID, authoring.ModeAmend
+	if _, _, err = store.CreateChangeSet(ctx, recovered, "recovered", "recovered"); err != nil {
+		t.Fatal(err)
+	}
+	applied := appliedRuntimeChangeSet(recovered, "receipt-recovered", "apply-recovered", recovered.UpdatedAt.Add(time.Minute))
+	result, err := store.ApplyChangeSet(ctx, applied, recovered.Revision)
+	if err != nil || result.Status != authoring.ChangeSetApplied {
+		t.Fatalf("applied=%#v err=%v", result, err)
+	}
+	if deployment, err := store.GetDeployment(ctx, recovered.Scope, "agent-live"); err != nil || deployment.Revision != 1 {
+		t.Fatalf("Agent deployment=%#v err=%v", deployment, err)
+	}
+	if deployment, err := store.GetTeamDeployment(ctx, recovered.Scope, "team-live"); err != nil || deployment.Revision != 1 {
+		t.Fatalf("Team deployment=%#v err=%v", deployment, err)
+	}
+}

@@ -34,6 +34,25 @@ type workforceObjectiveApplication struct {
 	expectedRevision int64
 }
 
+// Authoring mode describes how the model produced the candidate. Persistence
+// intent is per resource: revision zero creates, while a positive revision is
+// the compare-and-swap boundary for an update. This also scopes destructive
+// binding reconciliation to deployments this ChangeSet is actually updating.
+func workforceBindingReconciliationDeployments(value *authoring.ChangeSet) map[string]bool {
+	deployments := map[string]bool{}
+	if value == nil {
+		return deployments
+	}
+	for definitionID, expectedRevision := range value.Placement.AgentExpectedRevisions {
+		if expectedRevision > 0 {
+			if deploymentID := strings.TrimSpace(value.Placement.AgentDeploymentIDs[definitionID]); deploymentID != "" {
+				deployments[deploymentID] = true
+			}
+		}
+	}
+	return deployments
+}
+
 func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceApplication, error) {
 	if value == nil || value.ApplyReceipt == nil {
 		return nil, fmt.Errorf("applied workforce aggregate is incomplete")
@@ -51,10 +70,10 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		definition.Digest = portableDigest(definition)
 		deploymentID := value.Placement.AgentDeploymentIDs[definition.ID]
 		deploymentByDefinition[definition.ID] = deploymentID
-		revision := int64(1)
+		expectedRevision := value.Placement.AgentExpectedRevisions[definition.ID]
+		revision := expectedRevision + 1
 		previous := ""
-		if value.Mode == authoring.ModeAmend {
-			revision = value.Placement.AgentExpectedRevisions[definition.ID] + 1
+		if expectedRevision > 0 {
 			previous = "__load__"
 		}
 		deployment := &agent.AgentDeployment{ID: deploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, PreviousVersion: previous, RolloutStatus: agent.RolloutActive, Environment: value.Placement.Environment, Credentials: value.Placement.CredentialReferences[definition.ID], Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: definition.Authority.MaxConcurrentRuns}, Revision: revision, CreatedAt: now, UpdatedAt: now}
@@ -95,10 +114,7 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	for _, assignment := range value.Result.Candidate.Assignments {
 		roster = append(roster, team.RosterAssignment{ID: assignment.ID, RoleID: assignment.RoleID, AgentDeploymentID: deploymentByDefinition[assignment.AgentDefinitionID], DisplayName: assignment.DisplayName})
 	}
-	revision := int64(1)
-	if value.Mode == authoring.ModeAmend {
-		revision = value.Placement.TeamExpectedRevision + 1
-	}
+	revision := value.Placement.TeamExpectedRevision + 1
 	application.teamDeployment = &team.Deployment{ID: value.Placement.TeamDeploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Roster: roster, Status: team.DeploymentActive, Revision: revision, CreatedAt: now, UpdatedAt: now}
 	if err := application.teamDeployment.Validate(definition); err != nil {
 		return nil, err

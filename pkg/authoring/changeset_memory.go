@@ -47,16 +47,13 @@ func (s *MemoryChangeSetStore) ApplyChangeSet(_ context.Context, value *ChangeSe
 		return nil, err
 	}
 	for k := range definitions {
-		if s.definitions[k] != "" {
+		if existing := s.definitions[k]; existing != "" && existing != definitions[k] {
 			return nil, ErrChangeSetRevision
 		}
 	}
 	for k, proposed := range deployments {
 		currentDeployment, exists := s.deployments[k]
-		if current.Mode == ModeCreate && exists {
-			return nil, ErrChangeSetRevision
-		}
-		if current.Mode == ModeAmend && (!exists || currentDeployment.Revision+1 != proposed.Revision) {
+		if proposed.Revision == 1 && exists || proposed.Revision > 1 && (!exists || currentDeployment.Revision+1 != proposed.Revision) {
 			return nil, ErrChangeSetRevision
 		}
 	}
@@ -101,10 +98,7 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 		ref := AppliedResourceReference{Kind: "agent_definition", ID: definition.ID, Version: definition.Version}
 		definitions["agent\x00"+definition.ID+"\x00"+definition.Version] = digest
 		resources = append(resources, ref)
-		revision := int64(1)
-		if value.Mode == ModeAmend {
-			revision = value.Placement.AgentExpectedRevisions[definition.ID] + 1
-		}
+		revision := value.Placement.AgentExpectedRevisions[definition.ID] + 1
 		deployment := AppliedResourceReference{Kind: "agent_deployment", ID: value.Placement.AgentDeploymentIDs[definition.ID], Version: definition.Version, Revision: revision}
 		deployments[changeSetKey(value.Scope, deployment.ID)] = deployment
 		resources = append(resources, deployment)
@@ -123,10 +117,7 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 	digest, _ := digestJSON(team)
 	definitions["team\x00"+team.ID+"\x00"+team.Version] = digest
 	resources = append(resources, AppliedResourceReference{Kind: "team_definition", ID: team.ID, Version: team.Version})
-	revision := int64(1)
-	if value.Mode == ModeAmend {
-		revision = value.Placement.TeamExpectedRevision + 1
-	}
+	revision := value.Placement.TeamExpectedRevision + 1
 	deployment := AppliedResourceReference{Kind: "team_deployment", ID: value.Placement.TeamDeploymentID, Version: team.Version, Revision: revision}
 	deployments[changeSetKey(value.Scope, deployment.ID)] = deployment
 	resources = append(resources, deployment)

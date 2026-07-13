@@ -450,6 +450,109 @@ func TestSQLiteAtomicWorkforceAmendActivatesNewVersionsTogether(t *testing.T) {
 	}
 }
 
+func TestSQLiteAtomicWorkforceAmendCreatesUnappliedResourcesAndPreservesUnrelatedBindings(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	catalog := skill.NewCatalogWithStore(store)
+	if err = catalog.Register(ctx, &skill.Definition{ID: "unrelated", Version: "1", Name: "Unrelated", Prompt: &skill.PromptModule{Instructions: "Remain bound."}}); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := &skill.Binding{ID: "workforce:other-live:unrelated", Scope: skill.ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "other-live", SkillID: "unrelated", SkillVersion: "1", EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Revision: 1}
+	if err = catalog.Bind(ctx, unrelated); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := testApplicableWorkforceChangeSet()
+	parent.ID = "rejected-parent"
+	parent.Status = authoring.ChangeSetRejected
+	if _, _, err = store.CreateChangeSet(ctx, parent, "parent", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	recovered := testApplicableWorkforceChangeSet()
+	recovered.ID = "recovered"
+	recovered.ParentID = parent.ID
+	recovered.Mode = authoring.ModeAmend
+	if _, _, err = store.CreateChangeSet(ctx, recovered, "recovered", "recovered"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(recovered)
+	applied.Status = authoring.ChangeSetApplied
+	applied.Revision = 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-recovered", IdempotencyKey: "apply-recovered", CandidateDigest: recovered.CandidateDigest, Actor: recovered.Actor, AppliedAt: recovered.UpdatedAt.Add(time.Minute)}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	result, err := store.ApplyChangeSet(ctx, applied, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deployment, err := store.GetDeployment(ctx, recovered.Scope, "agent-live"); err != nil || deployment.Revision != 1 {
+		t.Fatalf("Agent deployment=%#v err=%v", deployment, err)
+	}
+	if deployment, err := store.GetTeamDeployment(ctx, recovered.Scope, "team-live"); err != nil || deployment.Revision != 1 {
+		t.Fatalf("Team deployment=%#v err=%v", deployment, err)
+	}
+	if prompts, err := catalog.ListModelPrompts(ctx, unrelated.Scope, unrelated.DeploymentID); err != nil || len(prompts) != 1 {
+		t.Fatalf("unrelated prompts=%#v err=%v", prompts, err)
+	}
+	if result.ApplyReceipt == nil || len(result.ApplyReceipt.Resources) != 6 {
+		t.Fatalf("receipt=%#v", result.ApplyReceipt)
+	}
+}
+
+func TestSQLiteAtomicWorkforceAmendSupportsMixedCreateAndUpdatePlacements(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	created := testApplicableWorkforceChangeSet()
+	if _, _, err = store.CreateChangeSet(ctx, created, "create-mixed", "create-mixed"); err != nil {
+		t.Fatal(err)
+	}
+	first := cloneRuntimeChangeSet(created)
+	first.Status, first.Revision = authoring.ChangeSetApplied, 3
+	first.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-create-mixed", IdempotencyKey: "apply-create-mixed", CandidateDigest: created.CandidateDigest, Actor: created.Actor, AppliedAt: created.UpdatedAt.Add(time.Minute)}
+	first.UpdatedAt = first.ApplyReceipt.AppliedAt
+	if _, err = store.ApplyChangeSet(ctx, first, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	amend := testApplicableWorkforceChangeSet()
+	amend.ID, amend.ParentID, amend.Mode, amend.CandidateDigest = "mixed", created.ID, authoring.ModeAmend, "candidate-mixed"
+	newAgent := &agent.AgentDefinition{ID: "reviewer", Version: "1", DisplayName: "Reviewer", Purpose: "Review", SystemPrompt: "Review the work", Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}}
+	amend.Result.Candidate.Agents = append(amend.Result.Candidate.Agents, newAgent)
+	amend.Result.Candidate.Team.Version = "2"
+	amend.Result.Candidate.Team.Roles = append(amend.Result.Candidate.Team.Roles, team.RoleSlot{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review", MinimumMembers: 1, MaximumMembers: 1, RequiredDefinitionIDs: []string{"reviewer"}})
+	amend.Result.Candidate.Assignments = append(amend.Result.Candidate.Assignments, authoring.Assignment{ID: "reviewer", RoleID: "reviewer", AgentDefinitionID: "reviewer"})
+	amend.Placement.AgentDeploymentIDs["reviewer"] = "reviewer-live"
+	amend.Placement.AgentExpectedRevisions = map[string]int64{"agent": 1}
+	amend.Placement.TeamExpectedRevision = 1
+	for key, placement := range amend.Placement.Objectives {
+		placement.ExpectedRevision = 1
+		amend.Placement.Objectives[key] = placement
+	}
+	if _, _, err = store.CreateChangeSet(ctx, amend, "mixed", "mixed"); err != nil {
+		t.Fatal(err)
+	}
+	second := cloneRuntimeChangeSet(amend)
+	second.Status, second.Revision = authoring.ChangeSetApplied, 3
+	second.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-mixed", IdempotencyKey: "apply-mixed", CandidateDigest: amend.CandidateDigest, Actor: amend.Actor, AppliedAt: first.UpdatedAt.Add(time.Minute)}
+	second.UpdatedAt = second.ApplyReceipt.AppliedAt
+	if _, err = store.ApplyChangeSet(ctx, second, 2); err != nil {
+		t.Fatal(err)
+	}
+	if deployment, err := store.GetDeployment(ctx, amend.Scope, "agent-live"); err != nil || deployment.Revision != 2 {
+		t.Fatalf("updated Agent=%#v err=%v", deployment, err)
+	}
+	if deployment, err := store.GetDeployment(ctx, amend.Scope, "reviewer-live"); err != nil || deployment.Revision != 1 {
+		t.Fatalf("new Agent=%#v err=%v", deployment, err)
+	}
+}
+
 func testApplicableWorkforceChangeSet() *authoring.ChangeSet {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
