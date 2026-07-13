@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -67,6 +68,15 @@ func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t 
 		Scope: scope, Compilation: compilation, ReferenceID: "catalog:research", ReferenceKind: "catalog",
 	}); err != nil || wasCreated {
 		t.Fatalf("second retention reference created=%t err=%v", wasCreated, err)
+	}
+	reordered := *compilation
+	reordered.Artifact = compilation.Artifact
+	reordered.Artifact.Files = append([]openclaw.File(nil), compilation.Artifact.Files...)
+	slices.Reverse(reordered.Artifact.Files)
+	if _, wasCreated, err := service.ImportOpenClaw(ctx, sourceartifact.ImportOpenClawRequest{
+		Scope: scope, Compilation: &reordered, ReferenceID: "catalog:research", ReferenceKind: "catalog",
+	}); err != nil || wasCreated {
+		t.Fatalf("reordered restart import created=%t err=%v", wasCreated, err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
