@@ -14,6 +14,16 @@ func resolveTurnActionInput(checkpoint map[string]interface{}, reference string)
 	if strings.HasPrefix(reference, "#") {
 		reference = strings.TrimPrefix(reference, "#")
 	}
+	// Hosted planners sometimes make the documented checkpoint root explicit.
+	// The resolver already receives that object as its root, so accept only this
+	// exact, credential-free alias before applying the normal bounded pointer.
+	const checkpointRoot = "/continuationCheckpoint"
+	if reference == checkpointRoot {
+		return nil, errors.New("action inputRef must select an object inside continuationCheckpoint")
+	}
+	if strings.HasPrefix(reference, checkpointRoot+"/") {
+		reference = strings.TrimPrefix(reference, checkpointRoot)
+	}
 	if !strings.HasPrefix(reference, "/") {
 		return nil, errors.New("action inputRef must be a JSON Pointer into continuationCheckpoint")
 	}
