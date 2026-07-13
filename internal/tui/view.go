@@ -699,6 +699,9 @@ func (m *Model) renderRunsContent(width int) string {
 	if run := m.selectedRun(); run != nil {
 		lines = append(lines, "", mutedStyle.Render("Selected"), compact(run.Goal, max(width-8, 24)))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Updated %s · revision %d", relativeTime(run.UpdatedAt), run.Revision)))
+		if run.ParentRunID != "" {
+			lines = append(lines, mutedStyle.Render(compact("Parent Run "+run.ParentRunID, max(width-8, 24))))
+		}
 		if run.Budget != nil {
 			state := run.BudgetState
 			if state == "" {
