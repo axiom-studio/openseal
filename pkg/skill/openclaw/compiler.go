@@ -159,6 +159,14 @@ func ExportBundle(compilation *Compilation) (Bundle, error) {
 	return cloneBundle(compilation.Artifact), nil
 }
 
+// BundleDigest returns the canonical content identity used by compiled source
+// provenance. Source registry and trust metadata are intentionally excluded:
+// identical bytes have one content digest while each retained artifact keeps
+// its own origin metadata.
+func BundleDigest(bundle Bundle) string {
+	return bundleDigest(bundle)
+}
+
 func resolvedVersion(parsed *skillmd.ParsedSkill, sourceVersion, digest string) string {
 	version := strings.TrimSpace(sourceVersion)
 	if version == "" {

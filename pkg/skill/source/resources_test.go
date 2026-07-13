@@ -35,7 +35,7 @@ func TestEffectiveSourceArtifactStagesIntoFilesystemSandbox(t *testing.T) {
 	if err != nil || len(snapshot.Effective) != 1 {
 		t.Fatalf("source discovery = %#v, %v", snapshot, err)
 	}
-	provider, err := NewArtifactProvider(snapshot)
+	provider, err := NewArtifactProvider(kernelskill.ScopeReference{Kind: "tenant", ID: "one"}, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,14 +52,14 @@ func TestEffectiveSourceArtifactStagesIntoFilesystemSandbox(t *testing.T) {
 	if err != nil || string(content) != "preserve evidence" {
 		t.Fatalf("staged effective resource = %q, %v", content, err)
 	}
-	if _, err := provider.ReadResource(context.Background(), candidate.Digest, "SKILL.md"); err == nil {
+	if _, err := provider.ReadResource(context.Background(), kernelskill.ScopeReference{Kind: "tenant", ID: "one"}, candidate.Digest, "SKILL.md"); err == nil {
 		t.Fatal("SKILL.md must not be exposed through the supporting-resource provider")
 	}
 	snapshot.Effective[0].Compilation.Definition.Resources = append(snapshot.Effective[0].Compilation.Definition.Resources, capability.Resource{
 		Path: "references/missing.md", Kind: "reference",
 		Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 1,
 	})
-	if _, err := NewArtifactProvider(snapshot); err == nil {
+	if _, err := NewArtifactProvider(kernelskill.ScopeReference{Kind: "tenant", ID: "one"}, snapshot); err == nil {
 		t.Fatal("missing retained source resource was accepted")
 	}
 }

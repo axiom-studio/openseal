@@ -105,7 +105,7 @@ func (s *Stager) StageResources(ctx context.Context, request kernelskill.Resourc
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		content, err := s.provider.ReadResource(ctx, request.SourceDigest, resource.Path)
+		content, err := s.provider.ReadResource(ctx, request.Scope, request.SourceDigest, resource.Path)
 		if err != nil {
 			return nil, fmt.Errorf("read declared resource %q: %w", resource.Path, err)
 		}

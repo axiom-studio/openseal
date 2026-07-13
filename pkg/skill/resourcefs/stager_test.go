@@ -15,7 +15,7 @@ import (
 
 type contentProvider map[string][]byte
 
-func (p contentProvider) ReadResource(_ context.Context, digest, path string) ([]byte, error) {
+func (p contentProvider) ReadResource(_ context.Context, _ kernelskill.ScopeReference, digest, path string) ([]byte, error) {
 	return append([]byte(nil), p[digest+":"+path]...), nil
 }
 

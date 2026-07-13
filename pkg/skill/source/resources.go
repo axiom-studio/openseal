@@ -17,16 +17,20 @@ import (
 // effective source snapshot. SKILL.md and shadowed candidates are deliberately
 // not addressable through the activation staging boundary.
 type ArtifactProvider struct {
+	scope     kernelskill.ScopeReference
 	resources map[string][]byte
 }
 
 var _ kernelskill.ResourceContentProvider = (*ArtifactProvider)(nil)
 
-func NewArtifactProvider(snapshot *Snapshot) (*ArtifactProvider, error) {
+func NewArtifactProvider(scope kernelskill.ScopeReference, snapshot *Snapshot) (*ArtifactProvider, error) {
+	if strings.TrimSpace(scope.Kind) == "" || strings.TrimSpace(scope.ID) == "" {
+		return nil, errors.New("skill source artifact scope is required")
+	}
 	if snapshot == nil {
 		return nil, errors.New("skill source snapshot is required")
 	}
-	provider := &ArtifactProvider{resources: make(map[string][]byte)}
+	provider := &ArtifactProvider{scope: scope, resources: make(map[string][]byte)}
 	for _, candidate := range snapshot.Effective {
 		if candidate.Compilation == nil || candidate.Compilation.Definition == nil {
 			return nil, fmt.Errorf("effective skill %q has no compiled artifact", candidate.Name)
@@ -69,12 +73,15 @@ func NewArtifactProvider(snapshot *Snapshot) (*ArtifactProvider, error) {
 	return provider, nil
 }
 
-func (p *ArtifactProvider) ReadResource(ctx context.Context, sourceDigest, resourcePath string) ([]byte, error) {
+func (p *ArtifactProvider) ReadResource(ctx context.Context, scope kernelskill.ScopeReference, sourceDigest, resourcePath string) ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("skill source artifact provider is not configured")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if scope != p.scope {
+		return nil, errors.New("skill source artifact is not available in this scope")
 	}
 	resourcePath = path.Clean(strings.ReplaceAll(strings.TrimSpace(resourcePath), "\\", "/"))
 	if resourcePath == "." || path.IsAbs(resourcePath) || resourcePath == ".." || strings.HasPrefix(resourcePath, "../") {
