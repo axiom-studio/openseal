@@ -46,6 +46,18 @@ type HostedSkillSelection struct {
 	Summary     string                 `json:"summary"`
 }
 
+// HostedRunBudget is the non-secret, provider-neutral capacity visible to one
+// hosted Turn. Policy distinguishes an unbounded zero from an exhausted zero;
+// Remaining has already accounted for committed usage, live reservations, and
+// durable child allocations so a model can propose valid bounded child work.
+type HostedRunBudget struct {
+	Policy         BudgetPolicy `json:"policy"`
+	CommittedUsage BudgetUsage  `json:"committedUsage,omitempty"`
+	EffectiveUsage BudgetUsage  `json:"effectiveUsage,omitempty"`
+	Allocated      BudgetPolicy `json:"allocated,omitempty"`
+	Remaining      BudgetPolicy `json:"remaining"`
+}
+
 // HostedTurnRequest is the portable execution envelope sent to an Agent host.
 // OpenSeal remains authoritative for leases, Turns, actions and state changes;
 // the host performs one bounded proposal-only model invocation.
@@ -63,6 +75,7 @@ type HostedTurnRequest struct {
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
+	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
 	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
 	ModelProvider          string                   `json:"modelProvider,omitempty"`
@@ -124,6 +137,10 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if r == nil || r.host == nil || input.Run == nil || input.Turn == nil {
 		return nil, errors.New("hosted turn requires a durable Run and Turn")
 	}
+	budget, err := projectHostedRunBudget(input.Run)
+	if err != nil {
+		return nil, err
+	}
 	request := HostedTurnRequest{
 		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
 		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
@@ -131,6 +148,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		Goal: input.Run.Goal, InputContext: cloneMap(input.Run.Context), SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
+		Budget:                 budget,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
@@ -237,6 +255,43 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 	}, nil
+}
+
+func projectHostedRunBudget(run *AgentRun) (*HostedRunBudget, error) {
+	if run == nil || run.Budget == nil {
+		return nil, nil
+	}
+	effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+	if err != nil {
+		return nil, fmt.Errorf("project hosted Run budget: %w", err)
+	}
+	policy := *cloneBudgetPolicy(run.Budget)
+	allocated := sumBudgetPolicies(run.BudgetAllocations)
+	remaining := BudgetPolicy{
+		MaxAttempts:     remainingBudgetDimension(policy.MaxAttempts, effective.Attempts, allocated.MaxAttempts),
+		MaxTurns:        remainingBudgetDimension(policy.MaxTurns, effective.Turns, allocated.MaxTurns),
+		MaxInputTokens:  remainingBudgetDimension(policy.MaxInputTokens, effective.InputTokens, allocated.MaxInputTokens),
+		MaxOutputTokens: remainingBudgetDimension(policy.MaxOutputTokens, effective.OutputTokens, allocated.MaxOutputTokens),
+		MaxTotalTokens:  remainingBudgetDimension(policy.MaxTotalTokens, effective.InputTokens+effective.OutputTokens, allocated.MaxTotalTokens),
+		MaxCostMicros:   remainingBudgetDimension(policy.MaxCostMicros, effective.CostMicros, allocated.MaxCostMicros),
+		MaxDurationMS:   remainingBudgetDimension(policy.MaxDurationMS, effective.DurationMS, allocated.MaxDurationMS),
+		MaxActions:      remainingBudgetDimension(policy.MaxActions, effective.Actions, allocated.MaxActions),
+	}
+	return &HostedRunBudget{
+		Policy: policy, CommittedUsage: run.BudgetUsage, EffectiveUsage: effective,
+		Allocated: allocated, Remaining: remaining,
+	}, nil
+}
+
+func remainingBudgetDimension(limit, used, allocated int64) int64 {
+	if limit == 0 {
+		return 0
+	}
+	remaining := limit - used - allocated
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func cloneHostedModelActions(values []capability.ModelAction) []capability.ModelAction {
