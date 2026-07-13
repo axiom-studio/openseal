@@ -347,7 +347,9 @@ func TestTurnCoordinatorCancelsAtDurableDurationCeiling(t *testing.T) {
 		Scope: scope, RunID: run.ID, WorkerID: "worker", LeaseDuration: time.Second,
 	}, TurnRunnerFunc(func(ctx context.Context, _ TurnExecutionContext) (*TurnOutcome, error) {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		// Enterprise transports commonly normalize a canceled request into
+		// host-unavailable. The kernel-owned deadline must take precedence.
+		return nil, ErrTurnHostUnavailable
 	}))
 	if !errors.Is(err, ErrBudgetExhausted) || time.Since(started) > time.Second {
 		t.Fatalf("duration enforcement err=%v elapsed=%s", err, time.Since(started))
