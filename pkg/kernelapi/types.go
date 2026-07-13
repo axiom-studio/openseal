@@ -112,6 +112,13 @@ type TeamDefinitionCapabilityFeatures struct {
 	Amendments bool
 }
 
+// WorkforceAuthoringCapabilityFeatures describes host-wide authoring services.
+// Resource-specific lifecycle authority is composed into a contextual
+// capability response and must never be inferred from these feature flags.
+type WorkforceAuthoringCapabilityFeatures struct {
+	ChangeSets bool
+}
+
 // CapabilityContext is server-authored authorization state for one explicitly
 // requested resource. It is never durable policy input and clients must not
 // infer authority from the underlying resource itself.
@@ -302,16 +309,13 @@ func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Capabi
 	return capability
 }
 
-func WorkforceAuthoringCapability(changeSets ...bool) Capability {
+func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures) Capability {
 	capability := Capability{
 		ID: WorkforceAuthoringCapabilityID, Version: WorkforceAuthoringCapabilityVersion, Available: true,
 		Operations: []string{OperationCompile},
 	}
-	if len(changeSets) > 0 && changeSets[0] {
+	if features.ChangeSets {
 		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
-	}
-	if len(changeSets) > 1 && changeSets[1] {
-		capability.Operations = append(capability.Operations, OperationApply)
 	}
 	return capability
 }

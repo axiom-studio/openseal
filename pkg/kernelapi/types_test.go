@@ -128,7 +128,7 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 }
 
 func TestWorkforceAuthoringAdvertisesCompilationWithoutActivation(t *testing.T) {
-	capability := WorkforceAuthoringCapability()
+	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{})
 	if !capability.Supports(OperationCompile) {
 		t.Fatalf("workforce authoring operations = %#v", capability.Operations)
 	}
@@ -138,7 +138,15 @@ func TestWorkforceAuthoringAdvertisesCompilationWithoutActivation(t *testing.T) 
 }
 
 func TestContextualApprovalEligibilityIsTypedAndNotAnOperationInference(t *testing.T) {
-	capability := WorkforceAuthoringCapability(true)
+	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	for _, operation := range []string{OperationCompile, OperationPropose, OperationGet} {
+		if !capability.Supports(operation) {
+			t.Fatalf("change set operation %q not advertised: %#v", operation, capability.Operations)
+		}
+	}
+	if capability.Supports(OperationApply) || capability.Supports(OperationEvaluate) || capability.Supports(OperationRetry) {
+		t.Fatalf("resource-authorized operation advertised globally: %#v", capability.Operations)
+	}
 	capability.Context = &CapabilityContext{ChangeSetID: "change-1", Revision: 4, EligibleApprovalRequirements: []ApprovalRequirementReference{{EvaluationID: "eval-1", PolicyID: "production", Role: "operator"}}}
 	if capability.Supports(OperationApprove) {
 		t.Fatal("eligibility context must not silently advertise an operation")
