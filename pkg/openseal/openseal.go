@@ -351,6 +351,7 @@ type (
 	HostedSkillDisposition             = runtime.HostedSkillDisposition
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
+	HostedRunBudget                    = runtime.HostedRunBudget
 	TurnHost                           = runtime.TurnHost
 	HostedTurnRunnerConfig             = runtime.HostedTurnRunnerConfig
 	HostedTurnRunner                   = runtime.HostedTurnRunner

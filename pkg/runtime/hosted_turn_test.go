@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -39,7 +40,10 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		t.Fatal(err)
 	}
 	outcome, err := runner.RunTurn(context.Background(), TurnExecutionContext{
-		Run:  &AgentRun{ID: "run-2", Scope: Scope{Kind: "tenant", ID: "1"}, AssignedAgentID: "agent-3", Goal: "Analyze launch feedback", Context: map[string]interface{}{"source": "https://example.test/evidence"}, Checkpoint: map[string]interface{}{"cursor": "next"}},
+		Run: &AgentRun{ID: "run-2", Scope: Scope{Kind: "tenant", ID: "1"}, AssignedAgentID: "agent-3", Goal: "Analyze launch feedback", Context: map[string]interface{}{"source": "https://example.test/evidence"}, Checkpoint: map[string]interface{}{"cursor": "next"},
+			Budget: &BudgetPolicy{MaxTurns: 10, MaxDurationMS: 120000, MaxActions: 4}, BudgetUsage: BudgetUsage{Turns: 2, DurationMS: 15000},
+			BudgetReservations: map[string]BudgetReservation{"pending": {ID: "pending", Usage: BudgetUsage{Turns: 1, DurationMS: 5000}, CreatedAt: time.Now()}},
+			BudgetAllocations:  map[string]BudgetPolicy{"child": {MaxTurns: 2, MaxDurationMS: 30000, MaxActions: 1}}},
 		Turn: &AgentTurn{ID: "turn-7"},
 	})
 	if err != nil {
@@ -50,6 +54,9 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	}
 	if host.request.InputContext["source"] != "https://example.test/evidence" {
 		t.Fatalf("input context = %#v", host.request.InputContext)
+	}
+	if host.request.Budget == nil || host.request.Budget.EffectiveUsage.Turns != 3 || host.request.Budget.Remaining.MaxTurns != 5 || host.request.Budget.Remaining.MaxDurationMS != 70000 || host.request.Budget.Remaining.MaxActions != 3 {
+		t.Fatalf("hosted budget = %#v", host.request.Budget)
 	}
 	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || host.request.SkillPrompts[0].Reference != "skill:summarize@1.0.0" || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" || outcome.ModelProvider != "openai-compatible" || outcome.Model != "deepseek-v4-flash" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
