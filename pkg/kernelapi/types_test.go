@@ -77,7 +77,7 @@ func TestChannelCapabilityAdvertisesOnlyConfiguredFeatures(t *testing.T) {
 }
 
 func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
-	capability := TeamDefinitionsCapability()
+	capability := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{})
 	for _, operation := range []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate} {
 		if !capability.Supports(operation) {
 			t.Fatalf("Team definition operation %q not advertised", operation)
@@ -85,6 +85,15 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	}
 	if capability.Supports("delete") {
 		t.Fatalf("unsupported Team definition operation advertised: %#v", capability.Operations)
+	}
+	if capability.Version != "2" || capability.Supports(OperationProposeAmendment) {
+		t.Fatalf("portable Team definition capability = %#v", capability)
+	}
+	amendments := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{Amendments: true})
+	for _, operation := range []string{OperationProposeAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment} {
+		if !amendments.Supports(operation) {
+			t.Fatalf("configured Team amendment operation %q not advertised: %#v", operation, amendments.Operations)
+		}
 	}
 }
 

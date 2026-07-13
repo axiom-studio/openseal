@@ -118,7 +118,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability())
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
-			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability())
+			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}))
 		}
 	}
 	if s.authoring != nil {
