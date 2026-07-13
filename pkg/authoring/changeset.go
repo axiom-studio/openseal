@@ -43,9 +43,10 @@ type ChangeSetPolicyFinding struct {
 }
 
 type ChangeSetApprovalRequirement struct {
-	PolicyID string `json:"policyId"`
-	Role     string `json:"role"`
-	Count    int    `json:"count"`
+	PolicyID        string `json:"policyId"`
+	Role            string `json:"role"`
+	Count           int    `json:"count"`
+	SeparationGroup string `json:"separationGroup,omitempty"`
 }
 
 // ChangeSetEvaluation is an immutable audit record submitted by a trusted
@@ -880,6 +881,7 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 	for i := range request.ApprovalRequirements {
 		request.ApprovalRequirements[i].PolicyID = strings.TrimSpace(request.ApprovalRequirements[i].PolicyID)
 		request.ApprovalRequirements[i].Role = strings.TrimSpace(request.ApprovalRequirements[i].Role)
+		request.ApprovalRequirements[i].SeparationGroup = strings.TrimSpace(request.ApprovalRequirements[i].SeparationGroup)
 		if request.ApprovalRequirements[i].PolicyID == "" || request.ApprovalRequirements[i].Role == "" || request.ApprovalRequirements[i].Count < 1 {
 			return nil, false, errors.New("approval requirements need a policy, role, and positive count")
 		}
@@ -993,6 +995,20 @@ func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveC
 		if decision.EvaluationID == request.EvaluationID && decision.PolicyID == request.PolicyID && decision.Role == request.Role &&
 			decision.Actor.Type == request.Actor.Type && decision.Actor.ID == request.Actor.ID {
 			return nil, false, fmt.Errorf("%w: principal already decided this requirement", ErrChangeSetTransition)
+		}
+	}
+	if request.Approved && requirement.SeparationGroup != "" {
+		for _, decision := range current.ApprovalDecisions {
+			if !decision.Approved || decision.EvaluationID != request.EvaluationID ||
+				decision.Actor.Type != request.Actor.Type || decision.Actor.ID != request.Actor.ID {
+				continue
+			}
+			for _, decidedRequirement := range evaluation.ApprovalRequirements {
+				if decidedRequirement.PolicyID == decision.PolicyID && decidedRequirement.Role == decision.Role &&
+					decidedRequirement.SeparationGroup == requirement.SeparationGroup {
+					return nil, false, fmt.Errorf("%w: principal already approved an incompatible requirement", ErrChangeSetTransition)
+				}
+			}
 		}
 	}
 	now := s.now().UTC()
