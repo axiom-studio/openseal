@@ -19,6 +19,24 @@ func TestResolveTurnActionInputUsesBoundedJSONPointer(t *testing.T) {
 	}
 }
 
+func TestResolveTurnActionInputAcceptsExplicitCheckpointRoot(t *testing.T) {
+	checkpoint := map[string]interface{}{"actionInputs": map[string]interface{}{
+		"sendEmail": map[string]interface{}{"subject": "Reviewed report"},
+	}}
+	for _, reference := range []string{
+		"/continuationCheckpoint/actionInputs/sendEmail",
+		"#/continuationCheckpoint/actionInputs/sendEmail",
+	} {
+		arguments, err := resolveTurnActionInput(checkpoint, reference)
+		if err != nil || arguments["subject"] != "Reviewed report" {
+			t.Fatalf("reference %q arguments=%#v err=%v", reference, arguments, err)
+		}
+	}
+	if _, err := resolveTurnActionInput(checkpoint, "/continuationCheckpoint"); err == nil {
+		t.Fatal("checkpoint root was accepted as action input")
+	}
+}
+
 func TestResolveTurnActionInputRejectsMissingAndScalarReferences(t *testing.T) {
 	checkpoint := map[string]interface{}{"inputs": map[string]interface{}{"value": "scalar"}}
 	for _, reference := range []string{"inputs/value", "/inputs/missing", "/inputs/value"} {
