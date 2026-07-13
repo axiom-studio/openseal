@@ -149,6 +149,41 @@ func TestConversationArbiterSuppressesRecentAndAcknowledgmentPileOn(t *testing.T
 	}
 }
 
+func TestConversationArbiterSuppressesSemanticClaimPileOn(t *testing.T) {
+	t.Parallel()
+	roundID := "round-semantic-duplicate"
+	channel := ConversationAudience{Kind: ConversationAudienceChannel}
+	proposals := []ParticipationProposal{
+		{
+			ID: "accountant", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "accountant"},
+			WantsToSpeak: true, Intent: MessageIntentProposal, Content: "I propose Agent 37 as rollout owner because they coordinate the whole team.", ContributionKey: "rollout-owner:agent-37", Audience: channel,
+			Signals: ParticipationSignals{HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true},
+		},
+		{
+			ID: "sales", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "sales"},
+			WantsToSpeak: true, Intent: MessageIntentProposal, Content: "The team leader should own release execution due to cross-functional visibility.", ContributionKey: "rollout-owner:agent-37", Audience: channel,
+			Signals: ParticipationSignals{HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true},
+		},
+		{
+			ID: "support", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "support"},
+			WantsToSpeak: true, Intent: MessageIntentProposal, Content: "Customer support should own the rollout so incidents have one accountable responder.", ContributionKey: "rollout-owner:support", Audience: channel,
+			Signals: ParticipationSignals{HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true},
+		},
+	}
+	result, err := ArbitrateParticipation(roundID, proposals, nil, DefaultConversationArbitrationPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Speakers, []string{"accountant", "support"}) {
+		t.Fatalf("speakers = %#v", result.Speakers)
+	}
+	decisions := decisionsByProposal(result.Decisions)
+	if decisions["sales"].Disposition != ParticipationSilent || decisions["sales"].DuplicateOfID != "accountant" ||
+		!containsParticipationReason(decisions["sales"].Reasons, ParticipationReasonDuplicate) {
+		t.Fatalf("decisions = %#v", decisions)
+	}
+}
+
 func TestConversationArbitrationIsInputOrderIndependent(t *testing.T) {
 	t.Parallel()
 	roundID := "round-deterministic"
