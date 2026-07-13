@@ -48,6 +48,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		return nil, errors.New("generated workforce candidate must be between 1 byte and 1 MiB")
 	}
 	generated, decodeErr := decodeGenerationResponse(payload)
+	repairUsed := false
 	if decodeErr != nil {
 		repairer, ok := c.generator.(RepairGenerator)
 		if !ok {
@@ -64,6 +65,19 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		if decodeErr != nil {
 			return nil, fmt.Errorf("decode repaired workforce candidate: %w", decodeErr)
 		}
+		repairUsed = true
+	}
+	validation := validateCandidate(&generated.Candidate, request.Existing)
+	missing := missingRequirements(&generated.Candidate, request.Catalog)
+	if !repairUsed && (len(validation) > 0 || len(missing) > 0) {
+		if repairer, ok := c.generator.(RepairGenerator); ok {
+			repairReason := deterministicContractError(validation, missing)
+			if repaired, repairErr := repairer.Repair(ctx, request, payload, repairReason); repairErr == nil && len(repaired) > 0 && len(repaired) <= maximumGenerationBytes {
+				if candidate, candidateErr := decodeGenerationResponse(repaired); candidateErr == nil {
+					generated = candidate
+				}
+			}
+		}
 	}
 	result := &CompileResult{
 		Candidate: generated.Candidate, Assumptions: normalized(generated.Assumptions), Questions: normalized(generated.Questions),
@@ -74,6 +88,14 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
 	return result, nil
+}
+
+func deterministicContractError(validation []ValidationIssue, missing []MissingRequirement) error {
+	payload, _ := json.Marshal(struct {
+		Validation          []ValidationIssue    `json:"validation,omitempty"`
+		MissingRequirements []MissingRequirement `json:"missingRequirements,omitempty"`
+	}{Validation: validation, MissingRequirements: missing})
+	return fmt.Errorf("candidate violates the deterministic authoring contract: %s", payload)
 }
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {

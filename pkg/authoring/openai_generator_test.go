@@ -63,6 +63,10 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"Every source monitor Objective must be owned by the Initiative owner",
 		"Never invent source allowlists, public identities, outbound destinations, credentials, or approval authority",
 		"sourcePolicyRef must name an exact supplied catalog.sourcePolicies key",
+		"A cadence containing only an interval is invalid",
+		"When a Team owns the Initiative, put the monitor Objective template on the Team",
+		"Questions are blocking requests for information, not suggestions or confirmations",
+		"Put non-blocking choices and safe defaults in assumptions, never questions",
 	} {
 		if !strings.Contains(authoringSystemPrompt, expected) {
 			t.Fatalf("authoring schema missing %q", expected)
