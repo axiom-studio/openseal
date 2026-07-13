@@ -98,12 +98,10 @@ func (s *PostgresStore) ImportSourceArtifact(ctx context.Context, artifact *sour
 			if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("skill_source_artifact_references")+` SET digest=$1,kind=$2,created_at=$3,expires_at=$4,payload=$5::jsonb WHERE scope_kind=$6 AND scope_id=$7 AND id=$8`, reference.Digest, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
 				return false, err
 			}
-		} else if existing.Origin.IsZero() && !reference.Origin.IsZero() {
+		} else if !sourceartifact.EquivalentReferences(&existing, reference) {
 			if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("skill_source_artifact_references")+` SET kind=$1,created_at=$2,expires_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7`, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
 				return false, err
 			}
-		} else if !sourceartifact.EquivalentReferences(&existing, reference) {
-			return false, sourceartifact.ErrReferenceConflict
 		}
 	}
 	if err := tx.Commit(); err != nil {
