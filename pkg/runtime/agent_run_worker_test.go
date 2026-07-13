@@ -376,11 +376,15 @@ func TestAgentRunWorkersExecuteJoinAllAndJoinAnyConcurrently(t *testing.T) {
 				t.Fatalf("children=%#v error=%v", children, err)
 			}
 			if mode == runbook.JoinAny {
-				canceled := 0
-				for _, child := range children {
-					if child.Status == AgentRunStatusCanceled {
-						canceled++
+				cancellationDeadline := time.Now().Add(2 * time.Second)
+				canceled := countAgentRunsWithStatus(children, AgentRunStatusCanceled)
+				for canceled != 1 && time.Now().Before(cancellationDeadline) {
+					time.Sleep(5 * time.Millisecond)
+					children, err = store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 10})
+					if err != nil || len(children) != 2 {
+						t.Fatalf("join_any children=%#v error=%v", children, err)
 					}
+					canceled = countAgentRunsWithStatus(children, AgentRunStatusCanceled)
 				}
 				if canceled != 1 {
 					t.Fatalf("join_any children=%#v", children)
@@ -388,6 +392,16 @@ func TestAgentRunWorkersExecuteJoinAllAndJoinAnyConcurrently(t *testing.T) {
 			}
 		})
 	}
+}
+
+func countAgentRunsWithStatus(runs []*AgentRun, status AgentRunStatus) int {
+	count := 0
+	for _, run := range runs {
+		if run.Status == status {
+			count++
+		}
+	}
+	return count
 }
 
 func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
