@@ -623,7 +623,7 @@ func SourceMonitorsCapability() KernelCapability {
 	return kernelapi.SourceMonitorsCapability()
 }
 
-func OutreachCapabilityDocument() KernelCapability {
+func OutreachLifecycleCapability() KernelCapability {
 	return kernelapi.OutreachCapability()
 }
 
