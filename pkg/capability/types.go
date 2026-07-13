@@ -88,11 +88,12 @@ type TransportArgument struct {
 }
 
 type PromptModule struct {
-	Instructions           string   `json:"instructions"`
-	AlwaysActive           bool     `json:"alwaysActive,omitempty"`
-	UserInvocable          bool     `json:"userInvocable"`
-	DisableModelInvocation bool     `json:"disableModelInvocation,omitempty"`
-	AllowedTools           []string `json:"allowedTools,omitempty"`
+	Instructions           string                  `json:"instructions"`
+	AlwaysActive           bool                    `json:"alwaysActive,omitempty"`
+	UserInvocable          bool                    `json:"userInvocable"`
+	DisableModelInvocation bool                    `json:"disableModelInvocation,omitempty"`
+	AllowedTools           []string                `json:"allowedTools,omitempty"`
+	Credentials            []CredentialRequirement `json:"credentials,omitempty"`
 }
 
 type Requirements struct {

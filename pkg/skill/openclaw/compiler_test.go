@@ -3,6 +3,8 @@ package openclaw
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -124,5 +126,71 @@ func TestCompilePromptOnlySkillAndRejectsSemanticLoss(t *testing.T) {
 	aliased, err := Compile(Bundle{SkillMD: []byte("---\nname: actual\ndescription: registry alias\n---\nbody"), Source: Source{Reference: "owner/globally-unique-registry-slug"}})
 	if err != nil || aliased.Definition.Source.Reference != "owner/globally-unique-registry-slug" {
 		t.Fatalf("registry reference alias should remain provenance, got %#v, %v", aliased, err)
+	}
+}
+
+func TestCompilePromptOnlyPrimaryEnvAsOpaqueCredential(t *testing.T) {
+	compilation, err := Compile(Bundle{SkillMD: []byte(`---
+name: prompt-publisher
+description: Draft authenticated publishing guidance.
+metadata:
+  openclaw:
+    primaryEnv: PUBLISH_TOKEN
+---
+Prepare publishing guidance using the authenticated account policy.
+`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := compilation.Definition
+	if definition.Prompt == nil || len(definition.Actions) != 0 || len(definition.Prompt.Credentials) != 1 ||
+		definition.Prompt.Credentials[0] != (skill.CredentialRequirement{Name: "PUBLISH_TOKEN", Kind: "environment-secret"}) ||
+		len(definition.Requirements.Environment) != 0 {
+		t.Fatalf("prompt credential compilation = %#v", definition)
+	}
+
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	bind := func(deployment string, credentials map[string]skill.CredentialReference) {
+		t.Helper()
+		if err := catalog.Bind(context.Background(), &skill.Binding{
+			ID: "publisher", Scope: scope, DeploymentID: deployment, SkillID: definition.ID, SkillVersion: definition.Version,
+			EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Credentials: credentials, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bind("missing", nil)
+	if prompts, err := catalog.ListModelPrompts(context.Background(), scope, "missing"); err != nil || len(prompts) != 0 {
+		t.Fatalf("unbound prompt entered model catalog: %#v, %v", prompts, err)
+	}
+	if _, err := catalog.ResolvePrompt(context.Background(), scope, "missing", definition.ID, definition.Version); err == nil {
+		t.Fatal("unbound prompt resolved into model instructions")
+	}
+	unavailable, err := catalog.Activate(context.Background(), scope, "missing", skill.HostCapabilityState{})
+	if err != nil || len(unavailable.Skills) != 0 || len(unavailable.Unavailable) != 1 ||
+		len(unavailable.Unavailable[0].Reasons) != 1 || unavailable.Unavailable[0].Reasons[0].Code != "credential_missing" {
+		t.Fatalf("missing prompt credential activation = %#v, %v", unavailable, err)
+	}
+
+	bind("publisher-a", map[string]skill.CredentialReference{"PUBLISH_TOKEN": {Kind: "environment-secret", ID: "opaque-a"}})
+	bind("publisher-b", map[string]skill.CredentialReference{"PUBLISH_TOKEN": {Kind: "environment-secret", ID: "opaque-b"}})
+	for _, deployment := range []string{"publisher-a", "publisher-b"} {
+		snapshot, err := catalog.Activate(context.Background(), scope, deployment, skill.HostCapabilityState{})
+		if err != nil || len(snapshot.Skills) != 1 || len(snapshot.Unavailable) != 0 || snapshot.Skills[0].Prompt == nil {
+			t.Fatalf("bound prompt activation for %s = %#v, %v", deployment, snapshot, err)
+		}
+		encoded, err := json.Marshal(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"opaque-a", "opaque-b", "PUBLISH_TOKEN"} {
+			if strings.Contains(string(encoded), forbidden) {
+				t.Fatalf("activation exposed credential metadata %q: %s", forbidden, encoded)
+			}
+		}
 	}
 }

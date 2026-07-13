@@ -73,7 +73,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		Prompt: &capability.PromptModule{
 			Instructions: parsed.Body, AlwaysActive: parsed.Metadata.Always,
 			UserInvocable: parsed.Invocation.UserInvocable, DisableModelInvocation: parsed.Invocation.DisableModelInvocation,
-			AllowedTools: append([]string(nil), parsed.AllowedTools...),
+			AllowedTools: append([]string(nil), parsed.AllowedTools...), Credentials: compilePromptCredentials(parsed.Metadata.PrimaryEnv),
 		},
 		Requirements: capability.Requirements{
 			OperatingSystems: append([]string(nil), parsed.Metadata.OS...), Executables: append([]string(nil), parsed.Metadata.RequiresBins...),
@@ -124,6 +124,14 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "resources.indexed", Message: fmt.Sprintf("indexed %d supporting resources for progressive disclosure", len(bundle.Files))})
 	}
 	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest, Artifact: cloneBundle(bundle)}, nil
+}
+
+func compilePromptCredentials(primaryEnv string) []capability.CredentialRequirement {
+	primaryEnv = strings.TrimSpace(primaryEnv)
+	if primaryEnv == "" {
+		return nil
+	}
+	return []capability.CredentialRequirement{{Name: primaryEnv, Kind: "environment-secret"}}
 }
 
 // ExportBundle returns the exact source artifact retained by the compiler.
