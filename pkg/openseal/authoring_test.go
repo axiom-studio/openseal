@@ -51,6 +51,17 @@ func TestPublicWorkforceInitiativeAuthoringContract(t *testing.T) {
 	}
 }
 
+func TestPublicInitiativeLifecycleConstants(t *testing.T) {
+	initiative := Initiative{Status: InitiativeStatusActive}
+	milestone := InitiativeMilestone{Status: InitiativeMilestonePending}
+	hypothesis := InitiativeHypothesis{Status: InitiativeHypothesisOpen}
+	deliverable := InitiativeDeliverable{Status: InitiativeDeliverablePlanned}
+	monitor := InitiativeSourceMonitorReference{Deduplication: InitiativeSourceDeduplicateStableSourceAndContent}
+	if initiative.Status != "active" || milestone.Status != "pending" || hypothesis.Status != "open" || deliverable.Status != "planned" || monitor.Deduplication != "stable_source_and_content" {
+		t.Fatalf("public Initiative lifecycle constants drifted")
+	}
+}
+
 func TestEngineExposesDurableWorkforceChangeSetsOnlyWithPersistentSupport(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
