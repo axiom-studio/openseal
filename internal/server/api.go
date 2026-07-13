@@ -113,7 +113,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
 	}
 	if _, ok := s.store.(runtime.ConversationStore); ok {
-		capabilities = append(capabilities, kernelapi.ChannelsCapability())
+		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability())

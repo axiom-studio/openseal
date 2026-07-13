@@ -1064,7 +1064,7 @@ func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 }
 
 func TestTeamChannelsRequireAdvertisedCapabilityAndConcreteClient(t *testing.T) {
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability())}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	if model.ready || strings.Contains(model.View(), "c Channels") {
@@ -1095,7 +1095,7 @@ func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testin
 		},
 	}}
 	fake := &fakeChannelKernelClient{
-		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability())},
+		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))},
 		conversations:    []*runtime.Conversation{conversation}, messages: []*runtime.ChannelMessage{answer, question},
 		rounds: []*runtime.ParticipationRoundResult{round},
 		presence: []*runtime.ConversationPresence{{
@@ -1127,7 +1127,7 @@ func TestBackgroundChannelRefreshDoesNotInventReadReceipt(t *testing.T) {
 	conversation := testConversation("release", "release-coordination", 1, 2)
 	fake := &fakeChannelKernelClient{
 		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
-			kernelapi.AgentRunsCapability(), kernelapi.ChannelsCapability(),
+			kernelapi.AgentRunsCapability(), kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}),
 		)},
 		conversations: []*runtime.Conversation{conversation},
 		messages: []*runtime.ChannelMessage{{
@@ -1152,7 +1152,7 @@ func TestBackgroundChannelRefreshDoesNotInventReadReceipt(t *testing.T) {
 func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 	conversation := testConversation("research", "market-research", 0, 4)
 	fake := &fakeChannelKernelClient{
-		fakeKernelClient:         &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability())},
+		fakeKernelClient:         &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))},
 		conversations:            []*runtime.Conversation{conversation},
 		createConversationErrors: []error{errors.New("temporary disconnect"), nil},
 		postErrors:               []error{errors.New("revision conflict"), nil},
