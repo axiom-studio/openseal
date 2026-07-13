@@ -554,6 +554,19 @@ func (m *Model) renderInitiativesContent(width int) string {
 				if monitor.SourcePolicyRef != "" {
 					lines = append(lines, mutedStyle.Render(compact("Policy · "+monitor.SourcePolicyRef, max(width-6, 24))))
 				}
+				if objective := m.objectiveRecord(monitor.ObjectiveID); objective != nil {
+					if objective.NextEvaluationAt != nil {
+						lines = append(lines, mutedStyle.Render(compact("Next evaluation "+relativeTime(*objective.NextEvaluationAt), max(width-6, 24))))
+					}
+					if condition := objective.ScheduleCondition; condition != nil {
+						conditionLine := compact(fmt.Sprintf("Schedule %s · %s", strings.ReplaceAll(string(condition.State), "_", " "), condition.Reason), max(width-6, 24))
+						style := mutedStyle
+						if condition.State == runtime.ObjectiveScheduleBudgetExhausted {
+							style = lipgloss.NewStyle().Foreground(danger)
+						}
+						lines = append(lines, style.Render(conditionLine))
+					}
+				}
 				if status, ok := m.sourceMonitorStatuses[sourceMonitorStatusKey(initiative.ID, monitor.ID)]; ok {
 					if status.err != nil {
 						lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("Status unavailable · "+status.err.Error(), max(width-6, 24))))
@@ -572,6 +585,9 @@ func (m *Model) renderInitiativesContent(width int) string {
 						}
 						for _, observation := range status.observations[:min(3, len(status.observations))] {
 							lines = append(lines, mutedStyle.Render(compact("  • "+observation.Summary+" · "+observation.SourceURI, max(width-6, 24))))
+							if observation.ArtifactRef != nil {
+								lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("    Artifact %s · revision %d", observation.ArtifactRef.ID, observation.ArtifactRef.Revision), max(width-8, 24))))
+							}
 						}
 					}
 				} else if m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) {

@@ -92,6 +92,29 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 	if err != nil || blocked.Backpressured != 1 || len(runs) != 1 {
 		t.Fatalf("blocked = %#v, err = %v", blocked, err)
 	}
+	backpressured, err := store.GetObjective(ctx, objective.Scope, objective.ID)
+	if err != nil || backpressured.ScheduleCondition == nil || backpressured.ScheduleCondition.State != ObjectiveScheduleBackpressured ||
+		backpressured.NextEvaluationAt == nil || !backpressured.NextEvaluationAt.Equal(scheduler.now().Add(5*time.Minute)) {
+		t.Fatalf("backpressured objective = %#v, err = %v", backpressured, err)
+	}
+	running := AgentRunStatusRunning
+	activeRun, _, err := NewRunActivityService(store, store).TransitionRun(ctx, objective.Scope, runs[0].ID, RunTransitionRequest{ExpectedRevision: runs[0].Revision, Status: running})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := AgentRunStatusCompleted
+	if _, _, err = NewRunActivityService(store, store).TransitionRun(ctx, objective.Scope, activeRun.ID, RunTransitionRequest{ExpectedRevision: activeRun.Revision, Status: completed}); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.now = func() time.Time { return backpressured.NextEvaluationAt.Add(time.Second) }
+	resumed, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
+	if err != nil || resumed.Scheduled != 1 {
+		t.Fatalf("resumed reconciliation = %#v, err = %v", resumed, err)
+	}
+	cleared, err := store.GetObjective(ctx, objective.Scope, objective.ID)
+	if err != nil || cleared.ScheduleCondition != nil {
+		t.Fatalf("cleared schedule condition = %#v, err = %v", cleared, err)
+	}
 }
 
 func TestObjectiveSchedulerDefersPausedInitiativeMonitor(t *testing.T) {
@@ -129,6 +152,61 @@ func TestObjectiveSchedulerDefersPausedInitiativeMonitor(t *testing.T) {
 	loaded, err := store.GetObjective(ctx, objective.Scope, objective.ID)
 	if err != nil || loaded.NextEvaluationAt == nil || !loaded.NextEvaluationAt.Equal(now.Add(5*time.Minute)) {
 		t.Fatalf("deferred objective = %#v, err = %v", loaded, err)
+	}
+	if loaded.ScheduleCondition == nil || loaded.ScheduleCondition.State != ObjectiveScheduleSuspended {
+		t.Fatalf("suspended schedule condition = %#v", loaded.ScheduleCondition)
+	}
+}
+
+func TestObjectiveSchedulerPersistsBudgetExhaustionWithoutFailingScope(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(20)
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	due := now.Add(-time.Minute)
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: Scope{Kind: "tenant", ID: "budgeted-monitor"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"},
+		Title: "Bounded research", Goal: "Collect permitted evidence", Status: ObjectiveStatusActive,
+		Budget: &BudgetPolicy{MaxTurns: 1}, NextEvaluationAt: &due,
+		Cadence: &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, AssignedAgentID: "analyst", RunBudget: &BudgetPolicy{MaxTurns: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewObjectiveScheduler(store)
+	scheduler.now = func() time.Time { return now }
+	first, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
+	if err != nil || first.Scheduled != 1 {
+		t.Fatalf("first reconciliation = %#v, %v", first, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs = %#v, %v", runs, err)
+	}
+	running := AgentRunStatusRunning
+	active, _, err := NewRunActivityService(store, store).TransitionRun(ctx, objective.Scope, runs[0].ID, RunTransitionRequest{ExpectedRevision: runs[0].Revision, Status: running})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := AgentRunStatusCompleted
+	if _, _, err = NewRunActivityService(store, store).TransitionRun(ctx, objective.Scope, runs[0].ID, RunTransitionRequest{ExpectedRevision: active.Revision, Status: completed}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.GetObjective(ctx, objective.Scope, objective.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler.now = func() time.Time { return current.NextEvaluationAt.Add(time.Second) }
+	second, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
+	if err != nil || second.BudgetExhausted != 1 || second.Scheduled != 0 {
+		t.Fatalf("budget reconciliation = %#v, %v", second, err)
+	}
+	exhausted, err := store.GetObjective(ctx, objective.Scope, objective.ID)
+	if err != nil || exhausted.ScheduleCondition == nil || exhausted.ScheduleCondition.State != ObjectiveScheduleBudgetExhausted || exhausted.Status != ObjectiveStatusActive {
+		t.Fatalf("exhausted objective = %#v, %v", exhausted, err)
+	}
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: objective.Scope, ObjectiveID: objective.ID, Descending: true, Limit: 20})
+	if err != nil || len(events) == 0 || events[0].TeamID != "research" || events[0].Visibility != ActivityVisibilityTeam {
+		t.Fatalf("budget activity = %#v, %v", events, err)
 	}
 }
 

@@ -1179,9 +1179,16 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 			SourcePolicyRef: "public-reddit-research@2026-07-13", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
 		}},
 	}
+	nextEvaluation := time.Now().Add(5 * time.Minute)
+	objective := &runtime.Objective{
+		ID: "objective-research", Scope: scope, Owner: initiative.Owner, Title: "Monitor sources", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive,
+		NextEvaluationAt: &nextEvaluation, ScheduleCondition: &runtime.ObjectiveScheduleCondition{
+			State: runtime.ObjectiveScheduleBackpressured, Reason: "Maximum concurrent Runs are already active", Since: time.Now().Add(-time.Minute), UpdatedAt: time.Now(),
+		},
+	}
 	key := sourceMonitorStatusKey(initiative.ID, "reddit-kubernetes")
 	fake := &fakeKernelClient{
-		document: kernelapi.Capabilities(), initiatives: []*runtime.Initiative{initiative},
+		document: kernelapi.Capabilities(), initiatives: []*runtime.Initiative{initiative}, objectives: []*runtime.Objective{objective},
 		monitorCheckpoints: map[string]*runtime.SourceMonitorCheckpoint{key: {
 			Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes", LastRunID: "run-live-123",
 			ObservationCount: 5, LastSuccessAt: time.Now().Add(-time.Minute), Revision: 2,
@@ -1189,6 +1196,7 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 		monitorObservations: map[string][]*runtime.SourceObservation{key: {{
 			ID: "observation-1", Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes",
 			Summary: "Operators want simpler upgrades", SourceURI: "https://www.reddit.com/r/kubernetes/comments/example",
+			ArtifactRef: &runtime.ResourceReference{Kind: runtime.ResourceKindArtifact, ID: "captured-thread", Revision: 2},
 		}}},
 		activityPages: map[string]*runtime.ActivityFeedPage{"run-live-123": {Items: []runtime.ActivityProjection{{
 			ID: "source-policy-call-1", EventType: "source_policy.authorized", InitiativeID: initiative.ID, RunID: "run-live-123", CreatedAt: time.Now().Add(-2 * time.Minute),
@@ -1199,7 +1207,7 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 	applyCommand(t, model, model.loadCapabilities())
 	model.section = sectionInitiatives
 	view := model.View()
-	for _, expected := range []string{"reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades"} {
+	for _, expected := range []string{"reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "Next evaluation", "Schedule backpressured", "Maximum concurrent Runs are", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
 		}

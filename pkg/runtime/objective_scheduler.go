@@ -9,13 +9,14 @@ import (
 )
 
 type ObjectiveScheduleResult struct {
-	Scopes        int `json:"scopes"`
-	Examined      int `json:"examined"`
-	Scheduled     int `json:"scheduled"`
-	Replayed      int `json:"replayed"`
-	Backpressured int `json:"backpressured"`
-	Suspended     int `json:"suspended"`
-	Initialized   int `json:"initialized"`
+	Scopes          int `json:"scopes"`
+	Examined        int `json:"examined"`
+	Scheduled       int `json:"scheduled"`
+	Replayed        int `json:"replayed"`
+	Backpressured   int `json:"backpressured"`
+	Suspended       int `json:"suspended"`
+	BudgetExhausted int `json:"budgetExhausted"`
+	Initialized     int `json:"initialized"`
 }
 
 // ObjectiveScheduler projects due recurring Objectives into the same durable
@@ -56,6 +57,7 @@ func (s *ObjectiveScheduler) ReconcileAll(ctx context.Context, limitPerScope int
 		total.Replayed += result.Replayed
 		total.Backpressured += result.Backpressured
 		total.Suspended += result.Suspended
+		total.BudgetExhausted += result.BudgetExhausted
 		total.Initialized += result.Initialized
 	}
 	return total, nil
@@ -106,7 +108,7 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			return result, monitorErr
 		}
 		if !active {
-			if deferErr := s.deferObjective(ctx, objective, now); deferErr != nil && !errors.Is(deferErr, ErrRevisionConflict) {
+			if deferErr := s.deferObjective(ctx, objective, now, ObjectiveScheduleSuspended, "Initiative is not active"); deferErr != nil && !errors.Is(deferErr, ErrRevisionConflict) {
 				return result, deferErr
 			}
 			result.Suspended++
@@ -117,7 +119,20 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			return result, pressureErr
 		}
 		if backpressured {
+			if deferErr := s.deferObjective(ctx, objective, now, ObjectiveScheduleBackpressured, "Maximum concurrent Runs are already active"); deferErr != nil && !errors.Is(deferErr, ErrRevisionConflict) {
+				return result, deferErr
+			}
 			result.Backpressured++
+			continue
+		}
+		if budgetErr := validateObjectiveRunBudget(objective, objective.Cadence.RunBudget); budgetErr != nil {
+			if !errors.Is(budgetErr, ErrBudgetExhausted) {
+				return result, budgetErr
+			}
+			if conditionErr := s.conditionObjective(ctx, objective, now, ObjectiveScheduleBudgetExhausted, "Objective budget cannot allocate another Run"); conditionErr != nil && !errors.Is(conditionErr, ErrRevisionConflict) {
+				return result, conditionErr
+			}
+			result.BudgetExhausted++
 			continue
 		}
 		scheduledFor := objective.NextEvaluationAt.UTC()
@@ -144,9 +159,16 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			Context: contextValues, Policy: policy,
 			Budget:         objective.Cadence.RunBudget,
 			IdempotencyKey: fmt.Sprintf("objective-schedule:%s:%s", objective.ID, scheduledFor.Format(time.RFC3339Nano)),
-			Actor:          ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: ActivityVisibilityScope,
+			Actor:          ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(objective),
 		})
 		if createErr != nil {
+			if errors.Is(createErr, ErrBudgetExhausted) {
+				if conditionErr := s.conditionObjective(ctx, objective, now, ObjectiveScheduleBudgetExhausted, "Objective budget cannot allocate another Run"); conditionErr != nil && !errors.Is(conditionErr, ErrRevisionConflict) {
+					return result, conditionErr
+				}
+				result.BudgetExhausted++
+				continue
+			}
 			return result, fmt.Errorf("schedule objective %s: %w", objective.ID, createErr)
 		}
 		if created.Event == nil {
@@ -166,8 +188,8 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			return result, ErrObjectiveNotFound
 		}
 		if _, updateErr := NewPortfolioService(s.store).UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
-			ExpectedRevision: current.Revision, NextEvaluationAt: &next,
-			Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Summary: "Objective schedule advanced",
+			ExpectedRevision: current.Revision, NextEvaluationAt: &next, ClearScheduleCondition: true,
+			Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(current), Summary: "Objective schedule advanced",
 		}); updateErr != nil && !errors.Is(updateErr, ErrRevisionConflict) {
 			return result, updateErr
 		}
@@ -210,16 +232,42 @@ func (s *ObjectiveScheduler) monitorInitiativeActive(ctx context.Context, object
 	return initiative.Status == InitiativeStatusActive, nil
 }
 
-func (s *ObjectiveScheduler) deferObjective(ctx context.Context, objective *Objective, now time.Time) error {
+func (s *ObjectiveScheduler) deferObjective(ctx context.Context, objective *Objective, now time.Time, state ObjectiveScheduleState, reason string) error {
 	next, err := objective.Cadence.Next(now)
 	if err != nil {
 		return fmt.Errorf("objective %s cadence: %w", objective.ID, err)
 	}
 	_, err = NewPortfolioService(s.store).UpdateObjective(ctx, objective.Scope, objective.ID, UpdateObjectiveRequest{
-		ExpectedRevision: objective.Revision, NextEvaluationAt: &next,
-		Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Summary: "Source monitor schedule deferred while Initiative is not active",
+		ExpectedRevision: objective.Revision, NextEvaluationAt: &next, ScheduleCondition: scheduleCondition(objective.ScheduleCondition, state, reason, now),
+		Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(objective), Summary: "Objective schedule deferred: " + reason,
 	})
 	return err
+}
+
+func (s *ObjectiveScheduler) conditionObjective(ctx context.Context, objective *Objective, now time.Time, state ObjectiveScheduleState, reason string) error {
+	if objective.ScheduleCondition != nil && objective.ScheduleCondition.State == state && objective.ScheduleCondition.Reason == reason {
+		return nil
+	}
+	_, err := NewPortfolioService(s.store).UpdateObjective(ctx, objective.Scope, objective.ID, UpdateObjectiveRequest{
+		ExpectedRevision: objective.Revision, ScheduleCondition: scheduleCondition(objective.ScheduleCondition, state, reason, now),
+		Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(objective), Summary: "Objective schedule blocked: " + reason,
+	})
+	return err
+}
+
+func scheduleCondition(current *ObjectiveScheduleCondition, state ObjectiveScheduleState, reason string, now time.Time) *ObjectiveScheduleCondition {
+	since := now.UTC()
+	if current != nil && current.State == state && current.Reason == reason && !current.Since.IsZero() {
+		since = current.Since
+	}
+	return &ObjectiveScheduleCondition{State: state, Reason: reason, Since: since, UpdatedAt: now.UTC()}
+}
+
+func objectiveScheduleVisibility(objective *Objective) ActivityVisibility {
+	if objective != nil && objective.Owner.Type == OwnerTypeTeam {
+		return ActivityVisibilityTeam
+	}
+	return ActivityVisibilityScope
 }
 
 func (s *ObjectiveScheduler) backpressured(ctx context.Context, objective *Objective) (bool, error) {
