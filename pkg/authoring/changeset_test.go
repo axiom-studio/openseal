@@ -236,6 +236,36 @@ func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	}
 }
 
+func TestAtomicMemoryApplyReturnsPermanentResourceConflictWithoutRecursing(t *testing.T) {
+	store := NewMemoryChangeSetStore()
+	now := time.Now().UTC()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	candidate := marketingCandidate("2", capability.RiskLevelRead)
+	agentID := candidate.Agents[0].ID
+	value := &ChangeSet{
+		ID: "conflicting", Scope: scope, Mode: ModeCreate, Prompt: "create", PromptDigest: "prompt", CandidateDigest: "candidate",
+		Result:    CompileResult{Candidate: candidate, Valid: true},
+		Placement: ChangeSetPlacement{TeamDeploymentID: "team-live", AgentDeploymentIDs: map[string]string{agentID: "agent-live"}, Environment: "development"},
+		Status:    ChangeSetReady, Actor: ChangeSetActor{Type: "user", ID: "7"}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "create-conflict", "digest-conflict"); err != nil {
+		t.Fatal(err)
+	}
+	store.deployments[changeSetKey(scope, "agent-live")] = AppliedResourceReference{Kind: "agent_deployment", ID: "agent-live", Revision: 1}
+	service := &ChangeSetService{store: store, now: time.Now}
+	started := time.Now()
+	_, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{
+		Scope: scope, ChangeSetID: value.ID, ExpectedRevision: value.Revision, CandidateDigest: value.CandidateDigest,
+		Reason: "Activate", Actor: value.Actor, IdempotencyKey: "apply-conflict",
+	})
+	if !errors.Is(err, ErrChangeSetRevision) {
+		t.Fatalf("conflict=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("permanent conflict took %s", elapsed)
+	}
+}
+
 func TestAtomicMemoryApplyCreatesResourcesForRecoveredUnappliedAmendment(t *testing.T) {
 	candidate := GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)}
 	payload, _ := json.Marshal(candidate)

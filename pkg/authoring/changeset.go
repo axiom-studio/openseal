@@ -577,9 +577,6 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	next.ApplyReceipt = &ChangeSetApplyReceipt{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, CandidateDigest: current.CandidateDigest, Reason: request.Reason, Actor: request.Actor, AppliedAt: now}
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetApplied, Reason: request.Reason, Actor: request.Actor, At: now})
 	applied, err := store.ApplyChangeSet(ctx, next, current.Revision)
-	if errors.Is(err, ErrChangeSetRevision) {
-		return s.Apply(ctx, request)
-	}
 	return applied, false, err
 }
 
