@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -159,6 +160,8 @@ func EquivalentArtifacts(left, right *Artifact) bool {
 	}
 	leftCopy, rightCopy := CloneArtifact(left), CloneArtifact(right)
 	leftCopy.CreatedAt, rightCopy.CreatedAt = time.Time{}, time.Time{}
+	sort.Slice(leftCopy.Files, func(i, j int) bool { return leftCopy.Files[i].Path < leftCopy.Files[j].Path })
+	sort.Slice(rightCopy.Files, func(i, j int) bool { return rightCopy.Files[i].Path < rightCopy.Files[j].Path })
 	return reflect.DeepEqual(leftCopy, rightCopy)
 }
 
