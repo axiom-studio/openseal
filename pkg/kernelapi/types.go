@@ -193,7 +193,12 @@ type TeamDeploymentResult struct {
 }
 
 type TeamDeploymentList struct {
-	Deployments []*kernelteam.Deployment `json:"deployments"`
+	Items []TeamDeploymentCatalogEntry `json:"items"`
+}
+
+type TeamDeploymentCatalogEntry struct {
+	Deployment *kernelteam.Deployment `json:"deployment"`
+	Definition *kernelteam.Definition `json:"definition"`
 }
 
 func (d CapabilityDocument) Find(id, version string) (Capability, bool) {

@@ -68,8 +68,9 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 		t.Fatalf("deployment create = %d %s", created.Code, created.Body.String())
 	}
 	listed := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/team-deployments?scopeKind=workspace&scopeId=local", "", "")
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"deployments":[`) ||
-		!strings.Contains(listed.Body.String(), `"id":"research-team-one"`) {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"items":[`) ||
+		!strings.Contains(listed.Body.String(), `"deployment":{"id":"research-team-one"`) ||
+		!strings.Contains(listed.Body.String(), `"definition":{"id":"research-team"`) {
 		t.Fatalf("deployment list = %d %s", listed.Code, listed.Body.String())
 	}
 	foreignList := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/team-deployments?scopeKind=workspace&scopeId=other", "", "")
