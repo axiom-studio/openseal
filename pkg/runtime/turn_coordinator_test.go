@@ -301,6 +301,36 @@ func TestTurnCoordinatorPausesAndAccountsExhaustedBudget(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorAllowsTerminalOutcomeAtExactBudgetLimit(t *testing.T) {
+	store := NewMemoryStore(100)
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "terminal-budget"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "deliver once",
+		Budget: &BudgetPolicy{MaxTurns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", Model: "fake",
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Delivery accepted",
+			RunOutput: map[string]interface{}{"receiptId": "receipt-1"},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Run.Status != AgentRunStatusCompleted || result.Run.BudgetState != BudgetStateExhausted || result.Run.BudgetUsage.Turns != 1 || result.Run.Output["receiptId"] != "receipt-1" {
+		t.Fatalf("terminal budget result = %#v", result.Run)
+	}
+	if result.Turn.NextRunStatus != AgentRunStatusCompleted || result.Turn.OutputSummary != "Delivery accepted" {
+		t.Fatalf("terminal turn was overwritten = %#v", result.Turn)
+	}
+}
+
 func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
 	store := NewMemoryStore(100)
 	ctx := context.Background()
