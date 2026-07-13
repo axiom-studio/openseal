@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -25,6 +26,8 @@ func migrateAuthoringChangeSets(db *sql.DB) error {
 			ON workforce_change_sets(scope_kind, scope_id, parent_id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_workforce_change_sets_status
 			ON workforce_change_sets(scope_kind, scope_id, status, updated_at);
+		CREATE INDEX IF NOT EXISTS idx_workforce_change_sets_global_recovery
+			ON workforce_change_sets(status, scope_kind, scope_id);
 	`)
 	return err
 }
@@ -151,6 +154,41 @@ func (s *SQLiteStore) ListPendingChangeSetGenerations(ctx context.Context, scope
 
 func (s *SQLiteStore) ListPendingChangeSetEvaluations(ctx context.Context, scope capability.ScopeReference, limit int) ([]*authoring.ChangeSet, error) {
 	return s.listChangeSetsByStatus(ctx, scope, authoring.ChangeSetReview, limit)
+}
+
+func (s *SQLiteStore) ListWorkforceAuthoringRecoveryScopes(ctx context.Context, after Scope, limit int) ([]Scope, error) {
+	if limit <= 0 {
+		limit = 256
+	}
+	now := time.Now().UTC()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT scope_kind, scope_id FROM (
+			SELECT scope_kind, scope_id FROM workforce_change_sets
+			WHERE status IN (?, ?)
+			UNION
+			SELECT scope_kind, scope_id FROM agent_runs
+			WHERE COALESCE(json_extract(payload, '$.kind'), 'agent_work') = ?
+			AND ((status = ? AND available_at <= ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))
+			  OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)))
+		) AS recovery
+		WHERE (? = '' OR scope_kind > ? OR (scope_kind = ? AND scope_id > ?))
+		ORDER BY scope_kind, scope_id LIMIT ?`,
+		authoring.ChangeSetEvaluating, authoring.ChangeSetReview, RunKindWorkforceAuthoring,
+		AgentRunStatusQueued, now, now, AgentRunStatusRunning, now,
+		after.Kind, after.Kind, after.Kind, after.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Scope, 0, limit)
+	for rows.Next() {
+		var scope Scope
+		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
+			return nil, err
+		}
+		result = append(result, scope)
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLiteStore) listChangeSetsByStatus(ctx context.Context, scope capability.ScopeReference, status authoring.ChangeSetStatus, limit int) ([]*authoring.ChangeSet, error) {

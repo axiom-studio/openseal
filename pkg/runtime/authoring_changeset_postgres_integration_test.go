@@ -22,6 +22,55 @@ func (postgresRetryFailureGenerator) Generate(context.Context, authoring.Generat
 	return nil, errors.New("provider unavailable")
 }
 
+func TestPostgresWorkforceAuthoringRecoveryScopesArePagedAndDurable(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	schema := "openseal_recovery_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	compiler, _ := authoring.NewCompiler(testAuthoringGenerator(t))
+	service, err := NewWorkforceAuthoringRunService(compiler, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"alpha", "beta", "gamma"} {
+		request := testPrepareWorkforceRequest()
+		request.Scope = capability.ScopeReference{Kind: "tenant", ID: id}
+		request.IdempotencyKey = "postgres-recovery-" + id
+		if _, _, _, err := service.Prepare(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := service.ListRecoveryScopes(ctx, Scope{}, 2)
+	if err != nil || len(first) != 2 || first[0].ID != "alpha" || first[1].ID != "beta" {
+		t.Fatalf("first recovery page = %#v, %v", first, err)
+	}
+
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+	restarted, err := NewWorkforceAuthoringRunService(compiler, replica)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := restarted.ListRecoveryScopes(ctx, first[len(first)-1], 2)
+	if err != nil || len(second) != 1 || second[0].ID != "gamma" {
+		t.Fatalf("restart recovery page = %#v, %v", second, err)
+	}
+}
+
 func TestPostgresGenerationRetryReceiptIsReplicaSafeAcrossRestart(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
 	if dsn == "" {

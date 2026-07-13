@@ -63,6 +63,11 @@ func migratePortfolio(db *sql.DB) error {
 		ON agent_runs(scope_kind, scope_id, status, available_at, lease_expires_at, priority, queue_entered_at)`); err != nil {
 		return err
 	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_runs_global_recovery
+		ON agent_runs(status, available_at, lease_expires_at, scope_kind, scope_id)
+		WHERE COALESCE(json_extract(payload, '$.kind'), 'agent_work') = 'workforce_authoring'`); err != nil {
+		return err
+	}
 	if err := migrateActivity(db); err != nil {
 		return err
 	}

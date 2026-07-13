@@ -21,6 +21,7 @@ type WorkforceAuthoringRunStore interface {
 	KernelStore
 	authoring.ChangeSetStore
 	authoring.PendingChangeSetGenerationStore
+	ListWorkforceAuthoringRecoveryScopes(context.Context, Scope, int) ([]Scope, error)
 }
 
 type WorkforceAuthoringRunService struct {
@@ -134,6 +135,19 @@ func (s *WorkforceAuthoringRunService) RecoverPending(ctx context.Context, scope
 		runs = append(runs, run)
 	}
 	return runs, nil
+}
+
+// ListRecoveryScopes pages only scopes that currently have durable authoring
+// work or evaluation state. Hosts use this as their loss-tolerant wake source;
+// its query cost is independent of the total number of tenants.
+func (s *WorkforceAuthoringRunService) ListRecoveryScopes(ctx context.Context, after Scope, limit int) ([]Scope, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("workforce authoring run store is required")
+	}
+	if limit <= 0 {
+		limit = 256
+	}
+	return s.store.ListWorkforceAuthoringRecoveryScopes(ctx, after, limit)
 }
 
 type WorkforceAuthoringWorkerConfig struct {
