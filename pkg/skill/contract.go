@@ -206,6 +206,9 @@ func (c *Catalog) ListModelPrompts(ctx context.Context, scope ScopeReference, de
 		if definition == nil || definition.Prompt == nil {
 			continue
 		}
+		if !promptCredentialsSatisfied(definition.Prompt, binding) {
+			continue
+		}
 		result = append(result, ModelPrompt{
 			Name: definition.Name, Description: definition.Description, SkillID: definition.ID, Version: definition.Version,
 			AlwaysActive: definition.Prompt.AlwaysActive, UserInvocable: definition.Prompt.UserInvocable,
@@ -232,8 +235,9 @@ func (c *Catalog) ResolvePrompt(ctx context.Context, scope ScopeReference, deplo
 		if err != nil {
 			return nil, err
 		}
-		if definition != nil && definition.Prompt != nil {
+		if definition != nil && definition.Prompt != nil && promptCredentialsSatisfied(definition.Prompt, binding) {
 			copy := cloneDefinition(definition)
+			copy.Prompt.Credentials = nil
 			return copy.Prompt, nil
 		}
 	}
@@ -452,6 +456,11 @@ func validateDefinition(definition *Definition) error {
 	if definition.Prompt != nil && strings.TrimSpace(definition.Prompt.Instructions) == "" {
 		return errors.New("skill prompt instructions are required")
 	}
+	if definition.Prompt != nil {
+		if err := validateCredentialRequirements(definition.Prompt.Credentials); err != nil {
+			return fmt.Errorf("skill prompt has an invalid credential requirement: %w", err)
+		}
+	}
 	for name, action := range definition.Actions {
 		if name == "" || action.Name != name || strings.TrimSpace(action.Description) == "" || action.InputSchema == nil {
 			return fmt.Errorf("skill action %s is incomplete", name)
@@ -462,12 +471,8 @@ func validateDefinition(definition *Definition) error {
 		if action.SideEffect != SideEffectNone && action.SideEffect != SideEffectRead && action.Idempotency == IdempotencyNone {
 			return fmt.Errorf("skill action %s with side effects must support idempotency", name)
 		}
-		seenCredentials := make(map[string]bool)
-		for _, requirement := range action.Credentials {
-			if strings.TrimSpace(requirement.Name) == "" || strings.TrimSpace(requirement.Kind) == "" || seenCredentials[requirement.Name] {
-				return fmt.Errorf("skill action %s has an invalid credential requirement", name)
-			}
-			seenCredentials[requirement.Name] = true
+		if err := validateCredentialRequirements(action.Credentials); err != nil {
+			return fmt.Errorf("skill action %s has an invalid credential requirement: %w", name, err)
 		}
 		if action.DryRunAction != "" {
 			if _, ok := definition.Actions[action.DryRunAction]; !ok {
@@ -522,6 +527,17 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 	if binding.EnablePrompt && definition.Prompt == nil {
 		return errors.New("binding enables a prompt that the skill does not define")
 	}
+	if binding.EnablePrompt && definition.Prompt != nil {
+		for _, requirement := range definition.Prompt.Credentials {
+			ref, ok := binding.Credentials[requirement.Name]
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
+				return fmt.Errorf("binding prompt credential %s must use an opaque reference of kind %s", requirement.Name, requirement.Kind)
+			}
+		}
+	}
 	for _, name := range binding.AllowedActions {
 		action, ok := definition.Actions[name]
 		if !ok {
@@ -547,6 +563,34 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 		}
 	}
 	return nil
+}
+
+func validateCredentialRequirements(requirements []CredentialRequirement) error {
+	seen := make(map[string]bool, len(requirements))
+	for _, requirement := range requirements {
+		name := strings.TrimSpace(requirement.Name)
+		if name == "" || strings.TrimSpace(requirement.Kind) == "" || seen[name] {
+			return errors.New("credential name and kind must be unique and non-empty")
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+func promptCredentialsSatisfied(prompt *PromptModule, binding *Binding) bool {
+	if prompt == nil || binding == nil {
+		return false
+	}
+	for _, requirement := range prompt.Credentials {
+		ref, ok := binding.Credentials[requirement.Name]
+		if requirement.Optional && !ok {
+			continue
+		}
+		if !ok || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
+			return false
+		}
+	}
+	return true
 }
 
 func validateScopeAndDeployment(scope ScopeReference, deploymentID string) error {

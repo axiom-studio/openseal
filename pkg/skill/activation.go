@@ -168,6 +168,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		prompt := (*PromptModule)(nil)
 		if binding.EnablePrompt && definition.Prompt != nil {
 			prompt = cloneDefinition(definition).Prompt
+			prompt.Credentials = nil
 			if strings.Contains(prompt.Instructions, "{baseDir}") {
 				if !validResourceRoot(host.OperatingSystem, resourceRoot) {
 					reasons = append(reasons, AvailabilityReason{Code: "resource_root_missing", Requirement: "{baseDir}", Message: "skill instructions require a trusted absolute resource root"})
@@ -215,10 +216,21 @@ func definitionSourceDigest(definition *Definition) string {
 }
 
 func evaluateAvailability(definition *Definition, binding *Binding, host HostCapabilityState) []AvailabilityReason {
-	if definition.Requirements.AlwaysAvailable {
-		return nil
-	}
 	reasons := make([]AvailabilityReason, 0)
+	if binding.EnablePrompt && definition.Prompt != nil {
+		for _, requirement := range definition.Prompt.Credentials {
+			ref, ok := binding.Credentials[requirement.Name]
+			if requirement.Optional && !ok {
+				continue
+			}
+			if !ok || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
+				reasons = append(reasons, AvailabilityReason{Code: "credential_missing", Requirement: requirement.Kind, Message: "required prompt credential is unavailable"})
+			}
+		}
+	}
+	if definition.Requirements.AlwaysAvailable {
+		return reasons
+	}
 	if len(definition.Requirements.OperatingSystems) > 0 && !containsOperatingSystem(definition.Requirements.OperatingSystems, host.OperatingSystem) {
 		reasons = append(reasons, AvailabilityReason{Code: "operating_system_unavailable", Requirement: strings.TrimSpace(host.OperatingSystem), Message: "host operating system is not supported"})
 	}
