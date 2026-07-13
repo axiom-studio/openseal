@@ -775,7 +775,7 @@ func (m *Model) renderAgentRequestsContent(width int) string {
 	}
 	if m.focus == focusPanel {
 		actions := []string{"↑/↓ select", "r refresh", "R requests"}
-		if m.supportsAgentRequest(kernelapi.OperationCreate) && m.selectedRun() != nil {
+		if m.canCreateAgentRequestFromSelectedRun() {
 			actions = append(actions, "n request from selected Work")
 		}
 		lines = append(lines, "", mutedStyle.Render(strings.Join(actions, " · ")))

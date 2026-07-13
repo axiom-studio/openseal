@@ -348,6 +348,25 @@ func NewCollaborationService(store CollaborationKernelStore) *CollaborationServi
 	return service
 }
 
+// CanStartAgentRequestFromRun reports whether a Run can safely become the
+// source of singular delegated work. Collaboration acceptance reserves the
+// Run's one wake condition, so terminal, paused, sleeping, and already-waiting
+// Runs must start a new Run before requesting or handing off more work.
+func CanStartAgentRequestFromRun(run *AgentRun) bool {
+	return canEnterDependencyWait(run)
+}
+
+func validateAgentRequestSource(run *AgentRun) error {
+	if CanStartAgentRequestFromRun(run) {
+		return nil
+	}
+	status := AgentRunStatus("")
+	if run != nil {
+		status = run.Status
+	}
+	return fmt.Errorf("%w: source run cannot start collaboration from %s", ErrInvalidAgentRequestState, status)
+}
+
 func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil || s.artifacts == nil {
 		return nil, errors.New("collaboration store is not configured")
@@ -394,6 +413,14 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	}
 	if !requesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
+	}
+	// Grouped requests are created only after their dependency coordinator has
+	// atomically moved the source into the group's wait state. Their membership
+	// is validated below; singular requests must still own the wake condition.
+	if strings.TrimSpace(req.DependencyGroupID) == "" {
+		if err := validateAgentRequestSource(source); err != nil {
+			return nil, err
+		}
 	}
 	now := s.now()
 	requestID := strings.TrimSpace(req.ID)
@@ -459,6 +486,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	if source == nil {
 		return nil, ErrRunNotFound
 	}
+	replaying := false
 	if source.Revision != req.ExpectedSourceRevision {
 		if existing, findErr := s.dependencies.FindRunDependencyGroupByIdempotencyKey(ctx, req.Scope, key); findErr != nil || existing == nil {
 			if findErr != nil {
@@ -466,9 +494,15 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			}
 			return nil, ErrRevisionConflict
 		}
+		replaying = true
 	}
 	if !requesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
+	}
+	if !replaying {
+		if err := validateAgentRequestSource(source); err != nil {
+			return nil, err
+		}
 	}
 	groupID := strings.TrimSpace(req.ID)
 	if groupID == "" {
@@ -627,6 +661,11 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			}
 		}
 	case AgentRequestDecisionAccept:
+		if groupedDependency == nil {
+			if err := validateAgentRequestSource(source); err != nil {
+				return nil, err
+			}
+		}
 		assignedAgentID, assignmentErr := s.resolveRequestAssignment(ctx, request, req.AssignedAgentID)
 		if assignmentErr != nil {
 			return nil, assignmentErr
