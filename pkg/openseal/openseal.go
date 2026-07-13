@@ -815,6 +815,31 @@ const (
 	ObjectiveScheduleSuspended       = runtime.ObjectiveScheduleSuspended
 	ObjectiveScheduleBudgetExhausted = runtime.ObjectiveScheduleBudgetExhausted
 
+	InitiativeStatusDraft                             = runtime.InitiativeStatusDraft
+	InitiativeStatusActive                            = runtime.InitiativeStatusActive
+	InitiativeStatusPaused                            = runtime.InitiativeStatusPaused
+	InitiativeStatusCompleted                         = runtime.InitiativeStatusCompleted
+	InitiativeStatusFailed                            = runtime.InitiativeStatusFailed
+	InitiativeStatusCanceled                          = runtime.InitiativeStatusCanceled
+	InitiativeStatusArchived                          = runtime.InitiativeStatusArchived
+	InitiativeMilestonePending                        = runtime.MilestonePending
+	InitiativeMilestoneInProgress                     = runtime.MilestoneInProgress
+	InitiativeMilestoneCompleted                      = runtime.MilestoneCompleted
+	InitiativeMilestoneBlocked                        = runtime.MilestoneBlocked
+	InitiativeMilestoneCanceled                       = runtime.MilestoneCanceled
+	InitiativeHypothesisOpen                          = runtime.HypothesisOpen
+	InitiativeHypothesisSupported                     = runtime.HypothesisSupported
+	InitiativeHypothesisContradicted                  = runtime.HypothesisContradicted
+	InitiativeHypothesisInconclusive                  = runtime.HypothesisInconclusive
+	InitiativeDeliverablePlanned                      = runtime.DeliverablePlanned
+	InitiativeDeliverableInProgress                   = runtime.DeliverableInProgress
+	InitiativeDeliverableReview                       = runtime.DeliverableReview
+	InitiativeDeliverableDelivered                    = runtime.DeliverableDelivered
+	InitiativeDeliverableCanceled                     = runtime.DeliverableCanceled
+	InitiativeSourceDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
+	InitiativeSourceDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
+	InitiativeSourceDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
+
 	RunSourceManual          = runtime.RunSourceManual
 	RunSourceChat            = runtime.RunSourceChat
 	RunSourceSchedule        = runtime.RunSourceSchedule
