@@ -756,6 +756,9 @@ var (
 	ErrConversationPresenceConflict        = runtime.ErrConversationPresenceConflict
 	ErrConversationCoordinationUnavailable = runtime.ErrConversationCoordinationUnavailable
 	ErrNoConversationParticipants          = runtime.ErrNoConversationParticipants
+	ErrAgentDefinitionNotFound             = kernelagent.ErrDefinitionNotFound
+	ErrAgentDeploymentNotFound             = kernelagent.ErrDeploymentNotFound
+	ErrAgentDeploymentRevisionConflict     = kernelagent.ErrRevisionConflict
 	ErrTeamDefinitionNotFound              = kernelteam.ErrDefinitionNotFound
 	ErrTeamDeploymentNotFound              = kernelteam.ErrDeploymentNotFound
 	ErrTeamDeploymentRevisionConflict      = kernelteam.ErrRevisionConflict
