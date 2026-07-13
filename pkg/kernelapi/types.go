@@ -119,6 +119,10 @@ type WorkforceAuthoringCapabilityFeatures struct {
 	ChangeSets bool
 }
 
+type ActionApprovalCapabilityFeatures struct {
+	Resolution bool
+}
+
 // CapabilityContext is server-authored authorization state for one explicitly
 // requested resource. It is never durable policy input and clients must not
 // infer authority from the underlying resource itself.
@@ -252,11 +256,15 @@ func AgentRequestsCapability() Capability {
 
 // ActionApprovalsCapability describes the governed decision surface for
 // deterministic actions that have paused at a durable approval checkpoint.
-func ActionApprovalsCapability() Capability {
-	return Capability{
+func ActionApprovalsCapability(features ActionApprovalCapabilityFeatures) Capability {
+	capability := Capability{
 		ID: ActionApprovalsCapabilityID, Version: ActionApprovalsCapabilityVersion, Available: true,
-		Operations: []string{OperationGet, OperationList, OperationResolve},
+		Operations: []string{OperationGet, OperationList},
 	}
+	if features.Resolution {
+		capability.Operations = append(capability.Operations, OperationResolve)
+	}
+	return capability
 }
 
 func ArtifactCapability(contentOperations ...string) Capability {
@@ -390,6 +398,14 @@ type CompleteAgentRequestRequest struct {
 	AcceptanceEvidence    map[string]interface{}      `json:"acceptanceEvidence,omitempty"`
 	Artifacts             []runtime.ArtifactReference `json:"artifacts,omitempty"`
 	IdempotencyKey        string                      `json:"idempotencyKey,omitempty"`
+}
+
+type ResolveActionApprovalRequest struct {
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	DecisionID       string                    `json:"decisionId,omitempty"`
+	Approve          bool                      `json:"approve"`
+	Principal        runtime.ApprovalPrincipal `json:"principal"`
+	Reason           string                    `json:"reason,omitempty"`
 }
 
 type CreateObjectiveRequest struct {

@@ -62,6 +62,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agent-requests/{id}", s.handleGetAgentRequest)
 	s.mux.HandleFunc("POST /api/v1/agent-requests/{id}/responses", s.handleRespondAgentRequest)
 	s.mux.HandleFunc("POST /api/v1/agent-requests/{id}/completions", s.handleCompleteAgentRequest)
+	s.mux.HandleFunc("GET /api/v1/action-approvals", s.handleListActionApprovals)
+	s.mux.HandleFunc("GET /api/v1/action-approvals/{id}", s.handleGetActionApproval)
+	s.mux.HandleFunc("POST /api/v1/action-approvals/{id}/decisions", s.handleResolveActionApproval)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/compilations", s.handleListAgentDefinitionCompilations)
 	s.mux.HandleFunc("POST /api/v1/artifacts", s.handleRegisterArtifact)
 	s.mux.HandleFunc("GET /api/v1/artifacts", s.handleListArtifacts)
@@ -104,6 +107,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.store.(runtime.CollaborationKernelStore); ok {
 		capabilities = append(capabilities, kernelapi.AgentRequestsCapability())
 	}
+	capabilities = append(capabilities, kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{
+		Resolution: s.actionApprovalAuth != nil,
+	}))
 	if _, ok := s.store.(runtime.InitiativeStore); ok {
 		capabilities = append(capabilities, kernelapi.InitiativesCapability())
 	}

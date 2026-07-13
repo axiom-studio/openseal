@@ -492,6 +492,7 @@ type (
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
 	TeamDefinitionCapabilityFeatures      = kernelapi.TeamDefinitionCapabilityFeatures
 	WorkforceAuthoringCapabilityFeatures  = kernelapi.WorkforceAuthoringCapabilityFeatures
+	ActionApprovalCapabilityFeatures      = kernelapi.ActionApprovalCapabilityFeatures
 )
 
 const (
@@ -582,8 +583,8 @@ func AgentRequestsCapability() KernelCapability {
 	return kernelapi.AgentRequestsCapability()
 }
 
-func ActionApprovalsCapability() KernelCapability {
-	return kernelapi.ActionApprovalsCapability()
+func ActionApprovalsCapability(features ActionApprovalCapabilityFeatures) KernelCapability {
+	return kernelapi.ActionApprovalsCapability(features)
 }
 
 func ArtifactsCapability(contentOperations ...string) KernelCapability {
