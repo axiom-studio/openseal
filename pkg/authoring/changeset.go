@@ -597,8 +597,8 @@ func validateApplyPlacement(value *ChangeSet) error {
 		if definition == nil || strings.TrimSpace(value.Placement.AgentDeploymentIDs[definition.ID]) == "" {
 			return errors.New("every Agent requires a deployment placement")
 		}
-		if value.Mode == ModeAmend && value.Placement.AgentExpectedRevisions[definition.ID] < 1 {
-			return errors.New("every amended Agent placement requires an expected revision")
+		if value.Placement.AgentExpectedRevisions[definition.ID] < 0 {
+			return errors.New("Agent placement expected revisions cannot be negative")
 		}
 		for _, kind := range value.RequiredCredentials[definition.ID] {
 			reference := value.Placement.CredentialReferences[definition.ID][kind]
@@ -607,15 +607,15 @@ func validateApplyPlacement(value *ChangeSet) error {
 			}
 		}
 	}
-	if value.Mode == ModeAmend && value.Result.Candidate.Team != nil && value.Placement.TeamExpectedRevision < 1 {
-		return errors.New("amended Team placement requires an expected revision")
+	if value.Placement.TeamExpectedRevision < 0 {
+		return errors.New("Team placement expected revision cannot be negative")
 	}
 	if value.Result.Candidate.Initiative != nil {
 		if strings.TrimSpace(value.Placement.InitiativeID) == "" {
 			return errors.New("Initiative placement is required")
 		}
-		if value.Mode == ModeAmend && value.Placement.InitiativeExpectedRevision < 1 {
-			return errors.New("amended Initiative placement requires an expected revision")
+		if value.Placement.InitiativeExpectedRevision < 0 {
+			return errors.New("Initiative placement expected revision cannot be negative")
 		}
 	}
 	for key, objective := range value.Placement.Objectives {

@@ -44,13 +44,29 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	}
 	for i, definition := range a.agentDefinitions {
 		p, _ := json.Marshal(definition)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_definitions")+`(id,version,digest,created_at,payload) VALUES($1,$2,$3,$4,$5::jsonb)`, definition.ID, definition.Version, definition.Digest, definition.CreatedAt, string(p)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_definitions")+`(id,version,digest,created_at,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT (id,version) DO NOTHING`, definition.ID, definition.Version, definition.Digest, definition.CreatedAt, string(p)); err != nil {
 			return nil, err
 		}
+		var storedDefinitionDigest, storedDefinitionPayload string
+		if err = tx.QueryRowContext(ctx, `SELECT digest,payload FROM `+s.table("agent_definitions")+` WHERE id=$1 AND version=$2`, definition.ID, definition.Version).Scan(&storedDefinitionDigest, &storedDefinitionPayload); err != nil {
+			return nil, authoring.ErrChangeSetRevision
+		}
+		if storedDefinitionDigest != definition.Digest {
+			var stored agent.AgentDefinition
+			if json.Unmarshal([]byte(storedDefinitionPayload), &stored) != nil {
+				return nil, authoring.ErrChangeSetRevision
+			}
+			definition.CreatedAt, definition.Digest = stored.CreatedAt, ""
+			definition.Digest = portableDigest(definition)
+			if definition.Digest != storedDefinitionDigest {
+				return nil, authoring.ErrChangeSetRevision
+			}
+		}
 		deployment := a.agentDeployments[i]
-		if value.Mode == authoring.ModeAmend {
+		expectedDeploymentRevision := value.Placement.AgentExpectedRevisions[definition.ID]
+		if expectedDeploymentRevision > 0 {
 			var existing string
-			if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_deployments")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, deployment.ID, value.Placement.AgentExpectedRevisions[definition.ID]).Scan(&existing); err != nil {
+			if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_deployments")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, deployment.ID, expectedDeploymentRevision).Scan(&existing); err != nil {
 				return nil, authoring.ErrChangeSetRevision
 			}
 			var current agent.AgentDeployment
@@ -64,11 +80,11 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		activation := a.agentActivations[i]
 		activation.FromVersion = deployment.PreviousVersion
 		ap, _ := json.Marshal(activation)
-		if value.Mode == authoring.ModeCreate {
+		if expectedDeploymentRevision == 0 {
 			_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_deployments")+`(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.DefinitionID, deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, string(dp))
 		} else {
 			var result sql.Result
-			result, err = tx.ExecContext(ctx, `UPDATE `+s.table("agent_deployments")+` SET active_version=$1,revision=$2,updated_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`, deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, string(dp), value.Scope.Kind, value.Scope.ID, deployment.ID, value.Placement.AgentExpectedRevisions[definition.ID])
+			result, err = tx.ExecContext(ctx, `UPDATE `+s.table("agent_deployments")+` SET active_version=$1,revision=$2,updated_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`, deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, string(dp), value.Scope.Kind, value.Scope.ID, deployment.ID, expectedDeploymentRevision)
 			if err == nil {
 				if rows, _ := result.RowsAffected(); rows != 1 {
 					return nil, authoring.ErrChangeSetRevision
@@ -87,12 +103,28 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	}
 	if a.teamDefinition != nil {
 		tdp, _ := json.Marshal(a.teamDefinition)
-		if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("team_definitions")+`(id,version,digest,created_at,payload) VALUES($1,$2,$3,$4,$5::jsonb)`, a.teamDefinition.ID, a.teamDefinition.Version, a.teamDefinition.Digest, a.teamDefinition.CreatedAt, string(tdp)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("team_definitions")+`(id,version,digest,created_at,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT (id,version) DO NOTHING`, a.teamDefinition.ID, a.teamDefinition.Version, a.teamDefinition.Digest, a.teamDefinition.CreatedAt, string(tdp)); err != nil {
 			return nil, err
 		}
-		if value.Mode == authoring.ModeAmend {
+		var storedTeamDigest, storedTeamPayload string
+		if err = tx.QueryRowContext(ctx, `SELECT digest,payload FROM `+s.table("team_definitions")+` WHERE id=$1 AND version=$2`, a.teamDefinition.ID, a.teamDefinition.Version).Scan(&storedTeamDigest, &storedTeamPayload); err != nil {
+			return nil, authoring.ErrChangeSetRevision
+		}
+		if storedTeamDigest != a.teamDefinition.Digest {
+			var stored team.Definition
+			if json.Unmarshal([]byte(storedTeamPayload), &stored) != nil {
+				return nil, authoring.ErrChangeSetRevision
+			}
+			a.teamDefinition.CreatedAt, a.teamDefinition.Digest = stored.CreatedAt, ""
+			a.teamDefinition.Digest = portableDigest(a.teamDefinition)
+			if a.teamDefinition.Digest != storedTeamDigest {
+				return nil, authoring.ErrChangeSetRevision
+			}
+		}
+		expectedTeamRevision := value.Placement.TeamExpectedRevision
+		if expectedTeamRevision > 0 {
 			var existing string
-			if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("team_deployments")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, value.Placement.TeamExpectedRevision).Scan(&existing); err != nil {
+			if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("team_deployments")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, expectedTeamRevision).Scan(&existing); err != nil {
 				return nil, authoring.ErrChangeSetRevision
 			}
 			var current team.Deployment
@@ -104,11 +136,11 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		}
 		tdp2, _ := json.Marshal(a.teamDeployment)
 		tap, _ := json.Marshal(a.teamActivation)
-		if value.Mode == authoring.ModeCreate {
+		if expectedTeamRevision == 0 {
 			_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("team_deployments")+`(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, a.teamDeployment.DefinitionID, a.teamDeployment.ActiveVersion, a.teamDeployment.Revision, a.teamDeployment.UpdatedAt, string(tdp2))
 		} else {
 			var result sql.Result
-			result, err = tx.ExecContext(ctx, `UPDATE `+s.table("team_deployments")+` SET active_version=$1,revision=$2,updated_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`, a.teamDeployment.ActiveVersion, a.teamDeployment.Revision, a.teamDeployment.UpdatedAt, string(tdp2), value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, value.Placement.TeamExpectedRevision)
+			result, err = tx.ExecContext(ctx, `UPDATE `+s.table("team_deployments")+` SET active_version=$1,revision=$2,updated_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`, a.teamDeployment.ActiveVersion, a.teamDeployment.Revision, a.teamDeployment.UpdatedAt, string(tdp2), value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, expectedTeamRevision)
 			if err == nil {
 				if rows, _ := result.RowsAffected(); rows != 1 {
 					return nil, authoring.ErrChangeSetRevision
@@ -210,7 +242,8 @@ func applyPostgresWorkforceInitiative(ctx context.Context, tx *sql.Tx, table str
 
 func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding) error {
 	existing := map[string]*capability.Binding{}
-	if value.Mode == authoring.ModeAmend {
+	reconciledDeployments := workforceBindingReconciliationDeployments(value)
+	if len(reconciledDeployments) > 0 {
 		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+bindingTable+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`, value.Scope.Kind, value.Scope.ID)
 		if err != nil {
 			return err
@@ -221,7 +254,7 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 			if err := rows.Scan(&payload); err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(payload), &binding) == nil && strings.HasPrefix(binding.ID, "workforce:") {
+			if json.Unmarshal([]byte(payload), &binding) == nil && strings.HasPrefix(binding.ID, "workforce:") && reconciledDeployments[binding.DeploymentID] {
 				existing[binding.ID] = &binding
 			}
 		}

@@ -23,6 +23,29 @@ func (g *sequenceChangeSetGenerator) Generate(context.Context, GenerateRequest) 
 	return payload, nil
 }
 
+type recoverExistingChangeSetGenerator struct{ initial []byte }
+
+func (g recoverExistingChangeSetGenerator) Generate(_ context.Context, request GenerateRequest) ([]byte, error) {
+	if request.Mode == ModeAmend && request.Existing != nil {
+		payload, err := json.Marshal(request.Existing)
+		if err != nil {
+			return nil, err
+		}
+		var candidate WorkforceCandidate
+		if err = json.Unmarshal(payload, &candidate); err != nil {
+			return nil, err
+		}
+		for _, definition := range candidate.Agents {
+			definition.Version = "2"
+		}
+		if candidate.Team != nil {
+			candidate.Team.Version = "2"
+		}
+		return json.Marshal(GenerationResponse{Candidate: candidate})
+	}
+	return append([]byte(nil), g.initial...), nil
+}
+
 func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	generator := &sequenceChangeSetGenerator{payloads: [][]byte{payload}}
@@ -210,6 +233,64 @@ func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: 2, CandidateDigest: ready.CandidateDigest, Reason: "Activate approved workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
 	if err != nil || applied.Placement.Environment != "default" || len(store.definitions) != 2 || len(store.deployments) != 2 {
 		t.Fatalf("applied=%#v err=%v definitions=%d deployments=%d", applied, err, len(store.definitions), len(store.deployments))
+	}
+}
+
+func TestAtomicMemoryApplyCreatesResourcesForRecoveredUnappliedAmendment(t *testing.T) {
+	candidate := GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)}
+	payload, _ := json.Marshal(candidate)
+	compiler, _ := NewCompiler(recoverExistingChangeSetGenerator{initial: payload})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+	}}
+	placement := ChangeSetPlacement{TeamDeploymentID: "marketing-live", AgentDeploymentIDs: map[string]string{"community-researcher": "researcher-live"}, Environment: "development"}
+	parent, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "create", Catalog: catalog, Placement: placement, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluated, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: parent.ID, ExpectedRevision: parent.Revision, CandidateDigest: parent.CandidateDigest, Allowed: true,
+		ApprovalRequirements: []ChangeSetApprovalRequirement{{PolicyID: "activation", Role: "tenant:admin", Count: 1}},
+		Actor:                ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "evaluate-parent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected, _, err := service.ResolveApproval(context.Background(), ResolveChangeSetApprovalRequest{
+		Scope: scope, ChangeSetID: parent.ID, ExpectedRevision: evaluated.Revision, EvaluationID: evaluated.Evaluations[0].ID,
+		PolicyID: "activation", Role: "tenant:admin", Approved: false, Reason: "revise", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "reject",
+	})
+	if err != nil || rejected.Status != ChangeSetRejected {
+		t.Fatalf("rejected=%#v err=%v", rejected, err)
+	}
+	recovered, _, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: scope, ParentID: rejected.ID, Prompt: "recover unchanged", Catalog: catalog, Placement: rejected.Placement,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "recover",
+	})
+	if err != nil || recovered.Status != ChangeSetReview || recovered.Mode != ModeAmend || len(recovered.Placement.AgentExpectedRevisions) != 0 || recovered.Placement.TeamExpectedRevision != 0 {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: recovered.ID, ExpectedRevision: recovered.Revision, CandidateDigest: recovered.CandidateDigest,
+		Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "evaluate-recovery",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{
+		Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest,
+		Reason: "Activate recovered workforce", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply-recovery",
+	})
+	if err != nil || applied.Status != ChangeSetApplied || len(store.deployments) != 2 {
+		t.Fatalf("applied=%#v deployments=%#v err=%v", applied, store.deployments, err)
+	}
+	for _, deployment := range store.deployments {
+		if deployment.Revision != 1 {
+			t.Fatalf("recovered deployment=%#v", deployment)
+		}
 	}
 }
 
