@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,7 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	}
 	outcome, err := runner.RunTurn(context.Background(), TurnExecutionContext{
 		Run: &AgentRun{ID: "run-2", Scope: Scope{Kind: "tenant", ID: "1"}, AssignedAgentID: "agent-3", Goal: "Analyze launch feedback", Context: map[string]interface{}{"source": "https://example.test/evidence"}, Checkpoint: map[string]interface{}{"cursor": "next"},
+			Output: map[string]interface{}{"summary": "delegated", "dependencyGroups": map[string]interface{}{"group-1": map[string]interface{}{"status": "satisfied", "dependencies": map[string]interface{}{"analysis": map[string]interface{}{"result": map[string]interface{}{"output": map[string]interface{}{"finding": "visual debugging matters"}}}}}}},
 			Budget: &BudgetPolicy{MaxTurns: 10, MaxDurationMS: 120000, MaxActions: 4}, BudgetUsage: BudgetUsage{Turns: 2, DurationMS: 15000},
 			BudgetReservations: map[string]BudgetReservation{"pending": {ID: "pending", Usage: BudgetUsage{Turns: 1, DurationMS: 5000}, CreatedAt: time.Now()}},
 			BudgetAllocations:  map[string]BudgetPolicy{"child": {MaxTurns: 2, MaxDurationMS: 30000, MaxActions: 1}}},
@@ -58,6 +60,9 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	if host.request.Budget == nil || host.request.Budget.EffectiveUsage.Turns != 3 || host.request.Budget.Remaining.MaxTurns != 5 || host.request.Budget.Remaining.MaxDurationMS != 70000 || host.request.Budget.Remaining.MaxActions != 3 {
 		t.Fatalf("hosted budget = %#v", host.request.Budget)
 	}
+	if host.request.DependencyResults["group-1"].(map[string]interface{})["status"] != "satisfied" {
+		t.Fatalf("dependency results = %#v", host.request.DependencyResults)
+	}
 	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || host.request.SkillPrompts[0].Reference != "skill:summarize@1.0.0" || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" || outcome.ModelProvider != "openai-compatible" || outcome.Model != "deepseek-v4-flash" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
 	}
@@ -66,6 +71,26 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		if strings.Contains(strings.ToLower(string(encoded)), strings.ToLower(forbidden)) {
 			t.Fatalf("host envelope exposes forbidden credential surface %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestHostedTurnRunnerRejectsUnsafeDependencyProjection(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Resume", Output: map[string]interface{}{
+			"dependencyGroups": map[string]interface{}{"group": map[string]interface{}{"result": map[string]interface{}{"apiToken": "resolved-secret"}}},
+		}},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if !errors.Is(err, ErrUnsafeSharedContext) || host.request.InvocationID != "" {
+		t.Fatalf("error=%v host request=%#v", err, host.request)
 	}
 }
 
