@@ -22,6 +22,7 @@ var (
 	ErrNotFound          = errors.New("skill source artifact not found")
 	ErrImmutable         = errors.New("skill source artifacts are immutable")
 	ErrReferenceConflict = errors.New("skill source artifact reference conflict")
+	ErrAmbiguousOrigin   = errors.New("skill source artifact origin is ambiguous")
 )
 
 // Origin preserves registry, publisher, version, identity, and trust evidence
@@ -34,6 +35,10 @@ type Origin struct {
 	ExpectedName string                 `json:"expectedName,omitempty"`
 	Version      string                 `json:"version,omitempty"`
 	Trust        map[string]interface{} `json:"trust,omitempty"`
+}
+
+func (o Origin) IsZero() bool {
+	return o.Registry == "" && o.Publisher == "" && o.Reference == "" && o.ExpectedName == "" && o.Version == "" && len(o.Trust) == 0
 }
 
 type File struct {
@@ -51,7 +56,6 @@ type Artifact struct {
 	Digest     string                    `json:"digest"`
 	Format     string                    `json:"format"`
 	EntryPoint string                    `json:"entryPoint"`
-	Origin     Origin                    `json:"origin"`
 	Files      []File                    `json:"files"`
 	CreatedAt  time.Time                 `json:"createdAt"`
 }
@@ -64,6 +68,7 @@ type Reference struct {
 	Digest    string                    `json:"digest"`
 	ID        string                    `json:"id"`
 	Kind      string                    `json:"kind"`
+	Origin    Origin                    `json:"origin,omitempty"`
 	CreatedAt time.Time                 `json:"createdAt"`
 	ExpiresAt *time.Time                `json:"expiresAt,omitempty"`
 }
@@ -81,6 +86,7 @@ type GarbageCollectionReport struct {
 type Store interface {
 	ImportSourceArtifact(context.Context, *Artifact, *Reference) (bool, error)
 	GetSourceArtifact(context.Context, capability.ScopeReference, string) (*Artifact, error)
+	ListSourceArtifactReferences(context.Context, capability.ScopeReference, string) ([]Reference, error)
 	DeleteSourceArtifactReference(context.Context, capability.ScopeReference, string, string) error
 	PurgeExpiredSourceArtifactReferences(context.Context, time.Time, int) (int, error)
 	ListUnreferencedSourceArtifacts(context.Context, time.Time, int) ([]Key, error)
@@ -118,7 +124,7 @@ func ValidateArtifact(value *Artifact) error {
 			return fmt.Errorf("skill source artifact file %q does not match its size or digest", file.Path)
 		}
 	}
-	bundle, err := artifactBundle(value)
+	bundle, err := artifactBundle(value, Origin{})
 	if err != nil {
 		return err
 	}
@@ -177,7 +183,6 @@ func CloneArtifact(value *Artifact) *Artifact {
 		return nil
 	}
 	result := *value
-	result.Origin.Trust = cloneMap(value.Origin.Trust)
 	result.Files = make([]File, len(value.Files))
 	for index, file := range value.Files {
 		result.Files[index] = file
@@ -191,6 +196,7 @@ func CloneReference(value *Reference) *Reference {
 		return nil
 	}
 	result := *value
+	result.Origin.Trust = cloneMap(value.Origin.Trust)
 	if value.ExpiresAt != nil {
 		expires := *value.ExpiresAt
 		result.ExpiresAt = &expires
@@ -198,15 +204,15 @@ func CloneReference(value *Reference) *Reference {
 	return &result
 }
 
-func artifactBundle(value *Artifact) (openclaw.Bundle, error) {
+func artifactBundle(value *Artifact, origin Origin) (openclaw.Bundle, error) {
 	if value == nil || len(value.Files) == 0 || value.Files[0].Path != "SKILL.md" {
 		return openclaw.Bundle{}, errors.New("skill source artifact has no SKILL.md entry point")
 	}
 	bundle := openclaw.Bundle{
 		SkillMD: bytes.Clone(value.Files[0].Content),
 		Source: openclaw.Source{
-			Registry: value.Origin.Registry, Publisher: value.Origin.Publisher, Reference: value.Origin.Reference,
-			ExpectedName: value.Origin.ExpectedName, Version: value.Origin.Version, Trust: cloneMap(value.Origin.Trust),
+			Registry: origin.Registry, Publisher: origin.Publisher, Reference: origin.Reference,
+			ExpectedName: origin.ExpectedName, Version: origin.Version, Trust: cloneMap(origin.Trust),
 		},
 		Files: make([]openclaw.File, 0, len(value.Files)-1),
 	}

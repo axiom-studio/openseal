@@ -104,6 +104,10 @@ func (s *SQLiteStore) ImportSourceArtifact(ctx context.Context, artifact *source
 			if _, err := conn.ExecContext(ctx, `UPDATE skill_source_artifact_references SET digest=?,kind=?,created_at=?,expires_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, reference.Digest, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
 				return false, err
 			}
+		} else if existing.Origin.IsZero() && !reference.Origin.IsZero() {
+			if _, err := conn.ExecContext(ctx, `UPDATE skill_source_artifact_references SET kind=?,created_at=?,expires_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
+				return false, err
+			}
 		} else if !sourceartifact.EquivalentReferences(&existing, reference) {
 			return false, sourceartifact.ErrReferenceConflict
 		}
@@ -113,6 +117,30 @@ func (s *SQLiteStore) ImportSourceArtifact(ctx context.Context, artifact *source
 	}
 	committed = true
 	return created, nil
+}
+
+func (s *SQLiteStore) ListSourceArtifactReferences(ctx context.Context, scope capability.ScopeReference, digest string) ([]sourceartifact.Reference, error) {
+	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_source_artifact_references WHERE scope_kind=? AND scope_id=? AND digest=? ORDER BY id`, scope.Kind, scope.ID, digest)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]sourceartifact.Reference, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var reference sourceartifact.Reference
+		if err := json.Unmarshal([]byte(payload), &reference); err != nil {
+			return nil, err
+		}
+		result = append(result, reference)
+	}
+	return result, rows.Err()
 }
 
 func (s *SQLiteStore) GetSourceArtifact(ctx context.Context, scope capability.ScopeReference, digest string) (*sourceartifact.Artifact, error) {

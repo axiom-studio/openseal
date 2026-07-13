@@ -1064,6 +1064,7 @@ var (
 	ErrSkillSourceArtifactNotFound   = sourceartifact.ErrNotFound
 	ErrSkillSourceArtifactImmutable  = sourceartifact.ErrImmutable
 	ErrSkillSourceReferenceConflict  = sourceartifact.ErrReferenceConflict
+	ErrSkillSourceOriginAmbiguous    = sourceartifact.ErrAmbiguousOrigin
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -2356,6 +2357,13 @@ func (e *Engine) ExportOpenClawSkillSource(ctx context.Context, scope skill.Scop
 		return skillopenclaw.Bundle{}, errors.New("skill source artifact store is unavailable")
 	}
 	return e.skillSources.ExportOpenClaw(ctx, scope, digest)
+}
+
+func (e *Engine) ExportOpenClawSkillSourceForReference(ctx context.Context, scope skill.ScopeReference, digest, referenceID string) (skillopenclaw.Bundle, error) {
+	if e == nil || e.skillSources == nil {
+		return skillopenclaw.Bundle{}, errors.New("skill source artifact store is unavailable")
+	}
+	return e.skillSources.ExportOpenClawForReference(ctx, scope, digest, referenceID)
 }
 
 func (e *Engine) GetSkillSourceArtifact(ctx context.Context, scope skill.ScopeReference, digest string) (*sourceartifact.Artifact, error) {

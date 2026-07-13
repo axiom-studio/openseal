@@ -112,11 +112,10 @@ func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated := sourceartifact.CloneArtifact(stored)
-	mutated.Origin.Registry = "https://untrusted.example"
-	if _, err := reopened.ImportSourceArtifact(ctx, mutated, &sourceartifact.Reference{
-		Scope: scope, Digest: mutated.Digest, ID: "mutation", Kind: "test", CreatedAt: time.Now().UTC(),
-	}); !errors.Is(err, sourceartifact.ErrImmutable) {
+	if _, err := reopened.ImportSourceArtifact(ctx, stored, &sourceartifact.Reference{
+		Scope: scope, Digest: stored.Digest, ID: "catalog:research", Kind: "catalog", CreatedAt: time.Now().UTC(),
+		Origin: sourceartifact.Origin{Registry: "https://untrusted.example"},
+	}); !errors.Is(err, sourceartifact.ErrReferenceConflict) {
 		t.Fatalf("provenance mutation error=%v", err)
 	}
 	corrupt := sourceartifact.CloneArtifact(stored)
@@ -154,6 +153,58 @@ func TestSourceArtifactSQLiteRestartRoundTripIsolationConcurrencyStagingAndGC(t 
 	expired, err := restarted.GarbageCollect(ctx, expires.Add(time.Minute), 0, 10)
 	if err != nil || expired.ExpiredReferences != 1 || expired.DeletedArtifacts != 1 {
 		t.Fatalf("expired GC=%#v err=%v", expired, err)
+	}
+}
+
+func TestSourceArtifactDeduplicatesBytesAndDisambiguatesPublisherProvenance(t *testing.T) {
+	ctx := context.Background()
+	store, err := opensealruntime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service, _ := sourceartifact.NewService(store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	aliceBundle := representativeBundle()
+	aliceBundle.Source.Publisher = "alice"
+	aliceBundle.Source.Reference = "@alice/research"
+	alice, err := openclaw.Compile(aliceBundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobBundle := representativeBundle()
+	bobBundle.Source.Publisher = "bob"
+	bobBundle.Source.Reference = "@bob/research"
+	bob, err := openclaw.Compile(bobBundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alice.SourceDigest != bob.SourceDigest {
+		t.Fatalf("byte-identical sources have different content digests: %s != %s", alice.SourceDigest, bob.SourceDigest)
+	}
+	if _, created, err := service.ImportOpenClaw(ctx, sourceartifact.ImportOpenClawRequest{Scope: scope, Compilation: alice, ReferenceID: "install:alice", ReferenceKind: "installation"}); err != nil || !created {
+		t.Fatalf("alice import created=%t err=%v", created, err)
+	}
+	if _, created, err := service.ImportOpenClaw(ctx, sourceartifact.ImportOpenClawRequest{Scope: scope, Compilation: bob, ReferenceID: "install:bob", ReferenceKind: "installation"}); err != nil || created {
+		t.Fatalf("bob import created=%t err=%v", created, err)
+	}
+	if _, err := service.ExportOpenClaw(ctx, scope, alice.SourceDigest); !errors.Is(err, sourceartifact.ErrAmbiguousOrigin) {
+		t.Fatalf("ambiguous digest-only export error=%v", err)
+	}
+	for _, testCase := range []struct {
+		name      string
+		reference string
+		want      openclaw.Bundle
+	}{
+		{name: "alice", reference: "install:alice", want: aliceBundle},
+		{name: "bob", reference: "install:bob", want: bobBundle},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			exported, err := service.ExportOpenClawForReference(ctx, scope, alice.SourceDigest, testCase.reference)
+			if err != nil || !reflect.DeepEqual(exported, testCase.want) {
+				t.Fatalf("publisher export equal=%t err=%v", reflect.DeepEqual(exported, testCase.want), err)
+			}
+		})
 	}
 }
 
