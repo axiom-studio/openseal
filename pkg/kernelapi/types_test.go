@@ -32,9 +32,9 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	}
 }
 
-func TestWorkforceAuthoringVersionDeclaresInitiativeCompositionContract(t *testing.T) {
+func TestWorkforceAuthoringVersionDeclaresApprovalSeparationContract(t *testing.T) {
 	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	if capability.Version != "3" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) {
+	if capability.Version != "4" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) {
 		t.Fatalf("workforce authoring capability = %#v", capability)
 	}
 }
