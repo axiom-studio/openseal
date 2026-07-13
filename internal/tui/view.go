@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -617,7 +618,11 @@ func (m *Model) renderRunsContent(width int) string {
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Updated %s · revision %d", relativeTime(run.UpdatedAt), run.Revision)))
 		if receipt, ok := runDeliveryReceipt(run); ok {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Bold(true).Render("DELIVERY ACCEPTED"))
-			lines = append(lines, compact(fmt.Sprintf("%d recipient%s · %d artifact%s · %s", receipt.recipientCount, pluralSuffix(receipt.recipientCount), len(receipt.artifacts), pluralSuffix(len(receipt.artifacts)), receipt.deliveredAt), max(width-8, 24)))
+			summary := fmt.Sprintf("%d recipient%s · %d artifact%s", receipt.recipientCount, pluralSuffix(receipt.recipientCount), len(receipt.artifacts), pluralSuffix(len(receipt.artifacts)))
+			if len(receipt.domains) > 0 {
+				summary += " · " + strings.Join(receipt.domains, ", ")
+			}
+			lines = append(lines, compact(summary+" · "+receipt.deliveredAt, max(width-8, 24)))
 			lines = append(lines, mutedStyle.Render("Receipt "+compact(receipt.id, max(width-16, 16))))
 			for _, artifact := range receipt.artifacts {
 				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Artifact %s · version %d", artifact.id, artifact.version), max(width-8, 24))))
@@ -644,6 +649,7 @@ type tuiDeliveryReceipt struct {
 	deliveredAt    string
 	recipientCount int
 	artifacts      []tuiDeliveryArtifact
+	domains        []string
 }
 
 func runDeliveryReceipt(run *runtime.AgentRun) (tuiDeliveryReceipt, bool) {
@@ -670,7 +676,41 @@ func runDeliveryReceipt(run *runtime.AgentRun) (tuiDeliveryReceipt, bool) {
 		}
 		artifacts = append(artifacts, tuiDeliveryArtifact{id: artifactID, version: version})
 	}
-	return tuiDeliveryReceipt{id: id, deliveredAt: deliveredAt, recipientCount: recipientCount, artifacts: artifacts}, true
+	domains := deliveryRecipientDomains(run.Context)
+	return tuiDeliveryReceipt{id: id, deliveredAt: deliveredAt, recipientCount: recipientCount, artifacts: artifacts, domains: domains}, true
+}
+
+func deliveryRecipientDomains(context map[string]interface{}) []string {
+	invocation, ok := context["capabilityInvocation"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	inputs, ok := invocation["inputs"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	recipients, ok := inputs["to"].([]interface{})
+	if !ok {
+		return nil
+	}
+	unique := map[string]struct{}{}
+	for _, candidate := range recipients {
+		recipient, ok := candidate.(string)
+		separator := strings.LastIndex(recipient, "@")
+		if !ok || separator <= 0 {
+			continue
+		}
+		domain := strings.ToLower(strings.TrimSpace(recipient[separator+1:]))
+		if domain != "" {
+			unique[domain] = struct{}{}
+		}
+	}
+	domains := make([]string, 0, len(unique))
+	for domain := range unique {
+		domains = append(domains, domain)
+	}
+	slices.Sort(domains)
+	return domains
 }
 
 func wholeNumber(value interface{}) (int, bool) {

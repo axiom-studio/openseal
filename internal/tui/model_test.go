@@ -985,11 +985,12 @@ func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
 		"deliveredAt":  "2026-07-13T00:19:22Z",
 		"artifactRefs": []interface{}{map[string]interface{}{"id": "pdf-report", "version": float64(3)}},
 	}
+	run.Context = map[string]interface{}{"capabilityInvocation": map[string]interface{}{"inputs": map[string]interface{}{"to": []interface{}{"reviewer@example.com", "operator@example.com"}}}}
 	model.runs = []*runtime.AgentRun{run}
 	model.section = sectionRuns
 
 	view := model.renderRunsContent(100)
-	for _, expected := range []string{"DELIVERY ACCEPTED", "1 recipient · 1 artifact", "smtp:action-1", "pdf-report · version 3"} {
+	for _, expected := range []string{"DELIVERY ACCEPTED", "1 recipient · 1 artifact · example.com", "smtp:action-1", "pdf-report · version 3"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("delivery receipt missing %q:\n%s", expected, view)
 		}
