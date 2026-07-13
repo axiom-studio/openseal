@@ -40,7 +40,7 @@ type ResourceStager interface {
 // adapter boundary. Implementations must resolve by immutable source digest and
 // normalized relative path; callers never receive a model-visible source blob.
 type ResourceContentProvider interface {
-	ReadResource(context.Context, string, string) ([]byte, error)
+	ReadResource(context.Context, ScopeReference, string, string) ([]byte, error)
 }
 
 // ValidateResourceStageRequest lets host adapters fail before reading any
