@@ -101,6 +101,71 @@ func TestWorkforceAuthoringPrepareQueuesDurableRunAndConcurrentWorkersGenerateOn
 	}
 }
 
+func TestWorkforceAuthoringRecoveryScopesAreDurableDeduplicatedAndPaged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := testAuthoringGenerator(t)
+	compiler, _ := authoring.NewCompiler(generator)
+	service, err := NewWorkforceAuthoringRunService(compiler, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"alpha", "beta", "gamma"} {
+		request := testPrepareWorkforceRequest()
+		request.Scope = capability.ScopeReference{Kind: "tenant", ID: id}
+		request.IdempotencyKey = "recovery-" + id
+		if _, _, _, err := service.Prepare(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	future := time.Now().UTC().Add(time.Hour)
+	if _, err := service.runs.CreateAgentRun(context.Background(), CreateAgentRunRequest{
+		Scope: Scope{Kind: "tenant", ID: "future-only"}, Kind: RunKindWorkforceAuthoring,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: workforceAuthoringAgentID}, AssignedAgentID: workforceAuthoringAgentID,
+		Goal: "Not due", Source: RunSourceRequest, AvailableAt: &future, IdempotencyKey: "future-only",
+		Actor: ActivityActor{Type: "user", ID: "test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.runs.CreateAgentRun(context.Background(), CreateAgentRunRequest{
+		Scope: Scope{Kind: "tenant", ID: "ordinary-run"}, Kind: RunKindAgentWork,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "ordinary"}, AssignedAgentID: "ordinary",
+		Goal: "Not authoring", Source: RunSourceRequest, IdempotencyKey: "ordinary-run",
+		Actor: ActivityActor{Type: "user", ID: "test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := service.ListRecoveryScopes(context.Background(), Scope{}, 2)
+	if err != nil || len(first) != 2 || first[0].ID != "alpha" || first[1].ID != "beta" {
+		t.Fatalf("first recovery page = %#v, %v", first, err)
+	}
+	second, err := service.ListRecoveryScopes(context.Background(), first[len(first)-1], 2)
+	if err != nil || len(second) != 1 || second[0].ID != "gamma" {
+		t.Fatalf("second recovery page = %#v, %v", second, err)
+	}
+	if end, err := service.ListRecoveryScopes(context.Background(), second[0], 2); err != nil || len(end) != 0 {
+		t.Fatalf("recovery end = %#v, %v", end, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	recovered, _ := NewWorkforceAuthoringRunService(compiler, reopened)
+	page, err := recovered.ListRecoveryScopes(context.Background(), Scope{}, 10)
+	if err != nil || len(page) != 3 {
+		t.Fatalf("restart recovery page = %#v, %v", page, err)
+	}
+}
+
 func TestWorkforceAuthoringStartupRecoversIntentPersistedBeforeEnqueue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := NewSQLiteStore(path)

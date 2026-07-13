@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -24,7 +25,9 @@ func (s *PostgresStore) migrateAuthoringChangeSets(ctx context.Context, tx *sql.
 		CREATE INDEX IF NOT EXISTS workforce_change_sets_parent_idx ON `+s.table("workforce_change_sets")+`
 			(scope_kind, scope_id, parent_id, created_at);
 		CREATE INDEX IF NOT EXISTS workforce_change_sets_status_idx ON `+s.table("workforce_change_sets")+`
-			(scope_kind, scope_id, status, updated_at)`); err != nil {
+			(scope_kind, scope_id, status, updated_at);
+		CREATE INDEX IF NOT EXISTS workforce_change_sets_global_recovery_idx ON `+s.table("workforce_change_sets")+`
+			(status, scope_kind, scope_id)`); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name)
@@ -156,6 +159,40 @@ func (s *PostgresStore) ListPendingChangeSetGenerations(ctx context.Context, sco
 
 func (s *PostgresStore) ListPendingChangeSetEvaluations(ctx context.Context, scope capability.ScopeReference, limit int) ([]*authoring.ChangeSet, error) {
 	return s.listChangeSetsByStatus(ctx, scope, authoring.ChangeSetReview, limit)
+}
+
+func (s *PostgresStore) ListWorkforceAuthoringRecoveryScopes(ctx context.Context, after Scope, limit int) ([]Scope, error) {
+	if limit <= 0 {
+		limit = 256
+	}
+	now := time.Now().UTC()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT scope_kind, scope_id FROM (
+			SELECT scope_kind, scope_id FROM `+s.table("workforce_change_sets")+`
+			WHERE status IN ($1, $2)
+			UNION
+			SELECT scope_kind, scope_id FROM `+s.table("agent_runs")+`
+			WHERE COALESCE(payload->>'kind', 'agent_work') = $3
+			AND ((status = $4 AND available_at <= $6 AND (lease_expires_at IS NULL OR lease_expires_at <= $6))
+			  OR (status = $5 AND (lease_expires_at IS NULL OR lease_expires_at <= $6)))
+		) AS recovery
+		WHERE ($7 = '' OR scope_kind > $7 OR (scope_kind = $7 AND scope_id > $8))
+		ORDER BY scope_kind, scope_id LIMIT $9`,
+		authoring.ChangeSetEvaluating, authoring.ChangeSetReview, RunKindWorkforceAuthoring,
+		AgentRunStatusQueued, AgentRunStatusRunning, now, after.Kind, after.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Scope, 0, limit)
+	for rows.Next() {
+		var scope Scope
+		if err := rows.Scan(&scope.Kind, &scope.ID); err != nil {
+			return nil, err
+		}
+		result = append(result, scope)
+	}
+	return result, rows.Err()
 }
 
 func (s *PostgresStore) listChangeSetsByStatus(ctx context.Context, scope capability.ScopeReference, status authoring.ChangeSetStatus, limit int) ([]*authoring.ChangeSet, error) {
