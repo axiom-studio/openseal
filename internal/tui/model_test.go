@@ -1096,6 +1096,29 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	}
 }
 
+func TestObjectiveAndRunViewsProjectAttemptAndDurationBudgets(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	policy := &runtime.BudgetPolicy{MaxAttempts: 3, MaxTurns: 8, MaxDurationMS: 60000}
+	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*runtime.Objective{{
+		ID: "objective-budget", Scope: scope, Owner: owner, Title: "Bounded research", Goal: "Finish safely",
+		Status: runtime.ObjectiveStatusActive, Budget: policy, Revision: 1,
+	}}, runs: []*runtime.AgentRun{{
+		ID: "run-budget", Scope: scope, Owner: owner, Goal: "Research within policy", Status: runtime.AgentRunStatusPaused,
+		Budget: policy, BudgetUsage: runtime.BudgetUsage{Attempts: 2, Turns: 4, DurationMS: 30000}, BudgetState: runtime.BudgetStateWarning, Revision: 2,
+	}}}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionObjectives
+	if view := model.View(); !strings.Contains(view, "attempts 3") || !strings.Contains(view, "duration ms 60000") {
+		t.Fatalf("objective budget missing:\n%s", view)
+	}
+	model.section = sectionRuns
+	if view := model.View(); !strings.Contains(view, "Autonomy budget · warning") || !strings.Contains(view, "attempts 2/3") || !strings.Contains(view, "duration ms 30000/60000") {
+		t.Fatalf("run budget missing:\n%s", view)
+	}
+}
+
 func TestInitiativePortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*runtime.Objective{{ID: "objective-research", Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, Title: "Research customer pain", Goal: "Gather cited evidence", Status: runtime.ObjectiveStatusActive, Revision: 1}}}
 	model := newTestModel(t, fake)

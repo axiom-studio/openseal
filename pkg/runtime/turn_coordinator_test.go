@@ -331,6 +331,36 @@ func TestTurnCoordinatorAllowsTerminalOutcomeAtExactBudgetLimit(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorCancelsAtDurableDurationCeiling(t *testing.T) {
+	store := NewMemoryStore(100)
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "duration-budget"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "remain bounded in wall time",
+		Budget: &BudgetPolicy{MaxTurns: 3, MaxDurationMS: 20},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", LeaseDuration: time.Second,
+	}, TurnRunnerFunc(func(ctx context.Context, _ TurnExecutionContext) (*TurnOutcome, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
+	if !errors.Is(err, ErrBudgetExhausted) || time.Since(started) > time.Second {
+		t.Fatalf("duration enforcement err=%v elapsed=%s", err, time.Since(started))
+	}
+	if result == nil || result.Run.Status != AgentRunStatusPaused || result.Run.BudgetState != BudgetStateExhausted ||
+		result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.DurationMS < 15 || result.Event == nil || result.Event.EventType != "budget.exhausted" {
+		t.Fatalf("duration result = %#v", result)
+	}
+	if result.Run.Error != "" || result.Turn.Status != AgentTurnStatusCanceled {
+		t.Fatalf("duration ceiling masqueraded as failure: run=%#v turn=%#v", result.Run, result.Turn)
+	}
+}
+
 func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
 	store := NewMemoryStore(100)
 	ctx := context.Background()

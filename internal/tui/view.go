@@ -512,6 +512,7 @@ func (m *Model) renderObjectivesContent(width int) string {
 		if objective.Budget != nil {
 			allocated := len(objective.BudgetAllocations)
 			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Bounded autonomy · %d run allocation(s)", allocated)))
+			lines = append(lines, renderBudgetLines(objective.Budget, nil, max(width-8, 24))...)
 		}
 		if m.supportsObjective(kernelapi.OperationUpdate) {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter amend  ·  n add objective"))
@@ -673,6 +674,14 @@ func (m *Model) renderRunsContent(width int) string {
 	if run := m.selectedRun(); run != nil {
 		lines = append(lines, "", mutedStyle.Render("Selected"), compact(run.Goal, max(width-8, 24)))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Updated %s · revision %d", relativeTime(run.UpdatedAt), run.Revision)))
+		if run.Budget != nil {
+			state := run.BudgetState
+			if state == "" {
+				state = runtime.BudgetStateActive
+			}
+			lines = append(lines, mutedStyle.Render("Autonomy budget · "+string(state)))
+			lines = append(lines, renderBudgetLines(run.Budget, &run.BudgetUsage, max(width-8, 24))...)
+		}
 		if receipt, ok := runDeliveryReceipt(run); ok {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Bold(true).Render("DELIVERY ACCEPTED"))
 			summary := fmt.Sprintf("%d recipient%s · %d artifact%s", receipt.recipientCount, pluralSuffix(receipt.recipientCount), len(receipt.artifacts), pluralSuffix(len(receipt.artifacts)))
@@ -694,6 +703,58 @@ func (m *Model) renderRunsContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("↑/↓ select · n new · r refresh · Tab compose"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderBudgetLines(policy *runtime.BudgetPolicy, usage *runtime.BudgetUsage, width int) []string {
+	if policy == nil {
+		return nil
+	}
+	type dimension struct {
+		label string
+		used  int64
+		limit int64
+	}
+	dimensions := []dimension{
+		{label: "attempts", limit: policy.MaxAttempts},
+		{label: "turns", limit: policy.MaxTurns},
+		{label: "input", limit: policy.MaxInputTokens},
+		{label: "output", limit: policy.MaxOutputTokens},
+		{label: "tokens", limit: policy.MaxTotalTokens},
+		{label: "cost μ", limit: policy.MaxCostMicros},
+		{label: "duration ms", limit: policy.MaxDurationMS},
+		{label: "actions", limit: policy.MaxActions},
+	}
+	if usage != nil {
+		dimensions[0].used = usage.Attempts
+		dimensions[1].used = usage.Turns
+		dimensions[2].used = usage.InputTokens
+		dimensions[3].used = usage.OutputTokens
+		dimensions[4].used = usage.InputTokens + usage.OutputTokens
+		dimensions[5].used = usage.CostMicros
+		dimensions[6].used = usage.DurationMS
+		dimensions[7].used = usage.Actions
+	}
+	parts := make([]string, 0, len(dimensions))
+	for _, item := range dimensions {
+		if item.limit == 0 {
+			continue
+		}
+		if usage == nil {
+			parts = append(parts, fmt.Sprintf("%s %d", item.label, item.limit))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s %d/%d", item.label, item.used, item.limit))
+		}
+	}
+	if len(parts) == 0 {
+		return []string{mutedStyle.Render("No finite limits")}
+	}
+	lines := make([]string, 0, (len(parts)+2)/3)
+	for len(parts) > 0 {
+		count := min(3, len(parts))
+		lines = append(lines, mutedStyle.Render(compact(strings.Join(parts[:count], " · "), width)))
+		parts = parts[count:]
+	}
+	return lines
 }
 
 func (m *Model) renderAgentRequestsContent(width int) string {

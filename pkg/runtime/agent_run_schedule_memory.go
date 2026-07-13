@@ -45,16 +45,8 @@ func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) 
 	if selected == nil {
 		return nil, nil
 	}
-	expires := claim.Now.Add(claim.LeaseDuration)
-	selected.Status = AgentRunStatusRunning
-	selected.LeaseOwner = claim.WorkerID
-	selected.LeaseExpiresAt = &expires
-	selected.LastClaimedAt = &claim.Now
-	selected.Attempt++
-	selected.Revision++
-	selected.UpdatedAt = claim.Now
-	if selected.StartedAt == nil {
-		selected.StartedAt = &claim.Now
+	if err := applyAgentRunClaim(selected, claim); err != nil {
+		return nil, err
 	}
 	return cloneAgentRun(selected), nil
 }

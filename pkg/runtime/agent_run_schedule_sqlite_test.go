@@ -81,6 +81,42 @@ func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 	}
 }
 
+func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attempt-budget.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "attempt-budget"}
+	now := time.Now().UTC()
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "restart safely", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxAttempts: 1, MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "first", Now: now, LeaseDuration: time.Second, AgingInterval: time.Minute})
+	if err != nil || first == nil || first.BudgetUsage.Attempts != 1 {
+		t.Fatalf("first claim = %#v, %v", first, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	recovered, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "recovery", Now: now.Add(2 * time.Second), LeaseDuration: time.Second, AgingInterval: time.Minute})
+	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.BudgetUsage.Attempts != 2 || !runAttemptBudgetExceeded(recovered) {
+		t.Fatalf("restart recovery = %#v, %v", recovered, err)
+	}
+}
+
 func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-schedule.db"))
 	if err != nil {

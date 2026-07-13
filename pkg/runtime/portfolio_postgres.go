@@ -375,16 +375,8 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 		return nil, err
 	}
 	previousRevision := selected.Revision
-	expires := claim.Now.Add(claim.LeaseDuration)
-	selected.Status = AgentRunStatusRunning
-	selected.LeaseOwner = claim.WorkerID
-	selected.LeaseExpiresAt = &expires
-	selected.LastClaimedAt = &claim.Now
-	selected.Attempt++
-	selected.Revision++
-	selected.UpdatedAt = claim.Now
-	if selected.StartedAt == nil {
-		selected.StartedAt = &claim.Now
+	if err := applyAgentRunClaim(selected, claim); err != nil {
+		return nil, err
 	}
 	updatedPayload, err := json.Marshal(selected)
 	if err != nil {

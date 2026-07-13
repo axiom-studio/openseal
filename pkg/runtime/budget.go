@@ -20,6 +20,7 @@ const (
 // Zero values are unlimited. Cost is represented in micros to keep accounting
 // deterministic across stores and process restarts.
 type BudgetPolicy struct {
+	MaxAttempts     int64 `json:"maxAttempts,omitempty"`
 	MaxTurns        int64 `json:"maxTurns,omitempty"`
 	MaxInputTokens  int64 `json:"maxInputTokens,omitempty"`
 	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
@@ -31,7 +32,7 @@ type BudgetPolicy struct {
 }
 
 func (p BudgetPolicy) Validate() error {
-	if p.MaxTurns < 0 || p.MaxInputTokens < 0 || p.MaxOutputTokens < 0 || p.MaxTotalTokens < 0 ||
+	if p.MaxAttempts < 0 || p.MaxTurns < 0 || p.MaxInputTokens < 0 || p.MaxOutputTokens < 0 || p.MaxTotalTokens < 0 ||
 		p.MaxCostMicros < 0 || p.MaxDurationMS < 0 || p.MaxActions < 0 {
 		return errors.New("budget limits cannot be negative")
 	}
@@ -42,6 +43,7 @@ func (p BudgetPolicy) Validate() error {
 }
 
 type BudgetUsage struct {
+	Attempts     int64 `json:"attempts,omitempty"`
 	Turns        int64 `json:"turns,omitempty"`
 	InputTokens  int64 `json:"inputTokens,omitempty"`
 	OutputTokens int64 `json:"outputTokens,omitempty"`
@@ -64,7 +66,7 @@ func (r BudgetReservation) Validate() error {
 }
 
 func (u BudgetUsage) Validate() error {
-	if u.Turns < 0 || u.InputTokens < 0 || u.OutputTokens < 0 || u.CostMicros < 0 || u.DurationMS < 0 || u.Actions < 0 {
+	if u.Attempts < 0 || u.Turns < 0 || u.InputTokens < 0 || u.OutputTokens < 0 || u.CostMicros < 0 || u.DurationMS < 0 || u.Actions < 0 {
 		return errors.New("budget usage cannot be negative")
 	}
 	return nil
@@ -78,7 +80,7 @@ func (u BudgetUsage) Add(delta BudgetUsage) (BudgetUsage, error) {
 		return BudgetUsage{}, err
 	}
 	return BudgetUsage{
-		Turns: u.Turns + delta.Turns, InputTokens: u.InputTokens + delta.InputTokens,
+		Attempts: u.Attempts + delta.Attempts, Turns: u.Turns + delta.Turns, InputTokens: u.InputTokens + delta.InputTokens,
 		OutputTokens: u.OutputTokens + delta.OutputTokens, CostMicros: u.CostMicros + delta.CostMicros,
 		DurationMS: u.DurationMS + delta.DurationMS, Actions: u.Actions + delta.Actions,
 	}, nil
@@ -96,6 +98,7 @@ func EvaluateBudget(policy BudgetPolicy, usage BudgetUsage) (BudgetState, []stri
 		used  int64
 		limit int64
 	}{
+		{"attempts", usage.Attempts, policy.MaxAttempts},
 		{"turns", usage.Turns, policy.MaxTurns},
 		{"input_tokens", usage.InputTokens, policy.MaxInputTokens},
 		{"output_tokens", usage.OutputTokens, policy.MaxOutputTokens},
@@ -154,6 +157,7 @@ func BudgetWouldExceed(policy BudgetPolicy, usage BudgetUsage) (bool, []string, 
 		used  int64
 		limit int64
 	}{
+		{"attempts", usage.Attempts, policy.MaxAttempts},
 		{"turns", usage.Turns, policy.MaxTurns},
 		{"input_tokens", usage.InputTokens, policy.MaxInputTokens},
 		{"output_tokens", usage.OutputTokens, policy.MaxOutputTokens},
@@ -317,6 +321,7 @@ func validateGroupedBudgetAllocations(parent *AgentRun, allocations []*BudgetPol
 			return errors.New("a budgeted source run requires explicit allocations for every child")
 		}
 		total.MaxTurns += allocation.MaxTurns
+		total.MaxAttempts += allocation.MaxAttempts
 		total.MaxInputTokens += allocation.MaxInputTokens
 		total.MaxOutputTokens += allocation.MaxOutputTokens
 		total.MaxTotalTokens += allocation.MaxTotalTokens
@@ -394,6 +399,7 @@ type budgetDimension struct {
 
 func budgetDimensions(parent BudgetPolicy, usage BudgetUsage, allocation BudgetPolicy) []budgetDimension {
 	return []budgetDimension{
+		{"attempts", parent.MaxAttempts, usage.Attempts, allocation.MaxAttempts},
 		{"turns", parent.MaxTurns, usage.Turns, allocation.MaxTurns},
 		{"input_tokens", parent.MaxInputTokens, usage.InputTokens, allocation.MaxInputTokens},
 		{"output_tokens", parent.MaxOutputTokens, usage.OutputTokens, allocation.MaxOutputTokens},
@@ -414,6 +420,7 @@ func sumBudgetPolicies(policies map[string]BudgetPolicy) BudgetPolicy {
 
 func addBudgetPolicies(left, right BudgetPolicy) BudgetPolicy {
 	return BudgetPolicy{
+		MaxAttempts:     left.MaxAttempts + right.MaxAttempts,
 		MaxTurns:        left.MaxTurns + right.MaxTurns,
 		MaxInputTokens:  left.MaxInputTokens + right.MaxInputTokens,
 		MaxOutputTokens: left.MaxOutputTokens + right.MaxOutputTokens,

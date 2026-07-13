@@ -80,6 +80,38 @@ func TestMemoryAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 	}
 }
 
+func TestMemoryAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
+	store := NewMemoryStore(20)
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "attempt-budget"}
+	now := time.Now().UTC()
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "recover at most once", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxAttempts: 1, MaxTurns: 5},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "first", Now: now, LeaseDuration: time.Second, AgingInterval: time.Minute})
+	if err != nil || first == nil || first.BudgetUsage.Attempts != 1 || first.BudgetState != BudgetStateExhausted {
+		t.Fatalf("first claim = %#v, %v", first, err)
+	}
+	recovered, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "recovery", Now: now.Add(2 * time.Second), LeaseDuration: time.Second, AgingInterval: time.Minute})
+	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.BudgetUsage.Attempts != 2 || !runAttemptBudgetExceeded(recovered) {
+		t.Fatalf("recovered claim = %#v, %v", recovered, err)
+	}
+	calls := 0
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "recovery"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		calls++
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted}, nil
+	}))
+	if !errors.Is(err, ErrBudgetExhausted) || calls != 0 || result == nil || result.Run.Status != AgentRunStatusPaused || result.Event == nil || result.Event.EventType != "budget.exhausted" {
+		t.Fatalf("attempt enforcement = %#v, calls=%d err=%v", result, calls, err)
+	}
+}
+
 func TestMemoryAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
 	store := NewMemoryStore(100)
 	ctx := context.Background()
