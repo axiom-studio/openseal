@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +46,8 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	if err != nil || completed.Status != ChangeSetReview || completed.Revision != 2 || completed.CandidateDigest == "" || completed.Generation.CompletedAt == nil || len(generator.payloads) != 0 {
 		t.Fatalf("completed=%#v payloads=%d err=%v", completed, len(generator.payloads), err)
 	}
-	if completed.Placement.Environment != "default" || completed.Placement.TeamDeploymentID != "tenant/one/gtm-research:live" || completed.Placement.AgentDeploymentIDs["tenant/one/community-researcher"] != "tenant/one/community-researcher:live" {
+	if completed.Placement.Environment != "default" || !strings.HasPrefix(completed.Placement.TeamDeploymentID, "team:") || strings.Contains(completed.Placement.TeamDeploymentID, "/") ||
+		!strings.HasPrefix(completed.Placement.AgentDeploymentIDs["tenant/one/community-researcher"], "agent:") || strings.Contains(completed.Placement.AgentDeploymentIDs["tenant/one/community-researcher"], "/") {
 		t.Fatalf("default placement=%#v", completed.Placement)
 	}
 	if _, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision); !errors.Is(err, ErrChangeSetRevision) {
@@ -211,6 +213,36 @@ func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	}
 }
 
+func TestAtomicMemoryApplyComposesInitiativeWithPortableDefaultPlacement(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{Candidate: researchInitiativeCandidate()})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}},
+	}}
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "Create a continuing research Initiative", Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-initiative"})
+	if err != nil || !created.Result.Valid || created.Result.Candidate.Initiative == nil {
+		t.Fatalf("created Initiative ChangeSet=%#v err=%v", created, err)
+	}
+	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: "Activate Initiative", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	if err != nil || len(store.initiatives) != 1 || strings.Contains(applied.Placement.InitiativeID, "/") {
+		t.Fatalf("applied Initiative=%#v stored=%#v err=%v", applied, store.initiatives, err)
+	}
+	found := false
+	for _, resource := range applied.ApplyReceipt.Resources {
+		found = found || resource.Kind == "initiative" && resource.ID == applied.Placement.InitiativeID && resource.Revision == 1
+	}
+	if !found {
+		t.Fatalf("Initiative receipt=%#v", applied.ApplyReceipt.Resources)
+	}
+}
+
 func TestChangeSetCanonicalizesDefinitionIdentityPerScopeBeforeApproval(t *testing.T) {
 	response := GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)}
 	payload, _ := json.Marshal(response)
@@ -253,6 +285,18 @@ func TestChangeSetCanonicalizesInitiativeSymbolicReferencesWithDefinitions(t *te
 	assigned, _ := candidate.Team.ObjectiveTemplates[0].Cadence["assignedAgentId"].(string)
 	if assigned != agentID {
 		t.Fatalf("canonical monitor cadence assigned Agent = %q", assigned)
+	}
+	placement := ChangeSetPlacement{}
+	canonicalizePlacement(&placement, scope, &candidate, nil)
+	firstInitiativeID := placement.InitiativeID
+	canonicalizePlacement(&placement, scope, &candidate, nil)
+	if placement.InitiativeID == "" || placement.InitiativeID != firstInitiativeID || strings.Contains(placement.InitiativeID, "/") {
+		t.Fatalf("portable deterministic Initiative placement = %#v", placement)
+	}
+	for key, objective := range placement.Objectives {
+		if objective.ID == "" || strings.Contains(objective.ID, "/") {
+			t.Fatalf("portable deterministic Objective placement %s = %#v", key, objective)
+		}
 	}
 }
 

@@ -16,15 +16,17 @@ import (
 )
 
 type workforceApplication struct {
-	agentDefinitions []*agent.AgentDefinition
-	agentDeployments []*agent.AgentDeployment
-	agentActivations []workforce.DefinitionActivation
-	skillBindings    []*capability.Binding
-	teamDefinition   *team.Definition
-	teamDeployment   *team.Deployment
-	teamActivation   workforce.DefinitionActivation
-	objectives       []workforceObjectiveApplication
-	resources        []authoring.AppliedResourceReference
+	agentDefinitions           []*agent.AgentDefinition
+	agentDeployments           []*agent.AgentDeployment
+	agentActivations           []workforce.DefinitionActivation
+	skillBindings              []*capability.Binding
+	teamDefinition             *team.Definition
+	teamDeployment             *team.Deployment
+	teamActivation             workforce.DefinitionActivation
+	objectives                 []workforceObjectiveApplication
+	initiative                 *Initiative
+	initiativeExpectedRevision int64
+	resources                  []authoring.AppliedResourceReference
 }
 
 type workforceObjectiveApplication struct {
@@ -72,11 +74,15 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		for _, binding := range bindings {
 			application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "skill_binding", ID: binding.ID, Version: binding.SkillVersion, Revision: binding.Revision})
 		}
-		application.objectives = append(application.objectives, materializeObjectives(value, "agent", definition.ID, deployment.ID, definition.ObjectiveTemplates)...)
+		objectives, err := materializeObjectives(value, "agent", definition.ID, deployment.ID, definition.ObjectiveTemplates, deploymentByDefinition)
+		if err != nil {
+			return nil, err
+		}
+		application.objectives = append(application.objectives, objectives...)
 	}
 	if value.Result.Candidate.Team == nil {
-		for _, objective := range application.objectives {
-			application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "objective", ID: objective.value.ID, Revision: objective.value.Revision})
+		if err := finishWorkforceApplication(value, application, deploymentByDefinition); err != nil {
+			return nil, err
 		}
 		return application, nil
 	}
@@ -99,14 +105,34 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	}
 	application.teamActivation = workforce.DefinitionActivation{ID: value.ApplyReceipt.ID + ":team", Scope: scope, DeploymentID: application.teamDeployment.ID, DefinitionID: definition.ID, ToVersion: definition.Version, DeploymentRevision: revision, Reason: "workforce_change_set:" + value.ID, ActorType: value.ApplyReceipt.Actor.Type, ActorID: value.ApplyReceipt.Actor.ID, CreatedAt: now}
 	application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "team_definition", ID: definition.ID, Version: definition.Version}, authoring.AppliedResourceReference{Kind: "team_deployment", ID: application.teamDeployment.ID, Version: definition.Version, Revision: revision})
-	application.objectives = append(application.objectives, materializeObjectives(value, "team", definition.ID, application.teamDeployment.ID, definition.ObjectiveTemplates)...)
+	objectives, err := materializeObjectives(value, "team", definition.ID, application.teamDeployment.ID, definition.ObjectiveTemplates, deploymentByDefinition)
+	if err != nil {
+		return nil, err
+	}
+	application.objectives = append(application.objectives, objectives...)
+	if err := finishWorkforceApplication(value, application, deploymentByDefinition); err != nil {
+		return nil, err
+	}
+	return application, nil
+}
+
+func finishWorkforceApplication(value *authoring.ChangeSet, application *workforceApplication, deploymentByDefinition map[string]string) error {
 	for _, objective := range application.objectives {
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "objective", ID: objective.value.ID, Revision: objective.value.Revision})
+	}
+	if value.Result.Candidate.Initiative != nil {
+		initiative, err := materializeInitiative(value, application, deploymentByDefinition)
+		if err != nil {
+			return err
+		}
+		application.initiative = initiative
+		application.initiativeExpectedRevision = value.Placement.InitiativeExpectedRevision
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "initiative", ID: initiative.ID, Revision: initiative.Revision})
 	}
 	sort.Slice(application.resources, func(i, j int) bool {
 		return application.resources[i].Kind+application.resources[i].ID < application.resources[j].Kind+application.resources[j].ID
 	})
-	return application, nil
+	return nil
 }
 
 func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *agent.AgentDefinition, deploymentID string) ([]*capability.Binding, error) {
@@ -218,16 +244,26 @@ func synchronizeWorkforceSkillBindingResources(application *workforceApplication
 	}
 }
 
-func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate) []workforceObjectiveApplication {
+func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate, deploymentByDefinition map[string]string) ([]workforceObjectiveApplication, error) {
 	result := make([]workforceObjectiveApplication, 0, len(templates))
 	for _, template := range templates {
 		var cadence *ObjectiveCadence
 		if len(template.Cadence) > 0 {
-			payload, _ := json.Marshal(template.Cadence)
-			var decoded ObjectiveCadence
-			if json.Unmarshal(payload, &decoded) == nil {
-				cadence = &decoded
+			payload, err := json.Marshal(template.Cadence)
+			if err != nil {
+				return nil, fmt.Errorf("materialize Objective %s cadence: %w", template.ID, err)
 			}
+			var decoded ObjectiveCadence
+			if err := json.Unmarshal(payload, &decoded); err != nil {
+				return nil, fmt.Errorf("materialize Objective %s cadence: %w", template.ID, err)
+			}
+			if deployed := deploymentByDefinition[decoded.AssignedAgentID]; deployed != "" {
+				decoded.AssignedAgentID = deployed
+			}
+			if blueprint := value.Result.Candidate.Initiative; blueprint != nil && decoded.RunTemplate != nil && decoded.RunTemplate.Context["initiativeId"] == blueprint.ID {
+				decoded.RunTemplate.Context["initiativeId"] = value.Placement.InitiativeID
+			}
+			cadence = &decoded
 		}
 		key := authoring.WorkforceObjectiveKey(ownerType, definitionID, template.ID)
 		placement := value.Placement.Objectives[key]
@@ -235,9 +271,131 @@ func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, 
 		if placement.ExpectedRevision > 0 {
 			revision = placement.ExpectedRevision + 1
 		}
-		result = append(result, workforceObjectiveApplication{value: &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: template.EventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}, expectedRevision: placement.ExpectedRevision})
+		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: template.EventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
+		if err := objective.Validate(); err != nil {
+			return nil, fmt.Errorf("materialize Objective %s: %w", template.ID, err)
+		}
+		result = append(result, workforceObjectiveApplication{value: objective, expectedRevision: placement.ExpectedRevision})
 	}
-	return result
+	return result, nil
+}
+
+func materializeInitiative(value *authoring.ChangeSet, application *workforceApplication, deploymentByDefinition map[string]string) (*Initiative, error) {
+	blueprint := value.Result.Candidate.Initiative
+	if blueprint == nil {
+		return nil, nil
+	}
+	objectiveIDs := make(map[string]string, len(value.Placement.Objectives))
+	for key, placement := range value.Placement.Objectives {
+		objectiveIDs[key] = placement.ID
+	}
+	translate := func(refs []string) ([]string, error) {
+		result := make([]string, len(refs))
+		for index, reference := range refs {
+			result[index] = objectiveIDs[reference]
+			if result[index] == "" {
+				return nil, fmt.Errorf("Initiative Objective reference %s has no placement", reference)
+			}
+		}
+		return result, nil
+	}
+	ownerID := ""
+	switch blueprint.Owner.Type {
+	case authoring.InitiativeOwnerAgent:
+		ownerID = deploymentByDefinition[blueprint.Owner.DefinitionID]
+	case authoring.InitiativeOwnerTeam:
+		if application.teamDeployment != nil && application.teamDefinition.ID == blueprint.Owner.DefinitionID {
+			ownerID = application.teamDeployment.ID
+		}
+	}
+	if ownerID == "" {
+		return nil, fmt.Errorf("Initiative owner has no deployed placement")
+	}
+	objectiveRefs, err := translate(blueprint.ObjectiveRefs)
+	if err != nil {
+		return nil, err
+	}
+	now := value.ApplyReceipt.AppliedAt
+	initiative := &Initiative{
+		ID: value.Placement.InitiativeID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Title: blueprint.Title, Purpose: blueprint.Purpose,
+		Status: InitiativeStatusActive, Owner: ObjectiveOwner{Type: OwnerType(blueprint.Owner.Type), ID: ownerID}, ObjectiveRefs: objectiveRefs,
+		Policy: cloneMap(blueprint.Policy), Revision: value.Placement.InitiativeExpectedRevision + 1, CreatedAt: now, UpdatedAt: now,
+	}
+	for index, definition := range application.agentDefinitions {
+		deployment := application.agentDeployments[index]
+		initiative.AgentRefs = append(initiative.AgentRefs,
+			ResourceReference{Kind: ResourceKindAgentDefinition, ID: definition.ID, Version: definition.Version},
+			ResourceReference{Kind: ResourceKindAgentDeployment, ID: deployment.ID, Version: definition.Version, Revision: deployment.Revision},
+		)
+	}
+	if application.teamDefinition != nil {
+		initiative.TeamRefs = append(initiative.TeamRefs,
+			ResourceReference{Kind: ResourceKindTeamDefinition, ID: application.teamDefinition.ID, Version: application.teamDefinition.Version},
+			ResourceReference{Kind: ResourceKindTeamDeployment, ID: application.teamDeployment.ID, Version: application.teamDefinition.Version, Revision: application.teamDeployment.Revision},
+		)
+	}
+	for _, source := range blueprint.Milestones {
+		refs, err := translate(source.ObjectiveRefs)
+		if err != nil {
+			return nil, err
+		}
+		initiative.Milestones = append(initiative.Milestones, InitiativeMilestone{ID: source.ID, Title: source.Title, Status: MilestonePending, ObjectiveRefs: refs})
+	}
+	for _, source := range blueprint.Hypotheses {
+		initiative.Hypotheses = append(initiative.Hypotheses, InitiativeHypothesis{ID: source.ID, Statement: source.Statement, Confidence: source.Confidence, Status: HypothesisOpen, UpdatedAt: now})
+	}
+	for _, source := range blueprint.SourceMonitors {
+		objectiveID := objectiveIDs[source.ObjectiveRef]
+		agentID := deploymentByDefinition[source.AssignedAgentDefinitionID]
+		if objectiveID == "" || agentID == "" {
+			return nil, fmt.Errorf("Initiative source monitor %s has unresolved Objective or Agent placement", source.ID)
+		}
+		initiative.SourceMonitors = append(initiative.SourceMonitors, SourceMonitorReference{
+			ID: source.ID, ObjectiveID: objectiveID, AssignedAgentID: agentID, SkillID: source.SkillID, SkillVersion: source.SkillVersion,
+			Action: source.Action, SourcePolicyRef: source.SourcePolicyRef, Deduplication: SourceMonitorDeduplication(source.Deduplication),
+		})
+	}
+	for _, source := range blueprint.Deliverables {
+		refs, err := translate(source.ObjectiveRefs)
+		if err != nil {
+			return nil, err
+		}
+		initiative.Deliverables = append(initiative.Deliverables, InitiativeDeliverable{ID: source.ID, Title: source.Title, Status: DeliverablePlanned, ObjectiveRefs: refs})
+	}
+	if err := initiative.Validate(); err != nil {
+		return nil, fmt.Errorf("materialize Initiative: %w", err)
+	}
+	if err := validateMaterializedInitiativeMonitors(initiative, application.objectives); err != nil {
+		return nil, err
+	}
+	idempotency := sha256.Sum256([]byte("workforce-change-set\x00" + value.ID + "\x00" + value.ApplyReceipt.IdempotencyKey))
+	initiative.IdempotencyKeyHash = hex.EncodeToString(idempotency[:])
+	fingerprint, err := initiativeCreationFingerprint(initiative)
+	if err != nil {
+		return nil, fmt.Errorf("fingerprint Initiative: %w", err)
+	}
+	initiative.CreationFingerprint = fingerprint
+	return initiative, nil
+}
+
+func validateMaterializedInitiativeMonitors(initiative *Initiative, objectives []workforceObjectiveApplication) error {
+	byID := make(map[string]*Objective, len(objectives))
+	for _, objective := range objectives {
+		byID[objective.value.ID] = objective.value
+	}
+	for _, monitor := range initiative.SourceMonitors {
+		objective := byID[monitor.ObjectiveID]
+		if objective == nil || objective.Owner != initiative.Owner || objective.Cadence == nil || objective.Cadence.RunTemplate == nil || objective.Cadence.RunTemplate.Capability == nil {
+			return fmt.Errorf("Initiative source monitor %s has no matching owned executable Objective", monitor.ID)
+		}
+		capability := objective.Cadence.RunTemplate.Capability
+		if objective.Cadence.AssignedAgentID != monitor.AssignedAgentID || capability.SkillID != monitor.SkillID || capability.SkillVersion != monitor.SkillVersion || capability.Action != monitor.Action ||
+			objective.Cadence.RunTemplate.Context["initiativeId"] != initiative.ID || objective.Cadence.RunTemplate.Context["sourceMonitorId"] != monitor.ID ||
+			objective.Cadence.RunTemplate.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
+			return fmt.Errorf("Initiative source monitor %s drifted from its Objective cadence", monitor.ID)
+		}
+	}
+	return nil
 }
 
 func portableDigest(value any) string {

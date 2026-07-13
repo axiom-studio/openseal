@@ -238,7 +238,8 @@ func TestPostgresAtomicWorkforceApplyHasOneReplicaWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	ready := testApplicableWorkforceChangeSet()
+	registerInitiativeSourceSkill(t, primary)
+	ready := testInitiativeWorkforceChangeSet()
 	if _, _, err = primary.CreateChangeSet(ctx, ready, "create", "digest"); err != nil {
 		t.Fatal(err)
 	}
@@ -278,5 +279,9 @@ func TestPostgresAtomicWorkforceApplyHasOneReplicaWinner(t *testing.T) {
 	}
 	if objectives, err := replica.ListObjectives(ctx, ObjectiveFilter{Scope: Scope{Kind: "tenant", ID: "one"}}); err != nil || len(objectives) != 2 {
 		t.Fatalf("objectives=%d err=%v", len(objectives), err)
+	}
+	initiative, err := replica.GetInitiative(ctx, Scope{Kind: "tenant", ID: "one"}, ready.Placement.InitiativeID)
+	if err != nil || initiative.Revision != 1 || len(initiative.SourceMonitors) != 1 || initiative.SourceMonitors[0].AssignedAgentID != "agent-live" {
+		t.Fatalf("Initiative=%#v err=%v", initiative, err)
 	}
 }
