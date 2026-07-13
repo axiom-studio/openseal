@@ -119,7 +119,16 @@ func (s *Server) handleListTeamDeployments(w http.ResponseWriter, r *http.Reques
 		s.respondTeamError(w, err)
 		return
 	}
-	s.respondJSON(w, http.StatusOK, kernelapi.TeamDeploymentList{Deployments: deployments})
+	items := make([]kernelapi.TeamDeploymentCatalogEntry, 0, len(deployments))
+	for _, deployment := range deployments {
+		definition, definitionErr := registry.GetDefinition(r.Context(), deployment.DefinitionID, deployment.ActiveVersion)
+		if definitionErr != nil {
+			s.respondTeamError(w, definitionErr)
+			return
+		}
+		items = append(items, kernelapi.TeamDeploymentCatalogEntry{Deployment: deployment, Definition: definition})
+	}
+	s.respondJSON(w, http.StatusOK, kernelapi.TeamDeploymentList{Items: items})
 }
 
 func (s *Server) handleUpdateTeamDeployment(w http.ResponseWriter, r *http.Request) {

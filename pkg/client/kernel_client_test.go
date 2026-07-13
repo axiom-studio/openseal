@@ -369,7 +369,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 		t.Fatalf("created Team = %#v, err = %v", created, err)
 	}
 	listed, err := client.ListTeamDeployments(ctx, scope)
-	if err != nil || len(listed.Deployments) != 1 || listed.Deployments[0].ID != created.Deployment.ID {
+	if err != nil || len(listed.Items) != 1 || listed.Items[0].Deployment.ID != created.Deployment.ID || listed.Items[0].Definition.ID != "research-team" {
 		t.Fatalf("listed Teams = %#v, err = %v", listed, err)
 	}
 	proposed := *created.Deployment
