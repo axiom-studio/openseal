@@ -29,6 +29,15 @@ import (
 type fakeKernelClient struct {
 	document            kernelapi.CapabilityDocument
 	runs                []*runtime.AgentRun
+	agentRequests       []*runtime.AgentRequest
+	agentRequestFilters []runtime.AgentRequestFilter
+	agentResponses      []kernelapi.RespondAgentRequestRequest
+	agentCompletions    []kernelapi.CompleteAgentRequestRequest
+	agentCompletionKeys []string
+	actionApprovals     []*runtime.ApprovalCheckpoint
+	approvalFilters     []runtime.ApprovalFilter
+	actionDecisions     []kernelapi.ResolveActionApprovalRequest
+	actionDecisionKeys  []string
 	compilations        []*kernelagent.DefinitionCompilation
 	createErrors        []error
 	createKeys          []string
@@ -248,32 +257,96 @@ func (f *fakeKernelClient) CreateAgentRequest(context.Context, kernelapi.CreateA
 	return nil, errors.New("agent requests are not configured in this test")
 }
 
-func (f *fakeKernelClient) ListAgentRequests(context.Context, runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
-	return nil, errors.New("agent requests are not configured in this test")
+func (f *fakeKernelClient) ListAgentRequests(_ context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+	f.agentRequestFilters = append(f.agentRequestFilters, filter)
+	result := make([]*runtime.AgentRequest, 0, len(f.agentRequests))
+	for _, request := range f.agentRequests {
+		if filter.Requester != nil && request.Requester != *filter.Requester {
+			continue
+		}
+		if filter.Recipient != nil && request.Recipient != *filter.Recipient {
+			continue
+		}
+		result = append(result, request)
+	}
+	return result, nil
 }
 
-func (f *fakeKernelClient) GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error) {
-	return nil, errors.New("agent requests are not configured in this test")
+func (f *fakeKernelClient) GetAgentRequest(_ context.Context, _ runtime.Scope, id string) (*runtime.AgentRequest, error) {
+	for _, request := range f.agentRequests {
+		if request.ID == id {
+			return request, nil
+		}
+	}
+	return nil, runtime.ErrAgentRequestNotFound
 }
 
-func (f *fakeKernelClient) RespondAgentRequest(context.Context, runtime.Scope, string, kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
-	return nil, errors.New("agent requests are not configured in this test")
+func (f *fakeKernelClient) RespondAgentRequest(_ context.Context, _ runtime.Scope, id string, response kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+	f.agentResponses = append(f.agentResponses, response)
+	request, err := f.GetAgentRequest(context.Background(), runtime.Scope{}, id)
+	if err != nil {
+		return nil, err
+	}
+	request.Revision++
+	request.Response = response.Message
+	switch response.Decision {
+	case runtime.AgentRequestDecisionAccept:
+		request.Status = runtime.AgentRequestStatusAccepted
+		request.AssignedAgentID = response.AssignedAgentID
+		request.ChildRunID = "child-run"
+	case runtime.AgentRequestDecisionReject:
+		request.Status = runtime.AgentRequestStatusRejected
+	case runtime.AgentRequestDecisionRequestClarification:
+		request.Status = runtime.AgentRequestStatusClarificationRequested
+		request.Clarification = response.Message
+	case runtime.AgentRequestDecisionProvideClarification:
+		request.Status = runtime.AgentRequestStatusPending
+	}
+	return &runtime.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) CompleteAgentRequest(context.Context, runtime.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*runtime.AgentRequestResult, error) {
-	return nil, errors.New("agent requests are not configured in this test")
+func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ runtime.Scope, id string, completion kernelapi.CompleteAgentRequestRequest, key string) (*runtime.AgentRequestResult, error) {
+	f.agentCompletions = append(f.agentCompletions, completion)
+	f.agentCompletionKeys = append(f.agentCompletionKeys, key)
+	request, err := f.GetAgentRequest(context.Background(), runtime.Scope{}, id)
+	if err != nil {
+		return nil, err
+	}
+	request.Revision++
+	request.Status = runtime.AgentRequestStatusCompleted
+	request.CompletionSummary = completion.Summary
+	return &runtime.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) ListActionApprovals(context.Context, runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
-	return nil, errors.New("action approvals are not configured in this test")
+func (f *fakeKernelClient) ListActionApprovals(_ context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+	f.approvalFilters = append(f.approvalFilters, filter)
+	return f.actionApprovals, nil
 }
 
-func (f *fakeKernelClient) GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error) {
-	return nil, errors.New("action approvals are not configured in this test")
+func (f *fakeKernelClient) GetActionApproval(_ context.Context, _ runtime.Scope, id string) (*runtime.ApprovalCheckpoint, error) {
+	for _, approval := range f.actionApprovals {
+		if approval.ID == id {
+			return approval, nil
+		}
+	}
+	return nil, runtime.ErrApprovalNotFound
 }
 
-func (f *fakeKernelClient) ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error) {
-	return nil, errors.New("action approvals are not configured in this test")
+func (f *fakeKernelClient) ResolveActionApproval(_ context.Context, _ runtime.Scope, id string, decision kernelapi.ResolveActionApprovalRequest, key string) (*runtime.ApprovalResolutionResult, error) {
+	f.actionDecisions = append(f.actionDecisions, decision)
+	f.actionDecisionKeys = append(f.actionDecisionKeys, key)
+	approval, err := f.GetActionApproval(context.Background(), runtime.Scope{}, id)
+	if err != nil {
+		return nil, err
+	}
+	approval.Revision++
+	approval.DecisionReason = decision.Reason
+	approval.DecisionBy = &decision.Principal
+	approval.Status = runtime.ApprovalStatusRejected
+	if decision.Approve {
+		approval.Status = runtime.ApprovalStatusApproved
+	}
+	return &runtime.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
 }
 
 func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
@@ -613,6 +686,115 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 		if strings.Contains(view, action) {
 			t.Fatalf("unadvertised action %q was rendered:\n%s", action, view)
 		}
+	}
+}
+
+func TestAgentRequestsAreAFirstClassCapabilityGatedProjection(t *testing.T) {
+	now := time.Now()
+	local := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	peer := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "researcher"}
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRequestsCapability()),
+		agentRequests: []*runtime.AgentRequest{
+			{ID: "incoming", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindRequest, Status: runtime.AgentRequestStatusPending, Requester: peer, Recipient: local, SourceRunID: "source-in", Goal: "Review the cited report", Revision: 1, CreatedAt: now, UpdatedAt: now},
+			{ID: "outgoing", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindHandoff, Status: runtime.AgentRequestStatusClarificationRequested, Requester: local, Recipient: peer, SourceRunID: "source-out", Goal: "Publish the release brief", Clarification: "Which audience?", Revision: 2, CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+			{ID: "unrelated", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindRequest, Status: runtime.AgentRequestStatusPending, Requester: peer, Recipient: runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "other"}, SourceRunID: "source-other", Goal: "Not visible", Revision: 1, CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionRequests || len(model.agentRequests) != 2 || len(fake.agentRequestFilters) != 2 {
+		t.Fatalf("request projection section=%v requests=%d filters=%#v", model.section, len(model.agentRequests), fake.agentRequestFilters)
+	}
+	view := model.View()
+	for _, expected := range []string{"R Requests", "Collaboration requests", "Review the cited report", "from agent:researcher", "y accept", "? clarify", "x reject"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("request view missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestAgentRequestResponsesAndCompletionUseExactDurableRevisions(t *testing.T) {
+	now := time.Now()
+	local := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	peer := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "developer"}
+	request := &runtime.AgentRequest{ID: "request-1", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindRequest, Status: runtime.AgentRequestStatusPending, Requester: peer, Recipient: local, SourceRunID: "source", Goal: "Review release evidence", Revision: 4, CreatedAt: now, UpdatedAt: now}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.AgentRequestsCapability()), agentRequests: []*runtime.AgentRequest{request}, runs: []*runtime.AgentRun{testRun("child-run", runtime.AgentRunStatusRunning, 7)}}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section, model.focus = sectionRequests, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if model.mode != modeRequestAccept || model.focus != focusComposer {
+		t.Fatalf("accept composer not prepared: mode=%v focus=%v", model.mode, model.focus)
+	}
+	model.editor.SetValue("Ready to review")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.agentResponses) != 1 || fake.agentResponses[0].ExpectedRevision != 4 || fake.agentResponses[0].Principal != local || fake.agentResponses[0].Decision != runtime.AgentRequestDecisionAccept {
+		t.Fatalf("response=%#v", fake.agentResponses)
+	}
+	if request.Status != runtime.AgentRequestStatusAccepted || request.ChildRunID == "" {
+		t.Fatalf("accepted request=%#v", request)
+	}
+	model.section, model.focus = sectionRequests, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.mode != modeRequestComplete {
+		t.Fatalf("completion composer mode=%v", model.mode)
+	}
+	model.editor.SetValue("Release evidence is complete")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.agentCompletions) != 1 || fake.agentCompletions[0].ExpectedRevision != 5 || fake.agentCompletions[0].ExpectedChildRevision != 7 || fake.agentCompletions[0].Principal != local || fake.agentCompletionKeys[0] == "" || fake.agentCompletions[0].IdempotencyKey != fake.agentCompletionKeys[0] {
+		t.Fatalf("completion=%#v keys=%#v", fake.agentCompletions, fake.agentCompletionKeys)
+	}
+}
+
+func TestActionApprovalResolutionRequiresAdvertisedOperationAndEligiblePrincipal(t *testing.T) {
+	now := time.Now()
+	approval := &runtime.ApprovalCheckpoint{
+		ID: "approval-1", Scope: runtime.Scope{Kind: "local", ID: "default"}, RunID: "run-1", ActionCallID: "call-1",
+		Status: runtime.ApprovalStatusPending, Risk: "production", Summary: "Publish the release announcement", PolicyReason: "External side effect",
+		ProposedAction: map[string]interface{}{"skillId": "publisher", "skillVersion": "1.0.0", "action": "publish"}, EvidenceRefs: []string{"artifact:brief@1"},
+		EligibleApprovers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 3, CreatedAt: now, UpdatedAt: now,
+	}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{Resolution: true})), actionApprovals: []*runtime.ApprovalCheckpoint{approval}}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionApprovals || len(fake.approvalFilters) != 1 || fake.approvalFilters[0].Owner == nil || *fake.approvalFilters[0].Owner != model.config.Owner {
+		t.Fatalf("approval projection section=%v filters=%#v", model.section, fake.approvalFilters)
+	}
+	view := model.View()
+	for _, expected := range []string{"A Approvals", "Action approvals", "External side effect", "publisher@1.0.0 / publish", "y approve", "x reject"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("approval view missing %q:\n%s", expected, view)
+		}
+	}
+	model.focus = focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model.editor.SetValue("Evidence confirms the authorized release window")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.actionDecisions) != 1 || !fake.actionDecisions[0].Approve || fake.actionDecisions[0].ExpectedRevision != 3 || fake.actionDecisions[0].Principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || fake.actionDecisionKeys[0] == "" || fake.actionDecisions[0].DecisionID != fake.actionDecisionKeys[0] {
+		t.Fatalf("decision=%#v keys=%#v", fake.actionDecisions, fake.actionDecisionKeys)
+	}
+
+	readOnly := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{})), actionApprovals: []*runtime.ApprovalCheckpoint{approval}}
+	readOnlyModel := newTestModel(t, readOnly)
+	applyCommand(t, readOnlyModel, readOnlyModel.loadCapabilities())
+	if strings.Contains(readOnlyModel.View(), "y approve") || strings.Contains(readOnlyModel.View(), "x reject") {
+		t.Fatalf("resolution controls rendered without advertised operation:\n%s", readOnlyModel.View())
+	}
+}
+
+func TestMismatchedRequestCapabilityFailsClosedWithoutHidingMatchingWork(t *testing.T) {
+	document := kernelapi.NewCapabilityDocument(
+		kernelapi.AgentRunsCapability(),
+		kernelapi.Capability{ID: kernelapi.AgentRequestsCapabilityID, Version: "future", Available: true, Operations: []string{kernelapi.OperationList, kernelapi.OperationRespond}},
+	)
+	model := newTestModel(t, &fakeKernelClient{document: document})
+	applyCommand(t, model, model.loadCapabilities())
+	if !model.ready || model.runCapability.Available == false || model.requestCapability.Available || strings.Contains(model.View(), "R Requests") {
+		t.Fatalf("capability drift was not isolated:\n%s", model.View())
 	}
 }
 
