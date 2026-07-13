@@ -234,6 +234,28 @@ func TestChangeSetCanonicalizesDefinitionIdentityPerScopeBeforeApproval(t *testi
 	}
 }
 
+func TestChangeSetCanonicalizesInitiativeSymbolicReferencesWithDefinitions(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	canonicalizeCandidateScope(&candidate, scope)
+	canonicalizeCandidateScope(&candidate, scope)
+
+	initiative := candidate.Initiative
+	agentID, teamID := "tenant/one/community-researcher", "tenant/one/gtm-research"
+	monitorRef := WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, "monitor")
+	if candidate.Agents[0].ID != agentID || candidate.Team.ID != teamID || initiative.Owner.DefinitionID != teamID ||
+		initiative.ObjectiveRefs[0] != WorkforceObjectiveKey(InitiativeOwnerAgent, agentID, "collect") ||
+		initiative.ObjectiveRefs[1] != monitorRef || initiative.Milestones[0].ObjectiveRefs[0] != monitorRef ||
+		initiative.SourceMonitors[0].ObjectiveRef != monitorRef || initiative.SourceMonitors[0].AssignedAgentDefinitionID != agentID ||
+		initiative.Deliverables[0].ObjectiveRefs[0] != WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, "report") {
+		t.Fatalf("canonical Initiative candidate = %#v", candidate)
+	}
+	assigned, _ := candidate.Team.ObjectiveTemplates[0].Cadence["assignedAgentId"].(string)
+	if assigned != agentID {
+		t.Fatalf("canonical monitor cadence assigned Agent = %q", assigned)
+	}
+}
+
 func TestAtomicMemoryApplySupportsAgentWithoutTeam(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Team = nil
