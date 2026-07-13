@@ -352,6 +352,46 @@ type CreateAgentRunRequest struct {
 	Visibility      runtime.ActivityVisibility `json:"visibility,omitempty"`
 }
 
+// CreateAgentRequestRequest is the public request body for a durable request or
+// handoff between Agents and Teams. Only explicitly shared, credential-free
+// context crosses the collaboration boundary.
+type CreateAgentRequestRequest struct {
+	ID                   string                        `json:"id,omitempty"`
+	Scope                runtime.Scope                 `json:"scope"`
+	Kind                 runtime.AgentRequestKind      `json:"kind"`
+	Requester            runtime.CollaborationParty    `json:"requester"`
+	Recipient            runtime.CollaborationParty    `json:"recipient"`
+	SourceRunID          string                        `json:"sourceRunId"`
+	Goal                 string                        `json:"goal"`
+	Instructions         string                        `json:"instructions,omitempty"`
+	SemanticRole         string                        `json:"semanticRole,omitempty"`
+	AcceptanceCriteria   map[string]interface{}        `json:"acceptanceCriteria,omitempty"`
+	ArtifactRequirements []runtime.ArtifactRequirement `json:"artifactRequirements,omitempty"`
+	SharedContext        map[string]interface{}        `json:"sharedContext,omitempty"`
+	ConversationRefs     []string                      `json:"conversationRefs,omitempty"`
+	BudgetAllocation     *runtime.BudgetPolicy         `json:"budgetAllocation,omitempty"`
+	IdempotencyKey       string                        `json:"idempotencyKey,omitempty"`
+}
+
+type RespondAgentRequestRequest struct {
+	ExpectedRevision int64                        `json:"expectedRevision"`
+	Decision         runtime.AgentRequestDecision `json:"decision"`
+	Principal        runtime.CollaborationParty   `json:"principal"`
+	AssignedAgentID  string                       `json:"assignedAgentId,omitempty"`
+	Message          string                       `json:"message,omitempty"`
+}
+
+type CompleteAgentRequestRequest struct {
+	ExpectedRevision      int64                       `json:"expectedRevision"`
+	ExpectedChildRevision int64                       `json:"expectedChildRevision"`
+	Principal             runtime.CollaborationParty  `json:"principal"`
+	Actor                 runtime.CollaborationParty  `json:"actor,omitempty"`
+	Summary               string                      `json:"summary"`
+	AcceptanceEvidence    map[string]interface{}      `json:"acceptanceEvidence,omitempty"`
+	Artifacts             []runtime.ArtifactReference `json:"artifacts,omitempty"`
+	IdempotencyKey        string                      `json:"idempotencyKey,omitempty"`
+}
+
 type CreateObjectiveRequest struct {
 	Scope            runtime.Scope             `json:"scope"`
 	Owner            runtime.ObjectiveOwner    `json:"owner"`

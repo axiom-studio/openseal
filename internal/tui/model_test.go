@@ -244,6 +244,26 @@ func (f *fakeKernelClient) WorkforceChangeSetCapabilities(context.Context, capab
 	return f.document, nil
 }
 
+func (f *fakeKernelClient) CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*runtime.AgentRequestResult, error) {
+	return nil, errors.New("agent requests are not configured in this test")
+}
+
+func (f *fakeKernelClient) ListAgentRequests(context.Context, runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+	return nil, errors.New("agent requests are not configured in this test")
+}
+
+func (f *fakeKernelClient) GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error) {
+	return nil, errors.New("agent requests are not configured in this test")
+}
+
+func (f *fakeKernelClient) RespondAgentRequest(context.Context, runtime.Scope, string, kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+	return nil, errors.New("agent requests are not configured in this test")
+}
+
+func (f *fakeKernelClient) CompleteAgentRequest(context.Context, runtime.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*runtime.AgentRequestResult, error) {
+	return nil, errors.New("agent requests are not configured in this test")
+}
+
 func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
 	f.authoringRequests = append(f.authoringRequests, request)
 	if len(f.authoringErrors) > 0 {
