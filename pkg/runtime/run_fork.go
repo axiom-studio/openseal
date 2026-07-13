@@ -404,26 +404,39 @@ func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *R
 		if edge.TargetRunID == winnerID || edge.State == RunDependencyStateSatisfied || edge.State == RunDependencyStateFailed || edge.State == RunDependencyStateCanceled {
 			continue
 		}
+		child, err := c.cancelLosingChild(ctx, activity, edge, winner.Group.ID, actor)
+		if err != nil {
+			return err
+		}
+		if _, err := c.CompleteChild(ctx, child, actor); err != nil && !errors.Is(err, ErrDependencyConflict) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, activity *RunActivityService, edge *RunDependency, groupID string, actor ActivityActor) (*AgentRun, error) {
+	const revisionRetries = 8
+	for attempt := 0; attempt < revisionRetries; attempt++ {
 		child, err := c.store.GetAgentRun(ctx, edge.Scope, edge.TargetRunID)
 		if err != nil || child == nil {
 			if err == nil {
 				err = ErrRunNotFound
 			}
-			return err
+			return nil, err
 		}
-		if !isTerminalAgentRunStatus(child.Status) {
-			child, _, err = activity.TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
-				ExpectedRevision: child.Revision, Status: AgentRunStatusCanceled,
-				Error: "canceled after another fork branch satisfied join_any", Actor: actor,
-				EventType: "run.fork_loser_canceled", Summary: "Canceled losing join_any branch", CorrelationID: winner.Group.ID,
-			})
-			if err != nil {
-				return err
-			}
+		if isTerminalAgentRunStatus(child.Status) {
+			return child, nil
 		}
-		if _, err := c.CompleteChild(ctx, child, actor); err != nil {
-			return err
+		child, _, err = activity.TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
+			ExpectedRevision: child.Revision, Status: AgentRunStatusCanceled,
+			Error: "canceled after another fork branch satisfied join_any", Actor: actor,
+			EventType: "run.fork_loser_canceled", Summary: "Canceled losing join_any branch", CorrelationID: groupID,
+		})
+		if errors.Is(err, ErrRevisionConflict) {
+			continue
 		}
+		return child, err
 	}
-	return nil
+	return nil, fmt.Errorf("cancel fork child %s after concurrent revisions: %w", edge.TargetRunID, ErrRevisionConflict)
 }

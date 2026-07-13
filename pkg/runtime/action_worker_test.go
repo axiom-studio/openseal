@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,20 +198,34 @@ func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
 
 func TestActionWorkerRenewsLeaseDuringLongDispatch(t *testing.T) {
 	store := NewMemoryStore(20)
-	now := time.Now().UTC()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "secret"}, nil
 	}), ActionDispatcherFunc(func(ctx context.Context, _ ActionDispatchInput) (map[string]interface{}, error) {
-		select {
-		case <-time.After(120 * time.Millisecond):
-			return map[string]interface{}{"ok": true}, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		deadline := time.NewTimer(2 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			call, err := store.GetActionCall(ctx, proposal.Call.Scope, proposal.Call.ID)
+			if err != nil {
+				return nil, err
+			}
+			if call.Revision >= 4 {
+				return map[string]interface{}{"ok": true}, nil
+			}
+			select {
+			case <-ticker.C:
+			case <-deadline.C:
+				return nil, errors.New("action lease was not renewed twice")
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}))
-	started := time.Now()
-	worker.now = func() time.Time { return now.Add(2 * time.Second).Add(time.Since(started)) }
+	var clockTicks atomic.Int64
+	worker.now = func() time.Time { return now.Add(2*time.Second + time.Duration(clockTicks.Add(1))*10*time.Millisecond) }
 	result, err := worker.RunOnce(context.Background(), proposal.Call.Scope, "long-worker", 45*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
