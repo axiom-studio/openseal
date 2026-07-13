@@ -975,6 +975,27 @@ func TestLifecycleCommandUsesSelectedRevisionAndAdvertisedOperation(t *testing.T
 	}
 }
 
+func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.runCapability = kernelapi.AgentRunsCapability()
+	run := testRun("delivery-run", runtime.AgentRunStatusCompleted, 4)
+	run.Output = map[string]interface{}{
+		"receiptId": "smtp:action-1", "status": "accepted", "recipientCount": float64(1),
+		"deliveredAt":  "2026-07-13T00:19:22Z",
+		"artifactRefs": []interface{}{map[string]interface{}{"id": "pdf-report", "version": float64(3)}},
+	}
+	model.runs = []*runtime.AgentRun{run}
+	model.section = sectionRuns
+
+	view := model.renderRunsContent(100)
+	for _, expected := range []string{"DELIVERY ACCEPTED", "1 recipient · 1 artifact", "smtp:action-1", "pdf-report · version 3"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("delivery receipt missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestContractMismatchFailsClosed(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.CapabilityDocument{Version: "99"}}
 	model := newTestModel(t, fake)
