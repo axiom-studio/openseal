@@ -2606,6 +2606,10 @@ func (e *Engine) ResolveExactSkillAction(ctx context.Context, scope skill.ScopeR
 	return e.skills.Resolve(ctx, scope, deploymentID, skillID, version, action, binding)
 }
 
+func (e *Engine) ValidateSkillActionInput(ctx context.Context, bound *skill.BoundAction, input map[string]interface{}) error {
+	return e.skills.ValidateInput(ctx, bound, input)
+}
+
 func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	return e.skills.Activate(ctx, scope, deploymentID, host)
 }
