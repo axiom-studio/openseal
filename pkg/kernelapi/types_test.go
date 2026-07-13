@@ -54,6 +54,21 @@ func TestAgentRequestsAdvertisePortableCollaborationLifecycle(t *testing.T) {
 	}
 }
 
+func TestActionApprovalsAdvertiseGovernedDecisionLifecycle(t *testing.T) {
+	capability := ActionApprovalsCapability()
+	if capability.ID != ActionApprovalsCapabilityID || capability.Version != ActionApprovalsCapabilityVersion {
+		t.Fatalf("action approval capability identity = %#v", capability)
+	}
+	for _, operation := range []string{OperationGet, OperationList, OperationResolve} {
+		if !capability.Supports(operation) {
+			t.Fatalf("action approval operation %q not advertised: %#v", operation, capability.Operations)
+		}
+	}
+	if capability.Supports(OperationCreate) || capability.Supports(OperationApprove) {
+		t.Fatalf("unsupported action approval operation advertised: %#v", capability.Operations)
+	}
+}
+
 func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *testing.T) {
 	capability := ArtifactCapability()
 	if !capability.Supports(OperationRegister) || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {

@@ -36,6 +36,8 @@ const (
 	AgentDefinitionsCapabilityVersion   = "2"
 	AgentRequestsCapabilityID           = "agent-requests"
 	AgentRequestsCapabilityVersion      = "1"
+	ActionApprovalsCapabilityID         = "action-approvals"
+	ActionApprovalsCapabilityVersion    = "1"
 )
 
 const (
@@ -238,6 +240,15 @@ func AgentRequestsCapability() Capability {
 	return Capability{
 		ID: AgentRequestsCapabilityID, Version: AgentRequestsCapabilityVersion, Available: true,
 		Operations: []string{OperationCreate, OperationGet, OperationList, OperationRespond, OperationComplete},
+	}
+}
+
+// ActionApprovalsCapability describes the governed decision surface for
+// deterministic actions that have paused at a durable approval checkpoint.
+func ActionApprovalsCapability() Capability {
+	return Capability{
+		ID: ActionApprovalsCapabilityID, Version: ActionApprovalsCapabilityVersion, Available: true,
+		Operations: []string{OperationGet, OperationList, OperationResolve},
 	}
 }
 
