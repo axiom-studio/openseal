@@ -509,6 +509,14 @@ const (
 	ChannelOperationReceipts                = kernelapi.OperationReceipts
 	ChannelOperationChanges                 = kernelapi.OperationChanges
 	ChannelOperationStream                  = kernelapi.OperationStream
+	KernelOperationUpload                   = kernelapi.OperationUpload
+	KernelOperationDownload                 = kernelapi.OperationDownload
+	KernelOperationResolve                  = kernelapi.OperationResolve
+	KernelOperationPropose                  = kernelapi.OperationPropose
+	KernelOperationEvaluate                 = kernelapi.OperationEvaluate
+	KernelOperationApprove                  = kernelapi.OperationApprove
+	KernelOperationApply                    = kernelapi.OperationApply
+	KernelOperationRetry                    = kernelapi.OperationRetry
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
 	RunbookAPIVersion                       = runbook.APIVersion
@@ -544,6 +552,38 @@ const (
 // channel services an embedding host has actually wired.
 func ChannelCapability(features ChannelCapabilityFeatures) KernelCapability {
 	return kernelapi.ChannelsCapability(features)
+}
+
+func AgentRunsCapability() KernelCapability {
+	return kernelapi.AgentRunsCapability()
+}
+
+func ObjectivesCapability() KernelCapability {
+	return kernelapi.ObjectivesCapability()
+}
+
+func InitiativesCapability() KernelCapability {
+	return kernelapi.InitiativesCapability()
+}
+
+func SourceMonitorsCapability() KernelCapability {
+	return kernelapi.SourceMonitorsCapability()
+}
+
+func AgentDefinitionsCapability() KernelCapability {
+	return kernelapi.AgentDefinitionsCapability()
+}
+
+func ArtifactsCapability(contentOperations ...string) KernelCapability {
+	return kernelapi.ArtifactCapability(contentOperations...)
+}
+
+func TeamDefinitionsCapability() KernelCapability {
+	return kernelapi.TeamDefinitionsCapability()
+}
+
+func WorkforceAuthoringCapability(changeSets ...bool) KernelCapability {
+	return kernelapi.WorkforceAuthoringCapability(changeSets...)
 }
 
 // NewKernelCapabilityDocument composes the exact capability envelope consumed
