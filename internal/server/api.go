@@ -7,6 +7,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/webui"
 )
@@ -67,6 +68,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/action-approvals/{id}", s.handleGetActionApproval)
 	s.mux.HandleFunc("POST /api/v1/action-approvals/{id}/decisions", s.handleResolveActionApproval)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/compilations", s.handleListAgentDefinitionCompilations)
+	s.mux.HandleFunc("GET /api/v1/agent-deployments/{deploymentId}/skill-actions", s.handleListSkillActions)
 	s.mux.HandleFunc("POST /api/v1/artifacts", s.handleRegisterArtifact)
 	s.mux.HandleFunc("GET /api/v1/artifacts", s.handleListArtifacts)
 	s.mux.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
@@ -135,6 +137,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
 			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}))
 		}
+	}
+	if _, skillsOK := s.store.(skill.CatalogStore); skillsOK {
+		capabilities = append(capabilities, kernelapi.SkillActionsCapability())
 	}
 	if s.authoring != nil {
 		workforceCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{

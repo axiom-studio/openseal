@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -278,7 +279,7 @@ func (m *Model) renderPanelTabs() string {
 		}
 		tabs = append(tabs, label)
 	}
-	if m.clawHubCapability.Available {
+	if m.clawHubCapability.Available || m.skillActionCapability.Available {
 		label := "s Skills"
 		if m.section == sectionSkills {
 			label = selectedStyle.Render(label)
@@ -612,12 +613,14 @@ func (m *Model) renderInitiativesContent(width int) string {
 }
 
 func (m *Model) renderClawHubSkillsContent(width int) string {
-	title := headerStyle.Render("Installed Skills")
+	title := headerStyle.Render("Skills and authorized actions")
 	if m.loading {
 		title += mutedStyle.Render("  refreshing…")
 	}
-	lines := []string{title, ""}
-	if len(m.clawHubSkills) == 0 {
+	lines := []string{title, "", mutedStyle.Render("Installed packages")}
+	if !m.clawHubCapability.Available {
+		lines = append(lines, mutedStyle.Render("Skill installation is not available from this kernel."))
+	} else if len(m.clawHubSkills) == 0 {
 		lines = append(lines, mutedStyle.Render("No ClawHub Skills installed. Press n and enter @owner/skill."))
 	} else {
 		visible := max(3, min(len(m.clawHubSkills), max(m.height-18, 5)))
@@ -668,6 +671,29 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 			actions = append(actions, "n install")
 		}
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
+	}
+	lines = append(lines, "", mutedStyle.Render("Authorized for this Agent"))
+	if !m.skillActionCapability.Available {
+		lines = append(lines, mutedStyle.Render("The kernel does not advertise owner-scoped action discovery."))
+	} else if len(m.skillActions) == 0 {
+		lines = append(lines,
+			mutedStyle.Render("No executable action is bound to this Agent."),
+			mutedStyle.Render("Install or bind a Skill, satisfy its credential and policy requirements, then refresh."),
+		)
+	} else {
+		for _, action := range m.skillActions {
+			identity := fmt.Sprintf("%s@%s/%s", action.SkillID, action.Version, action.Action)
+			contract := fmt.Sprintf("%s · %s · binding %s@%d", action.Risk, action.SideEffect, compact(action.BindingID, 24), action.BindingRevision)
+			lines = append(lines, "• "+compact(action.Name, max(width-8, 24))+"  "+mutedStyle.Render(identity), mutedStyle.Render("  "+contract))
+			if len(action.SemanticArguments) > 0 {
+				roles := make([]string, 0, len(action.SemanticArguments))
+				for role, argument := range action.SemanticArguments {
+					roles = append(roles, role+" → "+argument)
+				}
+				sort.Strings(roles)
+				lines = append(lines, mutedStyle.Render("  "+strings.Join(roles, " · ")))
+			}
+		}
 	}
 	return strings.Join(lines, "\n")
 }

@@ -534,6 +534,7 @@ type (
 	KernelCapabilityDocument              = kernelapi.CapabilityDocument
 	KernelCapabilityContext               = kernelapi.CapabilityContext
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
+	KernelSkillActionList                 = kernelapi.SkillActionList
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
 	TeamDefinitionCapabilityFeatures      = kernelapi.TeamDefinitionCapabilityFeatures
 	WorkforceAuthoringCapabilityFeatures  = kernelapi.WorkforceAuthoringCapabilityFeatures

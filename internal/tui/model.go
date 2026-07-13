@@ -138,6 +138,7 @@ type Model struct {
 	sourceMonitorCapability     kernelapi.Capability
 	activityCapability          kernelapi.Capability
 	clawHubCapability           kernelapi.Capability
+	skillActionCapability       kernelapi.Capability
 	artifactCapability          kernelapi.Capability
 	channelCapability           kernelapi.Capability
 	authoringCapability         kernelapi.Capability
@@ -162,6 +163,7 @@ type Model struct {
 	selectedInitiative          string
 	sourceMonitorStatuses       map[string]sourceMonitorStatus
 	clawHubSkills               []clawhub.InstalledState
+	skillActions                []capability.ModelAction
 	clawHubSelected             int
 	selectedClawHub             string
 	selected                    int
@@ -313,6 +315,10 @@ type clawHubSkillsLoaded struct {
 	skills []clawhub.InstalledState
 	err    error
 }
+type skillActionsLoaded struct {
+	actions []capability.ModelAction
+	err     error
+}
 type clawHubLifecycleCompleted struct {
 	result    *clawhub.LifecycleResult
 	batch     *clawhub.LifecycleBatchResult
@@ -443,6 +449,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
 		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
+		skillActionCapability, hasSkillActions := msg.document.Find(kernelapi.SkillActionsCapabilityID, kernelapi.SkillActionsCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
@@ -455,6 +462,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.sourceMonitorCapability = sourceMonitorCapability
 		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
+		m.skillActionCapability = skillActionCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
@@ -485,6 +493,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasClawHub || !clawHubCapability.Available || m.clawHubClient == nil {
 			m.clawHubCapability = kernelapi.Capability{}
 		}
+		if !hasSkillActions || !skillActionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
+			m.skillActionCapability = kernelapi.Capability{}
+		}
 		if !hasArtifacts || !artifactCapability.Available {
 			m.artifactCapability = kernelapi.Capability{}
 		}
@@ -497,7 +508,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
 			m.agentDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -521,10 +532,14 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionInitiatives
 			m.mode = modeInitiativeCreate
 			m.editor.Placeholder = "Describe the Initiative outcome…"
-		} else if m.clawHubCapability.Available {
+		} else if m.clawHubCapability.Available || m.skillActionCapability.Available {
 			m.section = sectionSkills
-			m.mode = modeSkillInstall
-			m.editor.Placeholder = "Enter @owner/skill to install…"
+			if m.clawHubCapability.Available {
+				m.mode = modeSkillInstall
+				m.editor.Placeholder = "Enter @owner/skill to install…"
+			} else {
+				m.focusPanelList()
+			}
 		} else if !m.objectiveCapability.Available && m.runCapability.Available {
 			m.section = sectionRuns
 			m.mode = modeCreate
@@ -544,7 +559,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionReadiness
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -639,6 +654,15 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.clawHubSkills = msg.skills
 		m.restoreClawHubSelection()
+		return m, nil
+	case skillActionsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.skillActions = msg.actions
 		return m, nil
 	case clawHubLifecycleCompleted:
 		m.busy = false
@@ -1094,8 +1118,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.section = sectionInitiatives
 			}
 		case "s":
-			if m.clawHubCapability.Available {
+			if m.clawHubCapability.Available || m.skillActionCapability.Available {
 				m.section = sectionSkills
+				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillActions())
 			}
 		case "a":
 			if m.artifactCapability.Available {
@@ -1631,6 +1656,26 @@ func (m *Model) loadClawHubSkills() tea.Cmd {
 	return func() tea.Msg {
 		skills, err := m.clawHubClient.ListInstalledClawHubSkills(m.ctx)
 		return clawHubSkillsLoaded{skills, err}
+	}
+}
+
+func (m *Model) loadSkillActions() tea.Cmd {
+	if !m.supportsSkillAction(kernelapi.OperationList) || m.config.Owner.Type != runtime.OwnerTypeAgent {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		result, err := m.client.ListAgentSkillActions(
+			m.ctx,
+			capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID},
+			m.config.Owner.ID,
+			nil,
+			"",
+		)
+		if err != nil {
+			return skillActionsLoaded{err: err}
+		}
+		return skillActionsLoaded{actions: result.Actions}
 	}
 }
 
@@ -2321,6 +2366,10 @@ func (m *Model) supportsSourceMonitor(operation string) bool {
 
 func (m *Model) supportsClawHub(operation clawhub.LifecycleOperation) bool {
 	return m.ready && m.clawHubClient != nil && m.clawHubCapability.Supports(string(operation))
+}
+
+func (m *Model) supportsSkillAction(operation string) bool {
+	return m.ready && m.skillActionCapability.Supports(operation)
 }
 
 func (m *Model) supportsArtifact(operation string) bool {

@@ -75,6 +75,8 @@ type fakeKernelClient struct {
 	retryKeys           []string
 	governanceResults   []*authoring.ChangeSet
 	governanceErrors    []error
+	skillActions        []capability.ModelAction
+	skillActionCalls    int
 }
 
 type fakeChannelKernelClient struct {
@@ -255,6 +257,11 @@ func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDo
 
 func (f *fakeKernelClient) WorkforceChangeSetCapabilities(context.Context, capability.ScopeReference, string) (kernelapi.CapabilityDocument, error) {
 	return f.document, nil
+}
+
+func (f *fakeKernelClient) ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error) {
+	f.skillActionCalls++
+	return &kernelapi.SkillActionList{DeploymentID: "researcher", Actions: f.skillActions}, nil
 }
 
 func (f *fakeKernelClient) CreateAgentRequest(_ context.Context, request kernelapi.CreateAgentRequestRequest, key string) (*runtime.AgentRequestResult, error) {
@@ -1305,7 +1312,7 @@ func TestClawHubSkillsUseAdvertisedLifecycleAndTypedConfirmation(t *testing.T) {
 	fake := &fakeClawHubKernelClient{fakeKernelClient: base, states: []clawhub.InstalledState{{APIVersion: clawhub.LifecycleAPIVersion, SourceIdentity: "source", Reference: clawhub.SkillReference{Owner: "acme", Slug: "research"}, Version: "1.0.0", Verified: true}}}
 	model := newModelWithClient(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	if model.section != sectionSkills || !strings.Contains(model.View(), "Installed Skills") || !strings.Contains(model.View(), "@acme/research@1.0.0") {
+	if model.section != sectionSkills || !strings.Contains(model.View(), "Skills and authorized actions") || !strings.Contains(model.View(), "@acme/research@1.0.0") {
 		t.Fatalf("Skills surface not rendered:\n%s", model.View())
 	}
 	model.mode = modeSkillInstall
@@ -1332,6 +1339,38 @@ func TestClawHubSkillsUseAdvertisedLifecycleAndTypedConfirmation(t *testing.T) {
 	applyCommand(t, model, model.submitClawHubRemoval())
 	if len(fake.uninstalls) != 1 {
 		t.Fatalf("uninstalls=%#v", fake.uninstalls)
+	}
+}
+
+func TestSkillActionsUseOwnerScopedTypedDiscovery(t *testing.T) {
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.SkillActionsCapability()),
+		skillActions: []capability.ModelAction{{
+			Name: "community.reply", Description: "Reply to a community thread", BindingID: "community-account", BindingRevision: 7,
+			SkillID: "community", Version: "1", Action: "reply", Risk: capability.RiskLevelExternal, SideEffect: capability.SideEffectExternal,
+			SemanticArguments: map[string]string{"target": "thread", "body": "message"},
+		}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionSkills || fake.skillActionCalls != 1 {
+		t.Fatalf("section=%v calls=%d", model.section, fake.skillActionCalls)
+	}
+	view := model.View()
+	for _, expected := range []string{"Authorized for this Agent", "community@1/reply", "community-account@7", "target → thread", "body → message"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("authorized action missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestSkillActionsRenderTruthfulEmptyState(t *testing.T) {
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.SkillActionsCapability())}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	if !strings.Contains(view, "No executable action is bound to this Agent") || strings.Contains(view, "Press n") {
+		t.Fatalf("empty action state is not truthful:\n%s", view)
 	}
 }
 
