@@ -251,14 +251,18 @@ func (r ConversationReference) Validate() error {
 // stores hidden reasoning; explanations belong in concise content and linked
 // evidence, decisions, Runs, requests, approvals, and artifacts.
 type ChannelMessage struct {
-	ID                   string                    `json:"id"`
-	Scope                Scope                     `json:"scope"`
-	ConversationID       string                    `json:"conversationId"`
-	Sequence             int64                     `json:"sequence"`
-	Sender               ConversationParticipant   `json:"sender"`
-	SenderDisplayName    string                    `json:"senderDisplayName,omitempty"`
-	Intent               ConversationMessageIntent `json:"intent"`
-	Content              string                    `json:"content"`
+	ID                string                    `json:"id"`
+	Scope             Scope                     `json:"scope"`
+	ConversationID    string                    `json:"conversationId"`
+	Sequence          int64                     `json:"sequence"`
+	Sender            ConversationParticipant   `json:"sender"`
+	SenderDisplayName string                    `json:"senderDisplayName,omitempty"`
+	Intent            ConversationMessageIntent `json:"intent"`
+	Content           string                    `json:"content"`
+	// ContributionKey is a privacy-safe, normalized semantic claim identifier
+	// used to suppress paraphrased pile-ons (for example rollout-owner:agent-37).
+	// It is user-visible metadata, never hidden reasoning.
+	ContributionKey      string                    `json:"contributionKey,omitempty"`
 	Audience             ConversationAudience      `json:"audience"`
 	ThreadRootID         string                    `json:"threadRootId,omitempty"`
 	ReplyToMessageID     string                    `json:"replyToMessageId,omitempty"`
@@ -292,6 +296,9 @@ func (m *ChannelMessage) Validate() error {
 	if !validConversationMessageIntent(m.Intent) || strings.TrimSpace(m.Content) == "" || len(m.Content) > 65536 {
 		return fmt.Errorf("%w: valid intent and content of at most 64 KiB are required", ErrInvalidConversation)
 	}
+	if !validConversationContributionKey(m.ContributionKey) {
+		return fmt.Errorf("%w: contribution key must be normalized lowercase metadata", ErrInvalidConversation)
+	}
 	if err := m.Audience.Validate(); err != nil {
 		return err
 	}
@@ -319,6 +326,22 @@ func (m *ChannelMessage) Validate() error {
 		return fmt.Errorf("%w: idempotency key cannot exceed 256 characters or contain line breaks", ErrInvalidConversation)
 	}
 	return nil
+}
+
+func validConversationContributionKey(value string) bool {
+	if value == "" {
+		return true
+	}
+	if value != strings.TrimSpace(value) || len(value) > 160 {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || strings.ContainsRune("._:-", character) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 type ConversationCursor struct {

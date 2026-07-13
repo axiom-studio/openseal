@@ -61,6 +61,7 @@ type ParticipationProposal struct {
 	WantsToSpeak      bool                      `json:"wantsToSpeak"`
 	Intent            ConversationMessageIntent `json:"intent,omitempty"`
 	Content           string                    `json:"content,omitempty"`
+	ContributionKey   string                    `json:"contributionKey,omitempty"`
 	Audience          ConversationAudience      `json:"audience,omitempty"`
 	Mentions          []ConversationParticipant `json:"mentions,omitempty"`
 	References        []ConversationReference   `json:"references,omitempty"`
@@ -82,7 +83,7 @@ func (p ParticipationProposal) Validate() error {
 		return errors.New("participation proposal priority must be between -100 and 100")
 	}
 	if !p.WantsToSpeak {
-		if strings.TrimSpace(p.Content) != "" || p.Intent != "" || len(p.Mentions) > 0 || len(p.References) > 0 ||
+		if strings.TrimSpace(p.Content) != "" || p.ContributionKey != "" || p.Intent != "" || len(p.Mentions) > 0 || len(p.References) > 0 ||
 			p.ReplyToMessageID != "" || p.RequiresResponse || p.ResolvesMessageID != "" {
 			return errors.New("silent participation proposal cannot include message output")
 		}
@@ -90,6 +91,9 @@ func (p ParticipationProposal) Validate() error {
 	}
 	if !validConversationMessageIntent(p.Intent) || p.Intent == MessageIntentSystem || strings.TrimSpace(p.Content) == "" || len(p.Content) > 65536 {
 		return errors.New("speaking participation proposal requires a valid non-system intent and content")
+	}
+	if !validConversationContributionKey(p.ContributionKey) {
+		return errors.New("participation proposal contribution key must be normalized lowercase metadata")
 	}
 	if err := p.Audience.Validate(); err != nil {
 		return err
@@ -255,7 +259,7 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 		if message == nil || strings.TrimSpace(message.Content) == "" {
 			continue
 		}
-		recentComparable = append(recentComparable, comparableMessage{id: message.ID, content: message.Content})
+		recentComparable = append(recentComparable, comparableMessage{id: message.ID, content: message.Content, key: message.ContributionKey})
 	}
 	speakers := make([]string, 0, normalizedPolicy.MaximumSpeakers)
 	for index := range decisions {
@@ -269,7 +273,7 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonLowRelevance)
 			continue
 		}
-		if duplicateID := findDuplicateConversationMessage(proposal.Content, recentComparable, normalizedPolicy.DuplicateThreshold); duplicateID != "" {
+		if duplicateID := findDuplicateConversationMessage(proposal.Content, proposal.ContributionKey, recentComparable, normalizedPolicy.DuplicateThreshold); duplicateID != "" {
 			decision.Disposition = ParticipationSilent
 			decision.DuplicateOfID = duplicateID
 			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonDuplicate)
@@ -284,7 +288,7 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 		decision.Rank = len(speakers) + 1
 		decision.Fingerprint = ConversationMessageFingerprint(proposal.Content)
 		speakers = append(speakers, proposal.ID)
-		recentComparable = append(recentComparable, comparableMessage{id: proposal.ID, content: proposal.Content})
+		recentComparable = append(recentComparable, comparableMessage{id: proposal.ID, content: proposal.Content, key: proposal.ContributionKey})
 	}
 	sort.Slice(decisions, func(i, j int) bool { return decisions[i].ProposalID < decisions[j].ProposalID })
 	return &ConversationArbitration{RoundID: roundID, Decisions: decisions, Speakers: speakers}, nil
@@ -359,10 +363,14 @@ func proposalCoordinatesWork(proposal ParticipationProposal) bool {
 type comparableMessage struct {
 	id      string
 	content string
+	key     string
 }
 
-func findDuplicateConversationMessage(content string, messages []comparableMessage, threshold float64) string {
+func findDuplicateConversationMessage(content, key string, messages []comparableMessage, threshold float64) string {
 	for _, message := range messages {
+		if key != "" && message.key != "" && key == message.key {
+			return message.id
+		}
 		if conversationMessageSimilarity(content, message.content) >= threshold {
 			return message.id
 		}

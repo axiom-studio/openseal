@@ -379,7 +379,8 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 		message := &ChannelMessage{
 			ID: stableConversationID(req.Scope, key, "speaker:"+proposal.ID), Scope: req.Scope, ConversationID: conversation.ID,
 			Sequence: sequence, Sender: proposal.Participant, Intent: proposal.Intent, Content: strings.TrimSpace(proposal.Content),
-			Audience: proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID,
+			ContributionKey: proposal.ContributionKey,
+			Audience:        proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID,
 			Mentions: cloneParticipants(proposal.Mentions), References: cloneConversationReferences(proposal.References),
 			RequiresResponse: proposal.RequiresResponse, ResolvesMessageID: proposal.ResolvesMessageID,
 			IdempotencyKey: key + ":speaker:" + proposal.ID, ParticipationRoundID: roundID, CreatedAt: now,
