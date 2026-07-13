@@ -17,7 +17,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v4"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v5"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
@@ -70,20 +70,22 @@ type HostedTurnRequest struct {
 }
 
 type HostedTurnResponse struct {
-	APIVersion             string                 `json:"apiVersion"`
-	InvocationID           string                 `json:"invocationId"`
-	ModelProvider          string                 `json:"modelProvider"`
-	Model                  string                 `json:"model"`
-	SkillSelections        []HostedSkillSelection `json:"skillSelections,omitempty"`
-	Decisions              []TurnDecision         `json:"decisions,omitempty"`
-	ProposedActions        []TurnAction           `json:"proposedActions,omitempty"`
-	OutputSummary          string                 `json:"outputSummary"`
-	Usage                  TurnUsage              `json:"usage,omitempty"`
-	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
-	NextRunStatus          AgentRunStatus         `json:"nextRunStatus"`
-	WakeCondition          *WakeCondition         `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{} `json:"runOutput,omitempty"`
-	RunError               string                 `json:"runError,omitempty"`
+	APIVersion             string                  `json:"apiVersion"`
+	InvocationID           string                  `json:"invocationId"`
+	ModelProvider          string                  `json:"modelProvider"`
+	Model                  string                  `json:"model"`
+	SkillSelections        []HostedSkillSelection  `json:"skillSelections,omitempty"`
+	Decisions              []TurnDecision          `json:"decisions,omitempty"`
+	ProposedActions        []TurnAction            `json:"proposedActions,omitempty"`
+	ProposedFork           *TurnForkProposal       `json:"proposedFork,omitempty"`
+	ProposedDelegation     *TurnDelegationProposal `json:"proposedDelegation,omitempty"`
+	OutputSummary          string                  `json:"outputSummary"`
+	Usage                  TurnUsage               `json:"usage,omitempty"`
+	ContinuationCheckpoint map[string]interface{}  `json:"continuationCheckpoint,omitempty"`
+	NextRunStatus          AgentRunStatus          `json:"nextRunStatus"`
+	WakeCondition          *WakeCondition          `json:"wakeCondition,omitempty"`
+	RunOutput              map[string]interface{}  `json:"runOutput,omitempty"`
+	RunError               string                  `json:"runError,omitempty"`
 }
 
 type TurnHost interface {
@@ -165,8 +167,27 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if len(response.ProposedActions) > 1 {
 		return nil, errors.New("a bounded hosted Turn can propose at most one action")
 	}
-	if len(response.ProposedActions) == 1 && response.NextRunStatus != AgentRunStatusRunning {
-		return nil, errors.New("a hosted Turn proposing an action must remain running until governance materializes it")
+	proposalCount := 0
+	if len(response.ProposedActions) == 1 {
+		proposalCount++
+	}
+	if response.ProposedFork != nil {
+		proposalCount++
+		if err := response.ProposedFork.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid hosted fork proposal: %w", err)
+		}
+	}
+	if response.ProposedDelegation != nil {
+		proposalCount++
+		if err := response.ProposedDelegation.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid hosted delegation proposal: %w", err)
+		}
+	}
+	if proposalCount > 1 {
+		return nil, errors.New("a bounded hosted Turn can propose only one action, fork, or delegation")
+	}
+	if proposalCount == 1 && response.NextRunStatus != AgentRunStatusRunning {
+		return nil, errors.New("a hosted Turn proposal must remain running until the kernel materializes it")
 	}
 	allowedSkillRefs := make(map[string]struct{}, len(request.SkillPrompts))
 	for _, prompt := range request.SkillPrompts {
@@ -211,6 +232,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ModelProvider: response.ModelProvider, Model: response.Model,
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
 		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
+		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation,
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,

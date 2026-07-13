@@ -51,7 +51,7 @@ type TurnDelegationProposal struct {
 }
 
 func (p *TurnDelegationProposal) Validate() error {
-	if p == nil || strings.TrimSpace(p.StepID) == "" || strings.TrimSpace(p.AssignedAgentID) == "" || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
+	if p == nil || !validOpaqueIdentifier(p.StepID, 128) || !validOpaqueIdentifier(p.AssignedAgentID, 128) || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
 		return errors.New("delegation proposal requires step, assigned Agent, goal, and non-negative timeout")
 	}
 	if err := ValidateCredentialFreeContext(p.Context); err != nil {
@@ -70,7 +70,7 @@ func (p *TurnDelegationProposal) Validate() error {
 }
 
 func (p *TurnForkProposal) Validate() error {
-	if p == nil || strings.TrimSpace(p.ForkID) == "" || len(p.Branches) < 2 {
+	if p == nil || !validOpaqueIdentifier(p.ForkID, 128) || len(p.Branches) < 2 {
 		return errors.New("fork proposal requires an ID and at least two branches")
 	}
 	if err := p.Policy.Validate(); err != nil {
@@ -85,9 +85,26 @@ func (p *TurnForkProposal) Validate() error {
 		if id == "" || seen[id] || strings.TrimSpace(branch.Goal) == "" {
 			return errors.New("fork proposal branches require unique IDs and goals")
 		}
+		if !validOpaqueIdentifier(id, 128) || branch.AssignedAgentID != "" && !validOpaqueIdentifier(branch.AssignedAgentID, 128) {
+			return errors.New("fork proposal branch and assigned Agent IDs must be portable opaque identifiers")
+		}
 		seen[id] = true
+		if err := ValidateCredentialFreeContext(branch.Context); err != nil {
+			return fmt.Errorf("fork branch %s context: %w", id, err)
+		}
 		if err := ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
 			return fmt.Errorf("fork branch %s: %w", id, err)
+		}
+		if branch.Budget != nil {
+			if err := branch.Budget.Validate(); err != nil {
+				return fmt.Errorf("fork branch %s budget: %w", id, err)
+			}
+		}
+		if branch.Timeout < 0 {
+			return fmt.Errorf("fork branch %s timeout cannot be negative", id)
+		}
+		if branch.Mode != "" && branch.Mode != runbook.DelegateBehavior && branch.Mode != runbook.DelegateReason {
+			return fmt.Errorf("fork branch %s delegation mode is invalid", id)
 		}
 	}
 	return nil
@@ -200,6 +217,17 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			assignedAgentID = source.AssignedAgentID
 			childContext = cloneMap(source.Context)
 			childPlan = cloneMap(source.Plan)
+		} else if initiativeID, ok := source.Context["initiativeId"].(string); ok && strings.TrimSpace(initiativeID) != "" {
+			// Initiative identity is safe, canonical work lineage. Preserve it
+			// across Agent boundaries without copying the source Run's broader
+			// context, which may contain owner-private references.
+			if childContext == nil {
+				childContext = map[string]interface{}{}
+			}
+			if supplied, exists := childContext["initiativeId"]; exists && supplied != initiativeID {
+				return nil, errors.New("fork branch cannot replace its source Initiative lineage")
+			}
+			childContext["initiativeId"] = initiativeID
 		}
 		if branch.Mode != "" {
 			if childContext == nil {
