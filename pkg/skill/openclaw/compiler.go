@@ -71,7 +71,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 	}
 
 	definition := &capability.Definition{
-		ID: parsed.CanonicalName, Version: resolvedVersion(parsed, bundle.Source.Version, digest), Name: parsed.Name,
+		ID: parsed.CanonicalName, Version: resolvedVersion(parsed, bundle.Source, digest), Name: parsed.Name,
 		Description: parsed.Description, Icon: parsed.Metadata.Emoji, ConfigurationKey: parsed.Metadata.SkillKey,
 		Actions: map[string]capability.Action{},
 		Prompt: &capability.PromptModule{
@@ -161,14 +161,14 @@ func ExportBundle(compilation *Compilation) (Bundle, error) {
 
 // BundleDigest returns the canonical content identity used by compiled source
 // provenance. Source registry and trust metadata are intentionally excluded:
-// identical bytes have one content digest while each retained artifact keeps
-// its own origin metadata.
+// identical bytes have one content digest while retention references preserve
+// each independent origin.
 func BundleDigest(bundle Bundle) string {
 	return bundleDigest(bundle)
 }
 
-func resolvedVersion(parsed *skillmd.ParsedSkill, sourceVersion, digest string) string {
-	version := strings.TrimSpace(sourceVersion)
+func resolvedVersion(parsed *skillmd.ParsedSkill, source Source, digest string) string {
+	version := strings.TrimSpace(source.Version)
 	if version == "" {
 		version = strings.TrimSpace(parsed.Version)
 	}
@@ -179,7 +179,23 @@ func resolvedVersion(parsed *skillmd.ParsedSkill, sourceVersion, digest string) 
 	if strings.Contains(version, "+") {
 		separator = ".source."
 	}
-	return version + separator + digest[:12]
+	version += separator + digest[:12]
+	if origin := sourceOriginDigest(source); origin != "" {
+		version += ".origin." + origin[:12]
+	}
+	return version
+}
+
+func sourceOriginDigest(source Source) string {
+	identity := strings.Join([]string{
+		strings.TrimSpace(source.Registry), strings.TrimSpace(source.Publisher),
+		strings.TrimSpace(source.Reference), strings.TrimSpace(source.ExpectedName),
+	}, "\x00")
+	if strings.Trim(identity, "\x00") == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(digest[:])
 }
 
 func compileInstallers(values []skillmd.InstallSpec) []capability.Installer {
