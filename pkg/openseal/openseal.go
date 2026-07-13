@@ -363,6 +363,7 @@ type (
 	TurnHost                           = runtime.TurnHost
 	HostedTurnRunnerConfig             = runtime.HostedTurnRunnerConfig
 	HostedTurnRunner                   = runtime.HostedTurnRunner
+	CapabilityInvocationTurnRunner     = runtime.CapabilityInvocationTurnRunner
 	AdvanceAgentRunRequest             = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult              = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore              = runtime.AgentRunScheduleStore
@@ -635,12 +636,13 @@ func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabil
 }
 
 var (
-	NewHostedTurnRunner         = runtime.NewHostedTurnRunner
-	NewArtifactRetentionService = runtime.NewArtifactRetentionService
-	ErrTurnHostUnavailable      = runtime.ErrTurnHostUnavailable
-	ValidateRunbook             = runbook.Validate
-	NewRunbookTurnRunner        = runtime.NewRunbookTurnRunner
-	NewRunForkCoordinator       = runtime.NewRunForkCoordinator
+	NewHostedTurnRunner               = runtime.NewHostedTurnRunner
+	NewCapabilityInvocationTurnRunner = runtime.NewCapabilityInvocationTurnRunner
+	NewArtifactRetentionService       = runtime.NewArtifactRetentionService
+	ErrTurnHostUnavailable            = runtime.ErrTurnHostUnavailable
+	ValidateRunbook                   = runbook.Validate
+	NewRunbookTurnRunner              = runtime.NewRunbookTurnRunner
+	NewRunForkCoordinator             = runtime.NewRunForkCoordinator
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
