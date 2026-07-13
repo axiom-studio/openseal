@@ -51,6 +51,8 @@ type fakeKernelClient struct {
 	initiatives         []*runtime.Initiative
 	monitorCheckpoints  map[string]*runtime.SourceMonitorCheckpoint
 	monitorObservations map[string][]*runtime.SourceObservation
+	activityPages       map[string]*runtime.ActivityFeedPage
+	activityRequests    []runtime.ActivityFeedRequest
 	initiativeKeys      []string
 	initiativeCreates   []kernelapi.CreateInitiativeRequest
 	initiativeUpdates   []kernelapi.UpdateInitiativeRequest
@@ -533,6 +535,13 @@ func (f *fakeKernelClient) ListInitiatives(context.Context, runtime.InitiativeFi
 }
 func (f *fakeKernelClient) ListSourceObservations(_ context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
 	return f.monitorObservations[sourceMonitorStatusKey(filter.InitiativeID, filter.MonitorID)], nil
+}
+func (f *fakeKernelClient) ListActivity(_ context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
+	f.activityRequests = append(f.activityRequests, request)
+	if page := f.activityPages[request.RunID]; page != nil {
+		return page, nil
+	}
+	return &runtime.ActivityFeedPage{}, nil
 }
 func (f *fakeKernelClient) GetSourceMonitorCheckpoint(_ context.Context, _ runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
 	checkpoint := f.monitorCheckpoints[sourceMonitorStatusKey(initiativeID, monitorID)]
@@ -1181,14 +1190,89 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 			ID: "observation-1", Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes",
 			Summary: "Operators want simpler upgrades", SourceURI: "https://www.reddit.com/r/kubernetes/comments/example",
 		}}},
+		activityPages: map[string]*runtime.ActivityFeedPage{"run-live-123": {Items: []runtime.ActivityProjection{{
+			ID: "source-policy-call-1", EventType: "source_policy.authorized", InitiativeID: initiative.ID, RunID: "run-live-123", CreatedAt: time.Now().Add(-2 * time.Minute),
+			Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "policyId": "public-reddit-research", "policyVersion": "2026-07-13", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": float64(5)},
+		}}}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	model.section = sectionInitiatives
 	view := model.View()
-	for _, expected := range []string{"reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Operators want simpler upgrades"} {
+	for _, expected := range []string{"reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
+		}
+	}
+	if len(fake.activityRequests) != 1 || fake.activityRequests[0].RunID != "run-live-123" || !fake.activityRequests[0].IncludeDetails || len(fake.activityRequests[0].EventTypes) != 1 || fake.activityRequests[0].EventTypes[0] != "source_policy.authorized" {
+		t.Fatalf("activity requests=%#v", fake.activityRequests)
+	}
+}
+
+func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBoundary(t *testing.T) {
+	store := runtime.NewMemoryStore(100)
+	scope := runtime.Scope{Kind: "local", ID: "research"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
+	portfolio := runtime.NewPortfolioService(store)
+	objective, err := portfolio.CreateObjective(t.Context(), runtime.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Monitor Kubernetes", Goal: "Collect governed evidence", Status: runtime.ObjectiveStatusActive,
+		Cadence: &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 60, AssignedAgentID: owner.ID, RunTemplate: &runtime.ObjectiveRunTemplate{
+			Context:    map[string]interface{}{"initiativeId": "initiative-policy", "sourceMonitorId": "reddit-kubernetes"},
+			Policy:     map[string]interface{}{"sourcePolicyRef": "public-reddit@1"},
+			Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initiative, _, err := runtime.NewInitiativeService(store, store).Create(t.Context(), runtime.CreateInitiativeRequest{Initiative: &runtime.Initiative{
+		ID: "initiative-policy", Scope: scope, Owner: owner, Title: "Governed research", Purpose: "Collect permitted evidence", Status: runtime.InitiativeStatusActive,
+		ObjectiveRefs: []string{objective.ID}, SourceMonitors: []runtime.SourceMonitorReference{{
+			ID: "reddit-kubernetes", ObjectiveID: objective.ID, AssignedAgentID: owner.ID, SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
+			SourcePolicyRef: "public-reddit@1", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := portfolio.CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
+		Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID, Goal: objective.Goal, Source: runtime.RunSourceSchedule,
+		Context: map[string]interface{}{"initiativeId": initiative.ID, "sourceMonitorId": "reddit-kubernetes"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.NewSourceMonitorService(store, store, store, store).AdvanceCheckpoint(t.Context(), runtime.AdvanceSourceMonitorCheckpointRequest{
+		Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes", RunID: run.ID, AgentID: owner.ID,
+		SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed", ActionCallID: "call-policy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.NewRunActivityService(store, store).AppendActivity(t.Context(), &runtime.ActivityEvent{
+		ID: "source-policy-call-policy", Scope: scope, InitiativeID: initiative.ID, ObjectiveID: objective.ID, RunID: run.ID, AgentID: owner.ID,
+		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo, Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"},
+		Summary: "Source access authorized by policy", Visibility: runtime.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
+		Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "actionCallId": "call-policy", "policyId": "public-reddit", "policyVersion": "1", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": 5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	config := DefaultConfig()
+	config.Endpoint, config.Scope, config.Owner, config.PollInterval = httpServer.URL, scope, owner, -1
+	model, err := NewModel(t.Context(), httpClient, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.width, model.height = 120, 40
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionInitiatives
+	view := model.View()
+	for _, expected := range []string{"Last success", "Authorized by public-reddit@1", "www.reddit.com/r/kubernetes · up to 5 items"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("HTTP-backed policy decision missing %q:\n%s", expected, view)
 		}
 	}
 }

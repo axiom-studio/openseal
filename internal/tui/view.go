@@ -561,6 +561,15 @@ func (m *Model) renderInitiativesContent(width int) string {
 						lines = append(lines, mutedStyle.Render("Awaiting first successful Run"))
 					} else {
 						lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Last success %s · %d evidence · Run %s", relativeTime(status.checkpoint.LastSuccessAt), status.checkpoint.ObservationCount, status.checkpoint.LastRunID), max(width-6, 24))))
+						if status.policyErr != nil {
+							lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("Authorization audit unavailable · "+status.policyErr.Error(), max(width-6, 24))))
+						} else if status.policyDecision != nil {
+							decision := status.policyDecision
+							lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Authorized by %s@%s · %s", decision.PolicyID, decision.PolicyVersion, relativeTime(status.policyAuthorizedAt)), max(width-6, 24))))
+							lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  %s%s · up to %d items", decision.SourceHost, decision.PathPrefix, decision.MaximumItems), max(width-6, 24))))
+						} else if m.activityCapability.Supports(kernelapi.OperationList) {
+							lines = append(lines, mutedStyle.Render("No authorization decision recorded for the last Run"))
+						}
 						for _, observation := range status.observations[:min(3, len(status.observations))] {
 							lines = append(lines, mutedStyle.Render(compact("  • "+observation.Summary+" · "+observation.SourceURI, max(width-6, 24))))
 						}

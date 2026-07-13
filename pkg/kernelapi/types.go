@@ -38,6 +38,8 @@ const (
 	AgentRequestsCapabilityVersion      = "1"
 	ActionApprovalsCapabilityID         = "action-approvals"
 	ActionApprovalsCapabilityVersion    = "1"
+	ActivityCapabilityID                = "activity"
+	ActivityCapabilityVersion           = "1"
 )
 
 const (
@@ -238,7 +240,13 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+}
+
+// ActivityCapability exposes the selector-bounded, redacted audit projection.
+// Raw append authority is deliberately not part of the interactive contract.
+func ActivityCapability() Capability {
+	return Capability{ID: ActivityCapabilityID, Version: ActivityCapabilityVersion, Available: true, Operations: []string{OperationList}}
 }
 
 func AgentDefinitionsCapability() Capability {

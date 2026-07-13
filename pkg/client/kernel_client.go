@@ -40,6 +40,7 @@ type KernelClient interface {
 	ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error)
 	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
 	PatchInitiative(context.Context, runtime.Scope, string, kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error)
+	ListActivity(context.Context, runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error)
 	ListSourceObservations(context.Context, runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error)
 	GetSourceMonitorCheckpoint(context.Context, runtime.Scope, string, string) (*runtime.SourceMonitorCheckpoint, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
@@ -294,6 +295,39 @@ func (c *KernelHTTPClient) PatchInitiative(ctx context.Context, scope runtime.Sc
 		return nil, err
 	}
 	return &initiative, nil
+}
+
+func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
+	query := scopeQuery(request.Scope)
+	for _, item := range []struct{ key, value string }{
+		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
+	} {
+		if value := strings.TrimSpace(item.value); value != "" {
+			query.Set(item.key, value)
+		}
+	}
+	for _, eventType := range request.EventTypes {
+		if eventType = strings.TrimSpace(eventType); eventType != "" {
+			query.Add("eventType", eventType)
+		}
+	}
+	for _, severity := range request.Severities {
+		query.Add("severity", string(severity))
+	}
+	for _, visibility := range request.Visibilities {
+		query.Add("visibility", string(visibility))
+	}
+	if request.Limit > 0 {
+		query.Set("limit", strconv.Itoa(request.Limit))
+	}
+	if request.IncludeDetails {
+		query.Set("includeDetails", "true")
+	}
+	var page runtime.ActivityFeedPage
+	if err := c.do(ctx, http.MethodGet, "/api/v1/activity?"+query.Encode(), nil, "", &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
 }
 
 func (c *KernelHTTPClient) ListSourceObservations(ctx context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
