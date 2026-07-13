@@ -32,6 +32,13 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	}
 }
 
+func TestWorkforceAuthoringVersionDeclaresInitiativeCompositionContract(t *testing.T) {
+	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	if capability.Version != "3" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) {
+		t.Fatalf("workforce authoring capability = %#v", capability)
+	}
+}
+
 func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	capability := AgentDefinitionsCapability()
 	if capability.Version != "2" || !capability.Supports("list-compilations") || capability.Supports("list_compilations") {
