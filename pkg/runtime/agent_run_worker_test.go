@@ -201,6 +201,7 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 					}},
 					ProposedActions: []TurnAction{{
 						Type: "skill_action", Capability: "release.deploy", Summary: "Deploy release to staging", InputRef: "/actionInputs/deploy",
+						EvidenceRefs: []string{"artifact:release-plan"},
 					}},
 				}, nil
 			}),
@@ -240,7 +241,8 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(calls) != 1 || calls[0].Status != ActionCallStatusReady || calls[0].SkillID != "release" ||
-		calls[0].Action != "deploy" || calls[0].Arguments["environment"] != "staging" || calls[0].IdempotencyKey == "" {
+		calls[0].Action != "deploy" || calls[0].Arguments["environment"] != "staging" || calls[0].IdempotencyKey == "" ||
+		len(calls[0].EvidenceRefs) != 1 || calls[0].EvidenceRefs[0] != "artifact:release-plan" {
 		t.Fatalf("governed action mismatch: %#v", calls)
 	}
 	turns, err := NewAgentTurnService(store, store).ListTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: run.ID})

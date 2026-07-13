@@ -217,6 +217,11 @@ type (
 	LinkOutreachActionRequest          = runtime.LinkOutreachActionRequest
 	RecordOutreachDeliveryRequest      = runtime.RecordOutreachDeliveryRequest
 	ResolveOutreachMessageRequest      = runtime.ResolveOutreachMessageRequest
+	ReconcileOutreachActionRequest     = runtime.ReconcileOutreachActionRequest
+	ReconcileOutreachActionResult      = runtime.ReconcileOutreachActionResult
+	OutreachTurnLifecycle              = runtime.OutreachTurnLifecycle
+	OutreachTurnRunner                 = runtime.OutreachTurnRunner
+	OutreachActionProposalObserver     = runtime.OutreachActionProposalObserver
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
 	BudgetPolicy                       = runtime.BudgetPolicy
@@ -654,6 +659,8 @@ func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabil
 var (
 	NewHostedTurnRunner               = runtime.NewHostedTurnRunner
 	NewCapabilityInvocationTurnRunner = runtime.NewCapabilityInvocationTurnRunner
+	NewOutreachTurnRunner             = runtime.NewOutreachTurnRunner
+	NewOutreachActionProposalObserver = runtime.NewOutreachActionProposalObserver
 	NewArtifactRetentionService       = runtime.NewArtifactRetentionService
 	ErrTurnHostUnavailable            = runtime.ErrTurnHostUnavailable
 	ValidateRunbook                   = runbook.Validate
@@ -876,6 +883,7 @@ const (
 	OutreachMessageDeclined                           = runtime.OutreachMessageDeclined
 	OutreachMessageFailed                             = runtime.OutreachMessageFailed
 	OutreachMessageCanceled                           = runtime.OutreachMessageCanceled
+	OutreachInvocationContextKey                      = runtime.OutreachInvocationContextKey
 
 	RunSourceManual          = runtime.RunSourceManual
 	RunSourceChat            = runtime.RunSourceChat
@@ -1938,6 +1946,11 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 			return err
 		}
 		pool.SetActionCoordinator(e.actions)
+		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
+		if observerErr != nil {
+			return observerErr
+		}
+		pool.SetActionProposalObserver(observer)
 		e.agentPools = append(e.agentPools, pool)
 	}
 	return nil
@@ -1951,6 +1964,11 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 			return err
 		}
 		supervisor.SetActionCoordinator(e.actions)
+		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
+		if observerErr != nil {
+			return observerErr
+		}
+		supervisor.SetActionProposalObserver(observer)
 		e.agentSupervisors = append(e.agentSupervisors, supervisor)
 	}
 	return nil
@@ -2092,6 +2110,13 @@ func (e *Engine) ResolveOutreachMessage(ctx context.Context, scope runtime.Scope
 		return nil, nil, errors.New("outreach capability is unavailable")
 	}
 	return e.outreach.ResolveMessage(ctx, scope, id, req)
+}
+
+func (e *Engine) ReconcileOutreachAction(ctx context.Context, scope runtime.Scope, id string, req runtime.ReconcileOutreachActionRequest) (*runtime.ReconcileOutreachActionResult, error) {
+	if e.outreach == nil {
+		return nil, errors.New("outreach capability is unavailable")
+	}
+	return e.outreach.ReconcileAction(ctx, scope, id, req)
 }
 
 func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.ObjectiveScheduleResult, error) {

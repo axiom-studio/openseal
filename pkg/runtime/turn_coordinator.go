@@ -533,6 +533,12 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 	proposalCount := 0
 	if len(outcome.ProposedActions) > 0 {
 		proposalCount++
+		if len(outcome.ProposedActions) != 1 {
+			return errors.New("a bounded Turn can propose exactly one action at a time")
+		}
+		if err := uniqueIDs(outcome.ProposedActions[0].EvidenceRefs, "turn action evidence"); err != nil {
+			return err
+		}
 	}
 	if outcome.ProposedFork != nil {
 		proposalCount++

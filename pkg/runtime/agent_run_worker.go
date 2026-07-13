@@ -35,6 +35,20 @@ func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *Agen
 	return f(ctx, run)
 }
 
+// ActionProposalObserver projects a committed governed ActionCall into other
+// durable kernel resources. Projection failures never roll back or redispatch
+// the authoritative action; observers must be idempotent and repairable from
+// the persisted proposal.
+type ActionProposalObserver interface {
+	ObserveActionProposal(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
+}
+
+type ActionProposalObserverFunc func(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error
+
+func (f ActionProposalObserverFunc) ObserveActionProposal(ctx context.Context, run *AgentRun, turn *AgentTurn, proposal *ActionProposalResult) error {
+	return f(ctx, run, turn, proposal)
+}
+
 type AgentRunWorkerConfig struct {
 	Scope                      Scope
 	Kind                       RunKind
@@ -87,29 +101,34 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 // AgentRunWorkerPool autonomously claims and advances canonical Runs. The
 // durable store is authoritative; the wake channel is only a latency hint.
 type AgentRunWorkerPool struct {
-	config        AgentRunWorkerConfig
-	scheduler     *AgentRunScheduler
-	portfolio     PortfolioStore
-	coordinator   *TurnCoordinator
-	wakeService   *AgentRunWakeService
-	activity      *RunActivityService
-	actions       *ActionCoordinator
-	forks         *RunForkCoordinator
-	collaboration *CollaborationService
-	resolver      TurnRunnerResolver
-	logger        *zap.SugaredLogger
-	wake          chan struct{}
-	poolID        string
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	startOnce     sync.Once
-	stopOnce      sync.Once
+	config         AgentRunWorkerConfig
+	scheduler      *AgentRunScheduler
+	portfolio      PortfolioStore
+	coordinator    *TurnCoordinator
+	wakeService    *AgentRunWakeService
+	activity       *RunActivityService
+	actions        *ActionCoordinator
+	actionObserver ActionProposalObserver
+	forks          *RunForkCoordinator
+	collaboration  *CollaborationService
+	resolver       TurnRunnerResolver
+	logger         *zap.SugaredLogger
+	wake           chan struct{}
+	poolID         string
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	startOnce      sync.Once
+	stopOnce       sync.Once
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
 // hosted action into the governed ActionCall lifecycle after its Turn commits.
 func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
 	p.actions = actions
+}
+
+func (p *AgentRunWorkerPool) SetActionProposalObserver(observer ActionProposalObserver) {
+	p.actionObserver = observer
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
@@ -403,14 +422,20 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: binding.DeploymentID,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 		IdempotencyKey: idempotencyKey, Summary: request.Summary,
-		Actor: ActivityActor{Type: "worker", ID: workerID}, ContinuationCheckpoint: turn.ContinuationCheckpoint,
-		CausationID: turn.ID,
+		Actor: ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
+		ContinuationCheckpoint: turn.ContinuationCheckpoint,
+		CausationID:            turn.ID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if proposal == nil || proposal.Run == nil {
-		return nil, errors.New("governed action proposal returned no durable Run")
+	if proposal == nil || proposal.Run == nil || proposal.Call == nil {
+		return nil, errors.New("governed action proposal returned no durable Run or ActionCall")
+	}
+	if p.actionObserver != nil {
+		if observeErr := p.actionObserver.ObserveActionProposal(ctx, run, turn, proposal); observeErr != nil {
+			p.logger.Warnw("governed action projection will require reconciliation", "runId", run.ID, "turnId", turn.ID, "actionCallId", proposal.Call.ID, "error", observeErr)
+		}
 	}
 	return proposal.Run, nil
 }
