@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -46,7 +47,7 @@ func (s *Service) ImportOpenClaw(ctx context.Context, request ImportOpenClawRequ
 	artifact := artifactFromBundle(request.Scope, request.Compilation.SourceDigest, bundle, now)
 	reference := &Reference{
 		Scope: request.Scope, Digest: artifact.Digest, ID: request.ReferenceID,
-		Kind: request.ReferenceKind, CreatedAt: now, ExpiresAt: request.ReferenceExpiresAt,
+		Kind: request.ReferenceKind, Origin: originFromBundle(bundle), CreatedAt: now, ExpiresAt: request.ReferenceExpiresAt,
 	}
 	if err := ValidateArtifact(artifact); err != nil {
 		return nil, false, err
@@ -96,7 +97,38 @@ func (s *Service) ExportOpenClaw(ctx context.Context, scope capability.ScopeRefe
 	if artifact.Format != FormatOpenClawSkillV1 {
 		return openclaw.Bundle{}, fmt.Errorf("skill source artifact %s is not OpenClaw format", artifact.Digest)
 	}
-	return artifactBundle(artifact)
+	references, err := s.store.ListSourceArtifactReferences(ctx, scope, digest)
+	if err != nil {
+		return openclaw.Bundle{}, err
+	}
+	origins := distinctOrigins(references)
+	if len(origins) == 0 {
+		return openclaw.Bundle{}, ErrNotFound
+	}
+	if len(origins) != 1 {
+		return openclaw.Bundle{}, ErrAmbiguousOrigin
+	}
+	return artifactBundle(artifact, origins[0])
+}
+
+func (s *Service) ExportOpenClawForReference(ctx context.Context, scope capability.ScopeReference, digest, referenceID string) (openclaw.Bundle, error) {
+	artifact, err := s.Get(ctx, scope, digest)
+	if err != nil {
+		return openclaw.Bundle{}, err
+	}
+	if artifact.Format != FormatOpenClawSkillV1 {
+		return openclaw.Bundle{}, fmt.Errorf("skill source artifact %s is not OpenClaw format", artifact.Digest)
+	}
+	references, err := s.store.ListSourceArtifactReferences(ctx, scope, digest)
+	if err != nil {
+		return openclaw.Bundle{}, err
+	}
+	for _, reference := range references {
+		if reference.ID == referenceID {
+			return artifactBundle(artifact, reference.Origin)
+		}
+	}
+	return openclaw.Bundle{}, ErrNotFound
 }
 
 func (s *Service) ReadResource(ctx context.Context, scope capability.ScopeReference, sourceDigest, resourcePath string) ([]byte, error) {
@@ -167,12 +199,32 @@ func artifactFromBundle(scope capability.ScopeReference, digest string, bundle o
 	}
 	return &Artifact{
 		Scope: scope, Digest: digest, Format: FormatOpenClawSkillV1, EntryPoint: "SKILL.md", CreatedAt: createdAt,
-		Origin: Origin{
-			Registry: bundle.Source.Registry, Publisher: bundle.Source.Publisher, Reference: bundle.Source.Reference,
-			ExpectedName: bundle.Source.ExpectedName, Version: bundle.Source.Version, Trust: cloneMap(bundle.Source.Trust),
-		},
 		Files: files,
 	}
+}
+
+func originFromBundle(bundle openclaw.Bundle) Origin {
+	return Origin{
+		Registry: bundle.Source.Registry, Publisher: bundle.Source.Publisher, Reference: bundle.Source.Reference,
+		ExpectedName: bundle.Source.ExpectedName, Version: bundle.Source.Version, Trust: cloneMap(bundle.Source.Trust),
+	}
+}
+
+func distinctOrigins(references []Reference) []Origin {
+	result := make([]Origin, 0, len(references))
+	for _, reference := range references {
+		duplicate := false
+		for _, origin := range result {
+			if reflect.DeepEqual(origin, reference.Origin) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			result = append(result, reference.Origin)
+		}
+	}
+	return result
 }
 
 func sourceFile(filePath string, content []byte) File {

@@ -98,6 +98,10 @@ func (s *PostgresStore) ImportSourceArtifact(ctx context.Context, artifact *sour
 			if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("skill_source_artifact_references")+` SET digest=$1,kind=$2,created_at=$3,expires_at=$4,payload=$5::jsonb WHERE scope_kind=$6 AND scope_id=$7 AND id=$8`, reference.Digest, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
 				return false, err
 			}
+		} else if existing.Origin.IsZero() && !reference.Origin.IsZero() {
+			if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("skill_source_artifact_references")+` SET kind=$1,created_at=$2,expires_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7`, reference.Kind, reference.CreatedAt, reference.ExpiresAt, string(referencePayload), reference.Scope.Kind, reference.Scope.ID, reference.ID); err != nil {
+				return false, err
+			}
 		} else if !sourceartifact.EquivalentReferences(&existing, reference) {
 			return false, sourceartifact.ErrReferenceConflict
 		}
@@ -106,6 +110,30 @@ func (s *PostgresStore) ImportSourceArtifact(ctx context.Context, artifact *sour
 		return false, err
 	}
 	return created, nil
+}
+
+func (s *PostgresStore) ListSourceArtifactReferences(ctx context.Context, scope capability.ScopeReference, digest string) ([]sourceartifact.Reference, error) {
+	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("skill_source_artifact_references")+` WHERE scope_kind=$1 AND scope_id=$2 AND digest=$3 ORDER BY id`, scope.Kind, scope.ID, digest)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]sourceartifact.Reference, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var reference sourceartifact.Reference
+		if err := json.Unmarshal([]byte(payload), &reference); err != nil {
+			return nil, err
+		}
+		result = append(result, reference)
+	}
+	return result, rows.Err()
 }
 
 func (s *PostgresStore) GetSourceArtifact(ctx context.Context, scope capability.ScopeReference, digest string) (*sourceartifact.Artifact, error) {
