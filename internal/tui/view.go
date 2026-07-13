@@ -615,6 +615,14 @@ func (m *Model) renderRunsContent(width int) string {
 	if run := m.selectedRun(); run != nil {
 		lines = append(lines, "", mutedStyle.Render("Selected"), compact(run.Goal, max(width-8, 24)))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Updated %s · revision %d", relativeTime(run.UpdatedAt), run.Revision)))
+		if receipt, ok := runDeliveryReceipt(run); ok {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Bold(true).Render("DELIVERY ACCEPTED"))
+			lines = append(lines, compact(fmt.Sprintf("%d recipient%s · %d artifact%s · %s", receipt.recipientCount, pluralSuffix(receipt.recipientCount), len(receipt.artifacts), pluralSuffix(len(receipt.artifacts)), receipt.deliveredAt), max(width-8, 24)))
+			lines = append(lines, mutedStyle.Render("Receipt "+compact(receipt.id, max(width-16, 16))))
+			for _, artifact := range receipt.artifacts {
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Artifact %s · version %d", artifact.id, artifact.version), max(width-8, 24))))
+			}
+		}
 		actions := m.availableActions(run)
 		if actions != "" {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(actions))
@@ -624,6 +632,64 @@ func (m *Model) renderRunsContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("↑/↓ select · n new · r refresh · Tab compose"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+type tuiDeliveryArtifact struct {
+	id      string
+	version int
+}
+
+type tuiDeliveryReceipt struct {
+	id             string
+	deliveredAt    string
+	recipientCount int
+	artifacts      []tuiDeliveryArtifact
+}
+
+func runDeliveryReceipt(run *runtime.AgentRun) (tuiDeliveryReceipt, bool) {
+	if run == nil || run.Output == nil || run.Output["status"] != "accepted" {
+		return tuiDeliveryReceipt{}, false
+	}
+	id, idOK := run.Output["receiptId"].(string)
+	deliveredAt, deliveredOK := run.Output["deliveredAt"].(string)
+	recipientCount, countOK := wholeNumber(run.Output["recipientCount"])
+	references, referencesOK := run.Output["artifactRefs"].([]interface{})
+	if !idOK || strings.TrimSpace(id) == "" || !deliveredOK || strings.TrimSpace(deliveredAt) == "" || !countOK || recipientCount < 1 || !referencesOK {
+		return tuiDeliveryReceipt{}, false
+	}
+	artifacts := make([]tuiDeliveryArtifact, 0, len(references))
+	for _, candidate := range references {
+		reference, ok := candidate.(map[string]interface{})
+		if !ok {
+			return tuiDeliveryReceipt{}, false
+		}
+		artifactID, idOK := reference["id"].(string)
+		version, versionOK := wholeNumber(reference["version"])
+		if !idOK || strings.TrimSpace(artifactID) == "" || !versionOK || version < 1 {
+			return tuiDeliveryReceipt{}, false
+		}
+		artifacts = append(artifacts, tuiDeliveryArtifact{id: artifactID, version: version})
+	}
+	return tuiDeliveryReceipt{id: id, deliveredAt: deliveredAt, recipientCount: recipientCount, artifacts: artifacts}, true
+}
+
+func wholeNumber(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case float64:
+		converted := int(typed)
+		return converted, float64(converted) == typed
+	default:
+		return 0, false
+	}
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func (m *Model) renderArtifactsContent(width int) string {
