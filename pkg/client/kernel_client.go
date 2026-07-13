@@ -46,6 +46,11 @@ type KernelClient interface {
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
 	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
+	CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
+	ListAgentRequests(context.Context, runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error)
+	GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error)
+	RespondAgentRequest(context.Context, runtime.Scope, string, kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error)
+	CompleteAgentRequest(context.Context, runtime.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
@@ -437,6 +442,71 @@ func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope runtime.Sc
 	var result runtime.AgentRunCommandResult
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/commands?" + query.Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) CreateAgentRequest(ctx context.Context, request kernelapi.CreateAgentRequestRequest, idempotencyKey string) (*runtime.AgentRequestResult, error) {
+	var result runtime.AgentRequestResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent-requests", request, idempotencyKey, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListAgentRequests(ctx context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+	query := scopeQuery(filter.Scope)
+	setIfPresent(query, "sourceRunId", filter.SourceRunID)
+	if filter.Requester != nil {
+		query.Set("requesterType", string(filter.Requester.Type))
+		query.Set("requesterId", filter.Requester.ID)
+	}
+	if filter.Recipient != nil {
+		query.Set("recipientType", string(filter.Recipient.Type))
+		query.Set("recipientId", filter.Recipient.ID)
+	}
+	for _, kind := range filter.Kinds {
+		query.Add("kind", string(kind))
+	}
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var requests []*runtime.AgentRequest
+	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-requests?"+query.Encode(), nil, "", &requests); err != nil {
+		return nil, err
+	}
+	return requests, nil
+}
+
+func (c *KernelHTTPClient) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {
+	var request runtime.AgentRequest
+	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &request); err != nil {
+		return nil, err
+	}
+	return &request, nil
+}
+
+func (c *KernelHTTPClient) RespondAgentRequest(ctx context.Context, scope runtime.Scope, requestID string, request kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+	var result runtime.AgentRequestResult
+	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/responses?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope runtime.Scope, requestID string, request kernelapi.CompleteAgentRequestRequest, idempotencyKey string) (*runtime.AgentRequestResult, error) {
+	var result runtime.AgentRequestResult
+	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/completions?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
