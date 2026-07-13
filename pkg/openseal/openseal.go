@@ -123,6 +123,8 @@ type (
 	WorkforceAuthoringMode                    = authoring.Mode
 	WorkforceSkillCapability                  = authoring.SkillCapability
 	WorkforceSkillCredential                  = authoring.SkillCredential
+	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
+	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
