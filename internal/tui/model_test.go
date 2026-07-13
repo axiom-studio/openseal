@@ -629,7 +629,7 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 		Diff:      []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "candidate"}},
 	}
 	fake := &fakeKernelClient{
-		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(), kernelapi.ObjectivesCapability()),
+		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{}), kernelapi.ObjectivesCapability()),
 		authoringResult: result,
 	}
 	model := newTestModel(t, fake)
@@ -686,7 +686,7 @@ func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
 		Mode: authoring.ModeAmend, Result: amendResult, Status: authoring.ChangeSetReview, Revision: 1,
 	}
 	fake := &fakeKernelClient{
-		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(true)),
+		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})),
 		changeSets:      []*authoring.ChangeSet{created, amended},
 		changeSetErrors: []error{errors.New("temporary disconnect"), nil},
 	}
@@ -732,7 +732,7 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 	applied := ready
 	applied.Status, applied.Revision = authoring.ChangeSetApplied, 4
 	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-1", CandidateDigest: ready.CandidateDigest, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "user", ID: "server-operator"}, AppliedAt: time.Now(), Resources: []authoring.AppliedResourceReference{{Kind: "agent_definition", ID: "researcher", Version: "1"}, {Kind: "team_deployment", ID: "research-live", Revision: 1}}}
-	approvalCapability := kernelapi.WorkforceAuthoringCapability(true)
+	approvalCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
 	approvalCapability.Operations = append(approvalCapability.Operations, kernelapi.OperationApprove)
 	approvalCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: awaiting.ID, Revision: awaiting.Revision, EligibleApprovalRequirements: []kernelapi.ApprovalRequirementReference{
 		{EvaluationID: evaluation.ID, PolicyID: "production", Role: "operator"},
@@ -761,7 +761,7 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 		t.Fatal("failed approval did not preserve reason and retry identity")
 	}
 	firstKey := model.pendingGovernanceKey
-	applyCapability := kernelapi.WorkforceAuthoringCapability(true)
+	applyCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
 	applyCapability.Operations = append(applyCapability.Operations, kernelapi.OperationApply)
 	applyCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: ready.ID, Revision: ready.Revision}
 	fake.document = kernelapi.NewCapabilityDocument(applyCapability)

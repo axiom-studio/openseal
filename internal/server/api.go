@@ -122,7 +122,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.authoring != nil {
-		workforceCapability := kernelapi.WorkforceAuthoringCapability(s.authoringRuns != nil && s.authoringWorker != nil)
+		workforceCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{
+			ChangeSets: s.authoringRuns != nil && s.authoringWorker != nil,
+		})
 		if s.authoringChanges != nil {
 			s.composeWorkforceLifecycleCapability(r, &workforceCapability)
 		}

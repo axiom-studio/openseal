@@ -491,6 +491,7 @@ type (
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
 	TeamDefinitionCapabilityFeatures      = kernelapi.TeamDefinitionCapabilityFeatures
+	WorkforceAuthoringCapabilityFeatures  = kernelapi.WorkforceAuthoringCapabilityFeatures
 )
 
 const (
@@ -593,8 +594,8 @@ func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Kernel
 	return kernelapi.TeamDefinitionsCapability(features)
 }
 
-func WorkforceAuthoringCapability(changeSets ...bool) KernelCapability {
-	return kernelapi.WorkforceAuthoringCapability(changeSets...)
+func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures) KernelCapability {
+	return kernelapi.WorkforceAuthoringCapability(features)
 }
 
 // NewKernelCapabilityDocument composes the exact capability envelope consumed

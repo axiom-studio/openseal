@@ -207,7 +207,9 @@ func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" key="+r.Header.Get("Idempotency-Key"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/capabilities" {
-			_ = json.NewEncoder(w).Encode(kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(true, true)))
+			capability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+			capability.Operations = append(capability.Operations, kernelapi.OperationApply)
+			_ = json.NewEncoder(w).Encode(kernelapi.NewCapabilityDocument(capability))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(authoring.ChangeSet{ID: "change/one", Scope: scope, Revision: 2})
