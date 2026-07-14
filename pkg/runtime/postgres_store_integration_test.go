@@ -735,3 +735,53 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 		t.Fatalf("command activity = %#v, %v", events, err)
 	}
 }
+
+func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := "openseal_pool_budget_" + uuid.NewString()[:8]
+	store, err := NewPostgresStore(ctx, dsn,
+		WithPostgresSchema(schema),
+		WithPostgresPool(PostgresPoolConfig{
+			MaxOpenConnections: 4, MaxIdleConnections: 2,
+			ConnectionLifetime: time.Minute, ConnectionIdleTime: time.Minute,
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_ = store.Close()
+	})
+
+	const callers = 24
+	start := make(chan struct{})
+	errorsFound := make(chan error, callers)
+	var group sync.WaitGroup
+	for index := 0; index < callers; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			_, queryErr := store.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)
+			errorsFound <- queryErr
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(errorsFound)
+	for queryErr := range errorsFound {
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+	}
+	stats := store.PoolStats()
+	if stats.MaxOpenConnections != 4 || stats.OpenConnections > 4 || stats.InUseConnections > 4 || stats.WaitCount < callers-4 || stats.WaitDuration <= 0 {
+		t.Fatalf("bounded pool stats = %#v", stats)
+	}
+}
