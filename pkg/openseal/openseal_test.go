@@ -24,6 +24,21 @@ func TestPublicFacadeExposesObjectiveScheduleConditions(t *testing.T) {
 	}
 }
 
+func TestPublicFacadeDecodesObjectiveEventRulesForHostConnectors(t *testing.T) {
+	rules, err := DecodeObjectiveEventRules(map[string]interface{}{
+		"version": "1",
+		"rules": []interface{}{map[string]interface{}{
+			"id": "warning", "eventType": "kubernetes.warning", "source": "kubernetes:cluster:1",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules.Rules) != 1 || rules.Rules[0].ID != "warning" {
+		t.Fatalf("rules = %#v", rules)
+	}
+}
+
 func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := runtime.NewSQLiteStore(path)
