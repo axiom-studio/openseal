@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
@@ -190,9 +192,18 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	prepared := skill.PreparedRuntime{
+		PreparationID: "sha256:" + strings.Repeat("a", 64), RuntimeID: "oci://runtime.test/release@sha256:" + strings.Repeat("b", 64),
+		Revision: "sha256:" + strings.Repeat("c", 64), Adapter: "oci-builder/v1", OperatingSystem: "linux", Architecture: "amd64",
+		Executables: []string{"release"},
+	}
 	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return &TurnRunnerBinding{
 			DeploymentID: "release-agent", DefinitionID: "release-agent", DefinitionVersion: "1", ModelActions: modelActions,
+			PreparedRuntimes: []PreparedSkillRuntime{{
+				BindingID: modelActions[0].BindingID, BindingRevision: modelActions[0].BindingRevision,
+				SkillID: modelActions[0].SkillID, SkillVersion: modelActions[0].Version, Runtime: prepared,
+			}},
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				return &TurnOutcome{
 					NextRunStatus: AgentRunStatusRunning, OutputSummary: "Proposed staging deployment",
@@ -201,7 +212,8 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 					}},
 					ProposedActions: []TurnAction{{
 						Type: "skill_action", Capability: "release.deploy", Summary: "Deploy release to staging", InputRef: "/actionInputs/deploy",
-						EvidenceRefs: []string{"artifact:release-plan"},
+						EvidenceRefs:    []string{"artifact:release-plan"},
+						PreparedRuntime: &skill.PreparedRuntime{RuntimeID: "model-controlled-runtime"},
 					}},
 				}, nil
 			}),
@@ -242,11 +254,13 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0].Status != ActionCallStatusReady || calls[0].SkillID != "release" ||
 		calls[0].Action != "deploy" || calls[0].Arguments["environment"] != "staging" || calls[0].IdempotencyKey == "" ||
+		calls[0].PreparedRuntime == nil || calls[0].PreparedRuntime.RuntimeID != prepared.RuntimeID ||
 		len(calls[0].EvidenceRefs) != 1 || calls[0].EvidenceRefs[0] != "artifact:release-plan" {
 		t.Fatalf("governed action mismatch: %#v", calls)
 	}
 	turns, err := NewAgentTurnService(store, store).ListTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: run.ID})
-	if err != nil || len(turns) != 1 || turns[0].RequestedActions[0].Capability != "release.deploy" {
+	if err != nil || len(turns) != 1 || turns[0].RequestedActions[0].Capability != "release.deploy" ||
+		turns[0].RequestedActions[0].PreparedRuntime == nil || turns[0].RequestedActions[0].PreparedRuntime.RuntimeID != prepared.RuntimeID {
 		t.Fatalf("durable proposal Turn mismatch: %#v, %v", turns, err)
 	}
 }

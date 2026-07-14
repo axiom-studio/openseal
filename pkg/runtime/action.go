@@ -48,6 +48,7 @@ type ActionCall struct {
 	Risk             skill.RiskLevel                      `json:"risk"`
 	SideEffect       skill.SideEffect                     `json:"sideEffect"`
 	Arguments        map[string]interface{}               `json:"arguments,omitempty"`
+	PreparedRuntime  *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
 	CredentialRefs   map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
 	EvidenceRefs     []string                             `json:"evidenceRefs,omitempty"`
 	IdempotencyKey   string                               `json:"idempotencyKey,omitempty"`
@@ -91,6 +92,11 @@ func (c *ActionCall) Validate() error {
 	if c.SemanticDigest != "" && c.SemanticDigest != ComputeActionSemanticDigest(c) {
 		return errors.New("action semantic digest does not match its invocation")
 	}
+	if c.PreparedRuntime != nil {
+		if err := skill.ValidatePreparedRuntimeReference(c.PreparedRuntime); err != nil {
+			return err
+		}
+	}
 	if err := uniqueIDs(c.EvidenceRefs, "action evidence"); err != nil {
 		return err
 	}
@@ -109,9 +115,10 @@ func ComputeActionInvocationDigest(call *ActionCall) string {
 		SkillVersion    string                               `json:"skillVersion"`
 		Action          string                               `json:"action"`
 		Arguments       map[string]interface{}               `json:"arguments,omitempty"`
+		PreparedRuntime *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
 		CredentialRefs  map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
 		EvidenceRefs    []string                             `json:"evidenceRefs,omitempty"`
-	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs, call.EvidenceRefs}
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.PreparedRuntime, call.CredentialRefs, call.EvidenceRefs}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
@@ -135,13 +142,23 @@ func ComputeActionSemanticDigest(call *ActionCall) string {
 		SkillVersion    string                 `json:"skillVersion"`
 		Action          string                 `json:"action"`
 		Arguments       map[string]interface{} `json:"arguments,omitempty"`
-	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments}
+		PreparedRuntime *skill.PreparedRuntime `json:"preparedRuntime,omitempty"`
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.PreparedRuntime}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
+}
+
+func clonePreparedRuntime(value *skill.PreparedRuntime) *skill.PreparedRuntime {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	result.Executables = append([]string(nil), value.Executables...)
+	return &result
 }
 
 type ApprovalStatus string

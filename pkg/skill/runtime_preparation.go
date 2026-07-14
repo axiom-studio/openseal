@@ -313,3 +313,39 @@ func validatePreparedRuntime(request RuntimePreparationRequest, runtime *Prepare
 	runtime.Executables = executables
 	return nil
 }
+
+// ValidatePreparedRuntimeReference validates the canonical, secret-free
+// identity carried from an activation snapshot into a durable action. It does
+// not prove that a host artifact exists; execution hosts must additionally
+// resolve RuntimeID and verify its published preparation and revision before
+// mounting it.
+func ValidatePreparedRuntimeReference(runtime *PreparedRuntime) error {
+	if runtime == nil {
+		return errors.New("prepared runtime reference is required")
+	}
+	preparationID := strings.TrimSpace(runtime.PreparationID)
+	digest, err := hex.DecodeString(strings.TrimPrefix(preparationID, "sha256:"))
+	if !strings.HasPrefix(preparationID, "sha256:") || err != nil || len(digest) != sha256.Size {
+		return errors.New("prepared runtime preparation identity is invalid")
+	}
+	if strings.TrimSpace(runtime.RuntimeID) == "" || strings.TrimSpace(runtime.Revision) == "" || strings.TrimSpace(runtime.Adapter) == "" ||
+		len(runtime.RuntimeID) > 2048 || len(runtime.Revision) > 512 || len(runtime.Adapter) > 256 ||
+		strings.ContainsAny(runtime.RuntimeID+runtime.Revision+runtime.Adapter, "\x00\r\n") {
+		return errors.New("prepared runtime artifact identity is invalid")
+	}
+	operatingSystem := normalizeOperatingSystem(runtime.OperatingSystem)
+	architecture := normalizeRuntimeArchitecture(runtime.Architecture)
+	if operatingSystem == "" || architecture == "" || operatingSystem != runtime.OperatingSystem || architecture != runtime.Architecture {
+		return errors.New("prepared runtime platform identity is invalid")
+	}
+	executables, err := normalizedRuntimeStrings(runtime.Executables, opensealprocess.ValidExecutableName)
+	if err != nil || len(executables) == 0 || len(executables) != len(runtime.Executables) {
+		return errors.New("prepared runtime executable identity is invalid")
+	}
+	for index := range executables {
+		if executables[index] != runtime.Executables[index] {
+			return errors.New("prepared runtime executables must be canonical")
+		}
+	}
+	return nil
+}

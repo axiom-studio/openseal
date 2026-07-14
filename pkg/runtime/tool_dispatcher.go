@@ -13,16 +13,17 @@ import (
 // credentials are deliberately separate from model-visible arguments and must
 // never be persisted or logged by an invoker.
 type ToolInvocation struct {
-	Name         string
-	Scope        skill.ScopeReference
-	DeploymentID string
-	SkillID      string
-	SkillVersion string
-	Action       string
-	ActionCallID string
-	RunID        string
-	Arguments    map[string]interface{}
-	Credentials  map[string]string
+	Name            string
+	Scope           skill.ScopeReference
+	DeploymentID    string
+	SkillID         string
+	SkillVersion    string
+	Action          string
+	ActionCallID    string
+	RunID           string
+	Arguments       map[string]interface{}
+	Credentials     map[string]string
+	PreparedRuntime *skill.PreparedRuntime
 }
 
 // ToolInvoker is the product-neutral boundary for a registered typed tool.
@@ -72,6 +73,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	if input.Call != nil {
 		invocation.ActionCallID = input.Call.ID
 		invocation.RunID = input.Call.RunID
+		invocation.PreparedRuntime = clonePreparedRuntime(input.Call.PreparedRuntime)
 	}
 	return d.invoker.InvokeTool(ctx, invocation)
 }
