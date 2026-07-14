@@ -19,14 +19,17 @@ import (
 // a deployment's skill snapshot will run. Environment contains names only;
 // secret values are resolved later by a bounded action worker.
 type HostCapabilityState struct {
-	OperatingSystem string                       `json:"operatingSystem,omitempty"`
-	Executables     map[string]bool              `json:"executables,omitempty"`
-	Environment     map[string]bool              `json:"environment,omitempty"`
-	Configuration   map[string]interface{}       `json:"configuration,omitempty"`
-	ResourceRoots   map[string]string            `json:"resourceRoots,omitempty"`
-	Adapters        map[string]AdapterCapability `json:"adapters,omitempty"`
-	Revision        string                       `json:"revision,omitempty"`
-	ResourceStager  ResourceStager               `json:"-"`
+	OperatingSystem string                 `json:"operatingSystem,omitempty"`
+	Executables     map[string]bool        `json:"executables,omitempty"`
+	Environment     map[string]bool        `json:"environment,omitempty"`
+	Configuration   map[string]interface{} `json:"configuration,omitempty"`
+	// ResourceRoots uses binding IDs so two source variants can be staged
+	// independently without exposing provenance in the model-facing snapshot.
+	// A declared skillId@version key remains supported for single-source hosts.
+	ResourceRoots  map[string]string            `json:"resourceRoots,omitempty"`
+	Adapters       map[string]AdapterCapability `json:"adapters,omitempty"`
+	Revision       string                       `json:"revision,omitempty"`
+	ResourceStager ResourceStager               `json:"-"`
 }
 
 type AdapterState string
@@ -114,12 +117,12 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		if binding.Disabled {
 			continue
 		}
-		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion)
+		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
 		if err != nil {
 			return nil, err
 		}
 		if definition != nil {
-			definitions[definitionKey(binding.SkillID, binding.SkillVersion)] = definition
+			definitions[definitionKey(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)] = definition
 		}
 	}
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].ID < bindings[j].ID })
@@ -136,7 +139,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		Adapters: adapters, Skills: make([]ActivatedSkill, 0, len(bindings)), CreatedAt: time.Now().UTC(),
 	}
 	for _, binding := range bindings {
-		definition := definitions[definitionKey(binding.SkillID, binding.SkillVersion)]
+		definition := definitions[definitionKey(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)]
 		if definition == nil {
 			snapshot.Unavailable = append(snapshot.Unavailable, UnavailableSkill{
 				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion,
@@ -145,7 +148,10 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			continue
 		}
 		reasons := evaluateAvailability(definition, binding, host)
-		resourceRoot := strings.TrimSpace(host.ResourceRoots[definitionKey(definition.ID, definition.Version)])
+		resourceRoot := strings.TrimSpace(host.ResourceRoots[binding.ID])
+		if resourceRoot == "" {
+			resourceRoot = strings.TrimSpace(host.ResourceRoots[definition.ID+"@"+definition.Version])
+		}
 		resourceRevision := ""
 		resourceAdapter := ""
 		if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 && adapterAvailable(adapters, AdapterResourceStaging) {

@@ -225,6 +225,92 @@ func TestEngineInstallsAndRestoresCompiledClawHubSkill(t *testing.T) {
 	}
 }
 
+func TestEngineInstallsBindsAndRestoresOwnerQualifiedClawHubSkills(t *testing.T) {
+	ctx := context.Background()
+	registry := &facadeClawHubRegistry{archive: facadeSkillZip(t)}
+	workspace := t.TempDir()
+	database := filepath.Join(t.TempDir(), "owner-qualified.db")
+	store, err := NewSQLiteStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := New(WithPersistentStore(store), WithClawHubRegistry("https://registry.test", registry, workspace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := make([]*ClawHubInstalledSkill, 0, 2)
+	for _, owner := range []string{"alice", "bob"} {
+		value, err := engine.InstallClawHubSkill(ctx, ClawHubInstallRequest{Reference: ClawHubSkillReference{Owner: owner, Slug: "research"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.SourceIdentity == "" || value.Compilation.Definition.Source.Identity != value.SourceIdentity {
+			t.Fatalf("installed source identity was not retained in canonical definition: %#v", value)
+		}
+		installed = append(installed, value)
+	}
+	if installed[0].SourceIdentity == installed[1].SourceIdentity {
+		t.Fatalf("owner-qualified identities collided: %#v", installed)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	for index, value := range installed {
+		if err := engine.BindSkill(ctx, &SkillBinding{
+			ID: []string{"alice", "bob"}[index], Scope: scope, DeploymentID: "analyst",
+			SkillID: value.Compilation.Definition.ID, SkillVersion: value.Compilation.Definition.Version,
+			SourceIdentity: value.SourceIdentity, EnablePrompt: true, MaximumRisk: SkillRiskRead, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewSQLiteStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restarted, err := New(WithPersistentStore(reopened), WithClawHubRegistry("https://registry.test", registry, workspace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts, err := restarted.ListModelSkillPrompts(ctx, scope, "analyst")
+	if err != nil || len(prompts) != 2 {
+		t.Fatalf("restored model prompts = %#v, %v", prompts, err)
+	}
+	encoded, err := json.Marshal(prompts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range installed {
+		definition, err := restarted.GetSkillDefinitionVariant(ctx, value.Compilation.Definition.ID, value.Compilation.Definition.Version, value.SourceIdentity)
+		if err != nil || definition == nil || definition.Source.Identity != value.SourceIdentity {
+			t.Fatalf("restored exact definition = %#v, %v", definition, err)
+		}
+		if strings.Contains(string(encoded), value.SourceIdentity) {
+			t.Fatalf("model prompt projection leaked source identity: %s", encoded)
+		}
+	}
+	for index, value := range installed {
+		prompt, err := restarted.ResolveExactSkillPrompt(ctx, scope, "analyst", value.Compilation.Definition.ID, value.Compilation.Definition.Version, SkillBindingReference{ID: []string{"alice", "bob"}[index], Revision: 1})
+		if err != nil || prompt == nil || prompt.Instructions == "" {
+			t.Fatalf("restored exact prompt = %#v, %v", prompt, err)
+		}
+	}
+	removed, err := restarted.UninstallClawHubSkill("@bob/research", false)
+	if err != nil || removed.SourceIdentity != installed[1].SourceIdentity {
+		t.Fatalf("exact uninstall = %#v, %v", removed, err)
+	}
+	states, err := restarted.ListInstalledClawHubSkillStates()
+	if err != nil || len(states) != 1 || states[0].SourceIdentity != installed[0].SourceIdentity {
+		t.Fatalf("peer installation after exact uninstall = %#v, %v", states, err)
+	}
+	alice, err := restarted.GetSkillDefinitionVariant(ctx, installed[0].Compilation.Definition.ID, installed[0].Compilation.Definition.Version, installed[0].SourceIdentity)
+	if err != nil || alice == nil || alice.Source.Identity != installed[0].SourceIdentity {
+		t.Fatalf("peer definition after exact uninstall = %#v, %v", alice, err)
+	}
+}
+
 func TestEngineClawHubLifecycleRetainsExportsRestoresAndReleasesSourceArtifact(t *testing.T) {
 	ctx := context.Background()
 	registry := &facadeClawHubRegistry{archive: facadeSkillZip(t)}

@@ -258,6 +258,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateAuthoringChangeSets(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateSourceQualifiedSkillVariants(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

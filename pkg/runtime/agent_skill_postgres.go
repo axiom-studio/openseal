@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -37,13 +38,13 @@ func (s *PostgresStore) migrateAgentAndSkillControlPlane(ctx context.Context, tx
 			PRIMARY KEY (scope_kind, scope_id, id)
 		);
 		CREATE TABLE IF NOT EXISTS `+s.table("skill_definitions")+` (
-			id TEXT NOT NULL, version TEXT NOT NULL, payload JSONB NOT NULL,
-			PRIMARY KEY (id, version)
+			id TEXT NOT NULL, version TEXT NOT NULL, source_identity TEXT NOT NULL DEFAULT '', payload JSONB NOT NULL,
+			PRIMARY KEY (id, version, source_identity)
 		);
 		CREATE TABLE IF NOT EXISTS `+s.table("skill_bindings")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, deployment_id TEXT NOT NULL,
 			id TEXT NOT NULL, skill_id TEXT NOT NULL, skill_version TEXT NOT NULL,
-			revision BIGINT NOT NULL, payload JSONB NOT NULL,
+			source_identity TEXT NOT NULL DEFAULT '', revision BIGINT NOT NULL, payload JSONB NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, deployment_id, id)
 		)`); err != nil {
 		return err
@@ -60,6 +61,34 @@ func (s *PostgresStore) migrateAgentAndSkillControlPlane(ctx context.Context, tx
 		}
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (4, 'agent and skill control plane') ON CONFLICT (version) DO NOTHING`)
+	return err
+}
+
+func (s *PostgresStore) migrateSourceQualifiedSkillVariants(ctx context.Context, tx *sql.Tx) error {
+	var applied bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = 18)`).Scan(&applied); err != nil {
+		return err
+	}
+	var definitionColumn, bindingColumn bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+		EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='skill_definitions' AND column_name='source_identity'),
+		EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='skill_bindings' AND column_name='source_identity')`, s.schema).Scan(&definitionColumn, &bindingColumn); err != nil {
+		return err
+	}
+	if applied && definitionColumn && bindingColumn {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE `+s.table("skill_definitions")+` ADD COLUMN IF NOT EXISTS source_identity TEXT NOT NULL DEFAULT '';
+		ALTER TABLE `+s.table("skill_bindings")+` ADD COLUMN IF NOT EXISTS source_identity TEXT NOT NULL DEFAULT '';
+		UPDATE `+s.table("skill_definitions")+` SET source_identity = COALESCE(payload->'source'->>'identity', '') WHERE source_identity = '';
+		UPDATE `+s.table("skill_bindings")+` SET source_identity = COALESCE(payload->>'sourceIdentity', '') WHERE source_identity = '';
+		ALTER TABLE `+s.table("skill_definitions")+` DROP CONSTRAINT IF EXISTS skill_definitions_pkey;
+		ALTER TABLE `+s.table("skill_definitions")+` ADD PRIMARY KEY (id, version, source_identity);
+	`); err != nil {
+		return fmt.Errorf("migrate source-qualified skill variants: %w", err)
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (18, 'source-qualified skill variants') ON CONFLICT (version) DO NOTHING`)
 	return err
 }
 
@@ -407,8 +436,9 @@ func (s *PostgresStore) CreateSkillDefinition(ctx context.Context, definition *s
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO `+s.table("skill_definitions")+` (id, version, payload)
-		VALUES ($1, $2, $3::jsonb) ON CONFLICT (id, version) DO NOTHING`, definition.ID, definition.Version, string(payload))
+	sourceIdentity := skill.DefinitionSourceIdentity(definition)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO `+s.table("skill_definitions")+` (id, version, source_identity, payload)
+		VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (id, version, source_identity) DO NOTHING`, definition.ID, definition.Version, sourceIdentity, string(payload))
 	if err != nil {
 		return err
 	}
@@ -421,19 +451,28 @@ func (s *PostgresStore) CreateSkillDefinition(ctx context.Context, definition *s
 	return nil
 }
 
-func (s *PostgresStore) GetSkillDefinition(ctx context.Context, id, version string) (*skill.Definition, error) {
-	var payload string
-	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_definitions")+` WHERE id = $1 AND version = $2`, id, version).Scan(&payload); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+func (s *PostgresStore) ListSkillDefinitionVariants(ctx context.Context, id, version string) ([]*skill.Definition, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT source_identity, payload FROM `+s.table("skill_definitions")+` WHERE id = $1 AND version = $2 ORDER BY source_identity`, id, version)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	definitions := make([]*skill.Definition, 0)
+	for rows.Next() {
+		var sourceIdentity, payload string
+		if err := rows.Scan(&sourceIdentity, &payload); err != nil {
+			return nil, err
 		}
-		return nil, err
+		var definition skill.Definition
+		if err := json.Unmarshal([]byte(payload), &definition); err != nil {
+			return nil, err
+		}
+		if skill.DefinitionSourceIdentity(&definition) != sourceIdentity {
+			return nil, errors.New("stored skill source identity does not match its immutable payload")
+		}
+		definitions = append(definitions, &definition)
 	}
-	var definition skill.Definition
-	if err := json.Unmarshal([]byte(payload), &definition); err != nil {
-		return nil, err
-	}
-	return &definition, nil
+	return definitions, rows.Err()
 }
 
 func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
@@ -446,9 +485,9 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 			return skill.ErrBindingRevisionConflict
 		}
 		result, err := s.db.ExecContext(ctx, `INSERT INTO `+s.table("skill_bindings")+`
-			(scope_kind, scope_id, deployment_id, id, skill_id, skill_version, revision, payload)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb) ON CONFLICT DO NOTHING`, binding.Scope.Kind, binding.Scope.ID,
-			binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload))
+			(scope_kind, scope_id, deployment_id, id, skill_id, skill_version, source_identity, revision, payload)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) ON CONFLICT DO NOTHING`, binding.Scope.Kind, binding.Scope.ID,
+			binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload))
 		if err != nil {
 			return err
 		}
@@ -463,9 +502,9 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 	if binding.Revision != expectedRevision+1 {
 		return skill.ErrBindingRevisionConflict
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("skill_bindings")+` SET skill_id = $1, skill_version = $2, revision = $3, payload = $4::jsonb
-		WHERE scope_kind = $5 AND scope_id = $6 AND deployment_id = $7 AND id = $8 AND revision = $9`, binding.SkillID,
-		binding.SkillVersion, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, expectedRevision)
+	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("skill_bindings")+` SET skill_id = $1, skill_version = $2, source_identity = $3, revision = $4, payload = $5::jsonb
+		WHERE scope_kind = $6 AND scope_id = $7 AND deployment_id = $8 AND id = $9 AND revision = $10`, binding.SkillID,
+		binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, expectedRevision)
 	if err != nil {
 		return err
 	}
@@ -499,3 +538,5 @@ func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.Scope
 	}
 	return bindings, rows.Err()
 }
+
+var _ skill.CatalogStore = (*PostgresStore)(nil)

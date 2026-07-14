@@ -135,6 +135,7 @@ type Resource struct {
 }
 
 type SourceProvenance struct {
+	Identity        string                 `json:"identity,omitempty"`
 	Format          string                 `json:"format"`
 	Registry        string                 `json:"registry,omitempty"`
 	Publisher       string                 `json:"publisher,omitempty"`
@@ -178,6 +179,7 @@ type Binding struct {
 	DeploymentID         string                             `json:"deploymentId"`
 	SkillID              string                             `json:"skillId"`
 	SkillVersion         string                             `json:"skillVersion"`
+	SourceIdentity       string                             `json:"sourceIdentity,omitempty"`
 	Disabled             bool                               `json:"disabled,omitempty"`
 	AllowedActions       []string                           `json:"allowedActions"`
 	EnablePrompt         bool                               `json:"enablePrompt,omitempty"`
@@ -211,13 +213,15 @@ type BindingReference struct {
 }
 
 type ModelPrompt struct {
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	SkillID        string `json:"skillId"`
-	Version        string `json:"version"`
-	AlwaysActive   bool   `json:"alwaysActive,omitempty"`
-	UserInvocable  bool   `json:"userInvocable"`
-	ModelInvocable bool   `json:"modelInvocable"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	BindingID       string `json:"bindingId"`
+	BindingRevision int64  `json:"bindingRevision"`
+	SkillID         string `json:"skillId"`
+	Version         string `json:"version"`
+	AlwaysActive    bool   `json:"alwaysActive,omitempty"`
+	UserInvocable   bool   `json:"userInvocable"`
+	ModelInvocable  bool   `json:"modelInvocable"`
 }
 
 type BoundAction struct {

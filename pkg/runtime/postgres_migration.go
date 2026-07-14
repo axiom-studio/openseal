@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 17
+const currentPostgresSchemaVersion int64 = 18
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -57,6 +57,25 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		1:  {"runs"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == 18 {
+			var hasCollisions bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+				SELECT 1 FROM `+s.table("skill_definitions")+` GROUP BY id, version HAVING COUNT(*) > 1
+			)`).Scan(&hasCollisions); err != nil {
+				return err
+			}
+			if hasCollisions {
+				return errors.New("cannot roll back source-qualified Skill variants while publisher-colliding definitions exist")
+			}
+			if _, err := tx.ExecContext(ctx, `
+				ALTER TABLE `+s.table("skill_definitions")+` DROP CONSTRAINT IF EXISTS skill_definitions_pkey;
+				ALTER TABLE `+s.table("skill_definitions")+` ADD PRIMARY KEY (id, version);
+				ALTER TABLE `+s.table("skill_definitions")+` DROP COLUMN IF EXISTS source_identity;
+				ALTER TABLE `+s.table("skill_bindings")+` DROP COLUMN IF EXISTS source_identity;
+			`); err != nil {
+				return err
+			}
+		}
 		if version == 6 {
 			if _, err := tx.ExecContext(ctx, `ALTER TABLE `+s.table("run_activity")+`
 				DROP COLUMN IF EXISTS agent_id,

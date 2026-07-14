@@ -3,9 +3,71 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestCatalogBindsSourceVariantsWithoutChangingModelIdentity(t *testing.T) {
+	ctx := context.Background()
+	catalog := NewCatalog()
+	identities := []string{"clawhub::@alice/release", "clawhub::@bob/release"}
+	for index, identity := range identities {
+		definition := testSkillDefinition()
+		definition.Source = &SourceProvenance{Identity: identity, Format: "openclaw.skill.v1", Publisher: []string{"alice", "bob"}[index]}
+		definition.Prompt = &PromptModule{Instructions: "Use the publisher-qualified release guidance.", UserInvocable: true}
+		if err := catalog.Register(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := catalog.GetDefinition(ctx, "release", "1.0.0"); !errors.Is(err, ErrDefinitionAmbiguous) {
+		t.Fatalf("unqualified colliding definition lookup = %v", err)
+	}
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	for index, identity := range identities {
+		if err := catalog.Bind(ctx, &Binding{
+			ID: []string{"alice", "bob"}[index], Scope: scope, DeploymentID: "operator",
+			SkillID: "release", SkillVersion: "1.0.0", SourceIdentity: identity,
+			AllowedActions: []string{"deploy"}, EnablePrompt: true, MaximumRisk: RiskLevelProduction,
+			Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "opaque-" + identity}}, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	actions, err := catalog.ListModelActions(ctx, scope, "operator")
+	if err != nil || len(actions) != 2 || actions[0].Name != "release.deploy" || actions[1].Name != "release.deploy" {
+		t.Fatalf("model actions = %#v, %v", actions, err)
+	}
+	encoded, err := json.Marshal(actions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range append(identities, "opaque-clawhub") {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("model actions leaked source or credential identity %q: %s", forbidden, encoded)
+		}
+	}
+	for index, bindingID := range []string{"alice", "bob"} {
+		bound, err := catalog.Resolve(ctx, scope, "operator", "release", "1.0.0", "deploy", BindingReference{ID: bindingID, Revision: 1})
+		if err != nil || DefinitionSourceIdentity(bound.Definition) != identities[index] {
+			t.Fatalf("exact action %s = %#v, %v", bindingID, bound, err)
+		}
+		prompt, err := catalog.ResolveExactPrompt(ctx, scope, "operator", "release", "1.0.0", BindingReference{ID: bindingID, Revision: 1})
+		if err != nil || prompt == nil || prompt.Instructions == "" {
+			t.Fatalf("exact prompt %s = %#v, %v", bindingID, prompt, err)
+		}
+	}
+	if _, err := catalog.ResolvePrompt(ctx, scope, "operator", "release", "1.0.0"); !errors.Is(err, ErrBindingAmbiguous) {
+		t.Fatalf("unqualified colliding prompt = %v", err)
+	}
+	if err := catalog.Bind(ctx, &Binding{
+		ID: "ambiguous", Scope: scope, DeploymentID: "operator", SkillID: "release", SkillVersion: "1.0.0",
+		AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
+		Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "opaque"}}, Revision: 1,
+	}); !errors.Is(err, ErrDefinitionAmbiguous) {
+		t.Fatalf("unqualified colliding binding = %v", err)
+	}
+}
 
 func TestCatalogProducesModelSafeScopedActions(t *testing.T) {
 	catalog := NewCatalog()
@@ -74,6 +136,9 @@ func TestCatalogResolvesAnExactBindingAndRejectsStaleSelection(t *testing.T) {
 	actions, err := catalog.ListModelActions(context.Background(), scope, "operator")
 	if err != nil || len(actions) != 2 {
 		t.Fatalf("actions = %#v, %v", actions, err)
+	}
+	if _, err := catalog.Resolve(context.Background(), scope, "operator", definition.ID, definition.Version, "deploy"); !errors.Is(err, ErrBindingAmbiguous) {
+		t.Fatalf("unqualified action with multiple bindings = %v", err)
 	}
 	selected, err := catalog.Resolve(context.Background(), scope, "operator", definition.ID, definition.Version, "deploy", BindingReference{ID: "secondary", Revision: 1})
 	if err != nil || selected.Binding.ID != "secondary" {

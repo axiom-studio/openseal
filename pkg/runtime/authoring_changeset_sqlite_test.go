@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -170,6 +171,74 @@ func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("receipt resources=%#v", result.ApplyReceipt.Resources)
+	}
+}
+
+func TestSQLiteWorkforceApplyRequiresExactSourceForCollidingSkills(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		sourceIdentity string
+		wantAmbiguous  bool
+	}{
+		{name: "exact", sourceIdentity: "clawhub::@alice/research"},
+		{name: "ambiguous", wantAmbiguous: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			catalog := skill.NewCatalogWithStore(store)
+			for _, identity := range []string{"clawhub::@alice/research", "clawhub::@bob/research"} {
+				if err := catalog.Register(ctx, &skill.Definition{
+					ID: "research", Version: "1.0.0", Name: "Research",
+					Source: &skill.SourceProvenance{Identity: identity, Format: "openclaw.skill.v1"},
+					Prompt: &skill.PromptModule{Instructions: "Preserve cited evidence."},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			value := testApplicableWorkforceChangeSet()
+			value.Result.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "research", PromptRequired: true}}
+			value.Result.Candidate.Agents[0].Authority.AllowedSkillIDs = []string{"research"}
+			value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+				"research": {ID: "research", Version: "1.0.0", PromptAvailable: true},
+			}}
+			if test.sourceIdentity != "" {
+				value.Placement.SkillSourceIdentities = map[string]map[string]string{"agent": {"research": test.sourceIdentity}}
+			}
+			if _, _, err := store.CreateChangeSet(ctx, value, "create", "digest"); err != nil {
+				t.Fatal(err)
+			}
+			applied := appliedRuntimeChangeSet(value, "receipt", "apply", value.UpdatedAt.Add(time.Minute))
+			result, err := store.ApplyChangeSet(ctx, applied, 2)
+			if test.wantAmbiguous {
+				if !errors.Is(err, skill.ErrDefinitionAmbiguous) {
+					t.Fatalf("ambiguous apply = %#v, %v", result, err)
+				}
+				if _, err := store.GetDefinition(ctx, "agent", "1"); !errors.Is(err, agent.ErrDefinitionNotFound) {
+					t.Fatalf("ambiguous apply leaked Agent state: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			bindings, err := store.ListSkillBindings(ctx, value.Scope, "agent-live")
+			if err != nil || len(bindings) != 1 || bindings[0].SourceIdentity != test.sourceIdentity {
+				t.Fatalf("exact workforce binding = %#v, %v", bindings, err)
+			}
+			prompts, err := catalog.ListModelPrompts(ctx, value.Scope, "agent-live")
+			if err != nil || len(prompts) != 1 || prompts[0].BindingID != bindings[0].ID {
+				t.Fatalf("exact model prompts = %#v, %v", prompts, err)
+			}
+			encoded, _ := json.Marshal(prompts)
+			if strings.Contains(string(encoded), test.sourceIdentity) {
+				t.Fatalf("model prompt leaked source identity: %s", encoded)
+			}
+		})
 	}
 }
 

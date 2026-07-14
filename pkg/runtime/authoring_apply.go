@@ -194,7 +194,8 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		}
 		bindings = append(bindings, &capability.Binding{
 			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
-			SkillID: requirement.SkillID, SkillVersion: skillCapability.Version, AllowedActions: allowed,
+			SkillID: requirement.SkillID, SkillVersion: skillCapability.Version,
+			SourceIdentity: strings.TrimSpace(value.Placement.SkillSourceIdentities[definition.ID][requirement.SkillID]), AllowedActions: allowed,
 			EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
 		})
 	}
@@ -221,6 +222,13 @@ func workforceRiskRank(risk capability.RiskLevel) int {
 func validateWorkforceBindingDefinition(binding *capability.Binding, definition *capability.Definition) error {
 	if binding == nil || definition == nil || definition.ID != binding.SkillID || definition.Version != binding.SkillVersion {
 		return fmt.Errorf("Skill binding %s does not match an installed immutable Skill definition", binding.ID)
+	}
+	definitionSourceIdentity := ""
+	if definition.Source != nil {
+		definitionSourceIdentity = strings.TrimSpace(definition.Source.Identity)
+	}
+	if strings.TrimSpace(binding.SourceIdentity) != definitionSourceIdentity {
+		return fmt.Errorf("Skill binding %s does not match the selected immutable Skill source", binding.ID)
 	}
 	if binding.EnablePrompt && definition.Prompt == nil {
 		return fmt.Errorf("Skill binding %s requires a prompt the Skill does not define", binding.ID)
