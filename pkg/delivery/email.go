@@ -44,6 +44,10 @@ func SkillDefinition() *skill.Definition {
 		Transport:   skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		Actions: map[string]skill.Action{SendEmail: {
 			Name: SendEmail, Description: "Send a reviewed email through the bound delivery identity.",
+			SemanticArguments: map[string]string{
+				"target": "to",
+				"body":   "body",
+			},
 			InputSchema: map[string]interface{}{
 				"type": "object", "additionalProperties": false,
 				"required": []interface{}{"to", "subject", "body"},
