@@ -167,6 +167,8 @@ type (
 	KernelStore                        = runtime.KernelStore
 	PostgresStore                      = runtime.PostgresStore
 	PostgresStoreOption                = runtime.PostgresStoreOption
+	PostgresPoolConfig                 = runtime.PostgresPoolConfig
+	PostgresPoolStats                  = runtime.PostgresPoolStats
 	Scope                              = runtime.Scope
 	ObjectiveOwner                     = runtime.ObjectiveOwner
 	Objective                          = runtime.Objective
@@ -809,6 +811,14 @@ func NewSQLiteStore(path string) (*runtime.SQLiteStore, error) {
 
 func WithPostgresSchema(schema string) runtime.PostgresStoreOption {
 	return runtime.WithPostgresSchema(schema)
+}
+
+func DefaultPostgresPoolConfig() runtime.PostgresPoolConfig {
+	return runtime.DefaultPostgresPoolConfig()
+}
+
+func WithPostgresPool(pool runtime.PostgresPoolConfig) runtime.PostgresStoreOption {
+	return runtime.WithPostgresPool(pool)
 }
 
 func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilation, error) {

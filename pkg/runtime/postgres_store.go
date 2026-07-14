@@ -16,12 +16,78 @@ import (
 
 const defaultPostgresSchema = "openseal"
 
+const (
+	defaultPostgresMaxOpenConnections = 16
+	defaultPostgresMaxIdleConnections = 4
+	defaultPostgresConnectionLifetime = 30 * time.Minute
+	defaultPostgresConnectionIdleTime = 5 * time.Minute
+)
+
 var postgresIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
 
 type PostgresStoreOption func(*postgresStoreConfig) error
 
 type postgresStoreConfig struct {
 	schema string
+	pool   PostgresPoolConfig
+}
+
+// PostgresPoolConfig bounds the process-local database/sql pool. OpenSeal
+// starts several durable worker families, so an explicit pool budget is a
+// correctness requirement during rolling deploys rather than a tuning hint.
+type PostgresPoolConfig struct {
+	MaxOpenConnections int
+	MaxIdleConnections int
+	ConnectionLifetime time.Duration
+	ConnectionIdleTime time.Duration
+}
+
+func DefaultPostgresPoolConfig() PostgresPoolConfig {
+	return PostgresPoolConfig{
+		MaxOpenConnections: defaultPostgresMaxOpenConnections,
+		MaxIdleConnections: defaultPostgresMaxIdleConnections,
+		ConnectionLifetime: defaultPostgresConnectionLifetime,
+		ConnectionIdleTime: defaultPostgresConnectionIdleTime,
+	}
+}
+
+func (c PostgresPoolConfig) validate() error {
+	if c.MaxOpenConnections <= 0 || c.MaxOpenConnections > 1024 {
+		return errors.New("PostgreSQL max open connections must be between 1 and 1024")
+	}
+	if c.MaxIdleConnections < 0 || c.MaxIdleConnections > c.MaxOpenConnections {
+		return errors.New("PostgreSQL max idle connections must be between zero and max open connections")
+	}
+	if c.ConnectionLifetime < 0 || c.ConnectionIdleTime < 0 {
+		return errors.New("PostgreSQL connection lifetime and idle time cannot be negative")
+	}
+	return nil
+}
+
+// WithPostgresPool applies a validated process-local connection budget.
+func WithPostgresPool(pool PostgresPoolConfig) PostgresStoreOption {
+	return func(config *postgresStoreConfig) error {
+		if err := pool.validate(); err != nil {
+			return err
+		}
+		config.pool = pool
+		return nil
+	}
+}
+
+// PostgresPoolStats is a credential-free operational projection of the
+// database/sql pool. Hosts can export it through their metrics system without
+// exposing DSNs, queries, tenant identifiers, or other private state.
+type PostgresPoolStats struct {
+	MaxOpenConnections int
+	OpenConnections    int
+	InUseConnections   int
+	IdleConnections    int
+	WaitCount          int64
+	WaitDuration       time.Duration
+	MaxIdleClosed      int64
+	MaxIdleTimeClosed  int64
+	MaxLifetimeClosed  int64
 }
 
 // WithPostgresSchema isolates OpenSeal tables in a validated PostgreSQL schema.
@@ -50,7 +116,7 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("PostgreSQL DSN is required")
 	}
-	config := postgresStoreConfig{schema: defaultPostgresSchema}
+	config := postgresStoreConfig{schema: defaultPostgresSchema, pool: DefaultPostgresPoolConfig()}
 	for _, option := range options {
 		if option == nil {
 			continue
@@ -63,6 +129,10 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL: %w", err)
 	}
+	db.SetMaxOpenConns(config.pool.MaxOpenConnections)
+	db.SetMaxIdleConns(config.pool.MaxIdleConnections)
+	db.SetConnMaxLifetime(config.pool.ConnectionLifetime)
+	db.SetConnMaxIdleTime(config.pool.ConnectionIdleTime)
 	store := &PostgresStore{db: db, schema: config.schema}
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
@@ -73,6 +143,24 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 		return nil, fmt.Errorf("migrate PostgreSQL: %w", err)
 	}
 	return store, nil
+}
+
+func (s *PostgresStore) PoolStats() PostgresPoolStats {
+	if s == nil || s.db == nil {
+		return PostgresPoolStats{}
+	}
+	stats := s.db.Stats()
+	return PostgresPoolStats{
+		MaxOpenConnections: stats.MaxOpenConnections,
+		OpenConnections:    stats.OpenConnections,
+		InUseConnections:   stats.InUse,
+		IdleConnections:    stats.Idle,
+		WaitCount:          stats.WaitCount,
+		WaitDuration:       stats.WaitDuration,
+		MaxIdleClosed:      stats.MaxIdleClosed,
+		MaxIdleTimeClosed:  stats.MaxIdleTimeClosed,
+		MaxLifetimeClosed:  stats.MaxLifetimeClosed,
+	}
 }
 
 func (s *PostgresStore) migrate(ctx context.Context) error {
