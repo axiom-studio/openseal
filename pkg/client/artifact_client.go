@@ -87,7 +87,7 @@ func (c *KernelHTTPClient) ListArtifacts(ctx context.Context, filter runtime.Art
 
 func (c *KernelHTTPClient) UploadArtifactContent(ctx context.Context, scope runtime.Scope, mediaType, digest string, sizeBytes int64, reader io.Reader) (*runtime.ArtifactStoredContent, error) {
 	query := scopeQuery(scope)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/artifact-content?"+query.Encode(), reader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiRoot+"/artifact-content?"+query.Encode(), reader)
 	if err != nil {
 		return nil, fmt.Errorf("build artifact upload request: %w", err)
 	}
@@ -100,17 +100,28 @@ func (c *KernelHTTPClient) UploadArtifactContent(ctx context.Context, scope runt
 	if sizeBytes >= 0 {
 		req.ContentLength = sizeBytes
 	}
+	for name, values := range c.requestHeaders {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upload artifact content: %w", err)
 	}
 	defer resp.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, decodeAPIError(resp.StatusCode, decoder)
+		return nil, decodeAPIError(resp.StatusCode, json.NewDecoder(io.LimitReader(resp.Body, 8<<20)))
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("read artifact upload response: %w", err)
+	}
+	if len(payload) > 8<<20 {
+		return nil, fmt.Errorf("decode artifact upload response: payload exceeds 8 MiB")
 	}
 	var stored runtime.ArtifactStoredContent
-	if err := decoder.Decode(&stored); err != nil {
+	if err := decodeKernelResult(payload, &stored); err != nil {
 		return nil, fmt.Errorf("decode artifact upload response: %w", err)
 	}
 	return &stored, nil
@@ -122,9 +133,15 @@ func (c *KernelHTTPClient) DownloadArtifactContent(ctx context.Context, scope ru
 		query.Set("version", strconv.FormatInt(version, 10))
 	}
 	path := "/api/v1/artifacts/" + url.PathEscape(strings.TrimSpace(artifactID)) + "/content?" + query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	requestPath := strings.TrimPrefix(path, "/api/v1")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiRoot+requestPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build artifact download request: %w", err)
+	}
+	for name, values := range c.requestHeaders {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
