@@ -86,7 +86,7 @@ Read {baseDir}/references/policy.md before searching.
 		t.Fatalf("unstable activation snapshot: first=%#v second=%#v", first, second)
 	}
 	activated := first.Skills[0]
-	if activated.ConfigurationKey != "research-config" || len(activated.Actions) != 1 || activated.ResourceRoot != "/sandbox/skills/research" ||
+	if activated.Name != "research" || activated.Description != "Research with a deterministic tool." || activated.ConfigurationKey != "research-config" || len(activated.Actions) != 1 || activated.ResourceRoot != "/sandbox/skills/research" ||
 		activated.Prompt == nil || strings.Contains(activated.Prompt.Instructions, "{baseDir}") || !strings.Contains(activated.Prompt.Instructions, "/sandbox/skills/research/references/policy.md") {
 		t.Fatalf("activation lost compiled semantics: %#v", activated)
 	}

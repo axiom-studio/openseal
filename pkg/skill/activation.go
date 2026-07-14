@@ -65,6 +65,8 @@ type ActivatedSkill struct {
 	BindingRevision  int64                  `json:"bindingRevision"`
 	SkillID          string                 `json:"skillId"`
 	SkillVersion     string                 `json:"skillVersion"`
+	Name             string                 `json:"name"`
+	Description      string                 `json:"description,omitempty"`
 	SourceDigest     string                 `json:"sourceDigest,omitempty"`
 	ConfigurationKey string                 `json:"configurationKey,omitempty"`
 	Configuration    map[string]interface{} `json:"configuration,omitempty"`
@@ -206,6 +208,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 		snapshot.Skills = append(snapshot.Skills, ActivatedSkill{
 			BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID, SkillVersion: definition.Version,
+			Name: definition.Name, Description: definition.Description,
 			SourceDigest: digest, ConfigurationKey: definition.ConfigurationKey, Configuration: cloneMap(binding.Config),
 			ResourceRoot: resourceRoot, ResourceRevision: resourceRevision, ResourceAdapter: resourceAdapter,
 			Prompt: prompt, Actions: actions,
