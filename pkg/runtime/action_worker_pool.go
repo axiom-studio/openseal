@@ -42,13 +42,14 @@ func (c *ActionWorkerConfig) applyDefaults() error {
 }
 
 type ActionWorkerPool struct {
-	worker *ActionWorker
-	config ActionWorkerConfig
-	logger *zap.SugaredLogger
-	wake   chan struct{}
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	worker  *ActionWorker
+	config  ActionWorkerConfig
+	logger  *zap.SugaredLogger
+	wake    chan struct{}
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	limiter *WorkerLimiter
 }
 
 func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
@@ -96,12 +97,25 @@ func (p *ActionWorkerPool) Wake() {
 	}
 }
 
+func (p *ActionWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
+	p.limiter = limiter
+}
+
 func (p *ActionWorkerPool) run(ctx context.Context, workerID string) {
 	defer p.wg.Done()
+	consecutiveFailures := 0
 	for {
+		release, acquireErr := p.limiter.acquire(ctx)
+		if acquireErr != nil {
+			return
+		}
 		result, err := p.worker.RunOnce(ctx, p.config.Scope, workerID, p.config.LeaseDuration)
+		release()
 		if err != nil && ctx.Err() == nil {
+			consecutiveFailures++
 			p.logger.Warnw("action worker iteration failed", "worker", workerID, "scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID, "error", err)
+		} else if err == nil {
+			consecutiveFailures = 0
 		}
 		if ctx.Err() != nil {
 			return
@@ -109,18 +123,8 @@ func (p *ActionWorkerPool) run(ctx context.Context, workerID string) {
 		if result != nil {
 			continue
 		}
-		timer := time.NewTimer(p.config.PollInterval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+		if !waitForWorkerPoll(ctx, p.wake, workerPollDelay(p.config.PollInterval, consecutiveFailures, workerID)) {
 			return
-		case <-p.wake:
-			if !timer.Stop() {
-				<-timer.C
-			}
-		case <-timer.C:
 		}
 	}
 }

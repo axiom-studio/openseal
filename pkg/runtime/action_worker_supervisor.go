@@ -55,6 +55,7 @@ type ActionWorkerSupervisor struct {
 	source      WorkerScopeSource
 	config      DynamicActionWorkerConfig
 	logger      *zap.SugaredLogger
+	limiter     *WorkerLimiter
 
 	mu     sync.RWMutex
 	pools  map[string]*ActionWorkerPool
@@ -131,6 +132,15 @@ func (s *ActionWorkerSupervisor) Wake() {
 	}
 }
 
+func (s *ActionWorkerSupervisor) SetWorkerLimiter(limiter *WorkerLimiter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.limiter = limiter
+	for _, pool := range s.pools {
+		pool.SetWorkerLimiter(limiter)
+	}
+}
+
 // ScopeCount exposes bounded operational state without revealing queued work.
 func (s *ActionWorkerSupervisor) ScopeCount() int {
 	s.mu.RLock()
@@ -191,6 +201,7 @@ func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
 			s.logger.Warnw("failed to create action worker pool", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 			continue
 		}
+		pool.SetWorkerLimiter(s.limiter)
 		s.pools[key] = pool
 		pool.Start(ctx)
 		s.logger.Infow("started action worker scope", "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)

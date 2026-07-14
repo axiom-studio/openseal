@@ -71,6 +71,35 @@ func TestWorkerPoolHonorsConfiguredConcurrency(t *testing.T) {
 	}
 }
 
+func TestWorkerPoolHonorsSharedProcessLimiter(t *testing.T) {
+	store := NewMemoryStore(100)
+	exec := &concurrencyExecutor{delay: 10 * time.Millisecond}
+	pool, scheduler := testPool(store, exec, 8)
+	limiter, err := NewWorkerLimiter(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.SetWorkerLimiter(limiter)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+	defer pool.Stop()
+	workflow := WorkflowEntry{
+		Name: "globally-bounded", Nodes: []*executor.NodeDefinition{{Id: "start", Name: "start", Type: exec.Type(), Config: map[string]interface{}{}}},
+		StartNodeID: "start",
+	}
+	for index := 0; index < 12; index++ {
+		if _, err := scheduler.Schedule(ctx, workflow, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForRuns(t, store, 12, RunStatusCompleted)
+	stats := limiter.Stats()
+	if exec.maxActive() != 2 || stats.MaximumInUse != 2 || stats.WaitCount == 0 {
+		t.Fatalf("maximum executions=%d limiter=%#v", exec.maxActive(), stats)
+	}
+}
+
 func TestWorkerPoolRecoversPersistedSQLiteRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.db")
 	store, err := NewSQLiteStore(path)
