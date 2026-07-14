@@ -11,6 +11,9 @@ func TestEmailSkillIsGovernedCredentialedAndArtifactSafe(t *testing.T) {
 	ctx := context.Background()
 	definition := SkillDefinition()
 	action := definition.Actions[SendEmail]
+	if definition.Version != "1.1.0" {
+		t.Fatalf("email semantic contract must use a new immutable version, got %q", definition.Version)
+	}
 	if action.SemanticArguments["target"] != "to" || action.SemanticArguments["body"] != "body" {
 		t.Fatalf("email action must expose portable outreach arguments, got %#v", action.SemanticArguments)
 	}
