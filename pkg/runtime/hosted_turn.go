@@ -17,17 +17,19 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v6"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v7"
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
 type HostedSkillPrompt struct {
-	SkillID      string `json:"skillId"`
-	Version      string `json:"version"`
-	Reference    string `json:"reference"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	Instructions string `json:"instructions"`
+	SkillID         string `json:"skillId"`
+	Version         string `json:"version"`
+	BindingID       string `json:"bindingId,omitempty"`
+	BindingRevision int64  `json:"bindingRevision,omitempty"`
+	Reference       string `json:"reference"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	Instructions    string `json:"instructions"`
 }
 
 type HostedSkillDisposition string
@@ -127,10 +129,19 @@ func NewHostedTurnRunner(host TurnHost, config HostedTurnRunnerConfig) (*HostedT
 	if host == nil || strings.TrimSpace(config.AgentID) == "" || strings.TrimSpace(config.DefinitionID) == "" || strings.TrimSpace(config.DefinitionVersion) == "" {
 		return nil, errors.New("turn host and Agent definition identity are required")
 	}
+	seenPromptReferences := make(map[string]bool, len(config.SkillPrompts))
 	for _, prompt := range config.SkillPrompts {
 		if strings.TrimSpace(prompt.SkillID) == "" || strings.TrimSpace(prompt.Version) == "" || strings.TrimSpace(prompt.Instructions) == "" {
 			return nil, errors.New("hosted Skill prompts require identity, version, and instructions")
 		}
+		if (strings.TrimSpace(prompt.BindingID) == "") != (prompt.BindingRevision == 0) || prompt.BindingRevision < 0 {
+			return nil, errors.New("hosted Skill prompts require both binding id and revision when selecting an exact binding")
+		}
+		reference := hostedSkillPromptReference(prompt)
+		if seenPromptReferences[reference] {
+			return nil, fmt.Errorf("hosted Skill prompt reference %q is ambiguous", reference)
+		}
+		seenPromptReferences[reference] = true
 	}
 	return &HostedTurnRunner{host: host, config: config}, nil
 }
@@ -223,7 +234,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	allowedSkillRefs := make(map[string]struct{}, len(request.SkillPrompts))
 	for _, prompt := range request.SkillPrompts {
-		allowedSkillRefs["skill:"+prompt.SkillID+"@"+prompt.Version] = struct{}{}
+		allowedSkillRefs[prompt.Reference] = struct{}{}
 	}
 	if len(response.SkillSelections) != len(allowedSkillRefs) {
 		return nil, errors.New("turn host must disposition every offered Skill")
@@ -320,9 +331,17 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
 	for index := range request.SkillPrompts {
-		request.SkillPrompts[index].Reference = "skill:" + request.SkillPrompts[index].SkillID + "@" + request.SkillPrompts[index].Version
+		request.SkillPrompts[index].Reference = hostedSkillPromptReference(request.SkillPrompts[index])
 	}
 	return request, nil
+}
+
+func hostedSkillPromptReference(prompt HostedSkillPrompt) string {
+	reference := "skill:" + strings.TrimSpace(prompt.SkillID) + "@" + strings.TrimSpace(prompt.Version)
+	if strings.TrimSpace(prompt.BindingID) != "" && prompt.BindingRevision > 0 {
+		reference += fmt.Sprintf("#binding:%s@%d", strings.TrimSpace(prompt.BindingID), prompt.BindingRevision)
+	}
+	return reference
 }
 
 // projectHostedDependencyResults exposes only the durable fan-in projection,

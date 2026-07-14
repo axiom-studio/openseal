@@ -74,6 +74,52 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	}
 }
 
+func TestHostedTurnRunnerKeepsPublisherCollidingPromptsBindingExact(t *testing.T) {
+	references := []string{
+		"skill:research@1.0.0#binding:alice@1",
+		"skill:research@1.0.0#binding:bob@1",
+	}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
+		SkillSelections: []HostedSkillSelection{
+			{SkillRef: references[0], Disposition: HostedSkillApplied, Summary: "Applied the first exact prompt"},
+			{SkillRef: references[1], Disposition: HostedSkillNotApplied, Summary: "Did not need the second exact prompt"},
+		},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+		SkillPrompts: []HostedSkillPrompt{
+			{SkillID: "research", Version: "1.0.0", BindingID: "alice", BindingRevision: 1, Instructions: "Research with the first selected installation."},
+			{SkillID: "research", Version: "1.0.0", BindingID: "bob", BindingRevision: 1, Instructions: "Research with the second selected installation."},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Research"}, Turn: &AgentTurn{ID: "turn"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.SkillPrompts) != 2 || host.request.SkillPrompts[0].Reference != references[0] || host.request.SkillPrompts[1].Reference != references[1] {
+		t.Fatalf("exact prompt references = %#v", host.request.SkillPrompts)
+	}
+	encoded, _ := json.Marshal(host.request.SkillPrompts)
+	if strings.Contains(string(encoded), "clawhub::") || strings.Contains(string(encoded), "sourceIdentity") {
+		t.Fatalf("hosted prompt leaked source provenance: %s", encoded)
+	}
+	if _, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+		SkillPrompts: []HostedSkillPrompt{
+			{SkillID: "research", Version: "1.0.0", Instructions: "First."},
+			{SkillID: "research", Version: "1.0.0", Instructions: "Second."},
+		},
+	}); err == nil {
+		t.Fatal("duplicate unqualified prompt references were accepted")
+	}
+}
+
 func TestHostedTurnRunnerRejectsUnsafeDependencyProjection(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
