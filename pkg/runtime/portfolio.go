@@ -135,6 +135,17 @@ func (o *Objective) Validate() error {
 	if err := o.Cadence.Validate(); err != nil {
 		return err
 	}
+	eventRules, err := DecodeObjectiveEventRules(o.EventRules)
+	if err != nil {
+		return err
+	}
+	if o.Budget != nil && eventRules != nil {
+		for _, rule := range eventRules.Rules {
+			if rule.RunBudget == nil {
+				return errors.New("budgeted event-driven objective requires rule runBudget allocation")
+			}
+		}
+	}
 	if o.ScheduleCondition != nil {
 		if o.Cadence == nil || strings.TrimSpace(o.ScheduleCondition.Reason) == "" || len(o.ScheduleCondition.Reason) > 512 ||
 			o.ScheduleCondition.Since.IsZero() || o.ScheduleCondition.UpdatedAt.IsZero() || o.ScheduleCondition.UpdatedAt.Before(o.ScheduleCondition.Since) {
