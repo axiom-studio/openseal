@@ -96,6 +96,7 @@ type ChangeSetPlacement struct {
 	AgentExpectedRevisions     map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
 	InitiativeExpectedRevision int64                                                `json:"initiativeExpectedRevision,omitempty"`
 	CredentialReferences       map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
+	SkillSourceIdentities      map[string]map[string]string                         `json:"skillSourceIdentities,omitempty"`
 	Objectives                 map[string]ObjectivePlacement                        `json:"objectives,omitempty"`
 	Environment                string                                               `json:"environment,omitempty"`
 }
@@ -745,6 +746,15 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		credentials[canonicalIdentity(scope, id)] = value
 	}
 	placement.CredentialReferences = credentials
+	skillSources := map[string]map[string]string{}
+	for id, values := range placement.SkillSourceIdentities {
+		qualified := canonicalIdentity(scope, id)
+		skillSources[qualified] = make(map[string]string, len(values))
+		for skillID, identity := range values {
+			skillSources[qualified][strings.TrimSpace(skillID)] = strings.TrimSpace(identity)
+		}
+	}
+	placement.SkillSourceIdentities = skillSources
 	if strings.TrimSpace(placement.Environment) == "" {
 		placement.Environment = "default"
 	}
@@ -853,6 +863,19 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		for kind, reference := range inherited {
 			if _, exists := placement.CredentialReferences[definitionID][kind]; !exists {
 				placement.CredentialReferences[definitionID][kind] = reference
+			}
+		}
+	}
+	if placement.SkillSourceIdentities == nil {
+		placement.SkillSourceIdentities = map[string]map[string]string{}
+	}
+	for definitionID, inherited := range parentPlacement.SkillSourceIdentities {
+		if placement.SkillSourceIdentities[definitionID] == nil {
+			placement.SkillSourceIdentities[definitionID] = map[string]string{}
+		}
+		for skillID, identity := range inherited {
+			if _, exists := placement.SkillSourceIdentities[definitionID][skillID]; !exists {
+				placement.SkillSourceIdentities[definitionID][skillID] = identity
 			}
 		}
 	}
@@ -1185,6 +1208,16 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 				nested[kind] = reference
 			}
 			copy.CredentialReferences[agentID] = nested
+		}
+	}
+	if value.SkillSourceIdentities != nil {
+		copy.SkillSourceIdentities = make(map[string]map[string]string, len(value.SkillSourceIdentities))
+		for agentID, identities := range value.SkillSourceIdentities {
+			nested := make(map[string]string, len(identities))
+			for skillID, identity := range identities {
+				nested[skillID] = identity
+			}
+			copy.SkillSourceIdentities[agentID] = nested
 		}
 	}
 	if value.Objectives != nil {

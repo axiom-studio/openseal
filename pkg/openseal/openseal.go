@@ -1194,6 +1194,10 @@ var (
 	ErrWorkforceChangeSetIdempotency = authoring.ErrChangeSetIdempotency
 	ErrWorkforceChangeSetRevision    = authoring.ErrChangeSetRevision
 	ErrWorkforceChangeSetTransition  = authoring.ErrChangeSetTransition
+	ErrSkillDefinitionImmutable      = skill.ErrDefinitionImmutable
+	ErrSkillDefinitionAmbiguous      = skill.ErrDefinitionAmbiguous
+	ErrSkillBindingAmbiguous         = skill.ErrBindingAmbiguous
+	ErrSkillBindingRevisionConflict  = skill.ErrBindingRevisionConflict
 	ErrSkillSourceArtifactNotFound   = sourceartifact.ErrNotFound
 	ErrSkillSourceArtifactImmutable  = sourceartifact.ErrImmutable
 	ErrSkillSourceReferenceConflict  = sourceartifact.ErrReferenceConflict
@@ -1928,7 +1932,18 @@ func (e *Engine) activateInstalledSkill(ctx context.Context, installed *clawhub.
 	if installed == nil || installed.Compilation == nil || installed.Compilation.Definition == nil {
 		return fmt.Errorf("installed skill compilation is required")
 	}
-	definition := installed.Compilation.Definition
+	if strings.TrimSpace(installed.SourceIdentity) == "" {
+		return fmt.Errorf("installed skill source identity is required")
+	}
+	definitionCopy := *installed.Compilation.Definition
+	if definitionCopy.Source == nil {
+		return fmt.Errorf("installed skill source provenance is required")
+	}
+	sourceCopy := *definitionCopy.Source
+	sourceCopy.Identity = strings.TrimSpace(installed.SourceIdentity)
+	definitionCopy.Source = &sourceCopy
+	installed.Compilation.Definition = &definitionCopy
+	definition := &definitionCopy
 	if err := e.validateClawHubCompilation(installed.Compilation); err != nil {
 		return err
 	}
@@ -1941,12 +1956,12 @@ func (e *Engine) activateInstalledSkill(ctx context.Context, installed *clawhub.
 		}
 		if _, _, err := e.skillSources.ImportOpenClaw(ctx, sourceartifact.ImportOpenClawRequest{
 			Scope: e.clawHubSourceScope, Compilation: installed.Compilation,
-			ReferenceID: "skill.definition:" + definition.ID + "@" + definition.Version, ReferenceKind: "definition",
+			ReferenceID: "skill.definition:" + definition.ID + "@" + definition.Version + ":" + installed.SourceIdentity, ReferenceKind: "definition",
 		}); err != nil {
 			return fmt.Errorf("retain registered skill definition source artifact: %w", err)
 		}
 	}
-	existing, err := e.skills.GetDefinition(ctx, definition.ID, definition.Version)
+	existing, err := e.skills.GetDefinitionVariant(ctx, definition.ID, definition.Version, installed.SourceIdentity)
 	if err != nil {
 		return err
 	}
@@ -1967,13 +1982,6 @@ func (e *Engine) validateClawHubCompilation(compilation *skillopenclaw.Compilati
 	validationCatalog := skill.NewCatalog()
 	if err := validationCatalog.Register(context.Background(), definition); err != nil {
 		return err
-	}
-	existing, err := e.skills.GetDefinition(context.Background(), definition.ID, definition.Version)
-	if err != nil {
-		return err
-	}
-	if existing != nil && (existing.Source == nil || definition.Source == nil || existing.Source.Digest != definition.Source.Digest) {
-		return fmt.Errorf("skill %s@%s conflicts with an active immutable definition", definition.ID, definition.Version)
 	}
 	return nil
 }
@@ -2638,6 +2646,10 @@ func (e *Engine) GetSkillDefinition(ctx context.Context, skillID, version string
 	return e.skills.GetDefinition(ctx, skillID, version)
 }
 
+func (e *Engine) GetSkillDefinitionVariant(ctx context.Context, skillID, version, sourceIdentity string) (*skill.Definition, error) {
+	return e.skills.GetDefinitionVariant(ctx, skillID, version, sourceIdentity)
+}
+
 func (e *Engine) BindSkill(ctx context.Context, binding *skill.Binding) error {
 	return e.skills.Bind(ctx, binding)
 }
@@ -2652,6 +2664,10 @@ func (e *Engine) ListModelSkillPrompts(ctx context.Context, scope skill.ScopeRef
 
 func (e *Engine) ResolveSkillPrompt(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version string) (*skill.PromptModule, error) {
 	return e.skills.ResolvePrompt(ctx, scope, deploymentID, skillID, version)
+}
+
+func (e *Engine) ResolveExactSkillPrompt(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version string, binding skill.BindingReference) (*skill.PromptModule, error) {
+	return e.skills.ResolveExactPrompt(ctx, scope, deploymentID, skillID, version, binding)
 }
 
 func (e *Engine) ResolveSkillAction(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string) (*skill.BoundAction, error) {

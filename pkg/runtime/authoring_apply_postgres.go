@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -265,12 +266,18 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 		rows.Close()
 	}
 	for _, binding := range desired {
-		var definitionPayload string
-		if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+definitionTable+` WHERE id=$1 AND version=$2`, binding.SkillID, binding.SkillVersion).Scan(&definitionPayload); err != nil {
+		definitionPayload, err := resolvePostgresWorkforceSkillDefinition(ctx, tx, definitionTable, binding)
+		if err != nil {
 			return fmt.Errorf("resolve Skill %s@%s for workforce binding: %w", binding.SkillID, binding.SkillVersion, err)
 		}
 		var definition capability.Definition
-		if json.Unmarshal([]byte(definitionPayload), &definition) != nil || validateWorkforceBindingDefinition(binding, &definition) != nil {
+		if json.Unmarshal([]byte(definitionPayload), &definition) != nil {
+			return fmt.Errorf("Skill %s@%s cannot satisfy workforce binding", binding.SkillID, binding.SkillVersion)
+		}
+		if binding.SourceIdentity == "" && definition.Source != nil {
+			binding.SourceIdentity = strings.TrimSpace(definition.Source.Identity)
+		}
+		if validateWorkforceBindingDefinition(binding, &definition) != nil {
 			return fmt.Errorf("Skill %s@%s cannot satisfy workforce binding", binding.SkillID, binding.SkillVersion)
 		}
 		current := existing[binding.ID]
@@ -279,11 +286,11 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 		}
 		payload, _ := json.Marshal(binding)
 		if current == nil {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO `+bindingTable+`(scope_kind,scope_id,deployment_id,id,skill_id,skill_version,revision,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload)); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO `+bindingTable+`(scope_kind,scope_id,deployment_id,id,skill_id,skill_version,source_identity,revision,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload)); err != nil {
 				return err
 			}
 		} else {
-			result, err := tx.ExecContext(ctx, `UPDATE `+bindingTable+` SET skill_id=$1,skill_version=$2,revision=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND deployment_id=$7 AND id=$8 AND revision=$9`, binding.SkillID, binding.SkillVersion, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, current.Revision)
+			result, err := tx.ExecContext(ctx, `UPDATE `+bindingTable+` SET skill_id=$1,skill_version=$2,source_identity=$3,revision=$4,payload=$5::jsonb WHERE scope_kind=$6 AND scope_id=$7 AND deployment_id=$8 AND id=$9 AND revision=$10`, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, current.Revision)
 			if err != nil {
 				return err
 			}
@@ -299,6 +306,43 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 		}
 	}
 	return nil
+}
+
+func resolvePostgresWorkforceSkillDefinition(ctx context.Context, tx *sql.Tx, table string, binding *capability.Binding) (string, error) {
+	query := `SELECT source_identity,payload FROM ` + table + ` WHERE id=$1 AND version=$2`
+	arguments := []interface{}{binding.SkillID, binding.SkillVersion}
+	if binding.SourceIdentity != "" {
+		query += ` AND source_identity=$3`
+		arguments = append(arguments, binding.SourceIdentity)
+	}
+	query += ` ORDER BY source_identity FOR SHARE`
+	rows, err := tx.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var payload string
+	count := 0
+	for rows.Next() {
+		var sourceIdentity, candidate string
+		if err := rows.Scan(&sourceIdentity, &candidate); err != nil {
+			return "", err
+		}
+		if sourceIdentity != binding.SourceIdentity && binding.SourceIdentity != "" {
+			return "", errors.New("selected Skill source does not match persisted provenance")
+		}
+		payload, count = candidate, count+1
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if count == 0 {
+		return "", sql.ErrNoRows
+	}
+	if count > 1 {
+		return "", skill.ErrDefinitionAmbiguous
+	}
+	return payload, nil
 }
 
 var _ authoring.AtomicChangeSetStore = (*PostgresStore)(nil)

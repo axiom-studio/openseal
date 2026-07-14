@@ -16,6 +16,81 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := "openseal_skill_variants_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	catalog := skill.NewCatalogWithStore(primary)
+	identities := []string{"clawhub::@alice/research", "clawhub::@bob/research"}
+	for _, identity := range identities {
+		if err := catalog.Register(ctx, &skill.Definition{
+			ID: "research", Version: "1.0.0", Name: "Research",
+			Source: &skill.SourceProvenance{Identity: identity, Format: "openclaw.skill.v1"},
+			Prompt: &skill.PromptModule{Instructions: "Use the exact installed source."},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	for index, identity := range identities {
+		if err := catalog.Bind(ctx, &skill.Binding{
+			ID: []string{"alice", "bob"}[index], Scope: scope, DeploymentID: "analyst",
+			SkillID: "research", SkillVersion: "1.0.0", SourceIdentity: identity,
+			EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+	restarted := skill.NewCatalogWithStore(replica)
+	if _, err := restarted.GetDefinition(ctx, "research", "1.0.0"); !errors.Is(err, skill.ErrDefinitionAmbiguous) {
+		t.Fatalf("restarted ambiguous definition = %v", err)
+	}
+	prompts, err := restarted.ListModelPrompts(ctx, scope, "analyst")
+	if err != nil || len(prompts) != 2 {
+		t.Fatalf("restarted prompts = %#v, %v", prompts, err)
+	}
+	if err := primary.RollbackPostgresMigrations(ctx, 17); err == nil {
+		t.Fatal("publisher-colliding definitions unexpectedly allowed a lossy rollback")
+	}
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 18 {
+		t.Fatalf("failed rollback changed schema version = %d, %v", version, err)
+	}
+	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("skill_bindings")+` WHERE source_identity = $1`, identities[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("skill_definitions")+` WHERE source_identity = $1`, identities[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.RollbackPostgresMigrations(ctx, 17); err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := skill.NewCatalogWithStore(primary)
+	definition, err := reloaded.GetDefinitionVariant(ctx, "research", "1.0.0", identities[0])
+	if err != nil || definition == nil || skill.DefinitionSourceIdentity(definition) != identities[0] {
+		t.Fatalf("reapplied source identity = %#v, %v", definition, err)
+	}
+}
+
 func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
 	if dsn == "" {
