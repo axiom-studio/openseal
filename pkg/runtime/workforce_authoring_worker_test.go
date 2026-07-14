@@ -101,6 +101,89 @@ func TestWorkforceAuthoringPrepareQueuesDurableRunAndConcurrentWorkersGenerateOn
 	}
 }
 
+func TestWorkforceAuthoringWorkerWaitsForDurableRunLinkage(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	generator := testAuthoringGenerator(t)
+	compiler, _ := authoring.NewCompiler(generator)
+	service, err := NewWorkforceAuthoringRunService(compiler, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testPrepareWorkforceRequest()
+	changeSet, _, err := service.changeSets.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	created, err := service.runs.CreateAgentRun(context.Background(), CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindWorkforceAuthoring,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: workforceAuthoringAgentID}, AssignedAgentID: workforceAuthoringAgentID,
+		ConcurrencyKey: "workforce-change-set:" + changeSet.ID,
+		Goal:           "Generate governed workforce change set " + changeSet.ID, Source: RunSourceRequest,
+		Context:        map[string]interface{}{"changeSetId": changeSet.ID},
+		Checkpoint:     map[string]interface{}{"phase": "queued", "changeSetId": changeSet.ID},
+		IdempotencyKey: "linkage-window:" + changeSet.ID,
+		Actor:          ActivityActor{Type: changeSet.Actor.Type, ID: changeSet.Actor.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "linkage-worker", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
+	if worked, err := worker.RunOnce(context.Background()); err != nil || worked {
+		t.Fatalf("unlinked worker worked=%t err=%v", worked, err)
+	}
+	if generator.calls.Load() != 0 {
+		t.Fatalf("provider calls before durable linkage = %d", generator.calls.Load())
+	}
+	yielded, err := store.GetAgentRun(context.Background(), scope, created.Run.ID)
+	if err != nil || yielded.Status != AgentRunStatusQueued || yielded.Checkpoint["phase"] != "awaiting_change_set_link" || yielded.LeaseOwner != "" {
+		t.Fatalf("yielded Run = %#v, err = %v", yielded, err)
+	}
+	replacement, err := service.runs.CreateAgentRun(context.Background(), CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindWorkforceAuthoring,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: workforceAuthoringAgentID}, AssignedAgentID: workforceAuthoringAgentID,
+		ConcurrencyKey: "workforce-change-set:" + changeSet.ID,
+		Goal:           "Generate governed workforce change set " + changeSet.ID, Source: RunSourceRequest,
+		Context:        map[string]interface{}{"changeSetId": changeSet.ID},
+		Checkpoint:     map[string]interface{}{"phase": "queued", "changeSetId": changeSet.ID},
+		IdempotencyKey: "linkage-window-replacement:" + changeSet.ID,
+		Actor:          ActivityActor{Type: changeSet.Actor.Type, ID: changeSet.Actor.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked := cloneRuntimeChangeSetForAuthoring(changeSet)
+	linked.Generation.RunID = replacement.Run.ID
+	linked.Revision++
+	linked.UpdatedAt = time.Now().UTC()
+	if _, err := store.UpdateChangeSet(context.Background(), linked, changeSet.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := worker.RunOnce(context.Background()); err != nil || !worked {
+		t.Fatalf("superseded worker worked=%t err=%v", worked, err)
+	}
+	if generator.calls.Load() != 0 {
+		t.Fatalf("provider calls from superseded Run = %d", generator.calls.Load())
+	}
+	superseded, err := store.GetAgentRun(context.Background(), scope, created.Run.ID)
+	if err != nil || superseded.Status != AgentRunStatusCompleted || superseded.Output["supersededByRunId"] != replacement.Run.ID {
+		t.Fatalf("superseded Run = %#v, err = %v", superseded, err)
+	}
+	if worked, err := worker.RunOnce(context.Background()); err != nil || !worked {
+		t.Fatalf("linked worker worked=%t err=%v", worked, err)
+	}
+	generated, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || generated.Status != authoring.ChangeSetReview || generator.calls.Load() != 1 {
+		t.Fatalf("generated = %#v calls=%d err=%v", generated, generator.calls.Load(), err)
+	}
+}
+
 func TestWorkforceAuthoringRecoveryScopesAreDurableDeduplicatedAndPaged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := NewSQLiteStore(path)

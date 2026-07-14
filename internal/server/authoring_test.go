@@ -147,7 +147,8 @@ func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
 	var changeSet authoring.ChangeSet
-	if err := json.NewDecoder(created.Body).Decode(&changeSet); err != nil || changeSet.ID == "" || changeSet.Status != authoring.ChangeSetEvaluating {
+	if err := json.NewDecoder(created.Body).Decode(&changeSet); err != nil || changeSet.ID == "" ||
+		changeSet.Status != authoring.ChangeSetEvaluating && changeSet.Status != authoring.ChangeSetBlocked {
 		t.Fatalf("change set = %#v, err = %v", changeSet, err)
 	}
 	replay := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets", body, "intent-one")

@@ -17,6 +17,8 @@ import (
 
 const workforceAuthoringAgentID = "openseal.workforce-authoring"
 
+var errWorkforceAuthoringRunLinkPending = errors.New("workforce authoring Run linkage is pending")
+
 type WorkforceAuthoringRunStore interface {
 	KernelStore
 	authoring.ChangeSetStore
@@ -270,7 +272,11 @@ func (w *WorkforceAuthoringWorker) RunOnce(ctx context.Context) (bool, error) {
 	if err != nil || run == nil {
 		return false, err
 	}
-	return true, w.execute(ctx, run)
+	err = w.execute(ctx, run)
+	if errors.Is(err, errWorkforceAuthoringRunLinkPending) {
+		return false, nil
+	}
+	return true, err
 }
 
 func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) error {
@@ -287,6 +293,21 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 		return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 			"changeSetId": changeSet.ID, "changeSetStatus": changeSet.Status, "candidateDigest": changeSet.CandidateDigest,
 		}, "", "workforce.generation.reconciled")
+	}
+	if changeSet.Generation == nil {
+		return w.finishRun(ctx, run, AgentRunStatusFailed, nil, "evaluating workforce change set has no generation state", "run.failed")
+	}
+	linkedRunID := strings.TrimSpace(changeSet.Generation.RunID)
+	if linkedRunID == "" {
+		if err := w.yieldPendingLink(ctx, run); err != nil {
+			return err
+		}
+		return errWorkforceAuthoringRunLinkPending
+	}
+	if linkedRunID != run.ID {
+		return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
+			"changeSetId": changeSet.ID, "changeSetStatus": changeSet.Status, "supersededByRunId": linkedRunID,
+		}, "", "workforce.generation.superseded")
 	}
 	_, _ = w.activity.AppendActivity(ctx, &ActivityEvent{
 		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID,
@@ -323,6 +344,27 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 		"changeSetId": generated.ID, "changeSetStatus": generated.Status, "candidateDigest": generated.CandidateDigest,
 	}, "", "workforce.generation.completed")
+}
+
+// yieldPendingLink closes the narrow creation window in which the canonical
+// Run exists but its ID has not yet been committed to the ChangeSet. A worker
+// must never call the provider from that state: doing so could race the
+// scheduling revision and strand the ChangeSet in evaluating forever.
+func (w *WorkforceAuthoringWorker) yieldPendingLink(ctx context.Context, claimed *AgentRun) error {
+	current, err := w.service.store.GetAgentRun(ctx, claimed.Scope, claimed.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Status != AgentRunStatusRunning {
+		return nil
+	}
+	_, _, err = w.activity.TransitionRun(ctx, current.Scope, current.ID, RunTransitionRequest{
+		ExpectedRevision: current.Revision, Status: AgentRunStatusQueued, LeaseOwner: w.config.WorkerID,
+		Checkpoint: map[string]interface{}{"phase": "awaiting_change_set_link", "changeSetId": claimed.Context["changeSetId"]},
+		EventType:  "workforce.generation.link_pending", Summary: "Workforce generation is waiting for durable Run linkage",
+		Actor: ActivityActor{Type: "worker", ID: w.config.WorkerID}, Severity: ActivitySeverityInfo,
+	})
+	return err
 }
 
 func (w *WorkforceAuthoringWorker) yieldInterruptedRun(ctx context.Context, claimed *AgentRun) error {
