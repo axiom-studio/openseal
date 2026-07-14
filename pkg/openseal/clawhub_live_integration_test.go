@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/executor"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	kernelruntime "github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	sdkresolver "github.com/axiom-studio/skills.sdk/resolver"
 )
@@ -34,7 +35,7 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 
 	skillRef := strings.TrimSpace(os.Getenv("OPENSEAL_E2E_CLAWHUB_SKILL"))
 	if skillRef == "" {
-		skillRef = "yuyonghao-summarize"
+		skillRef = "@nubzparmesan/minnow-writing"
 	}
 	reference, err := clawhub.ParseSkillReference(skillRef)
 	if err != nil {
@@ -46,7 +47,7 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 	workspace := t.TempDir()
 	skillsDirectory := filepath.Join(workspace, "skills")
 	databasePath := filepath.Join(workspace, "kernel.db")
-	store, err := runtime.NewSQLiteStore(databasePath)
+	store, err := kernelruntime.NewSQLiteStore(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,25 +76,23 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 
 	scope := SkillScope{Kind: "agent", ID: "live-clawhub-e2e"}
 	if err := engine.BindSkill(ctx, &SkillBinding{
-		ID: "summarizer", Scope: scope, DeploymentID: "live-e2e",
+		ID: "live-skill", Scope: scope, DeploymentID: "live-e2e",
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		EnablePrompt: true, MaximumRisk: SkillRiskRead, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	prompts, err := engine.ListModelSkillPrompts(ctx, scope, "live-e2e")
-	if err != nil || len(prompts) != 1 {
-		t.Fatalf("bound model prompt = %#v, %v", prompts, err)
+	host := SkillHostCapabilityState{OperatingSystem: goruntime.GOOS, Revision: "live-e2e-host/v1"}
+	activation, err := engine.ActivateSkills(ctx, scope, "live-e2e", host)
+	if err != nil || activation == nil || len(activation.Skills) != 1 || len(activation.Unavailable) != 0 || activation.Skills[0].Prompt == nil {
+		t.Fatalf("authoritative Skill activation = %#v, %v", activation, err)
 	}
-	resolved, err := engine.ResolveSkillPrompt(ctx, scope, "live-e2e", definition.ID, definition.Version)
-	if err != nil || resolved == nil {
-		t.Fatalf("resolve compiled prompt = %#v, %v", resolved, err)
-	}
+	resolved := activation.Skills[0].Prompt
 
 	runScope := Scope{Kind: scope.Kind, ID: scope.ID}
 	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: runScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "live-clawhub-agent"},
-		AssignedAgentID: "live-clawhub-agent", Goal: "Execute the bound real ClawHub summarizer", Source: RunSourceManual,
+		AssignedAgentID: "live-clawhub-agent", Goal: "Execute the bound real ClawHub writing Skill", Source: RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +110,7 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 		step := &executor.StepDefinition{Id: "live-clawhub-model", Type: executor.NodeTypeAI, Config: map[string]interface{}{
 			"provider": "openai-compatible", "model": model, "apiKey": apiKey, "baseUrl": baseURL,
 			"systemPrompt": resolved.Instructions,
-			"prompt":       "Summarize this sentence in one sentence and preserve the marker OPENSEAL_E2E_OK: OpenSeal installed, verified, compiled, bound, and executed a real ClawHub skill.",
+			"prompt":       "Rewrite this as one clear sentence according to the supplied writing Skill, preserving the exact marker OPENSEAL_E2E_OK: OpenSeal installed, verified, activated, bound, and executed a real ClawHub skill.",
 			"temperature":  float64(0), "maxTokens": float64(160),
 		}}
 		result, executeErr := executor.NewAIExecutor().Execute(turnContext, step, executor.NewResolver(sdkresolver.Config{}))
@@ -139,7 +138,7 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 	}
 	storeOpen = false
 
-	reopened, err := runtime.NewSQLiteStore(databasePath)
+	reopened, err := kernelruntime.NewSQLiteStore(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +151,9 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 	if err != nil || restored == nil || restored.Source == nil || restored.Source.Digest != definition.Source.Digest {
 		t.Fatalf("restart restore lost installed definition provenance: %#v, %v", restored, err)
 	}
-	restoredPrompts, err := restarted.ListModelSkillPrompts(ctx, scope, "live-e2e")
-	if err != nil || len(restoredPrompts) != 1 || restoredPrompts[0].SkillID != definition.ID {
-		t.Fatalf("restart restore lost the model-visible skill binding: %#v, %v", restoredPrompts, err)
-	}
-	if restoredPrompt, err := restarted.ResolveSkillPrompt(ctx, scope, "live-e2e", definition.ID, definition.Version); err != nil || restoredPrompt.Instructions != resolved.Instructions {
-		t.Fatalf("restart restore changed the bound skill prompt: %#v, %v", restoredPrompt, err)
+	restoredActivation, err := restarted.ActivateSkills(ctx, scope, "live-e2e", host)
+	if err != nil || restoredActivation == nil || restoredActivation.SnapshotID != activation.SnapshotID || len(restoredActivation.Skills) != 1 || restoredActivation.Skills[0].Prompt == nil || restoredActivation.Skills[0].Prompt.Instructions != resolved.Instructions {
+		t.Fatalf("restart restore changed the authoritative Skill activation: %#v, %v", restoredActivation, err)
 	}
 	restoredRun, err := restarted.GetAgentRun(ctx, runScope, run.ID)
 	if err != nil || restoredRun.Status != AgentRunStatusCompleted || restoredRun.Output["skillDigest"] != definition.Source.Digest {
@@ -167,7 +163,7 @@ func TestLiveClawHubSkillModelE2E(t *testing.T) {
 	if err != nil || len(activity) == 0 || activity[len(activity)-1].TurnID != advanced.Turn.ID {
 		t.Fatalf("restart restore lost durable activity: %#v, %v", activity, err)
 	}
-	assertLiveE2ESecretAbsent(t, apiKey, definition, restored, restoredPrompts, restoredRun, activity)
+	assertLiveE2ESecretAbsent(t, apiKey, definition, restored, activation, restoredActivation, restoredRun, activity)
 	assertLiveE2EWorkspaceSecretAbsent(t, workspace, apiKey)
 	t.Logf("live ClawHub skill accepted: skill=%s version=%s digest=%s response_bytes=%d", definition.ID, definition.Version, definition.Source.Digest, len(response))
 }
