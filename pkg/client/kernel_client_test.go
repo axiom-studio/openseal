@@ -245,6 +245,58 @@ func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
 	}
 }
 
+func TestKernelHTTPClientStreamsArtifactsThroughHostedRoot(t *testing.T) {
+	scope := runtime.Scope{Kind: "tenant", ID: "7"}
+	content := []byte("cited findings")
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-Workspace-Scope") != "tenant:7" {
+			t.Errorf("scope header = %q", request.Header.Get("X-Workspace-Scope"))
+		}
+		switch {
+		case request.Method == http.MethodPost && request.URL.Path == "/host/kernel/v1/artifact-content":
+			if request.URL.Query().Get("scopeKind") != scope.Kind || request.URL.Query().Get("scopeId") != scope.ID {
+				t.Errorf("upload query = %s", request.URL.RawQuery)
+			}
+			if request.Header.Get("Content-Type") != "application/pdf" || request.Header.Get("X-Content-SHA256") != "sha256:report" {
+				t.Errorf("upload headers = %#v", request.Header)
+			}
+			body, err := io.ReadAll(request.Body)
+			if err != nil || !bytes.Equal(body, content) {
+				t.Errorf("upload body = %q, %v", body, err)
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusCreated, "result": runtime.ArtifactStoredContent{ContentRef: "content:report", Digest: "sha256:report", SizeBytes: int64(len(content))}})
+		case request.Method == http.MethodGet && request.URL.Path == "/host/kernel/v1/artifacts/report/content":
+			if request.URL.Query().Get("scopeKind") != scope.Kind || request.URL.Query().Get("scopeId") != scope.ID || request.URL.Query().Get("version") != "2" {
+				t.Errorf("download query = %s", request.URL.RawQuery)
+			}
+			writer.Header().Set("Content-Type", "application/pdf")
+			writer.Header().Set("Content-Disposition", `attachment; filename="report.pdf"`)
+			writer.Header().Set("X-Content-SHA256", "sha256:report")
+			_, _ = writer.Write(content)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer httpServer.Close()
+
+	client := NewKernelHTTPClient(httpServer.URL+"/host/kernel/v1", httpServer.Client(), WithRequestHeaders(http.Header{"X-Workspace-Scope": {"tenant:7"}}))
+	stored, err := client.UploadArtifactContent(t.Context(), scope, "application/pdf", "sha256:report", int64(len(content)), bytes.NewReader(content))
+	if err != nil || stored.ContentRef != "content:report" || stored.SizeBytes != int64(len(content)) {
+		t.Fatalf("stored content = %#v, %v", stored, err)
+	}
+	download, err := client.DownloadArtifactContent(t.Context(), scope, "report", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer download.Body.Close()
+	downloaded, err := io.ReadAll(download.Body)
+	if err != nil || !bytes.Equal(downloaded, content) || download.MediaType != "application/pdf" || download.Digest != "sha256:report" {
+		t.Fatalf("download = %q %#v, %v", downloaded, download, err)
+	}
+}
+
 func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
 	if err != nil {
