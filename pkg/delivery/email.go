@@ -12,7 +12,7 @@ import (
 
 const (
 	SkillID             = "openseal.delivery"
-	SkillVersion        = "1.0.0"
+	SkillVersion        = "1.1.0"
 	SendEmail           = "send_email"
 	EmailCredentialName = "email-delivery"
 	EmailCredentialKind = "email-delivery"
