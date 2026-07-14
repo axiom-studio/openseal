@@ -117,6 +117,62 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 	}
 }
 
+func TestObjectiveSchedulerDoesNotInventTeamAssignee(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(10)
+	now := time.Date(2026, 7, 11, 5, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	due := now.Add(-time.Minute)
+	objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: Scope{Kind: "tenant", ID: "scheduler-team"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "sre-team"},
+		Title: "Coordinate", Goal: "Review production health", Status: ObjectiveStatusActive,
+		Cadence:          &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 300},
+		NextEvaluationAt: &due, IdempotencyKey: "coordinate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewObjectiveScheduler(store)
+	scheduler.now = func() time.Time { return now }
+	result, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
+	if err != nil || result.Scheduled != 1 {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
+	if err != nil || len(runs) != 1 || runs[0].AssignedAgentID != "" {
+		t.Fatalf("team runs = %#v, err = %v", runs, err)
+	}
+}
+
+func TestObjectiveSchedulerDefaultsAgentAssigneeToOwner(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(10)
+	now := time.Date(2026, 7, 11, 5, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	due := now.Add(-time.Minute)
+	objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: Scope{Kind: "tenant", ID: "scheduler-agent"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre-agent"},
+		Title: "Operate", Goal: "Inspect production health", Status: ObjectiveStatusActive,
+		Cadence:          &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 300},
+		NextEvaluationAt: &due, IdempotencyKey: "operate-default-assignee",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewObjectiveScheduler(store)
+	scheduler.now = func() time.Time { return now }
+	result, err := scheduler.ReconcileScope(ctx, objective.Scope, 10)
+	if err != nil || result.Scheduled != 1 {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
+	if err != nil || len(runs) != 1 || runs[0].AssignedAgentID != objective.Owner.ID {
+		t.Fatalf("agent runs = %#v, err = %v", runs, err)
+	}
+}
+
 func TestObjectiveSchedulerDefersPausedInitiativeMonitor(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(10)
