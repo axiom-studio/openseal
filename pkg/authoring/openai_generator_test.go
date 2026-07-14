@@ -52,6 +52,8 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 	for _, expected := range []string{
 		"domainContext is a JSON object, never a string or array",
 		"authority.budgetCeilings is a JSON object whose values are non-negative numbers",
+		"authority.maximumRisk and authority.requireApprovalAt are each one risk string",
+		"never an array or object; omit requireApprovalAt when no approval threshold is required",
 		"cadence, eventRules, successCriteria, and constraints are JSON objects",
 		"never strings or arrays",
 		"omit any of them when no structured value is needed",
