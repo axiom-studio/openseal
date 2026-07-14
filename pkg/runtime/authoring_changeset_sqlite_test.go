@@ -132,6 +132,44 @@ func TestSQLiteAtomicWorkforceApplyPersistsWholeAggregateAcrossRestart(t *testin
 	}
 }
 
+func TestSQLiteWorkforceApplyAcceptsCanonicalAgentEventAssignment(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	value := testApplicableWorkforceChangeSet()
+	canonicalAgentID := "tenant/one/agent"
+	value.Result.Candidate.Agents[0].ID = canonicalAgentID
+	value.Result.Candidate.Agents[0].ObjectiveTemplates[0].EventRules = map[string]interface{}{
+		"version": "1",
+		"rules": []interface{}{map[string]interface{}{
+			"id": "warning", "eventType": "kubernetes.warning", "source": "kubernetes:cluster:1",
+			"attributes": map[string]interface{}{"namespace": "operations"}, "assignedAgentId": canonicalAgentID,
+		}},
+	}
+	value.Result.Candidate.Team.Roles[0].RequiredDefinitionIDs = []string{canonicalAgentID}
+	value.Result.Candidate.Assignments[0].AgentDefinitionID = canonicalAgentID
+	value.Placement.AgentDeploymentIDs = map[string]string{canonicalAgentID: "agent-live"}
+	delete(value.Placement.Objectives, authoring.WorkforceObjectiveKey("agent", "agent", "agent-goal"))
+	value.Placement.Objectives[authoring.WorkforceObjectiveKey("agent", canonicalAgentID, "agent-goal")] = authoring.ObjectivePlacement{ID: "objective:agent"}
+	if _, _, err = store.CreateChangeSet(context.Background(), value, "canonical-event", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	applied := appliedRuntimeChangeSet(value, "receipt", "apply", value.UpdatedAt.Add(time.Minute))
+	if _, err = store.ApplyChangeSet(context.Background(), applied, 2); err != nil {
+		t.Fatal(err)
+	}
+	objective, err := store.GetObjective(context.Background(), Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, "objective:agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := DecodeObjectiveEventRules(objective.EventRules)
+	if err != nil || len(rules.Rules) != 1 || rules.Rules[0].AssignedAgentID != canonicalAgentID {
+		t.Fatalf("canonical event assignment = %#v, %v", rules, err)
+	}
+}
+
 func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {

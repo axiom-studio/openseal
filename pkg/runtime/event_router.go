@@ -141,7 +141,7 @@ func (r *ObjectiveEventRule) Validate() error {
 	if err := validateEventAttributes(r.Attributes); err != nil {
 		return err
 	}
-	if r.AssignedAgentID != "" && !validOpaqueIdentifier(r.AssignedAgentID, 256) {
+	if r.AssignedAgentID != "" && !validAgentReference(r.AssignedAgentID, 256) {
 		return errors.New("assignedAgentId is invalid")
 	}
 	if r.RunBudget != nil {
@@ -153,6 +153,27 @@ func (r *ObjectiveEventRule) Validate() error {
 		return err
 	}
 	return nil
+}
+
+// validAgentReference accepts both ordinary opaque deployment IDs and the
+// scope-qualified definition IDs produced by workforce authoring
+// (scope-kind/scope-id/definition-id). Keep URL/query/control delimiters out so
+// the reference remains data rather than a transport path.
+func validAgentReference(value string, maxLength int) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > maxLength || strings.Contains(value, "://") {
+		return false
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) != 1 && len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if !validOpaqueIdentifier(part, maxLength) {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *EventEnvelope) Validate() error {

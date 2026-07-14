@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestObjectiveEventRouterMatchesAndCreatesAuditedRunsExactlyOnce(t *testing.
 				t.Fatalf("first route = %#v", first)
 			}
 			run := first.Routes[0].Run
-			if run.ObjectiveID != objective.ID || run.Source != RunSourceEvent || run.Kind != RunKindAgentWork || run.AssignedAgentID != "sre" || run.Entrypoint != "investigate" {
+			if run.ObjectiveID != objective.ID || run.Source != RunSourceEvent || run.Kind != RunKindAgentWork || run.AssignedAgentID != "tenant/operations/sre" || run.Entrypoint != "investigate" {
 				t.Fatalf("event run identity = %#v", run)
 			}
 			if run.Context["event"].(map[string]interface{})["id"] != event.ID || run.Context["capabilityInvocation"].(map[string]interface{})["action"] != "list_events" {
@@ -86,6 +87,27 @@ func TestObjectiveEventRouteIdentityIncludesSource(t *testing.T) {
 	}
 	if first != eventRouteKey("objective", "rule", "kubernetes:cluster:1", "shared-uid") {
 		t.Fatal("same-source event identity is not stable")
+	}
+}
+
+func TestObjectiveEventRuleAgentReferenceValidation(t *testing.T) {
+	for name, reference := range map[string]string{
+		"empty segment": "tenant//sre",
+		"extra segment": "tenant/one/team/sre",
+		"query":         "tenant/one/sre?admin=true",
+		"url":           "https://example.invalid/sre",
+		"newline":       "tenant/one/sre\nother",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := ObjectiveEventRule{ID: "warning", EventType: "kubernetes.warning", AssignedAgentID: reference}
+			if err := rule.Validate(); err == nil || !strings.Contains(err.Error(), "assignedAgentId") {
+				t.Fatalf("invalid Agent reference %q accepted: %v", reference, err)
+			}
+		})
+	}
+	valid := ObjectiveEventRule{ID: "warning", EventType: "kubernetes.warning", AssignedAgentID: "tenant/one/sre"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("canonical Agent reference rejected: %v", err)
 	}
 }
 
@@ -201,7 +223,7 @@ func eventObjective(t *testing.T, store KernelStore, scope Scope, status Objecti
 	rules := ObjectiveEventRules{Version: "1", Rules: []ObjectiveEventRule{{
 		ID: "kubernetes-backoff", EventType: "kubernetes.warning", Source: "cluster:production",
 		Severities: []string{"warning"}, Attributes: map[string]interface{}{"namespace": "store", "reason": "BackOff"},
-		AssignedAgentID: "sre",
+		AssignedAgentID: "tenant/operations/sre",
 		RunTemplate: &ObjectiveRunTemplate{
 			Entrypoint: "investigate", Context: map[string]interface{}{"operatingMode": "evidence-first"},
 			Policy: map[string]interface{}{"approvalForProduction": true}, Capability: &ObjectiveCapabilityInvocation{
