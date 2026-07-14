@@ -581,6 +581,7 @@ const (
 	KernelOperationApprove                  = kernelapi.OperationApprove
 	KernelOperationApply                    = kernelapi.OperationApply
 	KernelOperationRetry                    = kernelapi.OperationRetry
+	KernelOperationPatch                    = kernelapi.OperationPatch
 	KernelOperationDeliver                  = kernelapi.OperationDeliver
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
