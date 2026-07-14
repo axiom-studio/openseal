@@ -15,7 +15,12 @@ const (
 	// is then charged at one token per UTF-8 byte, a deliberately conservative
 	// upper bound for byte-level OpenAI-compatible tokenizers.
 	HostedTurnProtocolInputReserveTokens int64 = 4096
-	HostedTurnMinimumOutputTokens        int64 = 64
+	// HostedTurnBudgetEnvelopeReserveTokens covers the bounded JSON growth when
+	// the durable reservation is projected into the model-visible budget after
+	// preflight. EstimateHostedTurnInputTokens intentionally normalizes that
+	// self-referential field so kernel and host calculate one stable estimate.
+	HostedTurnBudgetEnvelopeReserveTokens int64 = 256
+	HostedTurnMinimumOutputTokens         int64 = 64
 )
 
 // HostedTurnModelInput is the credential-free data envelope presented to the
@@ -43,11 +48,17 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 }
 
 func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
-	input, err := MarshalHostedTurnModelInput(request)
+	estimateRequest := request
+	if request.Budget != nil {
+		budget := *request.Budget
+		budget.TurnReservation = BudgetUsage{}
+		estimateRequest.Budget = &budget
+	}
+	input, err := MarshalHostedTurnModelInput(estimateRequest)
 	if err != nil {
 		return 0, err
 	}
-	return HostedTurnProtocolInputReserveTokens + int64(len(input)), nil
+	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + int64(len(input)), nil
 }
 
 func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecutionContext) (BudgetUsage, error) {

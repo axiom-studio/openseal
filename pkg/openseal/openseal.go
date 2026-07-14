@@ -541,6 +541,7 @@ type (
 const (
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
 	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
+	HostedTurnBudgetEnvelopeReserveTokens   = runtime.HostedTurnBudgetEnvelopeReserveTokens
 	HostedTurnMinimumOutputTokens           = runtime.HostedTurnMinimumOutputTokens
 	KernelAPIVersion                        = kernelapi.APIVersion
 	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
