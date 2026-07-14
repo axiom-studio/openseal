@@ -14,7 +14,7 @@ func TestSkillDefinitionPublishesCompleteGovernedKubernetesSurface(t *testing.T)
 	}
 	for _, name := range []string{GetResource, ListResources, ListEvents, GetLogs} {
 		action := definition.Actions[name]
-		if action.Risk != skill.RiskLevelRead || action.SideEffect != skill.SideEffectRead || action.Transport == nil || action.Transport.Kind != "tool" || action.Idempotency != skill.IdempotencySupported {
+		if action.Risk != skill.RiskLevelRead || action.SideEffect != skill.SideEffectRead || action.Transport == nil || action.Transport.Kind != "tool" || action.Idempotency != skill.IdempotencySupported || len(action.Credentials) != 1 || action.Credentials[0].Kind != ClusterCredentialKind {
 			t.Fatalf("read action %s is not governed correctly: %#v", name, action)
 		}
 	}
@@ -30,7 +30,7 @@ func TestSkillDefinitionPublishesCompleteGovernedKubernetesSurface(t *testing.T)
 	}
 }
 
-func TestSkillDefinitionPinsClusterThroughBindingNotModelInput(t *testing.T) {
+func TestSkillDefinitionPinsClusterThroughOpaqueBindingNotModelInput(t *testing.T) {
 	ctx := context.Background()
 	catalog := skill.NewCatalog()
 	definition := SkillDefinition()
@@ -40,7 +40,7 @@ func TestSkillDefinitionPinsClusterThroughBindingNotModelInput(t *testing.T) {
 	binding := &skill.Binding{
 		ID: "cluster-one", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
 		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{ListEvents, RestartWorkload},
-		MaximumRisk: skill.RiskLevelProduction, Config: map[string]interface{}{"clusterId": 1}, Revision: 1,
+		MaximumRisk: skill.RiskLevelProduction, Credentials: map[string]skill.CredentialReference{ClusterCredentialName: {Kind: ClusterCredentialKind, ID: "cluster://tenant-7/one"}}, Revision: 1,
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
@@ -53,20 +53,15 @@ func TestSkillDefinitionPinsClusterThroughBindingNotModelInput(t *testing.T) {
 	if err := catalog.ValidateInput(ctx, bound, input); err != nil {
 		t.Fatal(err)
 	}
-	transport, err := skill.MaterializeTransportArguments(bound, input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	clusterID, clusterOK := transport["clusterId"].(float64)
-	if !clusterOK || clusterID != 1 || transport["namespace"] != "axiomcd" {
-		t.Fatalf("binding configuration was not projected: %#v", transport)
+	if reference := bound.Binding.Credentials[ClusterCredentialName]; reference.Kind != ClusterCredentialKind || reference.ID != "cluster://tenant-7/one" {
+		t.Fatalf("opaque cluster binding was not preserved: %#v", reference)
 	}
 	properties := definition.Actions[ListEvents].InputSchema["properties"].(map[string]interface{})
 	if _, modelVisible := properties["clusterId"]; modelVisible {
 		t.Fatal("cluster identity must not be model-visible input")
 	}
-	if _, err := skill.MaterializeTransportArguments(bound, map[string]interface{}{"clusterId": 2}); err == nil {
-		t.Fatal("model input must not override the authorized cluster binding")
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"clusterId": 2}); err == nil {
+		t.Fatal("model input must not supply or override the authorized cluster binding")
 	}
 }
 
@@ -80,7 +75,7 @@ func TestSkillSchemasRejectUnsafeOrUnboundedInputs(t *testing.T) {
 	binding := &skill.Binding{
 		ID: "cluster", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
 		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{GetLogs, ScaleWorkload, PatchResource},
-		MaximumRisk: skill.RiskLevelProduction, Config: map[string]interface{}{"clusterId": 1}, Revision: 1,
+		MaximumRisk: skill.RiskLevelProduction, Credentials: map[string]skill.CredentialReference{ClusterCredentialName: {Kind: ClusterCredentialKind, ID: "cluster://tenant-7/one"}}, Revision: 1,
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)

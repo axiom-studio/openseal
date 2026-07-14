@@ -23,6 +23,9 @@ const (
 	ScaleWorkload   = "scale_workload"
 	PatchResource   = "patch_resource"
 	DeleteResource  = "delete_resource"
+
+	ClusterCredentialName = "clusterId"
+	ClusterCredentialKind = "kubernetes-cluster"
 )
 
 const (
@@ -48,7 +51,7 @@ var restartableKinds = []interface{}{"Deployment", "StatefulSet", "DaemonSet"}
 
 // SkillDefinition returns the immutable portable contract. clusterId is
 // deliberately absent from every model-visible schema: the embedding host
-// injects an authorized cluster identifier through binding configuration.
+// resolves an opaque, tenant-authorized cluster reference out of band.
 func SkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Kubernetes operations",
@@ -77,7 +80,8 @@ func readAction(name, description, endpoint string, input, output map[string]int
 	return skill.Action{
 		Name: name, Description: description, InputSchema: input, OutputSchema: output,
 		SideEffect: skill.SideEffectRead, Risk: skill.RiskLevelRead, Permissions: []string{permission},
-		Timeout: capability.Duration(30 * time.Second), Retry: skill.ActionRetryPolicy{MaxAttempts: 3, InitialBackoff: capability.Duration(time.Second), MaxBackoff: capability.Duration(10 * time.Second)},
+		Credentials: []capability.CredentialRequirement{{Name: ClusterCredentialName, Kind: ClusterCredentialKind}},
+		Timeout:     capability.Duration(30 * time.Second), Retry: skill.ActionRetryPolicy{MaxAttempts: 3, InitialBackoff: capability.Duration(time.Second), MaxBackoff: capability.Duration(10 * time.Second)},
 		Idempotency: skill.IdempotencySupported, Transport: &skill.TransportReference{Kind: "tool", Endpoint: endpoint},
 	}
 }
@@ -86,7 +90,8 @@ func mutationAction(name, description, endpoint string, input, output map[string
 	return skill.Action{
 		Name: name, Description: description, InputSchema: input, OutputSchema: output,
 		SideEffect: sideEffect, Risk: risk, Permissions: []string{permission},
-		Timeout: capability.Duration(time.Minute), Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
+		Credentials: []capability.CredentialRequirement{{Name: ClusterCredentialName, Kind: ClusterCredentialKind}},
+		Timeout:     capability.Duration(time.Minute), Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		Idempotency: skill.IdempotencyRequired, Transport: &skill.TransportReference{Kind: "tool", Endpoint: endpoint},
 	}
 }
