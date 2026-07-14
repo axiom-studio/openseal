@@ -34,7 +34,7 @@ const (
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "2"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion = "4"
+	WorkforceAuthoringCapabilityVersion = "5"
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
@@ -368,7 +368,7 @@ func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures)
 		Operations: []string{OperationCompile},
 	}
 	if features.ChangeSets {
-		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
+		capability.Operations = append(capability.Operations, OperationPropose, OperationGet, OperationPatch)
 	}
 	return capability
 }
