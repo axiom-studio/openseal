@@ -110,3 +110,82 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 		t.Fatalf("replica restart view = %#v, %v", loaded, err)
 	}
 }
+
+func TestPostgresHostedTurnTokenReservationIsReplicaSafeAndDurable(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	schema := "openseal_hosted_budget_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replica.Close()
+
+	scope := Scope{Kind: "tenant", ID: "hosted-token-budget"}
+	run, err := NewPortfolioService(primary).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal:   "execute one bounded hosted turn",
+		Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &blockingHostedTurnHost{started: make(chan struct{}), release: make(chan struct{})}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, advanceErr := NewTurnCoordinator(primary, primary, primary).Advance(ctx, AdvanceAgentRunRequest{
+			Scope: scope, RunID: run.ID, WorkerID: "primary-worker",
+		}, runner)
+		firstDone <- advanceErr
+	}()
+	select {
+	case <-host.started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	persisted, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
+	if err != nil || len(persisted.BudgetReservations) != 1 || persisted.BudgetUsage != (BudgetUsage{}) {
+		t.Fatalf("replica in-flight budget = %#v, %v", persisted, err)
+	}
+	_, concurrentErr := NewTurnCoordinator(replica, replica, replica).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "replica-worker",
+	}, runner)
+	if !errors.Is(concurrentErr, ErrTurnLeaseHeld) {
+		t.Fatalf("replica concurrent advance error = %v", concurrentErr)
+	}
+	host.mu.Lock()
+	providerCalls := host.calls
+	host.mu.Unlock()
+	if providerCalls != 1 {
+		t.Fatalf("provider calls during replica contention = %d", providerCalls)
+	}
+	close(host.release)
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	settled, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
+	if err != nil || settled.Status != AgentRunStatusCompleted || settled.BudgetUsage.Turns != 1 || settled.BudgetUsage.InputTokens != 100 || settled.BudgetUsage.OutputTokens != 20 || len(settled.BudgetReservations) != 0 {
+		t.Fatalf("replica settled budget = %#v, %v", settled, err)
+	}
+}
