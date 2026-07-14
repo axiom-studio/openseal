@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -177,6 +178,36 @@ Read references/method.md before monitoring.
 	lock, err = manager.List()
 	if err != nil || len(lock.Skills) != 0 {
 		t.Fatalf("lock after uninstall = %#v, %v", lock, err)
+	}
+}
+
+func TestInstallManagerRecompilesSameArtifactIdempotentlyAcrossResolutionPaths(t *testing.T) {
+	registry := &installRegistry{
+		version: "1.0.0",
+		verification: Verification{
+			Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass", ResolvedFrom: "latest", CreatedAt: 10,
+			Security: map[string]interface{}{"status": "clean", "checkedAt": float64(20)},
+		},
+		archive: createTestZip(t, map[string]string{"SKILL.md": "---\nname: summarize\ndescription: Summarize evidence.\n---\nSummarize carefully.\n"}),
+	}
+	manager, err := NewInstallManager("https://registry.test", registry, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := SkillReference{Owner: "seanford", Slug: "summarize"}
+	first, err := manager.Install(context.Background(), InstallRequest{Reference: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.verification.ResolvedFrom = "version"
+	registry.verification.CreatedAt = 999
+	registry.verification.Security = map[string]interface{}{"status": "clean", "checkedAt": float64(1000)}
+	replayed, err := manager.Install(context.Background(), InstallRequest{Reference: ref, Version: "1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.Changed || first.Compilation.Definition.Version != replayed.Compilation.Definition.Version || !reflect.DeepEqual(first.Compilation.Definition, replayed.Compilation.Definition) {
+		t.Fatalf("same artifact replay changed canonical definition: first=%#v replayed=%#v", first.Compilation.Definition, replayed.Compilation.Definition)
 	}
 }
 
