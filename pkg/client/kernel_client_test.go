@@ -205,6 +205,14 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: "researcher", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "local", "test"); err != nil {
 		t.Fatal(err)
 	}
+	listed, err := client.ListAgentDeployments(ctx, scope)
+	if err != nil || len(listed.Items) != 1 || listed.Items[0].Deployment.ID != "researcher" || listed.Items[0].Definition.DisplayName != "Researcher" {
+		t.Fatalf("Agent catalog = %#v, %v", listed, err)
+	}
+	detail, err := client.GetAgentDeployment(ctx, scope, "researcher")
+	if err != nil || detail.Deployment.ID != "researcher" || detail.Definition.Version != "1" {
+		t.Fatalf("Agent detail = %#v, %v", detail, err)
+	}
 	if _, err := registry.RecordCompilation(ctx, &kernelagent.DefinitionCompilation{ID: "researcher-1", Scope: scope, DeploymentID: "researcher", DefinitionID: definition.ID, CandidateVersion: "1", Source: kernelagent.CompilationSource{Kind: "prompt", ID: "source", Version: "1", Digest: "sha256:source"}, TargetDigest: definition.Digest, Status: kernelagent.CompilationClean}); err != nil {
 		t.Fatal(err)
 	}

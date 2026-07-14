@@ -225,6 +225,27 @@ func (s *PostgresStore) GetDeployment(ctx context.Context, scope capability.Scop
 	return &deployment, nil
 }
 
+func (s *PostgresStore) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_deployments")+` WHERE scope_kind = $1 AND scope_id = $2 ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*kernelagent.AgentDeployment, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var deployment kernelagent.AgentDeployment
+		if err := json.Unmarshal([]byte(payload), &deployment); err != nil {
+			return nil, err
+		}
+		result = append(result, &deployment)
+	}
+	return result, rows.Err()
+}
+
 func (s *PostgresStore) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
 	if err != nil {

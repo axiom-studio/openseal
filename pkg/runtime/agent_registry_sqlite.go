@@ -295,6 +295,27 @@ func (s *SQLiteStore) GetDeployment(ctx context.Context, scope capability.ScopeR
 	return &deployment, nil
 }
 
+func (s *SQLiteStore) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_deployments WHERE scope_kind = ? AND scope_id = ? ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*kernelagent.AgentDeployment, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var deployment kernelagent.AgentDeployment
+		if err := json.Unmarshal([]byte(payload), &deployment); err != nil {
+			return nil, err
+		}
+		result = append(result, &deployment)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLiteStore) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := registryPayloads(deployment, activation)
 	if err != nil {
