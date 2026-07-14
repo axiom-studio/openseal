@@ -147,6 +147,8 @@ type Model struct {
 	authoringChangeSet          *authoring.ChangeSet
 	authoringAmendment          bool
 	authoringApprovalSelected   int
+	authoringCredentialSelected int
+	authoringCredentialChoices  map[string]int
 	runs                        []*runtime.AgentRun
 	agentRequests               []*runtime.AgentRequest
 	agentRequestSelected        int
@@ -467,6 +469,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
+		m.syncWorkforceCredentialChoices()
 		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
 			m.authoringApprovalSelected = 0
 		} else {
@@ -1073,6 +1076,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.moveWorkforceApprovalSelection(-1)
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+				m.moveWorkforceCredentialSelection(-1)
 			} else {
 				m.movePanelSelection(-1)
 			}
@@ -1082,6 +1087,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.moveWorkforceApprovalSelection(1)
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+				m.moveWorkforceCredentialSelection(1)
 			} else {
 				m.movePanelSelection(1)
 			}
@@ -1168,6 +1175,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.loadPanel()
+		case "[":
+			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+				m.moveWorkforceCredentialChoice(-1)
+			}
+		case "]":
+			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+				m.moveWorkforceCredentialChoice(1)
+			}
+		case "b":
+			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+				return m, m.submitWorkforceCredentialPlacement()
+			}
 		case "m":
 			if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
 				m.mode = modeChannelPost
@@ -1430,6 +1449,53 @@ func (m *Model) submitWorkforceRetry() tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.client.RetryWorkforceChangeSetGeneration(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: "Generation retry", err: err}
+	}
+}
+
+func (m *Model) submitWorkforceCredentialPlacement() tea.Cmd {
+	rows := m.workforceCredentialRows()
+	if !m.canPlaceWorkforceCredentials() || m.busy || len(rows) == 0 {
+		return nil
+	}
+	credentialReferences := make(map[string]map[string]capability.CredentialReference, len(m.authoringChangeSet.Placement.CredentialReferences))
+	for agentID, references := range m.authoringChangeSet.Placement.CredentialReferences {
+		credentialReferences[agentID] = make(map[string]capability.CredentialReference, len(references))
+		for kind, reference := range references {
+			credentialReferences[agentID][kind] = reference
+		}
+	}
+	labels := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row.Choices) == 0 {
+			m.status = fmt.Sprintf("No authorized %s credential is available for %s.", row.Kind, row.AgentName)
+			return nil
+		}
+		selected := m.authoringCredentialChoices[row.Key]
+		if selected < 0 || selected >= len(row.Choices) {
+			selected = 0
+		}
+		choice := row.Choices[selected]
+		if credentialReferences[row.AgentID] == nil {
+			credentialReferences[row.AgentID] = make(map[string]capability.CredentialReference)
+		}
+		credentialReferences[row.AgentID][row.Kind] = choice.Reference
+		labels = append(labels, row.AgentName+" / "+row.Kind+" → "+choice.DisplayName)
+	}
+	placement := m.authoringChangeSet.Placement
+	placement.CredentialReferences = credentialReferences
+	intent := fmt.Sprintf("credentials\x00%s\x00%d\x00%s", m.authoringChangeSet.ID, m.authoringChangeSet.Revision, strings.Join(labels, "\x00"))
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.UpdateChangeSetPlacementRequest{
+		Scope: m.authoringChangeSet.Scope, ChangeSetID: m.authoringChangeSet.ID, ExpectedRevision: m.authoringChangeSet.Revision,
+		Placement: placement, Reason: "Selected authorized credentials: " + strings.Join(labels, "; "),
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err, m.status = true, nil, "Saving authorized credential placement…"
+	return func() tea.Msg {
+		result, err := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Credential placement", err: err}
 	}
 }
 
@@ -2424,6 +2490,113 @@ func (m *Model) canRetryWorkforce() bool {
 	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetFailed &&
 		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
 		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationRetry)
+}
+
+type workforceCredentialRow struct {
+	Key       string
+	AgentID   string
+	AgentName string
+	Kind      string
+	Choices   []capability.CredentialBindingChoice
+}
+
+func (m *Model) workforceCredentialRows() []workforceCredentialRow {
+	if m.authoringChangeSet == nil || m.authoringCapability.Context == nil {
+		return nil
+	}
+	choicesByKind := make(map[string][]capability.CredentialBindingChoice)
+	for _, choice := range m.authoringCapability.Context.CredentialBindings {
+		kind := strings.TrimSpace(choice.Reference.Kind)
+		if kind != "" && strings.TrimSpace(choice.Reference.ID) != "" && strings.TrimSpace(choice.DisplayName) != "" {
+			choicesByKind[kind] = append(choicesByKind[kind], choice)
+		}
+	}
+	for kind := range choicesByKind {
+		sort.Slice(choicesByKind[kind], func(i, j int) bool {
+			left, right := choicesByKind[kind][i], choicesByKind[kind][j]
+			if left.DisplayName == right.DisplayName {
+				return left.Reference.ID < right.Reference.ID
+			}
+			return left.DisplayName < right.DisplayName
+		})
+	}
+	names := make(map[string]string)
+	for _, definition := range m.authoringChangeSet.Result.Candidate.Agents {
+		if definition != nil {
+			names[definition.ID] = definition.DisplayName
+		}
+	}
+	rows := make([]workforceCredentialRow, 0)
+	for agentID, kinds := range m.authoringChangeSet.RequiredCredentials {
+		for _, kind := range kinds {
+			kind = strings.TrimSpace(kind)
+			if kind == "" {
+				continue
+			}
+			name := names[agentID]
+			if name == "" {
+				name = agentID
+			}
+			rows = append(rows, workforceCredentialRow{Key: agentID + "\x00" + kind, AgentID: agentID, AgentName: name, Kind: kind, Choices: choicesByKind[kind]})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].AgentName == rows[j].AgentName {
+			return rows[i].Kind < rows[j].Kind
+		}
+		return rows[i].AgentName < rows[j].AgentName
+	})
+	return rows
+}
+
+func (m *Model) syncWorkforceCredentialChoices() {
+	rows := m.workforceCredentialRows()
+	m.authoringCredentialChoices = make(map[string]int, len(rows))
+	for _, row := range rows {
+		selected := 0
+		current := m.authoringChangeSet.Placement.CredentialReferences[row.AgentID][row.Kind]
+		for index, choice := range row.Choices {
+			if choice.Reference == current {
+				selected = index
+				break
+			}
+		}
+		m.authoringCredentialChoices[row.Key] = selected
+	}
+	if len(rows) == 0 {
+		m.authoringCredentialSelected = 0
+	} else {
+		m.authoringCredentialSelected = min(m.authoringCredentialSelected, len(rows)-1)
+	}
+}
+
+func (m *Model) canPlaceWorkforceCredentials() bool {
+	return m.authoringChangeSet != nil && m.authoringCapability.Context != nil &&
+		m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
+		m.supportsAuthoring(kernelapi.OperationPatch) && len(m.workforceCredentialRows()) > 0
+}
+
+func (m *Model) moveWorkforceCredentialSelection(delta int) {
+	rows := m.workforceCredentialRows()
+	if len(rows) == 0 {
+		m.authoringCredentialSelected = 0
+		return
+	}
+	m.authoringCredentialSelected = (m.authoringCredentialSelected + delta + len(rows)) % len(rows)
+}
+
+func (m *Model) moveWorkforceCredentialChoice(delta int) {
+	rows := m.workforceCredentialRows()
+	if len(rows) == 0 {
+		return
+	}
+	row := rows[min(m.authoringCredentialSelected, len(rows)-1)]
+	if len(row.Choices) == 0 {
+		return
+	}
+	selected := m.authoringCredentialChoices[row.Key]
+	m.authoringCredentialChoices[row.Key] = (selected + delta + len(row.Choices)) % len(row.Choices)
 }
 
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {

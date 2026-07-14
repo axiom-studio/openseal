@@ -72,6 +72,8 @@ type fakeKernelClient struct {
 	approvalKeys        []string
 	applyRequests       []authoring.ApplyChangeSetRequest
 	applyKeys           []string
+	placementRequests   []authoring.UpdateChangeSetPlacementRequest
+	placementKeys       []string
 	retryRequests       []authoring.RetryChangeSetGenerationRequest
 	retryKeys           []string
 	governanceResults   []*authoring.ChangeSet
@@ -412,6 +414,12 @@ func (f *fakeKernelClient) GetWorkforceChangeSet(context.Context, capability.Sco
 		return f.governanceResults[0], nil
 	}
 	return nil, authoring.ErrChangeSetNotFound
+}
+
+func (f *fakeKernelClient) UpdateWorkforceChangeSetPlacement(_ context.Context, request authoring.UpdateChangeSetPlacementRequest, key string) (*authoring.ChangeSet, error) {
+	f.placementRequests = append(f.placementRequests, request)
+	f.placementKeys = append(f.placementKeys, key)
+	return f.nextGovernanceResult()
 }
 
 func (f *fakeKernelClient) EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error) {
@@ -1133,6 +1141,49 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 	}
 	if !strings.Contains(model.View(), "Created atomically") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") {
 		t.Fatalf("Apply receipt was not rendered:\n%s", model.View())
+	}
+}
+
+func TestWorkforceCredentialPlacementUsesTypedAuthorizedChoices(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	definition := &kernelagent.AgentDefinition{ID: "sre", DisplayName: "SRE Agent"}
+	changeSet := &authoring.ChangeSet{
+		ID: "credential-change", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest",
+		Result:              authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{definition}}},
+		RequiredCredentials: map[string][]string{"sre": {"kubernetes-cluster"}},
+		Placement:           authoring.ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"sre": "sre-live"}, Environment: "development"},
+	}
+	updated := *changeSet
+	updated.Revision = 4
+	updated.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
+		"sre": {"kubernetes-cluster": {Kind: "kubernetes-cluster", ID: "cluster://8"}},
+	}
+	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
+	capabilityDocument.Context = &kernelapi.CapabilityContext{
+		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
+		CredentialBindings: []capability.CredentialBindingChoice{
+			{Reference: capability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"}, DisplayName: "Development"},
+			{Reference: capability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://8"}, DisplayName: "Production"},
+		},
+	}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument), governanceResults: []*authoring.ChangeSet{&updated}}
+	model := newTestModel(t, fake)
+	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
+	applyCommand(t, model, model.loadCapabilities())
+	if view := model.View(); !strings.Contains(view, "SRE Agent") || !strings.Contains(view, "Development") || strings.Contains(view, "cluster://7") {
+		t.Fatalf("secret-safe credential choices were not rendered:\n%s", view)
+	}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	applyCommand(t, model, command)
+	if len(fake.placementRequests) != 1 || len(fake.placementKeys) != 1 || fake.placementKeys[0] == "" {
+		t.Fatalf("placement calls=%#v keys=%#v", fake.placementRequests, fake.placementKeys)
+	}
+	reference := fake.placementRequests[0].Placement.CredentialReferences["sre"]["kubernetes-cluster"]
+	if reference.Kind != "kubernetes-cluster" || reference.ID != "cluster://8" || fake.placementRequests[0].Placement.CredentialReferences["sre"]["clusterId"].ID != "" {
+		t.Fatalf("typed credential placement = %#v", fake.placementRequests[0].Placement.CredentialReferences)
 	}
 }
 
