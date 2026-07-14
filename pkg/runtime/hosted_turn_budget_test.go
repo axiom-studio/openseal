@@ -3,7 +3,9 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 )
 
 type countedHostedTurnHost struct {
@@ -116,5 +118,144 @@ func TestHostedTurnInputEstimateIsStableAfterReservationProjection(t *testing.T)
 	}
 	if growth := int64(len(withReservation) - len(withoutReservation)); growth <= 0 || growth > HostedTurnBudgetEnvelopeReserveTokens {
 		t.Fatalf("reservation envelope growth=%d reserve=%d", growth, HostedTurnBudgetEnvelopeReserveTokens)
+	}
+}
+
+type blockingHostedTurnHost struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+	request HostedTurnRequest
+}
+
+func (h *blockingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
+	h.mu.Lock()
+	h.calls++
+	h.request = request
+	h.mu.Unlock()
+	close(h.started)
+	<-h.release
+	return &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID,
+		ModelProvider: "test", Model: "test-model", NextRunStatus: AgentRunStatusCompleted,
+		OutputSummary: "done", Usage: TurnUsage{InputTokens: 100, OutputTokens: 20},
+	}, nil
+}
+
+func TestHostedTurnBudgetReservationIsAtomicAgainstConcurrentWorker(t *testing.T) {
+	store := NewMemoryStore(100)
+	scope := Scope{Kind: "tenant", ID: "atomic-budget"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &blockingHostedTurnHost{started: make(chan struct{}), release: make(chan struct{})}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, advanceErr := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+			Scope: scope, RunID: run.ID, WorkerID: "worker-1",
+		}, runner)
+		firstDone <- advanceErr
+	}()
+	<-host.started
+	reserved, err := NewPortfolioService(store).GetAgentRun(t.Context(), scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reserved.BudgetReservations) != 1 || reserved.BudgetUsage != (BudgetUsage{}) {
+		t.Fatalf("in-flight budget state = %#v", reserved)
+	}
+	_, concurrentErr := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
+	}, runner)
+	if !errors.Is(concurrentErr, ErrTurnLeaseHeld) {
+		t.Fatalf("concurrent advance error = %v", concurrentErr)
+	}
+	host.mu.Lock()
+	providerCalls := host.calls
+	host.mu.Unlock()
+	if providerCalls != 1 {
+		t.Fatalf("provider calls during concurrent advance = %d", providerCalls)
+	}
+	close(host.release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	settled, err := NewPortfolioService(store).GetAgentRun(t.Context(), scope, run.ID)
+	if err != nil || settled.BudgetUsage.Turns != 1 || settled.BudgetUsage.InputTokens != 100 || settled.BudgetUsage.OutputTokens != 20 || len(settled.BudgetReservations) != 0 {
+		t.Fatalf("settled budget state = %#v, %v", settled, err)
+	}
+}
+
+type retryingHostedTurnHost struct {
+	calls        int
+	invocations  []string
+	reservations []BudgetUsage
+}
+
+func (h *retryingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
+	h.calls++
+	h.invocations = append(h.invocations, request.InvocationID)
+	h.reservations = append(h.reservations, request.Budget.TurnReservation)
+	if h.calls == 1 {
+		return nil, errors.New("temporary provider outage")
+	}
+	return &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID,
+		ModelProvider: "test", Model: "test-model", NextRunStatus: AgentRunStatusCompleted,
+		OutputSummary: "done", Usage: TurnUsage{InputTokens: 100, OutputTokens: 20},
+	}, nil
+}
+
+func TestHostedTurnBudgetRetryReusesAndSettlesOneReservation(t *testing.T) {
+	store := NewMemoryStore(100)
+	scope := Scope{Kind: "tenant", ID: "retry-budget"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &retryingHostedTurnHost{}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
+	}, runner)
+	if !errors.Is(err, ErrTurnHostUnavailable) || first == nil || first.Run.Status != AgentRunStatusSleeping || len(first.Run.BudgetReservations) != 1 || first.Run.BudgetUsage != (BudgetUsage{}) {
+		t.Fatalf("retry scheduling = %#v, %v", first, err)
+	}
+	retryAt := first.Run.WakeCondition.WakeAt.Add(time.Second)
+	if _, err := NewAgentRunWakeService(store, store).WakeDueTimers(t.Context(), scope, retryAt); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewAgentRunScheduler(store)
+	scheduler.now = func() time.Time { return retryAt }
+	claimed, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
+	if err != nil || claimed == nil {
+		t.Fatalf("retry claim = %#v, %v", claimed, err)
+	}
+	second, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
+	}, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.calls != 2 || len(host.invocations) != 2 || host.invocations[0] != host.invocations[1] || host.reservations[0] != host.reservations[1] {
+		t.Fatalf("host retry calls=%d invocations=%#v reservations=%#v", host.calls, host.invocations, host.reservations)
+	}
+	if second.Run.Status != AgentRunStatusCompleted || second.Run.BudgetUsage.Turns != 1 || second.Run.BudgetUsage.InputTokens != 100 || second.Run.BudgetUsage.OutputTokens != 20 || len(second.Run.BudgetReservations) != 0 {
+		t.Fatalf("settled retry = %#v", second.Run)
 	}
 }
