@@ -38,6 +38,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)
 	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
 	s.mux.HandleFunc("PUT /api/v1/objectives/{id}", s.handleUpdateObjective)
+	s.mux.HandleFunc("POST /api/v1/events", s.handleRouteEvent)
 	s.mux.HandleFunc("POST /api/v1/initiatives", s.handleCreateInitiative)
 	s.mux.HandleFunc("GET /api/v1/initiatives", s.handleListInitiatives)
 	s.mux.HandleFunc("GET /api/v1/initiatives/{id}", s.handleGetInitiative)
@@ -110,7 +111,7 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.AgentRunsCapability(), kernelapi.ActivityCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(), kernelapi.ActivityCapability()}
 	if _, ok := s.store.(runtime.CollaborationKernelStore); ok {
 		capabilities = append(capabilities, kernelapi.AgentRequestsCapability())
 	}

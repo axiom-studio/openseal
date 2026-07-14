@@ -88,6 +88,10 @@ var (
 	_ client.KernelClient = (*fakeClawHubKernelClient)(nil)
 )
 
+func (f *fakeKernelClient) RouteEvent(_ context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
+	return &runtime.EventRouteResult{}, nil
+}
+
 type fakeChannelKernelClient struct {
 	*fakeKernelClient
 	conversations              []*runtime.Conversation
