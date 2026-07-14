@@ -749,6 +749,7 @@ var (
 	ErrObjectiveIdempotency                = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition          = runtime.ErrInvalidObjectiveTransition
 	ErrBudgetExhausted                     = runtime.ErrBudgetExhausted
+	ErrTurnNotFound                        = runtime.ErrTurnNotFound
 	ErrActionNotFound                      = runtime.ErrActionNotFound
 	ErrApprovalNotFound                    = runtime.ErrApprovalNotFound
 	ErrApprovalResolved                    = runtime.ErrApprovalResolved
