@@ -285,8 +285,12 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			retryAttempt = 1
 		}
 		retryAt := c.activity.now().Add(hostedTurnRetryDelay(retryAttempt))
+		leaseOwner := ""
+		if run.LeaseOwner != "" {
+			leaseOwner = req.WorkerID
+		}
 		requeued, event, transitionErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusSleeping, LeaseOwner: req.WorkerID,
+			ExpectedRevision: run.Revision, Status: AgentRunStatusSleeping, LeaseOwner: leaseOwner,
 			WakeCondition: &WakeCondition{Type: "timer", WakeAt: &retryAt, Reference: "hosted-turn-retry"},
 			Summary:       "Agent turn host unavailable; the bounded turn will retry", EventType: "turn.retry_scheduled",
 			Actor:       ActivityActor{Type: "worker", ID: req.WorkerID},
