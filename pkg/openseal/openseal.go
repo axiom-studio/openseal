@@ -680,6 +680,12 @@ func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabil
 	return kernelapi.NewCapabilityDocument(capabilities...)
 }
 
+// ValidateWorkforceCredentialPlacement applies the canonical kind-keyed,
+// secret-safe credential placement contract at an embedding host boundary.
+func ValidateWorkforceCredentialPlacement(candidate *WorkforceCandidate, required map[string][]string, placement WorkforceChangeSetPlacement, choices []CredentialBindingChoice) error {
+	return authoring.ValidateCredentialPlacement(candidate, required, placement, choices)
+}
+
 var (
 	NewHostedTurnRunner               = runtime.NewHostedTurnRunner
 	MarshalHostedTurnModelInput       = runtime.MarshalHostedTurnModelInput
