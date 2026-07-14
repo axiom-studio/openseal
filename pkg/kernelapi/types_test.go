@@ -32,9 +32,9 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	}
 }
 
-func TestWorkforceAuthoringVersionDeclaresApprovalSeparationContract(t *testing.T) {
+func TestWorkforceAuthoringVersionDeclaresDeterministicPlacementContract(t *testing.T) {
 	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	if capability.Version != "4" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) {
+	if capability.Version != "5" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) || !capability.Supports(OperationPatch) {
 		t.Fatalf("workforce authoring capability = %#v", capability)
 	}
 }
