@@ -177,6 +177,74 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 }
 
+func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "7"}
+	changeSet := &authoring.ChangeSet{
+		ID: "change-hosted", Scope: scope, Status: authoring.ChangeSetReview, Revision: 4,
+		Placement: authoring.ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+			"sre": {"kubernetes-cluster": {Kind: "kubernetes-cluster", ID: "cluster://7"}},
+		}},
+	}
+	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
+	capabilityDocument.Context = &kernelapi.CapabilityContext{
+		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
+		CredentialBindings: []capability.CredentialBindingChoice{{
+			Reference: capability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"}, DisplayName: "Development",
+		}},
+	}
+	document := kernelapi.NewCapabilityDocument(capabilityDocument)
+	var placement authoring.UpdateChangeSetPlacementRequest
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-Workspace-Scope") != "tenant:7" {
+			t.Errorf("scope header = %q", request.Header.Get("X-Workspace-Scope"))
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/host/kernel/v1/capabilities":
+			if request.URL.Query().Get("changeSetId") != changeSet.ID || request.URL.Query().Get("scopeKind") != scope.Kind || request.URL.Query().Get("scopeId") != scope.ID {
+				t.Errorf("capability query = %s", request.URL.RawQuery)
+			}
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusOK, "status": "OK", "result": document})
+		case request.Method == http.MethodPatch && request.URL.Path == "/host/kernel/v1/authoring/workforce/change-sets/change-hosted/placement":
+			if request.Header.Get("Idempotency-Key") != "placement-hosted" {
+				t.Errorf("idempotency key = %q", request.Header.Get("Idempotency-Key"))
+			}
+			if err := json.NewDecoder(request.Body).Decode(&placement); err != nil {
+				t.Errorf("decode placement: %v", err)
+			}
+			writer.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusAccepted, "status": "Accepted", "result": changeSet})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer httpServer.Close()
+
+	client := NewKernelHTTPClient(httpServer.URL+"/host/kernel/v1", httpServer.Client(), WithRequestHeaders(http.Header{
+		"X-Workspace-Scope": {"tenant:7"},
+		// Protocol-owned headers must remain request-specific.
+		"Idempotency-Key": {"caller-must-not-override"},
+	}))
+	gotDocument, err := client.WorkforceChangeSetCapabilities(t.Context(), scope, changeSet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotCapability, ok := gotDocument.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
+	if !ok || gotCapability.Context == nil || len(gotCapability.Context.CredentialBindings) != 1 || gotCapability.Context.CredentialBindings[0].DisplayName != "Development" {
+		t.Fatalf("hosted capability = %#v", gotDocument)
+	}
+	updated, err := client.UpdateWorkforceChangeSetPlacement(t.Context(), authoring.UpdateChangeSetPlacementRequest{
+		ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, Placement: changeSet.Placement,
+	}, "placement-hosted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != changeSet.ID || placement.Placement.CredentialReferences["sre"]["kubernetes-cluster"].ID != "cluster://7" {
+		t.Fatalf("updated=%#v placement=%#v", updated, placement)
+	}
+}
+
 func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
 	if err != nil {

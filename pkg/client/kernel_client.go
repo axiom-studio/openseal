@@ -96,8 +96,33 @@ type TeamClient interface {
 }
 
 type KernelHTTPClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL        string
+	apiRoot        string
+	requestHeaders http.Header
+	httpClient     *http.Client
+}
+
+// KernelHTTPClientOption configures transport concerns without changing the
+// canonical kernel protocol. Hosts may use request headers for an authorized
+// scope selector or other non-secret routing metadata.
+type KernelHTTPClientOption func(*KernelHTTPClient)
+
+// WithRequestHeaders adds headers to every kernel request. The values are
+// copied at construction time so callers may safely reuse or mutate input.
+// Protocol-owned Content-Type and Idempotency-Key headers cannot be replaced.
+func WithRequestHeaders(headers http.Header) KernelHTTPClientOption {
+	cloned := headers.Clone()
+	return func(client *KernelHTTPClient) {
+		for name, values := range cloned {
+			canonical := http.CanonicalHeaderKey(strings.TrimSpace(name))
+			if canonical == "" || canonical == "Content-Type" || canonical == "Idempotency-Key" {
+				continue
+			}
+			for _, value := range values {
+				client.requestHeaders.Add(canonical, value)
+			}
+		}
+	}
 }
 
 type APIError struct {
@@ -115,7 +140,7 @@ func (e *APIError) Error() string {
 	return e.Message
 }
 
-func NewKernelHTTPClient(baseURL string, httpClient *http.Client) *KernelHTTPClient {
+func NewKernelHTTPClient(baseURL string, httpClient *http.Client, options ...KernelHTTPClientOption) *KernelHTTPClient {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		baseURL = DefaultKernelBaseURL
@@ -123,7 +148,20 @@ func NewKernelHTTPClient(baseURL string, httpClient *http.Client) *KernelHTTPCli
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &KernelHTTPClient{baseURL: baseURL, httpClient: httpClient}
+	apiRoot := baseURL + "/api/v1"
+	if parsed, err := url.Parse(baseURL); err == nil && strings.Trim(parsed.Path, "/") != "" {
+		// A URL with a path is an explicit canonical API root. This lets a
+		// product-neutral client operate through a host-mounted kernel without
+		// teaching OpenSeal any host-specific route names.
+		apiRoot = baseURL
+	}
+	client := &KernelHTTPClient{baseURL: baseURL, apiRoot: apiRoot, requestHeaders: make(http.Header), httpClient: httpClient}
+	for _, option := range options {
+		if option != nil {
+			option(client)
+		}
+	}
+	return client
 }
 
 func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.CapabilityDocument, error) {
@@ -736,12 +774,18 @@ func (c *KernelHTTPClient) do(ctx context.Context, method, path string, body int
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	requestPath := strings.TrimPrefix(path, "/api/v1")
+	req, err := http.NewRequestWithContext(ctx, method, c.apiRoot+requestPath, reader)
 	if err != nil {
 		return fmt.Errorf("build OpenSeal request: %w", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, values := range c.requestHeaders {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
 	}
 	if idempotencyKey = strings.TrimSpace(idempotencyKey); idempotencyKey != "" {
 		req.Header.Set("Idempotency-Key", idempotencyKey)
@@ -751,17 +795,35 @@ func (c *KernelHTTPClient) do(ctx context.Context, method, path string, body int
 		return fmt.Errorf("connect to OpenSeal at %s: %w", c.baseURL, err)
 	}
 	defer resp.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		decoder := json.NewDecoder(io.LimitReader(resp.Body, 8<<20))
 		return decodeAPIError(resp.StatusCode, decoder)
 	}
 	if result == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	if err := decoder.Decode(result); err != nil {
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
+	if err != nil {
+		return fmt.Errorf("read OpenSeal response: %w", err)
+	}
+	if len(payload) > 8<<20 {
+		return fmt.Errorf("decode OpenSeal response: payload exceeds 8 MiB")
+	}
+	if err := decodeKernelResult(payload, result); err != nil {
 		return fmt.Errorf("decode OpenSeal response: %w", err)
 	}
 	return nil
+}
+
+func decodeKernelResult(payload []byte, result interface{}) error {
+	var envelope struct {
+		Code   *int            `json:"code"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err == nil && envelope.Code != nil && len(envelope.Result) > 0 && string(envelope.Result) != "null" {
+		return json.Unmarshal(envelope.Result, result)
+	}
+	return json.Unmarshal(payload, result)
 }
 
 func decodeAPIError(statusCode int, decoder *json.Decoder) error {
