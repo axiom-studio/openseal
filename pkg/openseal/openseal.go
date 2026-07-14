@@ -367,12 +367,14 @@ type (
 	TurnExecutionContext               = runtime.TurnExecutionContext
 	TurnRunner                         = runtime.TurnRunner
 	TurnRunnerFunc                     = runtime.TurnRunnerFunc
+	TurnBudgetPlanner                  = runtime.TurnBudgetPlanner
 	TurnOutcome                        = runtime.TurnOutcome
 	HostedSkillPrompt                  = runtime.HostedSkillPrompt
 	HostedSkillSelection               = runtime.HostedSkillSelection
 	HostedSkillDisposition             = runtime.HostedSkillDisposition
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
+	HostedTurnModelInput               = runtime.HostedTurnModelInput
 	HostedRunBudget                    = runtime.HostedRunBudget
 	TurnHost                           = runtime.TurnHost
 	HostedTurnRunnerConfig             = runtime.HostedTurnRunnerConfig
@@ -538,6 +540,8 @@ type (
 
 const (
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
+	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
+	HostedTurnMinimumOutputTokens           = runtime.HostedTurnMinimumOutputTokens
 	KernelAPIVersion                        = kernelapi.APIVersion
 	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion
@@ -666,6 +670,8 @@ func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabil
 
 var (
 	NewHostedTurnRunner               = runtime.NewHostedTurnRunner
+	MarshalHostedTurnModelInput       = runtime.MarshalHostedTurnModelInput
+	EstimateHostedTurnInputTokens     = runtime.EstimateHostedTurnInputTokens
 	NewCapabilityInvocationTurnRunner = runtime.NewCapabilityInvocationTurnRunner
 	NewOutreachTurnRunner             = runtime.NewOutreachTurnRunner
 	NewOutreachActionProposalObserver = runtime.NewOutreachActionProposalObserver

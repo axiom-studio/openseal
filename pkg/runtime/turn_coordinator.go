@@ -20,6 +20,12 @@ type TurnRunner interface {
 	RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error)
 }
 
+// TurnBudgetPlanner deterministically describes the maximum capacity a runner
+// can consume before any external provider or capability is invoked.
+type TurnBudgetPlanner interface {
+	PlanTurnBudget(context.Context, TurnExecutionContext) (BudgetUsage, error)
+}
+
 type TurnRunnerFunc func(context.Context, TurnExecutionContext) (*TurnOutcome, error)
 
 func (f TurnRunnerFunc) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
@@ -153,6 +159,21 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 				leaseOwner = req.WorkerID
 			}
 			reservationUsage := req.BudgetReservation
+			if planner, ok := runner.(TurnBudgetPlanner); ok {
+				planned, planErr := planner.PlanTurnBudget(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
+				if planErr != nil {
+					if errors.Is(planErr, ErrBudgetExhausted) {
+						return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, planErr.Error(), map[string]interface{}{
+							"reason": "hosted_input_preflight",
+						})
+					}
+					return nil, planErr
+				}
+				reservationUsage, err = reservationUsage.Add(planned)
+				if err != nil {
+					return nil, err
+				}
+			}
 			reservationUsage.Turns = 1
 			if err := reservationUsage.Validate(); err != nil {
 				return nil, err
@@ -170,18 +191,9 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 				return nil, err
 			}
 			if exceeded {
-				turn, finishErr := c.turns.FinishTurn(ctx, req.Scope, turn.ID, FinishAgentTurnRequest{
-					ExpectedRevision: turn.Revision, Status: AgentTurnStatusCanceled, WorkerID: req.WorkerID,
-					NextRunStatus: AgentRunStatusPaused, OutputSummary: "Run paused before exceeding its autonomous budget",
+				return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, "Run paused before exceeding its autonomous budget", map[string]interface{}{
+					"reason": "reservation_exceeds_remaining",
 				})
-				if finishErr != nil {
-					return nil, finishErr
-				}
-				result, applyErr := c.applyFinishedTurn(ctx, run, turn, req.WorkerID, false)
-				if applyErr != nil {
-					return nil, applyErr
-				}
-				return result, ErrBudgetExhausted
 			}
 			reservedRun, _, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 				ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
@@ -370,6 +382,33 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		return nil, err
 	}
 	return result, executionErr
+}
+
+func (c *TurnCoordinator) pauseBeforeTurnBudget(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID, summary string, payload map[string]interface{}) (*AdvanceAgentRunResult, error) {
+	if summary == "" {
+		summary = "Run paused before exceeding its autonomous budget"
+	}
+	finished, err := c.turns.FinishTurn(ctx, run.Scope, turn.ID, FinishAgentTurnRequest{
+		ExpectedRevision: turn.Revision, Status: AgentTurnStatusCanceled, WorkerID: workerID,
+		NextRunStatus: AgentRunStatusPaused, OutputSummary: summary,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result, err := c.applyFinishedTurn(ctx, run, finished, workerID, false)
+	if err != nil {
+		return nil, err
+	}
+	event, err := c.activity.AppendActivity(ctx, &ActivityEvent{
+		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
+		EventType: "budget.exhausted", Summary: summary, Payload: cloneMap(payload),
+		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result.Event = event
+	return result, ErrBudgetExhausted
 }
 
 type turnLeaseHeartbeatResult struct {

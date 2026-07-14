@@ -51,11 +51,12 @@ type HostedSkillSelection struct {
 // Remaining has already accounted for committed usage, live reservations, and
 // durable child allocations so a model can propose valid bounded child work.
 type HostedRunBudget struct {
-	Policy         BudgetPolicy `json:"policy"`
-	CommittedUsage BudgetUsage  `json:"committedUsage,omitempty"`
-	EffectiveUsage BudgetUsage  `json:"effectiveUsage,omitempty"`
-	Allocated      BudgetPolicy `json:"allocated,omitempty"`
-	Remaining      BudgetPolicy `json:"remaining"`
+	Policy          BudgetPolicy `json:"policy"`
+	CommittedUsage  BudgetUsage  `json:"committedUsage,omitempty"`
+	EffectiveUsage  BudgetUsage  `json:"effectiveUsage,omitempty"`
+	Allocated       BudgetPolicy `json:"allocated,omitempty"`
+	TurnReservation BudgetUsage  `json:"turnReservation,omitempty"`
+	Remaining       BudgetPolicy `json:"remaining"`
 }
 
 // HostedTurnRequest is the portable execution envelope sent to an Agent host.
@@ -138,29 +139,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if r == nil || r.host == nil || input.Run == nil || input.Turn == nil {
 		return nil, errors.New("hosted turn requires a durable Run and Turn")
 	}
-	budget, err := projectHostedRunBudget(input.Run)
+	request, err := r.buildRequest(input)
 	if err != nil {
 		return nil, err
-	}
-	dependencyResults, err := projectHostedDependencyResults(input.Run)
-	if err != nil {
-		return nil, err
-	}
-	request := HostedTurnRequest{
-		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
-		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
-		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
-		Goal: input.Run.Goal, InputContext: cloneMap(input.Run.Context), SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
-		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
-		Actions:                cloneHostedModelActions(r.config.Actions),
-		Budget:                 budget,
-		DependencyResults:      dependencyResults,
-		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
-		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
-		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
-	}
-	for index := range request.SkillPrompts {
-		request.SkillPrompts[index].Reference = "skill:" + request.SkillPrompts[index].SkillID + "@" + request.SkillPrompts[index].Version
 	}
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
@@ -178,6 +159,15 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if err := response.Usage.Validate(); err != nil {
 		return nil, err
+	}
+	if request.Budget != nil {
+		reserved := request.Budget.TurnReservation
+		if reserved.InputTokens > 0 && int64(response.Usage.InputTokens) > reserved.InputTokens {
+			return nil, fmt.Errorf("turn host reported %d input tokens beyond the reserved %d", response.Usage.InputTokens, reserved.InputTokens)
+		}
+		if reserved.OutputTokens > 0 && int64(response.Usage.OutputTokens) > reserved.OutputTokens {
+			return nil, fmt.Errorf("turn host reported %d output tokens beyond the reserved %d", response.Usage.OutputTokens, reserved.OutputTokens)
+		}
 	}
 	allowed := make(map[string]struct{}, len(request.Actions))
 	for _, action := range request.Actions {
@@ -263,6 +253,34 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}, nil
 }
 
+func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnRequest, error) {
+	budget, err := projectHostedRunBudget(input.Run, input.Turn.ID)
+	if err != nil {
+		return HostedTurnRequest{}, err
+	}
+	dependencyResults, err := projectHostedDependencyResults(input.Run)
+	if err != nil {
+		return HostedTurnRequest{}, err
+	}
+	request := HostedTurnRequest{
+		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
+		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
+		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
+		Goal: input.Run.Goal, InputContext: cloneMap(input.Run.Context), SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
+		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
+		Actions:                cloneHostedModelActions(r.config.Actions),
+		Budget:                 budget,
+		DependencyResults:      dependencyResults,
+		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
+		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
+		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
+	}
+	for index := range request.SkillPrompts {
+		request.SkillPrompts[index].Reference = "skill:" + request.SkillPrompts[index].SkillID + "@" + request.SkillPrompts[index].Version
+	}
+	return request, nil
+}
+
 // projectHostedDependencyResults exposes only the durable fan-in projection,
 // not the Run's general output. Child results are the explicit cross-Agent
 // return channel and must remain credential-free before becoming model input.
@@ -285,11 +303,20 @@ func projectHostedDependencyResults(run *AgentRun) (map[string]interface{}, erro
 	return projected, nil
 }
 
-func projectHostedRunBudget(run *AgentRun) (*HostedRunBudget, error) {
+func projectHostedRunBudget(run *AgentRun, currentTurnID string) (*HostedRunBudget, error) {
 	if run == nil || run.Budget == nil {
 		return nil, nil
 	}
-	effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+	otherReservations := make(map[string]BudgetReservation, len(run.BudgetReservations))
+	currentReservation := BudgetUsage{}
+	for id, reservation := range run.BudgetReservations {
+		if id == currentTurnID {
+			currentReservation = reservation.Usage
+			continue
+		}
+		otherReservations[id] = reservation
+	}
+	effective, err := EffectiveBudgetUsage(run.BudgetUsage, otherReservations)
 	if err != nil {
 		return nil, fmt.Errorf("project hosted Run budget: %w", err)
 	}
@@ -307,7 +334,7 @@ func projectHostedRunBudget(run *AgentRun) (*HostedRunBudget, error) {
 	}
 	return &HostedRunBudget{
 		Policy: policy, CommittedUsage: run.BudgetUsage, EffectiveUsage: effective,
-		Allocated: allocated, Remaining: remaining,
+		Allocated: allocated, TurnReservation: currentReservation, Remaining: remaining,
 	}, nil
 }
 
