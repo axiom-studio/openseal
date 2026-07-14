@@ -45,6 +45,8 @@ const (
 	ActionApprovalsCapabilityVersion    = "1"
 	ActivityCapabilityID                = "activity"
 	ActivityCapabilityVersion           = "1"
+	EventRoutingCapabilityID            = "event-routing"
+	EventRoutingCapabilityVersion       = "1"
 )
 
 const (
@@ -88,6 +90,7 @@ const (
 	OperationEvaluateAmendment = "evaluate-amendment"
 	OperationResolveAmendment  = "resolve-amendment"
 	OperationActivateAmendment = "activate-amendment"
+	OperationRoute             = "route"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -260,6 +263,13 @@ func ObjectivesCapability() Capability {
 	}
 }
 
+func EventRoutingCapability() Capability {
+	return Capability{
+		ID: EventRoutingCapabilityID, Version: EventRoutingCapabilityVersion, Available: true,
+		Operations: []string{OperationRoute},
+	}
+}
+
 func InitiativesCapability() Capability {
 	return Capability{
 		ID: InitiativesCapabilityID, Version: InitiativesCapabilityVersion, Available: true,
@@ -288,7 +298,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.

@@ -36,6 +36,7 @@ type KernelClient interface {
 	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
 	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
 	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
+	RouteEvent(context.Context, runtime.EventEnvelope) (*runtime.EventRouteResult, error)
 	CreateInitiative(context.Context, kernelapi.CreateInitiativeRequest, string) (*runtime.Initiative, error)
 	ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error)
 	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
@@ -339,6 +340,14 @@ func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Sc
 		return nil, err
 	}
 	return &objective, nil
+}
+
+func (c *KernelHTTPClient) RouteEvent(ctx context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
+	var result runtime.EventRouteResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/events", event, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (c *KernelHTTPClient) CreateInitiative(ctx context.Context, request kernelapi.CreateInitiativeRequest, idempotencyKey string) (*runtime.Initiative, error) {
