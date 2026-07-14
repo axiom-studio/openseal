@@ -265,7 +265,7 @@ func eventRunRequest(objective *Objective, rule ObjectiveEventRule, event EventE
 		Scope: event.Scope, Kind: RunKindAgentWork, ObjectiveID: objective.ID, Owner: objective.Owner,
 		AssignedAgentID: rule.AssignedAgentID, Entrypoint: entrypoint, ConcurrencyKey: "objective:" + objective.ID + ":event:" + rule.ID,
 		Goal: objective.Goal, Source: RunSourceEvent, Priority: objective.Priority, Context: contextValues,
-		Budget: rule.RunBudget, Policy: policy, IdempotencyKey: eventRouteKey(objective.ID, rule.ID, event.ID),
+		Budget: rule.RunBudget, Policy: policy, IdempotencyKey: eventRouteKey(objective.ID, rule.ID, event.Source, event.ID),
 		Actor: actor, Visibility: ActivityVisibilityScope,
 	}
 }
@@ -278,8 +278,8 @@ func eventContext(event EventEnvelope) map[string]interface{} {
 	}
 }
 
-func eventRouteKey(objectiveID, ruleID, eventID string) string {
-	digest := sha256.Sum256([]byte(eventID))
+func eventRouteKey(objectiveID, ruleID, eventSource, eventID string) string {
+	digest := sha256.Sum256([]byte(eventSource + "\x00" + eventID))
 	return "event:" + objectiveID + ":" + ruleID + ":" + hex.EncodeToString(digest[:16])
 }
 

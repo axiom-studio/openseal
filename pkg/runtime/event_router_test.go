@@ -78,6 +78,17 @@ func TestObjectiveEventRouterMatchesAndCreatesAuditedRunsExactlyOnce(t *testing.
 	}
 }
 
+func TestObjectiveEventRouteIdentityIncludesSource(t *testing.T) {
+	first := eventRouteKey("objective", "rule", "kubernetes:cluster:1", "shared-uid")
+	second := eventRouteKey("objective", "rule", "kubernetes:cluster:2", "shared-uid")
+	if first == second {
+		t.Fatalf("cross-source events collided: %q", first)
+	}
+	if first != eventRouteKey("objective", "rule", "kubernetes:cluster:1", "shared-uid") {
+		t.Fatal("same-source event identity is not stable")
+	}
+}
+
 func TestObjectiveEventRouterIsScopeLifecycleAndCredentialSafe(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(100)
