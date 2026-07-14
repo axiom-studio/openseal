@@ -130,6 +130,129 @@ func TestCompilePromptOnlySkillAndRejectsSemanticLoss(t *testing.T) {
 	}
 }
 
+func TestCompileDeclaredExecutableAsGovernedProcessAction(t *testing.T) {
+	compilation, err := Compile(Bundle{SkillMD: []byte(`---
+name: summarize
+description: Summarize a URL with a declared CLI.
+metadata:
+  openclaw:
+    requires:
+      bins: [summarize]
+      env: [OPENAI_API_KEY]
+    install:
+      - id: brew
+        kind: brew
+        formula: owner/tap/summarize
+        bins: [summarize]
+---
+Use the summarize CLI for URL summaries.
+`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := compilation.Definition
+	if !strings.HasSuffix(definition.Version, "."+processCompilationRevision) || len(definition.Actions) != 1 {
+		t.Fatalf("process compilation identity = %#v", definition)
+	}
+	action := definition.Actions["execute"]
+	if action.Transport == nil || action.Transport.Endpoint != "openseal.process.exec" || action.Risk != skill.RiskLevelExternal ||
+		action.Transport.Arguments["executable"].Literal != "summarize" || action.Transport.Arguments["arguments"].SourceArgument != "arguments" ||
+		len(action.Credentials) != 1 || action.Credentials[0].Name != "OPENAI_API_KEY" {
+		t.Fatalf("governed process action = %#v", action)
+	}
+	encoded, err := json.Marshal(action.Transport.Arguments["installers"].Literal)
+	if err != nil || !strings.Contains(string(encoded), "owner/tap/summarize") {
+		t.Fatalf("installer provenance = %s, %v", encoded, err)
+	}
+	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
+		t.Fatalf("compiled process definition is not canonical: %v", err)
+	}
+
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(context.Background(), &skill.Binding{
+		ID: "summarize", Scope: scope, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version,
+		EnablePrompt: true, AllowedActions: []string{"execute"}, MaximumRisk: skill.RiskLevelExternal,
+		Credentials: map[string]skill.CredentialReference{"OPENAI_API_KEY": {Kind: "environment-secret", ID: "opaque"}}, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unavailable, err := catalog.Activate(context.Background(), scope, "agent", skill.HostCapabilityState{OperatingSystem: "linux"})
+	if err != nil || len(unavailable.Skills) != 0 || !hasAvailabilityReason(unavailable.Unavailable[0].Reasons, "executable_missing") {
+		t.Fatalf("missing installer adapter activation = %#v, %v", unavailable, err)
+	}
+	if err := catalog.Bind(context.Background(), &skill.Binding{
+		ID: "summarize-unbound", Scope: scope, DeploymentID: "prompt-only", SkillID: definition.ID, SkillVersion: definition.Version,
+		EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	promptOnly, err := catalog.Activate(context.Background(), scope, "prompt-only", skill.HostCapabilityState{
+		OperatingSystem: "linux", Environment: map[string]bool{"OPENAI_API_KEY": true},
+		Adapters: map[string]skill.AdapterCapability{skill.AdapterInstaller: {State: skill.AdapterStateAvailable, Features: []string{"brew"}}},
+	})
+	if err != nil || len(promptOnly.Unavailable) != 1 || promptOnly.Unavailable[0].Reasons[0].Code != "process_action_unbound" {
+		t.Fatalf("prompt-only process binding activation = %#v, %v", promptOnly, err)
+	}
+	available, err := catalog.Activate(context.Background(), scope, "agent", skill.HostCapabilityState{
+		OperatingSystem: "linux", Adapters: map[string]skill.AdapterCapability{
+			skill.AdapterInstaller: {State: skill.AdapterStateAvailable, Version: "sandbox-job/v1", Features: []string{"brew"}},
+		},
+	})
+	if err != nil || len(available.Skills) != 1 || len(available.Skills[0].Actions) != 1 || len(available.Unavailable) != 0 {
+		t.Fatalf("governed installer activation = %#v, %v", available, err)
+	}
+}
+
+func TestCompileAnyExecutableProjectsOnlyHostEligibleAction(t *testing.T) {
+	compilation, err := Compile(Bundle{SkillMD: []byte(`---
+name: search-text
+description: Search text with an available CLI.
+metadata:
+  openclaw:
+    requires:
+      anyBins: [rg, grep]
+---
+Use the available search executable.
+`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := compilation.Definition
+	if len(definition.Actions) != 2 || definition.Actions["execute_1_grep"].Name == "" || definition.Actions["execute_2_rg"].Name == "" {
+		t.Fatalf("alternative process actions = %#v", definition.Actions)
+	}
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(context.Background(), &skill.Binding{
+		ID: "search", Scope: scope, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version,
+		EnablePrompt: true, AllowedActions: []string{"execute_1_grep", "execute_2_rg"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Activate(context.Background(), scope, "agent", skill.HostCapabilityState{
+		OperatingSystem: "linux", Executables: map[string]bool{"grep": true},
+	})
+	if err != nil || len(snapshot.Skills) != 1 || len(snapshot.Skills[0].Actions) != 1 || snapshot.Skills[0].Actions[0].Action != "execute_1_grep" {
+		t.Fatalf("host-eligible alternative action = %#v, %v", snapshot, err)
+	}
+}
+
+func hasAvailabilityReason(reasons []skill.AvailabilityReason, code string) bool {
+	for _, reason := range reasons {
+		if reason.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCompilePromptOnlyPrimaryEnvAsOpaqueCredential(t *testing.T) {
 	compilation, err := Compile(Bundle{SkillMD: []byte(`---
 name: prompt-publisher

@@ -9,10 +9,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	opensealprocess "github.com/axiom-studio/openseal/pkg/process"
 	"github.com/axiom-studio/openseal/pkg/skill/skillmd"
 )
+
+const processCompilationRevision = "process.1"
 
 type Source struct {
 	Registry     string
@@ -118,6 +122,16 @@ func Compile(bundle Bundle) (*Compilation, error) {
 			Retry: capability.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: capability.IdempotencySupported,
 		}
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "command.compiled", Path: "SKILL.md", Message: "deterministic tool command dispatch compiled as a native action"})
+	} else if len(definition.Requirements.Executables) > 0 || len(definition.Requirements.AnyExecutables) > 0 {
+		processActions, err := compileProcessActions(parsed, definition)
+		if err != nil {
+			return nil, err
+		}
+		for name, action := range processActions {
+			definition.Actions[name] = action
+		}
+		definition.Version += "." + processCompilationRevision
+		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "process.compiled", Path: "SKILL.md", Message: fmt.Sprintf("compiled %d declared executable(s) as argument-safe governed process actions", len(processActions))})
 	}
 	if len(definition.Actions) == 0 {
 		if definition.Prompt == nil {
@@ -129,6 +143,101 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "resources.indexed", Message: fmt.Sprintf("indexed %d supporting resources for progressive disclosure", len(bundle.Files))})
 	}
 	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest, Artifact: cloneBundle(bundle)}, nil
+}
+
+func compileProcessActions(parsed *skillmd.ParsedSkill, definition *capability.Definition) (map[string]capability.Action, error) {
+	executables := uniqueStrings(append(append([]string(nil), definition.Requirements.Executables...), definition.Requirements.AnyExecutables...))
+	result := make(map[string]capability.Action, len(executables))
+	environmentNames := uniqueStrings(append(append([]string(nil), definition.Requirements.Environment...), parsed.Metadata.PrimaryEnv))
+	credentials := make([]capability.CredentialRequirement, 0, len(environmentNames))
+	for _, name := range environmentNames {
+		credentials = append(credentials, capability.CredentialRequirement{Name: name, Kind: "environment-secret"})
+	}
+	for index, executable := range executables {
+		executable = strings.TrimSpace(executable)
+		if !opensealprocess.ValidExecutableName(executable) {
+			return nil, fmt.Errorf("declared executable %q is not a portable basename", executable)
+		}
+		name := "execute"
+		if len(executables) > 1 {
+			name = fmt.Sprintf("execute_%d_%s", index+1, processActionSuffix(executable))
+		}
+		installers := installersForExecutable(definition.Installers, executable)
+		result[name] = capability.Action{
+			Name: name, Description: fmt.Sprintf("Execute %s for the %s Skill in an isolated governed process.", executable, parsed.Name),
+			InputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{
+					"arguments": map[string]interface{}{
+						"type": "array", "description": "Ordered arguments passed directly to the executable without a shell.",
+						"items": map[string]interface{}{"type": "string", "maxLength": opensealprocess.MaxArgumentBytes}, "maxItems": opensealprocess.MaxArguments,
+					},
+				},
+				"required": []interface{}{"arguments"},
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{
+					"exitCode": map[string]interface{}{"type": "integer"}, "stdout": map[string]interface{}{"type": "string"}, "stderr": map[string]interface{}{"type": "string"},
+				},
+				"required": []interface{}{"exitCode", "stdout", "stderr"},
+			},
+			SideEffect: capability.SideEffectExternal, Risk: capability.RiskLevelExternal,
+			Permissions: []string{"process.exec:" + executable}, Credentials: credentials,
+			Timeout: capability.Duration(time.Duration(opensealprocess.MaxTimeoutSeconds) * time.Second),
+			Retry:   capability.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: capability.IdempotencySupported,
+			Transport: &capability.TransportReference{
+				Kind: "tool", Endpoint: opensealprocess.TransportName,
+				Arguments: map[string]capability.TransportArgument{
+					opensealprocess.ExecutableKey:       {Literal: executable},
+					opensealprocess.ArgumentsKey:        {SourceArgument: "arguments"},
+					opensealprocess.InstallersKey:       {Literal: installers},
+					opensealprocess.EnvironmentNamesKey: {Literal: environmentNames},
+					opensealprocess.TimeoutSecondsKey:   {Literal: opensealprocess.MaxTimeoutSeconds},
+				},
+			},
+		}
+	}
+	return result, nil
+}
+
+func installersForExecutable(installers []capability.Installer, executable string) []capability.Installer {
+	result := make([]capability.Installer, 0)
+	for _, installer := range installers {
+		for _, provided := range installer.Executables {
+			if strings.TrimSpace(provided) == executable {
+				result = append(result, installer)
+				break
+			}
+		}
+	}
+	return result
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			result = append(result, value)
+			seen[value] = true
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func processActionSuffix(executable string) string {
+	var builder strings.Builder
+	for _, character := range executable {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '_' {
+			builder.WriteRune(character)
+		} else {
+			builder.WriteByte('_')
+		}
+	}
+	return strings.Trim(builder.String(), "_")
 }
 
 func canonicalSourceName(reference string) string {
