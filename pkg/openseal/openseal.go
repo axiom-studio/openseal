@@ -424,6 +424,7 @@ type (
 	SkillTransportArgument             = skill.TransportArgument
 	SkillArgumentRule                  = skill.ArgumentRule
 	SkillActionRetryPolicy             = skill.ActionRetryPolicy
+	SkillRequirements                  = skill.Requirements
 	ModelSkillAction                   = skill.ModelAction
 	ModelSkillPrompt                   = skill.ModelPrompt
 	BoundSkillAction                   = skill.BoundAction
