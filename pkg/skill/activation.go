@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	opensealprocess "github.com/axiom-studio/openseal/pkg/process"
 )
 
 // HostCapabilityState is a non-secret declaration of the environment in which
@@ -49,9 +50,10 @@ const (
 )
 
 type AdapterCapability struct {
-	State   AdapterState `json:"state"`
-	Version string       `json:"version,omitempty"`
-	Reason  string       `json:"reason,omitempty"`
+	State    AdapterState `json:"state"`
+	Version  string       `json:"version,omitempty"`
+	Features []string     `json:"features,omitempty"`
+	Reason   string       `json:"reason,omitempty"`
 }
 
 type AvailabilityReason struct {
@@ -109,6 +111,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	if err != nil {
 		return nil, err
 	}
+	host.Adapters = adapters
 
 	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
 	if err != nil {
@@ -197,6 +200,9 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		actions := make([]ModelAction, 0, len(binding.AllowedActions))
 		for _, name := range binding.AllowedActions {
 			action := definition.Actions[name]
+			if action.Transport != nil && action.Transport.Endpoint == opensealprocess.TransportName && !processActionAvailable(definition, action, host) {
+				continue
+			}
 			actions = append(actions, ModelAction{
 				Name: definition.ID + "." + name, Description: action.Description,
 				BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
@@ -280,18 +286,25 @@ func evaluateAvailability(definition *Definition, binding *Binding, host HostCap
 	if definition.Requirements.AlwaysAvailable {
 		return reasons
 	}
+	if binding.EnablePrompt && definitionHasProcessActions(definition) {
+		if !bindingHasProcessAction(definition, binding) {
+			reasons = append(reasons, AvailabilityReason{Code: "process_action_unbound", Requirement: opensealprocess.TransportName, Message: "skill instructions require an explicitly authorized governed process action"})
+		} else if !bindingAllowsProcessAction(definition, binding, host) {
+			reasons = append(reasons, AvailabilityReason{Code: "process_action_unavailable", Requirement: opensealprocess.TransportName, Message: "authorized process actions are unavailable on this host"})
+		}
+	}
 	if len(definition.Requirements.OperatingSystems) > 0 && !containsOperatingSystem(definition.Requirements.OperatingSystems, host.OperatingSystem) {
 		reasons = append(reasons, AvailabilityReason{Code: "operating_system_unavailable", Requirement: strings.TrimSpace(host.OperatingSystem), Message: "host operating system is not supported"})
 	}
 	for _, executable := range definition.Requirements.Executables {
-		if !host.Executables[executable] {
+		if !hostProvidesExecutable(definition, executable, host) {
 			reasons = append(reasons, AvailabilityReason{Code: "executable_missing", Requirement: executable, Message: "required executable is unavailable"})
 		}
 	}
 	if len(definition.Requirements.AnyExecutables) > 0 {
 		available := false
 		for _, executable := range definition.Requirements.AnyExecutables {
-			available = available || host.Executables[executable]
+			available = available || hostProvidesExecutable(definition, executable, host)
 		}
 		if !available {
 			reasons = append(reasons, AvailabilityReason{Code: "any_executable_missing", Requirement: strings.Join(definition.Requirements.AnyExecutables, ","), Message: "none of the alternative executables are available"})
@@ -309,6 +322,81 @@ func evaluateAvailability(definition *Definition, binding *Binding, host HostCap
 		}
 	}
 	return reasons
+}
+
+func definitionHasProcessActions(definition *Definition) bool {
+	if definition == nil {
+		return false
+	}
+	for _, action := range definition.Actions {
+		if action.Transport != nil && action.Transport.Kind == "tool" && action.Transport.Endpoint == opensealprocess.TransportName {
+			return true
+		}
+	}
+	return false
+}
+
+func bindingHasProcessAction(definition *Definition, binding *Binding) bool {
+	if definition == nil || binding == nil {
+		return false
+	}
+	for _, name := range binding.AllowedActions {
+		action, ok := definition.Actions[name]
+		if ok && action.Transport != nil && action.Transport.Kind == "tool" && action.Transport.Endpoint == opensealprocess.TransportName {
+			return true
+		}
+	}
+	return false
+}
+
+func bindingAllowsProcessAction(definition *Definition, binding *Binding, host HostCapabilityState) bool {
+	if definition == nil || binding == nil {
+		return false
+	}
+	for _, name := range binding.AllowedActions {
+		action, ok := definition.Actions[name]
+		if ok && processActionAvailable(definition, action, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func processActionAvailable(definition *Definition, action Action, host HostCapabilityState) bool {
+	if action.Transport == nil || action.Transport.Kind != "tool" || action.Transport.Endpoint != opensealprocess.TransportName {
+		return false
+	}
+	executable, _ := action.Transport.Arguments[opensealprocess.ExecutableKey].Literal.(string)
+	return hostProvidesExecutable(definition, executable, host)
+}
+
+func hostProvidesExecutable(definition *Definition, executable string, host HostCapabilityState) bool {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return false
+	}
+	if host.Executables[executable] {
+		return true
+	}
+	adapter, ok := host.Adapters[AdapterInstaller]
+	if !ok || adapter.State != AdapterStateAvailable {
+		return false
+	}
+	for _, installer := range definition.Installers {
+		if !containsString(installer.Executables, executable) || !installerSupportsOperatingSystem(installer, host.OperatingSystem) ||
+			!containsString(adapter.Features, strings.ToLower(strings.TrimSpace(installer.Kind))) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func installerSupportsOperatingSystem(installer capability.Installer, operatingSystem string) bool {
+	if len(installer.OperatingSystems) == 0 {
+		return true
+	}
+	return containsOperatingSystem(installer.OperatingSystems, operatingSystem)
 }
 
 func containsOperatingSystem(supported []string, current string) bool {
@@ -399,6 +487,20 @@ func normalizeAdapterCapabilities(value map[string]AdapterCapability) (map[strin
 		key = strings.TrimSpace(key)
 		capability.Version = strings.TrimSpace(capability.Version)
 		capability.Reason = strings.TrimSpace(capability.Reason)
+		features := make([]string, 0, len(capability.Features))
+		seenFeatures := make(map[string]bool, len(capability.Features))
+		for _, feature := range capability.Features {
+			feature = strings.ToLower(strings.TrimSpace(feature))
+			if feature == "" || strings.ContainsAny(feature, "\x00\r\n") {
+				return nil, fmt.Errorf("host adapter %q has an invalid feature", key)
+			}
+			if !seenFeatures[feature] {
+				features = append(features, feature)
+				seenFeatures[feature] = true
+			}
+		}
+		sort.Strings(features)
+		capability.Features = features
 		if key == "" {
 			return nil, errors.New("host adapter capability id is required")
 		}
