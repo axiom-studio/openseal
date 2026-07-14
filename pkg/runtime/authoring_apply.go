@@ -194,12 +194,21 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		}
 		bindings = append(bindings, &capability.Binding{
 			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
-			SkillID: requirement.SkillID, SkillVersion: skillCapability.Version,
+			SkillID: requirement.SkillID, SkillVersion: workforceSkillBindingVersion(value, definition.ID, requirement.SkillID, skillCapability.Version),
 			SourceIdentity: strings.TrimSpace(value.Placement.SkillSourceIdentities[definition.ID][requirement.SkillID]), AllowedActions: allowed,
 			EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
 		})
 	}
 	return bindings, nil
+}
+
+func workforceSkillBindingVersion(value *authoring.ChangeSet, agentID, skillID, catalogVersion string) string {
+	if value != nil {
+		if version := strings.TrimSpace(value.Placement.SkillSourceVersions[agentID][skillID]); version != "" {
+			return version
+		}
+	}
+	return catalogVersion
 }
 
 func workforceRiskRank(risk capability.RiskLevel) int {

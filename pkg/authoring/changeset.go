@@ -109,8 +109,12 @@ type ChangeSetPlacement struct {
 	InitiativeExpectedRevision int64                                                `json:"initiativeExpectedRevision,omitempty"`
 	CredentialReferences       map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
 	SkillSourceIdentities      map[string]map[string]string                         `json:"skillSourceIdentities,omitempty"`
-	Objectives                 map[string]ObjectivePlacement                        `json:"objectives,omitempty"`
-	Environment                string                                               `json:"environment,omitempty"`
+	// SkillSourceVersions pins the immutable compiled version selected by the
+	// host for each source-qualified Skill. The declared catalog version remains
+	// model-visible; this version is deterministic placement and audit metadata.
+	SkillSourceVersions map[string]map[string]string  `json:"skillSourceVersions,omitempty"`
+	Objectives          map[string]ObjectivePlacement `json:"objectives,omitempty"`
+	Environment         string                        `json:"environment,omitempty"`
 }
 
 type ObjectivePlacement struct {
@@ -662,6 +666,16 @@ func validatePlacementReferences(placement ChangeSetPlacement, candidate *Workfo
 			if strings.TrimSpace(identity) == "" {
 				return fmt.Errorf("Skill source placement for Agent %s Skill %s is empty", agentID, skillID)
 			}
+			if strings.TrimSpace(placement.SkillSourceVersions[agentID][strings.TrimSpace(skillID)]) == "" {
+				return fmt.Errorf("Skill source placement for Agent %s Skill %s requires an immutable version", agentID, skillID)
+			}
+		}
+	}
+	for agentID, versions := range placement.SkillSourceVersions {
+		for skillID, version := range versions {
+			if strings.TrimSpace(version) == "" || strings.TrimSpace(placement.SkillSourceIdentities[agentID][strings.TrimSpace(skillID)]) == "" {
+				return fmt.Errorf("Skill source version for Agent %s Skill %s has no selected source", agentID, skillID)
+			}
 		}
 	}
 	return nil
@@ -880,6 +894,15 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		}
 	}
 	placement.SkillSourceIdentities = skillSources
+	skillVersions := map[string]map[string]string{}
+	for id, values := range placement.SkillSourceVersions {
+		qualified := canonicalIdentity(scope, id)
+		skillVersions[qualified] = make(map[string]string, len(values))
+		for skillID, version := range values {
+			skillVersions[qualified][strings.TrimSpace(skillID)] = strings.TrimSpace(version)
+		}
+	}
+	placement.SkillSourceVersions = skillVersions
 	if strings.TrimSpace(placement.Environment) == "" {
 		placement.Environment = "default"
 	}
@@ -1001,6 +1024,19 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		for skillID, identity := range inherited {
 			if _, exists := placement.SkillSourceIdentities[definitionID][skillID]; !exists {
 				placement.SkillSourceIdentities[definitionID][skillID] = identity
+			}
+		}
+	}
+	if placement.SkillSourceVersions == nil {
+		placement.SkillSourceVersions = map[string]map[string]string{}
+	}
+	for definitionID, inherited := range parentPlacement.SkillSourceVersions {
+		if placement.SkillSourceVersions[definitionID] == nil {
+			placement.SkillSourceVersions[definitionID] = map[string]string{}
+		}
+		for skillID, version := range inherited {
+			if _, exists := placement.SkillSourceVersions[definitionID][skillID]; !exists {
+				placement.SkillSourceVersions[definitionID][skillID] = version
 			}
 		}
 	}
@@ -1340,6 +1376,16 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 				nested[skillID] = identity
 			}
 			copy.SkillSourceIdentities[agentID] = nested
+		}
+	}
+	if value.SkillSourceVersions != nil {
+		copy.SkillSourceVersions = make(map[string]map[string]string, len(value.SkillSourceVersions))
+		for agentID, versions := range value.SkillSourceVersions {
+			nested := make(map[string]string, len(versions))
+			for skillID, version := range versions {
+				nested[skillID] = version
+			}
+			copy.SkillSourceVersions[agentID] = nested
 		}
 	}
 	if value.Objectives != nil {
