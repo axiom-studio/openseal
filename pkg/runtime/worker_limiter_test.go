@@ -66,6 +66,76 @@ func TestWorkerLimiterRejectsInvalidLimits(t *testing.T) {
 	}
 }
 
+func TestWorkerLimiterDoesNotStarveAWaitingScopeBehindHotWork(t *testing.T) {
+	limiter, err := NewWorkerLimiter(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialRelease, err := limiter.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hotFirst, hotContinue, hotSecond := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		release, acquireErr := limiter.acquire(t.Context())
+		if acquireErr != nil {
+			return
+		}
+		close(hotFirst)
+		<-hotContinue
+		release()
+		release, acquireErr = limiter.acquire(t.Context())
+		if acquireErr != nil {
+			return
+		}
+		close(hotSecond)
+		release()
+	}()
+	waitForLimiterWaiters(t, limiter, 1)
+	coolAcquired, coolRelease := make(chan struct{}), make(chan struct{})
+	go func() {
+		release, acquireErr := limiter.acquire(t.Context())
+		if acquireErr != nil {
+			return
+		}
+		close(coolAcquired)
+		<-coolRelease
+		release()
+	}()
+	waitForLimiterWaiters(t, limiter, 2)
+	initialRelease()
+	select {
+	case <-hotFirst:
+	case <-time.After(time.Second):
+		t.Fatal("first hot scope acquisition timed out")
+	}
+	close(hotContinue)
+	select {
+	case <-coolAcquired:
+	case <-hotSecond:
+		t.Fatal("hot scope reacquired before an already-waiting scope")
+	case <-time.After(time.Second):
+		t.Fatal("waiting scope was starved")
+	}
+	close(coolRelease)
+	select {
+	case <-hotSecond:
+	case <-time.After(time.Second):
+		t.Fatal("hot scope did not continue after the waiting scope released")
+	}
+}
+
+func waitForLimiterWaiters(t *testing.T, limiter *WorkerLimiter, count int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for limiter.Stats().WaitCount < count {
+		if time.Now().After(deadline) {
+			t.Fatalf("limiter did not observe %d waiters: %#v", count, limiter.Stats())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestWorkerPollDelayJittersAndExponentiallyBacksOff(t *testing.T) {
 	base := time.Second
 	previous := time.Duration(0)
