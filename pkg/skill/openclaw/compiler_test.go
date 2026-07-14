@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -224,5 +225,44 @@ Search Reddit for the requested topic.
 	}
 	if _, err := Compile(Bundle{SkillMD: source, Source: Source{Reference: "@owner/Invalid Slug"}}); err == nil {
 		t.Fatal("invalid canonical registry identity should fail closed")
+	}
+}
+
+func TestCompileCanonicalizesVolatileTrustAndVersionsMeaningfulEvidence(t *testing.T) {
+	skillMD := []byte("---\nname: summarize\ndescription: Summarize evidence.\n---\nSummarize carefully.\n")
+	base := Bundle{SkillMD: skillMD, Source: Source{
+		Registry: "https://clawhub.ai", Publisher: "seanford", Reference: "@seanford/summarize", Version: "1.0.0",
+		Trust: map[string]interface{}{
+			"schema": "clawhub.skill.verify.v1", "decision": "pass", "resolvedFrom": "latest", "createdAt": float64(10),
+			"security": map[string]interface{}{"status": "clean", "checkedAt": float64(20)},
+		},
+	}}
+	first, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed := base
+	replayed.Source.Trust = map[string]interface{}{
+		"schema": "clawhub.skill.verify.v1", "decision": "pass", "resolvedFrom": "version", "createdAt": float64(999),
+		"security": map[string]interface{}{"status": "clean", "checkedAt": float64(1000)},
+	}
+	second, err := Compile(replayed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Definition.Version != second.Definition.Version || !reflect.DeepEqual(first.Definition, second.Definition) {
+		t.Fatalf("volatile verification changed immutable definition:\nfirst=%#v\nsecond=%#v", first.Definition, second.Definition)
+	}
+	if !strings.Contains(first.Definition.Version, ".trust.") || first.Definition.Source.Trust["resolvedFrom"] != nil || first.Artifact.Source.Trust["resolvedFrom"] != "latest" {
+		t.Fatalf("canonical definition or retained artifact trust = definition=%#v artifact=%#v", first.Definition.Source.Trust, first.Artifact.Source.Trust)
+	}
+	changed := base
+	changed.Source.Trust = map[string]interface{}{"schema": "clawhub.skill.verify.v1", "decision": "pass", "security": map[string]interface{}{"status": "review"}}
+	third, err := Compile(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Definition.Version == first.Definition.Version {
+		t.Fatal("meaningful trust evidence change reused an immutable definition version")
 	}
 }

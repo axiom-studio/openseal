@@ -70,8 +70,9 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		}
 	}
 
+	canonicalTrust := CanonicalTrust(bundle.Source.Trust)
 	definition := &capability.Definition{
-		ID: parsed.CanonicalName, Version: resolvedVersion(parsed, bundle.Source, digest), Name: parsed.Name,
+		ID: parsed.CanonicalName, Version: resolvedVersion(parsed, bundle.Source, digest, canonicalTrust), Name: parsed.Name,
 		Description: parsed.Description, Icon: parsed.Metadata.Emoji, ConfigurationKey: parsed.Metadata.SkillKey,
 		Actions: map[string]capability.Action{},
 		Prompt: &capability.PromptModule{
@@ -89,7 +90,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		Source: &capability.SourceProvenance{
 			Format: "openclaw.skill.v1", Registry: bundle.Source.Registry, Publisher: bundle.Source.Publisher,
 			Reference: bundle.Source.Reference, ResolvedVersion: bundle.Source.Version, Digest: digest,
-			License: parsed.License, Homepage: parsed.Homepage, Trust: cloneMap(bundle.Source.Trust),
+			License: parsed.License, Homepage: parsed.Homepage, Trust: canonicalTrust,
 		},
 	}
 	if strings.TrimSpace(parsed.Body) == "" {
@@ -167,7 +168,7 @@ func BundleDigest(bundle Bundle) string {
 	return bundleDigest(bundle)
 }
 
-func resolvedVersion(parsed *skillmd.ParsedSkill, source Source, digest string) string {
+func resolvedVersion(parsed *skillmd.ParsedSkill, source Source, digest string, trust map[string]interface{}) string {
 	version := strings.TrimSpace(source.Version)
 	if version == "" {
 		version = strings.TrimSpace(parsed.Version)
@@ -183,7 +184,57 @@ func resolvedVersion(parsed *skillmd.ParsedSkill, source Source, digest string) 
 	if origin := sourceOriginDigest(source); origin != "" {
 		version += ".origin." + origin[:12]
 	}
+	if evidence := trustEvidenceDigest(trust); evidence != "" {
+		version += ".trust." + evidence[:12]
+	}
 	return version
+}
+
+// CanonicalTrust projects registry verification into immutable definition
+// evidence. Resolution hints and observation timestamps remain available in
+// the retained source artifact, but cannot make identical verified bytes
+// compile into conflicting definitions.
+func CanonicalTrust(input map[string]interface{}) map[string]interface{} {
+	canonical, _ := canonicalTrustValue(input).(map[string]interface{})
+	if len(canonical) == 0 {
+		return nil
+	}
+	return canonical
+}
+
+func canonicalTrustValue(input interface{}) interface{} {
+	switch value := input.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(value))
+		for key, child := range value {
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "resolvedfrom", "createdat", "checkedat":
+				continue
+			}
+			result[key] = canonicalTrustValue(child)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(value))
+		for index, child := range value {
+			result[index] = canonicalTrustValue(child)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func trustEvidenceDigest(trust map[string]interface{}) string {
+	if len(trust) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(trust)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 func sourceOriginDigest(source Source) string {

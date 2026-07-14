@@ -827,6 +827,13 @@ func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilati
 	return skillopenclaw.Compile(bundle)
 }
 
+// CanonicalOpenClawTrust projects mutable registry verification responses into
+// stable immutable Skill provenance while retained source artifacts preserve
+// the exact original response.
+func CanonicalOpenClawTrust(input map[string]interface{}) map[string]interface{} {
+	return skillopenclaw.CanonicalTrust(input)
+}
+
 func ExportOpenClawSkill(compilation *skillopenclaw.Compilation) (skillopenclaw.Bundle, error) {
 	return skillopenclaw.ExportBundle(compilation)
 }
