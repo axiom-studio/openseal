@@ -38,6 +38,12 @@ openseal tui \
   --download-dir ./research-artifacts
 ```
 
+`--endpoint` accepts either a standalone server origin or an explicit
+versioned kernel API root mounted by a host. Hosts that require non-secret
+scope-routing metadata can be reached with repeatable `--header name=value`
+selectors. Authentication secrets belong in an authorization-aware HTTP
+transport or local proxy, not command-line headers.
+
 `OPENSEAL_API_URL` can supply the default endpoint. The TUI refreshes work every
 five seconds; `--poll=-1s` disables automatic refresh for deterministic
 terminal testing.
@@ -57,6 +63,8 @@ terminal testing.
 | `x` | Stop selected work when advertised |
 | `m` | Message the selected Team channel when advertised |
 | `y` / `x` | Approve or reject the selected eligible Workforce requirement |
+| `[` / `]` | Select an authorized credential choice for the highlighted Workforce requirement |
+| `b` | Save the selected typed Workforce credential bindings |
 | `e` / `Enter` | Apply a ready Workforce, edit an objective, or expand selected evidence/audit |
 | `d` | Download selected artifact when advertised |
 | `Esc` | Cancel guidance composition |
