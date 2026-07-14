@@ -490,6 +490,15 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		return nil, err
 	}
 	reverseChannelMessages(recent)
+	// The direct Agent has now received and read the visible channel context
+	// that will be supplied to its turn. Persist that shared workplace fact
+	// before model execution so receipts remain truthful even if generation
+	// later retries or fails.
+	if err := r.coordinator.markObserved(ctx, conversation, ConversationParticipant{
+		Type: ConversationParticipantAgent, ID: conversation.Owner.ID,
+	}, latestConversationSequence(recent)); err != nil {
+		return nil, err
+	}
 	goal, err := agentConversationGoal(conversation, trigger, recent)
 	if err != nil {
 		return nil, err
