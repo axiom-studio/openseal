@@ -74,6 +74,32 @@ func TestActivationPinsPreparedRuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestPreparedRuntimeReferenceRequiresCanonicalImmutableIdentity(t *testing.T) {
+	runtime := &PreparedRuntime{
+		PreparationID: "sha256:" + strings.Repeat("a", 64), RuntimeID: "oci://runtime.test/summarize@sha256:" + strings.Repeat("b", 64),
+		Revision: "sha256:" + strings.Repeat("c", 64), Adapter: "oci-builder/v1", OperatingSystem: "linux", Architecture: "amd64",
+		Executables: []string{"helper", "summarize"},
+	}
+	if err := ValidatePreparedRuntimeReference(runtime); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*PreparedRuntime){
+		"preparation": func(value *PreparedRuntime) { value.PreparationID = "sha256:not-a-digest" },
+		"platform":    func(value *PreparedRuntime) { value.Architecture = "AMD64" },
+		"artifact":    func(value *PreparedRuntime) { value.RuntimeID = "artifact\nforged" },
+		"executables": func(value *PreparedRuntime) { value.Executables = []string{"summarize", "helper"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			copy := *runtime
+			copy.Executables = append([]string(nil), runtime.Executables...)
+			mutate(&copy)
+			if ValidatePreparedRuntimeReference(&copy) == nil {
+				t.Fatalf("invalid prepared runtime was accepted: %#v", copy)
+			}
+		})
+	}
+}
+
 func TestActivationFailsClosedWhileRuntimeIsPreparingOrInvalid(t *testing.T) {
 	for name, test := range map[string]struct {
 		preparer RuntimePreparer

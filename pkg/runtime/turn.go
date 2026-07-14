@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
@@ -40,6 +41,10 @@ type TurnAction struct {
 	IdempotencyKey  string   `json:"idempotencyKey,omitempty"`
 	InputRef        string   `json:"inputRef,omitempty"`
 	EvidenceRefs    []string `json:"evidenceRefs,omitempty"`
+	// PreparedRuntime is assigned by the trusted worker after the model
+	// proposes a capability. Any model-supplied value is discarded before the
+	// Turn is persisted.
+	PreparedRuntime *skill.PreparedRuntime `json:"preparedRuntime,omitempty"`
 }
 
 type TurnUsage struct {

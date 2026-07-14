@@ -61,6 +61,7 @@ type ProposeActionRequest struct {
 	SkillVersion           string
 	Action                 string
 	Arguments              map[string]interface{}
+	PreparedRuntime        *skill.PreparedRuntime
 	IdempotencyKey         string
 	Summary                string
 	Actor                  ActivityActor
@@ -142,7 +143,8 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(req.Arguments, bound.Action.InputSchema),
-		CredentialRefs: boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
+		CredentialRefs:  boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		MaxAttempts: max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
@@ -227,6 +229,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		ParentRunID: run.ParentRunID, Actor: actor, Summary: eventSummary, Visibility: ActivityVisibilityScope,
 		Payload:       map[string]interface{}{"actionCallId": call.ID, "approvalId": call.ApprovalID, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "risk": call.Risk},
 		CorrelationID: req.CorrelationID, CausationID: req.CausationID, CreatedAt: now,
+	}
+	if call.PreparedRuntime != nil {
+		event.Payload["preparedRuntime"] = clonePreparedRuntime(call.PreparedRuntime)
 	}
 	if decision.Reason != "" && decision.Disposition != ActionDispositionAllow {
 		event.Payload["policyReason"] = decision.Reason

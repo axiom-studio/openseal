@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -42,6 +43,10 @@ Publish the requested release.
 		t.Fatal(err)
 	}
 	output, err := dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+		Call: &ActionCall{ID: "call", RunID: "run", PreparedRuntime: &skill.PreparedRuntime{
+			PreparationID: "sha256:" + strings.Repeat("a", 64), RuntimeID: "oci://runtime.test/publisher@sha256:" + strings.Repeat("b", 64),
+			Revision: "sha256:" + strings.Repeat("c", 64), Adapter: "oci-builder/v1", OperatingSystem: "linux", Architecture: "amd64", Executables: []string{"publisher"},
+		}},
 		Bound: bound, Arguments: map[string]interface{}{"command": "release 1.2.3"}, Credentials: map[string]string{"token": "resolved-secret"},
 	})
 	if err != nil {
@@ -56,6 +61,9 @@ Publish the requested release.
 	}
 	if invocation.Scope != bound.Binding.Scope || invocation.DeploymentID != "agent" || invocation.SkillID != "publisher" || invocation.SkillVersion != definition.Version || invocation.Action != "invoke" {
 		t.Fatalf("tool routing metadata = %#v", invocation)
+	}
+	if invocation.PreparedRuntime == nil || invocation.PreparedRuntime.RuntimeID != "oci://runtime.test/publisher@sha256:"+strings.Repeat("b", 64) {
+		t.Fatalf("prepared runtime was not dispatched: %#v", invocation.PreparedRuntime)
 	}
 }
 

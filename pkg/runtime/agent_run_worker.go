@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -21,8 +22,21 @@ type TurnRunnerBinding struct {
 	ModelProvider     string
 	Model             string
 	ModelActions      []capability.ModelAction
+	PreparedRuntimes  []PreparedSkillRuntime
 	InputContextRefs  []string
 	BudgetReservation BudgetUsage
+}
+
+// PreparedSkillRuntime binds one activation-time immutable runtime to the
+// exact Skill binding revision exposed during a Turn. It stays outside the
+// model action catalog and is attached only after a proposal selects that
+// authorized binding.
+type PreparedSkillRuntime struct {
+	BindingID       string
+	BindingRevision int64
+	SkillID         string
+	SkillVersion    string
+	Runtime         skill.PreparedRuntime
 }
 
 type TurnRunnerResolver interface {
@@ -268,7 +282,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
 			ModelProvider: binding.ModelProvider, Model: binding.Model, InputContextRefs: binding.InputContextRefs,
 			BudgetReservation: binding.BudgetReservation,
-		}, binding.Runner)
+		}, preparedRuntimeTurnRunner{binding: binding})
 		cancelAdvance()
 		heartbeatErr := <-heartbeatDone
 		if heartbeatErr != nil && (advanceErr == nil || errors.Is(heartbeatErr, ErrLeaseLost)) {
@@ -410,16 +424,9 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	if request.Type != "skill_action" || strings.TrimSpace(request.Capability) == "" || strings.TrimSpace(request.Summary) == "" {
 		return nil, errors.New("requested action requires type skill_action, capability, and summary")
 	}
-	var selected *capability.ModelAction
-	for index := range binding.ModelActions {
-		candidate := &binding.ModelActions[index]
-		if candidate.Name != request.Capability || (request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision)) {
-			continue
-		}
-		if selected != nil {
-			return nil, fmt.Errorf("requested capability %q is ambiguous without an exact binding", request.Capability)
-		}
-		selected = candidate
+	selected, err := selectTurnModelAction(binding.ModelActions, request)
+	if err != nil {
+		return nil, err
 	}
 	if selected == nil {
 		return nil, fmt.Errorf("requested capability %q is not authorized", request.Capability)
@@ -436,7 +443,8 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: binding.DeploymentID,
 		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
-		IdempotencyKey: idempotencyKey, Summary: request.Summary,
+		PreparedRuntime: request.PreparedRuntime,
+		IdempotencyKey:  idempotencyKey, Summary: request.Summary,
 		Actor: ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		CausationID:            turn.ID,
@@ -453,6 +461,86 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		}
 	}
 	return proposal.Run, nil
+}
+
+type preparedRuntimeTurnRunner struct{ binding *TurnRunnerBinding }
+
+func (r preparedRuntimeTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+	if r.binding == nil || r.binding.Runner == nil {
+		return nil, errors.New("turn runner binding is unavailable")
+	}
+	if err := validatePreparedSkillRuntimes(r.binding); err != nil {
+		return nil, err
+	}
+	outcome, err := r.binding.Runner.RunTurn(ctx, input)
+	if outcome == nil {
+		return nil, err
+	}
+	for index := range outcome.ProposedActions {
+		request := &outcome.ProposedActions[index]
+		// The model is never an authority for execution artifacts.
+		request.PreparedRuntime = nil
+		selected, selectionErr := selectTurnModelAction(r.binding.ModelActions, *request)
+		if selectionErr != nil || selected == nil {
+			continue
+		}
+		for runtimeIndex := range r.binding.PreparedRuntimes {
+			prepared := &r.binding.PreparedRuntimes[runtimeIndex]
+			if prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
+				prepared.SkillID == selected.SkillID && prepared.SkillVersion == selected.Version {
+				copy := prepared.Runtime
+				copy.Executables = append([]string(nil), prepared.Runtime.Executables...)
+				request.PreparedRuntime = &copy
+				break
+			}
+		}
+	}
+	return outcome, err
+}
+
+func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
+	seen := make(map[string]bool, len(binding.PreparedRuntimes))
+	for index := range binding.PreparedRuntimes {
+		prepared := &binding.PreparedRuntimes[index]
+		if strings.TrimSpace(prepared.BindingID) == "" || prepared.BindingRevision < 1 || strings.TrimSpace(prepared.SkillID) == "" || strings.TrimSpace(prepared.SkillVersion) == "" {
+			return errors.New("prepared Skill runtime binding identity is invalid")
+		}
+		if err := skill.ValidatePreparedRuntimeReference(&prepared.Runtime); err != nil {
+			return fmt.Errorf("prepared Skill runtime binding is invalid: %w", err)
+		}
+		key := fmt.Sprintf("%s@%d:%s@%s", prepared.BindingID, prepared.BindingRevision, prepared.SkillID, prepared.SkillVersion)
+		if seen[key] {
+			return errors.New("prepared Skill runtime binding is duplicated")
+		}
+		seen[key] = true
+		authorized := false
+		for actionIndex := range binding.ModelActions {
+			action := &binding.ModelActions[actionIndex]
+			if action.BindingID == prepared.BindingID && action.BindingRevision == prepared.BindingRevision && action.SkillID == prepared.SkillID && action.Version == prepared.SkillVersion {
+				authorized = true
+				break
+			}
+		}
+		if !authorized {
+			return errors.New("prepared Skill runtime is not bound to an authorized model action")
+		}
+	}
+	return nil
+}
+
+func selectTurnModelAction(actions []capability.ModelAction, request TurnAction) (*capability.ModelAction, error) {
+	var selected *capability.ModelAction
+	for index := range actions {
+		candidate := &actions[index]
+		if candidate.Name != request.Capability || (request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision)) {
+			continue
+		}
+		if selected != nil {
+			return nil, fmt.Errorf("requested capability %q is ambiguous without an exact binding", request.Capability)
+		}
+		selected = candidate
+	}
+	return selected, nil
 }
 
 func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, cause error) {

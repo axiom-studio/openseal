@@ -397,6 +397,7 @@ type (
 	AgentRunWorkerConfig               = runtime.AgentRunWorkerConfig
 	DynamicAgentRunWorkerConfig        = runtime.DynamicAgentRunWorkerConfig
 	TurnRunnerBinding                  = runtime.TurnRunnerBinding
+	PreparedSkillRuntime               = runtime.PreparedSkillRuntime
 	TurnRunnerResolver                 = runtime.TurnRunnerResolver
 	TurnRunnerResolverFunc             = runtime.TurnRunnerResolverFunc
 	WorkerScopeSource                  = runtime.WorkerScopeSource
@@ -2747,6 +2748,10 @@ func SkillRuntimePreparationID(request skill.RuntimePreparationRequest) (string,
 
 func ValidateSkillRuntimePreparationRequest(request skill.RuntimePreparationRequest) error {
 	return skill.ValidateRuntimePreparationRequest(request)
+}
+
+func ValidateSkillPreparedRuntimeReference(runtime *skill.PreparedRuntime) error {
+	return skill.ValidatePreparedRuntimeReference(runtime)
 }
 
 func (e *Engine) RegisterAgentDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) (*kernelagent.AgentDefinition, error) {
