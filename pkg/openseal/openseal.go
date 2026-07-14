@@ -425,6 +425,7 @@ type (
 	SkillArgumentRule                  = skill.ArgumentRule
 	SkillActionRetryPolicy             = skill.ActionRetryPolicy
 	SkillRequirements                  = skill.Requirements
+	SkillInstaller                     = skill.Installer
 	ModelSkillAction                   = skill.ModelAction
 	ModelSkillPrompt                   = skill.ModelPrompt
 	BoundSkillAction                   = skill.BoundAction
