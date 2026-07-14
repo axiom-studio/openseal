@@ -62,6 +62,7 @@ type KernelClient interface {
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
 	GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error)
+	UpdateWorkforceChangeSetPlacement(context.Context, authoring.UpdateChangeSetPlacementRequest, string) (*authoring.ChangeSet, error)
 	RetryWorkforceChangeSetGeneration(context.Context, authoring.RetryChangeSetGenerationRequest, string) (*authoring.ChangeSet, error)
 	EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error)
 	ResolveWorkforceChangeSetApproval(context.Context, authoring.ResolveChangeSetApprovalRequest, string) (*authoring.ChangeSet, error)
@@ -210,6 +211,15 @@ func (c *KernelHTTPClient) GetWorkforceChangeSet(ctx context.Context, scope capa
 	var result authoring.ChangeSet
 	path := "/api/v1/authoring/workforce/change-sets/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) UpdateWorkforceChangeSetPlacement(ctx context.Context, request authoring.UpdateChangeSetPlacementRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
+	var result authoring.ChangeSet
+	path := "/api/v1/authoring/workforce/change-sets/" + url.PathEscape(strings.TrimSpace(request.ChangeSetID)) + "/placement"
+	if err := c.do(ctx, http.MethodPatch, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

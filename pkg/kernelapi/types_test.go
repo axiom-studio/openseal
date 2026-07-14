@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	kernelcapability "github.com/axiom-studio/openseal/pkg/capability"
 )
 
 func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
@@ -34,7 +36,7 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 
 func TestWorkforceAuthoringVersionDeclaresDeterministicPlacementContract(t *testing.T) {
 	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	if capability.Version != "5" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) || !capability.Supports(OperationPatch) {
+	if capability.Version != "6" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) || capability.Supports(OperationPatch) {
 		t.Fatalf("workforce authoring capability = %#v", capability)
 	}
 }
@@ -195,5 +197,20 @@ func TestContextualApprovalEligibilityIsTypedAndNotAnOperationInference(t *testi
 	capability.Operations = append(capability.Operations, OperationApprove)
 	if !capability.Supports(OperationApprove) || capability.Context.Revision != 4 || capability.Context.EligibleApprovalRequirements[0].EvaluationID != "eval-1" {
 		t.Fatalf("contextual capability = %#v", capability)
+	}
+}
+
+func TestContextualCredentialBindingsExposeOnlyOpaqueOperatorChoices(t *testing.T) {
+	context := CapabilityContext{CredentialBindings: []kernelcapability.CredentialBindingChoice{{
+		Reference:   kernelcapability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"},
+		DisplayName: "Development",
+	}}}
+	encoded, err := json.Marshal(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(encoded)
+	if !strings.Contains(value, `"displayName":"Development"`) || !strings.Contains(value, `"id":"cluster://7"`) || strings.Contains(value, "kubeconfig") || strings.Contains(value, "token") {
+		t.Fatalf("credential binding context = %s", encoded)
 	}
 }

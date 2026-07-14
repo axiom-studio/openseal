@@ -34,7 +34,7 @@ const (
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "2"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion = "5"
+	WorkforceAuthoringCapabilityVersion = "6"
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
@@ -140,9 +140,10 @@ type ActionApprovalCapabilityFeatures struct {
 // requested resource. It is never durable policy input and clients must not
 // infer authority from the underlying resource itself.
 type CapabilityContext struct {
-	ChangeSetID                  string                         `json:"changeSetId,omitempty"`
-	Revision                     int64                          `json:"revision,omitempty"`
-	EligibleApprovalRequirements []ApprovalRequirementReference `json:"eligibleApprovalRequirements,omitempty"`
+	ChangeSetID                  string                               `json:"changeSetId,omitempty"`
+	Revision                     int64                                `json:"revision,omitempty"`
+	EligibleApprovalRequirements []ApprovalRequirementReference       `json:"eligibleApprovalRequirements,omitempty"`
+	CredentialBindings           []capability.CredentialBindingChoice `json:"credentialBindings,omitempty"`
 }
 
 type ClawHubVersionRequest struct {
@@ -368,7 +369,7 @@ func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures)
 		Operations: []string{OperationCompile},
 	}
 	if features.ChangeSets {
-		capability.Operations = append(capability.Operations, OperationPropose, OperationGet, OperationPatch)
+		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
 	}
 	return capability
 }

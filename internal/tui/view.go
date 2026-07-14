@@ -452,6 +452,30 @@ func (m *Model) renderAuthoringContent(width int) string {
 		} else if m.supportsAuthoring(kernelapi.OperationEvaluate) {
 			lines = append(lines, "", mutedStyle.Render("Waiting for the configured policy evaluator to submit its decision."))
 		}
+		if m.canPlaceWorkforceCredentials() {
+			rows := m.workforceCredentialRows()
+			lines = append(lines, "", mutedStyle.Render("Authorized credential placement (j/k select · [/] choose)"))
+			for index, row := range rows {
+				prefix, style := "  ", mutedStyle
+				if index == m.authoringCredentialSelected {
+					prefix, style = "› ", selectedStyle
+				}
+				choiceLabel := "No authorized credential available"
+				if len(row.Choices) > 0 {
+					selected := m.authoringCredentialChoices[row.Key]
+					if selected < 0 || selected >= len(row.Choices) {
+						selected = 0
+					}
+					choice := row.Choices[selected]
+					choiceLabel = choice.DisplayName
+					if m.authoringChangeSet.Placement.CredentialReferences[row.AgentID][row.Kind] == choice.Reference {
+						choiceLabel += " · saved"
+					}
+				}
+				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s → %s", prefix, compact(row.AgentName, max(width-34, 16)), row.Kind, compact(choiceLabel, max(width-38, 18)))))
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("b save credential placement"))
+		}
 	}
 	if teamPurpose != "" {
 		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))

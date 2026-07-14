@@ -117,8 +117,51 @@ func (a governedFixtureAuthority) AuthorizeWorkforceLifecycle(_ context.Context,
 		return result, nil
 	case kernelapi.OperationApply:
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
+	case kernelapi.OperationPatch:
+		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
 	default:
 		return WorkforceLifecycleAuthorization{}, errors.New("unsupported operation")
+	}
+}
+
+func TestWorkforcePlacementPatchIsContextualAuthorizedAndIdempotent(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "placement.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{actor: "configured-operator"})
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	created, _, err := api.authoringChanges.Create(context.Background(), authoring.CreateChangeSetRequest{
+		Scope: scope, Prompt: "Create a governed research Team", IdempotencyKey: "create-placement",
+		Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}, Environment: "development"},
+		Actor:     authoring.ChangeSetActor{Type: "user", ID: "requester"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilityPath := "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId=" + created.ID
+	contextual := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", "")
+	if !strings.Contains(contextual.Body.String(), `"patch"`) || !strings.Contains(contextual.Body.String(), `"revision":1`) {
+		t.Fatalf("placement capability = %s", contextual.Body.String())
+	}
+	request := authoring.UpdateChangeSetPlacementRequest{
+		Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, Reason: "Use production placement",
+		Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}, Environment: "production"},
+		Actor:     authoring.ChangeSetActor{Type: "forged", ID: "browser"},
+	}
+	path := "/api/v1/authoring/workforce/change-sets/" + created.ID + "/placement"
+	updatedResponse := performAgentRunRequest(t, api.Handler(), http.MethodPatch, path, mustJSON(t, request), "placement-stable")
+	var updated authoring.ChangeSet
+	if updatedResponse.Code != http.StatusCreated || json.NewDecoder(updatedResponse.Body).Decode(&updated) != nil || updated.Revision != 2 || updated.Placement.Environment != "production" || updated.PlacementUpdates[0].Actor.ID != "configured-operator" {
+		t.Fatalf("updated placement = %d %s", updatedResponse.Code, updatedResponse.Body.String())
+	}
+	replay := performAgentRunRequest(t, api.Handler(), http.MethodPatch, path, mustJSON(t, request), "placement-stable")
+	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), updated.PlacementUpdates[0].ID) {
+		t.Fatalf("placement replay = %d %s", replay.Code, replay.Body.String())
 	}
 }
 

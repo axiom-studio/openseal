@@ -150,6 +150,11 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 	if s.workforceAuthority == nil {
 		return
 	}
+	if changeSet.CandidateDigest != "" && changeSet.Status != authoring.ChangeSetEvaluating && changeSet.Status != authoring.ChangeSetApplied && changeSet.Status != authoring.ChangeSetFailed {
+		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationPatch, changeSet); err == nil {
+			result.Operations = append(result.Operations, kernelapi.OperationPatch)
+		}
+	}
 	if changeSet.Status == authoring.ChangeSetFailed {
 		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationRetry, changeSet); err == nil {
 			result.Operations = append(result.Operations, kernelapi.OperationRetry)
@@ -187,6 +192,20 @@ func (s *Server) handleEvaluateWorkforceChangeSet(w http.ResponseWriter, r *http
 	result, replayed, err := s.authoringChanges.SubmitEvaluation(r.Context(), request)
 	s.respondWorkforceMutation(w, result, replayed, err)
 	_ = changeSet
+}
+
+func (s *Server) handleUpdateWorkforceChangeSetPlacement(w http.ResponseWriter, r *http.Request) {
+	var request authoring.UpdateChangeSetPlacementRequest
+	if !s.decodeGovernedWorkforceRequest(w, r, &request) {
+		return
+	}
+	_, authorization, ok := s.authorizeWorkforceLifecycle(w, r, kernelapi.OperationPatch, request.Scope, request.ChangeSetID)
+	if !ok {
+		return
+	}
+	request.Actor = authorization.Actor
+	result, replayed, err := s.authoringChanges.UpdatePlacement(r.Context(), request)
+	s.respondWorkforceMutation(w, result, replayed, err)
 }
 
 func (s *Server) handleApproveWorkforceChangeSet(w http.ResponseWriter, r *http.Request) {
@@ -250,6 +269,8 @@ func (s *Server) decodeGovernedWorkforceRequest(w http.ResponseWriter, r *http.R
 	case *authoring.ApplyChangeSetRequest:
 		request.IdempotencyKey = key
 	case *authoring.RetryChangeSetGenerationRequest:
+		request.IdempotencyKey = key
+	case *authoring.UpdateChangeSetPlacementRequest:
 		request.IdempotencyKey = key
 	}
 	return true

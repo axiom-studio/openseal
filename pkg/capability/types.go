@@ -44,6 +44,14 @@ type CredentialReference struct {
 	ID   string `json:"id"`
 }
 
+// CredentialBindingChoice is a secret-safe, operator-facing option for one
+// authorized opaque credential reference. Hosts resolve the reference out of
+// band; neither the reference nor its display label is model catalog input.
+type CredentialBindingChoice struct {
+	Reference   CredentialReference `json:"reference"`
+	DisplayName string              `json:"displayName"`
+}
+
 type ActionRetryPolicy struct {
 	MaxAttempts    int      `json:"maxAttempts"`
 	InitialBackoff Duration `json:"initialBackoff,omitempty"`
