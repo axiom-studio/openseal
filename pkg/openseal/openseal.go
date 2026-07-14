@@ -2103,6 +2103,13 @@ func (e *Engine) CreateObjective(ctx context.Context, req runtime.CreateObjectiv
 	return e.portfolio.CreateObjective(ctx, req)
 }
 
+// DecodeObjectiveEventRules validates and decodes the portable Objective event
+// subscription contract for host connectors. Transport configuration and
+// credentials remain the responsibility of the embedding host.
+func DecodeObjectiveEventRules(value map[string]interface{}) (*ObjectiveEventRules, error) {
+	return runtime.DecodeObjectiveEventRules(value)
+}
+
 func (e *Engine) CreateObjectiveIdempotent(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.CreateObjectiveResult, error) {
 	return e.portfolio.CreateObjectiveIdempotent(ctx, req)
 }
