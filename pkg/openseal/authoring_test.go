@@ -164,13 +164,24 @@ func TestEngineUpdatesWorkforcePlacementWithoutModelGeneration(t *testing.T) {
 		Scope: evaluated.Scope, ChangeSetID: evaluated.ID, ExpectedRevision: evaluated.Revision,
 		Placement: WorkforceChangeSetPlacement{SkillSourceIdentities: map[string]map[string]string{
 			"researcher": {"research": "clawhub::@alice/research"},
+		}, SkillSourceVersions: map[string]map[string]string{
+			"researcher": {"research": "1.0.0+source.alice"},
 		}},
 		Reason: "Select the reviewed publisher", Actor: WorkforceChangeSetActor{Type: "user", ID: "local"}, IdempotencyKey: "select-alice",
+	}
+	missingVersion := request
+	missingVersion.IdempotencyKey = "select-without-immutable-version"
+	missingVersion.Placement = WorkforceChangeSetPlacement{SkillSourceIdentities: map[string]map[string]string{
+		"researcher": {"research": "clawhub::@alice/research"},
+	}}
+	if _, _, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), missingVersion); err == nil {
+		t.Fatal("source-qualified placement without an immutable version was accepted")
 	}
 	updated, replayed, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), request)
 	qualifiedAgentID := "workspace/local/researcher"
 	if err != nil || replayed || updated.Status != WorkforceChangeSetReview || updated.Revision != evaluated.Revision+1 ||
-		updated.Placement.SkillSourceIdentities[qualifiedAgentID]["research"] != "clawhub::@alice/research" || len(updated.PlacementUpdates) != 1 {
+		updated.Placement.SkillSourceIdentities[qualifiedAgentID]["research"] != "clawhub::@alice/research" ||
+		updated.Placement.SkillSourceVersions[qualifiedAgentID]["research"] != "1.0.0+source.alice" || len(updated.PlacementUpdates) != 1 {
 		t.Fatalf("updated = %#v, replayed = %t, err = %v", updated, replayed, err)
 	}
 	if replay, replayed, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), request); err != nil || !replayed || replay.Revision != updated.Revision {

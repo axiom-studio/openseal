@@ -208,6 +208,7 @@ func TestSQLiteWorkforceApplyRequiresExactSourceForCollidingSkills(t *testing.T)
 			}}
 			if test.sourceIdentity != "" {
 				value.Placement.SkillSourceIdentities = map[string]map[string]string{"agent": {"research": test.sourceIdentity}}
+				value.Placement.SkillSourceVersions = map[string]map[string]string{"agent": {"research": "1.0.0"}}
 			}
 			if _, _, err := store.CreateChangeSet(ctx, value, "create", "digest"); err != nil {
 				t.Fatal(err)
@@ -239,6 +240,50 @@ func TestSQLiteWorkforceApplyRequiresExactSourceForCollidingSkills(t *testing.T)
 				t.Fatalf("model prompt leaked source identity: %s", encoded)
 			}
 		})
+	}
+}
+
+func TestSQLiteWorkforceApplyBindsImmutableSourceVersionBehindDeclaredContract(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	catalog := skill.NewCatalogWithStore(store)
+	const (
+		identity         = "https://clawhub.ai::@alice/research"
+		immutableVersion = "1.0.0+source.0123456789ab"
+	)
+	if err := catalog.Register(ctx, &skill.Definition{
+		ID: "research", Version: immutableVersion, Name: "Research",
+		Source: &skill.SourceProvenance{Identity: identity, Format: "openclaw.skill.v1", ResolvedVersion: "1.0.0"},
+		Prompt: &skill.PromptModule{Instructions: "Preserve immutable evidence."},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	value := testApplicableWorkforceChangeSet()
+	value.Result.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "research", VersionConstraint: "1.0.0", PromptRequired: true}}
+	value.Result.Candidate.Agents[0].Authority.AllowedSkillIDs = []string{"research"}
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		"research": {ID: "research", Version: "1.0.0", PromptAvailable: true},
+	}}
+	value.Placement.SkillSourceIdentities = map[string]map[string]string{"agent": {"research": identity}}
+	value.Placement.SkillSourceVersions = map[string]map[string]string{"agent": {"research": immutableVersion}}
+	if _, _, err := store.CreateChangeSet(ctx, value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	applied := appliedRuntimeChangeSet(value, "receipt", "apply", value.UpdatedAt.Add(time.Minute))
+	if _, err := store.ApplyChangeSet(ctx, applied, 2); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := store.ListSkillBindings(ctx, value.Scope, "agent-live")
+	if err != nil || len(bindings) != 1 || bindings[0].SkillVersion != immutableVersion || bindings[0].SourceIdentity != identity {
+		t.Fatalf("immutable source binding = %#v, %v", bindings, err)
+	}
+	prompts, err := catalog.ListModelPrompts(ctx, value.Scope, "agent-live")
+	if err != nil || len(prompts) != 1 || prompts[0].Version != immutableVersion {
+		t.Fatalf("immutable source prompt = %#v, %v", prompts, err)
 	}
 }
 
