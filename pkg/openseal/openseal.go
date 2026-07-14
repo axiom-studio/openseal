@@ -404,6 +404,11 @@ type (
 	WakeSignal                         = runtime.WakeSignal
 	WokenRun                           = runtime.WokenRun
 	WakeResult                         = runtime.WakeResult
+	ObjectiveEventRules                = runtime.ObjectiveEventRules
+	ObjectiveEventRule                 = runtime.ObjectiveEventRule
+	EventEnvelope                      = runtime.EventEnvelope
+	EventRoute                         = runtime.EventRoute
+	EventRouteResult                   = runtime.EventRouteResult
 	SkillCatalog                       = skill.Catalog
 	SkillDefinition                    = skill.Definition
 	SkillAction                        = skill.Action
@@ -1219,6 +1224,7 @@ var (
 	ErrOutreachThreadConflict        = runtime.ErrOutreachThreadConflict
 	ErrOutreachThreadIdempotency     = runtime.ErrOutreachThreadIdempotency
 	ErrInvalidOutreachThread         = runtime.ErrInvalidOutreachThread
+	ErrInvalidObjectiveEventRules    = runtime.ErrInvalidObjectiveEventRules
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -2607,6 +2613,16 @@ func (e *Engine) WakeAgentRuns(ctx context.Context, signal runtime.WakeSignal) (
 
 func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at time.Time) (*runtime.WakeResult, error) {
 	return e.wake.WakeDueTimers(ctx, scope, at)
+}
+
+// RouteEvent normalizes every event source onto canonical Objective and Run
+// semantics. Embedding hosts own transport watches and authorization; the
+// kernel owns matching, exact idempotency, durable work, and audit.
+func (e *Engine) RouteEvent(ctx context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
+	if e == nil || e.store == nil {
+		return nil, errors.New("objective event routing is unavailable")
+	}
+	return runtime.NewObjectiveEventRouter(e.store).Route(ctx, event)
 }
 
 func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition) error {
