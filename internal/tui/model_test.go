@@ -28,6 +28,7 @@ import (
 
 type fakeKernelClient struct {
 	document            kernelapi.CapabilityDocument
+	agentDeployments    []kernelapi.AgentDeploymentCatalogEntry
 	runs                []*runtime.AgentRun
 	agentRequests       []*runtime.AgentRequest
 	agentRequestFilters []runtime.AgentRequestFilter
@@ -78,6 +79,12 @@ type fakeKernelClient struct {
 	skillActions        []capability.ModelAction
 	skillActionCalls    int
 }
+
+var (
+	_ client.KernelClient = (*fakeKernelClient)(nil)
+	_ client.KernelClient = (*fakeChannelKernelClient)(nil)
+	_ client.KernelClient = (*fakeClawHubKernelClient)(nil)
+)
 
 type fakeChannelKernelClient struct {
 	*fakeKernelClient
@@ -609,6 +616,26 @@ func (f *fakeKernelClient) ListAgentDefinitionCompilations(context.Context, capa
 	return f.compilations, nil
 }
 
+func (f *fakeKernelClient) GetAgentDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelapi.AgentDeploymentCatalogEntry, error) {
+	for i := range f.agentDeployments {
+		entry := &f.agentDeployments[i]
+		if entry.Deployment != nil && entry.Deployment.ID == id && entry.Deployment.Scope == scope {
+			return entry, nil
+		}
+	}
+	return nil, kernelagent.ErrDeploymentNotFound
+}
+
+func (f *fakeKernelClient) ListAgentDeployments(_ context.Context, scope capability.ScopeReference) (*kernelapi.AgentDeploymentList, error) {
+	items := make([]kernelapi.AgentDeploymentCatalogEntry, 0, len(f.agentDeployments))
+	for _, entry := range f.agentDeployments {
+		if entry.Deployment != nil && entry.Deployment.Scope == scope {
+			items = append(items, entry)
+		}
+	}
+	return &kernelapi.AgentDeploymentList{Items: items}, nil
+}
+
 func (f *fakeKernelClient) GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error) {
 	if len(f.runs) == 0 {
 		return nil, runtime.ErrRunNotFound
@@ -695,6 +722,27 @@ func (f *fakeKernelClient) DownloadArtifactContent(context.Context, runtime.Scop
 
 func (f *fakeKernelClient) ResolveArtifactContent(context.Context, runtime.Scope, string, int64, kernelapi.ResolveArtifactContentRequest) (*runtime.ArtifactContentResolution, error) {
 	return nil, errors.New("not implemented by test client")
+}
+
+func TestFakeKernelClientAgentDeploymentsRespectScope(t *testing.T) {
+	tenantOne := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	tenantTwo := capability.ScopeReference{Kind: "tenant", ID: "two"}
+	fake := &fakeKernelClient{agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{
+		{Deployment: &kernelagent.AgentDeployment{ID: "shared", Scope: tenantOne}},
+		{Deployment: &kernelagent.AgentDeployment{ID: "shared", Scope: tenantTwo}},
+	}}
+
+	entry, err := fake.GetAgentDeployment(context.Background(), tenantTwo, "shared")
+	if err != nil || entry.Deployment.Scope != tenantTwo {
+		t.Fatalf("get exact tenant deployment: entry=%+v err=%v", entry, err)
+	}
+	if _, err := fake.GetAgentDeployment(context.Background(), capability.ScopeReference{Kind: "tenant", ID: "other"}, "shared"); !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
+		t.Fatalf("cross-scope get error = %v, want deployment not found", err)
+	}
+	list, err := fake.ListAgentDeployments(context.Background(), tenantOne)
+	if err != nil || len(list.Items) != 1 || list.Items[0].Deployment.Scope != tenantOne {
+		t.Fatalf("list tenant deployments: list=%+v err=%v", list, err)
+	}
 }
 
 func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
