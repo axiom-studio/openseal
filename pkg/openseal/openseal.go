@@ -91,6 +91,7 @@ type (
 	AgentRegistryStore                        = kernelagent.Store
 	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
 	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
+	KernelAgentDefinitionCompilationHistory   = kernelapi.AgentDefinitionCompilationHistory
 	TeamDefinition                            = kernelteam.Definition
 	TeamRoleSlot                              = kernelteam.RoleSlot
 	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
