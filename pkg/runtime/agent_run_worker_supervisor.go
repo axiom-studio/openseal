@@ -80,6 +80,7 @@ type AgentRunWorkerSupervisor struct {
 	logger         *zap.SugaredLogger
 	actions        *ActionCoordinator
 	actionObserver ActionProposalObserver
+	limiter        *WorkerLimiter
 
 	mu     sync.RWMutex
 	pools  map[string]*AgentRunWorkerPool
@@ -104,6 +105,15 @@ func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *ActionCoordinat
 	s.actions = actions
 	for _, pool := range s.pools {
 		pool.SetActionCoordinator(actions)
+	}
+}
+
+func (s *AgentRunWorkerSupervisor) SetWorkerLimiter(limiter *WorkerLimiter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.limiter = limiter
+	for _, pool := range s.pools {
+		pool.SetWorkerLimiter(limiter)
 	}
 }
 
@@ -238,6 +248,7 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 		}
 		pool.SetActionCoordinator(s.actions)
 		pool.SetActionProposalObserver(s.actionObserver)
+		pool.SetWorkerLimiter(s.limiter)
 		s.pools[key] = pool
 		pool.Start(ctx)
 		s.logger.Infow("started agent run worker scope", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)

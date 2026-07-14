@@ -119,6 +119,7 @@ type AgentRunWorkerPool struct {
 	wg             sync.WaitGroup
 	startOnce      sync.Once
 	stopOnce       sync.Once
+	limiter        *WorkerLimiter
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
@@ -129,6 +130,10 @@ func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
 
 func (p *AgentRunWorkerPool) SetActionProposalObserver(observer ActionProposalObserver) {
 	p.actionObserver = observer
+}
+
+func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
+	p.limiter = limiter
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
@@ -188,9 +193,12 @@ func (p *AgentRunWorkerPool) Wake() {
 
 func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 	defer p.wg.Done()
-	ticker := time.NewTicker(p.config.PollInterval)
-	defer ticker.Stop()
+	consecutiveFailures := 0
 	for {
+		release, acquireErr := p.limiter.acquire(ctx)
+		if acquireErr != nil {
+			return
+		}
 		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
 			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
@@ -198,17 +206,19 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			MaxActiveForConcurrencyKey: p.config.MaxActiveForConcurrencyKey,
 		})
 		if err != nil && ctx.Err() == nil {
+			consecutiveFailures++
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
+		} else if err == nil {
+			consecutiveFailures = 0
 		}
 		if run != nil {
 			p.executeClaim(ctx, workerID, run)
+			release()
 			continue
 		}
-		select {
-		case <-ctx.Done():
+		release()
+		if !waitForWorkerPoll(ctx, p.wake, workerPollDelay(p.config.PollInterval, consecutiveFailures, workerID)) {
 			return
-		case <-p.wake:
-		case <-ticker.C:
 		}
 	}
 }
@@ -490,23 +500,29 @@ func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel conte
 
 func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 	defer p.wg.Done()
-	ticker := time.NewTicker(p.config.PollInterval)
-	defer ticker.Stop()
+	consecutiveFailures := 0
+	seed := p.poolID + "-timer-wake"
 	for {
-		select {
-		case <-ctx.Done():
+		if !waitForWorkerPoll(ctx, nil, workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)) {
 			return
-		case now := <-ticker.C:
-			result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, now)
-			if err != nil {
-				p.logger.Warnw("failed to wake due agent runs", "error", err)
-				continue
-			}
-			if len(result.Runs) > 0 {
-				p.Wake()
-			}
-			p.reconcileForkChildren(ctx)
 		}
+		release, acquireErr := p.limiter.acquire(ctx)
+		if acquireErr != nil {
+			return
+		}
+		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
+		if err != nil {
+			consecutiveFailures++
+			release()
+			p.logger.Warnw("failed to wake due agent runs", "error", err)
+			continue
+		}
+		consecutiveFailures = 0
+		if len(result.Runs) > 0 {
+			p.Wake()
+		}
+		p.reconcileForkChildren(ctx)
+		release()
 	}
 }
 

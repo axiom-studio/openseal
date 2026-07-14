@@ -30,6 +30,7 @@ type WorkerPool struct {
 	wg            sync.WaitGroup
 	startOnce     sync.Once
 	stopOnce      sync.Once
+	limiter       *WorkerLimiter
 }
 
 // NewWorkerPool creates a worker pool with the given concurrency.
@@ -92,24 +93,35 @@ func (wp *WorkerPool) Wake() {
 	}
 }
 
+// SetWorkerLimiter installs the process-wide admission boundary. Configure it
+// before Start; durable replicas remain coordinated by persisted leases.
+func (wp *WorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
+	wp.limiter = limiter
+}
+
 func (wp *WorkerPool) worker(ctx context.Context, workerID string) {
 	defer wp.wg.Done()
-	ticker := time.NewTicker(wp.pollInterval)
-	defer ticker.Stop()
+	consecutiveFailures := 0
 	for {
+		release, acquireErr := wp.limiter.acquire(ctx)
+		if acquireErr != nil {
+			return
+		}
 		run, err := wp.store.ClaimNextRunnable(ctx, workerID, wp.leaseDuration)
 		if err != nil && ctx.Err() == nil {
+			consecutiveFailures++
 			wp.logger.Errorw("failed to claim runnable work", "workerId", workerID, "error", err)
+		} else if err == nil {
+			consecutiveFailures = 0
 		}
 		if run != nil {
 			wp.execute(ctx, workerID, run)
+			release()
 			continue
 		}
-		select {
-		case <-ctx.Done():
+		release()
+		if !waitForWorkerPoll(ctx, wp.wake, workerPollDelay(wp.pollInterval, consecutiveFailures, workerID)) {
 			return
-		case <-wp.wake:
-		case <-ticker.C:
 		}
 	}
 }

@@ -169,6 +169,8 @@ type (
 	PostgresStoreOption                = runtime.PostgresStoreOption
 	PostgresPoolConfig                 = runtime.PostgresPoolConfig
 	PostgresPoolStats                  = runtime.PostgresPoolStats
+	WorkerLimiter                      = runtime.WorkerLimiter
+	WorkerLimiterStats                 = runtime.WorkerLimiterStats
 	Scope                              = runtime.Scope
 	ObjectiveOwner                     = runtime.ObjectiveOwner
 	Objective                          = runtime.Objective
@@ -1245,6 +1247,7 @@ type Engine struct {
 	authoringChanges              *authoring.ChangeSetService
 	authoringRuns                 *runtime.WorkforceAuthoringRunService
 	logger                        *zap.SugaredLogger
+	workerLimiter                 *runtime.WorkerLimiter
 }
 
 type agentRunWorkerSpec struct {
@@ -1445,6 +1448,12 @@ func (e *Engine) Store() runtime.KernelStore {
 	return e.store
 }
 
+// WorkerConcurrencyStats exposes the process-wide worker admission state for
+// host metrics and rollout diagnostics.
+func (e *Engine) WorkerConcurrencyStats() runtime.WorkerLimiterStats {
+	return e.workerLimiter.Stats()
+}
+
 // Logger returns the engine's logger.
 func (e *Engine) Logger() *zap.SugaredLogger {
 	return e.logger
@@ -1457,6 +1466,7 @@ func WithRegistry(reg *executor.Registry) Option {
 		// Rebuild pool with new registry
 		pe := executor.NewPipelineExecutor(reg, e.logger)
 		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, 4, runtime.DefaultRetryPolicy())
+		e.pool.SetWorkerLimiter(e.workerLimiter)
 		e.scheduler = runtime.NewScheduler(e.pool, e.store)
 		return nil
 	}
@@ -1677,7 +1687,24 @@ func WithWorkerPool(concurrency int, retry *runtime.RetryPolicy) Option {
 	return func(e *Engine) error {
 		pe := executor.NewPipelineExecutor(e.registry, e.logger)
 		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, concurrency, retry)
+		e.pool.SetWorkerLimiter(e.workerLimiter)
 		e.scheduler = runtime.NewScheduler(e.pool, e.store)
+		return nil
+	}
+}
+
+// WithWorkerConcurrencyLimit bounds all workflow, Agent, conversation, and
+// action execution admitted by one Engine process. Replica safety remains
+// durable in the store; this protects shared host resources as scope count
+// grows and while rolling deployments overlap.
+func WithWorkerConcurrencyLimit(limit int) Option {
+	return func(e *Engine) error {
+		limiter, err := runtime.NewWorkerLimiter(limit)
+		if err != nil {
+			return err
+		}
+		e.workerLimiter = limiter
+		e.pool.SetWorkerLimiter(limiter)
 		return nil
 	}
 }
@@ -1949,6 +1976,7 @@ func (e *Engine) rebuildActionWorkerPools() error {
 		if err != nil {
 			return err
 		}
+		pool.SetWorkerLimiter(e.workerLimiter)
 		e.actionPools = append(e.actionPools, pool)
 	}
 	return nil
@@ -1961,6 +1989,7 @@ func (e *Engine) rebuildActionWorkerSupervisors() error {
 		if err != nil {
 			return err
 		}
+		supervisor.SetWorkerLimiter(e.workerLimiter)
 		e.actionSupervisors = append(e.actionSupervisors, supervisor)
 	}
 	return nil
@@ -1973,6 +2002,7 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 		if err != nil {
 			return err
 		}
+		pool.SetWorkerLimiter(e.workerLimiter)
 		pool.SetActionCoordinator(e.actions)
 		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
 		if observerErr != nil {
@@ -1991,6 +2021,7 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 		if err != nil {
 			return err
 		}
+		supervisor.SetWorkerLimiter(e.workerLimiter)
 		supervisor.SetActionCoordinator(e.actions)
 		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
 		if observerErr != nil {
