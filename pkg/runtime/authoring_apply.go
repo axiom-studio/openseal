@@ -298,17 +298,49 @@ func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, 
 			}
 			cadence = &decoded
 		}
+		eventRules, err := materializeObjectiveEventRules(value, template, deploymentByDefinition)
+		if err != nil {
+			return nil, err
+		}
 		key := authoring.WorkforceObjectiveKey(ownerType, definitionID, template.ID)
 		placement := value.Placement.Objectives[key]
 		revision := int64(1)
 		if placement.ExpectedRevision > 0 {
 			revision = placement.ExpectedRevision + 1
 		}
-		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: template.EventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
+		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: eventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
 		if err := objective.Validate(); err != nil {
 			return nil, fmt.Errorf("materialize Objective %s: %w", template.ID, err)
 		}
 		result = append(result, workforceObjectiveApplication{value: objective, expectedRevision: placement.ExpectedRevision})
+	}
+	return result, nil
+}
+
+func materializeObjectiveEventRules(value *authoring.ChangeSet, template workforce.ObjectiveTemplate, deploymentByDefinition map[string]string) (map[string]interface{}, error) {
+	if len(template.EventRules) == 0 {
+		return template.EventRules, nil
+	}
+	rules, err := DecodeObjectiveEventRules(template.EventRules)
+	if err != nil {
+		return nil, fmt.Errorf("materialize Objective %s event rules: %w", template.ID, err)
+	}
+	for index := range rules.Rules {
+		rule := &rules.Rules[index]
+		if deployed := deploymentByDefinition[rule.AssignedAgentID]; deployed != "" {
+			rule.AssignedAgentID = deployed
+		}
+		if blueprint := value.Result.Candidate.Initiative; blueprint != nil && rule.RunTemplate != nil && rule.RunTemplate.Context["initiativeId"] == blueprint.ID {
+			rule.RunTemplate.Context["initiativeId"] = value.Placement.InitiativeID
+		}
+	}
+	payload, err := json.Marshal(rules)
+	if err != nil {
+		return nil, fmt.Errorf("materialize Objective %s event rules: %w", template.ID, err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("materialize Objective %s event rules: %w", template.ID, err)
 	}
 	return result, nil
 }
