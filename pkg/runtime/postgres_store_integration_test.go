@@ -785,3 +785,64 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 		t.Fatalf("bounded pool stats = %#v", stats)
 	}
 }
+
+func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := "openseal_pool_replicas_" + uuid.NewString()[:8]
+	pool := PostgresPoolConfig{
+		MaxOpenConnections: 3, MaxIdleConnections: 1,
+		ConnectionLifetime: time.Minute, ConnectionIdleTime: time.Minute,
+	}
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema), WithPostgresPool(pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema), WithPostgresPool(pool))
+	if err != nil {
+		_ = primary.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = replacement.Close()
+		_ = primary.Close()
+	})
+
+	const callersPerReplica = 15
+	start := make(chan struct{})
+	errorsFound := make(chan error, callersPerReplica*2)
+	var group sync.WaitGroup
+	for _, store := range []*PostgresStore{primary, replacement} {
+		for index := 0; index < callersPerReplica; index++ {
+			group.Add(1)
+			go func(store *PostgresStore) {
+				defer group.Done()
+				<-start
+				_, queryErr := store.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)
+				errorsFound <- queryErr
+			}(store)
+		}
+	}
+	close(start)
+	group.Wait()
+	close(errorsFound)
+	for queryErr := range errorsFound {
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+	}
+	primaryStats, replacementStats := primary.PoolStats(), replacement.PoolStats()
+	for name, stats := range map[string]PostgresPoolStats{"primary": primaryStats, "replacement": replacementStats} {
+		if stats.MaxOpenConnections != 3 || stats.OpenConnections > 3 || stats.InUseConnections > 3 || stats.IdleConnections > 1 || stats.WaitCount < callersPerReplica-3 || stats.WaitDuration <= 0 {
+			t.Fatalf("%s replica pool stats = %#v", name, stats)
+		}
+	}
+	if primaryStats.OpenConnections+replacementStats.OpenConnections > 6 {
+		t.Fatalf("overlapping replica connections exceed aggregate budget: primary=%#v replacement=%#v", primaryStats, replacementStats)
+	}
+}
