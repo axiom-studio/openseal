@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -250,7 +249,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 			}
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
-		checkpoint := cloneMap(updatedRun.Checkpoint)
+		checkpoint := appendActionHistory(updatedRun.Checkpoint, updatedCall)
 		if checkpoint == nil {
 			checkpoint = make(map[string]interface{})
 		}
@@ -349,22 +348,6 @@ func sanitizeActionOutput(output map[string]interface{}, credentials map[string]
 		}
 	}
 	return sanitize(output).(map[string]interface{})
-}
-
-const maximumCheckpointActionResultBytes = 64 << 10
-
-func boundedActionResult(output map[string]interface{}) interface{} {
-	if output == nil {
-		return map[string]interface{}{}
-	}
-	encoded, err := json.Marshal(output)
-	if err != nil || len(encoded) > maximumCheckpointActionResultBytes {
-		return map[string]interface{}{
-			"available": false, "reason": "result exceeds the model checkpoint limit",
-			"sizeBytes": len(encoded),
-		}
-	}
-	return cloneMap(output)
 }
 
 func cloneCredentialReferences(input map[string]skill.CredentialReference) map[string]skill.CredentialReference {
