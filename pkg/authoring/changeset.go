@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/google/uuid"
@@ -75,6 +76,17 @@ type ChangeSetApprovalDecision struct {
 	Reason         string         `json:"reason,omitempty"`
 	Actor          ChangeSetActor `json:"actor"`
 	DecidedAt      time.Time      `json:"decidedAt"`
+}
+
+// ChangeSetPlacementUpdate is an immutable audit record for deterministic
+// host-owned placement changes. Placement never passes through the model.
+type ChangeSetPlacementUpdate struct {
+	ID              string         `json:"id"`
+	IdempotencyKey  string         `json:"idempotencyKey"`
+	PlacementDigest string         `json:"placementDigest"`
+	Reason          string         `json:"reason"`
+	Actor           ChangeSetActor `json:"actor"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
 }
 
 type ChangeSetLifecycleEvent struct {
@@ -143,6 +155,7 @@ type ChangeSet struct {
 	Generation          *ChangeSetGeneration        `json:"generation,omitempty"`
 	Evaluations         []ChangeSetEvaluation       `json:"evaluations,omitempty"`
 	ApprovalDecisions   []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
+	PlacementUpdates    []ChangeSetPlacementUpdate  `json:"placementUpdates,omitempty"`
 	ApplyReceipt        *ChangeSetApplyReceipt      `json:"applyReceipt,omitempty"`
 	Lifecycle           []ChangeSetLifecycleEvent   `json:"lifecycle"`
 	Revision            int64                       `json:"revision"`
@@ -213,6 +226,16 @@ type ApplyChangeSetRequest struct {
 	ChangeSetID      string                    `json:"changeSetId"`
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	CandidateDigest  string                    `json:"candidateDigest"`
+	Reason           string                    `json:"reason"`
+	Actor            ChangeSetActor            `json:"actor"`
+	IdempotencyKey   string                    `json:"idempotencyKey"`
+}
+
+type UpdateChangeSetPlacementRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ChangeSetID      string                    `json:"changeSetId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	Placement        ChangeSetPlacement        `json:"placement"`
 	Reason           string                    `json:"reason"`
 	Actor            ChangeSetActor            `json:"actor"`
 	IdempotencyKey   string                    `json:"idempotencyKey"`
@@ -540,6 +563,108 @@ func classifyGenerationFailure(err error) (string, string) {
 func (s *ChangeSetService) ApplyAvailable() bool {
 	_, ok := s.store.(AtomicChangeSetStore)
 	return ok
+}
+
+// UpdatePlacement deterministically updates host-owned resource, credential,
+// and Skill-source placement without invoking the probabilistic generator. Any
+// prior policy decision is made inactive by returning the aggregate to review.
+func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateChangeSetPlacementRequest) (*ChangeSet, bool, error) {
+	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
+	request.Reason = strings.TrimSpace(request.Reason)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" ||
+		request.ExpectedRevision < 1 || request.Reason == "" || request.Actor.Type == "" || request.Actor.ID == "" || request.IdempotencyKey == "" {
+		return nil, false, errors.New("placement scope, change set, revision, reason, actor, and idempotency key are required")
+	}
+	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
+	if err != nil {
+		return nil, false, err
+	}
+	canonicalizePlacement(&request.Placement, current.Scope, &current.Result.Candidate)
+	if err := validatePlacementReferences(request.Placement, &current.Result.Candidate); err != nil {
+		return nil, false, err
+	}
+	placementDigest, err := digestJSON(request.Placement)
+	if err != nil {
+		return nil, false, fmt.Errorf("digest workforce placement: %w", err)
+	}
+	requestDigest, err := digestJSON(struct {
+		PlacementDigest string
+		Reason          string
+		Actor           ChangeSetActor
+	}{placementDigest, request.Reason, request.Actor})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, update := range current.PlacementUpdates {
+		if update.IdempotencyKey != request.IdempotencyKey {
+			continue
+		}
+		storedDigest, _ := digestJSON(struct {
+			PlacementDigest string
+			Reason          string
+			Actor           ChangeSetActor
+		}{update.PlacementDigest, update.Reason, update.Actor})
+		if storedDigest != requestDigest {
+			return nil, false, ErrChangeSetIdempotency
+		}
+		return current, true, nil
+	}
+	if current.Revision != request.ExpectedRevision {
+		return nil, false, ErrChangeSetRevision
+	}
+	if current.CandidateDigest == "" || current.Status == ChangeSetEvaluating || current.Status == ChangeSetApplied || current.Status == ChangeSetFailed {
+		return nil, false, fmt.Errorf("%w: cannot update placement in status %s", ErrChangeSetTransition, current.Status)
+	}
+	now := s.now().UTC()
+	next := cloneChangeSet(current)
+	next.Placement = clonePlacement(request.Placement)
+	next.Status = ChangeSetReview
+	if !next.Result.Valid {
+		next.Status = ChangeSetBlocked
+	}
+	next.Revision, next.UpdatedAt = current.Revision+1, now
+	next.PlacementUpdates = append(next.PlacementUpdates, ChangeSetPlacementUpdate{
+		ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, PlacementDigest: placementDigest,
+		Reason: request.Reason, Actor: request.Actor, UpdatedAt: now,
+	})
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{
+		Revision: next.Revision, From: current.Status, To: next.Status, Reason: "placement_updated", Actor: request.Actor, At: now,
+	})
+	updated, err := s.store.UpdateChangeSet(ctx, next, current.Revision)
+	if errors.Is(err, ErrChangeSetRevision) {
+		return s.UpdatePlacement(ctx, request)
+	}
+	return updated, false, err
+}
+
+func validatePlacementReferences(placement ChangeSetPlacement, candidate *WorkforceCandidate) error {
+	agents := make(map[string]*agent.AgentDefinition, len(candidate.Agents))
+	for _, definition := range candidate.Agents {
+		if definition != nil {
+			agents[definition.ID] = definition
+		}
+	}
+	for agentID, sources := range placement.SkillSourceIdentities {
+		definition := agents[agentID]
+		if definition == nil {
+			return fmt.Errorf("Skill source placement references unknown Agent %s", agentID)
+		}
+		required := make(map[string]struct{}, len(definition.SkillRequirements))
+		for _, requirement := range definition.SkillRequirements {
+			required[strings.TrimSpace(requirement.SkillID)] = struct{}{}
+		}
+		for skillID, identity := range sources {
+			if _, ok := required[strings.TrimSpace(skillID)]; !ok {
+				return fmt.Errorf("Skill source placement references undeclared Skill %s for Agent %s", skillID, agentID)
+			}
+			if strings.TrimSpace(identity) == "" {
+				return fmt.Errorf("Skill source placement for Agent %s Skill %s is empty", agentID, skillID)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequest) (*ChangeSet, bool, error) {
@@ -1078,11 +1203,8 @@ func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveC
 		return nil, false, fmt.Errorf("%w: cannot approve status %s", ErrChangeSetTransition, current.Status)
 	}
 	var evaluation *ChangeSetEvaluation
-	for i := range current.Evaluations {
-		if current.Evaluations[i].ID == request.EvaluationID {
-			evaluation = &current.Evaluations[i]
-			break
-		}
+	if count := len(current.Evaluations); count > 0 && current.Evaluations[count-1].ID == request.EvaluationID {
+		evaluation = &current.Evaluations[count-1]
 	}
 	if evaluation == nil || !evaluation.Allowed {
 		return nil, false, fmt.Errorf("%w: approval evaluation is not active", ErrChangeSetTransition)

@@ -146,10 +146,12 @@ type (
 	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
 	WorkforceChangeSetEvaluation              = authoring.ChangeSetEvaluation
 	WorkforceChangeSetApprovalDecision        = authoring.ChangeSetApprovalDecision
+	WorkforceChangeSetPlacementUpdate         = authoring.ChangeSetPlacementUpdate
 	WorkforceChangeSetLifecycleEvent          = authoring.ChangeSetLifecycleEvent
 	CreateWorkforceChangeSetRequest           = authoring.CreateChangeSetRequest
 	SubmitWorkforceChangeSetEvaluationRequest = authoring.SubmitChangeSetEvaluationRequest
 	ResolveWorkforceChangeSetApprovalRequest  = authoring.ResolveChangeSetApprovalRequest
+	UpdateWorkforceChangeSetPlacementRequest  = authoring.UpdateChangeSetPlacementRequest
 	ApplyWorkforceChangeSetRequest            = authoring.ApplyChangeSetRequest
 	RetryWorkforceChangeSetGenerationRequest  = authoring.RetryChangeSetGenerationRequest
 	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
@@ -2854,6 +2856,13 @@ func (e *Engine) ResolveWorkforceChangeSetApproval(ctx context.Context, request 
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.ResolveApproval(ctx, request)
+}
+
+func (e *Engine) UpdateWorkforceChangeSetPlacement(ctx context.Context, request authoring.UpdateChangeSetPlacementRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.UpdatePlacement(ctx, request)
 }
 
 func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.ApplyChangeSetRequest) (*authoring.ChangeSet, bool, error) {

@@ -20,6 +20,12 @@ func (evaluableWorkforceFixtureGenerator) Generate(context.Context, WorkforceAut
 	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[]},"questions":[]}`), nil
 }
 
+type sourceQualifiedWorkforceFixtureGenerator struct{}
+
+func (sourceQualifiedWorkforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
+	return []byte(`{"candidate":{"agents":[{"id":"researcher","version":"1","displayName":"Researcher","purpose":"Research safely","systemPrompt":"Research with evidence.","skillRequirements":[{"skillId":"research","versionConstraint":"1.0.0","promptRequired":true}],"authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"assignments":[]},"questions":[]}`), nil
+}
+
 func TestPublicWorkforceObjectivePlacementContract(t *testing.T) {
 	key := WorkforceObjectiveKey("agent", "developer", "ship-feature")
 	placement := WorkforceChangeSetPlacement{
@@ -123,5 +129,75 @@ func TestEngineSubmitsGovernedWorkforceEvaluation(t *testing.T) {
 	})
 	if err != nil || replay || approved.Status != WorkforceChangeSetReady || len(approved.ApprovalDecisions) != 1 {
 		t.Fatalf("approved = %#v replay=%t err=%v", approved, replay, err)
+	}
+}
+
+func TestEngineUpdatesWorkforcePlacementWithoutModelGeneration(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	engine, err := New(WithPersistentStore(store), WithWorkforceAuthoringGenerator(sourceQualifiedWorkforceFixtureGenerator{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := engine.CreateWorkforceChangeSet(t.Context(), CreateWorkforceChangeSetRequest{
+		Scope: SkillScope{Kind: "workspace", ID: "local"}, Prompt: "Create a research Agent",
+		Catalog: WorkforceCapabilityCatalog{Skills: map[string]WorkforceSkillCapability{
+			"research": {ID: "research", Version: "1.0.0", PromptAvailable: true},
+		}},
+		Actor: WorkforceChangeSetActor{Type: "user", ID: "local"}, IdempotencyKey: "create-researcher",
+	})
+	if err != nil || created.Status != WorkforceChangeSetReview {
+		t.Fatalf("created = %#v, err = %v", created, err)
+	}
+	evaluated, _, err := engine.SubmitWorkforceChangeSetEvaluation(t.Context(), SubmitWorkforceChangeSetEvaluationRequest{
+		Scope: created.Scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest,
+		Allowed: true, Actor: WorkforceChangeSetActor{Type: "policy_evaluator", ID: "local"}, IdempotencyKey: "evaluate-before-placement",
+		ApprovalRequirements: []WorkforceChangeSetApprovalRequirement{{PolicyID: "source-policy", Role: "operator", Count: 1}},
+	})
+	if err != nil || evaluated.Status != WorkforceChangeSetAwaitingApproval {
+		t.Fatalf("evaluated = %#v, err = %v", evaluated, err)
+	}
+	request := UpdateWorkforceChangeSetPlacementRequest{
+		Scope: evaluated.Scope, ChangeSetID: evaluated.ID, ExpectedRevision: evaluated.Revision,
+		Placement: WorkforceChangeSetPlacement{SkillSourceIdentities: map[string]map[string]string{
+			"researcher": {"research": "clawhub::@alice/research"},
+		}},
+		Reason: "Select the reviewed publisher", Actor: WorkforceChangeSetActor{Type: "user", ID: "local"}, IdempotencyKey: "select-alice",
+	}
+	updated, replayed, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), request)
+	qualifiedAgentID := "workspace/local/researcher"
+	if err != nil || replayed || updated.Status != WorkforceChangeSetReview || updated.Revision != evaluated.Revision+1 ||
+		updated.Placement.SkillSourceIdentities[qualifiedAgentID]["research"] != "clawhub::@alice/research" || len(updated.PlacementUpdates) != 1 {
+		t.Fatalf("updated = %#v, replayed = %t, err = %v", updated, replayed, err)
+	}
+	if replay, replayed, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), request); err != nil || !replayed || replay.Revision != updated.Revision {
+		t.Fatalf("replay = %#v, replayed = %t, err = %v", replay, replayed, err)
+	}
+	request.IdempotencyKey = "stale-select-bob"
+	request.Placement.SkillSourceIdentities["researcher"]["research"] = "clawhub::@bob/research"
+	if _, _, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), request); err != ErrWorkforceChangeSetRevision {
+		t.Fatalf("stale placement error = %v", err)
+	}
+	restored, err := engine.GetWorkforceChangeSet(t.Context(), updated.Scope, updated.ID)
+	if err != nil || restored.Placement.SkillSourceIdentities[qualifiedAgentID]["research"] != "clawhub::@alice/research" || len(restored.PlacementUpdates) != 1 {
+		t.Fatalf("restored = %#v, err = %v", restored, err)
+	}
+	reEvaluated, _, err := engine.SubmitWorkforceChangeSetEvaluation(t.Context(), SubmitWorkforceChangeSetEvaluationRequest{
+		Scope: updated.Scope, ChangeSetID: updated.ID, ExpectedRevision: updated.Revision, CandidateDigest: updated.CandidateDigest,
+		Allowed: true, Actor: WorkforceChangeSetActor{Type: "policy_evaluator", ID: "local"}, IdempotencyKey: "evaluate-after-placement",
+		ApprovalRequirements: []WorkforceChangeSetApprovalRequirement{{PolicyID: "source-policy", Role: "operator", Count: 1}},
+	})
+	if err != nil || reEvaluated.Status != WorkforceChangeSetAwaitingApproval {
+		t.Fatalf("re-evaluated = %#v, err = %v", reEvaluated, err)
+	}
+	if _, _, err := engine.ResolveWorkforceChangeSetApproval(t.Context(), ResolveWorkforceChangeSetApprovalRequest{
+		Scope: reEvaluated.Scope, ChangeSetID: reEvaluated.ID, ExpectedRevision: reEvaluated.Revision,
+		EvaluationID: evaluated.Evaluations[0].ID, PolicyID: "source-policy", Role: "operator", Approved: true,
+		Actor: WorkforceChangeSetActor{Type: "user", ID: "local"}, IdempotencyKey: "approve-stale-evaluation",
+	}); err == nil {
+		t.Fatal("approval against a superseded placement evaluation was accepted")
 	}
 }
