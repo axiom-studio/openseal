@@ -146,6 +146,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		MaxAttempts: max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
 	updatedRun := cloneAgentRun(run)
 	updatedRun.Revision++
 	updatedRun.UpdatedAt = now
@@ -174,7 +175,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		call.Status = ActionCallStatusReady
 		updatedRun.Status = AgentRunStatusWaitingForDependency
 		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
-		updatedRun.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+		updatedRun.Checkpoint = preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 	case ActionDispositionDeny:
@@ -185,7 +186,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			updatedRun.Status = AgentRunStatusPaused
 		}
 		updatedRun.WakeCondition = nil
-		updatedRun.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+		updatedRun.Checkpoint = preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
 		updatedRun.AvailableAt = now
 		updatedRun.QueueEnteredAt = now
 		updatedRun.LeaseOwner = ""
@@ -211,7 +212,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		}
 		updatedRun.Status = AgentRunStatusWaitingForApproval
 		updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: approvalID}
-		updatedRun.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+		updatedRun.Checkpoint = preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.approval_requested"

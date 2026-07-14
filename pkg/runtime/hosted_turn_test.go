@@ -143,6 +143,53 @@ func TestHostedTurnRunnerRequiresOneRunningActionProposal(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerReusesSucceededSemanticActionAcrossRestart(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "kubernetes.get_resource", BindingID: "cluster-binding", BindingRevision: 3,
+		SkillID: "kubernetes", Version: "1", Action: "get_resource",
+	}
+	arguments := map[string]interface{}{"kind": "Deployment", "name": "api", "namespace": "system"}
+	call := &ActionCall{
+		ID: "completed-call", DeploymentID: "sre-agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+		SkillID: action.SkillID, SkillVersion: action.Version, Action: action.Action, Arguments: arguments,
+		Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"generation": 7},
+	}
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	checkpoint := appendActionHistory(map[string]interface{}{"phase": "inspect"}, call)
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-after-restart", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Read it again",
+		ProposedActions: []TurnAction{{
+			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+			Summary: "Repeat the read", IdempotencyKey: "a-new-model-key", InputRef: "/actionInputs/read",
+		}},
+		ContinuationCheckpoint: map[string]interface{}{
+			"actionInputs":             map[string]interface{}{"read": arguments},
+			actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "invented"}},
+		},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "sre-agent", DefinitionID: "sre", DefinitionVersion: "1", Actions: []capability.ModelAction{action},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "scheduled-run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Investigate", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "turn-after-restart"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcome.ProposedActions) != 0 || outcome.NextRunStatus != AgentRunStatusRunning || outcome.OutputSummary != "A matching succeeded action was reused; continue from its durable evidence." {
+		t.Fatalf("duplicate action was not suppressed: %#v", outcome)
+	}
+	last := outcome.ContinuationCheckpoint["lastAction"].(map[string]interface{})
+	if last["actionCallId"] != "completed-call" || actionHistoryEntries(outcome.ContinuationCheckpoint)[0]["actionCallId"] != "completed-call" {
+		t.Fatalf("authoritative evidence was not restored: %#v", outcome.ContinuationCheckpoint)
+	}
+}
+
 func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -178,6 +178,24 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, errors.New("turn host proposed an unauthorized capability")
 		}
 	}
+	response.ContinuationCheckpoint = preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
+	if len(response.ProposedActions) == 1 {
+		if reused, reuseErr := r.reuseSucceededAction(response.ProposedActions[0], response.ContinuationCheckpoint); reuseErr != nil {
+			return nil, reuseErr
+		} else if reused != nil {
+			response.ProposedActions = nil
+			response.ProposedFork = nil
+			response.ProposedDelegation = nil
+			response.NextRunStatus = AgentRunStatusRunning
+			response.WakeCondition = nil
+			response.ContinuationCheckpoint["lastAction"] = deepCloneCheckpointMap(reused)
+			response.Decisions = append(response.Decisions, TurnDecision{
+				Summary:      "Reused the matching succeeded action instead of executing it again.",
+				EvidenceRefs: []string{"action:" + fmt.Sprint(reused["actionCallId"])},
+			})
+			response.OutputSummary = "A matching succeeded action was reused; continue from its durable evidence."
+		}
+	}
 	if len(response.ProposedActions) > 1 {
 		return nil, errors.New("a bounded hosted Turn can propose at most one action")
 	}
@@ -251,6 +269,32 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 	}, nil
+}
+
+func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint map[string]interface{}) (map[string]interface{}, error) {
+	var selected *capability.ModelAction
+	for index := range r.config.Actions {
+		candidate := &r.config.Actions[index]
+		if candidate.Name != proposed.Capability || (proposed.BindingID != "" && (candidate.BindingID != proposed.BindingID || candidate.BindingRevision != proposed.BindingRevision)) {
+			continue
+		}
+		if selected != nil {
+			return nil, fmt.Errorf("requested capability %q is ambiguous without an exact binding", proposed.Capability)
+		}
+		selected = candidate
+	}
+	if selected == nil {
+		return nil, nil
+	}
+	arguments, err := resolveTurnActionInput(checkpoint, proposed.InputRef)
+	if err != nil {
+		return nil, err
+	}
+	call := &ActionCall{
+		DeploymentID: r.config.AgentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
+		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
+	}
+	return succeededActionHistoryEntry(checkpoint, ComputeActionSemanticDigest(call)), nil
 }
 
 func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnRequest, error) {

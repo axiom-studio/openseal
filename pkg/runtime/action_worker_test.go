@@ -63,6 +63,14 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 				lastAction["result"].(map[string]interface{})["deploymentId"] != "deploy-123" {
 				t.Fatalf("run checkpoint missing action reference: %#v", result.Run.Checkpoint)
 			}
+			history := actionHistoryEntries(result.Run.Checkpoint)
+			if len(history) != 1 || history[0]["actionCallId"] != proposal.Call.ID || history[0]["semanticDigest"] == "" {
+				t.Fatalf("run checkpoint missing durable action history: %#v", result.Run.Checkpoint)
+			}
+			persistedAfterExecution, persistErr := store.GetAgentRun(context.Background(), proposal.Call.Scope, proposal.Call.RunID)
+			if persistErr != nil || len(actionHistoryEntries(persistedAfterExecution.Checkpoint)) != 1 {
+				t.Fatalf("action history did not survive store round-trip: %#v, %v", persistedAfterExecution, persistErr)
+			}
 			callJSON, _ := json.Marshal(result.Call)
 			checkpointJSON, _ := json.Marshal(result.Run.Checkpoint)
 			if strings.Contains(string(callJSON), "resolved-super-secret") || strings.Contains(string(checkpointJSON), "resolved-super-secret") ||

@@ -52,6 +52,7 @@ type ActionCall struct {
 	EvidenceRefs     []string                             `json:"evidenceRefs,omitempty"`
 	IdempotencyKey   string                               `json:"idempotencyKey,omitempty"`
 	InvocationDigest string                               `json:"invocationDigest,omitempty"`
+	SemanticDigest   string                               `json:"semanticDigest,omitempty"`
 	ApprovalID       string                               `json:"approvalId,omitempty"`
 	Attempt          int                                  `json:"attempt"`
 	MaxAttempts      int                                  `json:"maxAttempts"`
@@ -87,6 +88,9 @@ func (c *ActionCall) Validate() error {
 	if c.IdempotencyKey != "" && c.InvocationDigest == "" {
 		return errors.New("idempotent action calls require an invocation digest")
 	}
+	if c.SemanticDigest != "" && c.SemanticDigest != ComputeActionSemanticDigest(c) {
+		return errors.New("action semantic digest does not match its invocation")
+	}
 	if err := uniqueIDs(c.EvidenceRefs, "action evidence"); err != nil {
 		return err
 	}
@@ -108,6 +112,30 @@ func ComputeActionInvocationDigest(call *ActionCall) string {
 		CredentialRefs  map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
 		EvidenceRefs    []string                             `json:"evidenceRefs,omitempty"`
 	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.CredentialRefs, call.EvidenceRefs}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+// ComputeActionSemanticDigest identifies the authorized capability invocation
+// independently of a model-selected idempotency key and mutable evidence refs.
+// It is used only to reuse an already-succeeded action inside the same Run.
+func ComputeActionSemanticDigest(call *ActionCall) string {
+	if call == nil {
+		return ""
+	}
+	canonical := struct {
+		DeploymentID    string                 `json:"deploymentId"`
+		BindingID       string                 `json:"bindingId"`
+		BindingRevision int64                  `json:"bindingRevision"`
+		SkillID         string                 `json:"skillId"`
+		SkillVersion    string                 `json:"skillVersion"`
+		Action          string                 `json:"action"`
+		Arguments       map[string]interface{} `json:"arguments,omitempty"`
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
