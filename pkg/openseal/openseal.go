@@ -436,6 +436,11 @@ type (
 	SkillResourceStage                 = skill.ResourceStage
 	SkillResourceStager                = skill.ResourceStager
 	SkillResourceContentProvider       = skill.ResourceContentProvider
+	SkillRuntimePreparationState       = skill.RuntimePreparationState
+	SkillRuntimePreparationRequest     = skill.RuntimePreparationRequest
+	SkillPreparedRuntime               = skill.PreparedRuntime
+	SkillRuntimePreparationResult      = skill.RuntimePreparationResult
+	SkillRuntimePreparer               = skill.RuntimePreparer
 	SkillAvailabilityReason            = skill.AvailabilityReason
 	ActivatedSkill                     = skill.ActivatedSkill
 	UnavailableSkill                   = skill.UnavailableSkill
@@ -1144,6 +1149,11 @@ const (
 	SkillAdapterWatcher         = skill.AdapterWatcher
 	SkillAdapterRemoteNode      = skill.AdapterRemoteNode
 	SkillAdapterResourceStaging = skill.AdapterResourceStaging
+	SkillAdapterPreparedRuntime = skill.AdapterPreparedRuntime
+
+	SkillRuntimePreparing   = skill.RuntimePreparationPreparing
+	SkillRuntimeReady       = skill.RuntimePreparationReady
+	SkillRuntimeUnavailable = skill.RuntimePreparationUnavailable
 
 	ActionDispositionAllow           = runtime.ActionDispositionAllow
 	ActionDispositionDeny            = runtime.ActionDispositionDeny
@@ -2728,6 +2738,14 @@ func (e *Engine) ValidateSkillActionInput(ctx context.Context, bound *skill.Boun
 
 func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	return e.skills.Activate(ctx, scope, deploymentID, host)
+}
+
+func SkillRuntimePreparationID(request skill.RuntimePreparationRequest) (string, error) {
+	return skill.RuntimePreparationID(request)
+}
+
+func ValidateSkillRuntimePreparationRequest(request skill.RuntimePreparationRequest) error {
+	return skill.ValidateRuntimePreparationRequest(request)
 }
 
 func (e *Engine) RegisterAgentDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) (*kernelagent.AgentDefinition, error) {

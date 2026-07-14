@@ -27,10 +27,12 @@ type HostCapabilityState struct {
 	// ResourceRoots uses binding IDs so two source variants can be staged
 	// independently without exposing provenance in the model-facing snapshot.
 	// A declared skillId@version key remains supported for single-source hosts.
-	ResourceRoots  map[string]string            `json:"resourceRoots,omitempty"`
-	Adapters       map[string]AdapterCapability `json:"adapters,omitempty"`
-	Revision       string                       `json:"revision,omitempty"`
-	ResourceStager ResourceStager               `json:"-"`
+	ResourceRoots   map[string]string            `json:"resourceRoots,omitempty"`
+	Adapters        map[string]AdapterCapability `json:"adapters,omitempty"`
+	Revision        string                       `json:"revision,omitempty"`
+	ResourceStager  ResourceStager               `json:"-"`
+	Architecture    string                       `json:"architecture,omitempty"`
+	RuntimePreparer RuntimePreparer              `json:"-"`
 }
 
 type AdapterState string
@@ -47,6 +49,7 @@ const (
 	AdapterWatcher         = "watcher"
 	AdapterRemoteNode      = "remote-node"
 	AdapterResourceStaging = "resource-staging"
+	AdapterPreparedRuntime = "prepared-runtime"
 )
 
 type AdapterCapability struct {
@@ -75,6 +78,7 @@ type ActivatedSkill struct {
 	ResourceRoot     string                 `json:"resourceRoot,omitempty"`
 	ResourceRevision string                 `json:"resourceRevision,omitempty"`
 	ResourceAdapter  string                 `json:"resourceAdapter,omitempty"`
+	PreparedRuntime  *PreparedRuntime       `json:"preparedRuntime,omitempty"`
 	Prompt           *PromptModule          `json:"prompt,omitempty"`
 	Actions          []ModelAction          `json:"actions,omitempty"`
 }
@@ -160,6 +164,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 		resourceRevision := ""
 		resourceAdapter := ""
+		var preparedRuntime *PreparedRuntime
 		if resourceRoot == "" && len(reasons) == 0 && resourcesRequired && host.ResourceStager == nil {
 			reasons = append(reasons, AvailabilityReason{Code: "resource_staging_unavailable", Requirement: AdapterResourceStaging, Message: "declared skill resources require a configured host staging adapter"})
 		} else if resourceRoot == "" && len(reasons) == 0 && resourcesRequired && !adapterAvailable(adapters, AdapterResourceStaging) {
@@ -197,6 +202,36 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			})
 			continue
 		}
+		if adapterAvailable(adapters, AdapterPreparedRuntime) {
+			if host.RuntimePreparer == nil {
+				reasons = append(reasons, AvailabilityReason{Code: "runtime_preparation_unavailable", Requirement: AdapterPreparedRuntime, Message: "the host advertises prepared runtimes without a configured preparation adapter"})
+			} else {
+				request, requestErr := runtimePreparationRequest(scope, deploymentID, binding, definition, host)
+				if requestErr != nil {
+					reasons = append(reasons, AvailabilityReason{Code: "runtime_preparation_invalid", Requirement: AdapterPreparedRuntime, Message: "the Skill runtime requirements cannot be prepared safely"})
+				} else if request != nil {
+					result, prepareErr := host.RuntimePreparer.PrepareRuntime(ctx, *request)
+					switch {
+					case prepareErr != nil || result == nil:
+						reasons = append(reasons, AvailabilityReason{Code: "runtime_preparation_failed", Requirement: request.PreparationID, Message: "the governed host could not reconcile the Skill runtime"})
+					case result.State == RuntimePreparationPreparing:
+						reasons = append(reasons, AvailabilityReason{Code: "runtime_preparing", Requirement: request.PreparationID, Message: "the governed Skill runtime is still being prepared"})
+					case result.State == RuntimePreparationUnavailable:
+						reasons = append(reasons, AvailabilityReason{Code: "runtime_preparation_unavailable", Requirement: request.PreparationID, Message: "the governed Skill runtime is unavailable on this host"})
+					case result.State != RuntimePreparationReady || validatePreparedRuntime(*request, result.Runtime) != nil:
+						reasons = append(reasons, AvailabilityReason{Code: "runtime_preparation_invalid", Requirement: request.PreparationID, Message: "the host returned an invalid prepared runtime identity"})
+					default:
+						preparedRuntime = result.Runtime
+					}
+				}
+			}
+		}
+		if len(reasons) > 0 {
+			snapshot.Unavailable = append(snapshot.Unavailable, UnavailableSkill{
+				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, Reasons: reasons,
+			})
+			continue
+		}
 		actions := make([]ModelAction, 0, len(binding.AllowedActions))
 		for _, name := range binding.AllowedActions {
 			action := definition.Actions[name]
@@ -220,7 +255,8 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			Name: definition.Name, Description: definition.Description,
 			SourceDigest: digest, ConfigurationKey: definition.ConfigurationKey, Configuration: cloneMap(binding.Config),
 			ResourceRoot: resourceRoot, ResourceRevision: resourceRevision, ResourceAdapter: resourceAdapter,
-			Prompt: prompt, Actions: actions,
+			PreparedRuntime: preparedRuntime,
+			Prompt:          prompt, Actions: actions,
 		})
 	}
 	sort.Slice(snapshot.Unavailable, func(i, j int) bool { return snapshot.Unavailable[i].BindingID < snapshot.Unavailable[j].BindingID })
