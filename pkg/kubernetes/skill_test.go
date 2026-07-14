@@ -1,0 +1,105 @@
+package kubernetes
+
+import (
+	"context"
+	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+func TestSkillDefinitionPublishesCompleteGovernedKubernetesSurface(t *testing.T) {
+	definition := SkillDefinition()
+	if definition.ID != SkillID || definition.Version != SkillVersion || definition.Prompt == nil || len(definition.Actions) != 8 {
+		t.Fatalf("unexpected Kubernetes Skill definition: %#v", definition)
+	}
+	for _, name := range []string{GetResource, ListResources, ListEvents, GetLogs} {
+		action := definition.Actions[name]
+		if action.Risk != skill.RiskLevelRead || action.SideEffect != skill.SideEffectRead || action.Transport == nil || action.Transport.Kind != "tool" || action.Idempotency != skill.IdempotencySupported {
+			t.Fatalf("read action %s is not governed correctly: %#v", name, action)
+		}
+	}
+	for _, name := range []string{RestartWorkload, ScaleWorkload, PatchResource} {
+		action := definition.Actions[name]
+		if action.Risk != skill.RiskLevelProduction || action.SideEffect != skill.SideEffectWrite || action.Idempotency != skill.IdempotencyRequired || action.Retry.MaxAttempts != 1 {
+			t.Fatalf("production action %s is not governed correctly: %#v", name, action)
+		}
+	}
+	deleted := definition.Actions[DeleteResource]
+	if deleted.Risk != skill.RiskLevelDestructive || deleted.SideEffect != skill.SideEffectDestructive || deleted.Idempotency != skill.IdempotencyRequired {
+		t.Fatalf("delete action is not destructive and idempotent: %#v", deleted)
+	}
+}
+
+func TestSkillDefinitionPinsClusterThroughBindingNotModelInput(t *testing.T) {
+	ctx := context.Background()
+	catalog := skill.NewCatalog()
+	definition := SkillDefinition()
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &skill.Binding{
+		ID: "cluster-one", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
+		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{ListEvents, RestartWorkload},
+		MaximumRisk: skill.RiskLevelProduction, Config: map[string]interface{}{"clusterId": 1}, Revision: 1,
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, SkillID, SkillVersion, ListEvents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]interface{}{"namespace": "axiomcd", "kind": "Deployment", "name": "atlas"}
+	if err := catalog.ValidateInput(ctx, bound, input); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := skill.MaterializeTransportArguments(bound, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clusterID, clusterOK := transport["clusterId"].(float64)
+	if !clusterOK || clusterID != 1 || transport["namespace"] != "axiomcd" {
+		t.Fatalf("binding configuration was not projected: %#v", transport)
+	}
+	properties := definition.Actions[ListEvents].InputSchema["properties"].(map[string]interface{})
+	if _, modelVisible := properties["clusterId"]; modelVisible {
+		t.Fatal("cluster identity must not be model-visible input")
+	}
+	if _, err := skill.MaterializeTransportArguments(bound, map[string]interface{}{"clusterId": 2}); err == nil {
+		t.Fatal("model input must not override the authorized cluster binding")
+	}
+}
+
+func TestSkillSchemasRejectUnsafeOrUnboundedInputs(t *testing.T) {
+	ctx := context.Background()
+	catalog := skill.NewCatalog()
+	definition := SkillDefinition()
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &skill.Binding{
+		ID: "cluster", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
+		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{GetLogs, ScaleWorkload, PatchResource},
+		MaximumRisk: skill.RiskLevelProduction, Config: map[string]interface{}{"clusterId": 1}, Revision: 1,
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		action string
+		input  map[string]interface{}
+	}{
+		{GetLogs, map[string]interface{}{"podName": "api", "tailLines": 5001}},
+		{ScaleWorkload, map[string]interface{}{"kind": "DaemonSet", "name": "agent", "replicas": 2}},
+		{PatchResource, map[string]interface{}{"kind": "Deployment", "name": "api", "patch": map[string]interface{}{}}},
+	}
+	for _, test := range tests {
+		bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, SkillID, SkillVersion, test.action)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := catalog.ValidateInput(ctx, bound, test.input); err == nil {
+			t.Fatalf("unsafe %s input unexpectedly validated: %#v", test.action, test.input)
+		}
+	}
+}
