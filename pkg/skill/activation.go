@@ -150,13 +150,18 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			continue
 		}
 		reasons := evaluateAvailability(definition, binding, host)
+		resourcesRequired := bindingRequiresStagedResources(definition, binding)
 		resourceRoot := strings.TrimSpace(host.ResourceRoots[binding.ID])
 		if resourceRoot == "" {
 			resourceRoot = strings.TrimSpace(host.ResourceRoots[definition.ID+"@"+definition.Version])
 		}
 		resourceRevision := ""
 		resourceAdapter := ""
-		if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 && adapterAvailable(adapters, AdapterResourceStaging) {
+		if resourceRoot == "" && len(reasons) == 0 && resourcesRequired && host.ResourceStager == nil {
+			reasons = append(reasons, AvailabilityReason{Code: "resource_staging_unavailable", Requirement: AdapterResourceStaging, Message: "declared skill resources require a configured host staging adapter"})
+		} else if resourceRoot == "" && len(reasons) == 0 && resourcesRequired && !adapterAvailable(adapters, AdapterResourceStaging) {
+			reasons = append(reasons, AvailabilityReason{Code: "resource_staging_unavailable", Requirement: AdapterResourceStaging, Message: "the configured resource stager is not advertised as available by this host"})
+		} else if resourceRoot == "" && len(reasons) == 0 && resourcesRequired {
 			stage, stageErr := host.ResourceStager.StageResources(ctx, ResourceStageRequest{
 				Scope: scope, DeploymentID: deploymentID, BindingID: binding.ID,
 				SkillID: definition.ID, SkillVersion: definition.Version,
@@ -170,8 +175,6 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 				resourceRevision = strings.TrimSpace(stage.Revision)
 				resourceAdapter = strings.TrimSpace(stage.Adapter)
 			}
-		} else if resourceRoot == "" && len(reasons) == 0 && host.ResourceStager != nil && len(definition.Resources) > 0 {
-			reasons = append(reasons, AvailabilityReason{Code: "resource_staging_unavailable", Requirement: AdapterResourceStaging, Message: "the configured resource stager is not advertised as available by this host"})
 		}
 		prompt := (*PromptModule)(nil)
 		if binding.EnablePrompt && definition.Prompt != nil {
@@ -217,6 +220,41 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	sort.Slice(snapshot.Unavailable, func(i, j int) bool { return snapshot.Unavailable[i].BindingID < snapshot.Unavailable[j].BindingID })
 	snapshot.SnapshotID = activationSnapshotDigest(snapshot)
 	return snapshot, nil
+}
+
+func bindingRequiresStagedResources(definition *Definition, binding *Binding) bool {
+	if definition == nil || binding == nil || len(definition.Resources) == 0 {
+		return false
+	}
+	search := make([]string, 0, len(definition.Actions)+1)
+	if binding.EnablePrompt && definition.Prompt != nil {
+		search = append(search, definition.Prompt.Instructions)
+	}
+	for _, actionName := range binding.AllowedActions {
+		action, ok := definition.Actions[actionName]
+		if !ok || action.Transport == nil {
+			continue
+		}
+		search = append(search, action.Transport.Endpoint)
+		for _, argument := range action.Transport.Arguments {
+			literal, err := json.Marshal(argument.Literal)
+			if err == nil {
+				search = append(search, string(literal))
+			}
+		}
+	}
+	for _, value := range search {
+		if strings.Contains(value, "{baseDir}") {
+			return true
+		}
+		for _, resource := range definition.Resources {
+			path := strings.TrimSpace(strings.ReplaceAll(resource.Path, "\\", "/"))
+			if path != "" && strings.Contains(value, path) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func definitionSourceDigest(definition *Definition) string {

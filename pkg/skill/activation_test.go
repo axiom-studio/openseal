@@ -238,6 +238,30 @@ func TestActivationRequiresTruthfulAdapterStates(t *testing.T) {
 	}
 }
 
+func TestActivationDoesNotRequireUnreferencedBundleMetadata(t *testing.T) {
+	catalog := NewCatalog()
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	definition := &Definition{
+		ID: "writing", Version: "1", Name: "Writing", Actions: map[string]Action{},
+		Prompt: &PromptModule{Instructions: "Write clearly and directly.", UserInvocable: true},
+		Resources: []Resource{
+			{Path: "_meta.json", Kind: "resource", Digest: strings.Repeat("a", 64), Size: 10},
+			{Path: "skill-card.md", Kind: "resource", Digest: strings.Repeat("b", 64), Size: 20},
+		},
+		Source: &SourceProvenance{Format: "openclaw.skill.v1", Digest: strings.Repeat("c", 64)},
+	}
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Bind(context.Background(), &Binding{ID: "writing", Scope: scope, DeploymentID: "agent", SkillID: "writing", SkillVersion: "1", EnablePrompt: true, MaximumRisk: RiskLevelRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{})
+	if err != nil || len(snapshot.Skills) != 1 || len(snapshot.Unavailable) != 0 || snapshot.Skills[0].ResourceRoot != "" {
+		t.Fatalf("unreferenced registry metadata blocked prompt activation: %#v, %v", snapshot, err)
+	}
+}
+
 func TestBindingConfigurationRejectsRawSecretFields(t *testing.T) {
 	catalog := NewCatalog()
 	if err := catalog.Register(context.Background(), &Definition{
