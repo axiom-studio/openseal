@@ -148,6 +148,13 @@ func TestSQLiteWorkforceApplyAcceptsCanonicalAgentEventAssignment(t *testing.T) 
 			"attributes": map[string]interface{}{"namespace": "operations"}, "assignedAgentId": canonicalAgentID,
 		}},
 	}
+	value.Result.Candidate.Team.ObjectiveTemplates[0].EventRules = map[string]interface{}{
+		"version": "1",
+		"rules": []interface{}{map[string]interface{}{
+			"id": "team-warning", "eventType": "kubernetes.warning", "source": "kubernetes:cluster:1",
+			"attributes": map[string]interface{}{"namespace": "operations"}, "assignedAgentId": canonicalAgentID,
+		}},
+	}
 	value.Result.Candidate.Team.Roles[0].RequiredDefinitionIDs = []string{canonicalAgentID}
 	value.Result.Candidate.Assignments[0].AgentDefinitionID = canonicalAgentID
 	value.Placement.AgentDeploymentIDs = map[string]string{canonicalAgentID: "agent-live"}
@@ -165,8 +172,47 @@ func TestSQLiteWorkforceApplyAcceptsCanonicalAgentEventAssignment(t *testing.T) 
 		t.Fatal(err)
 	}
 	rules, err := DecodeObjectiveEventRules(objective.EventRules)
-	if err != nil || len(rules.Rules) != 1 || rules.Rules[0].AssignedAgentID != canonicalAgentID {
-		t.Fatalf("canonical event assignment = %#v, %v", rules, err)
+	if err != nil || len(rules.Rules) != 1 || rules.Rules[0].AssignedAgentID != "agent-live" {
+		t.Fatalf("deployed event assignment = %#v, %v", rules, err)
+	}
+	if reviewed := value.Result.Candidate.Agents[0].ObjectiveTemplates[0].EventRules["rules"].([]interface{})[0].(map[string]interface{})["assignedAgentId"]; reviewed != canonicalAgentID {
+		t.Fatalf("reviewed candidate assignment mutated to %#v", reviewed)
+	}
+	teamObjective, err := store.GetObjective(context.Background(), Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, "objective:team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamRules, err := DecodeObjectiveEventRules(teamObjective.EventRules)
+	if err != nil || len(teamRules.Rules) != 1 || teamRules.Rules[0].AssignedAgentID != "agent-live" {
+		t.Fatalf("deployed Team event assignment = %#v, %v", teamRules, err)
+	}
+}
+
+func TestMaterializeObjectiveEventRulesTranslatesInitiativeContext(t *testing.T) {
+	value := testApplicableWorkforceChangeSet()
+	value.Result.Candidate.Initiative = &authoring.InitiativeBlueprint{ID: "research-program"}
+	value.Placement.InitiativeID = "initiative:live"
+	template := workforce.ObjectiveTemplate{ID: "monitor", EventRules: map[string]interface{}{
+		"version": "1",
+		"rules": []interface{}{map[string]interface{}{
+			"id": "observation", "eventType": "source.observed", "assignedAgentId": "agent",
+			"runTemplate": map[string]interface{}{"context": map[string]interface{}{"initiativeId": "research-program"}},
+		}},
+	}}
+	materialized, err := materializeObjectiveEventRules(value, template, map[string]string{"agent": "agent-live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := DecodeObjectiveEventRules(materialized)
+	if err != nil || len(rules.Rules) != 1 {
+		t.Fatalf("materialized rules = %#v, %v", rules, err)
+	}
+	if rules.Rules[0].AssignedAgentID != "agent-live" || rules.Rules[0].RunTemplate.Context["initiativeId"] != "initiative:live" {
+		t.Fatalf("materialized event rule = %#v", rules.Rules[0])
+	}
+	original := template.EventRules["rules"].([]interface{})[0].(map[string]interface{})
+	if original["assignedAgentId"] != "agent" || original["runTemplate"].(map[string]interface{})["context"].(map[string]interface{})["initiativeId"] != "research-program" {
+		t.Fatalf("reviewed event template mutated: %#v", original)
 	}
 }
 
