@@ -18,6 +18,7 @@ type Store interface {
 	ListDefinitionVersions(context.Context, string) ([]*AgentDefinition, error)
 	CreateDeployment(context.Context, *AgentDeployment, DefinitionActivation) error
 	GetDeployment(context.Context, capability.ScopeReference, string) (*AgentDeployment, error)
+	ListDeployments(context.Context, capability.ScopeReference) ([]*AgentDeployment, error)
 	UpdateDeployment(context.Context, *AgentDeployment, int64, DefinitionActivation) error
 	ListActivations(context.Context, capability.ScopeReference, string) ([]DefinitionActivation, error)
 	CreateAmendment(context.Context, *DefinitionAmendment) error
@@ -187,6 +188,24 @@ func (s *MemoryStore) GetDeployment(_ context.Context, scope capability.ScopeRef
 		return nil, ErrDeploymentNotFound
 	}
 	return cloneDeployment(value), nil
+}
+
+func (s *MemoryStore) ListDeployments(_ context.Context, scope capability.ScopeReference) ([]*AgentDeployment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*AgentDeployment, 0)
+	for _, value := range s.deployments {
+		if value.Scope == scope {
+			result = append(result, cloneDeployment(value))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+	return result, nil
 }
 
 func (s *MemoryStore) UpdateDeployment(_ context.Context, deployment *AgentDeployment, expectedRevision int64, activation DefinitionActivation) error {

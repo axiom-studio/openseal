@@ -56,6 +56,8 @@ type KernelClient interface {
 	GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
 	ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error)
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
+	GetAgentDeployment(context.Context, capability.ScopeReference, string) (*kernelapi.AgentDeploymentCatalogEntry, error)
+	ListAgentDeployments(context.Context, capability.ScopeReference) (*kernelapi.AgentDeploymentList, error)
 	ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
@@ -137,6 +139,25 @@ func (c *KernelHTTPClient) ListAgentDefinitionCompilations(ctx context.Context, 
 		return nil, err
 	}
 	return values, nil
+}
+
+func (c *KernelHTTPClient) GetAgentDeployment(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.AgentDeploymentCatalogEntry, error) {
+	query := capabilityScopeQuery(scope)
+	var result kernelapi.AgentDeploymentCatalogEntry
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListAgentDeployments(ctx context.Context, scope capability.ScopeReference) (*kernelapi.AgentDeploymentList, error) {
+	query := capabilityScopeQuery(scope)
+	var result kernelapi.AgentDeploymentList
+	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-deployments?"+query.Encode(), nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // ListAgentSkillActions returns the exact, secret-safe Skill bindings an Agent

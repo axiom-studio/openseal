@@ -88,6 +88,8 @@ type (
 	SubmitAgentAmendmentEvaluationRequest     = kernelagent.SubmitAmendmentEvaluationRequest
 	ResolveAgentAmendmentRequest              = kernelagent.ResolveAmendmentRequest
 	AgentRegistryStore                        = kernelagent.Store
+	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
+	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
 	TeamDefinition                            = kernelteam.Definition
 	TeamRoleSlot                              = kernelteam.RoleSlot
 	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
@@ -2698,6 +2700,10 @@ func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelag
 
 func (e *Engine) GetAgentDeployment(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*kernelagent.AgentDeployment, error) {
 	return e.agents.GetDeployment(ctx, scope, deploymentID)
+}
+
+func (e *Engine) ListAgentDeployments(ctx context.Context, scope skill.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+	return e.agents.ListDeployments(ctx, scope)
 }
 
 func (e *Engine) ActivateAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {

@@ -141,6 +141,10 @@ func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeRefe
 	return r.store.GetDeployment(ctx, scope, id)
 }
 
+func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*AgentDeployment, error) {
+	return r.store.ListDeployments(ctx, scope)
+}
+
 func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
 	if strings.TrimSpace(actorType) == "" || strings.TrimSpace(actorID) == "" {
 		return nil, nil, errors.New("deployment activation actor is required")

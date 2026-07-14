@@ -5,6 +5,7 @@ package kernelapi
 import (
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
@@ -37,7 +38,7 @@ const (
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
-	AgentDefinitionsCapabilityVersion   = "2"
+	AgentDefinitionsCapabilityVersion   = "3"
 	AgentRequestsCapabilityID           = "agent-requests"
 	AgentRequestsCapabilityVersion      = "1"
 	ActionApprovalsCapabilityID         = "action-approvals"
@@ -201,6 +202,15 @@ type TeamDeploymentCatalogEntry struct {
 	Definition *kernelteam.Definition `json:"definition"`
 }
 
+type AgentDeploymentList struct {
+	Items []AgentDeploymentCatalogEntry `json:"items"`
+}
+
+type AgentDeploymentCatalogEntry struct {
+	Deployment *kernelagent.AgentDeployment `json:"deployment"`
+	Definition *kernelagent.AgentDefinition `json:"definition"`
+}
+
 func (d CapabilityDocument) Find(id, version string) (Capability, bool) {
 	for _, candidate := range d.Capabilities {
 		if candidate.ID == id && candidate.Version == version {
@@ -277,7 +287,7 @@ func ActivityCapability() Capability {
 }
 
 func AgentDefinitionsCapability() Capability {
-	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationListCompilations}}
+	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList, OperationListCompilations}}
 }
 
 // AgentRequestsCapability describes the portable collaboration lifecycle used

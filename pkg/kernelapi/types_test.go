@@ -58,7 +58,8 @@ func TestOutreachAdvertisesReviewedDeliveryLifecycle(t *testing.T) {
 
 func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	capability := AgentDefinitionsCapability()
-	if capability.Version != "2" || !capability.Supports("list-compilations") || capability.Supports("list_compilations") {
+	if capability.Version != "3" || !capability.Supports(OperationGet) || !capability.Supports(OperationList) ||
+		!capability.Supports("list-compilations") || capability.Supports("list_compilations") {
 		t.Fatalf("agent definition capability = %#v", capability)
 	}
 }
