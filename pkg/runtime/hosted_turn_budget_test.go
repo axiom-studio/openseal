@@ -85,3 +85,36 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 		t.Fatalf("settled run=%#v", result.Run)
 	}
 }
+
+func TestHostedTurnInputEstimateIsStableAfterReservationProjection(t *testing.T) {
+	request := HostedTurnRequest{
+		Goal: "Do bounded work",
+		Budget: &HostedRunBudget{
+			Policy:    BudgetPolicy{MaxTotalTokens: 10000},
+			Remaining: BudgetPolicy{MaxTotalTokens: 10000},
+		},
+	}
+	before, err := EstimateHostedTurnInputTokens(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutReservation, err := MarshalHostedTurnModelInput(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Budget.TurnReservation = BudgetUsage{Turns: 1, InputTokens: before, OutputTokens: 2048}
+	after, err := EstimateHostedTurnInputTokens(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withReservation, err := MarshalHostedTurnModelInput(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("estimate changed after reservation projection: before=%d after=%d", before, after)
+	}
+	if growth := int64(len(withReservation) - len(withoutReservation)); growth <= 0 || growth > HostedTurnBudgetEnvelopeReserveTokens {
+		t.Fatalf("reservation envelope growth=%d reserve=%d", growth, HostedTurnBudgetEnvelopeReserveTokens)
+	}
+}
