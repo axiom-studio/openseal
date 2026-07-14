@@ -566,7 +566,10 @@ const (
 	ActivityCapabilityVersion               = kernelapi.ActivityCapabilityVersion
 	SkillActionsCapabilityID                = kernelapi.SkillActionsCapabilityID
 	SkillActionsCapabilityVersion           = kernelapi.SkillActionsCapabilityVersion
+	EventRoutingCapabilityID                = kernelapi.EventRoutingCapabilityID
+	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	KernelOperationList                     = kernelapi.OperationList
+	KernelOperationRoute                    = kernelapi.OperationRoute
 	ChannelOperationCreate                  = kernelapi.OperationCreate
 	ChannelOperationGet                     = kernelapi.OperationGet
 	ChannelOperationList                    = kernelapi.OperationList
@@ -634,6 +637,10 @@ func AgentRunsCapability() KernelCapability {
 
 func ObjectivesCapability() KernelCapability {
 	return kernelapi.ObjectivesCapability()
+}
+
+func EventRoutingCapability() KernelCapability {
+	return kernelapi.EventRoutingCapability()
 }
 
 func InitiativesCapability() KernelCapability {
