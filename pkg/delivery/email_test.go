@@ -11,6 +11,9 @@ func TestEmailSkillIsGovernedCredentialedAndArtifactSafe(t *testing.T) {
 	ctx := context.Background()
 	definition := SkillDefinition()
 	action := definition.Actions[SendEmail]
+	if action.SemanticArguments["target"] != "to" || action.SemanticArguments["body"] != "body" {
+		t.Fatalf("email action must expose portable outreach arguments, got %#v", action.SemanticArguments)
+	}
 	if definition.ID != SkillID || definition.Transport.Endpoint != SkillID || action.Risk != skill.RiskLevelExternal ||
 		action.SideEffect != skill.SideEffectExternal || action.Idempotency != skill.IdempotencyRequired || action.Retry.MaxAttempts != 1 ||
 		len(action.Credentials) != 1 || action.Credentials[0].Name != EmailCredentialName || action.Credentials[0].Kind != EmailCredentialKind {
