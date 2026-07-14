@@ -172,12 +172,15 @@ func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.Capabili
 
 func (c *KernelHTTPClient) ListAgentDefinitionCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
 	query := capabilityScopeQuery(scope)
-	var values []*kernelagent.DefinitionCompilation
+	var history kernelapi.AgentDefinitionCompilationHistory
 	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/compilations?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &values); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &history); err != nil {
 		return nil, err
 	}
-	return values, nil
+	if history.APIVersion != kernelapi.APIVersion {
+		return nil, fmt.Errorf("unsupported Agent compilation history contract %q", history.APIVersion)
+	}
+	return history.Items, nil
 }
 
 func (c *KernelHTTPClient) GetAgentDeployment(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.AgentDeploymentCatalogEntry, error) {

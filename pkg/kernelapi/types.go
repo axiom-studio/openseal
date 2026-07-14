@@ -212,6 +212,16 @@ type AgentDeploymentCatalogEntry struct {
 	Definition *kernelagent.AgentDefinition `json:"definition"`
 }
 
+// AgentDefinitionCompilationHistory is the canonical readiness history for an
+// Agent deployment. Latest is projected explicitly so interactive clients do
+// not need to infer ordering, while Items preserves the complete bounded
+// history returned by the store.
+type AgentDefinitionCompilationHistory struct {
+	APIVersion string                               `json:"apiVersion"`
+	Latest     *kernelagent.DefinitionCompilation   `json:"latest,omitempty"`
+	Items      []*kernelagent.DefinitionCompilation `json:"items"`
+}
+
 func (d CapabilityDocument) Find(id, version string) (Capability, bool) {
 	for _, candidate := range d.Capabilities {
 		if candidate.ID == id && candidate.Version == version {

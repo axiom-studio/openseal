@@ -6,6 +6,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 )
 
 func (s *Server) handleListAgentDefinitionCompilations(w http.ResponseWriter, r *http.Request) {
@@ -29,5 +30,13 @@ func (s *Server) handleListAgentDefinitionCompilations(w http.ResponseWriter, r 
 		s.respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.respondJSON(w, http.StatusOK, values)
+	var latest *kernelagent.DefinitionCompilation
+	if len(values) > 0 {
+		latest = values[0]
+	}
+	s.respondJSON(w, http.StatusOK, kernelapi.AgentDefinitionCompilationHistory{
+		APIVersion: kernelapi.APIVersion,
+		Latest:     latest,
+		Items:      values,
+	})
 }
