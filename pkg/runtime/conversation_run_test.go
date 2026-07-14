@@ -270,6 +270,10 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 		len(messages[1].References) != 1 || messages[1].References[0].Kind != ConversationReferenceRun || messages[1].References[0].ID != scheduled.Run.ID {
 		t.Fatalf("Agent channel messages = %#v, %v", messages, err)
 	}
+	cursor, err := service.GetCursor(ctx, scope, conversation.ID, ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-42"})
+	if err != nil || cursor == nil || cursor.DeliveredSequence != trigger.Sequence || cursor.ReadSequence != trigger.Sequence {
+		t.Fatalf("Agent channel read cursor = %#v, %v", cursor, err)
+	}
 	replayed, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
 	if err != nil || replayed.RunOutput["replayed"] != true || resolverCalls != 1 {
 		t.Fatalf("Agent response replay = %#v, calls=%d, err=%v", replayed, resolverCalls, err)
@@ -277,6 +281,10 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 	messages, err = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 2 {
 		t.Fatalf("Agent response replay duplicated messages: %#v, %v", messages, err)
+	}
+	cursor, err = service.GetCursor(ctx, scope, conversation.ID, ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-42"})
+	if err != nil || cursor == nil || cursor.DeliveredSequence != messages[1].Sequence || cursor.ReadSequence != messages[1].Sequence {
+		t.Fatalf("replayed Agent channel read cursor = %#v, %v", cursor, err)
 	}
 	reconciled, err := scheduler.ReconcileScope(ctx, scope)
 	if err != nil || reconciled.Scheduled != 0 || reconciled.Replayed != 1 || reconciled.Skipped != 1 {
