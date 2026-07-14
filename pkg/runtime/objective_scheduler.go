@@ -152,9 +152,13 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 				}
 			}
 		}
+		assignedAgentID := strings.TrimSpace(objective.Cadence.AssignedAgentID)
+		if assignedAgentID == "" && objective.Owner.Type == OwnerTypeAgent {
+			assignedAgentID = objective.Owner.ID
+		}
 		created, createErr := NewRunCommandService(s.store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: objective.Scope, ObjectiveID: objective.ID, Owner: objective.Owner,
-			AssignedAgentID: objective.Cadence.AssignedAgentID, Entrypoint: entrypoint, ConcurrencyKey: "objective:" + objective.ID,
+			AssignedAgentID: assignedAgentID, Entrypoint: entrypoint, ConcurrencyKey: "objective:" + objective.ID,
 			Goal: objective.Goal, Source: RunSourceSchedule, Priority: objective.Priority,
 			Context: contextValues, Policy: policy,
 			Budget:         objective.Cadence.RunBudget,
