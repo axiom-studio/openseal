@@ -134,6 +134,27 @@ func TestObjectiveEventRuleAgentReferenceValidation(t *testing.T) {
 	}
 }
 
+func TestObjectiveEventRuleCapabilityRequiresBudgetForBothDurablePhases(t *testing.T) {
+	template := &ObjectiveRunTemplate{Capability: &ObjectiveCapabilityInvocation{
+		SkillID: "openseal.kubernetes", SkillVersion: "1.0.1", Action: "list_events",
+	}}
+	for name, budget := range map[string]*BudgetPolicy{
+		"one attempt": {MaxAttempts: 1, MaxTurns: 2},
+		"one turn":    {MaxAttempts: 2, MaxTurns: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := ObjectiveEventRule{ID: "warning", EventType: "kubernetes.warning", RunBudget: budget, RunTemplate: template}
+			if err := rule.Validate(); err == nil || !strings.Contains(err.Error(), "at least 2") {
+				t.Fatalf("non-completable capability budget accepted: %v", err)
+			}
+		})
+	}
+	rule := ObjectiveEventRule{ID: "warning", EventType: "kubernetes.warning", RunBudget: &BudgetPolicy{MaxAttempts: 2, MaxTurns: 2}, RunTemplate: template}
+	if err := rule.Validate(); err != nil {
+		t.Fatalf("completable capability budget rejected: %v", err)
+	}
+}
+
 func TestObjectiveEventRouterIsScopeLifecycleAndCredentialSafe(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(100)

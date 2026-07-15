@@ -152,6 +152,9 @@ func (r *ObjectiveEventRule) Validate() error {
 	if err := r.RunTemplate.Validate(); err != nil {
 		return err
 	}
+	if err := validateObjectiveCapabilityRunBudget(r.RunTemplate, r.RunBudget); err != nil {
+		return err
+	}
 	return nil
 }
 

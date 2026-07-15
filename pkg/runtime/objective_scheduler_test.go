@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +21,34 @@ func TestObjectiveCadenceUsesExplicitTimezoneAndValidates(t *testing.T) {
 	}
 	if err := (&ObjectiveCadence{Type: ObjectiveCadenceWeekly, DayOfWeek: "noday"}).Validate(); err == nil {
 		t.Fatal("expected invalid weekday to fail")
+	}
+}
+
+func TestObjectiveCadenceCapabilityRequiresBudgetForBothDurablePhases(t *testing.T) {
+	template := &ObjectiveRunTemplate{Capability: &ObjectiveCapabilityInvocation{
+		SkillID: "openseal.kubernetes", SkillVersion: "1.0.1", Action: "list_events",
+	}}
+	for name, budget := range map[string]*BudgetPolicy{
+		"one attempt": {MaxAttempts: 1, MaxTurns: 2},
+		"one turn":    {MaxAttempts: 2, MaxTurns: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cadence := &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, RunBudget: budget, RunTemplate: template}
+			if err := cadence.Validate(); err == nil || !strings.Contains(err.Error(), "at least 2") {
+				t.Fatalf("non-completable capability budget accepted: %v", err)
+			}
+		})
+	}
+	for name, budget := range map[string]*BudgetPolicy{
+		"unbounded": {},
+		"bounded":   {MaxAttempts: 2, MaxTurns: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cadence := &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, RunBudget: budget, RunTemplate: template}
+			if err := cadence.Validate(); err != nil {
+				t.Fatalf("completable capability budget rejected: %v", err)
+			}
+		})
 	}
 }
 

@@ -208,6 +208,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 			issues = append(issues, issue(path, "invalid_agent", err.Error()))
 		}
 		issues = append(issues, validateObjectiveTemplateCadences(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
+		issues = append(issues, validateObjectiveTemplateEventRules(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
 	if candidate.Team == nil {
 		if len(candidate.Agents) == 0 {
@@ -226,6 +227,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		issues = append(issues, issue("team", "invalid_team", err.Error()))
 	}
 	issues = append(issues, validateObjectiveTemplateCadences("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
+	issues = append(issues, validateObjectiveTemplateEventRules("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
 	roles := make(map[string]int, len(candidate.Team.Roles))
 	roleDefinitions := make(map[string]map[string]bool, len(candidate.Team.Roles))
 	for _, role := range candidate.Team.Roles {

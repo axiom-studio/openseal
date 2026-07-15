@@ -236,6 +236,30 @@ func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
 	}
 }
 
+func TestCompilerRejectsEventCapabilityBudgetThatCannotComplete(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
+		ID: "warnings", Title: "Warnings", Goal: "Inspect warning evidence", Priority: 1,
+		EventRules: map[string]interface{}{"version": "1", "rules": []interface{}{map[string]interface{}{
+			"id": "warning", "eventType": "kubernetes.warning", "assignedAgentId": candidate.Agents[0].ID,
+			"runBudget": map[string]interface{}{"maxAttempts": float64(1), "maxTurns": float64(3), "maxActions": float64(1)},
+			"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
+				"skillId": "reddit-research", "skillVersion": "1.0.0", "action": "read",
+			}},
+		}}},
+	}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "invalid_objective_event_rules") {
+		t.Fatalf("non-completable event capability = %#v, err = %v", result, err)
+	}
+}
+
 func hasValidationCode(issues []ValidationIssue, code string) bool {
 	for _, value := range issues {
 		if value.Code == code {
