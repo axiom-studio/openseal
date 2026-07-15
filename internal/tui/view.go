@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -233,6 +234,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderAgentRequestsContent(width)
 	} else if m.section == sectionApprovals {
 		content = m.renderActionApprovalsContent(width)
+	} else if m.section == sectionActivity {
+		content = m.renderActivityContent(width)
 	} else if m.section == sectionArtifacts {
 		content = m.renderArtifactsContent(width)
 	} else {
@@ -242,7 +245,7 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 10)
+	tabs := make([]string, 0, 11)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
@@ -309,6 +312,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.approvalCapability.Available {
 		label := "A Approvals"
 		if m.section == sectionApprovals {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.activityCapability.Available {
+		label := "t Activity"
+		if m.section == sectionActivity {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -1077,6 +1089,99 @@ func pluralSuffix(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+func (m *Model) renderActivityContent(width int) string {
+	title := headerStyle.Render("Activity")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, mutedStyle.Render("Durable decisions, work, skill calls, approvals, evidence, and outcomes."), ""}
+	if len(m.activity) == 0 {
+		lines = append(lines, mutedStyle.Render("No activity has been recorded for this "+string(m.config.Owner.Type)+" yet."))
+	} else {
+		visible := max(3, min(len(m.activity), max(m.height-23, 5)))
+		start := max(0, min(m.activitySelected-visible/2, len(m.activity)-visible))
+		for index := start; index < min(len(m.activity), start+visible); index++ {
+			item := m.activity[index]
+			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+			if index == m.activitySelected {
+				prefix, style = "› ", selectedStyle
+			} else if item.Severity == runtime.ActivitySeverityError {
+				style = lipgloss.NewStyle().Foreground(danger)
+			}
+			label := strings.ReplaceAll(item.EventType, "_", " ")
+			line := fmt.Sprintf("%s%-10s %s · %s", prefix, compact(label, 10), compact(item.Summary, max(width-31, 18)), relativeTime(item.CreatedAt))
+			lines = append(lines, style.Render(compact(line, max(width-4, 28))))
+		}
+	}
+	if item := m.selectedActivityRecord(); item != nil {
+		lines = append(lines, "", compact(item.Summary, max(width-8, 24)))
+		actor := strings.TrimSpace(item.Actor.Type + ":" + item.Actor.ID)
+		if actor == ":" {
+			actor = "system"
+		}
+		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("%s · %s · %s · actor %s", item.EventType, item.Severity, item.Visibility, actor), max(width-8, 24))))
+		if m.activityExpanded {
+			lines = append(lines, "", mutedStyle.Render("Subject and lineage"))
+			for _, subject := range activitySubjectLines(item) {
+				lines = append(lines, mutedStyle.Render(compact(subject, max(width-8, 24))))
+			}
+			if item.CorrelationID != "" {
+				lines = append(lines, mutedStyle.Render(compact("Correlation "+item.CorrelationID, max(width-8, 24))))
+			}
+			if item.CausationID != "" {
+				lines = append(lines, mutedStyle.Render(compact("Caused by "+item.CausationID, max(width-8, 24))))
+			}
+			if len(item.ConversationRefs) > 0 {
+				lines = append(lines, mutedStyle.Render(compact("Conversations "+strings.Join(item.ConversationRefs, ", "), max(width-8, 24))))
+			}
+			if item.Payload != nil {
+				lines = append(lines, "", mutedStyle.Render("Evidence · redacted canonical projection"))
+				encoded, err := json.MarshalIndent(item.Payload, "", "  ")
+				if err == nil {
+					payloadLines := strings.Split(string(encoded), "\n")
+					for _, line := range payloadLines[:min(len(payloadLines), 12)] {
+						lines = append(lines, mutedStyle.Render(compact(line, max(width-8, 24))))
+					}
+					if len(payloadLines) > 12 {
+						lines = append(lines, mutedStyle.Render(fmt.Sprintf("… %d more projected lines", len(payloadLines)-12)))
+					}
+				}
+			}
+		}
+		action := "Enter expand"
+		if m.activityExpanded {
+			action = "Enter collapse"
+		}
+		if m.activityHasMore {
+			action += "  ·  m older"
+		}
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(action))
+	}
+	if m.focus == focusPanel {
+		lines = append(lines, mutedStyle.Render("↑/↓ select · r refresh · Tab compose"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func activitySubjectLines(item *runtime.ActivityProjection) []string {
+	if item == nil {
+		return nil
+	}
+	lines := make([]string, 0, 4)
+	for _, subject := range []struct{ label, value string }{
+		{"Agent", item.AgentID}, {"Team", item.TeamID}, {"Objective", item.ObjectiveID}, {"Initiative", item.InitiativeID},
+		{"Run", item.RunID}, {"Parent Run", item.ParentRunID}, {"Turn", item.TurnID},
+	} {
+		if subject.value != "" {
+			lines = append(lines, subject.label+" "+subject.value)
+		}
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "No additional subject identifiers")
+	}
+	return lines
 }
 
 func (m *Model) renderArtifactsContent(width int) string {

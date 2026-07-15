@@ -79,6 +79,7 @@ const (
 	sectionRuns
 	sectionRequests
 	sectionApprovals
+	sectionActivity
 	sectionArtifacts
 	sectionChannels
 )
@@ -156,6 +157,12 @@ type Model struct {
 	actionApprovals             []*runtime.ApprovalCheckpoint
 	actionApprovalSelected      int
 	selectedActionApproval      string
+	activity                    []runtime.ActivityProjection
+	activitySelected            int
+	selectedActivity            string
+	activityExpanded            bool
+	activityNextCursor          string
+	activityHasMore             bool
 	compilations                []*kernelagent.DefinitionCompilation
 	objectives                  []*runtime.Objective
 	objectiveSelected           int
@@ -265,6 +272,17 @@ type actionApprovalResolved struct {
 	result *runtime.ApprovalResolutionResult
 	action string
 	err    error
+}
+
+type activityLoaded struct {
+	page   *runtime.ActivityFeedPage
+	append bool
+	err    error
+}
+
+type activityDetailLoaded struct {
+	activity *runtime.ActivityProjection
+	err      error
 }
 
 type compilationsLoaded struct {
@@ -511,8 +529,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
 			m.agentDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
-			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
+			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
@@ -552,6 +570,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.approvalCapability.Available {
 			m.section = sectionApprovals
 			m.focusPanelList()
+		} else if m.activityCapability.Available {
+			m.section = sectionActivity
+			m.focusPanelList()
 		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.channelCapability.Available {
 			m.section = sectionChannels
 			m.focusPanelList()
@@ -562,7 +583,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionReadiness
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -788,10 +809,45 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.action + " recorded. The governed work was resumed."
 		m.resetComposerMode()
 		m.focusPanelList()
-		return m, tea.Batch(m.loadActionApprovals(), m.loadRuns())
+		return m, tea.Batch(m.loadActionApprovals(), m.loadRuns(), m.loadActivity(false))
+	case activityLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.mergeActivityPage(msg.page, msg.append)
+		m.restoreActivitySelection()
+		return m, nil
+	case activityDetailLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		if msg.activity != nil {
+			for index := range m.activity {
+				if m.activity[index].ID == msg.activity.ID {
+					m.activity[index] = *msg.activity
+					m.activityExpanded = true
+					break
+				}
+			}
+		}
+		return m, nil
 	case compilationsLoaded:
 		m.loading = false
 		if msg.err != nil {
+			if isHTTPStatus(msg.err, http.StatusNotFound) {
+				m.agentDefinitionCapability = kernelapi.Capability{}
+				m.compilations = nil
+				if m.section == sectionReadiness {
+					m.section = m.defaultOperationalSection()
+				}
+				return m, nil
+			}
 			m.err = msg.err
 			return m, nil
 		}
@@ -975,7 +1031,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -1107,6 +1163,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.approvalCapability.Available {
 				m.section = sectionApprovals
 			}
+		case "t":
+			if m.activityCapability.Available {
+				m.section = sectionActivity
+			}
 		case "f":
 			if m.authoringCapability.Available {
 				m.section = sectionAuthoring
@@ -1188,7 +1248,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitWorkforceCredentialPlacement()
 			}
 		case "m":
-			if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
+			if m.section == sectionActivity && m.activityHasMore {
+				return m, m.loadActivity(true)
+			} else if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
 				m.mode = modeChannelPost
 				m.editor.Reset()
 				m.editor.Placeholder = "Share an update or ask a question…"
@@ -1265,6 +1327,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focusComposerEditor()
 			} else if m.section == sectionRequests && m.canCompleteSelectedAgentRequest() {
 				m.prepareRequestComposer(modeRequestComplete, "Summarize the completed outcome…")
+			} else if m.section == sectionActivity && m.selectedActivityRecord() != nil {
+				if m.activityExpanded {
+					m.activityExpanded = false
+				} else if !m.selectedActivityRecord().DetailAvailable {
+					m.activityExpanded = true
+				} else {
+					return m, m.loadSelectedActivityDetail()
+				}
 			} else if m.section == sectionArtifacts && m.selectedArtifactRecord() != nil {
 				m.artifactExpanded = !m.artifactExpanded
 			} else if m.section == sectionChannels && m.supportsChannel(kernelapi.OperationAudit) && len(m.channelRounds) > 0 {
@@ -1539,6 +1609,107 @@ func (m *Model) loadRuns() tea.Cmd {
 		})
 		return runsLoaded{runs: runs}
 	}
+}
+
+func (m *Model) activityFeedRequest(cursor string, includeDetails bool, limit int) runtime.ActivityFeedRequest {
+	request := runtime.ActivityFeedRequest{
+		Scope: m.config.Scope, Cursor: cursor, IncludeDetails: includeDetails, Limit: limit,
+	}
+	if m.config.Owner.Type == runtime.OwnerTypeTeam {
+		request.TeamID = m.config.Owner.ID
+	} else {
+		request.AgentID = m.config.Owner.ID
+	}
+	return request
+}
+
+func (m *Model) loadActivity(appendPage bool) tea.Cmd {
+	if !m.activityCapability.Supports(kernelapi.OperationList) {
+		return nil
+	}
+	cursor := ""
+	if appendPage {
+		cursor = m.activityNextCursor
+		if cursor == "" {
+			return nil
+		}
+	}
+	m.loading = true
+	request := m.activityFeedRequest(cursor, false, 25)
+	return func() tea.Msg {
+		page, err := m.client.ListActivity(m.ctx, request)
+		return activityLoaded{page: page, append: appendPage, err: err}
+	}
+}
+
+func (m *Model) loadSelectedActivityDetail() tea.Cmd {
+	selected := m.selectedActivityRecord()
+	if selected == nil || !m.activityCapability.Supports(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	targetID := selected.ID
+	request := m.activityFeedRequest("", true, 100)
+	if selected.RunID != "" {
+		request.AgentID, request.TeamID, request.RunID = "", "", selected.RunID
+	} else if selected.ObjectiveID != "" {
+		request.AgentID, request.TeamID, request.ObjectiveID = "", "", selected.ObjectiveID
+	}
+	maximumPages := max(1, (len(m.activity)+request.Limit-1)/request.Limit+1)
+	return func() tea.Msg {
+		for pageNumber := 0; pageNumber < maximumPages; pageNumber++ {
+			page, err := m.client.ListActivity(m.ctx, request)
+			if err != nil {
+				return activityDetailLoaded{err: err}
+			}
+			for index := range page.Items {
+				if page.Items[index].ID == targetID {
+					activity := page.Items[index]
+					return activityDetailLoaded{activity: &activity}
+				}
+			}
+			if !page.HasMore || page.NextCursor == "" {
+				break
+			}
+			request.Cursor = page.NextCursor
+		}
+		return activityDetailLoaded{err: errors.New("selected activity detail is no longer available")}
+	}
+}
+
+func (m *Model) mergeActivityPage(page *runtime.ActivityFeedPage, appendPage bool) {
+	if page == nil {
+		return
+	}
+	wasEmpty := len(m.activity) == 0
+	byID := make(map[string]runtime.ActivityProjection, len(m.activity)+len(page.Items))
+	for _, item := range m.activity {
+		byID[item.ID] = item
+	}
+	for _, item := range page.Items {
+		if existing, ok := byID[item.ID]; ok && activityProjectionHasDetails(existing) && !activityProjectionHasDetails(item) {
+			continue
+		}
+		byID[item.ID] = item
+	}
+	m.activity = m.activity[:0]
+	for _, item := range byID {
+		m.activity = append(m.activity, item)
+	}
+	sort.Slice(m.activity, func(i, j int) bool {
+		if m.activity[i].CreatedAt.Equal(m.activity[j].CreatedAt) {
+			return m.activity[i].ID > m.activity[j].ID
+		}
+		return m.activity[i].CreatedAt.After(m.activity[j].CreatedAt)
+	})
+	if appendPage || wasEmpty {
+		m.activityNextCursor = page.NextCursor
+		m.activityHasMore = page.HasMore
+	}
+}
+
+func activityProjectionHasDetails(item runtime.ActivityProjection) bool {
+	return item.Payload != nil || len(item.ConversationRefs) > 0 || item.CorrelationID != "" || item.CausationID != ""
 }
 
 func (m *Model) loadAgentRequests() tea.Cmd {
@@ -1828,6 +1999,9 @@ func (m *Model) loadPanel() tea.Cmd {
 	}
 	if m.section == sectionApprovals {
 		return m.loadActionApprovals()
+	}
+	if m.section == sectionActivity {
+		return m.loadActivity(false)
 	}
 	if m.section == sectionChannels {
 		return m.loadConversations()
@@ -2406,6 +2580,28 @@ func (m *Model) supportsRun(operation string) bool {
 	return m.ready && m.runCapability.Supports(operation)
 }
 
+func (m *Model) defaultOperationalSection() panelSection {
+	for _, candidate := range []struct {
+		section   panelSection
+		available bool
+	}{
+		{sectionAuthoring, m.authoringCapability.Available},
+		{sectionObjectives, m.objectiveCapability.Available},
+		{sectionInitiatives, m.initiativeCapability.Available},
+		{sectionRuns, m.runCapability.Available},
+		{sectionActivity, m.activityCapability.Available},
+		{sectionRequests, m.requestCapability.Available},
+		{sectionApprovals, m.approvalCapability.Available},
+		{sectionChannels, m.channelCapability.Available},
+		{sectionArtifacts, m.artifactCapability.Available},
+	} {
+		if candidate.available {
+			return candidate.section
+		}
+	}
+	return sectionActivity
+}
+
 func (m *Model) supportsAgentRequest(operation string) bool {
 	return m.ready && m.requestCapability.Supports(operation)
 }
@@ -2846,6 +3042,42 @@ func (m *Model) moveArtifactSelection(delta int) {
 	m.artifactExpanded = false
 }
 
+func (m *Model) selectedActivityRecord() *runtime.ActivityProjection {
+	if m.activitySelected < 0 || m.activitySelected >= len(m.activity) {
+		return nil
+	}
+	return &m.activity[m.activitySelected]
+}
+
+func (m *Model) restoreActivitySelection() {
+	if len(m.activity) == 0 {
+		m.activitySelected = 0
+		m.selectedActivity = ""
+		m.activityExpanded = false
+		return
+	}
+	if m.selectedActivity != "" {
+		for index := range m.activity {
+			if m.activity[index].ID == m.selectedActivity {
+				m.activitySelected = index
+				return
+			}
+		}
+	}
+	m.activitySelected = min(m.activitySelected, len(m.activity)-1)
+	m.selectedActivity = m.activity[m.activitySelected].ID
+	m.activityExpanded = false
+}
+
+func (m *Model) moveActivitySelection(delta int) {
+	if len(m.activity) == 0 {
+		return
+	}
+	m.activitySelected = max(0, min(len(m.activity)-1, m.activitySelected+delta))
+	m.selectedActivity = m.activity[m.activitySelected].ID
+	m.activityExpanded = false
+}
+
 func (m *Model) movePanelSelection(delta int) {
 	if m.section == sectionObjectives {
 		m.moveObjectiveSelection(delta)
@@ -2865,6 +3097,10 @@ func (m *Model) movePanelSelection(delta int) {
 	}
 	if m.section == sectionApprovals {
 		m.moveActionApprovalSelection(delta)
+		return
+	}
+	if m.section == sectionActivity {
+		m.moveActivitySelection(delta)
 		return
 	}
 	if m.section == sectionChannels {
