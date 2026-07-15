@@ -90,6 +90,29 @@ func TestObjectiveEventRouteIdentityIncludesSource(t *testing.T) {
 	}
 }
 
+func TestEventRunRequestAllocatesCapabilityOnlyTemplateContext(t *testing.T) {
+	event := matchingEvent(Scope{Kind: "tenant", ID: "operations"}, "capability-only")
+	rule := ObjectiveEventRule{
+		ID: "warnings", EventType: "kubernetes.warning", AssignedAgentID: "agent-live",
+		RunTemplate: &ObjectiveRunTemplate{Capability: &ObjectiveCapabilityInvocation{
+			SkillID: "openseal.kubernetes", SkillVersion: "1.0.0", Action: "list_events",
+			Inputs: map[string]interface{}{"namespace": "operations"},
+		}},
+	}
+	request := eventRunRequest(&Objective{ID: "objective", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-live"}, Goal: "Investigate"}, rule, event)
+	invocation, ok := request.Context["capabilityInvocation"].(map[string]interface{})
+	if !ok || invocation["action"] != "list_events" {
+		t.Fatalf("capability invocation = %#v", request.Context)
+	}
+	projected, ok := request.Context["event"].(map[string]interface{})
+	if !ok || projected["id"] != event.ID {
+		t.Fatalf("event evidence = %#v", request.Context)
+	}
+	if rule.RunTemplate.Context != nil {
+		t.Fatalf("portable template context was mutated: %#v", rule.RunTemplate.Context)
+	}
+}
+
 func TestObjectiveEventRuleAgentReferenceValidation(t *testing.T) {
 	for name, reference := range map[string]string{
 		"empty segment": "tenant//sre",
