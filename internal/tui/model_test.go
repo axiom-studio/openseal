@@ -42,6 +42,7 @@ type fakeKernelClient struct {
 	actionDecisions     []kernelapi.ResolveActionApprovalRequest
 	actionDecisionKeys  []string
 	compilations        []*kernelagent.DefinitionCompilation
+	compilationErr      error
 	createErrors        []error
 	createKeys          []string
 	createRequests      []kernelapi.CreateAgentRunRequest
@@ -564,10 +565,34 @@ func (f *fakeKernelClient) ListSourceObservations(_ context.Context, filter runt
 }
 func (f *fakeKernelClient) ListActivity(_ context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	f.activityRequests = append(f.activityRequests, request)
+	keys := []string{activityTestRequestKey(request), request.RunID, request.AgentID, request.TeamID}
+	for _, key := range keys {
+		if page := f.activityPages[key]; page != nil {
+			return page, nil
+		}
+	}
 	if page := f.activityPages[request.RunID]; page != nil {
 		return page, nil
 	}
 	return &runtime.ActivityFeedPage{}, nil
+}
+
+func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
+	selector := "agent:" + request.AgentID
+	if request.TeamID != "" {
+		selector = "team:" + request.TeamID
+	} else if request.ObjectiveID != "" {
+		selector = "objective:" + request.ObjectiveID
+	} else if request.RunID != "" {
+		selector = "run:" + request.RunID
+	}
+	if request.Cursor != "" {
+		selector += "|cursor:" + request.Cursor
+	}
+	if request.IncludeDetails {
+		selector += "|details"
+	}
+	return selector
 }
 func (f *fakeKernelClient) GetSourceMonitorCheckpoint(_ context.Context, _ runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
 	checkpoint := f.monitorCheckpoints[sourceMonitorStatusKey(initiativeID, monitorID)]
@@ -625,7 +650,7 @@ func (f *fakeKernelClient) ListAgentRuns(context.Context, runtime.AgentRunFilter
 }
 
 func (f *fakeKernelClient) ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error) {
-	return f.compilations, nil
+	return f.compilations, f.compilationErr
 }
 
 func (f *fakeKernelClient) GetAgentDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelapi.AgentDeploymentCatalogEntry, error) {
@@ -931,6 +956,114 @@ func TestActionApprovalResolutionRequiresAdvertisedOperationAndEligiblePrincipal
 	applyCommand(t, readOnlyModel, readOnlyModel.loadCapabilities())
 	if strings.Contains(readOnlyModel.View(), "y approve") || strings.Contains(readOnlyModel.View(), "x reject") {
 		t.Fatalf("resolution controls rendered without advertised operation:\n%s", readOnlyModel.View())
+	}
+}
+
+func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *testing.T) {
+	now := time.Now().UTC()
+	summary := runtime.ActivityProjection{
+		ID: "event-2", EventType: "approval.resolved", Category: "approval", Severity: runtime.ActivitySeverityInfo,
+		Visibility: runtime.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
+		Actor: runtime.ActivityActor{Type: "user", ID: "alice"}, Summary: "Production restart approved", CreatedAt: now,
+		DetailAvailable: true,
+	}
+	older := runtime.ActivityProjection{
+		ID: "event-1", EventType: "run.created", Category: "run", Severity: runtime.ActivitySeverityInfo,
+		Visibility: runtime.ActivityVisibilityScope, AgentID: "operator", RunID: "run-1",
+		Actor: runtime.ActivityActor{Type: "system", ID: "scheduler"}, Summary: "Investigation started", CreatedAt: now.Add(-time.Minute),
+	}
+	detail := summary
+	detail.ParentRunID = "root-run"
+	detail.CorrelationID = "incident-42"
+	detail.ConversationRefs = []string{"conversation:sre"}
+	detail.Payload = map[string]interface{}{"approvalId": "approval-7", "decisionReason": "Exact workload and namespace reviewed"}
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
+		activityPages: map[string]*runtime.ActivityFeedPage{
+			"agent:operator":                 {Items: []runtime.ActivityProjection{summary}, HasMore: true, NextCursor: "cursor-1"},
+			"agent:operator|cursor:cursor-1": {Items: []runtime.ActivityProjection{summary, older}},
+			"run:run-2|details":              {Items: []runtime.ActivityProjection{detail}},
+		},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionActivity || len(model.activity) != 1 || fake.activityRequests[0].AgentID != "operator" || fake.activityRequests[0].TeamID != "" || fake.activityRequests[0].IncludeDetails {
+		t.Fatalf("initial Activity state section=%v activity=%#v requests=%#v", model.section, model.activity, fake.activityRequests)
+	}
+
+	applyCommand(t, model, model.loadSelectedActivityDetail())
+	if !model.activityExpanded || model.selectedActivity != "event-2" {
+		t.Fatalf("expanded=%t selected=%q", model.activityExpanded, model.selectedActivity)
+	}
+	view := model.View()
+	for _, expected := range []string{"t Activity", "Production restart approved", "Evidence · redacted canonical projection", "approval-7", "incident-42", "conversation:sre", "Parent Run root-run"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Activity view missing %q:\n%s", expected, view)
+		}
+	}
+
+	applyCommand(t, model, model.loadActivity(true))
+	if len(model.activity) != 2 || model.selectedActivity != "event-2" || !model.activityExpanded {
+		t.Fatalf("pagination lost context: count=%d selected=%q expanded=%t", len(model.activity), model.selectedActivity, model.activityExpanded)
+	}
+	newest := runtime.ActivityProjection{
+		ID: "event-3", EventType: "action.completed", Category: "action", Severity: runtime.ActivitySeverityInfo,
+		Visibility: runtime.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
+		Actor: runtime.ActivityActor{Type: "system", ID: "worker"}, Summary: "Restart completed", CreatedAt: now.Add(time.Second),
+	}
+	fake.activityPages["agent:operator"] = &runtime.ActivityFeedPage{Items: []runtime.ActivityProjection{newest, summary}, HasMore: true, NextCursor: "new-first-page-cursor"}
+	applyCommand(t, model, model.loadActivity(false))
+	if len(model.activity) != 3 || model.selectedActivity != "event-2" || !model.activityExpanded || model.activityNextCursor != "" {
+		t.Fatalf("poll reconciliation count=%d selected=%q expanded=%t cursor=%q", len(model.activity), model.selectedActivity, model.activityExpanded, model.activityNextCursor)
+	}
+	ids := map[string]int{}
+	for _, item := range model.activity {
+		ids[item.ID]++
+	}
+	if ids["event-2"] != 1 || model.activity[0].ID != "event-3" || model.selectedActivityRecord().Payload["approvalId"] != "approval-7" {
+		t.Fatalf("poll merge activity=%#v ids=%#v", model.activity, ids)
+	}
+}
+
+func TestActivityWorkspaceUsesExactTeamSelectorAndFailsClosedOnVersionMismatch(t *testing.T) {
+	teamFake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
+		activityPages: map[string]*runtime.ActivityFeedPage{"team:marketing": {Items: []runtime.ActivityProjection{{
+			ID: "team-event", EventType: "handoff.completed", TeamID: "marketing", Summary: "Launch brief returned", CreatedAt: time.Now().UTC(),
+		}}}},
+	}
+	config := DefaultConfig()
+	config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "marketing"}
+	config.PollInterval = -1
+	model, err := NewModel(t.Context(), teamFake, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.width, model.height = 120, 36
+	applyCommand(t, model, model.loadCapabilities())
+	if len(teamFake.activityRequests) != 1 || teamFake.activityRequests[0].TeamID != "marketing" || teamFake.activityRequests[0].AgentID != "" || !strings.Contains(model.View(), "Launch brief returned") {
+		t.Fatalf("Team Activity request=%#v view=%s", teamFake.activityRequests, model.View())
+	}
+
+	mismatched := kernelapi.ActivityCapability()
+	mismatched.Version = "future"
+	closed := newTestModel(t, &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), mismatched)})
+	applyCommand(t, closed, closed.loadCapabilities())
+	if closed.activityCapability.Available || strings.Contains(closed.View(), "t Activity") {
+		t.Fatalf("mismatched Activity capability leaked into TUI:\n%s", closed.View())
+	}
+
+	missingDeployment := &fakeKernelClient{
+		document:       kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability(), kernelapi.AgentDefinitionsCapability()),
+		compilationErr: &client.APIError{StatusCode: 404, Message: "Agent deployment was not found in this scope"},
+		activityPages: map[string]*runtime.ActivityFeedPage{"agent:operator": {Items: []runtime.ActivityProjection{{
+			ID: "available-activity", EventType: "run.created", AgentID: "operator", Summary: "Standalone work remains observable", CreatedAt: time.Now().UTC(),
+		}}}},
+	}
+	standalone := newTestModel(t, missingDeployment)
+	applyCommand(t, standalone, standalone.loadCapabilities())
+	if standalone.err != nil || standalone.agentDefinitionCapability.Available || !strings.Contains(standalone.View(), "Standalone work remains observable") || strings.Contains(standalone.View(), "h Runtime") {
+		t.Fatalf("optional deployment readiness polluted standalone Activity: err=%v\n%s", standalone.err, standalone.View())
 	}
 }
 
@@ -1326,7 +1459,15 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
 		}
 	}
-	if len(fake.activityRequests) != 1 || fake.activityRequests[0].RunID != "run-live-123" || !fake.activityRequests[0].IncludeDetails || len(fake.activityRequests[0].EventTypes) != 1 || fake.activityRequests[0].EventTypes[0] != "source_policy.authorized" {
+	var policyRequest *runtime.ActivityFeedRequest
+	for index := range fake.activityRequests {
+		request := &fake.activityRequests[index]
+		if request.RunID == "run-live-123" {
+			policyRequest = request
+			break
+		}
+	}
+	if policyRequest == nil || !policyRequest.IncludeDetails || len(policyRequest.EventTypes) != 1 || policyRequest.EventTypes[0] != "source_policy.authorized" {
 		t.Fatalf("activity requests=%#v", fake.activityRequests)
 	}
 }
@@ -1934,6 +2075,48 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 	restoredRun, err := httpClient.GetAgentRun(t.Context(), scope, run.ID)
 	if err != nil || restoredRun.Status != runtime.AgentRunStatusWaitingForDependency || restoredRun.WakeCondition == nil || restoredRun.WakeCondition.Reference != call.ID {
 		t.Fatalf("approved Run was not resumed for action execution: %#v, %v", restoredRun, err)
+	}
+}
+
+func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
+	store := runtime.NewMemoryStore(100)
+	scope := runtime.Scope{Kind: "local", ID: "activity-http"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	portfolio := runtime.NewPortfolioService(store)
+	run, err := portfolio.CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Verify durable Activity", Source: runtime.RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.NewRunActivityService(store, store).AppendActivity(t.Context(), &runtime.ActivityEvent{
+		ID: "activity-http-evidence", Scope: scope, RunID: run.ID, AgentID: owner.ID,
+		EventType: "action.completed", Severity: runtime.ActivitySeverityInfo, Visibility: runtime.ActivityVisibilityScope,
+		Actor: runtime.ActivityActor{Type: "system", ID: "worker"}, Summary: "Evidence persisted through the public boundary",
+		Payload: map[string]interface{}{"artifactId": "report-pdf", "outcome": "verified"}, CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	config := DefaultConfig()
+	config.Endpoint, config.Scope, config.Owner, config.PollInterval = httpServer.URL, scope, owner, -1
+	model, err := NewModel(t.Context(), httpClient, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.width, model.height = 120, 36
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionActivity
+	if len(model.activity) != 1 || model.activity[0].ID != "activity-http-evidence" || model.activity[0].Payload != nil {
+		t.Fatalf("summary-first HTTP activity=%#v", model.activity)
+	}
+	applyCommand(t, model, model.loadSelectedActivityDetail())
+	if !model.activityExpanded || model.selectedActivityRecord().Payload["artifactId"] != "report-pdf" || !strings.Contains(model.View(), "Evidence persisted through the public boundary") {
+		t.Fatalf("expanded HTTP Activity was not projected:\n%s", model.View())
 	}
 }
 
