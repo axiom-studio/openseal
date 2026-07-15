@@ -53,6 +53,23 @@ type authoredObjectiveCapabilityInvocation struct {
 	Inputs       map[string]interface{} `json:"inputs,omitempty"`
 }
 
+type authoredObjectiveEventRules struct {
+	Version string                       `json:"version"`
+	Rules   []authoredObjectiveEventRule `json:"rules"`
+}
+
+type authoredObjectiveEventRule struct {
+	ID              string                        `json:"id"`
+	EventType       string                        `json:"eventType"`
+	Source          string                        `json:"source,omitempty"`
+	Subject         string                        `json:"subject,omitempty"`
+	Severities      []string                      `json:"severities,omitempty"`
+	Attributes      map[string]interface{}        `json:"attributes,omitempty"`
+	AssignedAgentID string                        `json:"assignedAgentId,omitempty"`
+	RunBudget       *authoredObjectiveRunBudget   `json:"runBudget,omitempty"`
+	RunTemplate     *authoredObjectiveRunTemplate `json:"runTemplate,omitempty"`
+}
+
 func validateObjectiveTemplateCadences(path string, templates []workforce.ObjectiveTemplate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	for index, template := range templates {
@@ -64,6 +81,66 @@ func validateObjectiveTemplateCadences(path string, templates []workforce.Object
 		}
 	}
 	return issues
+}
+
+func validateObjectiveTemplateEventRules(path string, templates []workforce.ObjectiveTemplate) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	for index, template := range templates {
+		if len(template.EventRules) == 0 {
+			continue
+		}
+		if err := validateAuthoredObjectiveEventRules(template.EventRules); err != nil {
+			issues = append(issues, issue(fmt.Sprintf("%s[%d].eventRules", path, index), "invalid_objective_event_rules", err.Error()))
+		}
+	}
+	return issues
+}
+
+func validateAuthoredObjectiveEventRules(value map[string]interface{}) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var rules authoredObjectiveEventRules
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&rules); err != nil {
+		return fmt.Errorf("objective eventRules do not match the executable routing contract: %w", err)
+	}
+	if rules.Version != "1" || len(rules.Rules) == 0 {
+		return errors.New("objective eventRules require version 1 and at least one rule")
+	}
+	for index, rule := range rules.Rules {
+		if strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.EventType) == "" {
+			return fmt.Errorf("objective eventRules rule %d requires id and eventType", index)
+		}
+		if budget := rule.RunBudget; budget != nil {
+			if budget.MaxAttempts < 0 || budget.MaxTurns < 0 || budget.MaxInputTokens < 0 || budget.MaxOutputTokens < 0 ||
+				budget.MaxTotalTokens < 0 || budget.MaxCostMicros < 0 || budget.MaxDurationMS < 0 || budget.MaxActions < 0 {
+				return fmt.Errorf("objective eventRules rule %d runBudget limits cannot be negative", index)
+			}
+			if budget.WarningPermille < 0 || budget.WarningPermille > 1000 {
+				return fmt.Errorf("objective eventRules rule %d runBudget warningPermille must be between 0 and 1000", index)
+			}
+		}
+		if template := rule.RunTemplate; template != nil {
+			if len(strings.TrimSpace(template.Entrypoint)) > 128 {
+				return fmt.Errorf("objective eventRules rule %d runTemplate entrypoint cannot exceed 128 characters", index)
+			}
+			if capability := template.Capability; capability != nil {
+				if strings.TrimSpace(capability.SkillID) == "" || strings.TrimSpace(capability.SkillVersion) == "" || strings.TrimSpace(capability.Action) == "" {
+					return fmt.Errorf("objective eventRules rule %d capability requires Skill id, version, and action", index)
+				}
+				if rule.RunBudget != nil && rule.RunBudget.MaxAttempts > 0 && rule.RunBudget.MaxAttempts < 2 {
+					return errors.New("objective capability run budget requires at least 2 attempts when bounded")
+				}
+				if rule.RunBudget != nil && rule.RunBudget.MaxTurns > 0 && rule.RunBudget.MaxTurns < 2 {
+					return errors.New("objective capability run budget requires at least 2 turns when bounded")
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
@@ -122,6 +199,14 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 		if capability := template.Capability; capability != nil &&
 			(strings.TrimSpace(capability.SkillID) == "" || strings.TrimSpace(capability.SkillVersion) == "" || strings.TrimSpace(capability.Action) == "") {
 			return errors.New("objective cadence capability requires Skill id, version, and action")
+		}
+		if template.Capability != nil && cadence.RunBudget != nil {
+			if cadence.RunBudget.MaxAttempts > 0 && cadence.RunBudget.MaxAttempts < 2 {
+				return errors.New("objective capability run budget requires at least 2 attempts when bounded")
+			}
+			if cadence.RunBudget.MaxTurns > 0 && cadence.RunBudget.MaxTurns < 2 {
+				return errors.New("objective capability run budget requires at least 2 turns when bounded")
+			}
 		}
 	}
 	return nil

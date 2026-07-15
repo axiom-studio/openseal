@@ -103,6 +103,9 @@ func (c *ObjectiveCadence) Validate() error {
 	if err := c.RunTemplate.Validate(); err != nil {
 		return err
 	}
+	if err := validateObjectiveCapabilityRunBudget(c.RunTemplate, c.RunBudget); err != nil {
+		return err
+	}
 	if c.MaximumConcurrent < 0 {
 		return errors.New("objective cadence maximum concurrency cannot be negative")
 	}
@@ -129,6 +132,22 @@ func (c *ObjectiveCadence) Validate() error {
 		if _, err := time.LoadLocation(c.Timezone); err != nil {
 			return fmt.Errorf("objective cadence timezone: %w", err)
 		}
+	}
+	return nil
+}
+
+// A governed capability invocation is deliberately a two-phase durable
+// lifecycle: one Turn proposes the ActionCall and a later Turn consumes its
+// persisted result. A bounded template must reserve capacity for both phases.
+func validateObjectiveCapabilityRunBudget(template *ObjectiveRunTemplate, budget *BudgetPolicy) error {
+	if template == nil || template.Capability == nil || budget == nil {
+		return nil
+	}
+	if budget.MaxAttempts > 0 && budget.MaxAttempts < 2 {
+		return errors.New("objective capability run budget requires at least 2 attempts when bounded")
+	}
+	if budget.MaxTurns > 0 && budget.MaxTurns < 2 {
+		return errors.New("objective capability run budget requires at least 2 turns when bounded")
 	}
 	return nil
 }
