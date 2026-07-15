@@ -357,7 +357,17 @@ func TestAmendmentPlacementRevisionsComeOnlyFromAppliedReceipt(t *testing.T) {
 		{Kind: "objective", ID: "objective-live", Revision: 5},
 		{Kind: "initiative", ID: "initiative-live", Revision: 6},
 	}}
-	applied := ChangeSetPlacement{}
+	// Positive values submitted by a client are not concurrency truth. Stable
+	// resource identities inherit the exact authoritative receipt revisions.
+	applied := ChangeSetPlacement{
+		AgentDeploymentIDs:         map[string]string{agentDefinitionID: "agent-live"},
+		AgentExpectedRevisions:     map[string]int64{agentDefinitionID: 1},
+		TeamDeploymentID:           "team-live",
+		TeamExpectedRevision:       1,
+		InitiativeID:               "initiative-live",
+		InitiativeExpectedRevision: 1,
+		Objectives:                 map[string]ObjectivePlacement{objectiveKey: {ID: "objective-live", ExpectedRevision: 1}},
+	}
 	inheritParentPlacement(&applied, parent)
 	if applied.AgentExpectedRevisions[agentDefinitionID] != 3 || applied.TeamExpectedRevision != 4 || applied.Objectives[objectiveKey].ExpectedRevision != 5 || applied.InitiativeExpectedRevision != 6 {
 		t.Fatalf("applied receipt revisions were not inherited exactly: %#v", applied)
