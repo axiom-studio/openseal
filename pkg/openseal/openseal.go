@@ -548,6 +548,9 @@ type (
 	SourceObservationIngestResult         = runtime.SourceObservationIngestResult
 	AdvanceSourceMonitorCheckpointRequest = runtime.AdvanceSourceMonitorCheckpointRequest
 	SourceMonitorCheckpointResult         = runtime.SourceMonitorCheckpointResult
+	EventSourceCheckpoint                 = runtime.EventSourceCheckpoint
+	EventSourceCheckpointStore            = runtime.EventSourceCheckpointStore
+	AdvanceEventSourceCheckpointRequest   = runtime.AdvanceEventSourceCheckpointRequest
 	KernelCapability                      = kernelapi.Capability
 	KernelCapabilityDocument              = kernelapi.CapabilityDocument
 	KernelCapabilityContext               = kernelapi.CapabilityContext
@@ -759,6 +762,8 @@ var (
 	ErrSourceObservationConflict           = runtime.ErrSourceObservationConflict
 	ErrSourceMonitorCheckpoint             = runtime.ErrSourceMonitorCheckpoint
 	ErrInvalidSourceObservation            = runtime.ErrInvalidSourceObservation
+	ErrEventSourceCheckpointConflict       = runtime.ErrEventSourceCheckpointConflict
+	ErrInvalidEventSourceCheckpoint        = runtime.ErrInvalidEventSourceCheckpoint
 	ErrInvalidOwner                        = runtime.ErrInvalidOwner
 	ErrInitiativeNotFound                  = runtime.ErrInitiativeNotFound
 	ErrInitiativeConflict                  = runtime.ErrInitiativeConflict
@@ -1257,6 +1262,7 @@ type Engine struct {
 	portfolio                     *runtime.PortfolioService
 	initiatives                   *runtime.InitiativeService
 	sourceMonitors                *runtime.SourceMonitorService
+	eventSources                  *runtime.EventSourceCheckpointService
 	outreach                      *runtime.OutreachService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
@@ -1365,6 +1371,7 @@ func New(opts ...Option) (*Engine, error) {
 		portfolio:           runtime.NewPortfolioService(store),
 		initiatives:         runtime.NewInitiativeService(store, store),
 		sourceMonitors:      runtime.NewSourceMonitorService(store, store, store, store),
+		eventSources:        runtime.NewEventSourceCheckpointService(store),
 		outreach:            runtime.NewOutreachService(store, store, store, store),
 		activity:            runtime.NewRunActivityService(store, store),
 		dependencies:        runtime.NewDependencyCoordinator(store),
@@ -1531,6 +1538,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.pool.SetStore(store)
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
+		e.eventSources = runtime.NewEventSourceCheckpointService(store)
 		if initiativeStore, ok := store.(runtime.InitiativeStore); ok {
 			e.initiatives = runtime.NewInitiativeService(initiativeStore, store)
 			if sourceMonitorStore, supported := store.(runtime.SourceMonitorStore); supported {
@@ -2198,6 +2206,24 @@ func (e *Engine) GetSourceObservation(ctx context.Context, scope runtime.Scope, 
 		return nil, errors.New("source observation capability is unavailable")
 	}
 	return store.GetSourceObservation(ctx, scope, id)
+}
+
+// GetEventSourceCheckpoint returns durable host-connector progress without
+// projecting opaque cursors into the model-visible activity or prompt layers.
+func (e *Engine) GetEventSourceCheckpoint(ctx context.Context, scope runtime.Scope, source, subscriptionID string) (*runtime.EventSourceCheckpoint, error) {
+	if e.eventSources == nil {
+		return nil, errors.New("event source checkpoint capability is unavailable")
+	}
+	return e.eventSources.Get(ctx, scope, source, subscriptionID)
+}
+
+// AdvanceEventSourceCheckpoint atomically appends a bounded replay window and
+// advances the connector cursor using optimistic concurrency.
+func (e *Engine) AdvanceEventSourceCheckpoint(ctx context.Context, req runtime.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error) {
+	if e.eventSources == nil {
+		return nil, errors.New("event source checkpoint capability is unavailable")
+	}
+	return e.eventSources.Advance(ctx, req)
 }
 
 func (e *Engine) CreateOutreachThread(ctx context.Context, req runtime.CreateOutreachThreadRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {

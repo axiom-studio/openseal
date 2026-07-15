@@ -448,6 +448,7 @@ type KernelStore interface {
 	ExecutionStore
 	PortfolioStore
 	ObjectiveScopeStore
+	EventSourceCheckpointStore
 	RunActivityStore
 	ObjectiveActivityStore
 	AgentTurnStore
