@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -62,6 +63,41 @@ func TestSkillDefinitionPinsClusterThroughOpaqueBindingNotModelInput(t *testing.
 	}
 	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"clusterId": 2}); err == nil {
 		t.Fatal("model input must not supply or override the authorized cluster binding")
+	}
+}
+
+func TestSkillActivationUsesTypedClusterCredentialWithoutHostConfiguration(t *testing.T) {
+	ctx := context.Background()
+	catalog := skill.NewCatalog()
+	definition := SkillDefinition()
+	if len(definition.Requirements.Configuration) != 0 {
+		t.Fatalf("cluster authorization must not be modeled as host configuration: %#v", definition.Requirements.Configuration)
+	}
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &skill.Binding{
+		ID: "cluster-activation", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
+		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{ListEvents},
+		MaximumRisk: skill.RiskLevelRead, Credentials: map[string]skill.CredentialReference{ClusterCredentialName: {Kind: ClusterCredentialKind, ID: "cluster://tenant-7/one"}}, Revision: 1,
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := catalog.Activate(ctx, binding.Scope, binding.DeploymentID, skill.HostCapabilityState{
+		OperatingSystem: runtime.GOOS,
+		Architecture:    runtime.GOARCH,
+		Revision:        "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Unavailable) != 0 {
+		t.Fatalf("credential-authorized Kubernetes Skill is unavailable: %#v", snapshot.Unavailable)
+	}
+	if len(snapshot.Skills) != 1 || len(snapshot.Skills[0].Actions) != 1 || snapshot.Skills[0].Actions[0].Action != ListEvents {
+		t.Fatalf("expected the authorized Kubernetes action in the activation snapshot: %#v", snapshot.Skills)
 	}
 }
 

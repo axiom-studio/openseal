@@ -13,7 +13,7 @@ import (
 
 const (
 	SkillID      = "openseal.kubernetes"
-	SkillVersion = "1.0.0"
+	SkillVersion = "1.0.1"
 
 	GetResource     = "get_resource"
 	ListResources   = "list_resources"
@@ -72,7 +72,6 @@ func SkillDefinition() *skill.Definition {
 			UserInvocable: true,
 			AllowedTools:  []string{GetResource, ListResources, ListEvents, GetLogs, RestartWorkload, ScaleWorkload, PatchResource, DeleteResource},
 		},
-		Requirements: capability.Requirements{Configuration: []string{"authorized Kubernetes cluster binding"}},
 	}
 }
 
