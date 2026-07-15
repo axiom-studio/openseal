@@ -965,7 +965,7 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 			placement.AgentDeploymentIDs[definitionID] = deploymentID
 			currentID = deploymentID
 		}
-		if currentID == deploymentID && placement.AgentExpectedRevisions[definitionID] < 1 && parentPlacement.AgentExpectedRevisions[definitionID] > 0 {
+		if currentID == deploymentID && parentPlacement.AgentExpectedRevisions[definitionID] > 0 {
 			placement.AgentExpectedRevisions[definitionID] = parentPlacement.AgentExpectedRevisions[definitionID]
 		}
 	}
@@ -974,7 +974,7 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		placement.TeamDeploymentID = parentPlacement.TeamDeploymentID
 		currentTeamID = parentPlacement.TeamDeploymentID
 	}
-	if currentTeamID == parentPlacement.TeamDeploymentID && placement.TeamExpectedRevision < 1 && parentPlacement.TeamExpectedRevision > 0 {
+	if currentTeamID == parentPlacement.TeamDeploymentID && parentPlacement.TeamExpectedRevision > 0 {
 		placement.TeamExpectedRevision = parentPlacement.TeamExpectedRevision
 	}
 	currentInitiativeID := strings.TrimSpace(placement.InitiativeID)
@@ -982,7 +982,7 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		placement.InitiativeID = parentPlacement.InitiativeID
 		currentInitiativeID = parentPlacement.InitiativeID
 	}
-	if currentInitiativeID == parentPlacement.InitiativeID && placement.InitiativeExpectedRevision < 1 && parentPlacement.InitiativeExpectedRevision > 0 {
+	if currentInitiativeID == parentPlacement.InitiativeID && parentPlacement.InitiativeExpectedRevision > 0 {
 		placement.InitiativeExpectedRevision = parentPlacement.InitiativeExpectedRevision
 	}
 	if strings.TrimSpace(placement.Environment) == "" {
@@ -996,7 +996,7 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		if strings.TrimSpace(current.ID) == "" {
 			current.ID = inherited.ID
 		}
-		if current.ID == inherited.ID && current.ExpectedRevision < 1 && inherited.ExpectedRevision > 0 {
+		if current.ID == inherited.ID && inherited.ExpectedRevision > 0 {
 			current.ExpectedRevision = inherited.ExpectedRevision
 		}
 		placement.Objectives[key] = current
