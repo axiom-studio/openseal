@@ -268,6 +268,9 @@ func eventRunRequest(objective *Objective, rule ObjectiveEventRule, event EventE
 	policy := map[string]interface{}(nil)
 	if rule.RunTemplate != nil {
 		contextValues = cloneMap(rule.RunTemplate.Context)
+		if contextValues == nil {
+			contextValues = map[string]interface{}{}
+		}
 		entrypoint = strings.TrimSpace(rule.RunTemplate.Entrypoint)
 		policy = cloneMap(rule.RunTemplate.Policy)
 		if rule.RunTemplate.Capability != nil {
