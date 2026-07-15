@@ -12,6 +12,7 @@ openseal
 
 # Dependency directories
 vendor/
+skills/repos/
 
 # IDE
 .idea/
@@ -27,10 +28,6 @@ Thumbs.db
 # Build output
 bin/
 dist/
-
-# Node modules
-web/node_modules/
-web/dist/
 
 # Local config
 daemon.yaml

@@ -393,7 +393,7 @@ as provenance.
 | collaboration teams | Retain roster/context value; separate semantic roles from permissions and build delegation on AgentRequest |
 | approval service | Retain concept; migrate to ApprovalCheckpoint tied to runs/skill calls and policy authority |
 | agent/team manifests | Evolve schema to definitions, objectives, subscriptions, policies, skill requirements, and evaluations |
-| workflow-centric embedded web GUI | Remove as the primary product surface; replace useful coverage with the prompt-first TUI and public API |
+| workflow-centric embedded web GUI | Removed after its useful coverage moved to the prompt-first TUI and public API |
 
 No legacy path is deleted before scope-safe migration, compatibility reads, and
 rollback are proven. Compatibility adapters may not become new extension

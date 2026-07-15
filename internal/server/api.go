@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io/fs"
 	"net/http"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -9,7 +8,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/webui"
 )
 
 func (s *Server) registerRoutes() {
@@ -102,12 +100,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/v1/team-deployments/{id}", s.handleUpdateTeamDeployment)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/activations", s.handleActivateTeamDefinition)
 	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}/activations", s.handleListTeamDefinitionActivations)
-
-	// Serve static frontend files
-	dist, err := fs.Sub(webui.Dist, "dist")
-	if err == nil {
-		s.mux.Handle("/", http.FileServer(http.FS(dist)))
-	}
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
