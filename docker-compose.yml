@@ -9,7 +9,7 @@ services:
     container_name: openseal
     restart: unless-stopped
     ports:
-      - "8080:8080"   # API + Web GUI
+      - "8080:8080"   # Versioned kernel API
       - "9090:9090"   # Webhook server
     volumes:
       - ./workflows:/app/workflows:ro

@@ -1,7 +1,7 @@
 # Build stage
 FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache git npm
+RUN apk add --no-cache build-base git
 
 WORKDIR /build
 
@@ -9,20 +9,11 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy web frontend and build it
-COPY web/ ./web/
-RUN cd web && npm install && npm run build
-
-# Copy built web assets for embedding
-RUN mkdir -p pkg/webui && cp -r web/dist pkg/webui/dist
-
 # Copy source code
 COPY . .
 
-# Re-copy web dist to make sure embed has it
-RUN cp -r web/dist pkg/webui/dist
-
-# Build binary
+# SQLite-backed durability requires CGO; Alpine's toolchain produces a
+# self-contained musl-linked kernel binary for the runtime image.
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o openseal ./cmd/openseal
 
 # Runtime stage
