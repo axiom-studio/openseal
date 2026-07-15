@@ -66,7 +66,7 @@ func (s *PostgresStore) migrateAgentAndSkillControlPlane(ctx context.Context, tx
 
 func (s *PostgresStore) migrateSourceQualifiedSkillVariants(ctx context.Context, tx *sql.Tx) error {
 	var applied bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = 18)`).Scan(&applied); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = 19)`).Scan(&applied); err != nil {
 		return err
 	}
 	var definitionColumn, bindingColumn bool
@@ -88,7 +88,7 @@ func (s *PostgresStore) migrateSourceQualifiedSkillVariants(ctx context.Context,
 	`); err != nil {
 		return fmt.Errorf("migrate source-qualified skill variants: %w", err)
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (18, 'source-qualified skill variants') ON CONFLICT (version) DO NOTHING`)
+	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (19, 'source-qualified skill variants') ON CONFLICT (version) DO NOTHING`)
 	return err
 }
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 18
+const currentPostgresSchemaVersion int64 = 20
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,6 +39,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		20: {"event_source_checkpoints"},
 		17: {"skill_source_artifact_references", "skill_source_artifacts"},
 		16: {"source_monitor_checkpoints", "source_observations"},
 		15: {"agent_definition_compilations"},
@@ -57,7 +58,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		1:  {"runs"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
-		if version == 18 {
+		if version == 19 {
 			var hasCollisions bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
 				SELECT 1 FROM `+s.table("skill_definitions")+` GROUP BY id, version HAVING COUNT(*) > 1
@@ -73,6 +74,11 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 				ALTER TABLE `+s.table("skill_definitions")+` DROP COLUMN IF EXISTS source_identity;
 				ALTER TABLE `+s.table("skill_bindings")+` DROP COLUMN IF EXISTS source_identity;
 			`); err != nil {
+				return err
+			}
+		}
+		if version == 18 {
+			if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+s.table("outreach_threads")+` CASCADE`); err != nil {
 				return err
 			}
 		}

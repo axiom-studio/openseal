@@ -69,7 +69,7 @@ func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 	if err := primary.RollbackPostgresMigrations(ctx, 17); err == nil {
 		t.Fatal("publisher-colliding definitions unexpectedly allowed a lossy rollback")
 	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 18 {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("failed rollback changed schema version = %d, %v", version, err)
 	}
 	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("skill_bindings")+` WHERE source_identity = $1`, identities[1]); err != nil {

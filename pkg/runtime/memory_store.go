@@ -18,6 +18,7 @@ type MemoryStore struct {
 	sourceObservations       map[string]*SourceObservation
 	sourceObservationKeys    map[string]string
 	sourceMonitorCheckpoints map[string]*SourceMonitorCheckpoint
+	eventSourceCheckpoints   map[string]*EventSourceCheckpoint
 	outreachThreads          map[string]*OutreachThread
 	outreachIdempotency      map[string]string
 	agentRuns                map[string]*AgentRun
@@ -57,6 +58,7 @@ func NewMemoryStore(maxSize int) *MemoryStore {
 		sourceObservations:       make(map[string]*SourceObservation),
 		sourceObservationKeys:    make(map[string]string),
 		sourceMonitorCheckpoints: make(map[string]*SourceMonitorCheckpoint),
+		eventSourceCheckpoints:   make(map[string]*EventSourceCheckpoint),
 		outreachThreads:          make(map[string]*OutreachThread),
 		outreachIdempotency:      make(map[string]string),
 		agentRuns:                make(map[string]*AgentRun),
