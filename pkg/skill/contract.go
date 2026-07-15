@@ -147,6 +147,13 @@ func (c *Catalog) Bind(ctx context.Context, binding *Binding) error {
 	if err := validateBindingShape(binding); err != nil {
 		return err
 	}
+	// Disabling is a contraction operation. It must remain possible when an
+	// older unqualified binding has become ambiguous after a second publisher
+	// variant was installed; requiring definition resolution here would make
+	// the unsafe legacy capability impossible to turn off.
+	if binding.Disabled {
+		return c.disableBinding(ctx, binding)
+	}
 	definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
 	if err != nil {
 		return err
@@ -175,6 +182,59 @@ func (c *Catalog) Bind(ctx context.Context, binding *Binding) error {
 	}
 	c.bindings[key] = normalized
 	return nil
+}
+
+func (c *Catalog) disableBinding(ctx context.Context, binding *Binding) error {
+	current, err := c.currentBindingWithoutDefinition(ctx, binding.Scope, binding.DeploymentID, binding.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return errors.New("cannot create a disabled binding without an existing binding")
+	}
+	if current.SkillID != binding.SkillID || current.SkillVersion != binding.SkillVersion || current.SourceIdentity != binding.SourceIdentity {
+		return errors.New("disabled binding cannot change skill or source identity")
+	}
+	normalized := cloneBinding(binding)
+	key := bindingKey(normalized.Scope, normalized.DeploymentID, normalized.ID)
+	if c.store == nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		latest := c.bindings[key]
+		if latest == nil || normalized.Revision != latest.Revision+1 {
+			return ErrBindingRevisionConflict
+		}
+		c.bindings[key] = normalized
+		return nil
+	}
+	if err := c.store.SaveSkillBinding(ctx, normalized, normalized.Revision-1); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.bindings[key] = normalized
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Catalog) currentBindingWithoutDefinition(ctx context.Context, scope ScopeReference, deploymentID, bindingID string) (*Binding, error) {
+	if c.store == nil {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		return cloneBinding(c.bindings[bindingKey(scope, deploymentID, bindingID)]), nil
+	}
+	bindings, err := c.store.ListSkillBindings(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range bindings {
+		if candidate != nil && candidate.ID == bindingID {
+			if err := validateBindingShape(candidate); err != nil {
+				return nil, fmt.Errorf("stored skill binding is invalid: %w", err)
+			}
+			return cloneBinding(candidate), nil
+		}
+	}
+	return nil, nil
 }
 
 func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, deploymentID string) ([]ModelAction, error) {
@@ -430,6 +490,12 @@ func (c *Catalog) bindingsFor(ctx context.Context, scope ScopeReference, deploym
 	for _, binding := range bindings {
 		if err := validateBindingShape(binding); err != nil {
 			return nil, fmt.Errorf("stored skill binding is invalid: %w", err)
+		}
+		if binding.Disabled {
+			c.mu.Lock()
+			c.bindings[bindingKey(binding.Scope, binding.DeploymentID, binding.ID)] = cloneBinding(binding)
+			c.mu.Unlock()
+			continue
 		}
 		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
 		if err != nil {
