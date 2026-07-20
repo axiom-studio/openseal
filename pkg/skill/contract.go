@@ -297,7 +297,7 @@ func (c *Catalog) ListModelPrompts(ctx context.Context, scope ScopeReference, de
 		if err != nil {
 			return nil, err
 		}
-		if definition == nil || definition.Prompt == nil {
+		if definition == nil || definition.Prompt == nil || NeedsActionAdapter(definition) {
 			continue
 		}
 		if !promptCredentialsSatisfied(definition.Prompt, binding) {
@@ -345,7 +345,7 @@ func (c *Catalog) resolvePrompt(ctx context.Context, scope ScopeReference, deplo
 		if err != nil {
 			return nil, err
 		}
-		if definition != nil && definition.Prompt != nil && promptCredentialsSatisfied(definition.Prompt, binding) {
+		if definition != nil && definition.Prompt != nil && !NeedsActionAdapter(definition) && promptCredentialsSatisfied(definition.Prompt, binding) {
 			copy := cloneDefinition(definition)
 			copy.Prompt.Credentials = nil
 			if resolved != nil && selected == nil {
@@ -361,6 +361,18 @@ func (c *Catalog) resolvePrompt(ctx context.Context, scope ScopeReference, deplo
 		return nil, errors.New("selected skill binding is unavailable or stale")
 	}
 	return nil, errors.New("bound skill prompt not found")
+}
+
+// NeedsActionAdapter reports whether an imported OpenClaw instruction module
+// declares access to tools or credentials without defining any governed action
+// that could consume them. Such a module remains inspectable and exportable,
+// but must not be projected as an executable model capability.
+func NeedsActionAdapter(definition *Definition) bool {
+	if definition == nil || definition.Source == nil || definition.Source.Format != "openclaw.skill.v1" ||
+		definition.Prompt == nil || len(definition.Actions) != 0 {
+		return false
+	}
+	return len(definition.Prompt.AllowedTools) > 0 || len(definition.Prompt.Credentials) > 0 || len(definition.Requirements.Environment) > 0
 }
 
 func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentID, skillID, version, actionName string, selected ...BindingReference) (*BoundAction, error) {

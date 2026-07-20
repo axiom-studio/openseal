@@ -308,6 +308,12 @@ func definitionSourceDigest(definition *Definition) string {
 
 func evaluateAvailability(definition *Definition, binding *Binding, host HostCapabilityState) []AvailabilityReason {
 	reasons := make([]AvailabilityReason, 0)
+	if binding.EnablePrompt && NeedsActionAdapter(definition) {
+		return []AvailabilityReason{{
+			Code: "needs_action_adapter", Requirement: definition.ID,
+			Message: "this imported Skill requires external access but defines no governed action; install or configure an action adapter before activation",
+		}}
+	}
 	if binding.EnablePrompt && definition.Prompt != nil {
 		for _, requirement := range definition.Prompt.Credentials {
 			ref, ok := binding.Credentials[requirement.Name]

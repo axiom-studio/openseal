@@ -253,7 +253,7 @@ func hasAvailabilityReason(reasons []skill.AvailabilityReason, code string) bool
 	return false
 }
 
-func TestCompilePromptOnlyPrimaryEnvAsOpaqueCredential(t *testing.T) {
+func TestCompileCredentialBackedPromptRequiresGovernedActionAdapter(t *testing.T) {
 	compilation, err := Compile(Bundle{SkillMD: []byte(`---
 name: prompt-publisher
 description: Draft authenticated publishing guidance.
@@ -271,6 +271,9 @@ Prepare publishing guidance using the authenticated account policy.
 		definition.Prompt.Credentials[0] != (skill.CredentialRequirement{Name: "PUBLISH_TOKEN", Kind: "environment-secret"}) ||
 		len(definition.Requirements.Environment) != 0 {
 		t.Fatalf("prompt credential compilation = %#v", definition)
+	}
+	if !skill.NeedsActionAdapter(definition) || !hasCompilationDiagnostic(compilation.Diagnostics, NeedsActionAdapterDiagnostic) {
+		t.Fatalf("credential-backed prompt was not marked as requiring an action adapter: %#v", compilation.Diagnostics)
 	}
 
 	catalog := skill.NewCatalog()
@@ -296,7 +299,7 @@ Prepare publishing guidance using the authenticated account policy.
 	}
 	unavailable, err := catalog.Activate(context.Background(), scope, "missing", skill.HostCapabilityState{})
 	if err != nil || len(unavailable.Skills) != 0 || len(unavailable.Unavailable) != 1 ||
-		len(unavailable.Unavailable[0].Reasons) != 1 || unavailable.Unavailable[0].Reasons[0].Code != "credential_missing" {
+		len(unavailable.Unavailable[0].Reasons) != 1 || unavailable.Unavailable[0].Reasons[0].Code != NeedsActionAdapterDiagnostic {
 		t.Fatalf("missing prompt credential activation = %#v, %v", unavailable, err)
 	}
 
@@ -304,8 +307,15 @@ Prepare publishing guidance using the authenticated account policy.
 	bind("publisher-b", map[string]skill.CredentialReference{"PUBLISH_TOKEN": {Kind: "environment-secret", ID: "opaque-b"}})
 	for _, deployment := range []string{"publisher-a", "publisher-b"} {
 		snapshot, err := catalog.Activate(context.Background(), scope, deployment, skill.HostCapabilityState{})
-		if err != nil || len(snapshot.Skills) != 1 || len(snapshot.Unavailable) != 0 || snapshot.Skills[0].Prompt == nil {
+		if err != nil || len(snapshot.Skills) != 0 || len(snapshot.Unavailable) != 1 ||
+			!hasAvailabilityReason(snapshot.Unavailable[0].Reasons, NeedsActionAdapterDiagnostic) {
 			t.Fatalf("bound prompt activation for %s = %#v, %v", deployment, snapshot, err)
+		}
+		if prompts, err := catalog.ListModelPrompts(context.Background(), scope, deployment); err != nil || len(prompts) != 0 {
+			t.Fatalf("unadapted external prompt entered model catalog for %s: %#v, %v", deployment, prompts, err)
+		}
+		if _, err := catalog.ResolvePrompt(context.Background(), scope, deployment, definition.ID, definition.Version); err == nil {
+			t.Fatalf("unadapted external prompt resolved for %s", deployment)
 		}
 		encoded, err := json.Marshal(snapshot)
 		if err != nil {
@@ -339,6 +349,9 @@ Search Reddit for the requested topic.
 	if len(compilation.Diagnostics) == 0 || compilation.Diagnostics[0].Code != "identity.normalized" {
 		t.Fatalf("normalization diagnostics = %#v", compilation.Diagnostics)
 	}
+	if !hasCompilationDiagnostic(compilation.Diagnostics, NeedsActionAdapterDiagnostic) || !skill.NeedsActionAdapter(compilation.Definition) {
+		t.Fatalf("Reddit API Skill was advertised without a governed action: %#v", compilation.Diagnostics)
+	}
 	exported, err := ExportBundle(compilation)
 	if err != nil || string(exported.SkillMD) != string(source) {
 		t.Fatalf("source artifact was not preserved: %v", err)
@@ -349,6 +362,15 @@ Search Reddit for the requested topic.
 	if _, err := Compile(Bundle{SkillMD: source, Source: Source{Reference: "@owner/Invalid Slug"}}); err == nil {
 		t.Fatal("invalid canonical registry identity should fail closed")
 	}
+}
+
+func hasCompilationDiagnostic(diagnostics []Diagnostic, code string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompileCanonicalizesVolatileTrustAndVersionsMeaningfulEvidence(t *testing.T) {
