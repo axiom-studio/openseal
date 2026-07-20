@@ -95,6 +95,11 @@ func TestEvidenceGroundingRejectsSwappedCitationThenAcceptsRepair(t *testing.T) 
 	if len(rejected.EvidenceGrounding.Findings) != 1 || rejected.EvidenceGrounding.Findings[0].Status != EvidenceGroundingUnsupported {
 		t.Fatalf("findings=%#v", rejected.EvidenceGrounding.Findings)
 	}
+	rejectedState, err := parseEvidenceGroundingState(rejected.ContinuationCheckpoint)
+	if err != nil || rejectedState == nil || rejectedState.LastReview == nil || rejectedState.LastReview.Accepted ||
+		rejectedState.LastReview.ReviewerProvider != "review-provider" || rejectedState.LastReview.Usage.InputTokens == 0 {
+		t.Fatalf("durable rejected review state=%#v err=%v", rejectedState, err)
+	}
 	run.Checkpoint = rejected.ContinuationCheckpoint
 	repaired, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-three"}})
 	if err != nil || repaired.NextRunStatus != AgentRunStatusRunning || repaired.RunOutput != nil {
