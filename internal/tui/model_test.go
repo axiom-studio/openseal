@@ -1904,6 +1904,134 @@ func TestRunViewProjectsCanonicalParentLineage(t *testing.T) {
 	}
 }
 
+func TestEvidenceSnapshotProjectsAcrossRunObjectiveAndInitiativeInspection(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.objectiveCapability = kernelapi.ObjectivesCapability()
+	model.initiativeCapability = kernelapi.InitiativesCapability()
+	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
+	model.initiatives = []*runtime.Initiative{{ID: "initiative-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.InitiativeStatusActive}}
+	older := evidenceSnapshotRun("run-older", "snapshot-old", time.Date(2026, 7, 19, 9, 0, 0, 0, time.UTC))
+	newer := evidenceSnapshotRun("run-newer", "snapshot-new", time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
+	model.runs = []*runtime.AgentRun{older, newer}
+
+	model.section = sectionRuns
+	model.selected = 1
+	view := model.renderRunsContent(180)
+	for _, expected := range []string{"Evidence snapshot", "2 selected · 3 expired · bounded/truncated", "Snapshot · snapshot-new", "Initiative · initiative-research", "Run · run-newer", "25 observations · 120 runes/summary · 1000 runes total", "v expand bounded evidence"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Run evidence projection missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "https://forum.example/first") {
+		t.Fatalf("collapsed snapshot exposed observation detail:\n%s", view)
+	}
+
+	model.section = sectionObjectives
+	if view = model.renderObjectivesContent(180); !strings.Contains(view, "snapshot-new") || strings.Contains(view, "snapshot-old") {
+		t.Fatalf("Objective did not project its latest scheduled snapshot:\n%s", view)
+	}
+
+	model.section = sectionInitiatives
+	if view = model.renderInitiativesContent(180); !strings.Contains(view, "snapshot-new") || strings.Contains(view, "snapshot-old") {
+		t.Fatalf("Initiative did not project its latest scheduled snapshot:\n%s", view)
+	}
+}
+
+func TestEvidenceSnapshotExpansionPagesCredentialFreeObservationProjection(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.runs = []*runtime.AgentRun{evidenceSnapshotRun("run-evidence", "snapshot-safe", time.Now().UTC())}
+
+	applyKey(t, model, "v")
+	view := model.renderRunsContent(180)
+	for _, expected := range []string{"Observation 1 of 2", "observation-first", "https://forum.example/first", "2026-07-20T08:00:00Z", "sha256:first", "First bounded finding", "[ previous · ] next · v collapse"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expanded evidence missing %q:\n%s", expected, view)
+		}
+	}
+	for _, forbidden := range []string{"observation-second", "vaultBindingRef", "rawContent", "credential"} {
+		if strings.Contains(view, forbidden) {
+			t.Fatalf("expanded evidence exposed %q:\n%s", forbidden, view)
+		}
+	}
+
+	applyKey(t, model, "]")
+	view = model.renderRunsContent(180)
+	if !strings.Contains(view, "Observation 2 of 2") || !strings.Contains(view, "observation-second") || strings.Contains(view, "observation-first") {
+		t.Fatalf("evidence paging is not bounded to the selected observation:\n%s", view)
+	}
+	applyKey(t, model, "v")
+	if view = model.renderRunsContent(180); strings.Contains(view, "Observation 2 of 2") || !strings.Contains(view, "v expand bounded evidence") {
+		t.Fatalf("evidence did not collapse:\n%s", view)
+	}
+}
+
+func TestEvidenceSnapshotMismatchFailsClosedAndCapabilityGateHidesProjection(t *testing.T) {
+	run := evidenceSnapshotRun("run-malformed", "snapshot-malformed", time.Now().UTC())
+	run.Context[runtime.EvidenceSnapshotContextKey].(map[string]interface{})["credential"] = "should-never-render"
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.runs = []*runtime.AgentRun{run}
+
+	view := model.renderRunsContent(180)
+	if !strings.Contains(view, "Snapshot projection unavailable") || !strings.Contains(view, "contract does not match") || strings.Contains(view, "should-never-render") {
+		t.Fatalf("malformed projection did not fail closed:\n%s", view)
+	}
+	applyKey(t, model, "v")
+	if model.evidenceExpanded {
+		t.Fatal("malformed evidence projection was expandable")
+	}
+
+	model.runCapability = kernelapi.Capability{}
+	if view = model.renderRunsContent(180); strings.Contains(view, "Evidence snapshot") {
+		t.Fatalf("unadvertised Run evidence was rendered:\n%s", view)
+	}
+}
+
+func evidenceSnapshotRun(id, snapshotID string, createdAt time.Time) *runtime.AgentRun {
+	run := testRun(id, runtime.AgentRunStatusCompleted, 4)
+	run.Source = runtime.RunSourceSchedule
+	run.ObjectiveID = "objective-synthesis"
+	run.CreatedAt = createdAt
+	run.UpdatedAt = createdAt
+	run.Context = map[string]interface{}{
+		"initiativeId": "initiative-research",
+		runtime.EvidenceSnapshotContextKey: map[string]interface{}{
+			"apiVersion": evidenceSnapshotAPIVersion,
+			"id":         snapshotID, "initiativeId": "initiative-research",
+			"selectedCount": 2, "expiredCount": 3, "truncated": true,
+			"observationLimit": 25, "summaryRuneLimit": 120, "totalSummaryRuneLimit": 1000,
+			"observations": []interface{}{
+				map[string]interface{}{"id": "observation-first", "sourceUri": "https://forum.example/first", "observedAt": "2026-07-20T08:00:00Z", "contentDigest": "sha256:first", "summary": "First bounded finding", "summaryTruncated": false},
+				map[string]interface{}{"id": "observation-second", "sourceUri": "https://forum.example/second", "observedAt": "2026-07-20T08:30:00Z", "contentDigest": "sha256:second", "summary": "Second bounded finding", "summaryTruncated": true},
+			},
+		},
+		// This unrelated context proves the renderer consumes only the canonical
+		// credential-free projection rather than dumping Run context.
+		"vaultBindingRef": "opaque-secret-reference",
+		"rawContent":      "unbounded source body",
+	}
+	return run
+}
+
+func applyKey(t *testing.T, model *Model, key string) {
+	t.Helper()
+	message := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+	updated, command := model.Update(message)
+	if updated != model || command != nil {
+		t.Fatalf("key %q unexpectedly replaced model or dispatched command", key)
+	}
+}
+
 func TestContractMismatchFailsClosed(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.CapabilityDocument{APIVersion: "agent-kernel/v99"}}
 	model := newTestModel(t, fake)
