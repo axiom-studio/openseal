@@ -455,6 +455,23 @@ func TestPostgresExecutionStoreConformanceAndReplicaClaims(t *testing.T) {
 	if restoredDeployment, err := agentRegistry.GetDeployment(ctx, agentScope, deployment.ID); err != nil || restoredDeployment.ActiveVersion != "2" {
 		t.Fatalf("restored deployment = %#v, %v", restoredDeployment, err)
 	}
+	placement := *activated
+	placement.RolloutStatus = kernelagent.RolloutPaused
+	placement.Credentials = map[string]capability.CredentialReference{
+		"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://postgres-e2e/model-provider"},
+	}
+	updatedPlacement, placementAudit, err := agentRegistry.UpdateDeployment(ctx, &placement, activated.Revision, "system", "reconciler", "place model provider")
+	if err != nil || updatedPlacement.RolloutStatus != kernelagent.RolloutPaused || placementAudit.ChangeKind != "configuration-updated" {
+		t.Fatalf("deployment placement = %#v %#v, %v", updatedPlacement, placementAudit, err)
+	}
+	restoredPlacement, err := replicaRegistry.GetDeployment(ctx, agentScope, deployment.ID)
+	if err != nil || restoredPlacement.Revision != updatedPlacement.Revision || restoredPlacement.Credentials["MODEL_PROVIDER"].ID != "vault://postgres-e2e/model-provider" {
+		t.Fatalf("restored placement = %#v, %v", restoredPlacement, err)
+	}
+	placementHistory, err := replicaRegistry.ListActivations(ctx, agentScope, deployment.ID)
+	if err != nil || len(placementHistory) != 3 || placementHistory[2].ChangeKind != "configuration-updated" || placementHistory[2].FromVersion != placementHistory[2].ToVersion {
+		t.Fatalf("placement history = %#v, %v", placementHistory, err)
+	}
 	compilation, err := agentRegistry.RecordCompilation(ctx, &kernelagent.DefinitionCompilation{
 		ID: "operator-source-2", Scope: agentScope, DeploymentID: deployment.ID, DefinitionID: "operator", CandidateVersion: "2",
 		Source:       kernelagent.CompilationSource{Kind: "runbook", ID: "operator-source", Version: "2", Digest: "sha256:source-2"},
