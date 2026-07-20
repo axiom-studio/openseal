@@ -49,6 +49,21 @@ type ActionCatalog interface {
 	ValidateInput(context.Context, *skill.BoundAction, map[string]interface{}) error
 }
 
+// ActionProposalValidator applies deterministic kernel rules that cannot be
+// expressed by a JSON schema. Validators run before policy evaluation and
+// persistence, so an invalid or out-of-scope model proposal never becomes an
+// approval request. A validator may return a typed, secret-safe approval
+// preview; the last non-nil preview replaces the generic Skill invocation.
+type ActionProposalValidator interface {
+	ValidateActionProposal(context.Context, ActionProposalValidationInput) (map[string]interface{}, error)
+}
+
+type ActionProposalValidationInput struct {
+	Run       *AgentRun
+	Bound     *skill.BoundAction
+	Arguments map[string]interface{}
+}
+
 type ProposeActionRequest struct {
 	Scope                  Scope
 	RunID                  string
@@ -72,16 +87,17 @@ type ProposeActionRequest struct {
 }
 
 type ActionCoordinator struct {
-	portfolio PortfolioStore
-	actions   ActionStore
-	catalog   ActionCatalog
-	policy    ActionPolicyEvaluator
-	now       func() time.Time
-	newID     func() string
+	portfolio  PortfolioStore
+	actions    ActionStore
+	catalog    ActionCatalog
+	policy     ActionPolicyEvaluator
+	validators []ActionProposalValidator
+	now        func() time.Time
+	newID      func() string
 }
 
-func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator) *ActionCoordinator {
-	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, now: time.Now, newID: uuid.NewString}
+func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
+	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: append([]ActionProposalValidator(nil), validators...), now: time.Now, newID: uuid.NewString}
 }
 
 func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionRequest) (*ActionProposalResult, error) {
@@ -122,6 +138,19 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	if err := c.catalog.ValidateInput(ctx, bound, req.Arguments); err != nil {
 		return nil, err
+	}
+	var proposedAction map[string]interface{}
+	for _, validator := range c.validators {
+		if validator == nil {
+			continue
+		}
+		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(req.Arguments)})
+		if validateErr != nil {
+			return nil, validateErr
+		}
+		if preview != nil {
+			proposedAction = cloneMap(preview)
+		}
 	}
 	if bound.Action.Idempotency == skill.IdempotencyRequired && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, errors.New("skill action requires an idempotency key")
@@ -208,7 +237,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		call.ApprovalID = approvalID
 		approval = &ApprovalCheckpoint{
 			ID: approvalID, Scope: req.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
-			Risk: bound.Action.Risk, Summary: eventSummary, PolicyReason: decision.Reason, ProposedAction: approvalPreview(bound, req.Arguments),
+			Risk: bound.Action.Risk, Summary: eventSummary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
 			EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
 			ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
@@ -218,6 +247,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.approval_requested"
+	}
+	if approval != nil && approval.ProposedAction == nil {
+		approval.ProposedAction = approvalPreview(bound, req.Arguments)
 	}
 	actor := req.Actor
 	if actor.Type == "" {
