@@ -90,6 +90,8 @@ type fakeKernelClient struct {
 	applyKeys            []string
 	placementRequests    []authoring.UpdateChangeSetPlacementRequest
 	placementKeys        []string
+	refinementRequests   []authoring.AnswerChangeSetRefinementRequest
+	refinementKeys       []string
 	retryRequests        []authoring.RetryChangeSetGenerationRequest
 	retryKeys            []string
 	governanceResults    []*authoring.ChangeSet
@@ -439,6 +441,12 @@ func (f *fakeKernelClient) GetWorkforceChangeSet(context.Context, capability.Sco
 func (f *fakeKernelClient) UpdateWorkforceChangeSetPlacement(_ context.Context, request authoring.UpdateChangeSetPlacementRequest, key string) (*authoring.ChangeSet, error) {
 	f.placementRequests = append(f.placementRequests, request)
 	f.placementKeys = append(f.placementKeys, key)
+	return f.nextGovernanceResult()
+}
+
+func (f *fakeKernelClient) AnswerWorkforceChangeSetRefinement(_ context.Context, request authoring.AnswerChangeSetRefinementRequest, key string) (*authoring.ChangeSet, error) {
+	f.refinementRequests = append(f.refinementRequests, request)
+	f.refinementKeys = append(f.refinementKeys, key)
 	return f.nextGovernanceResult()
 }
 
@@ -1480,6 +1488,94 @@ func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
 	}
 	if model.authoringChangeSet == nil || model.authoringChangeSet.ID != amended.ID || !model.authoringAmendment || !strings.Contains(model.View(), "1 field changes") {
 		t.Fatalf("durable refinement was not rendered: changeSet=%#v\n%s", model.authoringChangeSet, model.View())
+	}
+}
+
+func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	scopeQuestion := authoring.RefinementQuestion{ID: "communities", Prompt: "Which subreddits should be monitored?", WhyNeeded: "An explicit source scope is required.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerMultiSelect, Options: []authoring.RefinementQuestionOption{{ID: "sre", Label: "r/sre"}}}, Priority: 20}
+	skillQuestion := authoring.RefinementQuestion{ID: "skills", Prompt: "Which available Skills should handle Reddit and language analysis?", WhyNeeded: "The proposal must use compatible capabilities.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerSkillSelection, Options: []authoring.RefinementQuestionOption{{ID: "reddit-monitor", Label: "Reddit Monitor"}}}, Priority: 10, DependsOn: []authoring.RefinementQuestionDependency{{QuestionID: scopeQuestion.ID, RequiredOptionIDs: []string{"sre"}}}}
+	credentialQuestion := authoring.RefinementQuestion{ID: "credential", Prompt: "Which Reddit credential should be bound?", WhyNeeded: "API access requires a binding.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerCredentialReference}, Priority: 1}
+	blocked := &authoring.ChangeSet{
+		ID: "change-refine", Scope: scope, Status: authoring.ChangeSetBlocked, Revision: 3, Result: authoring.CompileResult{Valid: false},
+		Catalog:    authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{"reddit-monitor": {ID: "reddit-monitor", Name: "Reddit Monitor", Readiness: authoring.SkillReadinessNeedsBinding, Compatibility: []authoring.SkillCompatibility{{Requirement: "reddit.read", Compatible: true, Evidence: "declared action"}}}}},
+		Refinement: authoring.ChangeSetRefinement{Questions: []authoring.RefinementQuestion{scopeQuestion, skillQuestion, credentialQuestion}, Answers: []authoring.RefinementAnswerEvent{{QuestionID: scopeQuestion.ID, Value: authoring.RefinementAnswerValue{OptionIDs: []string{"sre"}}, AnsweredAt: time.Now()}}},
+	}
+	evaluating := *blocked
+	evaluating.Status, evaluating.Revision = authoring.ChangeSetEvaluating, 4
+	fake := &fakeKernelClient{governanceErrors: []error{errors.New("temporary failure")}, governanceResults: []*authoring.ChangeSet{&evaluating}}
+	model := newTestModel(t, fake)
+	model.ready, model.section = true, sectionAuthoring
+	model.authoringChangeSet, model.authoringResult = blocked, &blocked.Result
+	model.authoringCapability = kernelapi.Capability{ID: kernelapi.WorkforceAuthoringCapabilityID, Version: kernelapi.WorkforceAuthoringCapabilityVersion, Available: true, Operations: []string{kernelapi.OperationRefine}, Context: &kernelapi.CapabilityContext{ChangeSetID: blocked.ID, Revision: blocked.Revision}}
+	model.activateReadyRefinement()
+	if model.mode != modeWorkforceRefinement || model.readyRefinement() == nil || model.readyRefinement().ID != skillQuestion.ID {
+		t.Fatalf("ready refinement = mode %v question %#v", model.mode, model.readyRefinement())
+	}
+	view := model.View()
+	for _, expected := range []string{"Which available Skills", "Reddit and language analysis?", "Reddit Monitor", "needs_binding", "declared action", "Answered questions", scopeQuestion.Prompt} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("refinement view missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, credentialQuestion.Prompt) {
+		t.Fatalf("later question was rendered with the ready question:\n%s", view)
+	}
+
+	model.editor.SetValue("Reddit Monitor")
+	applyCommand(t, model, model.submitWorkforceRefinement())
+	if len(fake.refinementRequests) != 1 || fake.refinementRequests[0].ExpectedRevision != blocked.Revision || fake.refinementRequests[0].QuestionID != skillQuestion.ID || len(fake.refinementRequests[0].Value.SkillIDs) != 1 || fake.refinementRequests[0].Value.SkillIDs[0] != "reddit-monitor" || fake.refinementKeys[0] == "" {
+		t.Fatalf("first refinement request = %#v keys=%#v", fake.refinementRequests, fake.refinementKeys)
+	}
+	firstKey := fake.refinementKeys[0]
+	applyCommand(t, model, model.submitWorkforceRefinement())
+	if len(fake.refinementKeys) != 2 || fake.refinementKeys[1] != firstKey {
+		t.Fatalf("refinement retry keys = %#v", fake.refinementKeys)
+	}
+	if model.authoringChangeSet != &evaluating || model.mode != modeWorkforceAuthoring {
+		t.Fatalf("successful refinement did not resume evaluation: change=%#v mode=%v", model.authoringChangeSet, model.mode)
+	}
+}
+
+func TestWorkforceRefinementRequiresExactContextCapability(t *testing.T) {
+	question := authoring.RefinementQuestion{ID: "scope", Prompt: "Which sources?", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerText}}
+	changeSet := &authoring.ChangeSet{ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Status: authoring.ChangeSetBlocked, Revision: 2, Refinement: authoring.ChangeSetRefinement{Questions: []authoring.RefinementQuestion{question}}}
+	model := newTestModel(t, &fakeKernelClient{})
+	model.ready, model.authoringChangeSet = true, changeSet
+	model.authoringCapability = kernelapi.Capability{Available: true, Operations: []string{kernelapi.OperationRefine}, Context: &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: 1}}
+	model.editor.SetValue("r/sre")
+	if model.readyRefinement() != nil || model.submitWorkforceRefinement() != nil {
+		t.Fatal("stale contextual capability exposed refinement")
+	}
+	model.authoringCapability.Context.Revision = changeSet.Revision
+	model.authoringCapability.Operations = nil
+	if model.readyRefinement() != nil || model.submitWorkforceRefinement() != nil {
+		t.Fatal("missing refine operation exposed refinement")
+	}
+}
+
+func TestParseRefinementAnswerUsesOnlyAdvertisedTypedChoices(t *testing.T) {
+	options := []authoring.RefinementQuestionOption{{ID: "reddit", Label: "Reddit Monitor"}, {ID: "nlp", Label: "Language Analysis"}}
+	question := authoring.RefinementQuestion{Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerSkillSelection, Options: options}}
+	value, err := parseRefinementAnswer(question, "Reddit Monitor, nlp")
+	if err != nil || strings.Join(value.SkillIDs, ",") != "reddit,nlp" {
+		t.Fatalf("skill answer = %#v, %v", value, err)
+	}
+	if _, err := parseRefinementAnswer(question, "invented-skill"); err == nil {
+		t.Fatal("invented Skill selection was accepted")
+	}
+	question.Answer.Kind = authoring.RefinementAnswerCredentialReference
+	value, err = parseRefinementAnswer(question, "reddit/oauth-primary")
+	if err != nil || value.CredentialReference == nil || value.CredentialReference.Kind != "reddit" || value.CredentialReference.ID != "oauth-primary" {
+		t.Fatalf("credential answer = %#v, %v", value, err)
+	}
+	model := newTestModel(t, &fakeKernelClient{})
+	model.authoringCapability.Context = &kernelapi.CapabilityContext{CredentialBindings: []capability.CredentialBindingChoice{{Reference: *value.CredentialReference, DisplayName: "Primary Reddit"}}}
+	if _, err := model.parseRefinementAnswer(question, "reddit/invented"); err == nil {
+		t.Fatal("unadvertised credential reference was accepted")
+	}
+	if _, err := model.parseRefinementAnswer(question, "reddit/oauth-primary"); err != nil {
+		t.Fatalf("advertised credential reference was rejected: %v", err)
 	}
 }
 
