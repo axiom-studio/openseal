@@ -15,6 +15,7 @@ const (
 	evidenceGroundingPendingReview     = "pending_review"
 	evidenceGroundingRepairRequired    = "repair_required"
 	EvidenceGroundingReviewOutputLimit = int64(8192)
+	evidenceGroundingDraftInstruction  = "For evidence-backed completion, put the complete human-readable report in runOutput.report and cite every EvidenceClaim using its exact observation IDs in that report. outputSummary and the claim ledger do not replace the report."
 )
 
 type EvidenceClaim struct {
@@ -173,6 +174,7 @@ func normalizeEvidenceClaims(claims []EvidenceClaim, snapshot *EvidenceSnapshot)
 
 func stageEvidenceGrounding(response *HostedTurnResponse, snapshot *EvidenceSnapshot) {
 	claims, digest, findings := normalizeEvidenceClaims(response.EvidenceClaims, snapshot)
+	findings = append(findings, validateEvidenceGroundingDraft(response.RunOutput, claims)...)
 	status := evidenceGroundingPendingReview
 	if len(findings) > 0 {
 		status = evidenceGroundingRepairRequired
@@ -201,6 +203,33 @@ func stageEvidenceGrounding(response *HostedTurnResponse, snapshot *EvidenceSnap
 	} else {
 		response.OutputSummary = "Draft requires repair before evidence-grounding review."
 	}
+}
+
+func validateEvidenceGroundingDraft(output map[string]interface{}, claims []EvidenceClaim) []EvidenceGroundingFinding {
+	report, ok := output["report"].(string)
+	report = strings.TrimSpace(report)
+	if !ok || report == "" {
+		return []EvidenceGroundingFinding{{
+			Status:  EvidenceGroundingUnsupported,
+			Summary: "Evidence-backed completion requires the complete human-readable report in runOutput.report; outputSummary and the claim ledger are not the deliverable.",
+		}}
+	}
+	findings := make([]EvidenceGroundingFinding, 0)
+	for _, claim := range claims {
+		missing := make([]string, 0)
+		for _, reference := range claim.EvidenceRefs {
+			if !strings.Contains(report, reference) {
+				missing = append(missing, reference)
+			}
+		}
+		if len(missing) > 0 {
+			findings = append(findings, EvidenceGroundingFinding{
+				ClaimID: claim.ID, Status: EvidenceGroundingUnsupported, EvidenceRefs: missing,
+				Summary: "The human-readable report must cite every exact observation ID used by this claim.",
+			})
+		}
+	}
+	return findings
 }
 
 func evidenceGroundingStateMap(state evidenceGroundingState) map[string]interface{} {
