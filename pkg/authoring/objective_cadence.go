@@ -40,10 +40,18 @@ type authoredObjectiveRunBudget struct {
 }
 
 type authoredObjectiveRunTemplate struct {
-	Entrypoint string                                 `json:"entrypoint,omitempty"`
-	Context    map[string]interface{}                 `json:"context,omitempty"`
-	Policy     map[string]interface{}                 `json:"policy,omitempty"`
-	Capability *authoredObjectiveCapabilityInvocation `json:"capability,omitempty"`
+	Entrypoint         string                                 `json:"entrypoint,omitempty"`
+	Context            map[string]interface{}                 `json:"context,omitempty"`
+	Policy             map[string]interface{}                 `json:"policy,omitempty"`
+	Capability         *authoredObjectiveCapabilityInvocation `json:"capability,omitempty"`
+	EvidenceProjection *authoredObjectiveEvidenceProjection   `json:"evidenceProjection,omitempty"`
+}
+
+type authoredObjectiveEvidenceProjection struct {
+	Disabled            bool `json:"disabled,omitempty"`
+	MaximumObservations int  `json:"maximumObservations,omitempty"`
+	MaximumSummaryRunes int  `json:"maximumSummaryRunes,omitempty"`
+	MaximumTotalRunes   int  `json:"maximumTotalRunes,omitempty"`
 }
 
 type authoredObjectiveCapabilityInvocation struct {
@@ -114,15 +122,6 @@ func validateAuthoredObjectiveEventRules(value map[string]interface{}) error {
 		if strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.EventType) == "" {
 			return fmt.Errorf("objective eventRules rule %d requires id and eventType", index)
 		}
-		if budget := rule.RunBudget; budget != nil {
-			if budget.MaxAttempts < 0 || budget.MaxTurns < 0 || budget.MaxInputTokens < 0 || budget.MaxOutputTokens < 0 ||
-				budget.MaxTotalTokens < 0 || budget.MaxCostMicros < 0 || budget.MaxDurationMS < 0 || budget.MaxActions < 0 {
-				return fmt.Errorf("objective eventRules rule %d runBudget limits cannot be negative", index)
-			}
-			if budget.WarningPermille < 0 || budget.WarningPermille > 1000 {
-				return fmt.Errorf("objective eventRules rule %d runBudget warningPermille must be between 0 and 1000", index)
-			}
-		}
 		if template := rule.RunTemplate; template != nil {
 			if len(strings.TrimSpace(template.Entrypoint)) > 128 {
 				return fmt.Errorf("objective eventRules rule %d runTemplate entrypoint cannot exceed 128 characters", index)
@@ -138,6 +137,12 @@ func validateAuthoredObjectiveEventRules(value map[string]interface{}) error {
 					return errors.New("objective capability run budget requires at least 2 turns when bounded")
 				}
 			}
+			if err := validateAuthoredEvidenceProjection(template.EvidenceProjection); err != nil {
+				return fmt.Errorf("objective eventRules rule %d: %w", index, err)
+			}
+		}
+		if err := validateAuthoredObjectiveRunBudget(rule.RunBudget, rule.RunTemplate == nil || rule.RunTemplate.Capability == nil); err != nil {
+			return fmt.Errorf("objective eventRules rule %d: %w", index, err)
 		}
 	}
 	return nil
@@ -156,15 +161,6 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 	}
 	if cadence.MaximumConcurrent < 0 {
 		return errors.New("objective cadence maximumConcurrent cannot be negative")
-	}
-	if budget := cadence.RunBudget; budget != nil {
-		if budget.MaxAttempts < 0 || budget.MaxTurns < 0 || budget.MaxInputTokens < 0 || budget.MaxOutputTokens < 0 ||
-			budget.MaxTotalTokens < 0 || budget.MaxCostMicros < 0 || budget.MaxDurationMS < 0 || budget.MaxActions < 0 {
-			return errors.New("objective cadence runBudget limits cannot be negative")
-		}
-		if budget.WarningPermille < 0 || budget.WarningPermille > 1000 {
-			return errors.New("objective cadence runBudget warningPermille must be between 0 and 1000")
-		}
 	}
 	switch cadence.Type {
 	case "interval":
@@ -208,6 +204,65 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 				return errors.New("objective capability run budget requires at least 2 turns when bounded")
 			}
 		}
+		if err := validateAuthoredEvidenceProjection(template.EvidenceProjection); err != nil {
+			return err
+		}
+	}
+	if err := validateAuthoredObjectiveRunBudget(cadence.RunBudget, cadence.RunTemplate == nil || cadence.RunTemplate.Capability == nil); err != nil {
+		return fmt.Errorf("objective cadence: %w", err)
+	}
+	return nil
+}
+
+const (
+	minimumHostedObjectiveInputTokens  int64 = 16000
+	minimumHostedObjectiveOutputTokens int64 = 1000
+)
+
+func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, hosted bool) error {
+	if budget == nil {
+		return nil
+	}
+	if budget.MaxAttempts < 0 || budget.MaxTurns < 0 || budget.MaxInputTokens < 0 || budget.MaxOutputTokens < 0 ||
+		budget.MaxTotalTokens < 0 || budget.MaxCostMicros < 0 || budget.MaxDurationMS < 0 || budget.MaxActions < 0 {
+		return errors.New("runBudget limits cannot be negative")
+	}
+	if budget.WarningPermille < 0 || budget.WarningPermille > 1000 {
+		return errors.New("runBudget warningPermille must be between 0 and 1000")
+	}
+	if !hosted {
+		return nil
+	}
+	if budget.MaxInputTokens > 0 && budget.MaxInputTokens < minimumHostedObjectiveInputTokens {
+		return fmt.Errorf("hosted runBudget maxInputTokens must be zero (unbounded) or at least %d", minimumHostedObjectiveInputTokens)
+	}
+	if budget.MaxOutputTokens > 0 && budget.MaxOutputTokens < minimumHostedObjectiveOutputTokens {
+		return fmt.Errorf("hosted runBudget maxOutputTokens must be zero (unbounded) or at least %d", minimumHostedObjectiveOutputTokens)
+	}
+	if budget.MaxTotalTokens > 0 {
+		input := budget.MaxInputTokens
+		if input == 0 {
+			input = minimumHostedObjectiveInputTokens
+		}
+		output := budget.MaxOutputTokens
+		if output == 0 {
+			output = minimumHostedObjectiveOutputTokens
+		}
+		if budget.MaxTotalTokens < input+output {
+			return fmt.Errorf("hosted runBudget maxTotalTokens must be at least maxInputTokens + maxOutputTokens (%d)", input+output)
+		}
+	}
+	return nil
+}
+
+func validateAuthoredEvidenceProjection(projection *authoredObjectiveEvidenceProjection) error {
+	if projection == nil {
+		return nil
+	}
+	if projection.MaximumObservations < 0 || projection.MaximumObservations > 99 ||
+		projection.MaximumSummaryRunes < 0 || projection.MaximumSummaryRunes > 4000 ||
+		projection.MaximumTotalRunes < 0 || projection.MaximumTotalRunes > 100000 {
+		return errors.New("objective evidenceProjection bounds are invalid")
 	}
 	return nil
 }
