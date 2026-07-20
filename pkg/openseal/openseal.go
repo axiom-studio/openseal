@@ -773,6 +773,9 @@ var (
 	ObjectiveManagementSkill           = runtime.ObjectiveManagementSkill
 	NewObjectiveActionValidator        = runtime.NewObjectiveActionValidator
 	NewObjectiveActionDispatcher       = runtime.NewObjectiveActionDispatcher
+	TeamManagementSkill                = runtime.TeamManagementSkill
+	NewTeamRoleActionValidator         = runtime.NewTeamRoleActionValidator
+	NewTeamRoleActionDispatcher        = runtime.NewTeamRoleActionDispatcher
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -968,6 +971,9 @@ const (
 	ObjectiveActionCreate            = runtime.ObjectiveActionCreate
 	ObjectiveActionUpdate            = runtime.ObjectiveActionUpdate
 	ObjectiveActionPause             = runtime.ObjectiveActionPause
+	TeamManagementSkillID            = runtime.TeamManagementSkillID
+	TeamManagementSkillVersion       = runtime.TeamManagementSkillVersion
+	TeamActionUpdateRole             = runtime.TeamActionUpdateRole
 	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
 	ObjectiveCadenceDaily            = runtime.ObjectiveCadenceDaily
 	ObjectiveCadenceWeekly           = runtime.ObjectiveCadenceWeekly
