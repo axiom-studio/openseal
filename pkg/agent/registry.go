@@ -170,6 +170,9 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployme
 		!proposed.CreatedAt.Equal(current.CreatedAt) {
 		return nil, nil, errors.New("agent deployment update cannot change identity or definition lineage")
 	}
+	if err := validateRolloutTransition(current.RolloutStatus, proposed.RolloutStatus); err != nil {
+		return nil, nil, err
+	}
 	updated := cloneDeployment(proposed)
 	updated.SkillBindingIDs = normalizedStrings(updated.SkillBindingIDs)
 	updated.Revision = current.Revision + 1
@@ -198,6 +201,28 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployme
 	}
 	copyActivation := activation
 	return cloneDeployment(updated), &copyActivation, nil
+}
+
+// validateRolloutTransition keeps lifecycle changes explicit and irreversible.
+// A retired deployment is an auditable terminal record; callers create a new
+// deployment instead of silently resurrecting or rewriting it.
+func validateRolloutTransition(current, proposed RolloutStatus) error {
+	if current == RolloutRetired {
+		return errors.New("retired agent deployments cannot be changed")
+	}
+	if current == proposed {
+		return nil
+	}
+	allowed := map[RolloutStatus]map[RolloutStatus]bool{
+		RolloutPending:  {RolloutActive: true, RolloutPaused: true, RolloutRetired: true},
+		RolloutActive:   {RolloutPaused: true, RolloutRetired: true},
+		RolloutDegraded: {RolloutPaused: true, RolloutRetired: true},
+		RolloutPaused:   {RolloutActive: true, RolloutRetired: true},
+	}
+	if allowed[current][proposed] {
+		return nil
+	}
+	return errors.New("invalid agent deployment rollout transition")
 }
 
 func deploymentConfigurationEqual(left, right *AgentDeployment) bool {

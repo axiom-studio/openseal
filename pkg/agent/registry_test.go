@@ -224,6 +224,38 @@ func TestUpdateDeploymentFailsClosedOnLineageWideningSecretsAndStaleState(t *tes
 	}
 }
 
+func TestUpdateDeploymentEnforcesTerminalLifecycle(t *testing.T) {
+	registry := NewRegistry()
+	registered, err := registry.RegisterDefinition(context.Background(), testDefinition("1", capability.RiskLevelRead, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployment, _, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
+		ID: "agent", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
+		RolloutStatus: RolloutActive, Environment: "production", Capacity: DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "initial placement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := cloneDeployment(deployment)
+	invalid.RolloutStatus = RolloutPending
+	if _, _, err = registry.UpdateDeployment(context.Background(), invalid, deployment.Revision, "user", "admin", "move backwards"); err == nil || !strings.Contains(err.Error(), "rollout transition") {
+		t.Fatalf("invalid transition error = %v", err)
+	}
+	retired := cloneDeployment(deployment)
+	retired.RolloutStatus = RolloutRetired
+	retired, _, err = registry.UpdateDeployment(context.Background(), retired, deployment.Revision, "user", "admin", "retire obsolete deployment")
+	if err != nil || retired.RolloutStatus != RolloutRetired {
+		t.Fatalf("retire = %#v, %v", retired, err)
+	}
+	resurrected := cloneDeployment(retired)
+	resurrected.RolloutStatus = RolloutActive
+	if _, _, err = registry.UpdateDeployment(context.Background(), resurrected, retired.Revision, "user", "admin", "resurrect"); err == nil || !strings.Contains(err.Error(), "cannot be changed") {
+		t.Fatalf("retired mutation error = %v", err)
+	}
+}
+
 func TestAmendmentsRequireAllowedDiffEvaluationApprovalAndAtomicActivation(t *testing.T) {
 	registry := NewRegistry()
 	base := testDefinition("1.0.0", capability.RiskLevelExternal, 4)
