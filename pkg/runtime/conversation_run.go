@@ -8,6 +8,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 const (
@@ -413,8 +415,11 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 				}
 				return r.runAgentTurn(ctx, input, conversation, triggerID, boundAgentRunner)
 			}),
+			DeploymentID: agentBinding.DeploymentID,
 			DefinitionID: agentBinding.DefinitionID, DefinitionVersion: agentBinding.DefinitionVersion,
 			ModelProvider: agentBinding.ModelProvider, Model: agentBinding.Model,
+			ModelActions:      append([]capability.ModelAction(nil), agentBinding.ModelActions...),
+			PreparedRuntimes:  append([]PreparedSkillRuntime(nil), agentBinding.PreparedRuntimes...),
 			InputContextRefs:  append([]string(nil), agentBinding.InputContextRefs...),
 			BudgetReservation: agentBinding.BudgetReservation,
 		}, nil

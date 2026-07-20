@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
@@ -231,7 +233,8 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 			t.Fatalf("hosted Agent projection = %#v", run)
 		}
 		return &TurnRunnerBinding{
-			DefinitionID: "agent-definition", DefinitionVersion: "7", ModelProvider: "host", Model: "agent-model",
+			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "7", ModelProvider: "host", Model: "agent-model",
+			ModelActions:     []capability.ModelAction{{Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create", BindingID: "bundled:objectives", BindingRevision: 1}},
 			InputContextRefs: []string{"skill:summarize@1"}, BudgetReservation: BudgetUsage{Turns: 1},
 			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 				if input.Run.Kind != RunKindAgentWork || input.Run.AssignedAgentID != run.AssignedAgentID ||
@@ -254,9 +257,9 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 		t.Fatal(err)
 	}
 	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
-	if err != nil || binding.DefinitionID != "agent-definition" || binding.DefinitionVersion != "7" ||
+	if err != nil || binding.DeploymentID != "agent-42" || binding.DefinitionID != "agent-definition" || binding.DefinitionVersion != "7" ||
 		binding.ModelProvider != "host" || binding.Model != "agent-model" || len(binding.InputContextRefs) != 1 ||
-		binding.BudgetReservation.Turns != 1 {
+		binding.BudgetReservation.Turns != 1 || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "bundled:objectives" {
 		t.Fatalf("Agent conversation binding = %#v, %v", binding, err)
 	}
 	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
