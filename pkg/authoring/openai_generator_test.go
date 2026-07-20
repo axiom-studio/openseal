@@ -75,6 +75,7 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"use at least maxInputTokens 16000 and maxOutputTokens 1000",
 		"use 16000/10000/26000 unless the user gives stricter compatible limits",
 		"evidenceProjection adds a separate durable semantic review",
+		"maxAttempts at least 5",
 		"maxTurns at least 4, maxInputTokens at least 32000, and maxOutputTokens at least 30000",
 		"maxTotalTokens 62000",
 		"Evidence projection is kernel-built from retained Initiative observations",
