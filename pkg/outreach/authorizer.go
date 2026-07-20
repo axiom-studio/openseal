@@ -1,6 +1,7 @@
 package outreach
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,6 +50,48 @@ func NewCanonicalInvocationAuthorizer(state AuthorizationState, policies PolicyR
 		return nil, errors.New("outreach authorization state and policy resolver are required")
 	}
 	return &CanonicalInvocationAuthorizer{state: state, policies: policies}, nil
+}
+
+// TransportInvocationAuthorizer consumes a trusted policy decision injected
+// by a control plane after action-schema validation. It exists only for
+// migration adapters whose execution host cannot reload kernel state; direct
+// and standalone execution should use CanonicalInvocationAuthorizer.
+type TransportInvocationAuthorizer struct{}
+
+func (TransportInvocationAuthorizer) AuthorizeOutreachInvocation(_ context.Context, invocation runtime.ToolInvocation) (*InvocationAuthorization, error) {
+	approvalPolicy, _ := invocation.Arguments[ApprovalPolicyTransportKey].(string)
+	actionCallID, _ := invocation.Arguments[ActionCallIDTransportKey].(string)
+	runID, _ := invocation.Arguments[RunIDTransportKey].(string)
+	deploymentID, _ := invocation.Arguments[DeploymentIDTransportKey].(string)
+	if actionCallID != invocation.ActionCallID || runID != invocation.RunID || deploymentID != invocation.DeploymentID ||
+		strings.TrimSpace(approvalPolicy) == "" {
+		return nil, errors.New("trusted outreach transport identity is incomplete or inconsistent")
+	}
+	decision, err := decodeTransportPolicyDecision(invocation.Arguments[PolicyDecisionTransportKey])
+	if err != nil {
+		return nil, err
+	}
+	return &InvocationAuthorization{Decision: *decision, ApprovalPolicy: approvalPolicy}, nil
+}
+
+func decodeTransportPolicyDecision(value interface{}) (*source.OutreachPolicyDecision, error) {
+	if value == nil {
+		return nil, errors.New("trusted outreach policy decision is required")
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, errors.New("trusted outreach policy decision is invalid")
+	}
+	var decision source.OutreachPolicyDecision
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decision); err != nil {
+		return nil, errors.New("trusted outreach policy decision is invalid")
+	}
+	if err := decision.Authorize("https://"+decision.SourceHost+decision.PathPrefix, 1, decision.ApprovalPolicy); err != nil {
+		return nil, errors.New("trusted outreach policy decision is invalid")
+	}
+	return &decision, nil
 }
 
 func (a *CanonicalInvocationAuthorizer) AuthorizeOutreachInvocation(ctx context.Context, invocation runtime.ToolInvocation) (*InvocationAuthorization, error) {

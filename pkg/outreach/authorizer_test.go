@@ -108,6 +108,25 @@ func TestCanonicalInvocationAuthorizerRequiresApprovedCheckpointAndExactAction(t
 	}
 }
 
+func TestTransportInvocationAuthorizerRequiresExactTrustedHandoff(t *testing.T) {
+	decision := source.OutreachPolicyDecision{PolicyID: "community", PolicyVersion: "1", SourceHost: "hooks.example.com", PathPrefix: "/replies", ApprovalPolicy: "human-review", MaximumBytes: 1000}
+	invocation := runtime.ToolInvocation{Name: SkillID, DeploymentID: "researcher", SkillID: SkillID, SkillVersion: SkillVersion, Action: PostReply, ActionCallID: "action-1", RunID: "run-1",
+		Arguments: map[string]interface{}{PolicyDecisionTransportKey: decision, ApprovalPolicyTransportKey: "human-review", ActionCallIDTransportKey: "action-1", RunIDTransportKey: "run-1", DeploymentIDTransportKey: "researcher"}}
+	authorization, err := (TransportInvocationAuthorizer{}).AuthorizeOutreachInvocation(t.Context(), invocation)
+	if err != nil || authorization.Decision.PolicyID != "community" || authorization.ApprovalPolicy != "human-review" {
+		t.Fatalf("authorization=%#v err=%v", authorization, err)
+	}
+	invocation.Arguments[RunIDTransportKey] = "another-run"
+	if _, err := (TransportInvocationAuthorizer{}).AuthorizeOutreachInvocation(t.Context(), invocation); err == nil {
+		t.Fatal("drifted trusted transport identity was accepted")
+	}
+	invocation.Arguments[RunIDTransportKey] = "run-1"
+	invocation.Arguments[PolicyDecisionTransportKey] = map[string]interface{}{"policyId": "community", "policyVersion": "1", "sourceHost": "hooks.example.com", "pathPrefix": "/replies", "approvalPolicy": "human-review", "maximumBytes": 1000, "unexpected": true}
+	if _, err := (TransportInvocationAuthorizer{}).AuthorizeOutreachInvocation(t.Context(), invocation); err == nil {
+		t.Fatal("unknown trusted policy field was accepted")
+	}
+}
+
 func authorizedFixture(withApproval bool) (*authorizationStateStub, runtime.ToolInvocation, *source.Policy) {
 	scope := runtime.Scope{Kind: "local", ID: "research"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team-1"}

@@ -18,6 +18,8 @@ const (
 	PolicyDecisionTransportKey = "_opensealOutreachPolicyDecision"
 	ApprovalPolicyTransportKey = "_opensealOutreachApprovalPolicy"
 	ActionCallIDTransportKey   = "_opensealOutreachActionCallId"
+	RunIDTransportKey          = "_opensealOutreachRunId"
+	DeploymentIDTransportKey   = "_opensealOutreachDeploymentId"
 )
 
 func SkillDefinition() *skill.Definition {
