@@ -53,3 +53,42 @@ func TestLiveGeneratorCompilesRepresentativeMarketingTeam(t *testing.T) {
 		t.Fatal("provider API key leaked into authoring result")
 	}
 }
+
+func TestLiveGeneratorPreservesReleaseNotesCommitments(t *testing.T) {
+	endpoint, apiKey, model := os.Getenv("OPENSEAL_LLM_BASE_URL"), os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENSEAL_LLM_MODEL")
+	if endpoint == "" || apiKey == "" || model == "" {
+		t.Skip("OpenSeal live authoring provider is not configured")
+	}
+	generator, err := NewOpenAICompatibleGenerator(endpoint, apiKey, model, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(generator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	result, err := compiler.Compile(ctx, GenerateRequest{Mode: ModeCreate, Prompt: liveReleaseNotesPrompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Validation) != 0 || len(result.MissingRequirements) != 0 || len(result.Candidate.Agents) != 1 {
+		t.Fatalf("release-notes candidate = %#v", result)
+	}
+	definition := result.Candidate.Agents[0]
+	if definition == nil || len(definition.ObjectiveTemplates) != 1 {
+		t.Fatalf("release-notes objective placement = %#v", definition)
+	}
+	if definition.Authority.RequireApprovalAt == "" || riskRank(definition.Authority.RequireApprovalAt) > riskRank(capability.RiskLevelWrite) {
+		t.Fatalf("release-notes approval threshold = %q", definition.Authority.RequireApprovalAt)
+	}
+	if result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 1 || len(result.Commitments.ObjectiveCounts) != 1 ||
+		len(result.Commitments.ApprovalRequirements) != 1 {
+		t.Fatalf("release-notes commitments = %#v", result.Commitments)
+	}
+	encoded, _ := json.Marshal(result)
+	if bytes.Contains(encoded, []byte(apiKey)) {
+		t.Fatal("provider API key leaked into authoring result")
+	}
+}

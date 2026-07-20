@@ -22,14 +22,16 @@ type repairingGenerator struct {
 	generated []byte
 	repaired  []byte
 	repairs   int
+	lastError error
 }
 
 func (g *repairingGenerator) Generate(context.Context, GenerateRequest) ([]byte, error) {
 	return g.generated, nil
 }
 
-func (g *repairingGenerator) Repair(_ context.Context, _ GenerateRequest, _ []byte, _ error) ([]byte, error) {
+func (g *repairingGenerator) Repair(_ context.Context, _ GenerateRequest, _ []byte, repairError error) ([]byte, error) {
 	g.repairs++
+	g.lastError = repairError
 	return g.repaired, nil
 }
 
