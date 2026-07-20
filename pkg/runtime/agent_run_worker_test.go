@@ -14,6 +14,76 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+type workerBudgetPlanningRunner struct {
+	planned BudgetUsage
+	seen    chan BudgetUsage
+}
+
+func (r *workerBudgetPlanningRunner) PlanTurnBudget(context.Context, TurnExecutionContext) (BudgetUsage, error) {
+	return r.planned, nil
+}
+
+func (r *workerBudgetPlanningRunner) RunTurn(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+	reservation := input.Run.BudgetReservations[input.Turn.ID].Usage
+	r.seen <- reservation
+	return &TurnOutcome{
+		NextRunStatus: AgentRunStatusCompleted,
+		OutputSummary: "bounded work complete",
+		Usage:         TurnUsage{InputTokens: int(reservation.InputTokens), OutputTokens: int(reservation.OutputTokens)},
+	}, nil
+}
+
+func TestAgentRunWorkerPreservesRunnerBudgetPlanning(t *testing.T) {
+	store := NewMemoryStore(50)
+	scope := Scope{Kind: "tenant", ID: "7"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher",
+		Goal: "Synthesize bounded evidence", Source: RunSourceManual,
+		Budget: &BudgetPolicy{MaxTurns: 2, MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &workerBudgetPlanningRunner{planned: BudgetUsage{InputTokens: 5000, OutputTokens: 1000}, seen: make(chan BudgetUsage, 1)}
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DefinitionID: "researcher", DefinitionVersion: "1", Runner: runner}, nil
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "researcher", Concurrency: 1, MaxTurnsPerClaim: 1,
+		PollInterval: 10 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+	defer pool.Stop()
+	select {
+	case reservation := <-runner.seen:
+		if reservation.Turns != 1 || reservation.InputTokens != 5000 || reservation.OutputTokens != 1000 {
+			t.Fatalf("worker discarded planned reservation: %#v", reservation)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("worker did not execute the bounded turn")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		completed, getErr := NewPortfolioService(store).GetAgentRun(ctx, scope, run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if completed.Status == AgentRunStatusCompleted {
+			if completed.BudgetUsage.Turns != 1 || completed.BudgetUsage.InputTokens != 5000 || completed.BudgetUsage.OutputTokens != 1000 || len(completed.BudgetReservations) != 0 {
+				t.Fatalf("planned reservation was not settled exactly: %#v", completed)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("bounded worker Run did not complete")
+}
+
 func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
 	tests := []struct {
 		name  string
