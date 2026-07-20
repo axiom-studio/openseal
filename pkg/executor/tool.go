@@ -48,7 +48,6 @@ func NewToolRegistry() *ToolRegistry {
 	r.Register("debug", NewDebugToolExecutor)
 	r.Register("memory", NewMemoryToolExecutor)
 	r.Register("mcp", NewMCPToolExecutor)
-	r.Register("openclaw-skill", NewOpenClawSkillToolExecutor)
 
 	return r
 }
