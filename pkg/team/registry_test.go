@@ -196,6 +196,14 @@ func TestRegistryGovernsEvaluatesApprovesAndAtomicallyActivatesTeamAmendment(t *
 	if err != nil || amendment.Status != AmendmentEvaluating || len(amendment.Changes) != 1 || amendment.Changes[0].Field != "purpose" {
 		t.Fatalf("proposed amendment = %#v, err = %v", amendment, err)
 	}
+	listed, err := registry.ListAmendments(ctx, scope, deployment.ID)
+	if err != nil || len(listed) != 1 || listed[0].ID != amendment.ID {
+		t.Fatalf("listed amendments = %#v, err = %v", listed, err)
+	}
+	foreign, err := registry.ListAmendments(ctx, capability.ScopeReference{Kind: "tenant", ID: "other"}, deployment.ID)
+	if err != nil || len(foreign) != 0 {
+		t.Fatalf("cross-scope amendments = %#v, err = %v", foreign, err)
+	}
 	evaluated, err := registry.SubmitAmendmentEvaluation(ctx, SubmitAmendmentEvaluationRequest{
 		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision,
 		Evaluations: []AmendmentEvaluation{{CriterionID: "coordination", Passed: true, Summary: "No coordination regression", EvidenceRefs: []string{"artifact:eval-result"}}},

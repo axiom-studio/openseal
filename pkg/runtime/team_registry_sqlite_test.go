@@ -79,6 +79,10 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	if err != nil || restoredAmendment.Status != kernelteam.AmendmentActivated || restoredAmendment.ActivationID != activated.ActivationID {
 		t.Fatalf("restored Team amendment = %#v, err = %v", restoredAmendment, err)
 	}
+	restoredAmendments, err := restartedTeams.ListAmendments(ctx, scope, deployment.ID)
+	if err != nil || len(restoredAmendments) != 1 || restoredAmendments[0].ID != amendment.ID {
+		t.Fatalf("restored Team amendment list = %#v, err = %v", restoredAmendments, err)
+	}
 	restored, err := restartedTeams.GetDeployment(ctx, scope, deployment.ID)
 	if err != nil || restored.ActiveVersion != updated.ActiveVersion || restored.Revision != 2 || restored.Roster[0].AgentDeploymentID != agentDeployment.ID {
 		t.Fatalf("restored Team = %#v, err = %v", restored, err)

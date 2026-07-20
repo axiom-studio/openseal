@@ -287,6 +287,13 @@ func (r *Registry) GetAmendment(ctx context.Context, scope capability.ScopeRefer
 	return r.store.GetTeamAmendment(ctx, scope, amendmentID)
 }
 
+// ListAmendments returns the scoped durable governance history for a Team
+// deployment, newest first. An empty deployment id lists the scope-wide
+// history for administrative clients without weakening scope isolation.
+func (r *Registry) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*DefinitionAmendment, error) {
+	return r.store.ListTeamAmendments(ctx, scope, strings.TrimSpace(deploymentID))
+}
+
 func (r *Registry) SubmitAmendmentEvaluation(ctx context.Context, req SubmitAmendmentEvaluationRequest) (*DefinitionAmendment, error) {
 	current, err := r.store.GetTeamAmendment(ctx, req.Scope, req.AmendmentID)
 	if err != nil {

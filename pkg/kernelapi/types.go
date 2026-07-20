@@ -87,6 +87,8 @@ const (
 	OperationGetCheckpoint     = "get-checkpoint"
 	OperationDeliver           = "deliver"
 	OperationProposeAmendment  = "propose-amendment"
+	OperationListAmendments    = "list-amendments"
+	OperationGetAmendment      = "get-amendment"
 	OperationEvaluateAmendment = "evaluate-amendment"
 	OperationResolveAmendment  = "resolve-amendment"
 	OperationActivateAmendment = "activate-amendment"
@@ -199,6 +201,24 @@ type TeamDeploymentResult struct {
 
 type TeamDeploymentList struct {
 	Items []TeamDeploymentCatalogEntry `json:"items"`
+}
+
+type TeamDefinitionAmendmentList struct {
+	Items []*kernelteam.DefinitionAmendment `json:"items"`
+}
+
+type ActivateTeamDefinitionAmendmentRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	ActorType        string                    `json:"actorType"`
+	ActorID          string                    `json:"actorId"`
+	Reason           string                    `json:"reason,omitempty"`
+}
+
+type TeamDefinitionAmendmentActivationResult struct {
+	Amendment  *kernelteam.DefinitionAmendment `json:"amendment"`
+	Deployment *kernelteam.Deployment          `json:"deployment"`
+	Activation *workforce.DefinitionActivation `json:"activation"`
 }
 
 type TeamDeploymentCatalogEntry struct {
@@ -378,7 +398,7 @@ func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Capabi
 		Operations: []string{OperationRegister, OperationGet, OperationList, OperationDeploy, OperationUpdate, OperationActivate},
 	}
 	if features.Amendments {
-		capability.Operations = append(capability.Operations, OperationProposeAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment)
+		capability.Operations = append(capability.Operations, OperationProposeAmendment, OperationListAmendments, OperationGetAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment)
 	}
 	return capability
 }

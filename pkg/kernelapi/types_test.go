@@ -163,7 +163,7 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 		t.Fatalf("portable Team definition capability = %#v", capability)
 	}
 	amendments := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{Amendments: true})
-	for _, operation := range []string{OperationProposeAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment} {
+	for _, operation := range []string{OperationProposeAmendment, OperationListAmendments, OperationGetAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment} {
 		if !amendments.Supports(operation) {
 			t.Fatalf("configured Team amendment operation %q not advertised: %#v", operation, amendments.Operations)
 		}
