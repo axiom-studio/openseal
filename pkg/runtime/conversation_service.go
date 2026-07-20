@@ -732,6 +732,13 @@ func cloneParticipationProposals(in []ParticipationProposal) []ParticipationProp
 		out[index].Audience.Roles = append([]string(nil), in[index].Audience.Roles...)
 		out[index].Mentions = cloneParticipants(in[index].Mentions)
 		out[index].References = cloneConversationReferences(in[index].References)
+		if in[index].ProposedAction != nil {
+			action := *in[index].ProposedAction
+			action.EvidenceRefs = append([]string(nil), in[index].ProposedAction.EvidenceRefs...)
+			action.PreparedRuntime = nil
+			out[index].ProposedAction = &action
+		}
+		out[index].ActionInputs = cloneMap(in[index].ActionInputs)
 	}
 	return out
 }

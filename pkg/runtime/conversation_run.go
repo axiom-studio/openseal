@@ -323,6 +323,10 @@ type ConversationRunTurnRunnerConfig struct {
 	// authorized Skills for Agent-owned channels. Team-owned channels continue
 	// through governed multi-participant arbitration.
 	AgentTurns TurnRunnerResolver
+	// TeamActions resolves the exact Team-level capability binding used after
+	// participant arbitration. It must return only trusted binding metadata;
+	// the Conversation runner remains the Turn runner.
+	TeamActions TurnRunnerResolver
 }
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
@@ -356,6 +360,7 @@ type ConversationRunTurnRunner struct {
 	coordinator   *ConversationCoordinator
 	config        ConversationRunTurnRunnerConfig
 	agentTurns    TurnRunnerResolver
+	teamActions   TurnRunnerResolver
 	now           func() time.Time
 }
 
@@ -373,7 +378,7 @@ func NewConversationRunTurnRunner(
 	}
 	return &ConversationRunTurnRunner{
 		conversations: NewConversationService(conversationStore), coordinator: coordinator,
-		config: normalized, agentTurns: normalized.AgentTurns, now: time.Now,
+		config: normalized, agentTurns: normalized.AgentTurns, teamActions: normalized.TeamActions, now: time.Now,
 	}, nil
 }
 
@@ -424,11 +429,25 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			BudgetReservation: agentBinding.BudgetReservation,
 		}, nil
 	}
-	return &TurnRunnerBinding{
+	binding := &TurnRunnerBinding{
 		Runner: r, DefinitionID: "openseal.conversation-coordinator", DefinitionVersion: "1",
 		ModelProvider: "host", Model: "participant-runtime",
 		InputContextRefs: []string{conversationRunContextConversationID, conversationRunContextTriggerID},
-	}, nil
+	}
+	if r.teamActions != nil {
+		actions, err := r.teamActions.ResolveTurnRunner(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+		if actions == nil || strings.TrimSpace(actions.DeploymentID) == "" {
+			return nil, ErrConversationCoordinationUnavailable
+		}
+		binding.DeploymentID = actions.DeploymentID
+		binding.ModelActions = append([]capability.ModelAction(nil), actions.ModelActions...)
+		binding.PreparedRuntimes = append([]PreparedSkillRuntime(nil), actions.PreparedRuntimes...)
+		binding.InputContextRefs = append(binding.InputContextRefs, actions.InputContextRefs...)
+	}
+	return binding, nil
 }
 
 func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
@@ -463,6 +482,41 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	for _, message := range result.Messages {
 		messageIDs = append(messageIDs, message.ID)
 	}
+	proposal := selectedParticipationAction(result.Round)
+	if proposal != nil {
+		if teamActionSucceeded(input.Run.Checkpoint, proposal.ProposedAction) {
+			message, replayed, postErr := r.postTeamActionCompletion(ctx, input.Run, conversation, triggerID, proposal.Participant, proposal.ProposedAction)
+			if postErr != nil {
+				return nil, postErr
+			}
+			messageIDs = append(messageIDs, message.ID)
+			return &TurnOutcome{
+				NextRunStatus: AgentRunStatusCompleted,
+				OutputSummary: "Governed Team action completed",
+				RunOutput: map[string]interface{}{
+					"conversationId": conversationID, "triggerMessageId": triggerID,
+					"participationRoundId": result.Round.ID, "messageIds": messageIDs,
+					"speakerCount": len(result.Messages), "replayed": replayed,
+				},
+			}, nil
+		}
+		action := *proposal.ProposedAction
+		action.EvidenceRefs = append([]string(nil), proposal.ProposedAction.EvidenceRefs...)
+		if strings.TrimSpace(action.IdempotencyKey) == "" {
+			action.IdempotencyKey = "team-participation-action:" + result.Round.ID + ":" + proposal.ID
+		}
+		return &TurnOutcome{
+			NextRunStatus:          AgentRunStatusRunning,
+			OutputSummary:          "Team participant proposed a governed action",
+			ProposedActions:        []TurnAction{action},
+			ContinuationCheckpoint: cloneMap(proposal.ActionInputs),
+			RunOutput: map[string]interface{}{
+				"conversationId": conversationID, "triggerMessageId": triggerID,
+				"participationRoundId": result.Round.ID, "messageIds": messageIDs,
+				"speakerCount": len(result.Messages), "replayed": result.Replayed,
+			},
+		}, nil
+	}
 	return &TurnOutcome{
 		NextRunStatus: AgentRunStatusCompleted,
 		OutputSummary: "Team channel participation coordinated",
@@ -472,6 +526,69 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 			"speakerCount": len(result.Messages), "replayed": result.Replayed,
 		},
 	}, nil
+}
+
+func selectedParticipationAction(round *ParticipationRound) *ParticipationProposal {
+	if round == nil {
+		return nil
+	}
+	byID := make(map[string]*ParticipationProposal, len(round.Proposals))
+	for index := range round.Proposals {
+		byID[round.Proposals[index].ID] = &round.Proposals[index]
+	}
+	for _, id := range round.Arbitration.Speakers {
+		if proposal := byID[id]; proposal != nil && proposal.ProposedAction != nil {
+			return proposal
+		}
+	}
+	return nil
+}
+
+func teamActionSucceeded(checkpoint map[string]interface{}, action *TurnAction) bool {
+	if action == nil {
+		return false
+	}
+	last, _ := checkpoint["lastAction"].(map[string]interface{})
+	if fmt.Sprint(last["status"]) != "succeeded" || fmt.Sprint(last["skillId"])+"."+fmt.Sprint(last["action"]) != action.Capability {
+		return false
+	}
+	if action.BindingID != "" && (fmt.Sprint(last["bindingId"]) != action.BindingID || fmt.Sprint(last["bindingRevision"]) != fmt.Sprint(action.BindingRevision)) {
+		return false
+	}
+	return true
+}
+
+func (r *ConversationRunTurnRunner) postTeamActionCompletion(
+	ctx context.Context,
+	run *AgentRun,
+	conversation *Conversation,
+	triggerID string,
+	participant ConversationParticipant,
+	action *TurnAction,
+) (*ChannelMessage, bool, error) {
+	key := "team-action-completion:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+triggerID)
+	content := "Governed action " + strings.TrimSpace(action.Capability) + " completed after all required approval gates were satisfied."
+	for range 3 {
+		current, err := r.conversations.GetConversation(ctx, run.Scope, conversation.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := r.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
+			Sender: participant, Intent: MessageIntentAnswer, Content: content,
+			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
+			ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
+			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			IdempotencyKey: key,
+		})
+		if err == nil {
+			return result.Message, result.Replayed, nil
+		}
+		if !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrMessageConflict) {
+			return nil, false, err
+		}
+	}
+	return nil, false, ErrRevisionConflict
 }
 
 func (r *ConversationRunTurnRunner) runAgentTurn(

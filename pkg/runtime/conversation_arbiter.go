@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -70,6 +71,12 @@ type ParticipationProposal struct {
 	ResolvesMessageID string                    `json:"resolvesMessageId,omitempty"`
 	Signals           ParticipationSignals      `json:"signals"`
 	Priority          int                       `json:"priority,omitempty"`
+	// ProposedAction is an optional, already-authorized capability request made
+	// by this participant. It remains part of the visible participation record;
+	// arbitration selects at most one speaker action and the Conversation Run
+	// materializes it through the ordinary ActionCoordinator.
+	ProposedAction *TurnAction            `json:"proposedAction,omitempty"`
+	ActionInputs   map[string]interface{} `json:"actionInputs,omitempty"`
 }
 
 func (p ParticipationProposal) Validate() error {
@@ -84,7 +91,7 @@ func (p ParticipationProposal) Validate() error {
 	}
 	if !p.WantsToSpeak {
 		if strings.TrimSpace(p.Content) != "" || p.ContributionKey != "" || p.Intent != "" || len(p.Mentions) > 0 || len(p.References) > 0 ||
-			p.ReplyToMessageID != "" || p.RequiresResponse || p.ResolvesMessageID != "" {
+			p.ReplyToMessageID != "" || p.RequiresResponse || p.ResolvesMessageID != "" || p.ProposedAction != nil || len(p.ActionInputs) > 0 {
 			return errors.New("silent participation proposal cannot include message output")
 		}
 		return nil
@@ -113,6 +120,19 @@ func (p ParticipationProposal) Validate() error {
 		if err := reference.Validate(); err != nil {
 			return err
 		}
+	}
+	if p.ProposedAction == nil {
+		if len(p.ActionInputs) > 0 {
+			return errors.New("participation action inputs require a proposed action")
+		}
+		return nil
+	}
+	if p.ProposedAction.PreparedRuntime != nil || strings.TrimSpace(p.ProposedAction.Capability) == "" || strings.TrimSpace(p.ProposedAction.Summary) == "" ||
+		strings.TrimSpace(p.ProposedAction.InputRef) == "" || len(p.ActionInputs) == 0 || p.ResolvesMessageID != "" {
+		return errors.New("participation action proposal is invalid")
+	}
+	if _, err := resolveTurnActionInput(p.ActionInputs, p.ProposedAction.InputRef); err != nil {
+		return fmt.Errorf("participation action input: %w", err)
 	}
 	return nil
 }
