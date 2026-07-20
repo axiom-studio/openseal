@@ -14,6 +14,10 @@ import (
 )
 
 func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
+	if s.agentRunCreation == nil {
+		s.respondError(w, http.StatusServiceUnavailable, "Agent Run creation is unavailable because no canonical worker is configured")
+		return
+	}
 	var payload kernelapi.CreateAgentRunRequest
 	if err := decodeStrictJSON(r, &payload); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
@@ -23,7 +27,7 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 	if idempotencyKey == "" {
 		idempotencyKey = strings.TrimSpace(payload.IdempotencyKey)
 	}
-	result, err := runtime.NewRunCommandService(s.store).CreateAgentRun(r.Context(), runtime.CreateAgentRunRequest{
+	result, err := s.agentRunCreation(r.Context(), runtime.CreateAgentRunRequest{
 		Scope: payload.Scope, Kind: payload.Kind, ObjectiveID: strings.TrimSpace(payload.ObjectiveID), ParentRunID: strings.TrimSpace(payload.ParentRunID),
 		Owner: payload.Owner, AssignedAgentID: strings.TrimSpace(payload.AssignedAgentID), ConcurrencyKey: strings.TrimSpace(payload.ConcurrencyKey),
 		Goal:   strings.TrimSpace(payload.Goal),

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
@@ -15,6 +16,7 @@ import (
 func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
 		"kind":"conversation",
@@ -94,10 +96,30 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 }
 
 func TestCapabilitiesAdvertiseAgentRunOperations(t *testing.T) {
-	server := NewServer(nil, nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
+	store := runtime.NewMemoryStore(10)
+	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
 	recorder := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"agent-runs"`) || !strings.Contains(recorder.Body.String(), `"intervene"`) {
+	var document kernelapi.CapabilityDocument
+	if recorder.Code != http.StatusOK || json.NewDecoder(recorder.Body).Decode(&document) != nil {
 		t.Fatalf("capabilities status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	runs, found := document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+	if !found || !runs.Supports(kernelapi.OperationIntervene) || runs.Supports(kernelapi.OperationCreate) {
+		t.Fatalf("workerless Run capability = %#v", runs)
+	}
+	unavailable := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", `{}`, "")
+	if unavailable.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unavailable create = %d %s", unavailable.Code, unavailable.Body.String())
+	}
+	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	recorder = performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
+	document = kernelapi.CapabilityDocument{}
+	if json.NewDecoder(recorder.Body).Decode(&document) != nil {
+		t.Fatalf("decode worker-backed capabilities: %s", recorder.Body.String())
+	}
+	runs, found = document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+	if !found || !runs.Supports(kernelapi.OperationCreate) {
+		t.Fatalf("worker-backed Run capability = %#v", runs)
 	}
 }
 
