@@ -59,6 +59,7 @@ type EvidenceGroundingRequest struct {
 	Scope           Scope                  `json:"scope"`
 	RunID           string                 `json:"runId"`
 	TurnID          string                 `json:"turnId"`
+	AgentID         string                 `json:"agentId"`
 	Goal            string                 `json:"goal"`
 	Snapshot        EvidenceSnapshot       `json:"snapshot"`
 	Claims          []EvidenceClaim        `json:"claims"`
@@ -239,7 +240,7 @@ func parseEvidenceGroundingState(checkpoint map[string]interface{}) (*evidenceGr
 func buildEvidenceGroundingRequest(input TurnExecutionContext, snapshot *EvidenceSnapshot, state *evidenceGroundingState, maxOutput int64) EvidenceGroundingRequest {
 	return EvidenceGroundingRequest{
 		APIVersion: EvidenceGroundingAPIVersion, InvocationID: input.Turn.ID,
-		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID, Goal: input.Run.Goal,
+		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID, AgentID: input.Run.AssignedAgentID, Goal: input.Run.Goal,
 		Snapshot: *snapshot, Claims: append([]EvidenceClaim(nil), state.Claims...), ClaimsDigest: state.ClaimsDigest,
 		DraftSummary: state.DraftSummary, DraftOutput: cloneMap(state.DraftOutput), MaxOutputTokens: maxOutput,
 	}
