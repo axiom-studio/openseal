@@ -226,6 +226,29 @@ func TestCompilerNormalizesOnlyCanonicalRefinementProvenanceShorthand(t *testing
 	}
 }
 
+func TestCompilerNormalizesOnlyCanonicalRefinementBlockingShorthand(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":"apply","answer":{"kind":"string_list"},"priority":100}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
+	if err != nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("normalized refinement result = %#v, err = %v", result, err)
+	}
+	if got := result.UnresolvedQuestions[0].Blocking; len(got) != 1 || got[0] != RefinementBlocksApply {
+		t.Fatalf("blocking shorthand = %#v", got)
+	}
+
+	strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":"later","answer":{"kind":"text"},"priority":1}]}`)
+	strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
+		t.Fatal("unknown refinement blocking shorthand must fail closed")
+	}
+}
+
 func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
 	invalid := marketingCandidate("1", capability.RiskLevelRead)
 	invalid.Assignments[0].RoleID = "invented-role"
