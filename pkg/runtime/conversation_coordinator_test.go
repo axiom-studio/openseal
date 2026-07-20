@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -249,7 +250,7 @@ func TestConversationCoordinatorFailsClosedWithoutCommittingPartialRound(t *test
 	_, err = coordinator.Coordinate(ctx, ConversationCoordinationRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, IdempotencyKey: "failed-round",
 	})
-	if !errors.Is(err, providerErr) {
+	if !errors.Is(err, ErrConversationParticipationQuorum) {
 		t.Fatalf("coordination error = %v", err)
 	}
 	rounds, listErr := service.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
@@ -258,6 +259,129 @@ func TestConversationCoordinatorFailsClosedWithoutCommittingPartialRound(t *test
 	}
 	if presence, presenceErr := service.ListPresence(ctx, scope, conversation.ID); presenceErr != nil || len(presence) != 0 {
 		t.Fatalf("presence after failure = %#v, err = %v", presence, presenceErr)
+	}
+}
+
+func TestConversationCoordinatorIsolatesUnavailableParticipantAndPreservesHealthyWork(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service := NewConversationService(NewMemoryStore(100))
+	scope := Scope{Kind: "tenant", ID: "degraded"}
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops"}, Title: "Operations", IdempotencyKey: "degraded-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "broken"}, SemanticRoles: []string{"observer"}},
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "healthy"}, SemanticRoles: []string{"operator"}},
+		}, nil
+	})
+	healthyStarted := make(chan struct{})
+	healthyFinished := make(chan struct{})
+	provider := ParticipationProposalProviderFunc(func(ctx context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		if input.Participant.ID == "broken" {
+			<-healthyStarted
+			return ParticipationProposal{}, errors.New("provider secret sk-must-not-persist")
+		}
+		close(healthyStarted)
+		select {
+		case <-time.After(40 * time.Millisecond):
+			close(healthyFinished)
+		case <-ctx.Done():
+			t.Fatalf("healthy participant was canceled: %v", ctx.Err())
+		}
+		return ParticipationProposal{
+			WantsToSpeak: true, Intent: MessageIntentUpdate, Content: "The healthy operator completed the review.",
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Signals:  ParticipationSignals{HasNewInformation: true, RoleRelevant: true},
+		}, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, provider, ConversationCoordinatorConfig{
+		MaximumParticipants: 4, MaximumConcurrency: 2, RecentMessageLimit: 10,
+		ProposalTimeout: time.Second, PresenceTTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		MaximumConcurrency: 2, IdempotencyKey: "degraded-round",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-healthyFinished:
+	default:
+		t.Fatal("healthy participant did not finish")
+	}
+	if len(round.Messages) != 1 || round.Messages[0].Sender.ID != "healthy" || len(round.Round.Proposals) != 2 {
+		t.Fatalf("degraded round = %#v", round)
+	}
+	broken := round.Round.Proposals[0]
+	if broken.Participant.ID != "broken" || broken.Availability.Status != ParticipationUnavailable ||
+		broken.Availability.FailureCode != "participant_runtime_unavailable" || broken.WantsToSpeak {
+		t.Fatalf("unavailable participant proposal = %#v", broken)
+	}
+	encoded := broken.Availability.FailureCode + broken.Content
+	if strings.Contains(encoded, "secret") || strings.Contains(encoded, "sk-") {
+		t.Fatalf("provider details leaked into round: %q", encoded)
+	}
+	if round.Round.Proposals[1].Availability.Status != ParticipationAvailable {
+		t.Fatalf("healthy availability = %#v", round.Round.Proposals[1].Availability)
+	}
+	replay, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		MaximumConcurrency: 2, IdempotencyKey: "degraded-round",
+	})
+	if err != nil || !replay.Replayed || len(replay.Messages) != 1 {
+		t.Fatalf("degraded replay = %#v, %v", replay, err)
+	}
+}
+
+func TestConversationCoordinatorEnforcesExplicitRequiredRoleQuorum(t *testing.T) {
+	t.Parallel()
+	service := NewConversationService(NewMemoryStore(100))
+	scope := Scope{Kind: "tenant", ID: "required-role"}
+	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops"}, Title: "Operations", IdempotencyKey: "required-role-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := NewConversationCoordinator(service,
+		ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+			return []ConversationParticipantBinding{
+				{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "reviewer"}, SemanticRoles: []string{"reviewer"}},
+				{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "operator"}, SemanticRoles: []string{"operator"}},
+			}, nil
+		}),
+		ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+			if input.Participant.ID == "reviewer" {
+				return ParticipationProposal{}, ErrTurnHostUnavailable
+			}
+			return ParticipationProposal{WantsToSpeak: false}, nil
+		}),
+		ConversationCoordinatorConfig{MaximumParticipants: 4, MaximumConcurrency: 2, RecentMessageLimit: 10, ProposalTimeout: time.Second, PresenceTTL: 30 * time.Second},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := DefaultConversationArbitrationPolicy()
+	policy.RequiredAvailableRole = "reviewer"
+	_, err = coordinator.Coordinate(t.Context(), ConversationCoordinationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Policy: policy, IdempotencyKey: "required-role-round",
+	})
+	if !errors.Is(err, ErrConversationParticipationQuorum) {
+		t.Fatalf("required-role quorum error = %v", err)
+	}
+	rounds, listErr := service.ListParticipationRounds(t.Context(), ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
+	if listErr != nil || len(rounds) != 0 {
+		t.Fatalf("required-role partial rounds = %#v, %v", rounds, listErr)
 	}
 }
 
