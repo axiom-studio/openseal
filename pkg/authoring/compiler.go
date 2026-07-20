@@ -198,6 +198,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	payload = normalizeGeneratedDurations(payload)
+	payload = normalizeGeneratedRefinementBlocking(payload)
 	payload = normalizeGeneratedRefinementProvenance(payload)
 	var generated GenerationResponse
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -213,6 +214,66 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
 	return generated, nil
+}
+
+// normalizeGeneratedRefinementBlocking accepts a single canonical blocking
+// scope as shorthand for the contract's array form. This conversion is
+// lossless and deliberately limited to known scope values; unknown strings and
+// all other shapes remain untouched so strict decoding and validation fail
+// closed.
+func normalizeGeneratedRefinementBlocking(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return payload
+	}
+	root, ok := document.(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	questions, ok := root["unresolvedQuestions"].([]interface{})
+	if !ok {
+		return payload
+	}
+	changed := false
+	for _, rawQuestion := range questions {
+		question, ok := rawQuestion.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		value, ok := question["blocking"].(string)
+		if !ok {
+			continue
+		}
+		scope := RefinementBlockingScope(strings.TrimSpace(value))
+		if !validRefinementBlockingScope(scope) {
+			continue
+		}
+		question["blocking"] = []interface{}{string(scope)}
+		changed = true
+	}
+	if !changed {
+		return payload
+	}
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
+}
+
+func validRefinementBlockingScope(scope RefinementBlockingScope) bool {
+	switch scope {
+	case RefinementBlocksCandidate, RefinementBlocksEvaluation, RefinementBlocksApply:
+		return true
+	default:
+		return false
+	}
 }
 
 // normalizeGeneratedRefinementProvenance accepts the unambiguous shorthand
