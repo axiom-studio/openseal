@@ -11,9 +11,11 @@ import (
 type groundingTurnHost struct {
 	responses []*HostedTurnResponse
 	reviews   int
+	requests  []HostedTurnRequest
 }
 
 func (h *groundingTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
+	h.requests = append(h.requests, request)
 	response := h.responses[0]
 	h.responses = h.responses[1:]
 	cloned := *response
@@ -125,5 +127,53 @@ func TestEvidenceGroundingRejectsUnknownSnapshotReferenceBeforeReview(t *testing
 	}
 	if host.reviews != 0 || !strings.Contains(outcome.EvidenceGrounding.Findings[0].Summary, "outside the immutable snapshot") {
 		t.Fatalf("review count=%d findings=%#v", host.reviews, outcome.EvidenceGrounding.Findings)
+	}
+}
+
+func TestEvidenceGroundingRequiresCitedHumanReadableReport(t *testing.T) {
+	_, runContext := groundedSnapshot(t)
+	host := &groundingTurnHost{responses: []*HostedTurnResponse{{
+		OutputSummary: "Claims only", NextRunStatus: AgentRunStatusCompleted,
+		RunOutput: map[string]interface{}{"summary": "AgentTransfer has friction."},
+		EvidenceClaims: []EvidenceClaim{{
+			ID: "claim-transfer", Statement: "AgentTransfer loses state.", EvidenceRefs: []string{"observation-transfer"},
+		}},
+	}}}
+	runner, _ := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "analyst", DefinitionID: "analyst", DefinitionVersion: "1"})
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Synthesize", Context: runContext},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if err != nil || outcome.NextRunStatus != AgentRunStatusRunning || outcome.RunOutput != nil || outcome.EvidenceGrounding == nil {
+		t.Fatalf("outcome=%#v err=%v", outcome, err)
+	}
+	if host.reviews != 0 || len(outcome.EvidenceGrounding.Findings) != 1 || !strings.Contains(outcome.EvidenceGrounding.Findings[0].Summary, "runOutput.report") {
+		t.Fatalf("reviews=%d findings=%#v", host.reviews, outcome.EvidenceGrounding.Findings)
+	}
+	if len(host.requests) != 1 || !containsString(host.requests[0].SystemInstructions, evidenceGroundingDraftInstruction) {
+		t.Fatalf("grounding instructions=%#v", host.requests)
+	}
+}
+
+func TestEvidenceGroundingRequiresEveryClaimCitationInReport(t *testing.T) {
+	_, runContext := groundedSnapshot(t)
+	host := &groundingTurnHost{responses: []*HostedTurnResponse{{
+		OutputSummary: "Draft", NextRunStatus: AgentRunStatusCompleted,
+		RunOutput: map[string]interface{}{"report": "AgentTransfer loses state."},
+		EvidenceClaims: []EvidenceClaim{{
+			ID: "claim-transfer", Statement: "AgentTransfer loses state.", EvidenceRefs: []string{"observation-transfer"},
+		}},
+	}}}
+	runner, _ := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "analyst", DefinitionID: "analyst", DefinitionVersion: "1"})
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Synthesize", Context: runContext},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if err != nil || outcome.EvidenceGrounding == nil || len(outcome.EvidenceGrounding.Findings) != 1 {
+		t.Fatalf("outcome=%#v err=%v", outcome, err)
+	}
+	finding := outcome.EvidenceGrounding.Findings[0]
+	if finding.ClaimID != "claim-transfer" || len(finding.EvidenceRefs) != 1 || finding.EvidenceRefs[0] != "observation-transfer" {
+		t.Fatalf("citation finding=%#v", finding)
 	}
 }
