@@ -79,7 +79,9 @@ func TestScheduledInitiativeEvidenceSnapshotPersistsAcrossStoresAndReplay(t *tes
 			store, restart := tc.open(t)
 			scope := Scope{Kind: "tenant", ID: "evidence-" + tc.name}
 			initiative, monitorRuns := seedExecutableMonitorInitiative(t, store, scope)
+			now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 			monitorService := NewSourceMonitorService(store, store, store, nil)
+			monitorService.now = func() time.Time { return now.Add(-time.Hour) }
 			if _, err := monitorService.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-a", monitorRuns["monitor-a"], 0, "one", "thread-one", strings.Repeat("A", 20))); err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +89,6 @@ func TestScheduledInitiativeEvidenceSnapshotPersistsAcrossStoresAndReplay(t *tes
 				t.Fatal(err)
 			}
 
-			now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 			due := now.Add(-time.Minute)
 			objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
 				Scope: scope, Owner: initiative.Owner, Title: "Synthesize", Goal: "Synthesize cited findings", Status: ObjectiveStatusActive,
