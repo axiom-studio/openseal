@@ -66,6 +66,19 @@ func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	}
 }
 
+func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
+	readOnly := SkillBindingsCapability(false)
+	if readOnly.ID != SkillBindingsCapabilityID || readOnly.Version != "1" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationUpsert) {
+		t.Fatalf("read-only binding capability = %#v", readOnly)
+	}
+	managed := SkillBindingsCapability(true)
+	for _, operation := range []string{OperationGet, OperationList, OperationUpsert, OperationDisable} {
+		if !managed.Supports(operation) {
+			t.Fatalf("binding operation %q not advertised: %#v", operation, managed.Operations)
+		}
+	}
+}
+
 func TestActivityCapabilityIsReadOnlyAndSelectorBounded(t *testing.T) {
 	capability := ActivityCapability()
 	if capability.ID != ActivityCapabilityID || capability.Version != ActivityCapabilityVersion || !capability.Supports(OperationList) {

@@ -430,6 +430,11 @@ type (
 	SkillAction                        = skill.Action
 	SkillBinding                       = skill.Binding
 	SkillBindingReference              = skill.BindingReference
+	SkillBindingActor                  = skill.BindingActor
+	SkillBindingLifecycleAction        = skill.BindingLifecycleAction
+	SkillBindingLifecycleEntry         = skill.BindingLifecycleEntry
+	UpsertSkillBindingRequest          = skill.UpsertBindingRequest
+	DisableSkillBindingRequest         = skill.DisableBindingRequest
 	SkillScope                         = skill.ScopeReference
 	SkillRiskLevel                     = skill.RiskLevel
 	SkillSideEffect                    = skill.SideEffect
@@ -575,6 +580,8 @@ type (
 	CredentialBindingChoice               = capability.CredentialBindingChoice
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	KernelSkillActionList                 = kernelapi.SkillActionList
+	KernelSkillBindingList                = kernelapi.SkillBindingList
+	KernelSkillBindingMutationResult      = kernelapi.SkillBindingMutationResult
 	KernelTeamDeploymentList              = kernelapi.TeamDeploymentList
 	KernelTeamDeploymentCatalogEntry      = kernelapi.TeamDeploymentCatalogEntry
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
@@ -601,6 +608,8 @@ const (
 	ActivityCapabilityVersion               = kernelapi.ActivityCapabilityVersion
 	SkillActionsCapabilityID                = kernelapi.SkillActionsCapabilityID
 	SkillActionsCapabilityVersion           = kernelapi.SkillActionsCapabilityVersion
+	SkillBindingsCapabilityID               = kernelapi.SkillBindingsCapabilityID
+	SkillBindingsCapabilityVersion          = kernelapi.SkillBindingsCapabilityVersion
 	EventRoutingCapabilityID                = kernelapi.EventRoutingCapabilityID
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	KernelOperationList                     = kernelapi.OperationList
@@ -611,6 +620,8 @@ const (
 	KernelOperationRetire                   = kernelapi.OperationRetire
 	KernelOperationListCompilations         = kernelapi.OperationListCompilations
 	KernelOperationRoute                    = kernelapi.OperationRoute
+	KernelOperationUpsert                   = kernelapi.OperationUpsert
+	KernelOperationDisable                  = kernelapi.OperationDisable
 	ChannelOperationCreate                  = kernelapi.OperationCreate
 	ChannelOperationGet                     = kernelapi.OperationGet
 	ChannelOperationList                    = kernelapi.OperationList
@@ -698,6 +709,10 @@ func OutreachLifecycleCapability() KernelCapability {
 
 func SkillActionsCapability() KernelCapability {
 	return kernelapi.SkillActionsCapability()
+}
+
+func SkillBindingsCapability(management bool) KernelCapability {
+	return kernelapi.SkillBindingsCapability(management)
 }
 
 func ActivityCapability() KernelCapability {
@@ -1282,6 +1297,8 @@ var (
 	ErrSkillDefinitionAmbiguous      = skill.ErrDefinitionAmbiguous
 	ErrSkillBindingAmbiguous         = skill.ErrBindingAmbiguous
 	ErrSkillBindingRevisionConflict  = skill.ErrBindingRevisionConflict
+	ErrSkillBindingNotFound          = skill.ErrBindingNotFound
+	ErrSkillBindingAlreadyDisabled   = skill.ErrBindingAlreadyDisabled
 	ErrSkillSourceArtifactNotFound   = sourceartifact.ErrNotFound
 	ErrSkillSourceArtifactImmutable  = sourceartifact.ErrImmutable
 	ErrSkillSourceReferenceConflict  = sourceartifact.ErrReferenceConflict
@@ -2801,6 +2818,22 @@ func (e *Engine) GetSkillDefinitionVariant(ctx context.Context, skillID, version
 
 func (e *Engine) BindSkill(ctx context.Context, binding *skill.Binding) error {
 	return e.skills.Bind(ctx, binding)
+}
+
+func (e *Engine) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
+	return e.skills.ListBindings(ctx, scope, deploymentID)
+}
+
+func (e *Engine) GetSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (*skill.Binding, error) {
+	return e.skills.GetBinding(ctx, scope, deploymentID, bindingID)
+}
+
+func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBindingRequest) (*skill.Binding, error) {
+	return e.skills.UpsertBinding(ctx, request)
+}
+
+func (e *Engine) DisableSkillBinding(ctx context.Context, request skill.DisableBindingRequest) (*skill.Binding, error) {
+	return e.skills.DisableBinding(ctx, request)
 }
 
 func (e *Engine) ListModelSkillActions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.ModelAction, error) {
