@@ -104,6 +104,12 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeSkillInstall && !m.supportsClawHub(clawhub.LifecycleInstall) {
 		return m.renderUnavailableComposer(width, "Install a Skill", "This server does not advertise governed ClawHub installation.")
 	}
+	if m.mode == modeSkillBindingUpsert && !m.supportsSkillBinding(kernelapi.OperationUpsert) {
+		return m.renderUnavailableComposer(width, "Bind a Skill", "This kernel does not advertise Skill binding management for this owner.")
+	}
+	if m.mode == modeSkillBindingDisable && !m.supportsSkillBinding(kernelapi.OperationDisable) {
+		return m.renderUnavailableComposer(width, "Disable Skill authority", "This kernel does not advertise Skill binding disablement.")
+	}
 	if m.mode == modeChannelCreate && !m.supportsChannel(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Create a Team channel", "This server does not advertise channel creation.")
 	}
@@ -218,6 +224,14 @@ func (m *Model) renderComposer(width int) string {
 		title = "Confirm Skill removal"
 		description = "Type REMOVE exactly. OpenSeal will preserve modified or pinned installations."
 		owner = "Governed uninstall · no force fallback"
+	case modeSkillBindingUpsert:
+		title = "Review Skill authority"
+		description = "Attach, update, or re-enable one exact version with least-privilege actions, prompt access, risk, and opaque credential references."
+		owner = strings.Title(string(m.config.Owner.Type)) + " · " + m.config.Owner.ID + " · no secret values"
+	case modeSkillBindingDisable:
+		title = "Disable selected Skill authority"
+		description = "Record a durable reason. The binding remains visible and can be reviewed or re-enabled later."
+		owner = "CAS protected · audit preserved"
 	case modeRequestAccept:
 		title = "Accept collaboration request"
 		description = "Accept this exact revision and create traceable child work for the recipient."
@@ -957,7 +971,59 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 	if m.loading {
 		title += mutedStyle.Render("  refreshing…")
 	}
-	lines := []string{title, "", mutedStyle.Render("Installed packages")}
+	ownerLabel := "Agent"
+	if m.config.Owner.Type == runtime.OwnerTypeTeam {
+		ownerLabel = "Team"
+	}
+	lines := []string{title, "", mutedStyle.Render(ownerLabel + " authority")}
+	if !m.skillBindingCapability.Available {
+		lines = append(lines, mutedStyle.Render("Binding management is not advertised for this owner."))
+	} else if len(m.skillBindings) == 0 {
+		lines = append(lines, mutedStyle.Render("No Skills attached. Press b to describe exact authority."))
+	} else {
+		for index, binding := range m.skillBindings {
+			prefix := "  "
+			style := lipgloss.NewStyle().Foreground(text)
+			if index == m.skillBindingSelected {
+				prefix, style = "› ", selectedStyle
+			}
+			state := "active"
+			if binding.Disabled {
+				state = "disabled"
+			}
+			lines = append(lines, style.Render(fmt.Sprintf("%s%-8s %s · %s@%s · rev %d", prefix, state, binding.ID, binding.SkillID, binding.SkillVersion, binding.Revision)))
+		}
+		if binding := m.selectedSkillBindingRecord(); binding != nil {
+			actions := "none"
+			if len(binding.AllowedActions) > 0 {
+				actions = strings.Join(binding.AllowedActions, ", ")
+			}
+			prompt := "off"
+			if binding.EnablePrompt {
+				prompt = "on"
+			}
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Actions %s · prompt %s · max risk %s", actions, prompt, binding.MaximumRisk)))
+			credentialNames := make([]string, 0, len(binding.Credentials))
+			for name, reference := range binding.Credentials {
+				credentialNames = append(credentialNames, name+"="+reference.Kind+":"+reference.ID)
+			}
+			sort.Strings(credentialNames)
+			if len(credentialNames) > 0 {
+				lines = append(lines, mutedStyle.Render("Opaque credentials · "+strings.Join(credentialNames, ", ")))
+			}
+			keys := []string{}
+			if m.supportsSkillBinding(kernelapi.OperationUpsert) {
+				keys = append(keys, "b attach", "Enter edit/re-enable")
+			}
+			if !binding.Disabled && m.supportsSkillBinding(kernelapi.OperationDisable) {
+				keys = append(keys, "x disable")
+			}
+			if len(keys) > 0 {
+				lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(keys, "  ·  ")))
+			}
+		}
+	}
+	lines = append(lines, "", mutedStyle.Render("Installed packages"))
 	if !m.clawHubCapability.Available {
 		lines = append(lines, mutedStyle.Render("Skill installation is not available from this kernel."))
 	} else if len(m.clawHubSkills) == 0 {
@@ -1009,6 +1075,9 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 		}
 		if m.supportsClawHub(clawhub.LifecycleInstall) {
 			actions = append(actions, "n install")
+		}
+		if len(m.clawHubSkills) > 1 {
+			actions = append([]string{"[ ] select package"}, actions...)
 		}
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -98,13 +99,42 @@ type fakeKernelClient struct {
 	governanceErrors     []error
 	skillActions         []capability.ModelAction
 	skillActionCalls     int
+	skillBindings        []*capability.Binding
+	skillBindingUpserts  []skill.UpsertBindingRequest
+	skillBindingDisables []skill.DisableBindingRequest
+	skillBindingError    error
 }
 
 var (
-	_ client.KernelClient = (*fakeKernelClient)(nil)
-	_ client.KernelClient = (*fakeChannelKernelClient)(nil)
-	_ client.KernelClient = (*fakeClawHubKernelClient)(nil)
+	_ client.KernelClient       = (*fakeKernelClient)(nil)
+	_ client.KernelClient       = (*fakeChannelKernelClient)(nil)
+	_ client.KernelClient       = (*fakeClawHubKernelClient)(nil)
+	_ client.SkillBindingClient = (*fakeKernelClient)(nil)
 )
+
+func (f *fakeKernelClient) ListSkillBindings(context.Context, capability.ScopeReference, client.SkillBindingOwner) (*kernelapi.SkillBindingList, error) {
+	return &kernelapi.SkillBindingList{Items: f.skillBindings}, nil
+}
+func (f *fakeKernelClient) UpsertSkillBinding(_ context.Context, _ client.SkillBindingOwner, request skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
+	f.skillBindingUpserts = append(f.skillBindingUpserts, request)
+	if f.skillBindingError != nil {
+		return nil, f.skillBindingError
+	}
+	value := *request.Binding
+	value.Revision = request.ExpectedRevision + 1
+	f.skillBindings = []*capability.Binding{&value}
+	return &kernelapi.SkillBindingMutationResult{Binding: &value}, nil
+}
+func (f *fakeKernelClient) DisableSkillBinding(_ context.Context, _ client.SkillBindingOwner, request skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
+	f.skillBindingDisables = append(f.skillBindingDisables, request)
+	if f.skillBindingError != nil {
+		return nil, f.skillBindingError
+	}
+	value := *f.skillBindings[0]
+	value.Disabled = true
+	value.Revision++
+	return &kernelapi.SkillBindingMutationResult{Binding: &value}, nil
+}
 
 func (f *fakeKernelClient) RouteEvent(_ context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
 	return &runtime.EventRouteResult{}, nil
@@ -3012,6 +3042,44 @@ func newModelWithClient(t *testing.T, kernelClient client.KernelClient) *Model {
 	}
 	model.width, model.height = 120, 36
 	return model
+}
+
+func TestSkillBindingPromptPreservesExactAuthorityAndOpaqueReferences(t *testing.T) {
+	binding, reason, err := parseSkillBindingPrompt("binding: reddit-research\nskill: reddit@2.1.0\nactions: search, post\nprompt: false\nrisk: external\ncredentials: reddit=vault:reddit-prod\nreason: approved market research", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.SkillID != "reddit" || binding.SkillVersion != "2.1.0" || len(binding.AllowedActions) != 2 || binding.EnablePrompt || binding.MaximumRisk != capability.RiskLevelExternal || binding.Credentials["reddit"].ID != "reddit-prod" || reason != "approved market research" {
+		t.Fatalf("parsed binding = %#v reason=%q", binding, reason)
+	}
+	if _, _, err := parseSkillBindingPrompt("binding: bad\nskill: reddit@2\nactions: post\nprompt: true\nrisk: external\ncredentials: reddit=secret-without-reference\nreason: test", nil); err == nil || !strings.Contains(err.Error(), "never paste a secret") {
+		t.Fatalf("raw credential was not rejected: %v", err)
+	}
+}
+
+func TestSkillBindingTUIUsesCASForAgentAndRecoversFromConflict(t *testing.T) {
+	existing := &capability.Binding{ID: "reddit", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, DeploymentID: "operator", SkillID: "reddit", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead, Revision: 7}
+	fake := &fakeKernelClient{skillBindings: []*capability.Binding{existing}}
+	model := newModelWithClient(t, fake)
+	model.ready = true
+	model.skillBindingCapability = kernelapi.SkillBindingsCapability(true)
+	model.skillBindings = fake.skillBindings
+	model.restoreSkillBindingSelection()
+	model.prepareSkillBindingComposer(existing)
+	model.editor.SetValue("binding: reddit\nskill: reddit@1\nactions: search,post\nprompt: true\nrisk: external\ncredentials: token=vault:reddit-prod\nreason: expand approved authority")
+	applyCommand(t, model, model.submitSkillBindingUpsert())
+	if len(fake.skillBindingUpserts) != 1 || fake.skillBindingUpserts[0].ExpectedRevision != 7 || fake.skillBindingUpserts[0].Binding.DeploymentID != "operator" || !fake.skillBindingUpserts[0].Binding.EnablePrompt {
+		t.Fatalf("upsert = %#v", fake.skillBindingUpserts)
+	}
+
+	fake.skillBindingError = &client.APIError{StatusCode: 409, Message: "revision conflict"}
+	model.prepareSkillBindingComposer(model.selectedSkillBindingRecord())
+	command := model.submitSkillBindingUpsert()
+	message := command()
+	_, followup := model.Update(message)
+	if followup == nil || !strings.Contains(model.status, "changed elsewhere") || model.editor.Value() == "" {
+		t.Fatalf("conflict recovery status=%q draft=%q", model.status, model.editor.Value())
+	}
 }
 
 func testConversation(id, title string, lastSequence, revision int64) *runtime.Conversation {

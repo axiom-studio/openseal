@@ -66,6 +66,15 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	}
 
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	agentRequest := skill.UpsertBindingRequest{
+		Binding: &skill.Binding{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
+		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Agent needs scoped research access",
+	}
+	agentPayload, _ := json.Marshal(agentRequest)
+	agentCreated := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/agent-deployments/analyst-one/skill-bindings/forum?scopeKind=tenant&scopeId=one", string(agentPayload), "")
+	if agentCreated.Code != http.StatusCreated || !strings.Contains(agentCreated.Body.String(), `"deploymentId":"analyst-one"`) {
+		t.Fatalf("create Agent binding = %d %s", agentCreated.Code, agentCreated.Body.String())
+	}
 	request := skill.UpsertBindingRequest{
 		Binding: &skill.Binding{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead, Credentials: map[string]capability.CredentialReference{"FORUM_TOKEN": {Kind: "vault", ID: "credential-17"}}},
 		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Team uses shared research account",
