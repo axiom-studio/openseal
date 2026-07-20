@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	maxCatalogPages       = 10000
+	catalogPageMaxRetries = 2
+	catalogRetryBaseDelay = 100 * time.Millisecond
+	catalogRetryMaxDelay  = 30 * time.Second
 )
 
 type SkillReference struct {
@@ -207,7 +215,7 @@ func ExploreCatalog(ctx context.Context, registry Registry, request ExploreReque
 		}
 
 		request.Cursor = cursor
-		page, err := registry.ExploreSkills(ctx, request)
+		page, err := exploreCatalogPage(ctx, registry, request)
 		if err != nil {
 			return snapshot, &CatalogTraversalError{CompletedPages: snapshot.Pages, UniqueItems: len(snapshot.Items), Cursor: cursor, Err: err}
 		}
@@ -232,8 +240,52 @@ func ExploreCatalog(ctx context.Context, registry Registry, request ExploreReque
 		if next == "" {
 			return snapshot, nil
 		}
+		if snapshot.Pages >= maxCatalogPages {
+			return snapshot, &CatalogTraversalError{CompletedPages: snapshot.Pages, UniqueItems: len(snapshot.Items), Cursor: next, Err: fmt.Errorf("registry exceeded the %d-page discovery safety limit", maxCatalogPages)}
+		}
 		cursor = next
 	}
+}
+
+func exploreCatalogPage(ctx context.Context, registry Registry, request ExploreRequest) (*SkillPage, error) {
+	var lastErr error
+	for attempt := 0; attempt <= catalogPageMaxRetries; attempt++ {
+		page, err := registry.ExploreSkills(ctx, request)
+		if err == nil {
+			return page, nil
+		}
+		lastErr = err
+		if attempt == catalogPageMaxRetries || !catalogPageErrorRetryable(err) {
+			return nil, err
+		}
+		delay := catalogRetryBaseDelay * time.Duration(1<<attempt)
+		var registryErr *ClawHubError
+		if errors.As(err, &registryErr) && registryErr.RetryAfter > 0 {
+			delay = time.Duration(registryErr.RetryAfter) * time.Second
+			if delay > catalogRetryMaxDelay {
+				delay = catalogRetryMaxDelay
+			}
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func catalogPageErrorRetryable(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var registryErr *ClawHubError
+	if !errors.As(err, &registryErr) {
+		return true
+	}
+	return registryErr.StatusCode == http.StatusTooManyRequests || registryErr.StatusCode >= http.StatusInternalServerError
 }
 
 func (c *ClawHubClient) SearchSkills(ctx context.Context, request SearchRequest) (*SkillPage, error) {
