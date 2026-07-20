@@ -601,6 +601,12 @@ const (
 	EventRoutingCapabilityID                = kernelapi.EventRoutingCapabilityID
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	KernelOperationList                     = kernelapi.OperationList
+	KernelOperationGet                      = kernelapi.OperationGet
+	KernelOperationUpdate                   = kernelapi.OperationUpdate
+	KernelOperationPause                    = kernelapi.OperationPause
+	KernelOperationResume                   = kernelapi.OperationResume
+	KernelOperationRetire                   = kernelapi.OperationRetire
+	KernelOperationListCompilations         = kernelapi.OperationListCompilations
 	KernelOperationRoute                    = kernelapi.OperationRoute
 	ChannelOperationCreate                  = kernelapi.OperationCreate
 	ChannelOperationGet                     = kernelapi.OperationGet
