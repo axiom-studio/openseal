@@ -301,8 +301,11 @@ func SourceMonitorsCapability() Capability {
 	return Capability{ID: SourceMonitorsCapabilityID, Version: SourceMonitorsCapabilityVersion, Available: true, Operations: []string{OperationListObservations, OperationGetCheckpoint}}
 }
 
-func OutreachCapability() Capability {
-	return Capability{ID: OutreachCapabilityID, Version: OutreachCapabilityVersion, Available: true, Operations: []string{OperationCreate, OperationGet, OperationList, OperationDeliver}}
+func OutreachCapability(operations ...string) Capability {
+	if len(operations) == 0 {
+		operations = []string{OperationCreate, OperationGet, OperationList, OperationDeliver}
+	}
+	return Capability{ID: OutreachCapabilityID, Version: OutreachCapabilityVersion, Available: len(operations) > 0, Operations: append([]string(nil), operations...)}
 }
 
 func SkillActionsCapability() Capability {
@@ -568,6 +571,40 @@ type UpdateInitiativeRequest struct {
 	ClearBudget      bool                              `json:"clearBudget,omitempty"`
 	Policy           map[string]interface{}            `json:"policy,omitempty"`
 	Checkpoint       map[string]interface{}            `json:"checkpoint,omitempty"`
+}
+
+type OutreachCapabilitySelection struct {
+	BindingID       string                 `json:"bindingId"`
+	BindingRevision int64                  `json:"bindingRevision"`
+	SkillID         string                 `json:"skillId"`
+	SkillVersion    string                 `json:"skillVersion"`
+	Action          string                 `json:"action"`
+	Arguments       map[string]interface{} `json:"arguments,omitempty"`
+}
+
+type CreateOutreachMessageRequest struct {
+	ID         string                        `json:"id,omitempty"`
+	Intent     runtime.OutreachMessageIntent `json:"intent"`
+	Body       string                        `json:"body"`
+	Capability OutreachCapabilitySelection   `json:"capability"`
+}
+
+type CreateOutreachThreadRequest struct {
+	ID                  string                       `json:"id,omitempty"`
+	Scope               runtime.Scope                `json:"scope"`
+	InitiativeID        string                       `json:"initiativeId"`
+	SourceObservationID string                       `json:"sourceObservationId"`
+	ApprovalPolicyRef   string                       `json:"approvalPolicyRef"`
+	Identity            runtime.OutreachIdentity     `json:"identity"`
+	Message             CreateOutreachMessageRequest `json:"message"`
+	IdempotencyKey      string                       `json:"idempotencyKey,omitempty"`
+}
+
+type DeliverOutreachMessageRequest struct {
+	Scope          runtime.Scope         `json:"scope"`
+	Priority       int                   `json:"priority,omitempty"`
+	Budget         *runtime.BudgetPolicy `json:"budget,omitempty"`
+	IdempotencyKey string                `json:"idempotencyKey,omitempty"`
 }
 
 type AgentRunCommandRequest struct {
