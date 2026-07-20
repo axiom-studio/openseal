@@ -102,7 +102,7 @@ func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	if err != nil || len(prompts) != 1 || prompts[0].SkillID != "release" {
 		t.Fatalf("prompt projection = %#v, %v", prompts, err)
 	}
-	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective})
+	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestEngineRunsDurableActionWorkers(t *testing.T) {
 	if err := engine.BindSkill(ctx, &SkillBinding{ID: "publisher", Scope: SkillScope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "marketing-agent", SkillID: "publisher", SkillVersion: "1.0.0", AllowedActions: []string{"publish"}, MaximumRisk: SkillRiskExternal, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "marketing"}, AssignedAgentID: "marketing-agent", Goal: "publish", Source: RunSourceObjective})
+	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "marketing-agent"}, AssignedAgentID: "marketing-agent", Goal: "publish", Source: RunSourceObjective})
 	if err != nil {
 		t.Fatal(err)
 	}

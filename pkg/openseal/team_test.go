@@ -58,7 +58,7 @@ func TestTeamManagementOptionOwnsValidationAndDispatcherComposition(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(engine.actionValidators) != 1 || len(engine.actionPoolSpecs) != 1 {
+	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Team action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}
 	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*TeamRoleActionDispatcher); !ok {

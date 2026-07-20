@@ -36,6 +36,7 @@ type TurnRunnerBinding struct {
 // model action catalog and is attached only after a proposal selects that
 // authorized binding.
 type PreparedSkillRuntime struct {
+	DeploymentID    string
 	BindingID       string
 	BindingRevision int64
 	SkillID         string
@@ -450,6 +451,9 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		idempotencyKey = fmt.Sprintf("turn:%s:action:0", turn.ID)
 	}
 	actionDeploymentID := strings.TrimSpace(binding.ActionDeploymentID)
+	if strings.TrimSpace(selected.DeploymentID) != "" {
+		actionDeploymentID = strings.TrimSpace(selected.DeploymentID)
+	}
 	if actionDeploymentID == "" {
 		actionDeploymentID = binding.DeploymentID
 	}
@@ -511,7 +515,7 @@ func (r preparedRuntimeTurnRunner) RunTurn(ctx context.Context, input TurnExecut
 		}
 		for runtimeIndex := range r.binding.PreparedRuntimes {
 			prepared := &r.binding.PreparedRuntimes[runtimeIndex]
-			if prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
+			if prepared.DeploymentID == selected.DeploymentID && prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
 				prepared.SkillID == selected.SkillID && prepared.SkillVersion == selected.Version {
 				copy := prepared.Runtime
 				copy.Executables = append([]string(nil), prepared.Runtime.Executables...)
@@ -527,13 +531,13 @@ func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
 	seen := make(map[string]bool, len(binding.PreparedRuntimes))
 	for index := range binding.PreparedRuntimes {
 		prepared := &binding.PreparedRuntimes[index]
-		if strings.TrimSpace(prepared.BindingID) == "" || prepared.BindingRevision < 1 || strings.TrimSpace(prepared.SkillID) == "" || strings.TrimSpace(prepared.SkillVersion) == "" {
+		if strings.TrimSpace(prepared.DeploymentID) == "" || strings.TrimSpace(prepared.BindingID) == "" || prepared.BindingRevision < 1 || strings.TrimSpace(prepared.SkillID) == "" || strings.TrimSpace(prepared.SkillVersion) == "" {
 			return errors.New("prepared Skill runtime binding identity is invalid")
 		}
 		if err := skill.ValidatePreparedRuntimeReference(&prepared.Runtime); err != nil {
 			return fmt.Errorf("prepared Skill runtime binding is invalid: %w", err)
 		}
-		key := fmt.Sprintf("%s@%d:%s@%s", prepared.BindingID, prepared.BindingRevision, prepared.SkillID, prepared.SkillVersion)
+		key := fmt.Sprintf("%s:%s@%d:%s@%s", prepared.DeploymentID, prepared.BindingID, prepared.BindingRevision, prepared.SkillID, prepared.SkillVersion)
 		if seen[key] {
 			return errors.New("prepared Skill runtime binding is duplicated")
 		}
@@ -541,7 +545,7 @@ func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
 		authorized := false
 		for actionIndex := range binding.ModelActions {
 			action := &binding.ModelActions[actionIndex]
-			if action.BindingID == prepared.BindingID && action.BindingRevision == prepared.BindingRevision && action.SkillID == prepared.SkillID && action.Version == prepared.SkillVersion {
+			if action.DeploymentID == prepared.DeploymentID && action.BindingID == prepared.BindingID && action.BindingRevision == prepared.BindingRevision && action.SkillID == prepared.SkillID && action.Version == prepared.SkillVersion {
 				authorized = true
 				break
 			}

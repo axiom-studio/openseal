@@ -18,6 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -116,6 +117,17 @@ type TeamClient interface {
 	ResolveTeamDefinitionAmendment(context.Context, string, kernelteam.ResolveAmendmentRequest) (*kernelteam.DefinitionAmendment, error)
 	ActivateTeamDefinitionAmendment(context.Context, string, string, kernelapi.ActivateTeamDefinitionAmendmentRequest) (*kernelapi.TeamDefinitionAmendmentActivationResult, error)
 }
+
+// TeamSkillClient is the narrow public boundary for first-class Team-owned
+// Skill portfolios. It stays separate from TeamClient so read-only Team
+// browsers do not accidentally acquire mutation authority.
+type TeamSkillClient interface {
+	ListTeamSkillBindings(context.Context, capability.ScopeReference, string) (*kernelapi.SkillBindingList, error)
+	UpsertTeamSkillBinding(context.Context, string, skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
+	DisableTeamSkillBinding(context.Context, string, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
+}
+
+var _ TeamSkillClient = (*KernelHTTPClient)(nil)
 
 type KernelHTTPClient struct {
 	baseURL        string
@@ -827,6 +839,36 @@ func (c *KernelHTTPClient) ListTeamDeployments(ctx context.Context, scope capabi
 	query := url.Values{"scopeKind": []string{scope.Kind}, "scopeId": []string{scope.ID}}
 	var result kernelapi.TeamDeploymentList
 	if err := c.do(ctx, http.MethodGet, "/api/v1/team-deployments?"+query.Encode(), nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListTeamSkillBindings(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.SkillBindingList, error) {
+	var result kernelapi.SkillBindingList
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-bindings?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) UpsertTeamSkillBinding(ctx context.Context, deploymentID string, request skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
+	var result kernelapi.SkillBindingMutationResult
+	if request.Binding == nil {
+		return nil, errors.New("binding is required")
+	}
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.Binding.ID)) + "?" + capabilityScopeQuery(request.Binding.Scope).Encode()
+	if err := c.do(ctx, http.MethodPut, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) DisableTeamSkillBinding(ctx context.Context, deploymentID string, request skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
+	var result kernelapi.SkillBindingMutationResult
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.BindingID)) + "/disable?" + capabilityScopeQuery(request.Scope).Encode()
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

@@ -227,10 +227,14 @@ type BindingLifecycleEntry struct {
 }
 
 type ModelAction struct {
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description"`
-	BindingID         string                 `json:"bindingId"`
-	BindingRevision   int64                  `json:"bindingRevision"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	BindingID       string `json:"bindingId"`
+	BindingRevision int64  `json:"bindingRevision"`
+	// DeploymentID identifies the Agent or Team binding owner. It is supplied
+	// by the kernel, never by the model, and prevents a mixed Team turn from
+	// resolving an Agent action against Team credentials (or vice versa).
+	DeploymentID      string                 `json:"deploymentId,omitempty"`
 	SkillID           string                 `json:"skillId"`
 	Version           string                 `json:"version"`
 	Action            string                 `json:"action"`

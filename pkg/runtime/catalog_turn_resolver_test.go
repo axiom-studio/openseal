@@ -10,15 +10,26 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 type resolverCatalog struct {
 	deployment            *kernelagent.AgentDeployment
 	definition            *kernelagent.AgentDefinition
+	teamDeployment        *kernelteam.Deployment
+	teamDefinition        *kernelteam.Definition
 	activation            *skill.ActivationSnapshot
 	activations           map[string]*skill.ActivationSnapshot
 	activationDeployments []string
 	gotHost               skill.HostCapabilityState
+}
+
+func (c *resolverCatalog) GetTeamDeployment(context.Context, skill.ScopeReference, string) (*kernelteam.Deployment, error) {
+	return c.teamDeployment, nil
+}
+
+func (c *resolverCatalog) GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error) {
+	return c.teamDefinition, nil
 }
 
 func (c *resolverCatalog) GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error) {
@@ -166,7 +177,15 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 	}}
 	catalog := &resolverCatalog{
 		deployment: &kernelagent.AgentDeployment{ID: "reviewer-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
-		definition: &kernelagent.AgentDefinition{ID: "reviewer", Version: "1", Purpose: "Review", SystemPrompt: "Review carefully."},
+		definition: &kernelagent.AgentDefinition{ID: "reviewer", Version: "1", Purpose: "Review", SystemPrompt: "Review carefully.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, AllowedSkillIDs: []string{"openseal.teams"}}},
+		teamDeployment: &kernelteam.Deployment{
+			ID: "review-team", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "review-team", ActiveVersion: "1",
+			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"}},
+		},
+		teamDefinition: &kernelteam.Definition{
+			ID: "review-team", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
+			Roles: []kernelteam.RoleSlot{{ID: "reviewer", SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "openseal.teams", SkillVersion: "1.0.0", AllowedActions: []string{"update_role"}, MaximumRisk: capability.RiskLevelWrite}}}},
+		},
 		activations: map[string]*skill.ActivationSnapshot{
 			"reviewer-agent": {SnapshotID: "agent-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "reviewer-agent", Skills: []skill.ActivatedSkill{{
 				BindingID: "agent-teams", BindingRevision: 1, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{agentAction},
@@ -181,11 +200,11 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 	if err != nil {
 		t.Fatal(err)
 	}
-	if binding.DeploymentID != "reviewer-agent" || binding.ActionDeploymentID != "review-team" || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "teams" || !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent", "review-team"}) {
+	if binding.DeploymentID != "reviewer-agent" || binding.ActionDeploymentID != "reviewer-agent" || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "teams" || binding.ModelActions[0].DeploymentID != "review-team" || !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent", "review-team"}) {
 		t.Fatalf("Team binding = %#v activations=%v", binding, catalog.activationDeployments)
 	}
 	hosted, ok := binding.Runner.(*HostedTurnRunner)
-	if !ok || hosted.config.AgentID != "reviewer-agent" || hosted.config.ActionDeploymentID != "review-team" {
+	if !ok || hosted.config.AgentID != "reviewer-agent" || hosted.config.ActionDeploymentID != "reviewer-agent" {
 		t.Fatalf("hosted Team identity = %#v", binding.Runner)
 	}
 	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: teamRun, Turn: &AgentTurn{ID: "turn"}})

@@ -269,7 +269,7 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 			action := definition.Actions[name]
 			result = append(result, ModelAction{
 				Name: definition.ID + "." + name, Description: action.Description,
-				BindingID: binding.ID, BindingRevision: binding.Revision,
+				BindingID: binding.ID, BindingRevision: binding.Revision, DeploymentID: binding.DeploymentID,
 				SkillID: definition.ID, Version: definition.Version, Action: name,
 				InputSchema: cloneMap(action.InputSchema), SemanticArguments: cloneStringMap(action.SemanticArguments),
 				Risk: action.Risk, SideEffect: action.SideEffect,

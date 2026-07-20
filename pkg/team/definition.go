@@ -23,7 +23,20 @@ type RoleSlot struct {
 	MaximumMembers        int                      `json:"maximumMembers,omitempty"`
 	RequiredSkillIDs      []string                 `json:"requiredSkillIds,omitempty"`
 	RequiredDefinitionIDs []string                 `json:"requiredDefinitionIds,omitempty"`
+	SkillGrants           []RoleSkillGrant         `json:"skillGrants,omitempty"`
 	ChannelParticipation  RoleChannelParticipation `json:"channelParticipation,omitempty"`
+}
+
+// RoleSkillGrant is the immutable delegation boundary through which a roster
+// Agent may use one Team-owned Skill. Team bindings hold credentials and
+// configuration; this grant only narrows which version, prompt, actions, and
+// risk a semantic role may exercise. It never copies a binding onto an Agent.
+type RoleSkillGrant struct {
+	SkillID        string               `json:"skillId"`
+	SkillVersion   string               `json:"skillVersion"`
+	AllowedActions []string             `json:"allowedActions,omitempty"`
+	EnablePrompt   bool                 `json:"enablePrompt,omitempty"`
+	MaximumRisk    capability.RiskLevel `json:"maximumRisk"`
 }
 
 type RoleChannelParticipation string
@@ -110,6 +123,23 @@ func (d *Definition) Validate() error {
 			return errors.New("team roles require unique ids, names, purposes, and valid member bounds")
 		}
 		roles[id] = true
+		grants := make(map[string]bool, len(role.SkillGrants))
+		for _, grant := range role.SkillGrants {
+			key := strings.TrimSpace(grant.SkillID) + "\x00" + strings.TrimSpace(grant.SkillVersion)
+			if strings.TrimSpace(grant.SkillID) == "" || !versionPattern.MatchString(strings.TrimSpace(grant.SkillVersion)) ||
+				!validRisk(grant.MaximumRisk) || riskRank(grant.MaximumRisk) > riskRank(d.Approvals.MaximumRisk) || grants[key] {
+				return errors.New("team role Skill grants require unique Skill versions and valid risk boundaries")
+			}
+			grants[key] = true
+			actions := make(map[string]bool, len(grant.AllowedActions))
+			for _, action := range grant.AllowedActions {
+				action = strings.TrimSpace(action)
+				if action == "" || actions[action] {
+					return errors.New("team role Skill grants require unique non-empty actions")
+				}
+				actions[action] = true
+			}
+		}
 	}
 	for _, roleID := range d.Approvals.ApproverRoleIDs {
 		if !roles[strings.TrimSpace(roleID)] {

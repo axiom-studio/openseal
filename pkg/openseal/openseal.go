@@ -96,6 +96,7 @@ type (
 	KernelAgentDefinitionCompilationHistory   = kernelapi.AgentDefinitionCompilationHistory
 	TeamDefinition                            = kernelteam.Definition
 	TeamRoleSlot                              = kernelteam.RoleSlot
+	TeamRoleSkillGrant                        = kernelteam.RoleSkillGrant
 	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
 	TeamCoordinationMode                      = kernelteam.CoordinationMode
 	TeamCoordinationPolicy                    = kernelteam.CoordinationPolicy
@@ -509,6 +510,8 @@ type (
 	ToolActionDispatcher               = runtime.ToolActionDispatcher
 	TeamRoleActionValidator            = runtime.TeamRoleActionValidator
 	TeamRoleActionDispatcher           = runtime.TeamRoleActionDispatcher
+	TeamSkillActionValidator           = runtime.TeamSkillActionValidator
+	TeamSkillAuthorityCatalog          = runtime.TeamSkillAuthorityCatalog
 	SkillBindingActionValidator        = runtime.SkillBindingActionValidator
 	SkillBindingActionDispatcher       = runtime.SkillBindingActionDispatcher
 	OpenClawSkillSource                = skillopenclaw.Source
@@ -787,6 +790,8 @@ var (
 	TeamManagementSkill                = runtime.TeamManagementSkill
 	NewTeamRoleActionValidator         = runtime.NewTeamRoleActionValidator
 	NewTeamRoleActionDispatcher        = runtime.NewTeamRoleActionDispatcher
+	NewTeamSkillActionValidator        = runtime.NewTeamSkillActionValidator
+	AuthorizeTeamSkillActivation       = runtime.AuthorizeTeamSkillActivation
 	SkillManagementSkill               = runtime.SkillManagementSkill
 	NewSkillBindingActionValidator     = runtime.NewSkillBindingActionValidator
 	NewSkillBindingActionDispatcher    = runtime.NewSkillBindingActionDispatcher
@@ -1499,6 +1504,11 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.configureTeamManagementActions(); err != nil {
 		return nil, fmt.Errorf("Team management action configuration: %w", err)
 	}
+	teamSkillValidator, err := runtime.NewTeamSkillActionValidator(e)
+	if err != nil {
+		return nil, fmt.Errorf("Team Skill authority configuration: %w", err)
+	}
+	e.actionValidators = append(e.actionValidators, teamSkillValidator)
 	e.rebuildGovernance()
 	if err := e.rebuildActionWorkerPools(); err != nil {
 		return nil, fmt.Errorf("action worker configuration: %w", err)
@@ -2940,6 +2950,36 @@ func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBin
 }
 
 func (e *Engine) DisableSkillBinding(ctx context.Context, request skill.DisableBindingRequest) (*skill.Binding, error) {
+	return e.skills.DisableBinding(ctx, request)
+}
+
+// ListTeamSkillBindings exposes the first-class Team-owned binding portfolio.
+// It verifies Team identity in the exact scope before reading the shared
+// canonical Skill contract.
+func (e *Engine) ListTeamSkillBindings(ctx context.Context, scope skill.ScopeReference, teamDeploymentID string) ([]*skill.Binding, error) {
+	if _, err := e.teams.GetDeployment(ctx, scope, teamDeploymentID); err != nil {
+		return nil, err
+	}
+	return e.skills.ListBindings(ctx, scope, teamDeploymentID)
+}
+
+func (e *Engine) UpsertTeamSkillBinding(ctx context.Context, teamDeploymentID string, request skill.UpsertBindingRequest) (*skill.Binding, error) {
+	if request.Binding == nil || request.Binding.DeploymentID != teamDeploymentID {
+		return nil, errors.New("Team Skill binding must identify the owning Team deployment")
+	}
+	if _, err := e.teams.GetDeployment(ctx, request.Binding.Scope, teamDeploymentID); err != nil {
+		return nil, err
+	}
+	return e.skills.UpsertBinding(ctx, request)
+}
+
+func (e *Engine) DisableTeamSkillBinding(ctx context.Context, teamDeploymentID string, request skill.DisableBindingRequest) (*skill.Binding, error) {
+	if request.DeploymentID != teamDeploymentID {
+		return nil, errors.New("Team Skill binding must identify the owning Team deployment")
+	}
+	if _, err := e.teams.GetDeployment(ctx, request.Scope, teamDeploymentID); err != nil {
+		return nil, err
+	}
 	return e.skills.DisableBinding(ctx, request)
 }
 

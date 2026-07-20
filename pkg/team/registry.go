@@ -482,6 +482,19 @@ func prepareDefinition(definition *Definition, now time.Time) (*Definition, erro
 		candidate.Roles[index].ID = strings.TrimSpace(candidate.Roles[index].ID)
 		candidate.Roles[index].RequiredSkillIDs = normalizedStrings(candidate.Roles[index].RequiredSkillIDs)
 		candidate.Roles[index].RequiredDefinitionIDs = normalizedStrings(candidate.Roles[index].RequiredDefinitionIDs)
+		for grantIndex := range candidate.Roles[index].SkillGrants {
+			grant := &candidate.Roles[index].SkillGrants[grantIndex]
+			grant.SkillID = strings.TrimSpace(grant.SkillID)
+			grant.SkillVersion = strings.TrimSpace(grant.SkillVersion)
+			grant.AllowedActions = normalizedStrings(grant.AllowedActions)
+		}
+		sort.Slice(candidate.Roles[index].SkillGrants, func(left, right int) bool {
+			leftGrant, rightGrant := candidate.Roles[index].SkillGrants[left], candidate.Roles[index].SkillGrants[right]
+			if leftGrant.SkillID == rightGrant.SkillID {
+				return leftGrant.SkillVersion < rightGrant.SkillVersion
+			}
+			return leftGrant.SkillID < rightGrant.SkillID
+		})
 	}
 	candidate.OperatingPrinciples = normalizedStrings(candidate.OperatingPrinciples)
 	candidate.Approvals.ApproverRoleIDs = normalizedStrings(candidate.Approvals.ApproverRoleIDs)
