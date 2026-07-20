@@ -509,6 +509,8 @@ type (
 	ToolActionDispatcher               = runtime.ToolActionDispatcher
 	TeamRoleActionValidator            = runtime.TeamRoleActionValidator
 	TeamRoleActionDispatcher           = runtime.TeamRoleActionDispatcher
+	SkillBindingActionValidator        = runtime.SkillBindingActionValidator
+	SkillBindingActionDispatcher       = runtime.SkillBindingActionDispatcher
 	OpenClawSkillSource                = skillopenclaw.Source
 	OpenClawSkillFile                  = skillopenclaw.File
 	OpenClawSkillBundle                = skillopenclaw.Bundle
@@ -785,6 +787,9 @@ var (
 	TeamManagementSkill                = runtime.TeamManagementSkill
 	NewTeamRoleActionValidator         = runtime.NewTeamRoleActionValidator
 	NewTeamRoleActionDispatcher        = runtime.NewTeamRoleActionDispatcher
+	SkillManagementSkill               = runtime.SkillManagementSkill
+	NewSkillBindingActionValidator     = runtime.NewSkillBindingActionValidator
+	NewSkillBindingActionDispatcher    = runtime.NewSkillBindingActionDispatcher
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -983,6 +988,10 @@ const (
 	TeamManagementSkillID            = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion       = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole             = runtime.TeamActionUpdateRole
+	SkillManagementSkillID           = runtime.SkillManagementSkillID
+	SkillManagementSkillVersion      = runtime.SkillManagementSkillVersion
+	SkillActionUpsertBinding         = runtime.SkillActionUpsertBinding
+	SkillActionDisableBinding        = runtime.SkillActionDisableBinding
 	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
 	ObjectiveCadenceDaily            = runtime.ObjectiveCadenceDaily
 	ObjectiveCadenceWeekly           = runtime.ObjectiveCadenceWeekly
@@ -1360,6 +1369,7 @@ type Engine struct {
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	actionValidators              []runtime.ActionProposalValidator
 	teamManagementActions         bool
+	skillManagementActions        bool
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
 	clawHubRegistry               clawhub.Registry
@@ -1482,6 +1492,9 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
+	}
+	if err := e.configureSkillManagementActions(); err != nil {
+		return nil, fmt.Errorf("Skill management action configuration: %w", err)
 	}
 	if err := e.configureTeamManagementActions(); err != nil {
 		return nil, fmt.Errorf("Team management action configuration: %w", err)
@@ -1988,6 +2001,45 @@ func WithTeamManagementActions() Option {
 		e.teamManagementActions = true
 		return nil
 	}
+}
+
+// WithSkillManagementActions enables the portable, governed Agent Skill
+// binding action layer. The Engine owns both catalog and durable runtime, so
+// hosts do not compose private validators or dispatchers.
+func WithSkillManagementActions() Option {
+	return func(e *Engine) error {
+		e.skillManagementActions = true
+		return nil
+	}
+}
+
+func (e *Engine) configureSkillManagementActions() error {
+	if !e.skillManagementActions {
+		return nil
+	}
+	if err := e.skills.Register(context.Background(), runtime.SkillManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+		return err
+	}
+	validator, err := runtime.NewSkillBindingActionValidator(e.skills)
+	if err != nil {
+		return err
+	}
+	e.actionValidators = append(e.actionValidators, validator)
+	for index := range e.actionPoolSpecs {
+		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionPoolSpecs[index].dispatcher = dispatcher
+	}
+	for index := range e.actionSupervisorSpecs {
+		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionSupervisorSpecs[index].dispatcher = dispatcher
+	}
+	return nil
 }
 
 func (e *Engine) configureTeamManagementActions() error {

@@ -1,0 +1,269 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(20)
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	deploymentID := "research-agent"
+	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{
+			Disposition: ActionDispositionRequireApproval, Reason: "Skill access requires review",
+			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
+		}, nil
+	})
+	validator, err := NewSkillBindingActionValidator(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
+	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert")
+	arguments := map[string]interface{}{
+		"bindingId": "reddit", "expectedRevision": 0,
+		"skillId": "reddit.reader", "skillVersion": "1.0.0",
+		"allowedActions": []interface{}{"read"}, "enablePrompt": true, "maximumRisk": "read",
+		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "vault://tenant-a/reddit"}},
+		"config":           map[string]interface{}{"subreddits": []interface{}{"kubernetes", "devops"}},
+	}
+	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-upsert", DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
+		Arguments: arguments, IdempotencyKey: "message-1:add-reddit", Summary: "Enable Reddit research",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
+		t.Fatalf("proposal lifecycle = %#v", proposal)
+	}
+	encodedPreview, _ := json.Marshal(proposal.Approval.ProposedAction)
+	if !strings.Contains(string(encodedPreview), "vault://tenant-a/reddit") || strings.Contains(string(encodedPreview), "client_secret") {
+		t.Fatalf("approval preview is not opaque and secret-safe: %s", encodedPreview)
+	}
+	if proposal.Approval.ProposedAction["deploymentId"] != deploymentID || proposal.Approval.ProposedAction["resourceType"] != "skill_binding" {
+		t.Fatalf("typed approval preview = %#v", proposal.Approval.ProposedAction)
+	}
+	approveSkillAction(t, ctx, store, scope, proposal)
+	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := NewActionWorker(store, catalog, nil, dispatcher)
+	executed, err := worker.RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != SkillActionUpsertBinding || executed.Call.Output["replayed"] != false {
+		t.Fatalf("upsert execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
+	}
+	binding, err := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
+	if err != nil || binding == nil || binding.Revision != 1 || binding.Disabled || binding.Credentials["reddit"].ID != "vault://tenant-a/reddit" {
+		t.Fatalf("materialized binding = %#v, %v", binding, err)
+	}
+	if len(binding.Lifecycle) != 1 || binding.Lifecycle[0].Actor.Type != "user" || binding.Lifecycle[0].Actor.ID != "operator" {
+		t.Fatalf("binding audit = %#v", binding.Lifecycle)
+	}
+
+	disableRun, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker-disable", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || disableRun == nil || disableRun.ID != run.ID {
+		t.Fatalf("reclaim after upsert = %#v, %v", disableRun, err)
+	}
+	disableProposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: disableRun.ID, WorkerID: "worker-disable", DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDisableBinding,
+		Arguments:      map[string]interface{}{"bindingId": "reddit", "expectedRevision": 1},
+		IdempotencyKey: "message-2:disable-reddit", Summary: "Disable Reddit research",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveSkillAction(t, ctx, store, scope, disableProposal)
+	executed, err = worker.RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != SkillActionDisableBinding {
+		t.Fatalf("disable execution = %#v, %v", executed, err)
+	}
+	disabled, _ := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
+	if disabled == nil || !disabled.Disabled || disabled.Revision != 2 || len(disabled.Lifecycle) != 2 || disabled.Lifecycle[1].Action != skill.BindingLifecycleDisabled {
+		t.Fatalf("disabled binding = %#v", disabled)
+	}
+
+	reenableRun, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker-reenable", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || reenableRun == nil || reenableRun.ID != run.ID {
+		t.Fatalf("reclaim after disable = %#v, %v", reenableRun, err)
+	}
+	reenable := cloneMap(arguments)
+	reenable["expectedRevision"] = 2
+	reenable["config"] = map[string]interface{}{"subreddits": []interface{}{"kubernetes"}}
+	reenableProposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: reenableRun.ID, WorkerID: "worker-reenable", DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
+		Arguments: reenable, IdempotencyKey: "message-3:reenable-reddit", Summary: "Re-enable Reddit research",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveSkillAction(t, ctx, store, scope, reenableProposal)
+	executed, err = worker.RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil || executed.Call.Status != ActionCallStatusSucceeded {
+		t.Fatalf("re-enable execution = %#v, %v", executed, err)
+	}
+	enabled, _ := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
+	if enabled == nil || enabled.Disabled || enabled.Revision != 3 || len(enabled.Lifecycle) != 3 || enabled.Lifecycle[2].Action != skill.BindingLifecycleEnabled {
+		t.Fatalf("re-enabled binding = %#v", enabled)
+	}
+}
+
+func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeApproval(t *testing.T) {
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	catalog := skillActionCatalog(t, ctx, scope, "agent-a")
+	validator, _ := NewSkillBindingActionValidator(catalog)
+	management := SkillManagementSkill()
+	bound, err := catalog.Resolve(ctx, skillScope, "agent-a", management.ID, management.Version, SkillActionUpsertBinding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := map[string]interface{}{
+		"bindingId": "reader", "expectedRevision": 0, "skillId": "reddit.reader", "skillVersion": "1.0.0",
+		"allowedActions": []interface{}{"read"}, "enablePrompt": false, "maximumRisk": "read",
+		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "vault://reddit"}},
+	}
+
+	foreignRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-b"}, AssignedAgentID: "agent-b"}
+	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: foreignRun, Bound: bound, Arguments: base}); err == nil {
+		t.Fatal("management binding from agent-a escalated into agent-b")
+	}
+	store := NewMemoryStore(5)
+	durableForeign, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: foreignRun.Owner, AssignedAgentID: foreignRun.AssignedAgentID, Goal: "Manage Skills", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, _ := NewSkillBindingActionDispatcher(store, catalog, nil)
+	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{
+		Call: &ActionCall{Scope: scope, RunID: durableForeign.ID, DeploymentID: "agent-a"}, Bound: bound, Arguments: base,
+	}); err == nil {
+		t.Fatal("dispatcher allowed a cross-Agent Skill mutation")
+	}
+
+	selfRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a"}
+	unknown := cloneMap(base)
+	unknown["skillId"] = "missing"
+	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: unknown}); err == nil {
+		t.Fatal("unknown Skill reached approval")
+	}
+
+	sourced := redditSkillDefinition()
+	sourced.ID = "sourced.reader"
+	sourced.Source = &capability.SourceProvenance{Identity: "clawhub://publisher/reddit@1.0.0", Format: "openclaw"}
+	if err := catalog.Register(ctx, sourced); err != nil {
+		t.Fatal(err)
+	}
+	missingSource := cloneMap(base)
+	missingSource["skillId"] = sourced.ID
+	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: missingSource}); err == nil || !strings.Contains(err.Error(), "sourceIdentity") {
+		t.Fatalf("sourced Skill without exact source error = %v", err)
+	}
+
+	secretConfig := cloneMap(base)
+	secretConfig["config"] = map[string]interface{}{"client_secret": "raw-secret"}
+	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: secretConfig}); err == nil || !strings.Contains(err.Error(), "opaque credential") {
+		t.Fatalf("secret config error = %v", err)
+	}
+
+	if _, err := catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{
+		Binding: &skill.Binding{
+			ID: "reader", Scope: skillScope, DeploymentID: "agent-a", SkillID: "reddit.reader", SkillVersion: "1.0.0",
+			AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead,
+			Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "vault://reddit"}},
+		},
+		ExpectedRevision: 0, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "initial",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stale := cloneMap(base)
+	stale["bindingId"] = "reader"
+	stale["expectedRevision"] = 0
+	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: stale}); !errors.Is(err, skill.ErrBindingRevisionConflict) {
+		t.Fatalf("stale CAS error = %v", err)
+	}
+}
+
+func skillActionCatalog(t *testing.T, ctx context.Context, scope Scope, deploymentID string) *skill.Catalog {
+	t.Helper()
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(ctx, SkillManagementSkill()); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Register(ctx, redditSkillDefinition()); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Bind(ctx, &skill.Binding{
+		ID: "skills", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
+		AllowedActions: []string{SkillActionUpsertBinding, SkillActionDisableBinding}, MaximumRisk: skill.RiskLevelWrite,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
+func redditSkillDefinition() *skill.Definition {
+	return &skill.Definition{
+		ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader", Description: "Read configured communities.",
+		Transport: skill.TransportReference{Kind: "http", Endpoint: "https://reddit.example"},
+		Prompt: &capability.PromptModule{
+			Instructions: "Use Reddit evidence.", UserInvocable: true,
+			Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}},
+		},
+		Actions: map[string]skill.Action{
+			"read": {
+				Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead,
+				Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
+				Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}},
+				InputSchema: map[string]interface{}{"type": "object"}, OutputSchema: map[string]interface{}{"type": "object"},
+			},
+		},
+	}
+}
+
+func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope, deploymentID, workerID string) *AgentRun {
+	t.Helper()
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
+		Goal: "Manage Skills", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: workerID, Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	return claimed
+}
+
+func approveSkillAction(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope, proposal *ActionProposalResult) {
+	t.Helper()
+	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
+		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		DecisionID: "approve-" + proposal.Call.ID, Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
+	})
+	if err != nil || resolved.Call.Status != ActionCallStatusReady {
+		t.Fatalf("resolve = %#v, %v", resolved, err)
+	}
+}
