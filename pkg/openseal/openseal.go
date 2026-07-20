@@ -732,18 +732,19 @@ func ValidateWorkforceCredentialPlacement(candidate *WorkforceCandidate, require
 }
 
 var (
-	NewHostedTurnRunner               = runtime.NewHostedTurnRunner
-	MarshalHostedTurnModelInput       = runtime.MarshalHostedTurnModelInput
-	EstimateHostedTurnInputTokens     = runtime.EstimateHostedTurnInputTokens
-	NewCapabilityInvocationTurnRunner = runtime.NewCapabilityInvocationTurnRunner
-	NewOutreachTurnRunner             = runtime.NewOutreachTurnRunner
-	NewOutreachActionProposalObserver = runtime.NewOutreachActionProposalObserver
-	ResolveCatalogTurnRunner          = runtime.ResolveCatalogTurnRunner
-	NewArtifactRetentionService       = runtime.NewArtifactRetentionService
-	ErrTurnHostUnavailable            = runtime.ErrTurnHostUnavailable
-	ValidateRunbook                   = runbook.Validate
-	NewRunbookTurnRunner              = runtime.NewRunbookTurnRunner
-	NewRunForkCoordinator             = runtime.NewRunForkCoordinator
+	NewHostedTurnRunner                = runtime.NewHostedTurnRunner
+	MarshalHostedTurnModelInput        = runtime.MarshalHostedTurnModelInput
+	MarshalEvidenceGroundingModelInput = runtime.MarshalEvidenceGroundingModelInput
+	EstimateHostedTurnInputTokens      = runtime.EstimateHostedTurnInputTokens
+	NewCapabilityInvocationTurnRunner  = runtime.NewCapabilityInvocationTurnRunner
+	NewOutreachTurnRunner              = runtime.NewOutreachTurnRunner
+	NewOutreachActionProposalObserver  = runtime.NewOutreachActionProposalObserver
+	ResolveCatalogTurnRunner           = runtime.ResolveCatalogTurnRunner
+	NewArtifactRetentionService        = runtime.NewArtifactRetentionService
+	ErrTurnHostUnavailable             = runtime.ErrTurnHostUnavailable
+	ValidateRunbook                    = runbook.Validate
+	NewRunbookTurnRunner               = runtime.NewRunbookTurnRunner
+	NewRunForkCoordinator              = runtime.NewRunForkCoordinator
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
