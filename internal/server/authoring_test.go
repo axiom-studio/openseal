@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,6 +120,8 @@ func (a governedFixtureAuthority) AuthorizeWorkforceLifecycle(_ context.Context,
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
 	case kernelapi.OperationPatch:
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
+	case kernelapi.OperationRefine:
+		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
 	default:
 		return WorkforceLifecycleAuthorization{}, errors.New("unsupported operation")
 	}
@@ -209,6 +212,29 @@ func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
 	}
 	if loaded == nil || loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"status":"blocked"`) {
 		t.Fatalf("load status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+	var blocked authoring.ChangeSet
+	if err := json.NewDecoder(strings.NewReader(loaded.Body.String())).Decode(&blocked); err != nil || blocked.Refinement.NextQuestion() == nil {
+		t.Fatalf("blocked refinement = %#v, err = %v", blocked.Refinement, err)
+	}
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{actor: "configured-operator"})
+	contextual := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId="+url.QueryEscape(blocked.ID), "", "")
+	if !strings.Contains(contextual.Body.String(), `"refine"`) {
+		t.Fatalf("contextual refinement capability = %s", contextual.Body.String())
+	}
+	question := blocked.Refinement.NextQuestion()
+	answer := authoring.AnswerChangeSetRefinementRequest{
+		Scope: blocked.Scope, ChangeSetID: blocked.ID, ExpectedRevision: blocked.Revision, QuestionID: question.ID,
+		Value: authoring.RefinementAnswerValue{Text: "Own evidence-backed product research"}, Source: authoring.RefinementAnswerSourceRuntime,
+		Actor: authoring.ChangeSetActor{Type: "user", ID: "forged"}, IdempotencyKey: "body-key-ignored",
+	}
+	refined := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+blocked.ID+"/refinements", mustJSON(t, answer), "answer-refinement")
+	if refined.Code != http.StatusAccepted || !strings.Contains(refined.Body.String(), `"status":"evaluating"`) || !strings.Contains(refined.Body.String(), `"configured-operator"`) || !strings.Contains(refined.Body.String(), `"source":"user"`) {
+		t.Fatalf("refined = %d %s", refined.Code, refined.Body.String())
+	}
+	replayedAnswer := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/change-sets/"+blocked.ID+"/refinements", mustJSON(t, answer), "answer-refinement")
+	if replayedAnswer.Code != http.StatusOK || !strings.Contains(replayedAnswer.Body.String(), `"answer-refinement"`) {
+		t.Fatalf("refinement replay = %d %s", replayedAnswer.Code, replayedAnswer.Body.String())
 	}
 	foreign := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/authoring/workforce/change-sets/"+changeSet.ID+"?scopeKind=tenant&scopeId=two", "", "")
 	if foreign.Code != http.StatusNotFound {

@@ -36,7 +36,7 @@ const (
 	TeamDefinitionsCapabilityID         = "team-definitions"
 	TeamDefinitionsCapabilityVersion    = "2"
 	WorkforceAuthoringCapabilityID      = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion = "6"
+	WorkforceAuthoringCapabilityVersion = "7"
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
@@ -98,6 +98,7 @@ const (
 	OperationRoute             = "route"
 	OperationUpsert            = "upsert"
 	OperationDisable           = "disable"
+	OperationRefine            = "refine"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an

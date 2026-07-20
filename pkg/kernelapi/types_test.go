@@ -36,7 +36,7 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 
 func TestWorkforceAuthoringVersionDeclaresDeterministicPlacementContract(t *testing.T) {
 	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	if capability.Version != "6" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) || capability.Supports(OperationPatch) {
+	if capability.Version != "7" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) || capability.Supports(OperationRefine) || capability.Supports(OperationPatch) {
 		t.Fatalf("workforce authoring capability = %#v", capability)
 	}
 }

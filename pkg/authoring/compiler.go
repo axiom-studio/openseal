@@ -339,6 +339,10 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				key := kind + ":" + requirement.SkillID + ":" + definition.ID
 				missing[key] = MissingRequirement{Kind: kind, ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
 			}
+			if capability.Readiness == SkillReadinessNeedsBinding {
+				key := "skill_binding:" + requirement.SkillID + ":" + definition.ID
+				missing[key] = MissingRequirement{Kind: "skill_binding", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
+			}
 			if requirement.PromptRequired && !capability.PromptAvailable {
 				key := "prompt:" + requirement.SkillID + ":" + definition.ID
 				missing[key] = MissingRequirement{Kind: "prompt", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
@@ -375,6 +379,10 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				}
 				key := kind + ":" + monitor.SkillID + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: kind, ID: monitor.SkillID, RequiredBy: requiredBy}
+			}
+			if available.Readiness == SkillReadinessNeedsBinding {
+				key := "skill_binding:" + monitor.SkillID + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: "skill_binding", ID: monitor.SkillID, RequiredBy: requiredBy}
 			}
 			if available.Version != monitor.SkillVersion {
 				key := "version:" + monitor.SkillID + "@" + monitor.SkillVersion + ":" + requiredBy

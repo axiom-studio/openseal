@@ -131,13 +131,18 @@ func TestChangeSetRefinementIsSequentialAuditedAndRestartSafe(t *testing.T) {
 }
 
 func TestRefinementQuestionsRejectCyclesAndSecretShapedAnswers(t *testing.T) {
-	first := RefinementQuestion{ID: "first", Category: RefinementCategoryScope, Prompt: "First?", WhyNeeded: "Needed", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerText}, Priority: 1, DependsOn: []RefinementQuestionDependency{{QuestionID: "second"}}}
-	second := RefinementQuestion{ID: "second", Category: RefinementCategoryCredential, Prompt: "Credential?", WhyNeeded: "Needed", Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference}, Priority: 2, DependsOn: []RefinementQuestionDependency{{QuestionID: "first"}}}
+	first := RefinementQuestion{ID: "first", Category: RefinementCategoryScope, Prompt: "First?", WhyNeeded: "Needed", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerText}, Priority: 1, DependsOn: []RefinementQuestionDependency{{QuestionID: "second"}}, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}}}
+	second := RefinementQuestion{ID: "second", Category: RefinementCategoryCredential, Prompt: "Credential?", WhyNeeded: "Needed", Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference}, Priority: 2, DependsOn: []RefinementQuestionDependency{{QuestionID: "first"}}, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}}}
 	if err := validateRefinementQuestions([]RefinementQuestion{first, second}); err == nil {
 		t.Fatal("cyclic dependencies were accepted")
 	}
 	if err := validateRefinementAnswer(second, RefinementAnswerValue{Text: "secret-value"}); err == nil {
 		t.Fatal("credential answer accepted a text secret instead of an opaque reference")
+	}
+	second.DependsOn = nil
+	second.Provenance[0].Reference = "vault/tenant/opaque-reference"
+	if err := validateRefinementQuestions([]RefinementQuestion{second}); err == nil {
+		t.Fatal("opaque credential reference was accepted in model-visible question provenance")
 	}
 }
 
@@ -165,4 +170,31 @@ func TestRefinementSkillOptionsMustBeTruthfulAuthorizedCatalogEntries(t *testing
 	if err := validateRefinementCatalog([]RefinementQuestion{question}, CapabilityCatalog{Skills: map[string]SkillCapability{"reddit": {ID: "reddit", Readiness: SkillReadinessUnavailable}}}); err == nil {
 		t.Fatal("unavailable Skill option was presented")
 	}
+}
+
+func TestSkillReadinessBlocksCandidateUntilInstallationOrBindingCompletes(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"search", "read"}, Readiness: SkillReadinessNeedsBinding},
+	}}
+	missing := missingRequirements(&candidate, catalog)
+	if !hasMissingRequirementKind(missing, "skill_binding") {
+		t.Fatalf("binding readiness=%#v", missing)
+	}
+	skill := catalog.Skills["reddit-research"]
+	skill.Readiness = SkillReadinessNeedsInstallation
+	catalog.Skills["reddit-research"] = skill
+	missing = missingRequirements(&candidate, catalog)
+	if !hasMissingRequirementKind(missing, "skill_installation") {
+		t.Fatalf("installation readiness=%#v", missing)
+	}
+}
+
+func hasMissingRequirementKind(values []MissingRequirement, kind string) bool {
+	for _, value := range values {
+		if value.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
