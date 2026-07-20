@@ -106,6 +106,48 @@ func TestSchemaGenerationFailureClassificationIsActionable(t *testing.T) {
 	}
 }
 
+func TestChangeSetRepairsGenericSkillQuestionAndPersistsCanonicalSelection(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	question := RefinementQuestion{
+		ID: "report-skills", Category: RefinementCategorySkill, Prompt: "Which reporting Skills should be configured?",
+		WhyNeeded: "The report requires generation and delivery capabilities.", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer: RefinementAnswerSchema{Kind: RefinementAnswerMultiSelect, Minimum: 1, Maximum: 2, Options: []RefinementQuestionOption{
+			{ID: "document", Label: "Document"}, {ID: "delivery", Label: "Delivery"},
+		}}, Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	repairedQuestion := question
+	repairedQuestion.Answer.Kind = RefinementAnswerSkillSelection
+	repairedQuestion.Answer.Options = []RefinementQuestionOption{
+		{ID: "openseal.document", Label: "Document", Description: "Ready and compatible with PDF generation."},
+		{ID: "openseal.delivery", Label: "Delivery", Description: "Requires a configured delivery binding."},
+	}
+	generated, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{question}})
+	repaired, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{repairedQuestion}})
+	generator := &repairingGenerator{generated: generated, repaired: repaired}
+	compiler, _ := NewCompiler(generator)
+	service, _ := NewChangeSetService(compiler, NewMemoryChangeSetStore())
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"reddit-research":   {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}, Readiness: SkillReadinessReady},
+		"openseal.document": {ID: "openseal.document", Version: "1.0.0", Actions: []string{"render_pdf"}, Readiness: SkillReadinessReady, Compatibility: []SkillCompatibility{{Requirement: "pdf", Compatible: true, Evidence: "native renderer"}}},
+		"openseal.delivery": {ID: "openseal.delivery", Version: "1.0.0", Actions: []string{"send_email"}, Readiness: SkillReadinessNeedsBinding, Compatibility: []SkillCompatibility{{Requirement: "email", Compatible: true, Evidence: "host adapter"}}},
+	}}
+
+	created, replay, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create a research Team that delivers a PDF report.", Catalog: catalog,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "canonical-skill-question",
+	})
+	if err != nil || replay || generator.repairs != 1 || created.Status != ChangeSetBlocked || len(created.Result.Validation) != 0 || len(created.Refinement.Questions) != 1 {
+		t.Fatalf("created=%#v replay=%t repairs=%d err=%v", created, replay, generator.repairs, err)
+	}
+	if got := generator.lastError.Error(); !strings.Contains(got, "category skill") || !strings.Contains(got, "skill_selection") {
+		t.Fatalf("repair diagnostic=%s", got)
+	}
+	persisted := created.Refinement.Questions[0]
+	if persisted.Answer.Kind != RefinementAnswerSkillSelection || persisted.Answer.Options[0].ID != "openseal.document" || persisted.Answer.Options[1].ID != "openseal.delivery" {
+		t.Fatalf("persisted Skill question=%#v", persisted)
+	}
+}
+
 func TestGenerationRetryIsConcurrentIdempotent(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()

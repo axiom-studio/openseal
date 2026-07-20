@@ -170,6 +170,24 @@ func TestRefinementSkillOptionsMustBeTruthfulAuthorizedCatalogEntries(t *testing
 	if err := validateRefinementCatalog([]RefinementQuestion{question}, CapabilityCatalog{Skills: map[string]SkillCapability{"reddit": {ID: "reddit", Readiness: SkillReadinessUnavailable}}}); err == nil {
 		t.Fatal("unavailable Skill option was presented")
 	}
+	question.Answer.Options[0].ID = "delivery"
+	err := validateRefinementCatalog([]RefinementQuestion{question}, CapabilityCatalog{Skills: map[string]SkillCapability{"openseal.delivery": {ID: "openseal.delivery", Readiness: SkillReadinessNeedsBinding}}})
+	if err == nil || !strings.Contains(err.Error(), `exact authorized catalog key "openseal.delivery"`) || !strings.Contains(err.Error(), "aliases are not accepted") {
+		t.Fatalf("delivery alias diagnostic=%v", err)
+	}
+}
+
+func TestRefinementSkillCategoryRequiresSkillSelectionAnswer(t *testing.T) {
+	question := RefinementQuestion{
+		ID: "skills", Category: RefinementCategorySkill, Prompt: "Choose Skills", WhyNeeded: "Capabilities are required",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerMultiSelect, Options: []RefinementQuestionOption{{ID: "openseal.document", Label: "Document"}}},
+		Priority: 1, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	err := validateRefinementQuestions([]RefinementQuestion{question})
+	if err == nil || !strings.Contains(err.Error(), "category skill") || !strings.Contains(err.Error(), "skill_selection") {
+		t.Fatalf("generic Skill question diagnostic=%v", err)
+	}
 }
 
 func TestSkillReadinessBlocksCandidateUntilInstallationOrBindingCompletes(t *testing.T) {
