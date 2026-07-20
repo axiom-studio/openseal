@@ -195,6 +195,40 @@ func TestCatalogPreservesInstalledClawHubOriginAndVersion(t *testing.T) {
 	}
 }
 
+func TestCatalogSurfacesUnadaptedExternalSkillWithoutDroppingProvenance(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "reddit-search")
+	if err := os.MkdirAll(filepath.Join(directory, ".clawhub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := `---
+name: reddit-search
+description: Search Reddit through an authenticated API.
+metadata:
+  openclaw:
+    primaryEnv: REDDIT_TOKEN
+---
+Search Reddit for the requested topic.
+`
+	if err := os.WriteFile(filepath.Join(directory, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	origin := `{"version":1,"registry":"https://clawhub.ai","slug":"reddit-search","ownerHandle":"publisher","installedVersion":"1.0.0","fingerprint":"fp-reddit","archiveSha256":"` + strings.Repeat("b", 64) + `"}`
+	if err := os.WriteFile(filepath.Join(directory, ".clawhub", "origin.json"), []byte(origin), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := NewCatalog().Discover(context.Background(), []Root{{ID: "managed", Kind: RootManaged, Path: root}})
+	if err != nil || len(snapshot.Effective) != 1 || !hasDiagnostic(snapshot, "needs_action_adapter") {
+		t.Fatalf("unadapted catalog Skill = %#v, %v", snapshot, err)
+	}
+	candidate := snapshot.Effective[0]
+	if candidate.Compilation == nil || candidate.Compilation.Definition.Source == nil ||
+		candidate.Compilation.Definition.Source.Registry != "https://clawhub.ai" || candidate.Compilation.Definition.Source.Reference != "publisher/reddit-search" {
+		t.Fatalf("source provenance was not retained: %#v", candidate)
+	}
+}
+
 func writeSkill(t *testing.T, directory, name, description string, resources map[string]string) {
 	t.Helper()
 	if err := os.MkdirAll(directory, 0o755); err != nil {

@@ -235,6 +235,15 @@ func discoverRoot(ctx context.Context, root Root, order int) ([]Candidate, []Dia
 			diagnostics = append(diagnostics, Diagnostic{Severity: "error", Code: "skill.compile_failed", RootID: root.ID, Path: directory, Message: compileErr.Error()})
 			continue
 		}
+		for _, compilerDiagnostic := range compilation.Diagnostics {
+			if compilerDiagnostic.Code != skillopenclaw.NeedsActionAdapterDiagnostic {
+				continue
+			}
+			diagnostics = append(diagnostics, Diagnostic{
+				Severity: compilerDiagnostic.Severity, Code: compilerDiagnostic.Code, RootID: root.ID,
+				Path: filepath.Join(directory, filepath.FromSlash(compilerDiagnostic.Path)), Message: compilerDiagnostic.Message,
+			})
+		}
 		result = append(result, Candidate{
 			Name: compilation.Definition.ID, Description: compilation.Definition.Description, Version: compilation.Definition.Version,
 			Digest: compilation.SourceDigest, RootID: root.ID, RootKind: root.Kind, Precedence: root.Precedence,

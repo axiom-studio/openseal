@@ -18,6 +18,8 @@ import (
 
 const processCompilationRevision = "process.1"
 
+const NeedsActionAdapterDiagnostic = "needs_action_adapter"
+
 type Source struct {
 	Registry     string
 	Publisher    string
@@ -137,12 +139,26 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		if definition.Prompt == nil {
 			return nil, fmt.Errorf("skill contains neither instructions nor a deterministic command dispatch")
 		}
-		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "prompt.compiled", Path: "SKILL.md", Message: "instruction skill compiled as a native prompt module"})
+		if promptRequiresGovernedAction(parsed, definition) {
+			diagnostics = append(diagnostics, Diagnostic{
+				Severity: "warning", Code: NeedsActionAdapterDiagnostic, Path: "SKILL.md",
+				Message: "this Skill declares external tools or credentials but no governed action; add deterministic command dispatch, a declared executable, or a host action adapter before activation",
+			})
+		} else {
+			diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "prompt.compiled", Path: "SKILL.md", Message: "local instruction skill compiled as a native prompt module"})
+		}
 	}
 	if len(bundle.Files) > 0 {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "resources.indexed", Message: fmt.Sprintf("indexed %d supporting resources for progressive disclosure", len(bundle.Files))})
 	}
 	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest, Artifact: cloneBundle(bundle)}, nil
+}
+
+func promptRequiresGovernedAction(parsed *skillmd.ParsedSkill, definition *capability.Definition) bool {
+	if parsed == nil || definition == nil || definition.Prompt == nil || len(definition.Actions) != 0 {
+		return false
+	}
+	return len(parsed.AllowedTools) > 0 || len(definition.Prompt.Credentials) > 0 || len(definition.Requirements.Environment) > 0
 }
 
 func compileProcessActions(parsed *skillmd.ParsedSkill, definition *capability.Definition) (map[string]capability.Action, error) {
