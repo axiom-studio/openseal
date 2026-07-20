@@ -12,7 +12,7 @@ openseal
 ```
 
 The workspace composes and operates canonical Agents, Teams, objectives, Runs,
-Team channels, and the durable Artifact/Evidence catalog. Workforce authoring
+Initiatives, governed outreach, Team channels, and the durable Artifact/Evidence catalog. Workforce authoring
 starts with an outcome prompt and persists a reviewable ChangeSet. When the
 connected host advertises the exact contextual authority, the TUI can resolve a
 specific approval requirement and atomically Apply the reviewed Agent, Team,
@@ -57,8 +57,8 @@ terminal testing.
 | `Ctrl+S` | Start work or submit guidance from the composer |
 | `Tab` | Move between the composer and current work |
 | `↑` / `↓` or `k` / `j` | Select an item or approval requirement |
-| `f` / `T` / `o` / `w` / `c` / `a` | Open Workforce, Teams, Objectives, Work, Channels, or Evidence |
-| `n` | Compose a new objective, Run, or Team channel in the current section |
+| `f` / `T` / `o` / `i` / `O` / `w` / `c` / `a` | Open Workforce, Teams, Objectives, Initiatives, Outreach, Work, Channels, or Evidence |
+| `n` | Compose a new resource or evidence-linked outreach draft in the current section |
 | `r` | Refresh from the kernel |
 | `p` | Pause or resume selected Team deployment or work when advertised |
 | `g` | Guide selected work when advertised |
@@ -69,6 +69,8 @@ terminal testing.
 | `b` | Save the selected typed Workforce credential bindings |
 | `e` / `Enter` | Apply a ready Workforce, edit an objective, or expand selected evidence/audit |
 | `d` | Download selected artifact when advertised |
+| `D` | Create a governed delivery Run for the selected outreach draft when advertised |
+| `[` / `]` and `{` / `}` | In Outreach, select exact source evidence and an authorized external Skill action |
 | `Esc` | Cancel guidance composition |
 | `Ctrl+C` | Exit the TUI without stopping work |
 
@@ -85,6 +87,13 @@ verify the catalog size and SHA-256 digest, and are atomically published with
 private file permissions. Failed or corrupted transfers leave no partial file.
 The TUI never persists content URLs or treats an opaque content reference as a
 filesystem path.
+
+Outreach drafting requires an immutable source observation, an external Skill
+action whose schema declares `target` and `body` semantics, a public profile,
+truthful affiliation and disclosure, and an explicit approval policy. Drafting
+does not send anything. Delivery creates a canonical durable Run; message status,
+Run, ActionCall, approval, terminal outcome, and provider receipt are reloaded
+from kernel state and survive TUI or daemon restarts.
 
 Skills remain capability inputs to Workforce authoring and runtime execution;
 the TUI does not render lifecycle controls that the connected server has not

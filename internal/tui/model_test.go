@@ -29,67 +29,72 @@ import (
 )
 
 type fakeKernelClient struct {
-	document            kernelapi.CapabilityDocument
-	agentDeployments    []kernelapi.AgentDeploymentCatalogEntry
-	teamDeployments     []kernelapi.TeamDeploymentCatalogEntry
-	teamUpdates         []kernelapi.UpdateTeamDeploymentRequest
-	teamAmendments      []*kernelteam.DefinitionAmendment
-	teamProposals       []kernelteam.ProposeAmendmentRequest
-	teamEvaluations     []kernelteam.SubmitAmendmentEvaluationRequest
-	teamDecisions       []kernelteam.ResolveAmendmentRequest
-	teamActivations     []kernelapi.ActivateTeamDefinitionAmendmentRequest
-	runs                []*runtime.AgentRun
-	agentRequests       []*runtime.AgentRequest
-	agentRequestFilters []runtime.AgentRequestFilter
-	agentRequestCreates []kernelapi.CreateAgentRequestRequest
-	agentRequestKeys    []string
-	agentResponses      []kernelapi.RespondAgentRequestRequest
-	agentCompletions    []kernelapi.CompleteAgentRequestRequest
-	agentCompletionKeys []string
-	actionApprovals     []*runtime.ApprovalCheckpoint
-	approvalFilters     []runtime.ApprovalFilter
-	actionDecisions     []kernelapi.ResolveActionApprovalRequest
-	actionDecisionKeys  []string
-	compilations        []*kernelagent.DefinitionCompilation
-	compilationErr      error
-	createErrors        []error
-	createKeys          []string
-	createRequests      []kernelapi.CreateAgentRunRequest
-	objectives          []*runtime.Objective
-	objectiveKeys       []string
-	objectiveCreates    []kernelapi.CreateObjectiveRequest
-	objectiveUpdates    []kernelapi.UpdateObjectiveRequest
-	initiatives         []*runtime.Initiative
-	monitorCheckpoints  map[string]*runtime.SourceMonitorCheckpoint
-	monitorObservations map[string][]*runtime.SourceObservation
-	activityPages       map[string]*runtime.ActivityFeedPage
-	activityRequests    []runtime.ActivityFeedRequest
-	initiativeKeys      []string
-	initiativeCreates   []kernelapi.CreateInitiativeRequest
-	initiativeUpdates   []kernelapi.UpdateInitiativeRequest
-	commands            []kernelapi.AgentRunCommandRequest
-	artifacts           []*runtime.Artifact
-	downloadBody        string
-	downloadCalls       int
-	authoringResult     *authoring.CompileResult
-	authoringRequests   []authoring.GenerateRequest
-	authoringErrors     []error
-	changeSets          []*authoring.ChangeSet
-	changeSetRequests   []authoring.CreateChangeSetRequest
-	changeSetKeys       []string
-	changeSetErrors     []error
-	approvalRequests    []authoring.ResolveChangeSetApprovalRequest
-	approvalKeys        []string
-	applyRequests       []authoring.ApplyChangeSetRequest
-	applyKeys           []string
-	placementRequests   []authoring.UpdateChangeSetPlacementRequest
-	placementKeys       []string
-	retryRequests       []authoring.RetryChangeSetGenerationRequest
-	retryKeys           []string
-	governanceResults   []*authoring.ChangeSet
-	governanceErrors    []error
-	skillActions        []capability.ModelAction
-	skillActionCalls    int
+	document             kernelapi.CapabilityDocument
+	agentDeployments     []kernelapi.AgentDeploymentCatalogEntry
+	teamDeployments      []kernelapi.TeamDeploymentCatalogEntry
+	teamUpdates          []kernelapi.UpdateTeamDeploymentRequest
+	teamAmendments       []*kernelteam.DefinitionAmendment
+	teamProposals        []kernelteam.ProposeAmendmentRequest
+	teamEvaluations      []kernelteam.SubmitAmendmentEvaluationRequest
+	teamDecisions        []kernelteam.ResolveAmendmentRequest
+	teamActivations      []kernelapi.ActivateTeamDefinitionAmendmentRequest
+	runs                 []*runtime.AgentRun
+	agentRequests        []*runtime.AgentRequest
+	agentRequestFilters  []runtime.AgentRequestFilter
+	agentRequestCreates  []kernelapi.CreateAgentRequestRequest
+	agentRequestKeys     []string
+	agentResponses       []kernelapi.RespondAgentRequestRequest
+	agentCompletions     []kernelapi.CompleteAgentRequestRequest
+	agentCompletionKeys  []string
+	actionApprovals      []*runtime.ApprovalCheckpoint
+	approvalFilters      []runtime.ApprovalFilter
+	actionDecisions      []kernelapi.ResolveActionApprovalRequest
+	actionDecisionKeys   []string
+	compilations         []*kernelagent.DefinitionCompilation
+	compilationErr       error
+	createErrors         []error
+	createKeys           []string
+	createRequests       []kernelapi.CreateAgentRunRequest
+	objectives           []*runtime.Objective
+	objectiveKeys        []string
+	objectiveCreates     []kernelapi.CreateObjectiveRequest
+	objectiveUpdates     []kernelapi.UpdateObjectiveRequest
+	initiatives          []*runtime.Initiative
+	monitorCheckpoints   map[string]*runtime.SourceMonitorCheckpoint
+	monitorObservations  map[string][]*runtime.SourceObservation
+	activityPages        map[string]*runtime.ActivityFeedPage
+	activityRequests     []runtime.ActivityFeedRequest
+	initiativeKeys       []string
+	initiativeCreates    []kernelapi.CreateInitiativeRequest
+	initiativeUpdates    []kernelapi.UpdateInitiativeRequest
+	outreachThreads      []*runtime.OutreachThread
+	outreachCreates      []kernelapi.CreateOutreachThreadRequest
+	outreachCreateKeys   []string
+	outreachDeliveries   []kernelapi.DeliverOutreachMessageRequest
+	outreachDeliveryKeys []string
+	commands             []kernelapi.AgentRunCommandRequest
+	artifacts            []*runtime.Artifact
+	downloadBody         string
+	downloadCalls        int
+	authoringResult      *authoring.CompileResult
+	authoringRequests    []authoring.GenerateRequest
+	authoringErrors      []error
+	changeSets           []*authoring.ChangeSet
+	changeSetRequests    []authoring.CreateChangeSetRequest
+	changeSetKeys        []string
+	changeSetErrors      []error
+	approvalRequests     []authoring.ResolveChangeSetApprovalRequest
+	approvalKeys         []string
+	applyRequests        []authoring.ApplyChangeSetRequest
+	applyKeys            []string
+	placementRequests    []authoring.UpdateChangeSetPlacementRequest
+	placementKeys        []string
+	retryRequests        []authoring.RetryChangeSetGenerationRequest
+	retryKeys            []string
+	governanceResults    []*authoring.ChangeSet
+	governanceErrors     []error
+	skillActions         []capability.ModelAction
+	skillActionCalls     int
 }
 
 var (
@@ -568,6 +573,37 @@ func (f *fakeKernelClient) CreateInitiative(_ context.Context, request kernelapi
 
 func (f *fakeKernelClient) ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
 	return f.initiatives, nil
+}
+func (f *fakeKernelClient) CreateOutreachThread(_ context.Context, request kernelapi.CreateOutreachThreadRequest, key string) (*runtime.OutreachThread, error) {
+	f.outreachCreates = append(f.outreachCreates, request)
+	f.outreachCreateKeys = append(f.outreachCreateKeys, key)
+	thread := &runtime.OutreachThread{ID: "outreach-created", Scope: request.Scope, InitiativeID: request.InitiativeID, SourceObservationID: request.SourceObservationID,
+		Identity: request.Identity, ApprovalPolicyRef: request.ApprovalPolicyRef, Status: runtime.OutreachThreadOpen,
+		Messages: []runtime.OutreachMessage{{ID: request.Message.ID, Direction: runtime.OutreachMessageOutbound, Intent: request.Message.Intent, Body: request.Message.Body, Status: runtime.OutreachMessageDraft}}}
+	f.outreachThreads = append([]*runtime.OutreachThread{thread}, f.outreachThreads...)
+	return thread, nil
+}
+func (f *fakeKernelClient) ListOutreachThreads(_ context.Context, filter runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error) {
+	result := make([]*runtime.OutreachThread, 0, len(f.outreachThreads))
+	for _, thread := range f.outreachThreads {
+		if thread.InitiativeID == filter.InitiativeID {
+			result = append(result, thread)
+		}
+	}
+	return result, nil
+}
+func (f *fakeKernelClient) GetOutreachThread(_ context.Context, _ runtime.Scope, _, threadID string) (*runtime.OutreachThread, error) {
+	for _, thread := range f.outreachThreads {
+		if thread.ID == threadID {
+			return thread, nil
+		}
+	}
+	return nil, runtime.ErrOutreachThreadNotFound
+}
+func (f *fakeKernelClient) DeliverOutreachMessage(_ context.Context, initiativeID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, key string) (*runtime.AgentRun, error) {
+	f.outreachDeliveries = append(f.outreachDeliveries, request)
+	f.outreachDeliveryKeys = append(f.outreachDeliveryKeys, key)
+	return &runtime.AgentRun{ID: "outreach-run", Scope: request.Scope, Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": threadID, "messageId": messageID}}, Goal: initiativeID}, nil
 }
 func (f *fakeKernelClient) ListSourceObservations(_ context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
 	return f.monitorObservations[sourceMonitorStatusKey(filter.InitiativeID, filter.MonitorID)], nil
@@ -1756,6 +1792,75 @@ func TestInitiativeCreationRequiresRealObjective(t *testing.T) {
 	}
 	if !strings.Contains(model.status, "Objective") || len(fake.initiativeCreates) != 0 {
 		t.Fatalf("status=%q creates=%#v", model.status, fake.initiativeCreates)
+	}
+}
+
+func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *testing.T) {
+	now := time.Now().UTC()
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	initiative := &runtime.Initiative{
+		ID: "initiative-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
+		Title: "Community research", Status: runtime.InitiativeStatusActive,
+		SourceMonitors: []runtime.SourceMonitorReference{{ID: "forum", AssignedAgentID: "researcher", SourcePolicyRef: "public-forum@1"}},
+	}
+	observation := &runtime.SourceObservation{
+		ID: "evidence-1", Scope: scope, InitiativeID: initiative.ID, MonitorID: "forum", Summary: "Install flow is confusing",
+		SourceURI: "https://forum.example/thread/1", ObservedAt: now,
+	}
+	disclosure := "Disclosure: automated OpenSeal research assistant."
+	thread := &runtime.OutreachThread{
+		ID: "thread-1", Scope: scope, InitiativeID: initiative.ID, SourceObservationID: observation.ID, TargetURI: observation.SourceURI,
+		AssignedAgentID: "researcher", SourcePolicyRef: "public-forum@1", ApprovalPolicyRef: "human-review",
+		Identity: runtime.OutreachIdentity{ProfileRef: "profile:research", DisplayName: "Research", Affiliation: "OpenSeal", Disclosure: disclosure},
+		Status:   runtime.OutreachThreadOpen, Messages: []runtime.OutreachMessage{{
+			ID: "message-1", Direction: runtime.OutreachMessageOutbound, Intent: runtime.OutreachIntentRequestFeedback,
+			Body: "Which step was hardest? " + disclosure, Status: runtime.OutreachMessageDelivered,
+			Capability: &runtime.OutreachCapability{SkillID: "forum", SkillVersion: "1", Action: "reply", BindingID: "forum-account", BindingRevision: 4},
+			RunID:      "run-1", ActionCallID: "action-1", ApprovalID: "approval-1", Outcome: "delivered once",
+			Receipt: &runtime.OutreachReceipt{Provider: "forum", ExternalID: "post-1", Digest: "sha256:receipt", DeliveredAt: now},
+		}},
+	}
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(
+			kernelapi.InitiativesCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(),
+		),
+		initiatives: []*runtime.Initiative{initiative}, outreachThreads: []*runtime.OutreachThread{thread},
+		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(initiative.ID, "forum"): {observation}},
+		skillActions: []capability.ModelAction{{
+			Name: "Reply", BindingID: "forum-account", BindingRevision: 4, SkillID: "forum", Version: "1", Action: "reply",
+			SideEffect: capability.SideEffectExternal, SemanticArguments: map[string]string{"target": "url", "body": "message"},
+		}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionOutreach
+	applyCommand(t, model, model.loadOutreach())
+	for _, expected := range []string{"O Outreach", "Governed outreach", "evidence-1", "public-forum@1", "human-review", "Research · OpenSeal", "run-1", "action-1", "approval-1", "forum/post-1", "sha256:receipt", "n draft"} {
+		if view := model.View(); !strings.Contains(view, expected) {
+			t.Fatalf("outreach view missing %q:\n%s", expected, view)
+		}
+	}
+	model.prepareOutreachComposer()
+	model.editor.SetValue("Name: Research\nAffiliation: OpenSeal\nProfile: profile:research\nDisclosure: " + disclosure + "\nApproval: human-review\nIntent: request_feedback\n\nCould you describe the hardest install step? " + disclosure)
+	applyCommand(t, model, model.submitOutreachDraft())
+	if len(fake.outreachCreates) != 1 || fake.outreachCreateKeys[0] == "" || fake.outreachCreates[0].SourceObservationID != observation.ID ||
+		fake.outreachCreates[0].Message.Capability.BindingID != "forum-account" || fake.outreachCreates[0].Identity.Disclosure != disclosure {
+		t.Fatalf("outreach create=%#v keys=%#v", fake.outreachCreates, fake.outreachCreateKeys)
+	}
+	applyCommand(t, model, model.deliverSelectedOutreachDraft())
+	if len(fake.outreachDeliveries) != 1 || fake.outreachDeliveryKeys[0] == "" || !strings.Contains(model.status, "outreach-run") {
+		t.Fatalf("outreach deliveries=%#v keys=%#v status=%q", fake.outreachDeliveries, fake.outreachDeliveryKeys, model.status)
+	}
+
+	readOnly := &fakeKernelClient{
+		document:    kernelapi.NewCapabilityDocument(kernelapi.InitiativesCapability(), kernelapi.OutreachCapability(kernelapi.OperationGet, kernelapi.OperationList)),
+		initiatives: []*runtime.Initiative{initiative}, outreachThreads: []*runtime.OutreachThread{thread},
+	}
+	readOnlyModel := newTestModel(t, readOnly)
+	applyCommand(t, readOnlyModel, readOnlyModel.loadCapabilities())
+	readOnlyModel.section = sectionOutreach
+	if view := readOnlyModel.View(); strings.Contains(view, "n draft") || strings.Contains(view, "D create delivery Run") || strings.Contains(view, "Draft basis") {
+		t.Fatalf("mutating outreach controls leaked without advertised operations:\n%s", view)
 	}
 }
 
