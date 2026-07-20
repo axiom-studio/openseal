@@ -40,5 +40,8 @@ web/dist/
 !/.env.example
 /daemon.yaml
 /workflow.hcl
-/skills/repos/skills/repos/
+/data/*.db
+/data/*.db-*
+/skills/.clawhub/
+/skills/repos/
 openseal
