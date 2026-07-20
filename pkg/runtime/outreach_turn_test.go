@@ -9,8 +9,9 @@ import (
 )
 
 type fixedOutreachTurnLifecycle struct {
-	thread     *OutreachThread
-	reconciled ReconcileOutreachActionRequest
+	thread          *OutreachThread
+	reconciled      ReconcileOutreachActionRequest
+	reconcileStatus OutreachMessageStatus
 }
 
 func (f *fixedOutreachTurnLifecycle) GetOutreachThread(context.Context, Scope, string) (*OutreachThread, error) {
@@ -23,8 +24,12 @@ func (f *fixedOutreachTurnLifecycle) ReconcileOutreachAction(_ context.Context, 
 		return &ReconcileOutreachActionResult{}, nil
 	}
 	thread := cloneOutreachThread(f.thread)
-	thread.Messages[0].Status = OutreachMessageDelivered
-	thread.Messages[0].Receipt = cloneOutreachReceipt(req.Receipt)
+	if req.Receipt != nil {
+		thread.Messages[0].Status = OutreachMessageDelivered
+		thread.Messages[0].Receipt = cloneOutreachReceipt(req.Receipt)
+	} else if f.reconcileStatus != "" {
+		thread.Messages[0].Status = f.reconcileStatus
+	}
 	return &ReconcileOutreachActionResult{Thread: thread}, nil
 }
 
@@ -69,6 +74,35 @@ func TestOutreachTurnRunnerUsesOnlyReviewedArgumentsEvidenceAndReceipt(t *testin
 	if err != nil || second.NextRunStatus != AgentRunStatusCompleted || lifecycle.reconciled.ActionCallID != "action-1" ||
 		lifecycle.reconciled.Receipt == nil || lifecycle.reconciled.Receipt.ExternalID != "reply-1" || second.ContinuationCheckpoint["lastAction"] != nil {
 		t.Fatalf("second=%#v reconciled=%#v err=%v", second, lifecycle.reconciled, err)
+	}
+}
+
+func TestOutreachTurnRunnerReconcilesDeniedAndCanceledActionsWithoutProviderResult(t *testing.T) {
+	for _, terminal := range []OutreachMessageStatus{OutreachMessageDeclined, OutreachMessageCanceled} {
+		t.Run(string(terminal), func(t *testing.T) {
+			scope := Scope{Kind: "tenant", ID: "research"}
+			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"}
+			lifecycle := &fixedOutreachTurnLifecycle{reconcileStatus: terminal, thread: &OutreachThread{
+				ID: "thread-1", Scope: scope, SourceObservationID: "observation-1", TargetURI: "https://forum.example/thread/1",
+				Owner: owner, AssignedAgentID: "research-agent", Status: OutreachThreadOpen,
+				Messages: []OutreachMessage{{
+					ID: "message-1", Direction: OutreachMessageOutbound, Status: OutreachMessagePendingApproval, ActionCallID: "action-1",
+					Capability: &OutreachCapability{SkillID: "forum", SkillVersion: "1", Action: "reply"},
+				}},
+			}}
+			runner, err := NewOutreachTurnRunner(lifecycle, []capability.ModelAction{{Name: "forum.reply", SkillID: "forum", Version: "1", Action: "reply"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run := &AgentRun{ID: "run-1", Scope: scope, Owner: owner, AssignedAgentID: "research-agent", Context: map[string]interface{}{
+				OutreachInvocationContextKey: map[string]interface{}{"threadId": "thread-1", "messageId": "message-1"},
+			}, Checkpoint: map[string]interface{}{"outreachActionInputs": map[string]interface{}{"reviewed": map[string]interface{}{"body": "reviewed"}}}}
+			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2"}})
+			if err != nil || outcome.NextRunStatus != AgentRunStatusFailed || outcome.RunError == "" || lifecycle.reconciled.ActionCallID != "action-1" ||
+				outcome.ContinuationCheckpoint["outreachActionInputs"] != nil {
+				t.Fatalf("terminal=%s outcome=%#v reconcile=%#v err=%v", terminal, outcome, lifecycle.reconciled, err)
+			}
+		})
 	}
 }
 
