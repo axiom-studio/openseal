@@ -465,6 +465,17 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 
 type preparedRuntimeTurnRunner struct{ binding *TurnRunnerBinding }
 
+func (r preparedRuntimeTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
+	if r.binding == nil || r.binding.Runner == nil {
+		return BudgetUsage{}, errors.New("turn runner binding is unavailable")
+	}
+	planner, ok := r.binding.Runner.(TurnBudgetPlanner)
+	if !ok {
+		return BudgetUsage{}, nil
+	}
+	return planner.PlanTurnBudget(ctx, input)
+}
+
 func (r preparedRuntimeTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 	if r.binding == nil || r.binding.Runner == nil {
 		return nil, errors.New("turn runner binding is unavailable")
