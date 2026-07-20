@@ -223,6 +223,7 @@ const (
 	minimumHostedObjectiveOutputTokens   int64 = 1000
 	minimumGroundedObjectiveInputTokens  int64 = 32000
 	minimumGroundedObjectiveOutputTokens int64 = 30000
+	minimumGroundedObjectiveAttempts     int64 = 5
 	minimumGroundedObjectiveTurns        int64 = 4
 )
 
@@ -245,6 +246,13 @@ func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, host
 	if grounded {
 		minimumInput = minimumGroundedObjectiveInputTokens
 		minimumOutput = minimumGroundedObjectiveOutputTokens
+		// A grounded completion has four durable phases in the repair path:
+		// draft, semantic review, repair, and re-review. Attempts are Run
+		// claims rather than completed Turns, so reserve one additional claim
+		// for a transient provider or transport retry.
+		if budget.MaxAttempts > 0 && budget.MaxAttempts < minimumGroundedObjectiveAttempts {
+			return fmt.Errorf("evidence-grounded hosted runBudget maxAttempts must be zero (unbounded) or at least %d", minimumGroundedObjectiveAttempts)
+		}
 		if budget.MaxTurns > 0 && budget.MaxTurns < minimumGroundedObjectiveTurns {
 			return fmt.Errorf("evidence-grounded hosted runBudget maxTurns must be zero (unbounded) or at least %d", minimumGroundedObjectiveTurns)
 		}
