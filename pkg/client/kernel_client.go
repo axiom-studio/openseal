@@ -41,6 +41,10 @@ type KernelClient interface {
 	ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error)
 	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
 	PatchInitiative(context.Context, runtime.Scope, string, kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error)
+	CreateOutreachThread(context.Context, kernelapi.CreateOutreachThreadRequest, string) (*runtime.OutreachThread, error)
+	ListOutreachThreads(context.Context, runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error)
+	GetOutreachThread(context.Context, runtime.Scope, string, string) (*runtime.OutreachThread, error)
+	DeliverOutreachMessage(context.Context, string, string, string, kernelapi.DeliverOutreachMessageRequest, string) (*runtime.AgentRun, error)
 	ListActivity(context.Context, runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error)
 	ListSourceObservations(context.Context, runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error)
 	GetSourceMonitorCheckpoint(context.Context, runtime.Scope, string, string) (*runtime.SourceMonitorCheckpoint, error)
@@ -405,6 +409,55 @@ func (c *KernelHTTPClient) PatchInitiative(ctx context.Context, scope runtime.Sc
 		return nil, err
 	}
 	return &initiative, nil
+}
+
+func (c *KernelHTTPClient) CreateOutreachThread(ctx context.Context, request kernelapi.CreateOutreachThreadRequest, idempotencyKey string) (*runtime.OutreachThread, error) {
+	var thread runtime.OutreachThread
+	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(request.InitiativeID)) + "/outreach"
+	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &thread); err != nil {
+		return nil, err
+	}
+	return &thread, nil
+}
+
+func (c *KernelHTTPClient) ListOutreachThreads(ctx context.Context, filter runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error) {
+	query := scopeQuery(filter.Scope)
+	setIfPresent(query, "sourceObservationId", filter.SourceObservationID)
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var threads []*runtime.OutreachThread
+	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(filter.InitiativeID)) + "/outreach?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &threads); err != nil {
+		return nil, err
+	}
+	return threads, nil
+}
+
+func (c *KernelHTTPClient) GetOutreachThread(ctx context.Context, scope runtime.Scope, initiativeID, threadID string) (*runtime.OutreachThread, error) {
+	query := scopeQuery(scope)
+	var thread runtime.OutreachThread
+	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &thread); err != nil {
+		return nil, err
+	}
+	return &thread, nil
+}
+
+func (c *KernelHTTPClient) DeliverOutreachMessage(ctx context.Context, initiativeID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, idempotencyKey string) (*runtime.AgentRun, error) {
+	var run runtime.AgentRun
+	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) +
+		"/messages/" + url.PathEscape(strings.TrimSpace(messageID)) + "/deliveries"
+	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &run); err != nil {
+		return nil, err
+	}
+	return &run, nil
 }
 
 func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
