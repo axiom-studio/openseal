@@ -29,6 +29,8 @@ import (
 type fakeKernelClient struct {
 	document            kernelapi.CapabilityDocument
 	agentDeployments    []kernelapi.AgentDeploymentCatalogEntry
+	teamDeployments     []kernelapi.TeamDeploymentCatalogEntry
+	teamUpdates         []kernelapi.UpdateTeamDeploymentRequest
 	runs                []*runtime.AgentRun
 	agentRequests       []*runtime.AgentRequest
 	agentRequestFilters []runtime.AgentRequestFilter
@@ -712,16 +714,35 @@ func (f *fakeKernelClient) GetTeamDeployment(context.Context, capability.ScopeRe
 	return nil, errors.New("not implemented by test client")
 }
 
-func (f *fakeKernelClient) ListTeamDeployments(context.Context, capability.ScopeReference) (*kernelapi.TeamDeploymentList, error) {
-	return &kernelapi.TeamDeploymentList{}, nil
+func (f *fakeKernelClient) ListTeamDeployments(_ context.Context, scope capability.ScopeReference) (*kernelapi.TeamDeploymentList, error) {
+	items := make([]kernelapi.TeamDeploymentCatalogEntry, 0, len(f.teamDeployments))
+	for _, entry := range f.teamDeployments {
+		if entry.Deployment != nil && entry.Deployment.Scope == scope {
+			items = append(items, entry)
+		}
+	}
+	return &kernelapi.TeamDeploymentList{Items: items}, nil
 }
 
 func (f *fakeKernelClient) ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error) {
 	return nil, errors.New("not implemented by test client")
 }
 
-func (f *fakeKernelClient) UpdateTeamDeployment(context.Context, string, kernelapi.UpdateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error) {
-	return nil, errors.New("not implemented")
+func (f *fakeKernelClient) UpdateTeamDeployment(_ context.Context, id string, request kernelapi.UpdateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error) {
+	f.teamUpdates = append(f.teamUpdates, request)
+	if request.Deployment == nil || request.Deployment.ID != id {
+		return nil, errors.New("team deployment id mismatch")
+	}
+	updated := *request.Deployment
+	updated.Revision = request.ExpectedRevision + 1
+	updated.UpdatedAt = time.Now()
+	for index := range f.teamDeployments {
+		if f.teamDeployments[index].Deployment != nil && f.teamDeployments[index].Deployment.ID == id && f.teamDeployments[index].Deployment.Scope == updated.Scope {
+			f.teamDeployments[index].Deployment = &updated
+			break
+		}
+	}
+	return &kernelapi.TeamDeploymentResult{Deployment: &updated}, nil
 }
 
 func (f *fakeKernelClient) ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error) {
@@ -801,6 +822,52 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 		if strings.Contains(view, action) {
 			t.Fatalf("unadvertised action %q was rendered:\n%s", action, view)
 		}
+	}
+}
+
+func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	definition := &kernelteam.Definition{
+		ID: "gtm-research", Version: "3", DisplayName: "GTM Research", Purpose: "Find evidence, synthesize it, and coordinate approved outreach.",
+		Coordination:       kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
+		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "monitor", Title: "Monitor source communities"}, {ID: "report", Title: "Deliver cited report"}},
+	}
+	deployment := &kernelteam.Deployment{
+		ID: "gtm-live", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		Status: kernelteam.DeploymentActive, Revision: 7,
+		Roster:       []kernelteam.RosterAssignment{{ID: "researcher", RoleID: "research", AgentDeploymentID: "agent-research", DisplayName: "Researcher"}},
+		Restrictions: kernelteam.DeploymentRestrictions{MaximumConcurrency: 3, MaximumRisk: capability.RiskLevelExternal},
+	}
+	fake := &fakeKernelClient{
+		document:        kernelapi.NewCapabilityDocument(kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{})),
+		teamDeployments: []kernelapi.TeamDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionTeams || model.selectedTeamDeployment != deployment.ID {
+		t.Fatalf("team projection section=%v selected=%q", model.section, model.selectedTeamDeployment)
+	}
+	view := model.View()
+	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "dynamic coordination", "Researcher · research · Agent agent-research", "2 template(s)", "p pause/resume"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Team view missing %q:\n%s", expected, view)
+		}
+	}
+
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if updated != model || command == nil {
+		t.Fatal("pause did not create a Team lifecycle command")
+	}
+	applyCommand(t, model, command)
+	if len(fake.teamUpdates) != 1 {
+		t.Fatalf("team updates=%d, want 1", len(fake.teamUpdates))
+	}
+	request := fake.teamUpdates[0]
+	if request.ExpectedRevision != 7 || request.Deployment.Status != kernelteam.DeploymentPaused || request.ActorType != "user" || request.ActorID != "local" || request.Reason == "" {
+		t.Fatalf("unsafe Team lifecycle request: %#v", request)
+	}
+	if selected := model.selectedTeamDeploymentRecord(); selected == nil || selected.Deployment == nil || selected.Deployment.Revision != 8 || selected.Deployment.Status != kernelteam.DeploymentPaused {
+		t.Fatalf("updated Team was not reloaded: %#v", selected)
 	}
 }
 
