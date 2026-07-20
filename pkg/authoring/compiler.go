@@ -198,6 +198,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	payload = normalizeGeneratedDurations(payload)
+	payload = normalizeGeneratedRefinementProvenance(payload)
 	var generated GenerationResponse
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
@@ -212,6 +213,94 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
 	return generated, nil
+}
+
+// normalizeGeneratedRefinementProvenance accepts the unambiguous shorthand
+// forms "prompt" and ["prompt", "catalog"] at the one schema location where
+// each value maps losslessly to a provenance object with no reference or
+// evidence. Providers frequently collapse arrays of single-field objects even
+// after schema repair. Unknown strings and object shapes remain untouched so
+// the strict decoder and refinement validator continue to fail closed.
+func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return payload
+	}
+	root, ok := document.(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	questions, ok := root["unresolvedQuestions"].([]interface{})
+	if !ok {
+		return payload
+	}
+	changed := false
+	for _, rawQuestion := range questions {
+		question, ok := rawQuestion.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		normalized, ok := normalizedRefinementProvenanceShorthand(question["provenance"])
+		if !ok {
+			continue
+		}
+		question["provenance"] = normalized
+		changed = true
+	}
+	if !changed {
+		return payload
+	}
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
+}
+
+func normalizedRefinementProvenanceShorthand(raw interface{}) ([]interface{}, bool) {
+	values := make([]string, 0, 1)
+	switch value := raw.(type) {
+	case string:
+		values = append(values, value)
+	case []interface{}:
+		for _, item := range value {
+			text, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			values = append(values, text)
+		}
+	default:
+		return nil, false
+	}
+	if len(values) == 0 {
+		return nil, false
+	}
+	result := make([]interface{}, 0, len(values))
+	for _, value := range values {
+		kind := RefinementProvenanceKind(strings.TrimSpace(value))
+		if !validRefinementProvenanceKind(kind) {
+			return nil, false
+		}
+		result = append(result, map[string]interface{}{"kind": string(kind)})
+	}
+	return result, true
+}
+
+func validRefinementProvenanceKind(kind RefinementProvenanceKind) bool {
+	switch kind {
+	case RefinementProvenancePrompt, RefinementProvenanceCatalog, RefinementProvenanceSkill,
+		RefinementProvenanceCredential, RefinementProvenancePolicy, RefinementProvenanceRuntime:
+		return true
+	default:
+		return false
+	}
 }
 
 // normalizeGeneratedDurations accepts unambiguous human duration strings only

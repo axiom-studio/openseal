@@ -196,6 +196,36 @@ func TestCompilerNormalizesOnlyDeclaredHumanDurationFields(t *testing.T) {
 	}
 }
 
+func TestCompilerNormalizesOnlyCanonicalRefinementProvenanceShorthand(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":["apply"],"answer":{"kind":"string_list"},"provenance":"prompt","priority":100},{"id":"skill","category":"skill","prompt":"Which Skill should be used?","whyNeeded":"Execution needs a compatible Skill.","blocking":["apply"],"answer":{"kind":"skill_selection","options":[{"id":"reddit-research","label":"Reddit research"}]},"provenance":["catalog","skill"],"priority":90}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || len(result.UnresolvedQuestions) != 2 {
+		t.Fatalf("normalized refinement result = %#v, err = %v", result, err)
+	}
+	if got := result.UnresolvedQuestions[0].Provenance; len(got) != 1 || got[0].Kind != RefinementProvenancePrompt {
+		t.Fatalf("single provenance shorthand = %#v", got)
+	}
+	if got := result.UnresolvedQuestions[1].Provenance; len(got) != 2 || got[0].Kind != RefinementProvenanceCatalog || got[1].Kind != RefinementProvenanceSkill {
+		t.Fatalf("provenance shorthand list = %#v", got)
+	}
+
+	strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":"invented","priority":1}]}`)
+	strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
+		t.Fatal("unknown refinement provenance shorthand must fail closed")
+	}
+}
+
 func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
 	invalid := marketingCandidate("1", capability.RiskLevelRead)
 	invalid.Assignments[0].RoleID = "invented-role"
