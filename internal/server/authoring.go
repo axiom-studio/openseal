@@ -24,12 +24,12 @@ type WorkforceLifecycleAuthorizer interface {
 }
 
 // StandaloneRetryAuthorizer is the deliberately narrow local-daemon authority:
-// it permits recovery of failed generation only and replaces any actor claimed
-// by an interactive client with the configured operator identity.
+// it permits recovery and answering authoring questions, and replaces any actor
+// claimed by an interactive client with the configured operator identity.
 type StandaloneRetryAuthorizer struct{ ActorID string }
 
 func (a StandaloneRetryAuthorizer) AuthorizeWorkforceLifecycle(_ context.Context, operation string, _ *authoring.ChangeSet) (WorkforceLifecycleAuthorization, error) {
-	if operation != kernelapi.OperationRetry {
+	if operation != kernelapi.OperationRetry && operation != kernelapi.OperationRefine {
 		return WorkforceLifecycleAuthorization{}, errors.New("operation requires an explicitly configured lifecycle authority")
 	}
 	id := strings.TrimSpace(a.ActorID)
@@ -37,6 +37,37 @@ func (a StandaloneRetryAuthorizer) AuthorizeWorkforceLifecycle(_ context.Context
 		id = "local-operator"
 	}
 	return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: id}}, nil
+}
+
+func (s *Server) handleAnswerWorkforceChangeSetRefinement(w http.ResponseWriter, r *http.Request) {
+	if s.authoringRuns == nil || s.authoringWorker == nil {
+		s.respondError(w, http.StatusNotImplemented, "workforce change sets are not configured")
+		return
+	}
+	var request authoring.AnswerChangeSetRefinementRequest
+	if !s.decodeGovernedWorkforceRequest(w, r, &request) {
+		return
+	}
+	_, authorization, ok := s.authorizeWorkforceLifecycle(w, r, kernelapi.OperationRefine, request.Scope, request.ChangeSetID)
+	if !ok {
+		return
+	}
+	request.Actor = authorization.Actor
+	// This endpoint represents an interactive answer. Trusted automatic
+	// resolvers call the in-process Run service after deriving host facts; a
+	// client cannot forge runtime provenance in its request body.
+	request.Source = authoring.RefinementAnswerSourceUser
+	result, _, replayed, err := s.authoringRuns.AnswerRefinement(r.Context(), request)
+	if err != nil {
+		s.respondWorkforceMutation(w, result, replayed, err)
+		return
+	}
+	s.authoringWorker.Wake()
+	status := http.StatusAccepted
+	if replayed {
+		status = http.StatusOK
+	}
+	s.respondJSON(w, status, result)
 }
 
 func (s *Server) handleCompileWorkforce(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +186,12 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 			result.Operations = append(result.Operations, kernelapi.OperationPatch)
 		}
 	}
+	if changeSet.Status != authoring.ChangeSetEvaluating && changeSet.Status != authoring.ChangeSetApplied && changeSet.Status != authoring.ChangeSetFailed &&
+		(changeSet.Refinement.NextQuestion() != nil || len(changeSet.Refinement.Answers) > 0) {
+		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationRefine, changeSet); err == nil {
+			result.Operations = append(result.Operations, kernelapi.OperationRefine)
+		}
+	}
 	if changeSet.Status == authoring.ChangeSetFailed {
 		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationRetry, changeSet); err == nil {
 			result.Operations = append(result.Operations, kernelapi.OperationRetry)
@@ -271,6 +308,8 @@ func (s *Server) decodeGovernedWorkforceRequest(w http.ResponseWriter, r *http.R
 	case *authoring.RetryChangeSetGenerationRequest:
 		request.IdempotencyKey = key
 	case *authoring.UpdateChangeSetPlacementRequest:
+		request.IdempotencyKey = key
+	case *authoring.AnswerChangeSetRefinementRequest:
 		request.IdempotencyKey = key
 	}
 	return true

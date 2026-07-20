@@ -324,6 +324,9 @@ func validateRefinementQuestions(questions []RefinementQuestion) error {
 			if !validProvenanceKind(provenance.Kind) {
 				return fmt.Errorf("refinement question %s has invalid provenance", q.ID)
 			}
+			if provenance.Kind == RefinementProvenanceCredential && strings.TrimSpace(provenance.Reference) != "" {
+				return fmt.Errorf("refinement question %s cannot expose an opaque credential reference", q.ID)
+			}
 		}
 	}
 	for _, q := range questions {

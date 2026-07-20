@@ -89,6 +89,15 @@ type ClawHubClient interface {
 	UninstallClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
 }
 
+// WorkforceRefinementClient is separate from KernelClient until a host
+// advertises workforce-authoring v7/refine. Older hosts and clients therefore
+// fail capability negotiation instead of silently exposing a dead control.
+type WorkforceRefinementClient interface {
+	AnswerWorkforceChangeSetRefinement(context.Context, authoring.AnswerChangeSetRefinementRequest, string) (*authoring.ChangeSet, error)
+}
+
+var _ WorkforceRefinementClient = (*KernelHTTPClient)(nil)
+
 type TeamClient interface {
 	RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error)
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
@@ -285,6 +294,10 @@ func (c *KernelHTTPClient) UpdateWorkforceChangeSetPlacement(ctx context.Context
 		return nil, err
 	}
 	return &result, nil
+}
+
+func (c *KernelHTTPClient) AnswerWorkforceChangeSetRefinement(ctx context.Context, request authoring.AnswerChangeSetRefinementRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
+	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "refinements", request, idempotencyKey)
 }
 
 func (c *KernelHTTPClient) EvaluateWorkforceChangeSet(ctx context.Context, request authoring.SubmitChangeSetEvaluationRequest, idempotencyKey string) (*authoring.ChangeSet, error) {

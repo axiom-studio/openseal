@@ -487,6 +487,9 @@ func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
 	if _, err := client.UpdateWorkforceChangeSetPlacement(ctx, authoring.UpdateChangeSetPlacementRequest{Scope: scope, ChangeSetID: "change/one"}, "placement-1"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := client.AnswerWorkforceChangeSetRefinement(ctx, authoring.AnswerChangeSetRefinementRequest{Scope: scope, ChangeSetID: "change/one", QuestionID: "sources"}, "refine-1"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := client.EvaluateWorkforceChangeSet(ctx, authoring.SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: "change/one"}, "evaluate-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -499,6 +502,7 @@ func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
 	want := []string{
 		"GET /api/v1/capabilities?changeSetId=change%2Fone&scopeId=one&scopeKind=tenant key=",
 		"PATCH /api/v1/authoring/workforce/change-sets/change%2Fone/placement key=placement-1",
+		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/refinements key=refine-1",
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/evaluations key=evaluate-1",
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/approvals key=approve-1",
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/apply key=apply-1",
