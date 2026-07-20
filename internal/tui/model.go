@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/axiom-studio/openseal/pkg/source"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -106,6 +108,8 @@ const (
 	modeSkillInstall
 	modeSkillPin
 	modeSkillRemove
+	modeSkillBindingUpsert
+	modeSkillBindingDisable
 	modeWorkforceApprove
 	modeWorkforceReject
 	modeWorkforceApply
@@ -130,6 +134,7 @@ type Model struct {
 	client                      client.KernelClient
 	conversationClient          client.ConversationClient
 	clawHubClient               client.ClawHubClient
+	skillBindingClient          client.SkillBindingClient
 	config                      Config
 	editor                      textarea.Model
 	focus                       focusArea
@@ -153,6 +158,7 @@ type Model struct {
 	activityCapability          kernelapi.Capability
 	clawHubCapability           kernelapi.Capability
 	skillActionCapability       kernelapi.Capability
+	skillBindingCapability      kernelapi.Capability
 	artifactCapability          kernelapi.Capability
 	channelCapability           kernelapi.Capability
 	authoringCapability         kernelapi.Capability
@@ -205,6 +211,9 @@ type Model struct {
 	sourceMonitorStatuses       map[string]sourceMonitorStatus
 	clawHubSkills               []clawhub.InstalledState
 	skillActions                []capability.ModelAction
+	skillBindings               []*capability.Binding
+	skillBindingSelected        int
+	selectedSkillBinding        string
 	clawHubSelected             int
 	selectedClawHub             string
 	selected                    int
@@ -429,6 +438,15 @@ type skillActionsLoaded struct {
 	actions []capability.ModelAction
 	err     error
 }
+type skillBindingsLoaded struct {
+	bindings []*capability.Binding
+	err      error
+}
+type skillBindingChanged struct {
+	binding *capability.Binding
+	action  string
+	err     error
+}
 type clawHubLifecycleCompleted struct {
 	result    *clawhub.LifecycleResult
 	batch     *clawhub.LifecycleBatchResult
@@ -514,6 +532,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
 		conversationClient: conversationClient(kernelClient),
 		clawHubClient:      clawHubClient(kernelClient),
+		skillBindingClient: skillBindingClient(kernelClient),
 	}, nil
 }
 
@@ -561,6 +580,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
 		skillActionCapability, hasSkillActions := msg.document.Find(kernelapi.SkillActionsCapabilityID, kernelapi.SkillActionsCapabilityVersion)
+		skillBindingCapability, hasSkillBindings := msg.document.Find(kernelapi.SkillBindingsCapabilityID, kernelapi.SkillBindingsCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
@@ -576,6 +596,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
 		m.skillActionCapability = skillActionCapability
+		m.skillBindingCapability = skillBindingCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
@@ -614,6 +635,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSkillActions || !skillActionCapability.Available {
 			m.skillActionCapability = kernelapi.Capability{}
 		}
+		if !hasSkillBindings || !skillBindingCapability.Available || m.skillBindingClient == nil || (m.config.Owner.Type != runtime.OwnerTypeAgent && m.config.Owner.Type != runtime.OwnerTypeTeam) {
+			m.skillBindingCapability = kernelapi.Capability{}
+		}
 		if !hasArtifacts || !artifactCapability.Available {
 			m.artifactCapability = kernelapi.Capability{}
 		}
@@ -629,7 +653,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
 			m.teamDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -653,7 +677,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionInitiatives
 			m.mode = modeInitiativeCreate
 			m.editor.Placeholder = "Describe the Initiative outcome…"
-		} else if m.clawHubCapability.Available || m.skillActionCapability.Available {
+		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
 			m.section = sectionSkills
 			if m.clawHubCapability.Available {
 				m.mode = modeSkillInstall
@@ -687,7 +711,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 		}
 		m.activateReadyRefinement()
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -847,6 +871,35 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.skillActions = msg.actions
 		return m, nil
+	case skillBindingsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err, m.skillBindings = nil, msg.bindings
+		m.restoreSkillBindingSelection()
+		return m, nil
+	case skillBindingChanged:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			if isHTTPStatus(msg.err, http.StatusConflict) {
+				m.status = "This binding changed elsewhere. Latest state reloaded; review and retry."
+				return m, m.loadSkillBindings()
+			}
+			m.status = "Skill binding change failed. Your draft is preserved for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.binding != nil {
+			m.selectedSkillBinding = msg.binding.ID
+			m.status = fmt.Sprintf("Skill binding %s · revision %d.", msg.action, msg.binding.Revision)
+		}
+		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions())
 	case clawHubLifecycleCompleted:
 		m.busy = false
 		if msg.err != nil {
@@ -1333,6 +1386,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitClawHubPin()
 			case modeSkillRemove:
 				return m, m.submitClawHubRemoval()
+			case modeSkillBindingUpsert:
+				return m, m.submitSkillBindingUpsert()
+			case modeSkillBindingDisable:
+				return m, m.submitSkillBindingDisable()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
 			case modeWorkforceRefinement:
@@ -1454,9 +1511,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadOutreach()
 			}
 		case "s":
-			if m.clawHubCapability.Available || m.skillActionCapability.Available {
+			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
 				m.section = sectionSkills
-				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillActions())
+				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions())
 			}
 		case "a":
 			if m.artifactCapability.Available {
@@ -1514,6 +1571,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionOutreach {
 				m.moveOutreachObservation(-1)
 				return m, m.loadOutreach()
+			} else if m.section == sectionSkills {
+				m.moveClawHubSelection(-1)
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveEvidenceObservation(-1)
 			}
@@ -1525,6 +1584,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionOutreach {
 				m.moveOutreachObservation(1)
 				return m, m.loadOutreach()
+			} else if m.section == sectionSkills {
+				m.moveClawHubSelection(1)
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveEvidenceObservation(1)
 			}
@@ -1543,6 +1604,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "b":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				return m, m.submitWorkforceCredentialPlacement()
+			} else if m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert) {
+				m.prepareSkillBindingComposer(nil)
 			}
 		case "m":
 			if m.section == sectionActivity && m.activityHasMore {
@@ -1582,6 +1645,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
 			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentReject, "Record why this exact Team amendment must not proceed…")
+			} else if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && !m.selectedSkillBindingRecord().Disabled && m.supportsSkillBinding(kernelapi.OperationDisable) {
+				m.mode = modeSkillBindingDisable
+				m.editor.Reset()
+				m.editor.Placeholder = "Why should this binding be disabled?"
+				m.focusComposerEditor()
 			} else if m.section == sectionSkills && m.selectedClawHubRecord() != nil && m.supportsClawHub(clawhub.LifecycleUninstall) {
 				m.mode = modeSkillRemove
 				m.editor.Reset()
@@ -1620,7 +1688,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "e", "enter":
-			if m.section == sectionTeams && m.canEvaluateSelectedTeamAmendment() {
+			if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && m.supportsSkillBinding(kernelapi.OperationUpsert) {
+				m.prepareSkillBindingComposer(m.selectedSkillBindingRecord())
+			} else if m.section == sectionTeams && m.canEvaluateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentEvaluate, teamEvaluationPlaceholder(m.selectedTeamDeploymentRecord()))
 			} else if m.section == sectionAuthoring && m.canApplyWorkforce() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
@@ -2344,6 +2414,24 @@ func (m *Model) loadSkillActions() tea.Cmd {
 	}
 }
 
+func (m *Model) skillBindingOwner() client.SkillBindingOwner {
+	return client.SkillBindingOwner{Type: m.config.Owner.Type, DeploymentID: m.config.Owner.ID}
+}
+
+func (m *Model) loadSkillBindings() tea.Cmd {
+	if !m.supportsSkillBinding(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		result, err := m.skillBindingClient.ListSkillBindings(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.skillBindingOwner())
+		if err != nil {
+			return skillBindingsLoaded{err: err}
+		}
+		return skillBindingsLoaded{bindings: result.Items}
+	}
+}
+
 func (m *Model) loadArtifacts() tea.Cmd {
 	if !m.supportsArtifact(kernelapi.OperationList) {
 		return nil
@@ -2426,7 +2514,7 @@ func (m *Model) loadPanel() tea.Cmd {
 		return m.loadOutreach()
 	}
 	if m.section == sectionSkills {
-		return m.loadClawHubSkills()
+		return tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions())
 	}
 	if m.section == sectionRequests {
 		return m.loadAgentRequests()
@@ -2772,6 +2860,138 @@ func (m *Model) submitClawHubRemoval() tea.Cmd {
 		return clawHubLifecycleCompleted{result: result, operation: clawhub.LifecycleUninstall, err: err}
 	}
 }
+
+func (m *Model) prepareSkillBindingComposer(binding *capability.Binding) {
+	m.mode = modeSkillBindingUpsert
+	m.editor.Reset()
+	m.editor.Placeholder = "binding: reddit\nskill: reddit@1.0.0\nactions: search,post\nprompt: true\nrisk: external\ncredentials: reddit=vault:credential-id\nreason: why this access is needed"
+	if binding != nil {
+		credentials := make([]string, 0, len(binding.Credentials))
+		for name, reference := range binding.Credentials {
+			credentials = append(credentials, name+"="+reference.Kind+":"+reference.ID)
+		}
+		sort.Strings(credentials)
+		m.editor.SetValue(fmt.Sprintf("binding: %s\nskill: %s@%s\nsource: %s\nactions: %s\nprompt: %t\nrisk: %s\ncredentials: %s\nreason: update this exact binding", binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, strings.Join(binding.AllowedActions, ","), binding.EnablePrompt, binding.MaximumRisk, strings.Join(credentials, ",")))
+	}
+	m.focusComposerEditor()
+}
+
+func parseSkillBindingPrompt(value string, existing *capability.Binding) (*capability.Binding, string, error) {
+	fields := map[string]string{}
+	for _, line := range strings.Split(value, "\n") {
+		key, raw, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		fields[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(raw)
+	}
+	binding := &capability.Binding{}
+	if existing != nil {
+		*binding = *existing
+		binding.AllowedActions = append([]string(nil), existing.AllowedActions...)
+		binding.Credentials = mapsClone(existing.Credentials)
+	}
+	binding.ID = fields["binding"]
+	identity := fields["skill"]
+	skillID, version, ok := strings.Cut(identity, "@")
+	if binding.ID == "" || !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(version) == "" {
+		return nil, "", errors.New("include binding and exact skill id@version")
+	}
+	binding.SkillID, binding.SkillVersion = strings.TrimSpace(skillID), strings.TrimSpace(version)
+	binding.SourceIdentity = fields["source"]
+	binding.AllowedActions = splitNonEmpty(fields["actions"])
+	prompt, err := strconv.ParseBool(fields["prompt"])
+	if err != nil {
+		return nil, "", errors.New("prompt must be true or false")
+	}
+	binding.EnablePrompt = prompt
+	binding.MaximumRisk = capability.RiskLevel(fields["risk"])
+	switch binding.MaximumRisk {
+	case capability.RiskLevelRead, capability.RiskLevelWrite, capability.RiskLevelExternal, capability.RiskLevelProduction, capability.RiskLevelDestructive:
+	default:
+		return nil, "", errors.New("risk must be read, write, external, production, or destructive")
+	}
+	binding.Credentials = map[string]capability.CredentialReference{}
+	for _, item := range splitNonEmpty(fields["credentials"]) {
+		name, reference, ok := strings.Cut(item, "=")
+		kind, id, refOK := strings.Cut(reference, ":")
+		if !ok || !refOK || strings.TrimSpace(name) == "" || strings.TrimSpace(kind) == "" || strings.TrimSpace(id) == "" {
+			return nil, "", errors.New("credentials must be opaque name=kind:id references; never paste a secret")
+		}
+		binding.Credentials[strings.TrimSpace(name)] = capability.CredentialReference{Kind: strings.TrimSpace(kind), ID: strings.TrimSpace(id)}
+	}
+	reason := fields["reason"]
+	if reason == "" {
+		return nil, "", errors.New("include a durable reason")
+	}
+	binding.Disabled = false
+	return binding, reason, nil
+}
+
+func splitNonEmpty(value string) []string {
+	result := []string{}
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" && item != "none" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func mapsClone[K comparable, V any](input map[K]V) map[K]V {
+	result := make(map[K]V, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
+}
+
+func (m *Model) submitSkillBindingUpsert() tea.Cmd {
+	if m.busy || !m.supportsSkillBinding(kernelapi.OperationUpsert) {
+		return nil
+	}
+	existing := m.selectedSkillBindingRecord()
+	if existing != nil && !strings.Contains(m.editor.Value(), "binding: "+existing.ID) {
+		existing = nil
+	}
+	binding, reason, err := parseSkillBindingPrompt(m.editor.Value(), existing)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	binding.Scope = capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+	binding.DeploymentID = m.config.Owner.ID
+	expected := int64(0)
+	if existing != nil && existing.ID == binding.ID {
+		expected = existing.Revision
+	}
+	m.busy, m.err, m.status = true, nil, "Applying the reviewed Skill authority…"
+	request := skill.UpsertBindingRequest{Binding: binding, ExpectedRevision: expected, Actor: capability.BindingActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID}, Reason: reason}
+	return func() tea.Msg {
+		result, changeErr := m.skillBindingClient.UpsertSkillBinding(m.ctx, m.skillBindingOwner(), request)
+		if result == nil {
+			return skillBindingChanged{action: "update failed", err: changeErr}
+		}
+		return skillBindingChanged{binding: result.Binding, action: "active", err: changeErr}
+	}
+}
+
+func (m *Model) submitSkillBindingDisable() tea.Cmd {
+	binding, reason := m.selectedSkillBindingRecord(), strings.TrimSpace(m.editor.Value())
+	if binding == nil || reason == "" || m.busy || !m.supportsSkillBinding(kernelapi.OperationDisable) {
+		m.status = "Record why this authority should be disabled."
+		return nil
+	}
+	m.busy, m.err, m.status = true, nil, "Disabling this exact Skill authority…"
+	request := skill.DisableBindingRequest{Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision, Actor: capability.BindingActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID}, Reason: reason}
+	return func() tea.Msg {
+		result, changeErr := m.skillBindingClient.DisableSkillBinding(m.ctx, m.skillBindingOwner(), request)
+		if result == nil {
+			return skillBindingChanged{action: "disable failed", err: changeErr}
+		}
+		return skillBindingChanged{binding: result.Binding, action: "disabled", err: changeErr}
+	}
+}
 func (m *Model) pinOrUnpinClawHub() tea.Cmd {
 	skill := m.selectedClawHubRecord()
 	if skill == nil {
@@ -3076,6 +3296,10 @@ func (m *Model) supportsClawHub(operation clawhub.LifecycleOperation) bool {
 
 func (m *Model) supportsSkillAction(operation string) bool {
 	return m.ready && m.skillActionCapability.Supports(operation)
+}
+
+func (m *Model) supportsSkillBinding(operation string) bool {
+	return m.ready && m.skillBindingClient != nil && m.skillBindingCapability.Supports(operation)
 }
 
 func (m *Model) supportsArtifact(operation string) bool {
@@ -3716,7 +3940,7 @@ func (m *Model) movePanelSelection(delta int) {
 		return
 	}
 	if m.section == sectionSkills {
-		m.moveClawHubSelection(delta)
+		m.moveSkillBindingSelection(delta)
 		return
 	}
 	if m.section == sectionRequests {
@@ -4076,6 +4300,36 @@ func (m *Model) moveClawHubSelection(delta int) {
 	m.clawHubSelected = max(0, min(len(m.clawHubSkills)-1, m.clawHubSelected+delta))
 	m.selectedClawHub = m.clawHubSkills[m.clawHubSelected].SourceIdentity
 }
+
+func (m *Model) selectedSkillBindingRecord() *capability.Binding {
+	if m.skillBindingSelected < 0 || m.skillBindingSelected >= len(m.skillBindings) {
+		return nil
+	}
+	return m.skillBindings[m.skillBindingSelected]
+}
+
+func (m *Model) restoreSkillBindingSelection() {
+	if len(m.skillBindings) == 0 {
+		m.skillBindingSelected, m.selectedSkillBinding = 0, ""
+		return
+	}
+	for index, binding := range m.skillBindings {
+		if binding.ID == m.selectedSkillBinding {
+			m.skillBindingSelected = index
+			return
+		}
+	}
+	m.skillBindingSelected = min(m.skillBindingSelected, len(m.skillBindings)-1)
+	m.selectedSkillBinding = m.skillBindings[m.skillBindingSelected].ID
+}
+
+func (m *Model) moveSkillBindingSelection(delta int) {
+	if len(m.skillBindings) == 0 {
+		return
+	}
+	m.skillBindingSelected = max(0, min(len(m.skillBindings)-1, m.skillBindingSelected+delta))
+	m.selectedSkillBinding = m.skillBindings[m.skillBindingSelected].ID
+}
 func (m *Model) restoreInitiativeSelection() {
 	if len(m.initiatives) == 0 {
 		m.initiativeSelected = 0
@@ -4214,6 +4468,8 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeSkillInstall
 		m.editor.Placeholder = "Enter @owner/skill to install…"
 		m.focusComposerEditor()
+	case m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert):
+		m.prepareSkillBindingComposer(nil)
 	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -4276,8 +4532,13 @@ func (m *Model) resetComposerMode() {
 		return
 	}
 	if m.section == sectionSkills {
-		m.mode = modeSkillInstall
-		m.editor.Placeholder = "Enter @owner/skill to install…"
+		if m.supportsSkillBinding(kernelapi.OperationUpsert) {
+			m.mode = modeSkillBindingUpsert
+			m.editor.Placeholder = "Describe the exact Skill authority…"
+		} else {
+			m.mode = modeSkillInstall
+			m.editor.Placeholder = "Enter @owner/skill to install…"
+		}
 		return
 	}
 	if m.section == sectionChannels && m.selectedConversationRecord() != nil {
@@ -4355,6 +4616,11 @@ func conversationClient(kernelClient client.KernelClient) client.ConversationCli
 
 func clawHubClient(kernelClient client.KernelClient) client.ClawHubClient {
 	value, _ := kernelClient.(client.ClawHubClient)
+	return value
+}
+
+func skillBindingClient(kernelClient client.KernelClient) client.SkillBindingClient {
+	value, _ := kernelClient.(client.SkillBindingClient)
 	return value
 }
 

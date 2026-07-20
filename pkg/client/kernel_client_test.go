@@ -582,6 +582,18 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	agentOwner := SkillBindingOwner{Type: runtime.OwnerTypeAgent, DeploymentID: agentDeployment.ID}
+	agentBinding, err := client.UpsertSkillBinding(ctx, agentOwner, skill.UpsertBindingRequest{
+		Binding: &skill.Binding{ID: "reader", Scope: scope, DeploymentID: agentDeployment.ID, SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
+		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "attach exact reader to Agent",
+	})
+	if err != nil || agentBinding.Binding == nil || agentBinding.Binding.DeploymentID != agentDeployment.ID {
+		t.Fatalf("created Agent Skill binding = %#v, err = %v", agentBinding, err)
+	}
+	agentBindings, err := client.ListSkillBindings(ctx, scope, agentOwner)
+	if err != nil || len(agentBindings.Items) != 1 {
+		t.Fatalf("listed Agent Skill bindings = %#v, err = %v", agentBindings, err)
+	}
 	teamBinding, err := client.UpsertTeamSkillBinding(ctx, created.Deployment.ID, skill.UpsertBindingRequest{
 		Binding: &skill.Binding{ID: "reader", Scope: scope, DeploymentID: created.Deployment.ID, SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
 		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "share reader with Team",

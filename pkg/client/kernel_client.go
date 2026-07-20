@@ -127,7 +127,23 @@ type TeamSkillClient interface {
 	DisableTeamSkillBinding(context.Context, string, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
 }
 
+// SkillBindingOwner identifies the canonical deployment resource that owns a
+// Skill portfolio. The binding representation is identical for both kinds.
+type SkillBindingOwner struct {
+	Type         runtime.OwnerType
+	DeploymentID string
+}
+
+// SkillBindingClient is the owner-neutral management boundary used by prompt-
+// first clients. Hosts may implement it without exposing unrelated APIs.
+type SkillBindingClient interface {
+	ListSkillBindings(context.Context, capability.ScopeReference, SkillBindingOwner) (*kernelapi.SkillBindingList, error)
+	UpsertSkillBinding(context.Context, SkillBindingOwner, skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
+	DisableSkillBinding(context.Context, SkillBindingOwner, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
+}
+
 var _ TeamSkillClient = (*KernelHTTPClient)(nil)
+var _ SkillBindingClient = (*KernelHTTPClient)(nil)
 
 type KernelHTTPClient struct {
 	baseURL        string
@@ -845,8 +861,31 @@ func (c *KernelHTTPClient) ListTeamDeployments(ctx context.Context, scope capabi
 }
 
 func (c *KernelHTTPClient) ListTeamSkillBindings(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.SkillBindingList, error) {
+	return c.ListSkillBindings(ctx, scope, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID})
+}
+
+func skillBindingOwnerPath(owner SkillBindingOwner) (string, error) {
+	id := strings.TrimSpace(owner.DeploymentID)
+	if id == "" {
+		return "", errors.New("deployment id is required")
+	}
+	switch owner.Type {
+	case runtime.OwnerTypeAgent:
+		return "/api/v1/agent-deployments/" + url.PathEscape(id), nil
+	case runtime.OwnerTypeTeam:
+		return "/api/v1/team-deployments/" + url.PathEscape(id), nil
+	default:
+		return "", fmt.Errorf("Skill bindings are not supported for owner type %q", owner.Type)
+	}
+}
+
+func (c *KernelHTTPClient) ListSkillBindings(ctx context.Context, scope capability.ScopeReference, owner SkillBindingOwner) (*kernelapi.SkillBindingList, error) {
 	var result kernelapi.SkillBindingList
-	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-bindings?" + capabilityScopeQuery(scope).Encode()
+	root, err := skillBindingOwnerPath(owner)
+	if err != nil {
+		return nil, err
+	}
+	path := root + "/skill-bindings?" + capabilityScopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
 	}
@@ -854,11 +893,19 @@ func (c *KernelHTTPClient) ListTeamSkillBindings(ctx context.Context, scope capa
 }
 
 func (c *KernelHTTPClient) UpsertTeamSkillBinding(ctx context.Context, deploymentID string, request skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
+	return c.UpsertSkillBinding(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+}
+
+func (c *KernelHTTPClient) UpsertSkillBinding(ctx context.Context, owner SkillBindingOwner, request skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
 	var result kernelapi.SkillBindingMutationResult
 	if request.Binding == nil {
 		return nil, errors.New("binding is required")
 	}
-	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.Binding.ID)) + "?" + capabilityScopeQuery(request.Binding.Scope).Encode()
+	root, err := skillBindingOwnerPath(owner)
+	if err != nil {
+		return nil, err
+	}
+	path := root + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.Binding.ID)) + "?" + capabilityScopeQuery(request.Binding.Scope).Encode()
 	if err := c.do(ctx, http.MethodPut, path, request, "", &result); err != nil {
 		return nil, err
 	}
@@ -866,8 +913,16 @@ func (c *KernelHTTPClient) UpsertTeamSkillBinding(ctx context.Context, deploymen
 }
 
 func (c *KernelHTTPClient) DisableTeamSkillBinding(ctx context.Context, deploymentID string, request skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
+	return c.DisableSkillBinding(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+}
+
+func (c *KernelHTTPClient) DisableSkillBinding(ctx context.Context, owner SkillBindingOwner, request skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
 	var result kernelapi.SkillBindingMutationResult
-	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.BindingID)) + "/disable?" + capabilityScopeQuery(request.Scope).Encode()
+	root, err := skillBindingOwnerPath(owner)
+	if err != nil {
+		return nil, err
+	}
+	path := root + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.BindingID)) + "/disable?" + capabilityScopeQuery(request.Scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err
 	}

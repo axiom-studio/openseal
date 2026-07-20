@@ -107,6 +107,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}/skill-bindings", s.handleListTeamSkillBindings)
 	s.mux.HandleFunc("PUT /api/v1/team-deployments/{id}/skill-bindings/{bindingId}", s.handleUpsertTeamSkillBinding)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/skill-bindings/{bindingId}/disable", s.handleDisableTeamSkillBinding)
+	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/skill-bindings", s.handleListAgentSkillBindings)
+	s.mux.HandleFunc("PUT /api/v1/agent-deployments/{id}/skill-bindings/{bindingId}", s.handleUpsertAgentSkillBinding)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/skill-bindings/{bindingId}/disable", s.handleDisableAgentSkillBinding)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/activations", s.handleActivateTeamDefinition)
 	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}/activations", s.handleListTeamDefinitionActivations)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments", s.handleProposeTeamDefinitionAmendment)
@@ -171,7 +174,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, skillsOK := s.store.(skill.CatalogStore); skillsOK {
 		capabilities = append(capabilities, kernelapi.SkillActionsCapability())
-		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
+		if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 			capabilities = append(capabilities, kernelapi.SkillBindingsCapability(true))
 		}
 	}
