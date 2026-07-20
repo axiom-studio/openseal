@@ -2363,7 +2363,7 @@ func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 	artifact := &runtime.Artifact{
 		ID: "research-report", Version: 2, Name: "OpenClaw research.pdf", Type: "report",
 		MediaType: "application/pdf", Digest: testDigest(body), SizeBytes: int64(len(body)),
-		Classification: runtime.ArtifactClassificationInternal, CreatedAt: time.Now(),
+		Classification: runtime.ArtifactClassificationInternal, ContentAvailability: runtime.ArtifactContentAvailable, CreatedAt: time.Now(),
 		Provenance: runtime.ArtifactProvenance{
 			Producer: runtime.ActivityActor{Type: "agent", ID: "researcher"}, RunID: "run-research",
 		},
@@ -2411,6 +2411,28 @@ func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 	}
 	if strings.Contains(model.View(), "d download") {
 		t.Fatal("TUI rendered an unadvertised artifact download")
+	}
+}
+
+func TestUnavailableArtifactContentCannotRenderOrDispatchDownload(t *testing.T) {
+	artifact := &runtime.Artifact{
+		ID: "pending-report", Version: 1, Name: "pending-report.pdf", Type: "report",
+		ContentAvailability: runtime.ArtifactContentUnavailable,
+	}
+	fake := &fakeKernelClient{
+		document:  kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.ArtifactCapability(kernelapi.OperationDownload)),
+		artifacts: []*runtime.Artifact{artifact},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionArtifacts
+	model.focusPanelList()
+
+	if command := model.downloadSelectedArtifact(); command != nil {
+		t.Fatal("TUI dispatched download for unavailable artifact content")
+	}
+	if strings.Contains(model.View(), "d download") {
+		t.Fatal("TUI rendered download for unavailable artifact content")
 	}
 }
 
