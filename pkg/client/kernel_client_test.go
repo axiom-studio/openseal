@@ -202,6 +202,45 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 }
 
+func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-update.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := kernelagent.NewRegistryWithStore(store)
+	definition, err := registry.RegisterDefinition(t.Context(), &kernelagent.AgentDefinition{
+		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate", SystemPrompt: "Inspect first.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelProduction, MaxConcurrentRuns: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployment, _, err := registry.CreateDeployment(t.Context(), &kernelagent.AgentDeployment{
+		ID: "operator-live", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "production", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+
+	proposed := *deployment
+	proposed.RolloutStatus = kernelagent.RolloutPaused
+	proposed.Credentials = map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://tenant-one/provider"}}
+	result, err := client.UpdateAgentDeployment(t.Context(), deployment.ID, kernelapi.UpdateAgentDeploymentRequest{
+		Deployment: &proposed, ExpectedRevision: deployment.Revision, ActorType: "system", ActorID: "reconciler", Reason: "place provider",
+	})
+	if err != nil || result.Deployment == nil || result.Audit == nil || result.Deployment.RolloutStatus != kernelagent.RolloutPaused ||
+		result.Deployment.Credentials["MODEL_PROVIDER"].ID != "vault://tenant-one/provider" || result.Audit.ChangeKind != workforce.DeploymentChangeConfigurationUpdated {
+		t.Fatalf("update result = %#v, %v", result, err)
+	}
+}
+
 func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "tenant", ID: "7"}
 	changeSet := &authoring.ChangeSet{

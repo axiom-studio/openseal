@@ -63,6 +63,7 @@ type KernelClient interface {
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
 	GetAgentDeployment(context.Context, capability.ScopeReference, string) (*kernelapi.AgentDeploymentCatalogEntry, error)
 	ListAgentDeployments(context.Context, capability.ScopeReference) (*kernelapi.AgentDeploymentList, error)
+	UpdateAgentDeployment(context.Context, string, kernelapi.UpdateAgentDeploymentRequest) (*kernelapi.AgentDeploymentUpdateResult, error)
 	ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
@@ -208,6 +209,15 @@ func (c *KernelHTTPClient) ListAgentDeployments(ctx context.Context, scope capab
 	query := capabilityScopeQuery(scope)
 	var result kernelapi.AgentDeploymentList
 	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-deployments?"+query.Encode(), nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) UpdateAgentDeployment(ctx context.Context, deploymentID string, request kernelapi.UpdateAgentDeploymentRequest) (*kernelapi.AgentDeploymentUpdateResult, error) {
+	var result kernelapi.AgentDeploymentUpdateResult
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID))
+	if err := c.do(ctx, http.MethodPut, path, request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

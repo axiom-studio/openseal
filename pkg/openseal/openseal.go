@@ -91,6 +91,8 @@ type (
 	AgentRegistryStore                        = kernelagent.Store
 	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
 	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
+	KernelUpdateAgentDeploymentRequest        = kernelapi.UpdateAgentDeploymentRequest
+	KernelAgentDeploymentUpdateResult         = kernelapi.AgentDeploymentUpdateResult
 	KernelAgentDefinitionCompilationHistory   = kernelapi.AgentDefinitionCompilationHistory
 	TeamDefinition                            = kernelteam.Definition
 	TeamRoleSlot                              = kernelteam.RoleSlot
@@ -117,6 +119,7 @@ type (
 	WorkforceAmendmentPolicy                  = workforce.AmendmentPolicy
 	WorkforceDefinitionProvenance             = workforce.DefinitionProvenance
 	WorkforceDefinitionActivation             = workforce.DefinitionActivation
+	DeploymentChangeKind                      = workforce.DeploymentChangeKind
 	WorkforceAuthoringMode                    = authoring.Mode
 	WorkforceSkillCapability                  = authoring.SkillCapability
 	WorkforceSkillCredential                  = authoring.SkillCredential
@@ -578,6 +581,7 @@ type (
 )
 
 const (
+	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
 	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
 	HostedTurnBudgetEnvelopeReserveTokens   = runtime.HostedTurnBudgetEnvelopeReserveTokens
@@ -2842,6 +2846,10 @@ func (e *Engine) GetAgentDeployment(ctx context.Context, scope skill.ScopeRefere
 
 func (e *Engine) ListAgentDeployments(ctx context.Context, scope skill.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
 	return e.agents.ListDeployments(ctx, scope)
+}
+
+func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return e.agents.UpdateDeployment(ctx, deployment, expectedRevision, actorType, actorID, reason)
 }
 
 func (e *Engine) ActivateAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {

@@ -70,10 +70,36 @@ func (s *Server) handleListAgentDeployments(w http.ResponseWriter, r *http.Reque
 	s.respondJSON(w, http.StatusOK, kernelapi.AgentDeploymentList{Items: items})
 }
 
+func (s *Server) handleUpdateAgentDeployment(w http.ResponseWriter, r *http.Request) {
+	registry, err := s.agentRegistry()
+	if err != nil {
+		s.respondError(w, http.StatusNotImplemented, err.Error())
+		return
+	}
+	var payload kernelapi.UpdateAgentDeploymentRequest
+	if err := decodeStrictJSON(r, &payload); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if payload.Deployment == nil || strings.TrimSpace(payload.Deployment.ID) != strings.TrimSpace(r.PathValue("id")) {
+		s.respondError(w, http.StatusBadRequest, "agent deployment path and payload ids must match")
+		return
+	}
+	deployment, audit, err := registry.UpdateDeployment(r.Context(), payload.Deployment, payload.ExpectedRevision,
+		payload.ActorType, payload.ActorID, payload.Reason)
+	if err != nil {
+		s.respondAgentDeploymentError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, kernelapi.AgentDeploymentUpdateResult{Deployment: deployment, Audit: audit})
+}
+
 func (s *Server) respondAgentDeploymentError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, kernelagent.ErrDeploymentNotFound), errors.Is(err, kernelagent.ErrDefinitionNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, kernelagent.ErrRevisionConflict):
+		s.respondError(w, http.StatusConflict, err.Error())
 	default:
 		s.respondError(w, http.StatusBadRequest, err.Error())
 	}

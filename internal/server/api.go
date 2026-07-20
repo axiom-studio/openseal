@@ -73,6 +73,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/action-approvals/{id}/decisions", s.handleResolveActionApproval)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments", s.handleListAgentDeployments)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}", s.handleGetAgentDeployment)
+	s.mux.HandleFunc("PUT /api/v1/agent-deployments/{id}", s.handleUpdateAgentDeployment)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/compilations", s.handleListAgentDefinitionCompilations)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{deploymentId}/skill-actions", s.handleListSkillActions)
 	s.mux.HandleFunc("POST /api/v1/artifacts", s.handleRegisterArtifact)

@@ -38,7 +38,7 @@ const (
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
-	AgentDefinitionsCapabilityVersion   = "3"
+	AgentDefinitionsCapabilityVersion   = "4"
 	AgentRequestsCapabilityID           = "agent-requests"
 	AgentRequestsCapabilityVersion      = "1"
 	ActionApprovalsCapabilityID         = "action-approvals"
@@ -235,6 +235,19 @@ type AgentDeploymentCatalogEntry struct {
 	Definition *kernelagent.AgentDefinition `json:"definition"`
 }
 
+type UpdateAgentDeploymentRequest struct {
+	Deployment       *kernelagent.AgentDeployment `json:"deployment"`
+	ExpectedRevision int64                        `json:"expectedRevision"`
+	ActorType        string                       `json:"actorType"`
+	ActorID          string                       `json:"actorId"`
+	Reason           string                       `json:"reason"`
+}
+
+type AgentDeploymentUpdateResult struct {
+	Deployment *kernelagent.AgentDeployment    `json:"deployment"`
+	Audit      *workforce.DefinitionActivation `json:"audit"`
+}
+
 // AgentDefinitionCompilationHistory is the canonical readiness history for an
 // Agent deployment. Latest is projected explicitly so interactive clients do
 // not need to infer ordering, while Items preserves the complete bounded
@@ -334,7 +347,7 @@ func ActivityCapability() Capability {
 }
 
 func AgentDefinitionsCapability() Capability {
-	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList, OperationListCompilations}}
+	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList, OperationUpdate, OperationListCompilations}}
 }
 
 // AgentRequestsCapability describes the portable collaboration lifecycle used

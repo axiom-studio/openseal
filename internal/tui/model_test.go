@@ -31,6 +31,7 @@ import (
 type fakeKernelClient struct {
 	document             kernelapi.CapabilityDocument
 	agentDeployments     []kernelapi.AgentDeploymentCatalogEntry
+	agentUpdates         []kernelapi.UpdateAgentDeploymentRequest
 	teamDeployments      []kernelapi.TeamDeploymentCatalogEntry
 	teamUpdates          []kernelapi.UpdateTeamDeploymentRequest
 	teamAmendments       []*kernelteam.DefinitionAmendment
@@ -699,6 +700,9 @@ func (f *fakeKernelClient) ListAgentDefinitionCompilations(context.Context, capa
 }
 
 func (f *fakeKernelClient) GetAgentDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelapi.AgentDeploymentCatalogEntry, error) {
+	if f.compilationErr != nil {
+		return nil, f.compilationErr
+	}
 	for i := range f.agentDeployments {
 		entry := &f.agentDeployments[i]
 		if entry.Deployment != nil && entry.Deployment.ID == id && entry.Deployment.Scope == scope {
@@ -716,6 +720,24 @@ func (f *fakeKernelClient) ListAgentDeployments(_ context.Context, scope capabil
 		}
 	}
 	return &kernelapi.AgentDeploymentList{Items: items}, nil
+}
+
+func (f *fakeKernelClient) UpdateAgentDeployment(_ context.Context, id string, request kernelapi.UpdateAgentDeploymentRequest) (*kernelapi.AgentDeploymentUpdateResult, error) {
+	f.agentUpdates = append(f.agentUpdates, request)
+	for index := range f.agentDeployments {
+		entry := &f.agentDeployments[index]
+		if entry.Deployment == nil || entry.Deployment.ID != id {
+			continue
+		}
+		updated := *request.Deployment
+		updated.Revision++
+		entry.Deployment = &updated
+		return &kernelapi.AgentDeploymentUpdateResult{Deployment: &updated, Audit: &workforce.DefinitionActivation{
+			DeploymentID: id, DefinitionID: updated.DefinitionID, ToVersion: updated.ActiveVersion,
+			DeploymentRevision: updated.Revision, ChangeKind: workforce.DeploymentChangeConfigurationUpdated,
+		}}, nil
+	}
+	return nil, kernelagent.ErrDeploymentNotFound
 }
 
 func (f *fakeKernelClient) GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error) {
@@ -2752,6 +2774,10 @@ func newTestModel(t *testing.T, fake *fakeKernelClient) *Model {
 func TestRuntimeReadinessRendersLatestCompilationTruth(t *testing.T) {
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability()),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{
+			Deployment: &kernelagent.AgentDeployment{ID: "operator", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, DefinitionID: "operator", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1},
+			Definition: &kernelagent.AgentDefinition{ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely"},
+		}},
 		compilations: []*kernelagent.DefinitionCompilation{{
 			ID: "failed", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, DeploymentID: "operator", DefinitionID: "operator", CandidateVersion: "source-2",
 			Source: kernelagent.CompilationSource{Kind: "visual_graph", ID: "source", Version: "2", Digest: testDigest("source")}, Status: kernelagent.CompilationFailed,
@@ -2762,10 +2788,49 @@ func TestRuntimeReadinessRendersLatestCompilationTruth(t *testing.T) {
 	applyCommand(t, model, model.loadCapabilities())
 	model.section = sectionReadiness
 	view := model.View()
-	for _, expected := range []string{"Native runtime readiness", "NEEDS ATTENTION", "Reddit action is unavailable", "Node reddit", "candidate was not activated"} {
+	for _, expected := range []string{"Agent runtime & placement", "Native runtime readiness", "Operator", "active · definition operator@1 · revision 1", "NEEDS ATTENTION", "Reddit action is unavailable", "Node reddit", "candidate was not activated", "p pause/resume"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("readiness view missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestRuntimePlacementPauseUsesAdvertisedGovernedUpdate(t *testing.T) {
+	definitionCapability := kernelapi.AgentDefinitionsCapability()
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(definitionCapability),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{
+			Deployment: &kernelagent.AgentDeployment{
+				ID: "operator", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, DefinitionID: "operator", ActiveVersion: "1",
+				RolloutStatus: kernelagent.RolloutActive, Environment: "local", Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://hidden/provider"}},
+				Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 3,
+			},
+			Definition: &kernelagent.AgentDefinition{ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely"},
+		}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionReadiness
+	model.focus = focusPanel
+	view := model.View()
+	if !strings.Contains(view, "Credentials · 1 opaque reference(s) · model-provider") || strings.Contains(view, "vault://hidden/provider") {
+		t.Fatalf("credential placement was not secret-safe:\n%s", view)
+	}
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	if updated != model || command == nil {
+		t.Fatal("advertised Agent pause did not dispatch")
+	}
+	applyCommand(t, model, command)
+	if len(fake.agentUpdates) != 1 || fake.agentUpdates[0].ExpectedRevision != 3 || fake.agentUpdates[0].Deployment.RolloutStatus != kernelagent.RolloutPaused ||
+		fake.agentUpdates[0].Reason != "Pause Agent from the terminal" || model.agentDeployment.Deployment.Revision != 4 {
+		t.Fatalf("Agent update = %#v deployment=%#v", fake.agentUpdates, model.agentDeployment)
+	}
+
+	readOnly := definitionCapability
+	readOnly.Operations = []string{kernelapi.OperationGet, kernelapi.OperationList, kernelapi.OperationListCompilations}
+	model.agentDefinitionCapability = readOnly
+	if strings.Contains(model.renderReadinessContent(100), "p pause/resume") || model.pauseOrResumeAgentDeployment() != nil {
+		t.Fatal("unadvertised Agent deployment update remained operable")
 	}
 }
 

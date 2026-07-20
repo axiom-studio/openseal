@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
@@ -132,6 +133,94 @@ func TestRegistryClonesCredentialReferencesWithoutValues(t *testing.T) {
 	encoded, _ := json.Marshal(deployment)
 	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "vault-ref") {
 		t.Fatalf("deployment credential representation = %s", encoded)
+	}
+}
+
+func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
+	registry := NewRegistry()
+	definition := testDefinition("1", capability.RiskLevelProduction, 4)
+	registered, err := registry.RegisterDefinition(context.Background(), definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployment, _, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
+		ID: "agent", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
+		RolloutStatus: RolloutActive, Environment: "production", Capacity: DeploymentCapacity{MaxConcurrentRuns: 2, MaxQueuedRuns: 10},
+	}, "user", "admin", "initial placement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed := cloneDeployment(deployment)
+	proposed.RolloutStatus = RolloutPaused
+	proposed.Placement = map[string]string{"modelProvider": "deepseek"}
+	proposed.Credentials = map[string]capability.CredentialReference{
+		"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://tenant-one/model-provider"},
+	}
+	proposed.SkillBindingIDs = []string{"zeta", "alpha", "alpha"}
+	proposed.Capacity.MaxQueuedRuns = 25
+
+	updated, audit, err := registry.UpdateDeployment(context.Background(), proposed, deployment.Revision, "system", "atlas-reconciler", "place model provider credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != deployment.Revision+1 || updated.RolloutStatus != RolloutPaused || updated.Capacity.MaxQueuedRuns != 25 ||
+		len(updated.SkillBindingIDs) != 2 || updated.SkillBindingIDs[0] != "alpha" ||
+		updated.Credentials["MODEL_PROVIDER"].ID != "vault://tenant-one/model-provider" {
+		t.Fatalf("updated deployment = %#v", updated)
+	}
+	if audit == nil || audit.ChangeKind != workforce.DeploymentChangeConfigurationUpdated || audit.FromVersion != "1" || audit.ToVersion != "1" ||
+		audit.DeploymentRevision != updated.Revision || audit.ActorID != "atlas-reconciler" || audit.Reason != "place model provider credential" {
+		t.Fatalf("deployment audit = %#v", audit)
+	}
+	history, err := registry.ListActivations(context.Background(), scope, deployment.ID)
+	if err != nil || len(history) != 2 || history[1].ChangeKind != workforce.DeploymentChangeConfigurationUpdated {
+		t.Fatalf("deployment history = %#v, %v", history, err)
+	}
+	encoded, _ := json.Marshal(updated)
+	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "vault://tenant-one/model-provider") {
+		t.Fatalf("credential projection = %s", encoded)
+	}
+}
+
+func TestUpdateDeploymentFailsClosedOnLineageWideningSecretsAndStaleState(t *testing.T) {
+	registry := NewRegistry()
+	registered, err := registry.RegisterDefinition(context.Background(), testDefinition("1", capability.RiskLevelWrite, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployment, _, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
+		ID: "agent", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
+		RolloutStatus: RolloutActive, Environment: "production", Capacity: DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "initial placement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		mutate   func(*AgentDeployment)
+		revision int64
+		reason   string
+		message  string
+	}{
+		{name: "stale", revision: deployment.Revision + 1, reason: "update", mutate: func(value *AgentDeployment) { value.RolloutStatus = RolloutPaused }, message: "revision"},
+		{name: "definition lineage", revision: deployment.Revision, reason: "update", mutate: func(value *AgentDeployment) { value.ActiveVersion = "2" }, message: "identity or definition lineage"},
+		{name: "scope", revision: deployment.Revision, reason: "update", mutate: func(value *AgentDeployment) { value.Scope.ID = "two" }, message: "not found"},
+		{name: "widening", revision: deployment.Revision, reason: "update", mutate: func(value *AgentDeployment) { value.Capacity.MaxConcurrentRuns = 3 }, message: "cannot exceed"},
+		{name: "secret placement", revision: deployment.Revision, reason: "update", mutate: func(value *AgentDeployment) { value.Placement = map[string]string{"apiKey": "raw-secret"} }, message: "cannot contain credentials"},
+		{name: "missing reason", revision: deployment.Revision, mutate: func(value *AgentDeployment) { value.RolloutStatus = RolloutPaused }, message: "actor and reason"},
+		{name: "no change", revision: deployment.Revision, reason: "update", mutate: func(value *AgentDeployment) {}, message: "does not change"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			proposed := cloneDeployment(deployment)
+			test.mutate(proposed)
+			_, _, updateErr := registry.UpdateDeployment(context.Background(), proposed, test.revision, "user", "admin", test.reason)
+			if updateErr == nil || !strings.Contains(updateErr.Error(), test.message) {
+				t.Fatalf("error = %v, want %q", updateErr, test.message)
+			}
+		})
 	}
 }
 

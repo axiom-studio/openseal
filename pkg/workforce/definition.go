@@ -41,6 +41,12 @@ type DefinitionProvenance struct {
 	DerivedFrom string `json:"derivedFrom,omitempty"`
 }
 
+type DeploymentChangeKind string
+
+const (
+	DeploymentChangeConfigurationUpdated DeploymentChangeKind = "configuration-updated"
+)
+
 type SharedContextPolicy struct {
 	Retention        time.Duration `json:"retention,omitempty"`
 	MaximumBytes     int64         `json:"maximumBytes,omitempty"`
@@ -56,6 +62,7 @@ type DefinitionActivation struct {
 	FromVersion        string                    `json:"fromVersion,omitempty"`
 	ToVersion          string                    `json:"toVersion"`
 	DeploymentRevision int64                     `json:"deploymentRevision"`
+	ChangeKind         DeploymentChangeKind      `json:"changeKind,omitempty"`
 	Reason             string                    `json:"reason,omitempty"`
 	ActorType          string                    `json:"actorType"`
 	ActorID            string                    `json:"actorId"`

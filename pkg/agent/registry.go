@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/google/uuid"
 )
 
@@ -143,6 +144,72 @@ func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeRefe
 
 func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*AgentDeployment, error) {
 	return r.store.ListDeployments(ctx, scope)
+}
+
+// UpdateDeployment atomically changes only an Agent's deployment-local
+// configuration. Immutable behavior identity and definition lineage cannot be
+// changed through this command; those changes use definition activation or the
+// governed amendment lifecycle.
+func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
+	if r == nil || r.store == nil || proposed == nil {
+		return nil, nil, errors.New("agent registry and deployment are required")
+	}
+	actorType, actorID, reason = strings.TrimSpace(actorType), strings.TrimSpace(actorID), strings.TrimSpace(reason)
+	if actorType == "" || actorID == "" || reason == "" {
+		return nil, nil, errors.New("agent deployment update actor and reason are required")
+	}
+	current, err := r.store.GetDeployment(ctx, proposed.Scope, proposed.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if current.Revision != expectedRevision || proposed.Revision != expectedRevision {
+		return nil, nil, ErrRevisionConflict
+	}
+	if proposed.ID != current.ID || proposed.Scope != current.Scope || proposed.DefinitionID != current.DefinitionID ||
+		proposed.ActiveVersion != current.ActiveVersion || proposed.PreviousVersion != current.PreviousVersion ||
+		!proposed.CreatedAt.Equal(current.CreatedAt) {
+		return nil, nil, errors.New("agent deployment update cannot change identity or definition lineage")
+	}
+	updated := cloneDeployment(proposed)
+	updated.SkillBindingIDs = normalizedStrings(updated.SkillBindingIDs)
+	updated.Revision = current.Revision + 1
+	updated.UpdatedAt = r.now().UTC()
+	definition, err := r.store.GetDefinition(ctx, updated.DefinitionID, updated.ActiveVersion)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := updated.Validate(); err != nil {
+		return nil, nil, err
+	}
+	if err := validateNarrowing(definition, updated); err != nil {
+		return nil, nil, err
+	}
+	if deploymentConfigurationEqual(current, updated) {
+		return nil, nil, errors.New("agent deployment update does not change configuration")
+	}
+	activation := DefinitionActivation{
+		ID: r.newID(), Scope: updated.Scope, DeploymentID: updated.ID, DefinitionID: updated.DefinitionID,
+		FromVersion: current.ActiveVersion, ToVersion: current.ActiveVersion, DeploymentRevision: updated.Revision,
+		ChangeKind: workforce.DeploymentChangeConfigurationUpdated,
+		Reason:     reason, ActorType: actorType, ActorID: actorID, CreatedAt: updated.UpdatedAt,
+	}
+	if err := r.store.UpdateDeployment(ctx, updated, expectedRevision, activation); err != nil {
+		return nil, nil, err
+	}
+	copyActivation := activation
+	return cloneDeployment(updated), &copyActivation, nil
+}
+
+func deploymentConfigurationEqual(left, right *AgentDeployment) bool {
+	leftCopy, rightCopy := cloneDeployment(left), cloneDeployment(right)
+	if leftCopy == nil || rightCopy == nil {
+		return leftCopy == nil && rightCopy == nil
+	}
+	leftCopy.Revision, rightCopy.Revision = 0, 0
+	leftCopy.UpdatedAt, rightCopy.UpdatedAt = time.Time{}, time.Time{}
+	leftJSON, _ := json.Marshal(leftCopy)
+	rightJSON, _ := json.Marshal(rightCopy)
+	return string(leftJSON) == string(rightJSON)
 }
 
 func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {
