@@ -309,6 +309,9 @@ func validateRefinementQuestions(questions []RefinementQuestion) error {
 		if !validQuestionCategory(q.Category) || !validAnswerKind(q.Answer.Kind) || len(q.Blocking) == 0 {
 			return fmt.Errorf("refinement question %s has an invalid category, answer kind, or blocking scope", q.ID)
 		}
+		if q.Category == RefinementCategorySkill && q.Answer.Kind != RefinementAnswerSkillSelection {
+			return fmt.Errorf("refinement question %s has category skill and must use answer kind skill_selection", q.ID)
+		}
 		for _, scope := range q.Blocking {
 			if scope != RefinementBlocksCandidate && scope != RefinementBlocksEvaluation && scope != RefinementBlocksApply {
 				return fmt.Errorf("refinement question %s has an invalid blocking scope", q.ID)
@@ -400,7 +403,7 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 		for _, option := range question.Answer.Options {
 			skill, ok := catalog.Skills[option.ID]
 			if !ok {
-				return fmt.Errorf("refinement question %s references Skill %s outside the authorized catalog", question.ID, option.ID)
+				return refinementCatalogOptionError(question.ID, option.ID, catalog.Skills)
 			}
 			if skill.Readiness == SkillReadinessUnavailable {
 				return fmt.Errorf("refinement question %s presents unavailable Skill %s", question.ID, option.ID)
@@ -408,6 +411,31 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 		}
 	}
 	return nil
+}
+
+func refinementCatalogOptionError(questionID, optionID string, skills map[string]SkillCapability) error {
+	aliases := make([]string, 0, 1)
+	for id := range skills {
+		if strings.HasSuffix(id, "."+optionID) || strings.HasSuffix(id, "/"+optionID) {
+			aliases = append(aliases, id)
+		}
+	}
+	sort.Strings(aliases)
+	if len(aliases) == 1 {
+		return fmt.Errorf("refinement question %s uses non-canonical Skill option id %q; use the exact authorized catalog key %q (aliases are not accepted)", questionID, optionID, aliases[0])
+	}
+	authorized := make([]string, 0, len(skills))
+	for id := range skills {
+		authorized = append(authorized, id)
+	}
+	sort.Strings(authorized)
+	if len(authorized) > 8 {
+		authorized = authorized[:8]
+	}
+	if len(authorized) == 0 {
+		return fmt.Errorf("refinement question %s references Skill option id %q, but the authorized catalog is empty", questionID, optionID)
+	}
+	return fmt.Errorf("refinement question %s references unknown Skill option id %q; use an exact authorized catalog key (available keys include %s)", questionID, optionID, strings.Join(authorized, ", "))
 }
 
 func validQuestionCategory(category RefinementQuestionCategory) bool {
