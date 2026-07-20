@@ -38,7 +38,7 @@ const (
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
-	AgentDefinitionsCapabilityVersion   = "4"
+	AgentDefinitionsCapabilityVersion   = "5"
 	AgentRequestsCapabilityID           = "agent-requests"
 	AgentRequestsCapabilityVersion      = "1"
 	ActionApprovalsCapabilityID         = "action-approvals"
@@ -55,6 +55,7 @@ const (
 	OperationList              = "list"
 	OperationPause             = "pause"
 	OperationResume            = "resume"
+	OperationRetire            = "retire"
 	OperationCancel            = "cancel"
 	OperationIntervene         = "intervene"
 	OperationUpdate            = "update"
