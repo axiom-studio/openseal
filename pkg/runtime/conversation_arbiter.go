@@ -51,6 +51,42 @@ type ParticipationSignals struct {
 	SubstantiveObjection           bool `json:"substantiveObjection,omitempty"`
 }
 
+type ParticipationAvailabilityStatus string
+
+const (
+	ParticipationAvailable   ParticipationAvailabilityStatus = "available"
+	ParticipationUnavailable ParticipationAvailabilityStatus = "unavailable"
+	ParticipationNotInvited  ParticipationAvailabilityStatus = "not_invited"
+)
+
+// ParticipationAvailability records whether the participant runtime could
+// produce a bounded proposal. FailureCode is deliberately coarse so provider
+// errors and credentials never enter shared channel state.
+type ParticipationAvailability struct {
+	Status      ParticipationAvailabilityStatus `json:"status"`
+	FailureCode string                          `json:"failureCode,omitempty"`
+}
+
+func (a ParticipationAvailability) Validate() error {
+	switch a.Status {
+	case "", ParticipationAvailable:
+		if a.FailureCode != "" {
+			return errors.New("available participant cannot include a failure code")
+		}
+	case ParticipationUnavailable:
+		if a.FailureCode != "participant_timeout" && a.FailureCode != "participant_runtime_unavailable" {
+			return errors.New("unavailable participant requires a public failure code")
+		}
+	case ParticipationNotInvited:
+		if a.FailureCode != "" {
+			return errors.New("participant outside the message audience cannot include a failure code")
+		}
+	default:
+		return errors.New("participation availability is required")
+	}
+	return nil
+}
+
 // ParticipationProposal is the bounded, visible output of a participant's
 // relevance check. It contains no chain-of-thought: only the proposed message,
 // structured intent, audience, and independently auditable signals.
@@ -71,6 +107,7 @@ type ParticipationProposal struct {
 	ResolvesMessageID string                    `json:"resolvesMessageId,omitempty"`
 	Signals           ParticipationSignals      `json:"signals"`
 	Priority          int                       `json:"priority,omitempty"`
+	Availability      ParticipationAvailability `json:"availability"`
 	// ProposedAction is an optional, already-authorized capability request made
 	// by this participant. It remains part of the visible participation record;
 	// arbitration selects at most one speaker action and the Conversation Run
@@ -88,6 +125,12 @@ func (p ParticipationProposal) Validate() error {
 	}
 	if p.Priority < -100 || p.Priority > 100 {
 		return errors.New("participation proposal priority must be between -100 and 100")
+	}
+	if err := p.Availability.Validate(); err != nil {
+		return err
+	}
+	if (p.Availability.Status == ParticipationUnavailable || p.Availability.Status == ParticipationNotInvited) && p.WantsToSpeak {
+		return errors.New("unavailable participant cannot speak")
 	}
 	if !p.WantsToSpeak {
 		if strings.TrimSpace(p.Content) != "" || p.ContributionKey != "" || p.Intent != "" || len(p.Mentions) > 0 || len(p.References) > 0 ||
@@ -188,21 +231,28 @@ func (r *ParticipationRound) Validate() error {
 }
 
 type ConversationArbitrationPolicy struct {
-	MinimumScore       int     `json:"minimumScore"`
-	MaximumSpeakers    int     `json:"maximumSpeakers"`
-	DuplicateThreshold float64 `json:"duplicateThreshold"`
+	MinimumScore                 int     `json:"minimumScore"`
+	MaximumSpeakers              int     `json:"maximumSpeakers"`
+	DuplicateThreshold           float64 `json:"duplicateThreshold"`
+	MinimumAvailableParticipants int     `json:"minimumAvailableParticipants"`
+	RequiredAvailableRole        string  `json:"requiredAvailableRole,omitempty"`
 }
 
 func DefaultConversationArbitrationPolicy() ConversationArbitrationPolicy {
-	return ConversationArbitrationPolicy{MinimumScore: 30, MaximumSpeakers: 3, DuplicateThreshold: 0.72}
+	return ConversationArbitrationPolicy{MinimumScore: 30, MaximumSpeakers: 3, DuplicateThreshold: 0.72, MinimumAvailableParticipants: 1}
 }
 
 func (p ConversationArbitrationPolicy) normalize() (ConversationArbitrationPolicy, error) {
-	if p.MinimumScore == 0 && p.MaximumSpeakers == 0 && p.DuplicateThreshold == 0 {
+	if p.MinimumScore == 0 && p.MaximumSpeakers == 0 && p.DuplicateThreshold == 0 && p.MinimumAvailableParticipants == 0 && strings.TrimSpace(p.RequiredAvailableRole) == "" {
 		return DefaultConversationArbitrationPolicy(), nil
 	}
+	if p.MinimumAvailableParticipants == 0 {
+		p.MinimumAvailableParticipants = 1
+	}
+	p.RequiredAvailableRole = strings.TrimSpace(p.RequiredAvailableRole)
 	if p.MinimumScore < 1 || p.MinimumScore > 100 || p.MaximumSpeakers < 1 || p.MaximumSpeakers > 20 ||
-		p.DuplicateThreshold < 0.5 || p.DuplicateThreshold > 1 {
+		p.DuplicateThreshold < 0.5 || p.DuplicateThreshold > 1 || p.MinimumAvailableParticipants < 1 || p.MinimumAvailableParticipants > 256 ||
+		len(p.RequiredAvailableRole) > 80 {
 		return ConversationArbitrationPolicy{}, errors.New("invalid conversation arbitration policy")
 	}
 	return p, nil

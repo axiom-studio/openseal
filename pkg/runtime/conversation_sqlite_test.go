@@ -62,7 +62,8 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
 		Proposals: []ParticipationProposal{{
 			Participant: agent, WantsToSpeak: true, Intent: MessageIntentAnswer,
-			Content: "It is ready and the smoke-test evidence passed.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Availability: ParticipationAvailability{Status: ParticipationAvailable},
+			Content:      "It is ready and the smoke-test evidence passed.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: question.Message.ID, ResolvesMessageID: question.Message.ID,
 			Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, HasEvidence: true},
 		}},
@@ -132,7 +133,8 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatalf("restored round replay = %#v, err = %v", roundReplay, err)
 	}
 	loadedRound, err := restartedService.GetParticipationRound(ctx, scope, conversation.ID, roundReplay.Round.ID)
-	if err != nil || len(loadedRound.Messages) != 1 || len(loadedRound.Round.Arbitration.Decisions) != 1 {
+	if err != nil || len(loadedRound.Messages) != 1 || len(loadedRound.Round.Arbitration.Decisions) != 1 ||
+		loadedRound.Round.Proposals[0].Availability.Status != ParticipationAvailable {
 		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
 	}
 	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})

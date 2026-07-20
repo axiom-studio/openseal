@@ -13,6 +13,7 @@ import (
 var (
 	ErrConversationCoordinationUnavailable = errors.New("conversation coordination is not configured")
 	ErrNoConversationParticipants          = errors.New("conversation has no eligible agent participants")
+	ErrConversationParticipationQuorum     = errors.New("conversation participation quorum is unavailable")
 )
 
 // ConversationParticipantBinding is the portable identity and semantic role
@@ -288,7 +289,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 						cancel()
 						continue
 					}
-					proposals[index] = ParticipationProposal{Participant: binding.Participant, SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority}
+					proposals[index] = ParticipationProposal{Participant: binding.Participant, SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority, Availability: ParticipationAvailability{Status: ParticipationNotInvited}}
 					continue
 				}
 				presence, presenceErr := c.conversations.SetPresence(workerCtx, SetConversationPresenceRequest{
@@ -310,8 +311,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				})
 				proposalCancel()
 				if proposalErr != nil {
-					errs[index] = fmt.Errorf("participant %s proposal: %w", binding.Participant.ID, proposalErr)
-					cancel()
+					proposals[index] = unavailableParticipationProposal(binding, publicParticipationFailureCode(proposalErr))
 					continue
 				}
 				proposal.ID = ""
@@ -319,6 +319,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				proposal.Participant = binding.Participant
 				proposal.SemanticRoles = append([]string(nil), binding.SemanticRoles...)
 				proposal.Priority = binding.Priority
+				proposal.Availability = ParticipationAvailability{Status: ParticipationAvailable}
 				directlyMentioned := participantDirectlyMentioned(visibleTrigger, binding.Participant)
 				proposal.Signals.DirectlyMentioned = directlyMentioned
 				proposal.Signals.TriggerTargetsOtherParticipant = triggerTargetsSpecificAgent(visibleTrigger) && !directlyMentioned
@@ -358,11 +359,48 @@ queue:
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := validateParticipationQuorum(proposals, policy); err != nil {
+		return nil, err
+	}
 
 	return c.conversations.CoordinateParticipation(ctx, CoordinateParticipationRequest{
 		Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: req.ExpectedRevision,
 		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Policy: policy, Proposals: proposals, IdempotencyKey: key,
 	})
+}
+
+func unavailableParticipationProposal(binding ConversationParticipantBinding, failureCode string) ParticipationProposal {
+	return ParticipationProposal{
+		Participant: binding.Participant, SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority,
+		Availability: ParticipationAvailability{Status: ParticipationUnavailable, FailureCode: failureCode},
+	}
+}
+
+func publicParticipationFailureCode(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "participant_timeout"
+	}
+	return "participant_runtime_unavailable"
+}
+
+func validateParticipationQuorum(proposals []ParticipationProposal, policy ConversationArbitrationPolicy) error {
+	available := 0
+	requiredRoleAvailable := strings.TrimSpace(policy.RequiredAvailableRole) == ""
+	for _, proposal := range proposals {
+		if proposal.Availability.Status != ParticipationAvailable {
+			continue
+		}
+		available++
+		for _, role := range proposal.SemanticRoles {
+			if role == policy.RequiredAvailableRole {
+				requiredRoleAvailable = true
+			}
+		}
+	}
+	if available < policy.MinimumAvailableParticipants || !requiredRoleAvailable {
+		return ErrConversationParticipationQuorum
+	}
+	return nil
 }
 
 func (c *ConversationCoordinator) markObserved(ctx context.Context, conversation *Conversation, participant ConversationParticipant, sequence int64) error {
