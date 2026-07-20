@@ -141,7 +141,9 @@ func validateAuthoredObjectiveEventRules(value map[string]interface{}) error {
 				return fmt.Errorf("objective eventRules rule %d: %w", index, err)
 			}
 		}
-		if err := validateAuthoredObjectiveRunBudget(rule.RunBudget, rule.RunTemplate == nil || rule.RunTemplate.Capability == nil); err != nil {
+		hosted := rule.RunTemplate == nil || rule.RunTemplate.Capability == nil
+		grounded := hosted && rule.RunTemplate != nil && rule.RunTemplate.EvidenceProjection != nil && !rule.RunTemplate.EvidenceProjection.Disabled
+		if err := validateAuthoredObjectiveRunBudget(rule.RunBudget, hosted, grounded); err != nil {
 			return fmt.Errorf("objective eventRules rule %d: %w", index, err)
 		}
 	}
@@ -208,18 +210,22 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 			return err
 		}
 	}
-	if err := validateAuthoredObjectiveRunBudget(cadence.RunBudget, cadence.RunTemplate == nil || cadence.RunTemplate.Capability == nil); err != nil {
+	hosted := cadence.RunTemplate == nil || cadence.RunTemplate.Capability == nil
+	grounded := hosted && cadence.RunTemplate != nil && cadence.RunTemplate.EvidenceProjection != nil && !cadence.RunTemplate.EvidenceProjection.Disabled
+	if err := validateAuthoredObjectiveRunBudget(cadence.RunBudget, hosted, grounded); err != nil {
 		return fmt.Errorf("objective cadence: %w", err)
 	}
 	return nil
 }
 
 const (
-	minimumHostedObjectiveInputTokens  int64 = 16000
-	minimumHostedObjectiveOutputTokens int64 = 1000
+	minimumHostedObjectiveInputTokens   int64 = 16000
+	minimumHostedObjectiveOutputTokens  int64 = 1000
+	minimumGroundedObjectiveInputTokens int64 = 24000
+	minimumGroundedObjectiveTurns       int64 = 4
 )
 
-func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, hosted bool) error {
+func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, hosted, grounded bool) error {
 	if budget == nil {
 		return nil
 	}
@@ -233,8 +239,15 @@ func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, host
 	if !hosted {
 		return nil
 	}
-	if budget.MaxInputTokens > 0 && budget.MaxInputTokens < minimumHostedObjectiveInputTokens {
-		return fmt.Errorf("hosted runBudget maxInputTokens must be zero (unbounded) or at least %d", minimumHostedObjectiveInputTokens)
+	minimumInput := minimumHostedObjectiveInputTokens
+	if grounded {
+		minimumInput = minimumGroundedObjectiveInputTokens
+		if budget.MaxTurns > 0 && budget.MaxTurns < minimumGroundedObjectiveTurns {
+			return fmt.Errorf("evidence-grounded hosted runBudget maxTurns must be zero (unbounded) or at least %d", minimumGroundedObjectiveTurns)
+		}
+	}
+	if budget.MaxInputTokens > 0 && budget.MaxInputTokens < minimumInput {
+		return fmt.Errorf("hosted runBudget maxInputTokens must be zero (unbounded) or at least %d", minimumInput)
 	}
 	if budget.MaxOutputTokens > 0 && budget.MaxOutputTokens < minimumHostedObjectiveOutputTokens {
 		return fmt.Errorf("hosted runBudget maxOutputTokens must be zero (unbounded) or at least %d", minimumHostedObjectiveOutputTokens)
@@ -242,7 +255,7 @@ func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, host
 	if budget.MaxTotalTokens > 0 {
 		input := budget.MaxInputTokens
 		if input == 0 {
-			input = minimumHostedObjectiveInputTokens
+			input = minimumInput
 		}
 		output := budget.MaxOutputTokens
 		if output == 0 {

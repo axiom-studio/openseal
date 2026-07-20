@@ -269,8 +269,8 @@ func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
 		Cadence: map[string]interface{}{
 			"type": "interval", "intervalSeconds": float64(3600),
 			"runBudget": map[string]interface{}{
-				"maxAttempts": float64(3), "maxTurns": float64(3), "maxInputTokens": float64(16000),
-				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(26000),
+				"maxAttempts": float64(3), "maxTurns": float64(4), "maxInputTokens": float64(24000),
+				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(34000),
 			},
 			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
 				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
@@ -290,6 +290,29 @@ func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
 	projection := result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["evidenceProjection"].(map[string]interface{})
 	if projection["maximumObservations"] != float64(7) || projection["maximumSummaryRunes"] != float64(600) || projection["maximumTotalRunes"] != float64(4200) {
 		t.Fatalf("evidence projection did not round-trip: %#v", projection)
+	}
+}
+
+func TestCompilerRejectsEvidenceProjectionBudgetWithoutReviewAndRepairCapacity(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
+		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
+		Cadence: map[string]interface{}{
+			"type": "interval", "intervalSeconds": float64(3600),
+			"runBudget": map[string]interface{}{
+				"maxAttempts": float64(3), "maxTurns": float64(3), "maxInputTokens": float64(16000),
+				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(26000),
+			},
+			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
+				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
+			}},
+		},
+	}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"})
+	if err != nil || result.Valid || !validationMessageContains(result.Validation, "maxTurns must be zero (unbounded) or at least 4") {
+		t.Fatalf("insufficient evidence-grounding budget = %#v, err = %v", result, err)
 	}
 }
 
