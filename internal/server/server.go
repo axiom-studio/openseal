@@ -20,7 +20,7 @@ import (
 // compatibility routes. Interactive clients discover its capabilities.
 type Server struct {
 	registry           *executor.Registry
-	scheduler          *runtime.Scheduler
+	scheduler          workflowScheduler
 	store              runtime.KernelStore
 	artifactContent    runtime.ArtifactContentStore
 	artifactResolver   runtime.ArtifactContentResolver
@@ -42,6 +42,10 @@ type Server struct {
 	clawHubMutations   bool
 	outreachDelivery   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 	agentRunCreation   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+}
+
+type workflowScheduler interface {
+	Schedule(context.Context, runtime.WorkflowEntry, map[string]interface{}) (int, error)
 }
 
 // SetClawHubLifecycle enables the canonical registry/install engine. Mutation
@@ -75,12 +79,12 @@ type WorkflowEdge struct {
 }
 
 // NewServer creates a new API server.
-func NewServer(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
+func NewServer(registry *executor.Registry, scheduler workflowScheduler, store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
 	return NewServerWithDir(registry, scheduler, store, "", logger)
 }
 
 // NewServerWithDir creates a new API server with a workflows directory for persistence.
-func NewServerWithDir(registry *executor.Registry, scheduler *runtime.Scheduler, store runtime.KernelStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
+func NewServerWithDir(registry *executor.Registry, scheduler workflowScheduler, store runtime.KernelStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
 	s := &Server{
 		registry:     registry,
 		scheduler:    scheduler,
