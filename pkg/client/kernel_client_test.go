@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"go.uber.org/zap"
 )
 
@@ -505,6 +506,8 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
 			Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, QuietByDefault: true},
 			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+			Evaluations:  []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
+			Amendments:   workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
 		})
 		if err != nil || registered.Digest == "" {
 			t.Fatalf("registered Team definition = %#v, err = %v", registered, err)
@@ -547,6 +550,46 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	loaded, err := client.GetTeamDeployment(ctx, scope, created.Deployment.ID)
 	if err != nil || loaded.Revision != 3 || loaded.Roster[0].DisplayName != "Evidence lead" || loaded.Roster[0].AgentDeploymentID != agentDeployment.ID {
 		t.Fatalf("loaded Team = %#v, err = %v", loaded, err)
+	}
+	base, err := client.GetTeamDefinition(ctx, "research-team", "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := *base
+	candidate.Version, candidate.Purpose, candidate.Digest = "3", "Produce attributable findings and syntheses", ""
+	amendment, err := client.ProposeTeamDefinitionAmendment(ctx, kernelteam.ProposeAmendmentRequest{
+		Scope: scope, DeploymentID: loaded.ID, Candidate: &candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Include synthesis",
+	})
+	if err != nil || amendment.Status != kernelteam.AmendmentEvaluating || amendment.Revision != 1 {
+		t.Fatalf("proposed amendment = %#v, err = %v", amendment, err)
+	}
+	amendments, err := client.ListTeamDefinitionAmendments(ctx, scope, loaded.ID)
+	if err != nil || len(amendments.Items) != 1 || amendments.Items[0].ID != amendment.ID {
+		t.Fatalf("listed amendments = %#v, err = %v", amendments, err)
+	}
+	inspected, err := client.GetTeamDefinitionAmendment(ctx, scope, loaded.ID, amendment.ID)
+	if err != nil || inspected.Revision != amendment.Revision {
+		t.Fatalf("inspected amendment = %#v, err = %v", inspected, err)
+	}
+	evaluated, err := client.SubmitTeamDefinitionAmendmentEvaluation(ctx, loaded.ID, kernelteam.SubmitAmendmentEvaluationRequest{
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision,
+		Evaluations: []kernelteam.AmendmentEvaluation{{CriterionID: "evidence", Passed: true, Summary: "Sources remain attributable"}},
+	})
+	if err != nil || evaluated.Status != kernelteam.AmendmentAwaitingApproval || evaluated.Revision != 2 {
+		t.Fatalf("evaluated amendment = %#v, err = %v", evaluated, err)
+	}
+	approved, err := client.ResolveTeamDefinitionAmendment(ctx, loaded.ID, kernelteam.ResolveAmendmentRequest{
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: evaluated.Revision, Approved: true,
+		ActorType: "user", ActorID: "operator", Reason: "Evidence gate passed",
+	})
+	if err != nil || approved.Status != kernelteam.AmendmentApproved || approved.Revision != 3 {
+		t.Fatalf("approved amendment = %#v, err = %v", approved, err)
+	}
+	amendmentActivation, err := client.ActivateTeamDefinitionAmendment(ctx, loaded.ID, amendment.ID, kernelapi.ActivateTeamDefinitionAmendmentRequest{
+		Scope: scope, ExpectedRevision: approved.Revision, ActorType: "user", ActorID: "operator", Reason: "Reviewed",
+	})
+	if err != nil || amendmentActivation.Amendment.Status != kernelteam.AmendmentActivated || amendmentActivation.Deployment.ActiveVersion != "3" || amendmentActivation.Activation.ToVersion != "3" {
+		t.Fatalf("activated amendment = %#v, err = %v", amendmentActivation, err)
 	}
 }
 
