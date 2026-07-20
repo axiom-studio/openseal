@@ -6,10 +6,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -178,6 +180,123 @@ Read references/method.md before monitoring.
 	lock, err = manager.List()
 	if err != nil || len(lock.Skills) != 0 {
 		t.Fatalf("lock after uninstall = %#v, %v", lock, err)
+	}
+}
+
+func TestPreviewCompilesWithoutInstallingAndPinsInstallationArtifact(t *testing.T) {
+	registry := &installRegistry{
+		version: "2.1.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"},
+		archive: createTestZip(t, map[string]string{
+			"SKILL.md": `---
+name: reddit-research
+description: Monitor configured communities and classify feedback.
+command-dispatch: tool
+command-tool: reddit_api
+allowed-tools: [reddit_api]
+metadata:
+  openclaw:
+    primaryEnv: REDDIT_API_TOKEN
+---
+PRIVATE_PREVIEW_PROMPT_BODY must not enter the control-plane projection.
+`,
+			"references/method.md": "Preserve source provenance.",
+		}),
+	}
+	workspace := t.TempDir()
+	manager, err := NewInstallManager("https://registry.test", registry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := SkillReference{Owner: "acme", Slug: "reddit-research"}
+	preview, err := manager.Preview(context.Background(), PreviewRequest{Reference: reference})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.APIVersion != CompilationPreviewAPIVersion || !preview.Compatible || preview.Receipt.SourceIdentity != manager.identity(reference) ||
+		preview.Receipt.Version != "2.1.0" || len(preview.Receipt.SourceDigest) != 64 || len(preview.Receipt.ArchiveSHA256) != 64 ||
+		!strings.HasPrefix(preview.Receipt.CompilationDigest, "sha256:") {
+		t.Fatalf("preview identity is incomplete: %#v", preview)
+	}
+	if action, ok := preview.Actions["invoke"]; !ok || action.Name != "invoke" || len(action.Credentials) != 1 {
+		t.Fatalf("exact compiled action missing: %#v", preview.Actions)
+	}
+	if len(preview.CredentialRequirements) != 1 || preview.CredentialRequirements[0].Name != "REDDIT_API_TOKEN" {
+		t.Fatalf("credential requirements = %#v", preview.CredentialRequirements)
+	}
+	encoded, err := json.Marshal(preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "PRIVATE_PREVIEW_PROMPT_BODY") || strings.Contains(string(encoded), "credentialReference") {
+		t.Fatalf("preview leaked source content or credential references: %s", encoded)
+	}
+	lock, err := manager.List()
+	if err != nil || len(lock.Skills) != 0 {
+		t.Fatalf("preview mutated installation state: %#v, %v", lock, err)
+	}
+
+	installed, err := manager.Install(context.Background(), InstallRequest{
+		Reference: reference, Version: preview.Receipt.Version, PreviewReceipt: &preview.Receipt,
+	})
+	if err != nil || !installed.Changed || installed.Compilation.SourceDigest != preview.Receipt.SourceDigest {
+		t.Fatalf("receipt-pinned install = %#v, %v", installed, err)
+	}
+	tamperedReceipt := preview.Receipt
+	tamperedReceipt.CompilationDigest = "sha256:" + strings.Repeat("0", 64)
+	if _, err := manager.Install(context.Background(), InstallRequest{
+		Reference: reference, Version: preview.Receipt.Version, Force: true, PreviewReceipt: &tamperedReceipt,
+	}); !errors.Is(err, ErrCompilationPreviewMismatch) {
+		t.Fatalf("tampered compilation projection was accepted: %v", err)
+	}
+
+	registry.archive = createTestZip(t, map[string]string{
+		"SKILL.md": `---
+name: reddit-research
+description: Mutated after preview.
+command-dispatch: tool
+command-tool: reddit_api
+---
+Changed bytes.
+`,
+	})
+	if _, err := manager.Install(context.Background(), InstallRequest{
+		Reference: reference, Version: preview.Receipt.Version, Force: true, PreviewReceipt: &preview.Receipt,
+	}); !errors.Is(err, ErrCompilationPreviewMismatch) {
+		t.Fatalf("mutated preview artifact was accepted: %v", err)
+	}
+}
+
+func TestPreviewMarksUnadaptedExternalPromptIncompatibleWithDiagnostic(t *testing.T) {
+	registry := &installRegistry{
+		version: "1.0.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"},
+		archive: createTestZip(t, map[string]string{"SKILL.md": `---
+name: external-prompt
+description: Needs a governed adapter.
+allowed-tools: [reddit_api]
+metadata:
+  openclaw:
+    primaryEnv: REDDIT_API_TOKEN
+---
+Use the external service.
+`}),
+	}
+	manager, err := NewInstallManager("https://registry.test", registry, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := manager.Preview(context.Background(), PreviewRequest{Reference: SkillReference{Owner: "acme", Slug: "external-prompt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Compatible {
+		t.Fatalf("unadapted external prompt was presented as compatible: %#v", preview)
+	}
+	found := false
+	for _, diagnostic := range preview.Diagnostics {
+		found = found || diagnostic.Code == "needs_action_adapter"
+	}
+	if !found {
+		t.Fatalf("actionable incompatibility diagnostic missing: %#v", preview.Diagnostics)
 	}
 }
 
