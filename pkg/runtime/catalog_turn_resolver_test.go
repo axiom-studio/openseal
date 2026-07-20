@@ -13,10 +13,12 @@ import (
 )
 
 type resolverCatalog struct {
-	deployment *kernelagent.AgentDeployment
-	definition *kernelagent.AgentDefinition
-	activation *skill.ActivationSnapshot
-	gotHost    skill.HostCapabilityState
+	deployment            *kernelagent.AgentDeployment
+	definition            *kernelagent.AgentDefinition
+	activation            *skill.ActivationSnapshot
+	activations           map[string]*skill.ActivationSnapshot
+	activationDeployments []string
+	gotHost               skill.HostCapabilityState
 }
 
 func (c *resolverCatalog) GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error) {
@@ -27,8 +29,12 @@ func (c *resolverCatalog) GetAgentDefinition(context.Context, string, string) (*
 	return c.definition, nil
 }
 
-func (c *resolverCatalog) ActivateSkills(_ context.Context, _ skill.ScopeReference, _ string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
+func (c *resolverCatalog) ActivateSkills(_ context.Context, _ skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	c.gotHost = host
+	c.activationDeployments = append(c.activationDeployments, deploymentID)
+	if c.activations != nil {
+		return c.activations[deploymentID], nil
+	}
 	return c.activation, nil
 }
 
@@ -135,5 +141,66 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	modelInput, _ := MarshalHostedTurnModelInput(host.request)
 	if strings.Contains(string(modelInput), "17") || strings.Contains(strings.ToLower(string(modelInput)), "credential") {
 		t.Fatalf("model input leaked credential reference: %s", modelInput)
+	}
+}
+
+func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRuns(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	teamAction := capability.ModelAction{
+		Name: "openseal.teams.update_role", BindingID: "teams", BindingRevision: 2,
+		SkillID: "openseal.teams", Version: "1.0.0", Action: "update_role", Risk: capability.RiskLevelWrite,
+	}
+	agentAction := teamAction
+	agentAction.BindingID = "agent-teams"
+	agentAction.BindingRevision = 1
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Propose the role change",
+		ProposedActions: []TurnAction{{
+			Type: "skill_action", Capability: teamAction.Name, BindingID: teamAction.BindingID,
+			BindingRevision: teamAction.BindingRevision, Summary: "Enable the reviewer", InputRef: "/roleChange",
+		}},
+		ContinuationCheckpoint: map[string]interface{}{"roleChange": map[string]interface{}{
+			"roleId": "reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
+		}},
+	}}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "reviewer-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "reviewer", Version: "1", Purpose: "Review", SystemPrompt: "Review carefully."},
+		activations: map[string]*skill.ActivationSnapshot{
+			"reviewer-agent": {SnapshotID: "agent-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "reviewer-agent", Skills: []skill.ActivatedSkill{{
+				BindingID: "agent-teams", BindingRevision: 1, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{agentAction},
+			}}},
+			"review-team": {SnapshotID: "team-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "review-team", Skills: []skill.ActivatedSkill{{
+				BindingID: "teams", BindingRevision: 2, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{teamAction},
+			}}},
+		},
+	}
+	teamRun := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "review-team"}, AssignedAgentID: "reviewer-agent", Goal: "Enable the reviewer", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, teamRun, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.DeploymentID != "reviewer-agent" || binding.ActionDeploymentID != "review-team" || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "teams" || !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent", "review-team"}) {
+		t.Fatalf("Team binding = %#v activations=%v", binding, catalog.activationDeployments)
+	}
+	hosted, ok := binding.Runner.(*HostedTurnRunner)
+	if !ok || hosted.config.AgentID != "reviewer-agent" || hosted.config.ActionDeploymentID != "review-team" {
+		t.Fatalf("hosted Team identity = %#v", binding.Runner)
+	}
+	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: teamRun, Turn: &AgentTurn{ID: "turn"}})
+	if err != nil || len(outcome.ProposedActions) != 1 || host.request.AgentID != "reviewer-agent" {
+		t.Fatalf("Team hosted turn = %#v request=%#v err=%v", outcome, host.request, err)
+	}
+
+	catalog.activationDeployments = nil
+	agentRun := cloneAgentRun(teamRun)
+	agentRun.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer-agent"}
+	agentBinding, err := ResolveCatalogTurnRunner(t.Context(), catalog, agentRun, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent"}) || agentBinding.ActionDeploymentID != "reviewer-agent" || agentBinding.ModelActions[0].BindingID != "agent-teams" {
+		t.Fatalf("Agent run binding=%#v activations=%v", agentBinding, catalog.activationDeployments)
 	}
 }

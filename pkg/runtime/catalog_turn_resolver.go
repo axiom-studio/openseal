@@ -83,8 +83,37 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, errors.New("Skill activation returned no immutable snapshot")
 	}
 	prompts, actions, prepared, contextRefs := projectActivatedSkills(activation)
+	actionDeploymentID := deployment.ID
+	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {
+		teamActivation, activateErr := catalog.ActivateSkills(ctx, scope, run.Owner.ID, skillHost)
+		if activateErr != nil {
+			return nil, fmt.Errorf("activate bound Skills for Team %s: %w", run.Owner.ID, activateErr)
+		}
+		if teamActivation == nil || strings.TrimSpace(teamActivation.SnapshotID) == "" {
+			return nil, errors.New("Team Skill activation returned no immutable snapshot")
+		}
+		teamPrompts, teamActions, teamPrepared, teamContextRefs := projectActivatedSkills(teamActivation)
+		mergedActions, shadowedBindings, mergeErr := mergeOwnerModelActions(actions, teamActions)
+		if mergeErr != nil {
+			return nil, mergeErr
+		}
+		if len(shadowedBindings) > 0 {
+			filtered := prepared[:0]
+			for _, runtime := range prepared {
+				if _, shadowed := shadowedBindings[runtime.BindingID]; !shadowed {
+					filtered = append(filtered, runtime)
+				}
+			}
+			prepared = filtered
+		}
+		prompts = append(prompts, teamPrompts...)
+		actions = mergedActions
+		prepared = append(prepared, teamPrepared...)
+		contextRefs = append(contextRefs, teamContextRefs...)
+		actionDeploymentID = run.Owner.ID
+	}
 	base := TurnRunnerBinding{
-		DeploymentID: deployment.ID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+		DeploymentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		ModelActions: actions, PreparedRuntimes: prepared, InputContextRefs: contextRefs,
 		BudgetReservation: BudgetUsage{Turns: 1},
 	}
@@ -129,7 +158,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		instructions = append(instructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
 	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
-		AgentID: deployment.ID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		SystemInstructions: instructions, SkillPrompts: prompts, Actions: actions,
 		ModelCredential: deploymentModelCredential(deployment),
 	})
@@ -138,6 +167,32 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	base.Runner = runner
 	return &base, nil
+}
+
+func mergeOwnerModelActions(existing, owner []capability.ModelAction) ([]capability.ModelAction, map[string]struct{}, error) {
+	merged := append([]capability.ModelAction(nil), existing...)
+	indexByName := make(map[string]int, len(merged)+len(owner))
+	for index, action := range merged {
+		if _, duplicate := indexByName[action.Name]; duplicate {
+			return nil, nil, fmt.Errorf("Agent Skill activation exposes ambiguous action %q", action.Name)
+		}
+		indexByName[action.Name] = index
+	}
+	shadowedBindings := make(map[string]struct{})
+	for _, action := range owner {
+		if index, duplicate := indexByName[action.Name]; duplicate {
+			current := merged[index]
+			if current.SkillID != action.SkillID || current.Version != action.Version || current.Action != action.Action {
+				return nil, nil, fmt.Errorf("Team and Agent Skill activations expose conflicting action %q", action.Name)
+			}
+			shadowedBindings[current.BindingID] = struct{}{}
+			merged[index] = action
+			continue
+		}
+		indexByName[action.Name] = len(merged)
+		merged = append(merged, action)
+	}
+	return merged, shadowedBindings, nil
 }
 
 func deploymentModelCredential(deployment *kernelagent.AgentDeployment) *capability.CredentialReference {

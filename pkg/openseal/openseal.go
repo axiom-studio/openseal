@@ -507,6 +507,8 @@ type (
 	ToolInvokerFunc                    = runtime.ToolInvokerFunc
 	ToolInvocation                     = runtime.ToolInvocation
 	ToolActionDispatcher               = runtime.ToolActionDispatcher
+	TeamRoleActionValidator            = runtime.TeamRoleActionValidator
+	TeamRoleActionDispatcher           = runtime.TeamRoleActionDispatcher
 	OpenClawSkillSource                = skillopenclaw.Source
 	OpenClawSkillFile                  = skillopenclaw.File
 	OpenClawSkillBundle                = skillopenclaw.Bundle
@@ -1350,6 +1352,7 @@ type Engine struct {
 	artifacts                     *runtime.ArtifactCatalog
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	actionValidators              []runtime.ActionProposalValidator
+	teamManagementActions         bool
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
 	clawHubRegistry               clawhub.Registry
@@ -1472,6 +1475,9 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
+	}
+	if err := e.configureTeamManagementActions(); err != nil {
+		return nil, fmt.Errorf("Team management action configuration: %w", err)
 	}
 	e.rebuildGovernance()
 	if err := e.rebuildActionWorkerPools(); err != nil {
@@ -1965,6 +1971,42 @@ func WithActionProposalValidators(validators ...runtime.ActionProposalValidator)
 		}
 		return nil
 	}
+}
+
+// WithTeamManagementActions enables the portable, governed Team action layer.
+// The Engine owns its Team registry, so embedding hosts never need to import
+// internal registry implementations or duplicate dispatcher composition.
+func WithTeamManagementActions() Option {
+	return func(e *Engine) error {
+		e.teamManagementActions = true
+		return nil
+	}
+}
+
+func (e *Engine) configureTeamManagementActions() error {
+	if !e.teamManagementActions {
+		return nil
+	}
+	validator, err := runtime.NewTeamRoleActionValidator(e.teams)
+	if err != nil {
+		return err
+	}
+	e.actionValidators = append(e.actionValidators, validator)
+	for index := range e.actionPoolSpecs {
+		dispatcher, dispatchErr := runtime.NewTeamRoleActionDispatcher(e.store, e.teams, e.actionPoolSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionPoolSpecs[index].dispatcher = dispatcher
+	}
+	for index := range e.actionSupervisorSpecs {
+		dispatcher, dispatchErr := runtime.NewTeamRoleActionDispatcher(e.store, e.teams, e.actionSupervisorSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionSupervisorSpecs[index].dispatcher = dispatcher
+	}
+	return nil
 }
 
 func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {

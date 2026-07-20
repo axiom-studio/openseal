@@ -15,16 +15,20 @@ import (
 )
 
 type TurnRunnerBinding struct {
-	Runner            TurnRunner
-	DeploymentID      string
-	DefinitionID      string
-	DefinitionVersion string
-	ModelProvider     string
-	Model             string
-	ModelActions      []capability.ModelAction
-	PreparedRuntimes  []PreparedSkillRuntime
-	InputContextRefs  []string
-	BudgetReservation BudgetUsage
+	Runner       TurnRunner
+	DeploymentID string
+	// ActionDeploymentID is the resource whose Skill bindings authorized the
+	// projected actions. Team conversations keep the roster Agent as the Turn
+	// identity while resolving governed mutations against the owning Team.
+	ActionDeploymentID string
+	DefinitionID       string
+	DefinitionVersion  string
+	ModelProvider      string
+	Model              string
+	ModelActions       []capability.ModelAction
+	PreparedRuntimes   []PreparedSkillRuntime
+	InputContextRefs   []string
+	BudgetReservation  BudgetUsage
 }
 
 // PreparedSkillRuntime binds one activation-time immutable runtime to the
@@ -445,8 +449,12 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	if idempotencyKey == "" {
 		idempotencyKey = fmt.Sprintf("turn:%s:action:0", turn.ID)
 	}
+	actionDeploymentID := strings.TrimSpace(binding.ActionDeploymentID)
+	if actionDeploymentID == "" {
+		actionDeploymentID = binding.DeploymentID
+	}
 	proposal, err := p.actions.Propose(ctx, ProposeActionRequest{
-		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: binding.DeploymentID,
+		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: actionDeploymentID,
 		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 		PreparedRuntime: request.PreparedRuntime,
