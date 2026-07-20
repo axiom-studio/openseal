@@ -45,6 +45,36 @@ func TestEngineExposesGovernedSkillCatalog(t *testing.T) {
 	}
 }
 
+func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	definition := &SkillDefinition{ID: "reader", Version: "1", Name: "Reader", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{
+		"read": {Name: "read", Description: "Read", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}},
+	}}
+	if err := engine.RegisterSkill(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	created, err := engine.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{
+		Binding: &SkillBinding{ID: "reader", Scope: scope, DeploymentID: "agent", SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead},
+		Actor:   SkillBindingActor{Type: "user", ID: "admin"}, Reason: "assign reader",
+	})
+	if err != nil || created.Revision != 1 {
+		t.Fatalf("created binding = %#v, %v", created, err)
+	}
+	values, err := engine.ListSkillBindings(ctx, scope, "agent")
+	if err != nil || len(values) != 1 {
+		t.Fatalf("binding list = %#v, %v", values, err)
+	}
+	disabled, err := engine.DisableSkillBinding(ctx, DisableSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "retire reader"})
+	if err != nil || !disabled.Disabled || disabled.Revision != 2 {
+		t.Fatalf("disabled binding = %#v, %v", disabled, err)
+	}
+}
+
 func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	engine, err := New()
 	if err != nil {

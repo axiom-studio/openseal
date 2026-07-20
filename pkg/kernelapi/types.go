@@ -27,6 +27,8 @@ const (
 	OutreachCapabilityVersion           = "1"
 	SkillActionsCapabilityID            = "skill-actions"
 	SkillActionsCapabilityVersion       = "1"
+	SkillBindingsCapabilityID           = "skill-bindings"
+	SkillBindingsCapabilityVersion      = "1"
 	ArtifactsCapabilityID               = "artifacts"
 	ArtifactsCapabilityVersion          = "1"
 	ChannelsCapabilityID                = "channels"
@@ -94,6 +96,8 @@ const (
 	OperationResolveAmendment  = "resolve-amendment"
 	OperationActivateAmendment = "activate-amendment"
 	OperationRoute             = "route"
+	OperationUpsert            = "upsert"
+	OperationDisable           = "disable"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -109,6 +113,17 @@ type Capability struct {
 	Available  bool               `json:"available"`
 	Operations []string           `json:"operations"`
 	Context    *CapabilityContext `json:"context,omitempty"`
+}
+
+type SkillBindingList struct {
+	APIVersion   string                `json:"apiVersion"`
+	DeploymentID string                `json:"deploymentId"`
+	Items        []*capability.Binding `json:"items"`
+}
+
+type SkillBindingMutationResult struct {
+	APIVersion string              `json:"apiVersion"`
+	Binding    *capability.Binding `json:"binding"`
 }
 
 type SkillActionList struct {
@@ -349,7 +364,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -360,6 +375,14 @@ func ActivityCapability() Capability {
 
 func AgentDefinitionsCapability() Capability {
 	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList, OperationUpdate, OperationListCompilations}}
+}
+
+func SkillBindingsCapability(management bool) Capability {
+	result := Capability{ID: SkillBindingsCapabilityID, Version: SkillBindingsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList}}
+	if management {
+		result.Operations = append(result.Operations, OperationUpsert, OperationDisable)
+	}
+	return result
 }
 
 // AgentRequestsCapability describes the portable collaboration lifecycle used
