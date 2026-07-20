@@ -196,6 +196,34 @@ type Binding struct {
 	Credentials          map[string]CredentialReference     `json:"credentials,omitempty"`
 	Config               map[string]interface{}             `json:"config,omitempty"`
 	Revision             int64                              `json:"revision"`
+	CreatedAt            time.Time                          `json:"createdAt,omitempty"`
+	UpdatedAt            time.Time                          `json:"updatedAt,omitempty"`
+	Lifecycle            []BindingLifecycleEntry            `json:"lifecycle,omitempty"`
+}
+
+type BindingLifecycleAction string
+
+const (
+	BindingLifecycleCreated  BindingLifecycleAction = "created"
+	BindingLifecycleUpdated  BindingLifecycleAction = "updated"
+	BindingLifecycleEnabled  BindingLifecycleAction = "enabled"
+	BindingLifecycleDisabled BindingLifecycleAction = "disabled"
+)
+
+// BindingActor identifies the principal responsible for a management change.
+// Hosts authenticate and authorize this principal before invoking the portable
+// contract; OpenSeal persists only the product-neutral attribution.
+type BindingActor struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type BindingLifecycleEntry struct {
+	Revision int64                  `json:"revision"`
+	Action   BindingLifecycleAction `json:"action"`
+	Actor    BindingActor           `json:"actor"`
+	Reason   string                 `json:"reason"`
+	At       time.Time              `json:"at"`
 }
 
 type ModelAction struct {
