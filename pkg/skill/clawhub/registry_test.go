@@ -94,6 +94,52 @@ func TestExploreCatalogReportsPartialFailureAndRejectsCursorLoops(t *testing.T) 
 	})
 }
 
+func TestExploreCatalogRetriesPagesWithBoundedContextAwareBackoff(t *testing.T) {
+	t.Run("transient page recovers", func(t *testing.T) {
+		pageTwoAttempts := 0
+		registry := exploreRegistryStub{explore: func(_ context.Context, request ExploreRequest) (*SkillPage, error) {
+			if request.Cursor == "" {
+				return &SkillPage{Items: []SkillSummary{{Slug: "alpha"}}, NextCursor: "page-2"}, nil
+			}
+			pageTwoAttempts++
+			if pageTwoAttempts < 3 {
+				return nil, errors.New("temporary transport failure")
+			}
+			return &SkillPage{Items: []SkillSummary{{Slug: "beta"}}}, nil
+		}}
+		snapshot, err := ExploreCatalog(context.Background(), registry, ExploreRequest{})
+		if err != nil || snapshot.Pages != 2 || len(snapshot.Items) != 2 || pageTwoAttempts != 3 {
+			t.Fatalf("snapshot=%#v attempts=%d error=%v", snapshot, pageTwoAttempts, err)
+		}
+	})
+
+	t.Run("rate limit wait respects context", func(t *testing.T) {
+		calls := 0
+		registry := exploreRegistryStub{explore: func(_ context.Context, _ ExploreRequest) (*SkillPage, error) {
+			calls++
+			return nil, &ClawHubError{StatusCode: http.StatusTooManyRequests, Message: "slow down", RetryAfter: 30}
+		}}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		started := time.Now()
+		_, err := ExploreCatalog(ctx, registry, ExploreRequest{})
+		if !errors.Is(err, context.DeadlineExceeded) || calls != 1 || time.Since(started) > 250*time.Millisecond {
+			t.Fatalf("calls=%d error=%v duration=%s", calls, err, time.Since(started))
+		}
+	})
+
+	t.Run("permanent client error is not retried", func(t *testing.T) {
+		calls := 0
+		registry := exploreRegistryStub{explore: func(_ context.Context, _ ExploreRequest) (*SkillPage, error) {
+			calls++
+			return nil, &ClawHubError{StatusCode: http.StatusBadRequest, Message: "bad cursor"}
+		}}
+		if _, err := ExploreCatalog(context.Background(), registry, ExploreRequest{}); err == nil || calls != 1 {
+			t.Fatalf("calls=%d error=%v", calls, err)
+		}
+	})
+}
+
 func TestParseSkillReferenceRejectsPathAndAmbiguousValues(t *testing.T) {
 	valid := map[string]SkillReference{
 		"summarize":               {Slug: "summarize"},
