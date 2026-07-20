@@ -202,6 +202,111 @@ func TestConversationRunTurnRunnerCompletesAndReplaysCommittedRound(t *testing.T
 	}
 }
 
+func TestConversationRunTurnRunnerArbitratesOneGovernedTeamActionAndCompletesTruthfully(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "team-action"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
+		Title: "Engineering", IdempotencyKey: "team-action-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Create the release objective.", "team-action-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"}, Priority: 10},
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-2"}, SemanticRoles: []string{"reviewer"}},
+		}, nil
+	})
+	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		if input.Participant.ID == "agent-2" {
+			return ParticipationProposal{}, nil
+		}
+		return ParticipationProposal{
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "I propose creating the release objective through the governed approval gate.",
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Signals:  ParticipationSignals{DirectlyMentioned: true, HasNewInformation: true, RoleRelevant: true},
+			ProposedAction: &TurnAction{
+				Type: "skill_action", Capability: "openseal.objectives.create", Summary: "Create the release objective", InputRef: "/call",
+			},
+			ActionInputs: map[string]interface{}{"call": map[string]interface{}{"title": "Release", "goal": "Ship safely"}},
+		}, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, proposals, DefaultConversationCoordinatorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamActions := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		if run.Owner != conversation.Owner || run.Kind != RunKindConversation {
+			t.Fatalf("Team action binding run = %#v", run)
+		}
+		return &TurnRunnerBinding{
+			DeploymentID: "team:engineering",
+			ModelActions: []capability.ModelAction{{
+				Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create",
+				BindingID: "bundled:objectives", BindingRevision: 1,
+			}},
+		}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, coordinator, ConversationRunTurnRunnerConfig{TeamActions: teamActions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil || binding.DeploymentID != "team:engineering" || len(binding.ModelActions) != 1 {
+		t.Fatalf("Team action binding = %#v, %v", binding, err)
+	}
+	first, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || first.NextRunStatus != AgentRunStatusRunning || len(first.ProposedActions) != 1 ||
+		first.ProposedActions[0].Capability != "openseal.objectives.create" || first.ProposedActions[0].IdempotencyKey == "" {
+		t.Fatalf("Team action proposal = %#v, %v", first, err)
+	}
+	arguments, err := resolveTurnActionInput(first.ContinuationCheckpoint, first.ProposedActions[0].InputRef)
+	if err != nil || arguments["title"] != "Release" {
+		t.Fatalf("Team action arguments = %#v, %v", arguments, err)
+	}
+	resumed := cloneAgentRun(scheduled.Run)
+	resumed.Checkpoint = cloneMap(first.ContinuationCheckpoint)
+	resumed.Checkpoint["lastAction"] = map[string]interface{}{
+		"status": "succeeded", "skillId": "openseal.objectives", "action": "create",
+		"bindingId": "bundled:objectives", "bindingRevision": float64(1),
+	}
+	second, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || second.NextRunStatus != AgentRunStatusCompleted || len(second.ProposedActions) != 0 {
+		t.Fatalf("Team action completion = %#v, %v", second, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 3 || messages[1].Sender.ID != "agent-1" ||
+		messages[2].Content != "Governed action openseal.objectives.create completed after all required approval gates were satisfied." ||
+		messages[2].ResolvesMessageID != trigger.ID {
+		t.Fatalf("Team action channel messages = %#v, %v", messages, err)
+	}
+	replay, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || replay.RunOutput["replayed"] != true {
+		t.Fatalf("Team action completion replay = %#v, %v", replay, err)
+	}
+	messages, _ = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if len(messages) != 3 {
+		t.Fatalf("Team action replay duplicated messages: %#v", messages)
+	}
+}
+
+func mustConversationRunScheduler(t *testing.T, store *MemoryStore) *ConversationRunScheduler {
+	t.Helper()
+	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scheduler
+}
+
 func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *testing.T) {
 	store := NewMemoryStore(50)
 	ctx := context.Background()
