@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +86,23 @@ func TestHostedTurnRunnerRejectsIncompleteModelCredentialReference(t *testing.T)
 	})
 	if err == nil || !strings.Contains(err.Error(), "model credential reference") {
 		t.Fatalf("incomplete model credential error = %v", err)
+	}
+}
+
+func TestHostedTurnRunnerDoesNotRetryConfigurationFailures(t *testing.T) {
+	host := &recordingTurnHost{err: fmt.Errorf("%w: Agent requires a configured model provider", ErrTurnHostConfiguration)}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Respond"},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if !errors.Is(err, ErrTurnHostConfiguration) || errors.Is(err, ErrTurnHostUnavailable) || !strings.Contains(err.Error(), "configured model provider") {
+		t.Fatalf("configuration failure = %v", err)
 	}
 }
 

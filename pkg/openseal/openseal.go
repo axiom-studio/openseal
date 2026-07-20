@@ -750,6 +750,7 @@ var (
 	ResolveCatalogTurnRunner           = runtime.ResolveCatalogTurnRunner
 	NewArtifactRetentionService        = runtime.NewArtifactRetentionService
 	ErrTurnHostUnavailable             = runtime.ErrTurnHostUnavailable
+	ErrTurnHostConfiguration           = runtime.ErrTurnHostConfiguration
 	ValidateRunbook                    = runbook.Validate
 	NewRunbookTurnRunner               = runtime.NewRunbookTurnRunner
 	NewRunForkCoordinator              = runtime.NewRunForkCoordinator

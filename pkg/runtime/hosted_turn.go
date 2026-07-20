@@ -9,7 +9,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
-var ErrTurnHostUnavailable = errors.New("turn host is temporarily unavailable")
+var (
+	ErrTurnHostUnavailable   = errors.New("turn host is temporarily unavailable")
+	ErrTurnHostConfiguration = errors.New("turn host configuration is invalid")
+)
 
 type retryableTurnHostError struct{ cause error }
 
@@ -181,6 +184,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	applyEvidenceGroundingDraftInstruction(&request, snapshot)
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
+		if errors.Is(err, ErrTurnHostConfiguration) {
+			return nil, err
+		}
 		return nil, retryableTurnHostError{cause: err}
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
