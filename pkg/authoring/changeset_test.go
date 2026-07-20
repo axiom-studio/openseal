@@ -576,7 +576,7 @@ func TestChangeSetEvaluationIsScopedIdempotentAuditableAndPolicyDerived(t *testi
 		t.Fatalf("created = %#v, err = %v", created, err)
 	}
 	request := SubmitChangeSetEvaluationRequest{Scope: created.Scope, ChangeSetID: created.ID, ExpectedRevision: 1,
-		CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "policy_evaluator", ID: "atlas"},
+		CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "policy_evaluator", ID: "enterprise-policy"},
 		IdempotencyKey: "evaluation-1", Findings: []ChangeSetPolicyFinding{{PolicyID: "production", Code: "review", Message: "Human review required"}},
 		ApprovalRequirements: []ChangeSetApprovalRequirement{{PolicyID: "production", Role: "workforce_admin", Count: 1}}}
 	evaluated, replay, err := service.SubmitEvaluation(context.Background(), request)
@@ -650,7 +650,7 @@ func TestPendingChangeSetEvaluationsAreDurableScopedAndLeaveAfterDecision(t *tes
 	}
 	if _, _, err = service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
 		Scope: scope, ChangeSetID: "review", ExpectedRevision: 1, CandidateDigest: "candidate", Allowed: true,
-		Actor: ChangeSetActor{Type: "workload", ID: "atlas"}, IdempotencyKey: "evaluation",
+		Actor: ChangeSetActor{Type: "workload", ID: "policy-host"}, IdempotencyKey: "evaluation",
 	}); err != nil {
 		t.Fatal(err)
 	}

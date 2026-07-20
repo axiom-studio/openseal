@@ -50,7 +50,7 @@ func TestSkillDefinitionPinsClusterThroughOpaqueBindingNotModelInput(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := map[string]interface{}{"namespace": "axiomcd", "kind": "Deployment", "name": "atlas"}
+	input := map[string]interface{}{"namespace": "workloads", "kind": "Deployment", "name": "agent-host"}
 	if err := catalog.ValidateInput(ctx, bound, input); err != nil {
 		t.Fatal(err)
 	}

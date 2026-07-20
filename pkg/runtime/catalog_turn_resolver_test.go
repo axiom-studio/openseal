@@ -91,7 +91,7 @@ func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
 		definition: &kernelagent.AgentDefinition{ID: "sre", Version: "1", Purpose: "Operate safely", SystemPrompt: "Use bounded tools."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot-host", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "sre"},
 	}
-	wanted := skill.HostCapabilityState{OperatingSystem: "linux", Architecture: "arm64", Revision: "atlas-host/v1"}
+	wanted := skill.HostCapabilityState{OperatingSystem: "linux", Architecture: "arm64", Revision: "enterprise-host/v1"}
 	var resolvedScope skill.ScopeReference
 	var resolvedDeployment string
 	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre"}, AssignedAgentID: "sre", Context: map[string]interface{}{"capabilityInvocation": map[string]interface{}{}}}
