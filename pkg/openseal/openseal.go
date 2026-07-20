@@ -946,6 +946,11 @@ const (
 	ObjectiveStatusSatisfied         = runtime.ObjectiveStatusSatisfied
 	ObjectiveStatusFailed            = runtime.ObjectiveStatusFailed
 	ObjectiveStatusRetired           = runtime.ObjectiveStatusRetired
+	ObjectiveManagementSkillID       = runtime.ObjectiveManagementSkillID
+	ObjectiveManagementSkillVersion  = runtime.ObjectiveManagementSkillVersion
+	ObjectiveActionCreate            = runtime.ObjectiveActionCreate
+	ObjectiveActionUpdate            = runtime.ObjectiveActionUpdate
+	ObjectiveActionPause             = runtime.ObjectiveActionPause
 	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
 	ObjectiveCadenceDaily            = runtime.ObjectiveCadenceDaily
 	ObjectiveCadenceWeekly           = runtime.ObjectiveCadenceWeekly
