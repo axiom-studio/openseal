@@ -160,7 +160,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 	proposed.SkillBindingIDs = []string{"zeta", "alpha", "alpha"}
 	proposed.Capacity.MaxQueuedRuns = 25
 
-	updated, audit, err := registry.UpdateDeployment(context.Background(), proposed, deployment.Revision, "system", "atlas-reconciler", "place model provider credential")
+	updated, audit, err := registry.UpdateDeployment(context.Background(), proposed, deployment.Revision, "system", "deployment-reconciler", "place model provider credential")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 		t.Fatalf("updated deployment = %#v", updated)
 	}
 	if audit == nil || audit.ChangeKind != workforce.DeploymentChangeConfigurationUpdated || audit.FromVersion != "1" || audit.ToVersion != "1" ||
-		audit.DeploymentRevision != updated.Revision || audit.ActorID != "atlas-reconciler" || audit.Reason != "place model provider credential" {
+		audit.DeploymentRevision != updated.Revision || audit.ActorID != "deployment-reconciler" || audit.Reason != "place model provider credential" {
 		t.Fatalf("deployment audit = %#v", audit)
 	}
 	history, err := registry.ListActivations(context.Background(), scope, deployment.ID)
