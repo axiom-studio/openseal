@@ -201,16 +201,21 @@ func TestContextualApprovalEligibilityIsTypedAndNotAnOperationInference(t *testi
 }
 
 func TestContextualCredentialBindingsExposeOnlyOpaqueOperatorChoices(t *testing.T) {
-	context := CapabilityContext{CredentialBindings: []kernelcapability.CredentialBindingChoice{{
-		Reference:   kernelcapability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"},
-		DisplayName: "Development",
-	}}}
+	context := CapabilityContext{
+		CredentialBindings: []kernelcapability.CredentialBindingChoice{{
+			Reference:   kernelcapability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"},
+			DisplayName: "Development",
+		}},
+		BlockingRequirements: []CapabilityBlockingRequirement{{
+			Code: "requires_credential", CredentialKey: "MODEL_PROVIDER", Message: "Connect a model provider.",
+		}},
+	}
 	encoded, err := json.Marshal(context)
 	if err != nil {
 		t.Fatal(err)
 	}
 	value := string(encoded)
-	if !strings.Contains(value, `"displayName":"Development"`) || !strings.Contains(value, `"id":"cluster://7"`) || strings.Contains(value, "kubeconfig") || strings.Contains(value, "token") {
+	if !strings.Contains(value, `"displayName":"Development"`) || !strings.Contains(value, `"id":"cluster://7"`) || !strings.Contains(value, `"code":"requires_credential"`) || !strings.Contains(value, `"credentialKey":"MODEL_PROVIDER"`) || strings.Contains(value, "kubeconfig") || strings.Contains(value, "token") {
 		t.Fatalf("credential binding context = %s", encoded)
 	}
 }
