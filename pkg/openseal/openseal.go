@@ -395,6 +395,8 @@ type (
 	EvidenceGroundingReview            = runtime.EvidenceGroundingReview
 	EvidenceGroundingRequest           = runtime.EvidenceGroundingRequest
 	EvidenceGroundingReviewer          = runtime.EvidenceGroundingReviewer
+	EvidenceSnapshot                   = runtime.EvidenceSnapshot
+	EvidenceSnapshotObservation        = runtime.EvidenceSnapshotObservation
 	CapabilityInvocationTurnRunner     = runtime.CapabilityInvocationTurnRunner
 	AdvanceAgentRunRequest             = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult              = runtime.AdvanceAgentRunResult
