@@ -30,6 +30,7 @@ import (
 func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
 	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 
@@ -40,7 +41,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	capability, ok := document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
-	if !ok || !capability.Supports(kernelapi.OperationIntervene) {
+	if !ok || !capability.Supports(kernelapi.OperationCreate) || !capability.Supports(kernelapi.OperationIntervene) {
 		t.Fatalf("unexpected capabilities: %#v", document)
 	}
 	objectiveCapability, ok := document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
