@@ -39,7 +39,7 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 	}
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
 	capabilities := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
-	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"id":"agent-definitions","version":"4"`) || !strings.Contains(capabilities.Body.String(), `"update"`) {
+	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"id":"agent-definitions","version":"5"`) || !strings.Contains(capabilities.Body.String(), `"update"`) {
 		t.Fatalf("capabilities = %d %s", capabilities.Code, capabilities.Body.String())
 	}
 
