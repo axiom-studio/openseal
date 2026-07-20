@@ -251,14 +251,21 @@ func TestAgentRunWorkerCompletesArtifactFreeHandoffFromTerminalChild(t *testing.
 func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	store := NewMemoryStore(20)
 	catalog, scope := governedActionCatalog(t)
+	if err := catalog.Bind(t.Context(), &skill.Binding{
+		ID: "team-release-binding", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "release-team",
+		SkillID: "release", SkillVersion: "1.0.0", AllowedActions: []string{"deploy"}, MaximumRisk: skill.RiskLevelProduction,
+		Credentials: map[string]skill.CredentialReference{"token": {Kind: "vault", ID: "release-secret"}}, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent",
 		Goal: "deploy staging", Source: RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	modelActions, err := catalog.ListModelActions(t.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-agent")
+	modelActions, err := catalog.ListModelActions(t.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-team")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +276,7 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	}
 	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return &TurnRunnerBinding{
-			DeploymentID: "release-agent", DefinitionID: "release-agent", DefinitionVersion: "1", ModelActions: modelActions,
+			DeploymentID: "release-agent", ActionDeploymentID: "release-team", DefinitionID: "release-agent", DefinitionVersion: "1", ModelActions: modelActions,
 			PreparedRuntimes: []PreparedSkillRuntime{{
 				BindingID: modelActions[0].BindingID, BindingRevision: modelActions[0].BindingRevision,
 				SkillID: modelActions[0].SkillID, SkillVersion: modelActions[0].Version, Runtime: prepared,
@@ -322,7 +329,7 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 1 || calls[0].Status != ActionCallStatusReady || calls[0].SkillID != "release" ||
+	if len(calls) != 1 || calls[0].Status != ActionCallStatusReady || calls[0].DeploymentID != "release-team" || calls[0].SkillID != "release" ||
 		calls[0].Action != "deploy" || calls[0].Arguments["environment"] != "staging" || calls[0].IdempotencyKey == "" ||
 		calls[0].PreparedRuntime == nil || calls[0].PreparedRuntime.RuntimeID != prepared.RuntimeID ||
 		len(calls[0].EvidenceRefs) != 1 || calls[0].EvidenceRefs[0] != "artifact:release-plan" {

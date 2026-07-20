@@ -46,3 +46,22 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 		t.Fatalf("Team deployment = %#v, activation = %#v, err = %v", teamDeployment, activation, err)
 	}
 }
+
+func TestTeamManagementOptionOwnsValidationAndDispatcherComposition(t *testing.T) {
+	fallback := ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		return map[string]interface{}{"fallback": true}, nil
+	})
+	engine, err := New(
+		WithActionWorkers(ActionWorkerConfig{Scope: Scope{Kind: "tenant", ID: "one"}}, nil, fallback),
+		WithTeamManagementActions(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(engine.actionValidators) != 1 || len(engine.actionPoolSpecs) != 1 {
+		t.Fatalf("Team action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
+	}
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*TeamRoleActionDispatcher); !ok {
+		t.Fatalf("Team dispatcher was not composed over the host fallback: %T", engine.actionPoolSpecs[0].dispatcher)
+	}
+}

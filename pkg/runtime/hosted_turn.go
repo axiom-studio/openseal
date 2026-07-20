@@ -120,6 +120,7 @@ type TurnHost interface {
 
 type HostedTurnRunnerConfig struct {
 	AgentID            string
+	ActionDeploymentID string
 	DefinitionID       string
 	DefinitionVersion  string
 	SystemInstructions []string
@@ -337,8 +338,12 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 	if err != nil {
 		return nil, err
 	}
+	actionDeploymentID := strings.TrimSpace(r.config.ActionDeploymentID)
+	if actionDeploymentID == "" {
+		actionDeploymentID = r.config.AgentID
+	}
 	call := &ActionCall{
-		DeploymentID: r.config.AgentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
+		DeploymentID: actionDeploymentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 	}
 	return succeededActionHistoryEntry(checkpoint, ComputeActionSemanticDigest(call)), nil
