@@ -17,6 +17,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -236,6 +237,16 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 	}
 	if err := candidate.Team.Validate(); err != nil {
 		issues = append(issues, issue("team", "invalid_team", err.Error()))
+	}
+	hasSpeakingRole := false
+	for _, role := range candidate.Team.Roles {
+		if role.ChannelParticipation == "" || role.ChannelParticipation == team.RoleChannelActive {
+			hasSpeakingRole = true
+			break
+		}
+	}
+	if !hasSpeakingRole {
+		issues = append(issues, issue("team.roles", "no_speaking_role", "A prompt-created Team requires at least one role with active channel participation"))
 	}
 	issues = append(issues, validateObjectiveTemplateCadences("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
 	issues = append(issues, validateObjectiveTemplateEventRules("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)

@@ -108,6 +108,24 @@ func TestCompilerRejectsInvalidCompositionAndNonStrictGeneratorOutput(t *testing
 	}
 }
 
+func TestCompilerRequiresOneSpeakingRoleForPromptCreatedTeams(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Team.Roles[0].ChannelParticipation = team.RoleChannelObserveOnly
+	issues := validateCandidate(&candidate, nil)
+	if !hasValidationCode(issues, "no_speaking_role") {
+		t.Fatalf("all-observe-only Team issues = %#v", issues)
+	}
+
+	candidate.Team.Roles = append(candidate.Team.Roles, team.RoleSlot{
+		ID: "reviewer", DisplayName: "Reviewer", Purpose: "Share reviewed findings",
+		ChannelParticipation: team.RoleChannelActive,
+	})
+	issues = validateCandidate(&candidate, nil)
+	if hasValidationCode(issues, "no_speaking_role") {
+		t.Fatalf("mixed-participation Team issues = %#v", issues)
+	}
+}
+
 func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
 	valid, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	generator := &repairingGenerator{generated: []byte(`{"candidate":{"agents":[]},"unknown":true}`), repaired: valid}
