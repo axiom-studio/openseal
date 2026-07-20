@@ -121,6 +121,41 @@ func TestHostedTurnInputEstimateIsStableAfterReservationProjection(t *testing.T)
 	}
 }
 
+func TestGroundedHostedTurnReservationIncludesDraftInstruction(t *testing.T) {
+	_, runContext := groundedSnapshot(t)
+	runner, err := NewHostedTurnRunner(&countedHostedTurnHost{}, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{
+		ID: "grounded", Scope: Scope{Kind: "tenant", ID: "7"}, Goal: "Synthesize cited findings", Context: runContext,
+		Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 30000, MaxTotalTokens: 62000},
+	}
+	turn := &AgentTurn{ID: "turn"}
+	planned, err := runner.PlanTurnBudget(t.Context(), TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := runner.buildRequest(TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := evidenceSnapshotForGrounding(run.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyEvidenceGroundingDraftInstruction(&request, snapshot)
+	estimate, err := EstimateHostedTurnInputTokens(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planned.InputTokens != estimate || !containsString(request.SystemInstructions, evidenceGroundingDraftInstruction) {
+		t.Fatalf("planned=%#v estimate=%d instructions=%#v", planned, estimate, request.SystemInstructions)
+	}
+}
+
 type blockingHostedTurnHost struct {
 	started chan struct{}
 	release chan struct{}

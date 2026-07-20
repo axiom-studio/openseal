@@ -84,6 +84,7 @@ func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecution
 	if err != nil {
 		return BudgetUsage{}, err
 	}
+	applyEvidenceGroundingDraftInstruction(&request, snapshot)
 	groundingState, err := parseEvidenceGroundingState(input.Run.Checkpoint)
 	if err != nil {
 		return BudgetUsage{}, err

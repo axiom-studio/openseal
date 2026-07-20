@@ -170,9 +170,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if err != nil {
 		return nil, err
 	}
-	if snapshot != nil {
-		request.SystemInstructions = append(request.SystemInstructions, evidenceGroundingDraftInstruction)
-	}
+	applyEvidenceGroundingDraftInstruction(&request, snapshot)
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
 		return nil, retryableTurnHostError{cause: err}
