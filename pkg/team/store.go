@@ -21,6 +21,7 @@ type Store interface {
 	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
 	CreateTeamAmendment(context.Context, *DefinitionAmendment) error
 	GetTeamAmendment(context.Context, capability.ScopeReference, string) (*DefinitionAmendment, error)
+	ListTeamAmendments(context.Context, capability.ScopeReference, string) ([]*DefinitionAmendment, error)
 	UpdateTeamAmendment(context.Context, *DefinitionAmendment, int64) error
 	ActivateTeamAmendment(context.Context, *DefinitionAmendment, int64, *Definition, *Deployment, int64, workforce.DefinitionActivation) error
 }
@@ -59,6 +60,24 @@ func (s *MemoryStore) GetTeamAmendment(_ context.Context, scope capability.Scope
 		return nil, ErrAmendmentNotFound
 	}
 	return cloneAmendment(value), nil
+}
+
+func (s *MemoryStore) ListTeamAmendments(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]*DefinitionAmendment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*DefinitionAmendment, 0)
+	for _, value := range s.amendments {
+		if value.Scope == scope && (deploymentID == "" || value.DeploymentID == deploymentID) {
+			result = append(result, cloneAmendment(value))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+	return result, nil
 }
 
 func (s *MemoryStore) UpdateTeamAmendment(_ context.Context, amendment *DefinitionAmendment, expectedRevision int64) error {

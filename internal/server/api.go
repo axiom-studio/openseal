@@ -100,6 +100,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/v1/team-deployments/{id}", s.handleUpdateTeamDeployment)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/activations", s.handleActivateTeamDefinition)
 	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}/activations", s.handleListTeamDefinitionActivations)
+	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments", s.handleProposeTeamDefinitionAmendment)
+	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}/amendments", s.handleListTeamDefinitionAmendments)
+	s.mux.HandleFunc("GET /api/v1/team-deployments/{id}/amendments/{amendmentId}", s.handleGetTeamDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments/{amendmentId}/evaluations", s.handleEvaluateTeamDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments/{amendmentId}/decisions", s.handleResolveTeamDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments/{amendmentId}/activations", s.handleActivateTeamDefinitionAmendment)
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +138,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability())
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
-			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}))
+			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{Amendments: true}))
 		}
 	}
 	if _, skillsOK := s.store.(skill.CatalogStore); skillsOK {

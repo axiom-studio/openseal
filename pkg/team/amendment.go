@@ -50,30 +50,30 @@ type DefinitionAmendment struct {
 }
 
 type ProposeAmendmentRequest struct {
-	Scope        capability.ScopeReference
-	DeploymentID string
-	Candidate    *Definition
-	ProposerType string
-	ProposerID   string
-	Rationale    string
-	EvidenceRefs []string
+	Scope        capability.ScopeReference `json:"scope"`
+	DeploymentID string                    `json:"deploymentId"`
+	Candidate    *Definition               `json:"candidate"`
+	ProposerType string                    `json:"proposerType"`
+	ProposerID   string                    `json:"proposerId"`
+	Rationale    string                    `json:"rationale"`
+	EvidenceRefs []string                  `json:"evidenceRefs,omitempty"`
 }
 
 type SubmitAmendmentEvaluationRequest struct {
-	Scope            capability.ScopeReference
-	AmendmentID      string
-	ExpectedRevision int64
-	Evaluations      []AmendmentEvaluation
+	Scope            capability.ScopeReference `json:"scope"`
+	AmendmentID      string                    `json:"amendmentId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	Evaluations      []AmendmentEvaluation     `json:"evaluations"`
 }
 
 type ResolveAmendmentRequest struct {
-	Scope            capability.ScopeReference
-	AmendmentID      string
-	ExpectedRevision int64
-	Approved         bool
-	ActorType        string
-	ActorID          string
-	Reason           string
+	Scope            capability.ScopeReference `json:"scope"`
+	AmendmentID      string                    `json:"amendmentId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	Approved         bool                      `json:"approved"`
+	ActorType        string                    `json:"actorType"`
+	ActorID          string                    `json:"actorId"`
+	Reason           string                    `json:"reason,omitempty"`
 }
 
 func (a *DefinitionAmendment) Validate() error {

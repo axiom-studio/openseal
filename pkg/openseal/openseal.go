@@ -2996,6 +2996,10 @@ func (e *Engine) GetTeamDefinitionAmendment(ctx context.Context, scope skill.Sco
 	return e.teams.GetAmendment(ctx, scope, amendmentID)
 }
 
+func (e *Engine) ListTeamDefinitionAmendments(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*kernelteam.DefinitionAmendment, error) {
+	return e.teams.ListAmendments(ctx, scope, deploymentID)
+}
+
 func (e *Engine) SubmitTeamDefinitionAmendmentEvaluation(ctx context.Context, request kernelteam.SubmitAmendmentEvaluationRequest) (*kernelteam.DefinitionAmendment, error) {
 	return e.teams.SubmitAmendmentEvaluation(ctx, request)
 }

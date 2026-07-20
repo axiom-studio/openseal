@@ -151,6 +151,10 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	if err != nil || restoredAmendment.Status != kernelteam.AmendmentActivated {
 		t.Fatalf("restored amendment = %#v, err = %v", restoredAmendment, err)
 	}
+	restoredAmendments, err := restartedTeams.ListAmendments(ctx, scope, deploymentInput.ID)
+	if err != nil || len(restoredAmendments) != 1 || restoredAmendments[0].ID != amendment.ID {
+		t.Fatalf("restored amendment list = %#v, err = %v", restoredAmendments, err)
+	}
 	if _, err := restartedTeams.GetDeployment(ctx, capability.ScopeReference{Kind: "tenant", ID: "other"}, deploymentInput.ID); err == nil {
 		t.Fatal("cross-scope Team deployment should not be visible")
 	}
