@@ -301,7 +301,9 @@ func TestObjectiveCadenceRunTemplateFailsClosedOnSecretsAndReservedContext(t *te
 		"secret policy":     {Policy: map[string]interface{}{"apiToken": "must-not-persist"}},
 		"scheduledFor":      {Context: map[string]interface{}{"scheduledFor": "invented"}},
 		"capability field":  {Context: map[string]interface{}{"capabilityInvocation": "invented"}},
+		"evidence snapshot": {Context: map[string]interface{}{EvidenceSnapshotContextKey: map[string]interface{}{"id": "invented"}}},
 		"capability secret": {Capability: &ObjectiveCapabilityInvocation{SkillID: "reader", SkillVersion: "1", Action: "search", Inputs: map[string]interface{}{"apiKey": "must-not-persist"}}},
+		"evidence bounds":   {EvidenceProjection: &ObjectiveEvidenceProjection{MaximumObservations: 100}},
 		"long entrypoint":   {Entrypoint: string(make([]byte, 129))},
 	} {
 		t.Run(name, func(t *testing.T) {

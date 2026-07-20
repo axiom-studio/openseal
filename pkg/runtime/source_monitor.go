@@ -24,26 +24,27 @@ var (
 // monitor action. Raw source content belongs in ArtifactContentStore; this
 // record keeps stable identity, digest, public provenance, and linked evidence.
 type SourceObservation struct {
-	ID             string                 `json:"id"`
-	Scope          Scope                  `json:"scope"`
-	InitiativeID   string                 `json:"initiativeId"`
-	MonitorID      string                 `json:"monitorId"`
-	DedupeKey      string                 `json:"dedupeKey"`
-	StableSourceID string                 `json:"stableSourceId,omitempty"`
-	SourceURI      string                 `json:"sourceUri"`
-	ContentDigest  string                 `json:"contentDigest"`
-	Summary        string                 `json:"summary"`
-	ObservedAt     time.Time              `json:"observedAt"`
-	IngestedAt     time.Time              `json:"ingestedAt"`
-	RunID          string                 `json:"runId"`
-	AgentID        string                 `json:"agentId"`
-	SkillID        string                 `json:"skillId"`
-	SkillVersion   string                 `json:"skillVersion"`
-	Action         string                 `json:"action"`
-	ActionCallID   string                 `json:"actionCallId"`
-	ArtifactRef    *ResourceReference     `json:"artifactRef,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	Fingerprint    string                 `json:"fingerprint"`
+	ID                 string                 `json:"id"`
+	Scope              Scope                  `json:"scope"`
+	InitiativeID       string                 `json:"initiativeId"`
+	MonitorID          string                 `json:"monitorId"`
+	DedupeKey          string                 `json:"dedupeKey"`
+	StableSourceID     string                 `json:"stableSourceId,omitempty"`
+	SourceURI          string                 `json:"sourceUri"`
+	ContentDigest      string                 `json:"contentDigest"`
+	Summary            string                 `json:"summary"`
+	ObservedAt         time.Time              `json:"observedAt"`
+	IngestedAt         time.Time              `json:"ingestedAt"`
+	RetentionExpiresAt *time.Time             `json:"retentionExpiresAt,omitempty"`
+	RunID              string                 `json:"runId"`
+	AgentID            string                 `json:"agentId"`
+	SkillID            string                 `json:"skillId"`
+	SkillVersion       string                 `json:"skillVersion"`
+	Action             string                 `json:"action"`
+	ActionCallID       string                 `json:"actionCallId"`
+	ArtifactRef        *ResourceReference     `json:"artifactRef,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	Fingerprint        string                 `json:"fingerprint"`
 }
 
 type SourceMonitorCheckpoint struct {
@@ -89,6 +90,7 @@ type IngestSourceObservationRequest struct {
 	ContentDigest              string
 	Summary                    string
 	ObservedAt                 time.Time
+	RetentionExpiresAt         *time.Time
 	RunID                      string
 	AgentID                    string
 	SkillID                    string
@@ -171,7 +173,7 @@ func (s *SourceMonitorService) Ingest(ctx context.Context, req IngestSourceObser
 		Scope: req.Scope, InitiativeID: initiative.ID, MonitorID: monitor.ID,
 		StableSourceID: strings.TrimSpace(req.StableSourceID), SourceURI: strings.TrimSpace(req.SourceURI),
 		ContentDigest: strings.ToLower(strings.TrimSpace(req.ContentDigest)), Summary: strings.TrimSpace(req.Summary),
-		ObservedAt: req.ObservedAt.UTC(), IngestedAt: now, RunID: run.ID, AgentID: req.AgentID,
+		ObservedAt: req.ObservedAt.UTC(), IngestedAt: now, RetentionExpiresAt: cloneTimePointer(req.RetentionExpiresAt), RunID: run.ID, AgentID: req.AgentID,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, ActionCallID: strings.TrimSpace(req.ActionCallID),
 		ArtifactRef: cloneResourceReference(req.ArtifactRef), Metadata: cloneMap(req.Metadata),
 	}
@@ -310,6 +312,9 @@ func (o *SourceObservation) Validate() error {
 	if o.Summary == "" || len(o.Summary) > 4000 || o.ObservedAt.IsZero() || o.IngestedAt.IsZero() {
 		return fmt.Errorf("%w: summary and timestamps are required", ErrInvalidSourceObservation)
 	}
+	if o.RetentionExpiresAt != nil && !o.RetentionExpiresAt.After(o.IngestedAt) {
+		return fmt.Errorf("%w: retention expiry must be after ingestion", ErrInvalidSourceObservation)
+	}
 	if o.ArtifactRef != nil {
 		if o.ArtifactRef.Kind != ResourceKindArtifact || validateResourceRefs([]ResourceReference{*o.ArtifactRef}) != nil {
 			return fmt.Errorf("%w: artifact reference is invalid", ErrInvalidSourceObservation)
@@ -392,5 +397,13 @@ func cloneResourceReference(value *ResourceReference) *ResourceReference {
 		return nil
 	}
 	cloned := *value
+	return &cloned
+}
+
+func cloneTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := value.UTC()
 	return &cloned
 }

@@ -35,10 +35,34 @@ type ObjectiveCadence struct {
 // research listeners, financial controls, and other domains reuse the same
 // scheduler without teaching it domain-specific configuration.
 type ObjectiveRunTemplate struct {
-	Entrypoint string                         `json:"entrypoint,omitempty"`
-	Context    map[string]interface{}         `json:"context,omitempty"`
-	Policy     map[string]interface{}         `json:"policy,omitempty"`
-	Capability *ObjectiveCapabilityInvocation `json:"capability,omitempty"`
+	Entrypoint         string                         `json:"entrypoint,omitempty"`
+	Context            map[string]interface{}         `json:"context,omitempty"`
+	Policy             map[string]interface{}         `json:"policy,omitempty"`
+	Capability         *ObjectiveCapabilityInvocation `json:"capability,omitempty"`
+	EvidenceProjection *ObjectiveEvidenceProjection   `json:"evidenceProjection,omitempty"`
+}
+
+// ObjectiveEvidenceProjection bounds the immutable SourceObservation snapshot
+// attached to a scheduled, Initiative-owned, non-monitor Run. Zero values use
+// conservative kernel defaults. The scheduler always projects Initiative
+// evidence unless Disabled is explicit; callers cannot supply snapshot data.
+type ObjectiveEvidenceProjection struct {
+	Disabled            bool `json:"disabled,omitempty"`
+	MaximumObservations int  `json:"maximumObservations,omitempty"`
+	MaximumSummaryRunes int  `json:"maximumSummaryRunes,omitempty"`
+	MaximumTotalRunes   int  `json:"maximumTotalRunes,omitempty"`
+}
+
+func (p *ObjectiveEvidenceProjection) Validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.MaximumObservations < 0 || p.MaximumObservations > 99 ||
+		p.MaximumSummaryRunes < 0 || p.MaximumSummaryRunes > 4000 ||
+		p.MaximumTotalRunes < 0 || p.MaximumTotalRunes > 100000 {
+		return errors.New("objective evidence projection bounds are invalid")
+	}
+	return nil
 }
 
 // ObjectiveCapabilityInvocation is an immutable typed action intent attached
@@ -79,6 +103,9 @@ func (t *ObjectiveRunTemplate) Validate() error {
 	if _, reserved := t.Context["capabilityInvocation"]; reserved {
 		return errors.New("objective cadence runTemplate context cannot override capabilityInvocation")
 	}
+	if _, reserved := t.Context[EvidenceSnapshotContextKey]; reserved {
+		return errors.New("objective cadence runTemplate context cannot override evidenceSnapshot")
+	}
 	if err := validateCredentialFreeContext(t.Context); err != nil {
 		return fmt.Errorf("objective cadence runTemplate context: %w", err)
 	}
@@ -86,6 +113,9 @@ func (t *ObjectiveRunTemplate) Validate() error {
 		return fmt.Errorf("objective cadence runTemplate policy: %w", err)
 	}
 	if err := t.Capability.Validate(); err != nil {
+		return err
+	}
+	if err := t.EvidenceProjection.Validate(); err != nil {
 		return err
 	}
 	return nil

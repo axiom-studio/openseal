@@ -26,8 +26,9 @@ type ObjectiveScheduler struct {
 		RunCommandStore
 		ObjectiveScopeStore
 	}
-	initiatives InitiativeStore
-	now         func() time.Time
+	initiatives  InitiativeStore
+	observations SourceMonitorStore
+	now          func() time.Time
 }
 
 func NewObjectiveScheduler(store interface {
@@ -35,7 +36,8 @@ func NewObjectiveScheduler(store interface {
 	ObjectiveScopeStore
 }) *ObjectiveScheduler {
 	initiatives, _ := any(store).(InitiativeStore)
-	return &ObjectiveScheduler{store: store, initiatives: initiatives, now: time.Now}
+	observations, _ := any(store).(SourceMonitorStore)
+	return &ObjectiveScheduler{store: store, initiatives: initiatives, observations: observations, now: time.Now}
 }
 
 func (s *ObjectiveScheduler) ReconcileAll(ctx context.Context, limitPerScope int) (*ObjectiveScheduleResult, error) {
@@ -103,11 +105,27 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 		if objective.NextEvaluationAt.After(now) {
 			continue
 		}
-		active, monitorErr := s.monitorInitiativeActive(ctx, objective)
-		if monitorErr != nil {
-			return result, monitorErr
+		scheduledFor := objective.NextEvaluationAt.UTC()
+		idempotencyKey := fmt.Sprintf("objective-schedule:%s:%s", objective.ID, scheduledFor.Format(time.RFC3339Nano))
+		// A process may stop after atomically creating the Run and before moving
+		// the Objective cursor. Advance that exact durable schedule occurrence
+		// before backpressure checks and without rebuilding its evidence snapshot.
+		existing, loadErr := s.store.GetAgentRun(ctx, scope, runIDForIdempotencyKey(scope, idempotencyKey))
+		if loadErr != nil {
+			return result, loadErr
 		}
-		if !active {
+		if existing != nil {
+			result.Replayed++
+			if advanceErr := s.advanceObjective(ctx, scope, objective, scheduledFor); advanceErr != nil {
+				return result, advanceErr
+			}
+			continue
+		}
+		initiative, lineageErr := s.resolveInitiative(ctx, objective)
+		if lineageErr != nil {
+			return result, lineageErr
+		}
+		if initiative != nil && initiative.Status != InitiativeStatusActive {
 			if deferErr := s.deferObjective(ctx, objective, now, ObjectiveScheduleSuspended, "Initiative is not active"); deferErr != nil && !errors.Is(deferErr, ErrRevisionConflict) {
 				return result, deferErr
 			}
@@ -135,7 +153,6 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			result.BudgetExhausted++
 			continue
 		}
-		scheduledFor := objective.NextEvaluationAt.UTC()
 		contextValues := map[string]interface{}{"scheduledFor": scheduledFor.Format(time.RFC3339Nano)}
 		entrypoint := ""
 		policy := map[string]interface{}(nil)
@@ -152,6 +169,30 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 				}
 			}
 		}
+		if initiative != nil {
+			contextValues["initiativeId"] = initiative.ID
+			if monitorID, _ := contextValues["sourceMonitorId"].(string); strings.TrimSpace(monitorID) != "" {
+				if err := s.validateSourceMonitorLineage(objective, initiative, strings.TrimSpace(monitorID)); err != nil {
+					return result, err
+				}
+			} else {
+				var projection *ObjectiveEvidenceProjection
+				if objective.Cadence.RunTemplate != nil {
+					projection = objective.Cadence.RunTemplate.EvidenceProjection
+				}
+				snapshot, snapshotErr := buildEvidenceSnapshot(ctx, s.observations, scope, initiative.ID, scheduledFor, projection)
+				if snapshotErr != nil {
+					return result, fmt.Errorf("objective %s evidence projection: %w", objective.ID, snapshotErr)
+				}
+				projected, projectionErr := evidenceSnapshotContext(snapshot)
+				if projectionErr != nil {
+					return result, fmt.Errorf("objective %s evidence projection: %w", objective.ID, projectionErr)
+				}
+				if projected != nil {
+					contextValues[EvidenceSnapshotContextKey] = projected
+				}
+			}
+		}
 		assignedAgentID := strings.TrimSpace(objective.Cadence.AssignedAgentID)
 		if assignedAgentID == "" && objective.Owner.Type == OwnerTypeAgent {
 			assignedAgentID = objective.Owner.ID
@@ -162,7 +203,7 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			Goal: objective.Goal, Source: RunSourceSchedule, Priority: objective.Priority,
 			Context: contextValues, Policy: policy,
 			Budget:         objective.Cadence.RunBudget,
-			IdempotencyKey: fmt.Sprintf("objective-schedule:%s:%s", objective.ID, scheduledFor.Format(time.RFC3339Nano)),
+			IdempotencyKey: idempotencyKey,
 			Actor:          ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(objective),
 		})
 		if createErr != nil {
@@ -180,60 +221,75 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 		} else {
 			result.Scheduled++
 		}
-		next, nextErr := objective.Cadence.Next(scheduledFor)
-		if nextErr != nil {
-			return result, nextErr
-		}
-		current, loadErr := s.store.GetObjective(ctx, scope, objective.ID)
-		if loadErr != nil {
-			return result, loadErr
-		}
-		if current == nil {
-			return result, ErrObjectiveNotFound
-		}
-		if _, updateErr := NewPortfolioService(s.store).UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
-			ExpectedRevision: current.Revision, NextEvaluationAt: &next, ClearScheduleCondition: true,
-			Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(current), Summary: "Objective schedule advanced",
-		}); updateErr != nil && !errors.Is(updateErr, ErrRevisionConflict) {
-			return result, updateErr
+		if advanceErr := s.advanceObjective(ctx, scope, objective, scheduledFor); advanceErr != nil {
+			return result, advanceErr
 		}
 	}
 	return result, nil
 }
 
-func (s *ObjectiveScheduler) monitorInitiativeActive(ctx context.Context, objective *Objective) (bool, error) {
-	if objective == nil || objective.Cadence == nil || objective.Cadence.RunTemplate == nil {
-		return true, nil
-	}
-	contextValues := objective.Cadence.RunTemplate.Context
-	monitorID, hasMonitor := contextValues["sourceMonitorId"].(string)
-	monitorID = strings.TrimSpace(monitorID)
-	if !hasMonitor || monitorID == "" {
-		return true, nil
-	}
-	initiativeID, ok := contextValues["initiativeId"].(string)
-	initiativeID = strings.TrimSpace(initiativeID)
-	if !ok || initiativeID == "" {
-		return false, fmt.Errorf("objective %s source monitor %s has no initiative provenance", objective.ID, monitorID)
-	}
+func (s *ObjectiveScheduler) resolveInitiative(ctx context.Context, objective *Objective) (*Initiative, error) {
 	if s.initiatives == nil {
-		return false, fmt.Errorf("objective %s source monitor cannot run without Initiative persistence", objective.ID)
+		return nil, nil
 	}
-	initiative, err := s.initiatives.GetInitiative(ctx, objective.Scope, initiativeID)
+	values, err := s.initiatives.ListInitiatives(ctx, InitiativeFilter{Scope: objective.Scope, ObjectiveID: objective.ID, Limit: 2})
 	if err != nil {
-		return false, fmt.Errorf("objective %s source monitor initiative: %w", objective.ID, err)
+		return nil, fmt.Errorf("objective %s Initiative membership: %w", objective.ID, err)
 	}
+	if len(values) > 1 {
+		return nil, fmt.Errorf("objective %s belongs to multiple Initiatives in scope", objective.ID)
+	}
+	var declaredID string
+	if objective.Cadence != nil && objective.Cadence.RunTemplate != nil {
+		declaredID, _ = objective.Cadence.RunTemplate.Context["initiativeId"].(string)
+		declaredID = strings.TrimSpace(declaredID)
+	}
+	if len(values) == 0 {
+		if declaredID != "" {
+			return nil, fmt.Errorf("objective %s declares Initiative %s but is not a member", objective.ID, declaredID)
+		}
+		return nil, nil
+	}
+	if declaredID != "" && declaredID != values[0].ID {
+		return nil, fmt.Errorf("objective %s Initiative provenance has drifted", objective.ID)
+	}
+	return values[0], nil
+}
+
+func (s *ObjectiveScheduler) validateSourceMonitorLineage(objective *Objective, initiative *Initiative, monitorID string) error {
 	monitor, found := initiativeSourceMonitor(initiative, monitorID)
 	if !found || monitor.ObjectiveID != objective.ID || monitor.AssignedAgentID != objective.Cadence.AssignedAgentID {
-		return false, fmt.Errorf("objective %s source monitor provenance has drifted", objective.ID)
+		return fmt.Errorf("objective %s source monitor provenance has drifted", objective.ID)
 	}
 	if invocation := objective.Cadence.RunTemplate.Capability; invocation == nil || monitor.SkillID != invocation.SkillID || monitor.SkillVersion != invocation.SkillVersion || monitor.Action != invocation.Action {
-		return false, fmt.Errorf("objective %s source monitor capability has drifted", objective.ID)
+		return fmt.Errorf("objective %s source monitor capability has drifted", objective.ID)
 	}
 	if policyRef, _ := objective.Cadence.RunTemplate.Policy["sourcePolicyRef"].(string); monitor.SourcePolicyRef != strings.TrimSpace(policyRef) {
-		return false, fmt.Errorf("objective %s source monitor policy has drifted", objective.ID)
+		return fmt.Errorf("objective %s source monitor policy has drifted", objective.ID)
 	}
-	return initiative.Status == InitiativeStatusActive, nil
+	return nil
+}
+
+func (s *ObjectiveScheduler) advanceObjective(ctx context.Context, scope Scope, objective *Objective, scheduledFor time.Time) error {
+	next, err := objective.Cadence.Next(scheduledFor)
+	if err != nil {
+		return err
+	}
+	current, err := s.store.GetObjective(ctx, scope, objective.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrObjectiveNotFound
+	}
+	_, err = NewPortfolioService(s.store).UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
+		ExpectedRevision: current.Revision, NextEvaluationAt: &next, ClearScheduleCondition: true,
+		Actor: ActivityActor{Type: "service", ID: "objective-scheduler"}, Visibility: objectiveScheduleVisibility(current), Summary: "Objective schedule advanced",
+	})
+	if errors.Is(err, ErrRevisionConflict) {
+		return nil
+	}
+	return err
 }
 
 func (s *ObjectiveScheduler) deferObjective(ctx context.Context, objective *Objective, now time.Time, state ObjectiveScheduleState, reason string) error {
