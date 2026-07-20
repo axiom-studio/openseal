@@ -219,10 +219,11 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 }
 
 const (
-	minimumHostedObjectiveInputTokens   int64 = 16000
-	minimumHostedObjectiveOutputTokens  int64 = 1000
-	minimumGroundedObjectiveInputTokens int64 = 24000
-	minimumGroundedObjectiveTurns       int64 = 4
+	minimumHostedObjectiveInputTokens    int64 = 16000
+	minimumHostedObjectiveOutputTokens   int64 = 1000
+	minimumGroundedObjectiveInputTokens  int64 = 24000
+	minimumGroundedObjectiveOutputTokens int64 = 16000
+	minimumGroundedObjectiveTurns        int64 = 4
 )
 
 func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, hosted, grounded bool) error {
@@ -240,8 +241,10 @@ func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, host
 		return nil
 	}
 	minimumInput := minimumHostedObjectiveInputTokens
+	minimumOutput := minimumHostedObjectiveOutputTokens
 	if grounded {
 		minimumInput = minimumGroundedObjectiveInputTokens
+		minimumOutput = minimumGroundedObjectiveOutputTokens
 		if budget.MaxTurns > 0 && budget.MaxTurns < minimumGroundedObjectiveTurns {
 			return fmt.Errorf("evidence-grounded hosted runBudget maxTurns must be zero (unbounded) or at least %d", minimumGroundedObjectiveTurns)
 		}
@@ -249,8 +252,8 @@ func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, host
 	if budget.MaxInputTokens > 0 && budget.MaxInputTokens < minimumInput {
 		return fmt.Errorf("hosted runBudget maxInputTokens must be zero (unbounded) or at least %d", minimumInput)
 	}
-	if budget.MaxOutputTokens > 0 && budget.MaxOutputTokens < minimumHostedObjectiveOutputTokens {
-		return fmt.Errorf("hosted runBudget maxOutputTokens must be zero (unbounded) or at least %d", minimumHostedObjectiveOutputTokens)
+	if budget.MaxOutputTokens > 0 && budget.MaxOutputTokens < minimumOutput {
+		return fmt.Errorf("hosted runBudget maxOutputTokens must be zero (unbounded) or at least %d", minimumOutput)
 	}
 	if budget.MaxTotalTokens > 0 {
 		input := budget.MaxInputTokens
@@ -259,7 +262,7 @@ func validateAuthoredObjectiveRunBudget(budget *authoredObjectiveRunBudget, host
 		}
 		output := budget.MaxOutputTokens
 		if output == 0 {
-			output = minimumHostedObjectiveOutputTokens
+			output = minimumOutput
 		}
 		if budget.MaxTotalTokens < input+output {
 			return fmt.Errorf("hosted runBudget maxTotalTokens must be at least maxInputTokens + maxOutputTokens (%d)", input+output)
