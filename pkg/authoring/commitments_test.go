@@ -14,6 +14,7 @@ import (
 )
 
 const liveReleaseNotesPrompt = "Create one release-notes agent with one objective to turn completed development work into release notes. Require approval before any external publication."
+const shippedSREPrompt = "Create one SRE Agent that watches Kubernetes events, investigates safely, and asks before production changes."
 
 func TestCompilerRejectsLiveReleaseNotesCandidateThatDropsExplicitCommitments(t *testing.T) {
 	candidate := releaseNotesCandidate(nil, "")
@@ -26,13 +27,44 @@ func TestCompilerRejectsLiveReleaseNotesCandidateThatDropsExplicitCommitments(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Valid || !hasValidationCode(result.Validation, "prompt_objective_mismatch") || !hasValidationCode(result.Validation, "prompt_approval_mismatch") {
+	if result.Valid || !hasValidationCode(result.Validation, "prompt_objective_mismatch") || hasValidationCode(result.Validation, "prompt_approval_mismatch") {
 		t.Fatalf("omitted live commitments = %#v", result)
+	}
+	if got := result.Candidate.Agents[0].Authority.RequireApprovalAt; got != capability.RiskLevelWrite {
+		t.Fatalf("deterministically repaired approval threshold = %q", got)
 	}
 	if result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 1 || len(result.Commitments.ObjectiveCounts) != 1 ||
 		result.Commitments.ObjectiveCounts[0].OwnerType != CommitmentOwnerAgent || result.Commitments.ObjectiveCounts[0].Count != 1 ||
 		len(result.Commitments.ApprovalRequirements) != 1 || result.Commitments.ApprovalRequirements[0].RequireApprovalAt != capability.RiskLevelWrite {
 		t.Fatalf("extracted live commitments = %#v", result.Commitments)
+	}
+}
+
+func TestCompilerDeterministicallyRepairsShippedSingleAgentSREApproval(t *testing.T) {
+	agentCount, teamCount := 1, 0
+	candidate := releaseNotesCandidate(nil, "")
+	candidate.Agents[0].ID = "sre-agent"
+	candidate.Agents[0].DisplayName = "SRE Agent"
+	candidate.Agents[0].Purpose = "Watch Kubernetes events and investigate safely"
+	candidate.Agents[0].SystemPrompt = "Watch Kubernetes events, investigate safely, and ask before production changes."
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate:   candidate,
+		Commitments: PromptCommitments{AgentCount: &agentCount, TeamCount: &teamCount},
+	})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: shippedSREPrompt})
+	if err != nil || !result.Valid {
+		t.Fatalf("shipped SRE candidate = %#v, err = %v", result, err)
+	}
+	if len(result.Candidate.Agents) != 1 || result.Candidate.Team != nil {
+		t.Fatalf("shipped SRE topology = %#v", result.Candidate)
+	}
+	definition := result.Candidate.Agents[0]
+	if definition.Authority.MaximumRisk != capability.RiskLevelDestructive || definition.Authority.RequireApprovalAt != capability.RiskLevelWrite {
+		t.Fatalf("shipped SRE authority = %#v", definition.Authority)
+	}
+	if len(result.Commitments.ApprovalRequirements) != 1 || result.Commitments.ApprovalRequirements[0].RequireApprovalAt != capability.RiskLevelWrite {
+		t.Fatalf("shipped SRE commitments = %#v", result.Commitments)
 	}
 }
 
@@ -49,7 +81,7 @@ func TestCompilerRepairsLiveReleaseNotesCommitmentsOnce(t *testing.T) {
 		t.Fatalf("repaired live candidate = %#v, repairs = %d, err = %v", result, generator.repairs, err)
 	}
 	if generator.lastError == nil || !strings.Contains(generator.lastError.Error(), "prompt_commitment_missing") ||
-		!strings.Contains(generator.lastError.Error(), "prompt_objective_mismatch") || !strings.Contains(generator.lastError.Error(), "prompt_approval_mismatch") {
+		!strings.Contains(generator.lastError.Error(), "prompt_objective_mismatch") || strings.Contains(generator.lastError.Error(), "prompt_approval_mismatch") {
 		t.Fatalf("repair diagnostic = %v", generator.lastError)
 	}
 }
