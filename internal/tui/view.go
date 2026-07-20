@@ -718,6 +718,7 @@ func (m *Model) renderObjectivesContent(width int) string {
 			lines = append(lines, renderBudgetLines(objective.Budget, nil, max(width-8, 24))...)
 		}
 		lines = append(lines, m.renderSelectedEvidence(width)...)
+		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		if m.supportsObjective(kernelapi.OperationUpdate) {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter amend  ·  n add objective"))
 		}
@@ -750,6 +751,7 @@ func (m *Model) renderInitiativesContent(width int) string {
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(initiative.ObjectiveRefs), len(initiative.Milestones), len(initiative.SourceMonitors), len(initiative.Deliverables))))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", initiative.Revision, relativeTime(initiative.UpdatedAt))))
 		lines = append(lines, m.renderSelectedEvidence(width)...)
+		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		if len(initiative.SourceMonitors) > 0 {
 			lines = append(lines, "", mutedStyle.Render("Source monitors"))
 			for _, monitor := range initiative.SourceMonitors {
@@ -941,6 +943,7 @@ func (m *Model) renderRunsContent(width int) string {
 			lines = append(lines, renderBudgetLines(run.Budget, &run.BudgetUsage, max(width-8, 24))...)
 		}
 		lines = append(lines, m.renderSelectedEvidence(width)...)
+		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		if receipt, ok := runDeliveryReceipt(run); ok {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Bold(true).Render("DELIVERY ACCEPTED"))
 			summary := fmt.Sprintf("%d recipient%s · %d artifact%s", receipt.recipientCount, pluralSuffix(receipt.recipientCount), len(receipt.artifacts), pluralSuffix(len(receipt.artifacts)))

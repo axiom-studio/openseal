@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http/httptest"
@@ -1995,6 +1996,176 @@ func TestEvidenceSnapshotMismatchFailsClosedAndCapabilityGateHidesProjection(t *
 	if view = model.renderRunsContent(180); strings.Contains(view, "Evidence snapshot") {
 		t.Fatalf("unadvertised Run evidence was rendered:\n%s", view)
 	}
+}
+
+func TestEvidenceGroundingProjectsVerifiedClaimsAcrossInspectionSurfaces(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.objectiveCapability = kernelapi.ObjectivesCapability()
+	model.initiativeCapability = kernelapi.InitiativesCapability()
+	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
+	model.initiatives = []*runtime.Initiative{{ID: "initiative-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.InitiativeStatusActive}}
+	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
+	model.runs = []*runtime.AgentRun{run}
+
+	model.section = sectionRuns
+	view := model.renderRunsContent(180)
+	for _, expected := range []string{
+		"Evidence grounding", "VERIFIED · 2 claims", "Accepted · yes · Coverage · complete",
+		"grounding-provider / grounding-model", "17 input · 9 output · 0.0012 cost · 42 ms",
+		"V expand 2 claim/review pages",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("verified grounding projection missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "The first finding is supported") || strings.Contains(view, "observation-first") {
+		t.Fatalf("collapsed grounding exposed claim detail:\n%s", view)
+	}
+
+	applyKey(t, model, "V")
+	view = model.renderRunsContent(180)
+	for _, expected := range []string{
+		"Claim/review page 1 of 2", "Claim · claim-first", "Statement · The first finding is supported",
+		"Evidence ref 1 · observation-first", "supported · Exact first-source support", "Reviewed ref 1 · observation-first",
+		"{ previous · } next · V collapse",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expanded grounding projection missing %q:\n%s", expected, view)
+		}
+	}
+	applyKey(t, model, "}")
+	view = model.renderRunsContent(180)
+	if !strings.Contains(view, "Claim/review page 2 of 2") || !strings.Contains(view, "observation-second") || strings.Contains(view, "claim-first") {
+		t.Fatalf("grounding paging did not isolate one claim:\n%s", view)
+	}
+
+	model.section = sectionObjectives
+	model.resetEvidenceInspection()
+	if view = model.renderObjectivesContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
+		t.Fatalf("Objective inspection omitted grounding:\n%s", view)
+	}
+	model.section = sectionInitiatives
+	if view = model.renderInitiativesContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
+		t.Fatalf("Initiative inspection omitted grounding:\n%s", view)
+	}
+}
+
+func TestEvidenceGroundingProjectsDurableRepairReviewAndPendingState(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.runs = []*runtime.AgentRun{groundedEvidenceRun(t, runtime.AgentRunStatusRunning, groundingRepairRequired, true)}
+
+	view := model.renderRunsContent(180)
+	for _, expected := range []string{
+		"REPAIR REQUIRED · 2 claims", "Accepted · no · Coverage · complete",
+		"grounding-provider / grounding-model", "17 input · 9 output · 0.0012 cost · 42 ms",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("repair grounding projection missing %q:\n%s", expected, view)
+		}
+	}
+
+	pending := groundedEvidenceRun(t, runtime.AgentRunStatusRunning, groundingPendingReview, false)
+	model.runs = []*runtime.AgentRun{pending}
+	view = model.renderRunsContent(180)
+	for _, expected := range []string{"REVIEW PENDING", "Reviewer · awaiting independent review", "Usage · not recorded yet"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("pending grounding projection missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestEvidenceGroundingMismatchFailsClosedWithoutRenderingUnknownData(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
+	review := run.Output["evidenceGrounding"].(map[string]interface{})
+	review["credential"] = "must-not-render"
+	model.runs = []*runtime.AgentRun{run}
+
+	view := model.renderRunsContent(180)
+	if !strings.Contains(view, "Review projection unavailable") || !strings.Contains(view, "contract does not match") || strings.Contains(view, "must-not-render") {
+		t.Fatalf("unknown grounding field did not fail closed:\n%s", view)
+	}
+	applyKey(t, model, "V")
+	if model.groundingExpanded {
+		t.Fatal("malformed grounding projection was expandable")
+	}
+
+	run = groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
+	claims := run.Output["evidenceClaims"].([]runtime.EvidenceClaim)
+	claims[0].EvidenceRefs = []string{"observation-invented"}
+	run.Output["evidenceClaims"] = claims
+	model.runs = []*runtime.AgentRun{run}
+	if view = model.renderRunsContent(180); !strings.Contains(view, "outside the immutable snapshot") || strings.Contains(view, "observation-invented") {
+		t.Fatalf("out-of-snapshot claim did not fail closed:\n%s", view)
+	}
+}
+
+func groundedEvidenceRun(t *testing.T, status runtime.AgentRunStatus, phase string, includeReview bool) *runtime.AgentRun {
+	t.Helper()
+	run := evidenceSnapshotRun("run-grounded", "snapshot-grounded", time.Now().UTC())
+	run.Status = status
+	claims := []runtime.EvidenceClaim{
+		{ID: "claim-first", Statement: "The first finding is supported", EvidenceRefs: []string{"observation-first"}},
+		{ID: "claim-second", Statement: "The second finding is supported", EvidenceRefs: []string{"observation-second"}},
+	}
+	encoded, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digestBytes := sha256.Sum256(encoded)
+	digest := "sha256:" + hex.EncodeToString(digestBytes[:])
+	findings := []runtime.EvidenceGroundingFinding{
+		{ClaimID: "claim-first", Status: runtime.EvidenceGroundingSupported, Summary: "Exact first-source support", EvidenceRefs: []string{"observation-first"}},
+		{ClaimID: "claim-second", Status: runtime.EvidenceGroundingSupported, Summary: "Exact second-source support", EvidenceRefs: []string{"observation-second"}},
+	}
+	review := &runtime.EvidenceGroundingReview{
+		APIVersion: evidenceGroundingAPIVersion, InvocationID: "turn-review", SnapshotID: "snapshot-grounded", ClaimsDigest: digest,
+		ReviewerProvider: "grounding-provider", ReviewerModel: "grounding-model", Accepted: true, CoverageComplete: true,
+		Findings: findings, Usage: runtime.TurnUsage{InputTokens: 17, OutputTokens: 9, Cost: 0.0012, DurationMS: 42},
+	}
+	if status == runtime.AgentRunStatusCompleted {
+		run.Output = map[string]interface{}{"report": "Cited report", "evidenceClaims": claims, "evidenceGrounding": groundingReviewMap(t, review)}
+		return run
+	}
+	review.Accepted = false
+	if phase == groundingRepairRequired {
+		review.Findings[1].Status = runtime.EvidenceGroundingUnsupported
+		review.Findings[1].Summary = "Second claim needs repair"
+	}
+	state := map[string]interface{}{
+		"apiVersion": evidenceGroundingAPIVersion, "status": phase, "snapshotId": "snapshot-grounded", "claimsDigest": digest,
+		"claims": claims, "draftSummary": "Drafted report", "draftOutput": map[string]interface{}{"report": "Draft"},
+	}
+	if includeReview {
+		state["findings"] = review.Findings
+		state["lastReview"] = groundingReviewMap(t, review)
+	}
+	run.Checkpoint = map[string]interface{}{evidenceGroundingCheckpoint: state}
+	return run
+}
+
+func groundingReviewMap(t *testing.T, review *runtime.EvidenceGroundingReview) map[string]interface{} {
+	t.Helper()
+	encoded, err := json.Marshal(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 func evidenceSnapshotRun(id, snapshotID string, createdAt time.Time) *runtime.AgentRun {

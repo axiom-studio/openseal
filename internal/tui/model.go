@@ -163,6 +163,8 @@ type Model struct {
 	runs                        []*runtime.AgentRun
 	evidenceExpanded            bool
 	evidenceObservationSelected int
+	groundingExpanded           bool
+	groundingPageSelected       int
 	agentRequests               []*runtime.AgentRequest
 	agentRequestSelected        int
 	selectedAgentRequest        string
@@ -1378,6 +1380,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveEvidenceObservation(1)
 			}
+		case "{":
+			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+				m.moveGroundingPage(-1)
+			}
+		case "}":
+			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+				m.moveGroundingPage(1)
+			}
 		case "b":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				return m, m.submitWorkforceCredentialPlacement()
@@ -1506,6 +1516,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if lineage := m.selectedEvidenceLineage(); lineage != nil && lineage.err == nil {
 					m.evidenceExpanded = !m.evidenceExpanded
 					m.evidenceObservationSelected = 0
+				}
+			}
+		case "V":
+			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+				if grounding := m.selectedEvidenceGrounding(); grounding != nil && grounding.err == nil {
+					m.groundingExpanded = !m.groundingExpanded
+					m.groundingPageSelected = 0
 				}
 			}
 		}

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -90,6 +91,7 @@ type evidenceGroundingState struct {
 	DraftSummary string                     `json:"draftSummary"`
 	DraftOutput  map[string]interface{}     `json:"draftOutput"`
 	Findings     []EvidenceGroundingFinding `json:"findings,omitempty"`
+	LastReview   *EvidenceGroundingReview   `json:"lastReview,omitempty"`
 }
 
 func evidenceSnapshotForGrounding(contextValues map[string]interface{}) (*EvidenceSnapshot, error) {
@@ -270,6 +272,28 @@ func parseEvidenceGroundingState(checkpoint map[string]interface{}) (*evidenceGr
 	if err := ValidateCredentialFreeContext(state.DraftOutput); err != nil {
 		return nil, fmt.Errorf("evidence grounding draft: %w", err)
 	}
+	if state.LastReview != nil {
+		if state.Status != evidenceGroundingRepairRequired {
+			return nil, errors.New("evidence grounding checkpoint review requires repair state")
+		}
+		if state.LastReview.Accepted {
+			return nil, errors.New("accepted evidence grounding review cannot remain in a checkpoint")
+		}
+		request := EvidenceGroundingRequest{
+			APIVersion: EvidenceGroundingAPIVersion, InvocationID: state.LastReview.InvocationID,
+			Snapshot: EvidenceSnapshot{ID: state.SnapshotID}, Claims: state.Claims, ClaimsDigest: state.ClaimsDigest,
+		}
+		if err := validateEvidenceGroundingReview(state.LastReview, request); err != nil {
+			return nil, fmt.Errorf("evidence grounding checkpoint review: %w", err)
+		}
+		encodedFindings, _ := json.Marshal(state.Findings)
+		encodedReviewFindings, _ := json.Marshal(state.LastReview.Findings)
+		if !bytes.Equal(encodedFindings, encodedReviewFindings) {
+			return nil, errors.New("evidence grounding checkpoint findings do not match its last review")
+		}
+	} else if state.Status == evidenceGroundingPendingReview && len(state.Findings) != 0 {
+		return nil, errors.New("pending evidence grounding review cannot contain findings")
+	}
 	return &state, nil
 }
 
@@ -440,6 +464,7 @@ func (r *HostedTurnRunner) runEvidenceGroundingReview(ctx context.Context, input
 	}
 	state.Status = evidenceGroundingRepairRequired
 	state.Findings = append([]EvidenceGroundingFinding(nil), review.Findings...)
+	state.LastReview = cloneEvidenceGroundingReview(review)
 	checkpoint[evidenceGroundingCheckpointKey] = evidenceGroundingStateMap(*state)
 	return &TurnOutcome{
 		ModelProvider: review.ReviewerProvider, Model: review.ReviewerModel,
