@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -14,6 +16,7 @@ type resolverCatalog struct {
 	deployment *kernelagent.AgentDeployment
 	definition *kernelagent.AgentDefinition
 	activation *skill.ActivationSnapshot
+	gotHost    skill.HostCapabilityState
 }
 
 func (c *resolverCatalog) GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error) {
@@ -24,7 +27,8 @@ func (c *resolverCatalog) GetAgentDefinition(context.Context, string, string) (*
 	return c.definition, nil
 }
 
-func (c *resolverCatalog) ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
+func (c *resolverCatalog) ActivateSkills(_ context.Context, _ skill.ScopeReference, _ string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
+	c.gotHost = host
 	return c.activation, nil
 }
 
@@ -77,5 +81,28 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	_, err = ResolveCatalogTurnRunner(t.Context(), catalog, base, CatalogTurnResolverConfig{})
 	if !errors.Is(err, ErrTurnHostUnavailable) {
 		t.Fatalf("unhosted prompt work error = %v", err)
+	}
+}
+
+func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "sre", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "sre", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "sre", Version: "1", Purpose: "Operate safely", SystemPrompt: "Use bounded tools."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot-host", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "sre"},
+	}
+	wanted := skill.HostCapabilityState{OperatingSystem: "linux", Architecture: "arm64", Revision: "atlas-host/v1"}
+	var resolvedScope skill.ScopeReference
+	var resolvedDeployment string
+	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre"}, AssignedAgentID: "sre", Context: map[string]interface{}{"capabilityInvocation": map[string]interface{}{}}}
+	_, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{SkillHosts: SkillHostCapabilityResolverFunc(func(_ context.Context, gotScope skill.ScopeReference, deploymentID string) (*skill.HostCapabilityState, error) {
+		resolvedScope, resolvedDeployment = gotScope, deploymentID
+		return &wanted, nil
+	})})
+	if err == nil || !strings.Contains(err.Error(), "requires authorized actions") {
+		t.Fatalf("expected deterministic runner validation after host resolution, got %v", err)
+	}
+	if resolvedScope != (skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}) || resolvedDeployment != "sre" || !reflect.DeepEqual(catalog.gotHost, wanted) {
+		t.Fatalf("scope=%#v deployment=%q host=%#v", resolvedScope, resolvedDeployment, catalog.gotHost)
 	}
 }

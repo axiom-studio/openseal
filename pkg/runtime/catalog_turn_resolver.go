@@ -22,8 +22,23 @@ type AgentTurnCatalog interface {
 }
 
 type CatalogTurnResolverConfig struct {
-	Host      TurnHost
-	SkillHost skill.HostCapabilityState
+	Host       TurnHost
+	SkillHost  skill.HostCapabilityState
+	SkillHosts SkillHostCapabilityResolver
+}
+
+// SkillHostCapabilityResolver lets an embedding runtime project the exact
+// adapters available to one deployment without duplicating Agent, Skill, and
+// Turn resolution. The returned state is host-authoritative and never model
+// writable.
+type SkillHostCapabilityResolver interface {
+	ResolveSkillHostCapabilities(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error)
+}
+
+type SkillHostCapabilityResolverFunc func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error)
+
+func (f SkillHostCapabilityResolverFunc) ResolveSkillHostCapabilities(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*skill.HostCapabilityState, error) {
+	return f(ctx, scope, deploymentID)
 }
 
 // ResolveCatalogTurnRunner resolves deterministic runbooks and typed Skill
@@ -49,7 +64,18 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if err != nil || definition == nil {
 		return nil, fmt.Errorf("resolve active Agent definition: %w", err)
 	}
-	activation, err := catalog.ActivateSkills(ctx, scope, deployment.ID, config.SkillHost)
+	skillHost := config.SkillHost
+	if config.SkillHosts != nil {
+		resolved, resolveErr := config.SkillHosts.ResolveSkillHostCapabilities(ctx, scope, deployment.ID)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("resolve Skill execution host for Agent %s: %w", deployment.ID, resolveErr)
+		}
+		if resolved == nil {
+			return nil, fmt.Errorf("resolve Skill execution host for Agent %s: empty capability state", deployment.ID)
+		}
+		skillHost = *resolved
+	}
+	activation, err := catalog.ActivateSkills(ctx, scope, deployment.ID, skillHost)
 	if err != nil {
 		return nil, fmt.Errorf("activate bound Skills for Agent %s: %w", deployment.ID, err)
 	}
