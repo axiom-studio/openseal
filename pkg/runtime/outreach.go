@@ -443,11 +443,78 @@ func (s *OutreachService) Create(ctx context.Context, req CreateOutreachThreadRe
 }
 
 func (s *OutreachService) Get(ctx context.Context, scope Scope, id string) (*OutreachThread, error) {
-	return s.store.GetOutreachThread(ctx, scope, id)
+	thread, err := s.store.GetOutreachThread(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.reconcileTerminalMessages(ctx, thread)
 }
 
 func (s *OutreachService) List(ctx context.Context, filter OutreachThreadFilter) ([]*OutreachThread, error) {
-	return s.store.ListOutreachThreads(ctx, filter)
+	threads, err := s.store.ListOutreachThreads(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	for index := range threads {
+		threads[index], err = s.reconcileTerminalMessages(ctx, threads[index])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return threads, nil
+}
+
+// reconcileTerminalMessages repairs derived outreach state from authoritative
+// governed ActionCalls. This makes cancellation/denial crash-safe: if a process
+// stops after atomically resolving the action but before projecting the linked
+// message, the next observation converges the thread without dispatching work.
+func (s *OutreachService) reconcileTerminalMessages(ctx context.Context, thread *OutreachThread) (*OutreachThread, error) {
+	if s == nil || s.actions == nil || thread == nil {
+		return thread, nil
+	}
+	current := thread
+	for _, snapshot := range thread.Messages {
+		if strings.TrimSpace(snapshot.ActionCallID) == "" || snapshot.Status == OutreachMessageDelivered || snapshot.Status == OutreachMessageReceived ||
+			snapshot.Status == OutreachMessageDeclined || snapshot.Status == OutreachMessageFailed || snapshot.Status == OutreachMessageCanceled {
+			continue
+		}
+		call, err := s.actions.GetActionCall(ctx, thread.Scope, snapshot.ActionCallID)
+		if err != nil {
+			return nil, err
+		}
+		if call == nil || (call.Status != ActionCallStatusDenied && call.Status != ActionCallStatusFailed && call.Status != ActionCallStatusCanceled) {
+			continue
+		}
+		visibility := ActivityVisibilityScope
+		if current.Owner.Type == OwnerTypeTeam {
+			visibility = ActivityVisibilityTeam
+		}
+		result, err := s.ReconcileAction(ctx, current.Scope, current.ID, ReconcileOutreachActionRequest{
+			MessageID: snapshot.ID, ActionCallID: snapshot.ActionCallID,
+			Actor: ActivityActor{Type: "system", ID: "outreach-reconciler"}, Visibility: visibility,
+		})
+		if errors.Is(err, ErrOutreachThreadConflict) {
+			current, err = s.store.GetOutreachThread(ctx, current.Scope, current.ID)
+			if err != nil {
+				return nil, err
+			}
+			message := findOutreachMessage(current, snapshot.ID)
+			if message == nil || message.Status == OutreachMessageDeclined || message.Status == OutreachMessageFailed || message.Status == OutreachMessageCanceled {
+				continue
+			}
+			result, err = s.ReconcileAction(ctx, current.Scope, current.ID, ReconcileOutreachActionRequest{
+				MessageID: snapshot.ID, ActionCallID: snapshot.ActionCallID,
+				Actor: ActivityActor{Type: "system", ID: "outreach-reconciler"}, Visibility: visibility,
+			})
+		}
+		if err != nil {
+			return nil, err
+		}
+		if result != nil && result.Thread != nil {
+			current = result.Thread
+		}
+	}
+	return current, nil
 }
 
 func (s *OutreachService) LinkAction(ctx context.Context, scope Scope, id string, req LinkOutreachActionRequest) (*OutreachThread, *ActivityEvent, error) {

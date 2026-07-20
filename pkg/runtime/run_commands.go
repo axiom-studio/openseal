@@ -41,6 +41,7 @@ type AgentRunCommandResult struct {
 type RunCommandStore interface {
 	PortfolioStore
 	RunActivityStore
+	ActionStore
 }
 
 type RunCommandService struct {
@@ -156,6 +157,9 @@ func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCom
 	if current.Revision != req.ExpectedRevision {
 		return nil, ErrRevisionConflict
 	}
+	if req.Kind == AgentRunCommandCancel && current.Status == AgentRunStatusWaitingForApproval {
+		return s.cancelWaitingApprovalRun(ctx, current, req)
+	}
 	transition, err := commandTransition(current, req, s.now())
 	if err != nil {
 		return nil, err
@@ -166,6 +170,96 @@ func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCom
 		return nil, err
 	}
 	return &AgentRunCommandResult{Run: run, Event: event}, nil
+}
+
+// cancelWaitingApprovalRun atomically closes all three authoritative facts
+// that otherwise permit future work: the pending approval, its ActionCall, and
+// the waiting Run. A plain Run transition is insufficient because an approval
+// could still be accepted later and make the external action executable.
+func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, current *AgentRun, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
+	if current.WakeCondition == nil || current.WakeCondition.Type != "approval" || strings.TrimSpace(current.WakeCondition.Reference) == "" {
+		return nil, fmt.Errorf("%w: waiting approval run has no approval wake condition", ErrInvalidRunTransition)
+	}
+	approval, err := s.store.GetApproval(ctx, current.Scope, current.WakeCondition.Reference)
+	if err != nil {
+		return nil, err
+	}
+	if approval == nil || approval.Status != ApprovalStatusPending || approval.RunID != current.ID {
+		return nil, fmt.Errorf("%w: run approval is unavailable or already resolved", ErrApprovalResolved)
+	}
+	call, err := s.store.GetActionCall(ctx, current.Scope, approval.ActionCallID)
+	if err != nil {
+		return nil, err
+	}
+	if call == nil || call.Status != ActionCallStatusWaitingApproval || call.RunID != current.ID || call.ApprovalID != approval.ID {
+		return nil, fmt.Errorf("%w: run action is not waiting on its approval", ErrApprovalResolved)
+	}
+
+	now := s.now().UTC()
+	actor := req.Actor
+	if strings.TrimSpace(actor.Type) == "" || strings.TrimSpace(actor.ID) == "" {
+		actor = ActivityActor{Type: "system", ID: "openseal"}
+	}
+	summary := strings.TrimSpace(req.Summary)
+	if summary == "" {
+		summary = "Run canceled"
+	}
+	decisionID := "run-cancel:" + hashString(current.Scope.Kind+"\x00"+current.Scope.ID+"\x00"+current.ID+"\x00"+fmt.Sprint(current.Revision))
+
+	updatedApproval := cloneApprovalCheckpoint(approval)
+	updatedApproval.Status = ApprovalStatusCanceled
+	updatedApproval.DecisionID = decisionID
+	updatedApproval.DecisionBy = &ApprovalPrincipal{Type: actor.Type, ID: actor.ID}
+	updatedApproval.DecisionReason = summary
+	updatedApproval.DecidedAt = &now
+	updatedApproval.UpdatedAt = now
+	updatedApproval.Revision++
+
+	updatedCall := cloneActionCall(call)
+	updatedCall.Status = ActionCallStatusCanceled
+	updatedCall.Error = "run canceled: " + summary
+	updatedCall.LeaseOwner = ""
+	updatedCall.LeaseExpiresAt = nil
+	updatedCall.CompletedAt = &now
+	updatedCall.UpdatedAt = now
+	updatedCall.Revision++
+
+	updatedRun := cloneAgentRun(current)
+	if updatedRun.Budget != nil {
+		if _, reserved := updatedRun.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved {
+			if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	updatedRun.Status = AgentRunStatusCanceled
+	updatedRun.WakeCondition = nil
+	updatedRun.LeaseOwner = ""
+	updatedRun.LeaseExpiresAt = nil
+	updatedRun.CompletedAt = &now
+	updatedRun.UpdatedAt = now
+	updatedRun.Revision++
+
+	visibility := req.Visibility
+	if visibility == "" {
+		visibility = ActivityVisibilityScope
+	}
+	event := &ActivityEvent{
+		ID: uuid.NewString(), Scope: current.Scope, EventType: "run.canceled", Severity: ActivitySeverityInfo,
+		AgentID: current.AssignedAgentID, ObjectiveID: current.ObjectiveID, RunID: current.ID, TurnID: call.TurnID,
+		ParentRunID: current.ParentRunID, TeamID: teamIDForRun(current), Actor: actor, Summary: summary,
+		Visibility: visibility, CausationID: approval.ID, CreatedAt: now,
+		Payload: map[string]interface{}{"status": AgentRunStatusCanceled, "approvalId": approval.ID, "actionCallId": call.ID},
+	}
+	resolved, err := s.store.ResolveApproval(ctx, ApprovalResolutionRecord{
+		Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,
+		Call: updatedCall, ExpectedCallRevision: call.Revision,
+		Run: updatedRun, ExpectedRunRevision: current.Revision, Event: event,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &AgentRunCommandResult{Run: resolved.Run, Event: resolved.Event}, nil
 }
 
 func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.Time) (RunTransitionRequest, error) {
