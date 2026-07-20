@@ -3,6 +3,7 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -19,19 +20,25 @@ type staticGenerator struct {
 }
 
 type repairingGenerator struct {
-	generated []byte
-	repaired  []byte
-	repairs   int
-	lastError error
+	generated            []byte
+	repaired             []byte
+	repairSequence       [][]byte
+	repairs              int
+	lastError            error
+	repairInvocationKeys []string
 }
 
 func (g *repairingGenerator) Generate(context.Context, GenerateRequest) ([]byte, error) {
 	return g.generated, nil
 }
 
-func (g *repairingGenerator) Repair(_ context.Context, _ GenerateRequest, _ []byte, repairError error) ([]byte, error) {
+func (g *repairingGenerator) Repair(_ context.Context, request GenerateRequest, _ []byte, repairError error) ([]byte, error) {
 	g.repairs++
 	g.lastError = repairError
+	g.repairInvocationKeys = append(g.repairInvocationKeys, request.InvocationKey)
+	if len(g.repairSequence) >= g.repairs {
+		return g.repairSequence[g.repairs-1], nil
+	}
 	return g.repaired, nil
 }
 
@@ -126,7 +133,7 @@ func TestCompilerRequiresOneSpeakingRoleForPromptCreatedTeams(t *testing.T) {
 	}
 }
 
-func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
+func TestCompilerPerformsBoundedStrictSchemaRepair(t *testing.T) {
 	valid, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	generator := &repairingGenerator{generated: []byte(`{"candidate":{"agents":[]},"unknown":true}`), repaired: valid}
 	compiler, _ := NewCompiler(generator)
@@ -136,10 +143,29 @@ func TestCompilerPerformsOnlyOneStrictSchemaRepair(t *testing.T) {
 	if err != nil || !result.Valid || generator.repairs != 1 {
 		t.Fatalf("repaired result = %#v, repairs = %d, err = %v", result, generator.repairs, err)
 	}
-	generator = &repairingGenerator{generated: []byte(`{"unknown":true}`), repaired: []byte(`{"stillUnknown":true}`)}
+	generator = &repairingGenerator{
+		generated: []byte(`{"unknown":true}`), repairSequence: [][]byte{[]byte(`{"stillUnknown":true}`), valid},
+	}
 	compiler, _ = NewCompiler(generator)
-	if _, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || generator.repairs != 1 {
-		t.Fatalf("second invalid output should fail after one repair, repairs = %d, err = %v", generator.repairs, err)
+	result, err = compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create", InvocationKey: "change-set:one:0",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
+	})
+	if err != nil || !result.Valid || generator.repairs != 2 || len(generator.repairInvocationKeys) != 2 || generator.repairInvocationKeys[0] == generator.repairInvocationKeys[1] {
+		t.Fatalf("second bounded schema repair = %#v, repairs = %d, keys = %#v, err = %v", result, generator.repairs, generator.repairInvocationKeys, err)
+	}
+
+	generator = &repairingGenerator{
+		generated: []byte(`{"unknown":true}`), repairSequence: [][]byte{[]byte(`{"stillUnknown":true}`), []byte(`{"alsoUnknown":true}`)},
+	}
+	compiler, _ = NewCompiler(generator)
+	if _, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || generator.repairs != maximumSchemaRepairAttempts {
+		t.Fatalf("schema repair budget was not enforced, repairs = %d, err = %v", generator.repairs, err)
+	} else {
+		var schemaError *SchemaGenerationError
+		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || schemaError.Diagnostic != "unknown field alsoUnknown" {
+			t.Fatalf("schema failure diagnostic = %#v, err = %v", schemaError, err)
+		}
 	}
 }
 

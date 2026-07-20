@@ -21,7 +21,26 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-const maximumGenerationBytes = 1 << 20
+const (
+	maximumGenerationBytes        = 1 << 20
+	maximumSchemaRepairAttempts   = 2
+	maximumPublicSchemaDiagnostic = 256
+)
+
+// SchemaGenerationError is a credential-free account of a provider response
+// that remained structurally invalid after the bounded strict-schema repair
+// budget. It deliberately excludes the provider payload.
+type SchemaGenerationError struct {
+	RepairAttempts int
+	Diagnostic     string
+}
+
+func (e *SchemaGenerationError) Error() string {
+	if e == nil {
+		return "decode repaired workforce candidate"
+	}
+	return fmt.Sprintf("decode repaired workforce candidate after %d schema repair attempts: %s", e.RepairAttempts, e.Diagnostic)
+}
 
 type Compiler struct {
 	generator Generator
@@ -54,22 +73,26 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	}
 	generated, decodeErr := decodeGenerationResponse(payload)
 	repairUsed := false
-	if decodeErr != nil {
+	for attempt := 1; decodeErr != nil; attempt++ {
 		repairer, ok := c.generator.(RepairGenerator)
 		if !ok {
 			return nil, fmt.Errorf("decode workforce candidate: %w", decodeErr)
 		}
-		payload, err = repairer.Repair(ctx, request, payload, decodeErr)
+		if attempt > maximumSchemaRepairAttempts {
+			return nil, &SchemaGenerationError{RepairAttempts: maximumSchemaRepairAttempts, Diagnostic: publicSchemaDiagnostic(decodeErr)}
+		}
+		repairRequest := request
+		if repairRequest.InvocationKey != "" {
+			repairRequest.InvocationKey = fmt.Sprintf("%s:schema:%d", repairRequest.InvocationKey, attempt)
+		}
+		payload, err = repairer.Repair(ctx, repairRequest, payload, decodeErr)
 		if err != nil {
-			return nil, fmt.Errorf("repair workforce candidate: %w", err)
+			return nil, fmt.Errorf("repair workforce candidate schema attempt %d: %w", attempt, err)
 		}
 		if len(payload) == 0 || len(payload) > maximumGenerationBytes {
 			return nil, errors.New("repaired workforce candidate must be between 1 byte and 1 MiB")
 		}
 		generated, decodeErr = decodeGenerationResponse(payload)
-		if decodeErr != nil {
-			return nil, fmt.Errorf("decode repaired workforce candidate: %w", decodeErr)
-		}
 		repairUsed = true
 	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
@@ -117,6 +140,52 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+func publicSchemaDiagnostic(err error) string {
+	switch value := err.(type) {
+	case *json.SyntaxError:
+		return fmt.Sprintf("malformed JSON at byte %d", value.Offset)
+	case *json.UnmarshalTypeError:
+		field := strings.TrimSpace(value.Field)
+		if field == "" {
+			field = "unknown"
+		}
+		return truncateSchemaDiagnostic(fmt.Sprintf("field %s expects %s but received %s", field, value.Type, value.Value))
+	}
+	message := strings.TrimSpace(err.Error())
+	const unknownPrefix = "json: unknown field \""
+	if strings.HasPrefix(message, unknownPrefix) && strings.HasSuffix(message, "\"") {
+		field := strings.TrimSuffix(strings.TrimPrefix(message, unknownPrefix), "\"")
+		if validSchemaFieldName(field) {
+			return "unknown field " + field
+		}
+	}
+	if strings.Contains(message, "must contain one JSON object") {
+		return "provider response must contain one JSON object"
+	}
+	return "strict JSON schema mismatch"
+}
+
+func validSchemaFieldName(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func truncateSchemaDiagnostic(value string) string {
+	if len(value) <= maximumPublicSchemaDiagnostic {
+		return value
+	}
+	return value[:maximumPublicSchemaDiagnostic]
 }
 
 func deterministicContractError(validation []ValidationIssue, missing []MissingRequirement) error {

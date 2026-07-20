@@ -99,6 +99,13 @@ func TestPreparedGenerationFailureIsDurable(t *testing.T) {
 	}
 }
 
+func TestSchemaGenerationFailureClassificationIsActionable(t *testing.T) {
+	code, message := classifyGenerationFailure(&SchemaGenerationError{RepairAttempts: 2, Diagnostic: "field candidate.team.roles expects []team.RoleSlot but received string"})
+	if code != "schema_failed" || !strings.Contains(message, "2 bounded schema repairs") || !strings.Contains(message, "candidate.team.roles") {
+		t.Fatalf("schema failure classification = %q / %q", code, message)
+	}
+}
+
 func TestGenerationRetryIsConcurrentIdempotent(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()
