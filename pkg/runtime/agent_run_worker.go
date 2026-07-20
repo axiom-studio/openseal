@@ -272,6 +272,12 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		}
 		return
 	}
+	resolvedBinding := *binding
+	resolvedBinding.InputContextRefs = append([]string(nil), binding.InputContextRefs...)
+	binding = &resolvedBinding
+	if ref := evidenceSnapshotInputContextRef(run.Context); ref != "" && !containsString(binding.InputContextRefs, ref) {
+		binding.InputContextRefs = append(binding.InputContextRefs, ref)
+	}
 	current := run
 	for turnIndex := 0; turnIndex < p.config.MaxTurnsPerClaim; turnIndex++ {
 		advanceCtx, cancelAdvance := context.WithCancel(ctx)

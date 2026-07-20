@@ -102,6 +102,13 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 		Summary: "Run created", Visibility: visibility, CreatedAt: now,
 		Payload: map[string]interface{}{"status": run.Status, "source": run.Source, "owner": run.Owner},
 	}
+	if initiativeID, _ := run.Context["initiativeId"].(string); strings.TrimSpace(initiativeID) != "" {
+		event.InitiativeID = strings.TrimSpace(initiativeID)
+		event.Payload["initiativeId"] = event.InitiativeID
+	}
+	if snapshotID := evidenceSnapshotIdentity(run.Context); snapshotID != "" {
+		event.Payload["evidenceSnapshotId"] = snapshotID
+	}
 	persisted, err := s.store.CreateAgentRunWithEvent(ctx, run, event)
 	if err != nil {
 		if key != "" {
