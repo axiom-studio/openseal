@@ -31,6 +31,11 @@ type fakeKernelClient struct {
 	agentDeployments    []kernelapi.AgentDeploymentCatalogEntry
 	teamDeployments     []kernelapi.TeamDeploymentCatalogEntry
 	teamUpdates         []kernelapi.UpdateTeamDeploymentRequest
+	teamAmendments      []*kernelteam.DefinitionAmendment
+	teamProposals       []kernelteam.ProposeAmendmentRequest
+	teamEvaluations     []kernelteam.SubmitAmendmentEvaluationRequest
+	teamDecisions       []kernelteam.ResolveAmendmentRequest
+	teamActivations     []kernelapi.ActivateTeamDefinitionAmendmentRequest
 	runs                []*runtime.AgentRun
 	agentRequests       []*runtime.AgentRequest
 	agentRequestFilters []runtime.AgentRequestFilter
@@ -749,6 +754,65 @@ func (f *fakeKernelClient) ListTeamDefinitionActivations(context.Context, capabi
 	return nil, errors.New("not implemented by test client")
 }
 
+func (f *fakeKernelClient) ProposeTeamDefinitionAmendment(_ context.Context, request kernelteam.ProposeAmendmentRequest) (*kernelteam.DefinitionAmendment, error) {
+	f.teamProposals = append(f.teamProposals, request)
+	amendment := &kernelteam.DefinitionAmendment{ID: "amendment-new", Scope: request.Scope, DeploymentID: request.DeploymentID, DefinitionID: request.Candidate.ID, BaseVersion: "1", BaseDigest: "sha256:base", Candidate: *request.Candidate, Changes: []workforce.DefinitionFieldChange{{Field: "purpose"}}, ProposerType: request.ProposerType, ProposerID: request.ProposerID, Rationale: request.Rationale, Status: kernelteam.AmendmentReady, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.teamAmendments = append([]*kernelteam.DefinitionAmendment{amendment}, f.teamAmendments...)
+	return amendment, nil
+}
+
+func (f *fakeKernelClient) GetTeamDefinitionAmendment(_ context.Context, scope capability.ScopeReference, deploymentID, amendmentID string) (*kernelteam.DefinitionAmendment, error) {
+	for _, amendment := range f.teamAmendments {
+		if amendment.Scope == scope && amendment.DeploymentID == deploymentID && amendment.ID == amendmentID {
+			return amendment, nil
+		}
+	}
+	return nil, kernelteam.ErrAmendmentNotFound
+}
+
+func (f *fakeKernelClient) ListTeamDefinitionAmendments(_ context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.TeamDefinitionAmendmentList, error) {
+	result := &kernelapi.TeamDefinitionAmendmentList{}
+	for _, amendment := range f.teamAmendments {
+		if amendment.Scope == scope && amendment.DeploymentID == deploymentID {
+			result.Items = append(result.Items, amendment)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeKernelClient) SubmitTeamDefinitionAmendmentEvaluation(_ context.Context, _ string, request kernelteam.SubmitAmendmentEvaluationRequest) (*kernelteam.DefinitionAmendment, error) {
+	f.teamEvaluations = append(f.teamEvaluations, request)
+	amendment, err := f.GetTeamDefinitionAmendment(context.Background(), request.Scope, f.teamAmendments[0].DeploymentID, request.AmendmentID)
+	if err != nil {
+		return nil, err
+	}
+	amendment.Evaluations, amendment.Status, amendment.Revision = request.Evaluations, kernelteam.AmendmentAwaitingApproval, request.ExpectedRevision+1
+	return amendment, nil
+}
+
+func (f *fakeKernelClient) ResolveTeamDefinitionAmendment(_ context.Context, _ string, request kernelteam.ResolveAmendmentRequest) (*kernelteam.DefinitionAmendment, error) {
+	f.teamDecisions = append(f.teamDecisions, request)
+	amendment := f.teamAmendments[0]
+	amendment.Decision = &kernelteam.AmendmentDecision{Approved: request.Approved, ActorType: request.ActorType, ActorID: request.ActorID, Reason: request.Reason}
+	amendment.Revision = request.ExpectedRevision + 1
+	if request.Approved {
+		amendment.Status = kernelteam.AmendmentApproved
+	} else {
+		amendment.Status = kernelteam.AmendmentRejected
+	}
+	return amendment, nil
+}
+
+func (f *fakeKernelClient) ActivateTeamDefinitionAmendment(_ context.Context, _ string, _ string, request kernelapi.ActivateTeamDefinitionAmendmentRequest) (*kernelapi.TeamDefinitionAmendmentActivationResult, error) {
+	f.teamActivations = append(f.teamActivations, request)
+	amendment := f.teamAmendments[0]
+	amendment.Status, amendment.Revision, amendment.ActivationID = kernelteam.AmendmentActivated, request.ExpectedRevision+1, "activation-amendment"
+	deployment := *f.teamDeployments[0].Deployment
+	deployment.ActiveVersion, deployment.Revision = amendment.Candidate.Version, deployment.Revision+1
+	f.teamDeployments[0].Deployment, f.teamDeployments[0].Definition = &deployment, &amendment.Candidate
+	return &kernelapi.TeamDefinitionAmendmentActivationResult{Amendment: amendment, Deployment: &deployment, Activation: &workforce.DefinitionActivation{ID: amendment.ActivationID}}, nil
+}
+
 func (f *fakeKernelClient) RegisterArtifact(context.Context, runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
 	return nil, errors.New("not implemented by test client")
 }
@@ -868,6 +932,78 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	}
 	if selected := model.selectedTeamDeploymentRecord(); selected == nil || selected.Deployment == nil || selected.Deployment.Revision != 8 || selected.Deployment.Status != kernelteam.DeploymentPaused {
 		t.Fatalf("updated Team was not reloaded: %#v", selected)
+	}
+}
+
+func TestTeamAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	definition := &kernelteam.Definition{
+		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Monitor evidence",
+		Roles:        []kernelteam.RoleSlot{{ID: "analyst", DisplayName: "Analyst", Purpose: "Synthesize evidence"}},
+		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
+		Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:local"}},
+	}
+	candidate := *definition
+	candidate.Version, candidate.Purpose = "2", "Monitor and synthesize attributable evidence"
+	deployment := &kernelteam.Deployment{ID: "research-live", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Status: kernelteam.DeploymentActive, Revision: 9}
+	amendment := &kernelteam.DefinitionAmendment{
+		ID: "amend-1", Scope: scope, DeploymentID: deployment.ID, DefinitionID: definition.ID, BaseVersion: definition.Version, BaseDigest: "sha256:base",
+		Candidate: candidate, Changes: []workforce.DefinitionFieldChange{{Field: "purpose"}}, ProposerType: "agent", ProposerID: "researcher", Rationale: "Synthesis is now part of the mandate",
+		Status: kernelteam.AmendmentEvaluating, Revision: 4, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	fake := &fakeKernelClient{
+		document:        kernelapi.NewCapabilityDocument(kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{Amendments: true})),
+		teamDeployments: []kernelapi.TeamDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}}, teamAmendments: []*kernelteam.DefinitionAmendment{amendment},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	for _, expected := range []string{"Governance history · 1 amendment(s)", "evaluating · 1 → 2 · r4", "Proposed by agent:researcher", "Changed · purpose", "evaluate"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Team governance view missing %q:\n%s", expected, view)
+		}
+	}
+
+	model.section, model.focus = sectionTeams, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model.editor.SetValue("evidence=pass: Sources remain linked to immutable observations")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.teamEvaluations) != 1 || fake.teamEvaluations[0].ExpectedRevision != 4 || len(fake.teamEvaluations[0].Evaluations) != 1 || !fake.teamEvaluations[0].Evaluations[0].Passed {
+		t.Fatalf("unsafe evaluation request: %#v", fake.teamEvaluations)
+	}
+
+	model.section, model.focus = sectionTeams, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model.editor.SetValue("Required evidence gate passed")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.teamDecisions) != 1 || fake.teamDecisions[0].ExpectedRevision != 5 || !fake.teamDecisions[0].Approved || fake.teamDecisions[0].ActorType != "user" || fake.teamDecisions[0].ActorID != "local" {
+		t.Fatalf("unsafe decision request: %#v", fake.teamDecisions)
+	}
+
+	model.section, model.focus = sectionTeams, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	model.editor.SetValue("Reviewed evidence supports activation")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.teamActivations) != 1 || fake.teamActivations[0].ExpectedRevision != 6 || fake.teamActivations[0].ActorType != "user" || fake.teamActivations[0].ActorID != "local" || fake.teamDeployments[0].Deployment.ActiveVersion != "2" {
+		t.Fatalf("unsafe activation request: requests=%#v deployment=%#v", fake.teamActivations, fake.teamDeployments[0].Deployment)
+	}
+	if !strings.Contains(model.View(), "activated · 1 → 2 · r7") || !strings.Contains(model.View(), "Activation · activation-amendment") {
+		t.Fatalf("authoritative activation was not rendered:\n%s", model.View())
+	}
+
+	readOnly := newTestModel(t, &fakeKernelClient{
+		document:        kernelapi.NewCapabilityDocument(kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{})),
+		teamDeployments: []kernelapi.TeamDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}}, teamAmendments: []*kernelteam.DefinitionAmendment{amendment},
+	})
+	applyCommand(t, readOnly, readOnly.loadCapabilities())
+	for _, forbidden := range []string{"Governance history", "m propose purpose", "Enter evaluate", "y approve", "v activate"} {
+		if strings.Contains(readOnly.View(), forbidden) {
+			t.Fatalf("unadvertised Team governance control %q rendered:\n%s", forbidden, readOnly.View())
+		}
 	}
 }
 

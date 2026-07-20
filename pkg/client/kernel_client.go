@@ -94,6 +94,12 @@ type TeamClient interface {
 	UpdateTeamDeployment(context.Context, string, kernelapi.UpdateTeamDeploymentRequest) (*kernelapi.TeamDeploymentResult, error)
 	ActivateTeamDefinition(context.Context, string, kernelapi.ActivateTeamDefinitionRequest) (*kernelapi.TeamDeploymentResult, error)
 	ListTeamDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
+	ProposeTeamDefinitionAmendment(context.Context, kernelteam.ProposeAmendmentRequest) (*kernelteam.DefinitionAmendment, error)
+	GetTeamDefinitionAmendment(context.Context, capability.ScopeReference, string, string) (*kernelteam.DefinitionAmendment, error)
+	ListTeamDefinitionAmendments(context.Context, capability.ScopeReference, string) (*kernelapi.TeamDefinitionAmendmentList, error)
+	SubmitTeamDefinitionAmendmentEvaluation(context.Context, string, kernelteam.SubmitAmendmentEvaluationRequest) (*kernelteam.DefinitionAmendment, error)
+	ResolveTeamDefinitionAmendment(context.Context, string, kernelteam.ResolveAmendmentRequest) (*kernelteam.DefinitionAmendment, error)
+	ActivateTeamDefinitionAmendment(context.Context, string, string, kernelapi.ActivateTeamDefinitionAmendmentRequest) (*kernelapi.TeamDefinitionAmendmentActivationResult, error)
 }
 
 type KernelHTTPClient struct {
@@ -775,6 +781,60 @@ func (c *KernelHTTPClient) ListTeamDefinitionActivations(ctx context.Context, sc
 		return nil, err
 	}
 	return result, nil
+}
+
+func (c *KernelHTTPClient) ProposeTeamDefinitionAmendment(ctx context.Context, request kernelteam.ProposeAmendmentRequest) (*kernelteam.DefinitionAmendment, error) {
+	var result kernelteam.DefinitionAmendment
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(request.DeploymentID)) + "/amendments"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) GetTeamDefinitionAmendment(ctx context.Context, scope capability.ScopeReference, deploymentID, amendmentID string) (*kernelteam.DefinitionAmendment, error) {
+	var result kernelteam.DefinitionAmendment
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(amendmentID)) + "?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListTeamDefinitionAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.TeamDefinitionAmendmentList, error) {
+	var result kernelapi.TeamDefinitionAmendmentList
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) SubmitTeamDefinitionAmendmentEvaluation(ctx context.Context, deploymentID string, request kernelteam.SubmitAmendmentEvaluationRequest) (*kernelteam.DefinitionAmendment, error) {
+	var result kernelteam.DefinitionAmendment
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(request.AmendmentID)) + "/evaluations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ResolveTeamDefinitionAmendment(ctx context.Context, deploymentID string, request kernelteam.ResolveAmendmentRequest) (*kernelteam.DefinitionAmendment, error) {
+	var result kernelteam.DefinitionAmendment
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(request.AmendmentID)) + "/decisions"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ActivateTeamDefinitionAmendment(ctx context.Context, deploymentID, amendmentID string, request kernelapi.ActivateTeamDefinitionAmendmentRequest) (*kernelapi.TeamDefinitionAmendmentActivationResult, error) {
+	var result kernelapi.TeamDefinitionAmendmentActivationResult
+	path := "/api/v1/team-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(amendmentID)) + "/activations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (c *KernelHTTPClient) do(ctx context.Context, method, path string, body interface{}, idempotencyKey string, result interface{}) error {

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -66,6 +67,18 @@ func (m *Model) renderHeader(width int) string {
 }
 
 func (m *Model) renderComposer(width int) string {
+	if m.mode == modeTeamAmendmentPropose && !m.supportsTeamDefinition(kernelapi.OperationProposeAmendment) {
+		return m.renderUnavailableComposer(width, "Propose Team amendment", "This server does not advertise governed Team amendments.")
+	}
+	if m.mode == modeTeamAmendmentEvaluate && !m.supportsTeamDefinition(kernelapi.OperationEvaluateAmendment) {
+		return m.renderUnavailableComposer(width, "Evaluate Team amendment", "This server does not advertise Team amendment evaluations.")
+	}
+	if (m.mode == modeTeamAmendmentApprove || m.mode == modeTeamAmendmentReject) && !m.supportsTeamDefinition(kernelapi.OperationResolveAmendment) {
+		return m.renderUnavailableComposer(width, "Review Team amendment", "This server does not advertise Team amendment decisions.")
+	}
+	if m.mode == modeTeamAmendmentActivate && !m.supportsTeamDefinition(kernelapi.OperationActivateAmendment) {
+		return m.renderUnavailableComposer(width, "Activate Team amendment", "This server does not advertise Team amendment activation.")
+	}
 	if m.mode == modeWorkforceAuthoring && !m.supportsWorkforceAuthoring() {
 		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce authoring.")
 	}
@@ -90,7 +103,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -100,6 +113,26 @@ func (m *Model) renderComposer(width int) string {
 	description := "Describe an outcome. OpenSeal will keep the work safe across restarts."
 	owner := humanOwner(m.config.Owner)
 	switch m.mode {
+	case modeTeamAmendmentPropose:
+		title = "Propose Team purpose amendment"
+		description = "Record a concise rationale and a new immutable Team purpose for governed review."
+		owner = "No behavior changes until activation"
+	case modeTeamAmendmentEvaluate:
+		title = "Evaluate Team amendment"
+		description = "Record pass/fail evidence for every declared criterion at this exact revision."
+		owner = "Revision-bound evaluation audit"
+	case modeTeamAmendmentApprove:
+		title = "Approve Team amendment"
+		description = "Record why this reviewed candidate may proceed. The decision is permanent."
+		owner = "Eligible principal · revision-bound decision"
+	case modeTeamAmendmentReject:
+		title = "Reject Team amendment"
+		description = "Record why this candidate must not proceed. The decision is permanent."
+		owner = "Eligible principal · revision-bound decision"
+	case modeTeamAmendmentActivate:
+		title = "Activate Team amendment"
+		description = "Atomically activate this exact reviewed definition and reload authoritative Team state."
+		owner = "Optimistic revision · immutable activation audit"
 	case modeWorkforceAuthoring:
 		if m.authoringResult == nil {
 			title = "Create Agents and Teams"
@@ -445,9 +478,65 @@ func (m *Model) renderTeamsContent(width int) string {
 			lines = append(lines, compact("• "+objective.Title, max(width-6, 24)))
 		}
 	}
-	if m.supportsTeamDefinition(kernelapi.OperationUpdate) && (deployment.Status == "active" || deployment.Status == "paused") {
-		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("p pause/resume · r refresh"))
+	if m.supportsTeamDefinition(kernelapi.OperationListAmendments) {
+		lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Governance history · %d amendment(s)", len(m.teamAmendments))))
+		for index, amendment := range m.teamAmendments[:min(3, len(m.teamAmendments))] {
+			if amendment == nil {
+				continue
+			}
+			prefix := "  "
+			if index == m.teamAmendmentSelected {
+				prefix = "› "
+			}
+			lines = append(lines, compact(fmt.Sprintf("%s%s · %s → %s · r%d", prefix, amendment.Status, amendment.BaseVersion, amendment.Candidate.Version, amendment.Revision), max(width-6, 24)))
+		}
+		if amendment := m.selectedTeamAmendmentRecord(); amendment != nil {
+			lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Proposed by %s:%s · %s", amendment.ProposerType, amendment.ProposerID, amendment.Rationale), max(width-6, 24))))
+			if amendment.RiskWidening {
+				lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render("Risk widening · approval required"))
+			}
+			for _, change := range amendment.Changes {
+				lines = append(lines, mutedStyle.Render("  Changed · "+change.Field))
+			}
+			for _, evaluation := range amendment.Evaluations {
+				outcome := "failed"
+				if evaluation.Passed {
+					outcome = "passed"
+				}
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  Evaluation %s · %s · %s", evaluation.CriterionID, outcome, evaluation.Summary), max(width-8, 24))))
+			}
+			if amendment.Decision != nil {
+				decision := "rejected"
+				if amendment.Decision.Approved {
+					decision = "approved"
+				}
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  Decision %s by %s:%s · %s", decision, amendment.Decision.ActorType, amendment.Decision.ActorID, amendment.Decision.Reason), max(width-8, 24))))
+			}
+			if amendment.Status == kernelteam.AmendmentActivated {
+				lines = append(lines, mutedStyle.Render("  Activation · "+amendment.ActivationID))
+			}
+		}
 	}
+	actions := []string{"r refresh"}
+	if m.supportsTeamDefinition(kernelapi.OperationUpdate) && (deployment.Status == "active" || deployment.Status == "paused") {
+		actions = append(actions, "p pause/resume")
+	}
+	if m.canProposeTeamPurposeAmendment() {
+		actions = append(actions, "m propose purpose")
+	}
+	if len(m.teamAmendments) > 1 {
+		actions = append(actions, "[ ] amendment")
+	}
+	if m.canEvaluateSelectedTeamAmendment() {
+		actions = append(actions, "Enter evaluate")
+	}
+	if m.canResolveSelectedTeamAmendment() {
+		actions = append(actions, "y approve", "x reject")
+	}
+	if m.canActivateSelectedTeamAmendment() {
+		actions = append(actions, "v activate")
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, " · ")))
 	return strings.Join(lines, "\n")
 }
 

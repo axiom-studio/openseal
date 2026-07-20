@@ -5,6 +5,7 @@ package tui
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/axiom-studio/openseal/pkg/source"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -113,6 +115,11 @@ const (
 	modeRequestComplete
 	modeApprovalApprove
 	modeApprovalReject
+	modeTeamAmendmentPropose
+	modeTeamAmendmentEvaluate
+	modeTeamAmendmentApprove
+	modeTeamAmendmentReject
+	modeTeamAmendmentActivate
 )
 
 type Model struct {
@@ -170,6 +177,9 @@ type Model struct {
 	teamDeployments             []kernelapi.TeamDeploymentCatalogEntry
 	teamDeploymentSelected      int
 	selectedTeamDeployment      string
+	teamAmendments              []*kernelteam.DefinitionAmendment
+	teamAmendmentSelected       int
+	selectedTeamAmendment       string
 	objectives                  []*runtime.Objective
 	objectiveSelected           int
 	selectedObjective           string
@@ -251,6 +261,19 @@ type teamDeploymentsLoaded struct {
 type teamDeploymentUpdated struct {
 	result *kernelapi.TeamDeploymentResult
 	err    error
+}
+
+type teamAmendmentsLoaded struct {
+	deploymentID string
+	items        []*kernelteam.DefinitionAmendment
+	err          error
+}
+
+type teamAmendmentChanged struct {
+	amendment  *kernelteam.DefinitionAmendment
+	deployment *kernelteam.Deployment
+	action     string
+	err        error
 }
 
 type runsLoaded struct {
@@ -680,6 +703,18 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.teamDeployments = msg.items
 		m.restoreTeamDeploymentSelection()
+		return m, m.loadTeamAmendments()
+	case teamAmendmentsLoaded:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if deployment := m.selectedTeamDeploymentRecord(); deployment == nil || deployment.Deployment == nil || deployment.Deployment.ID != msg.deploymentID {
+			return m, nil
+		}
+		m.err = nil
+		m.teamAmendments = msg.items
+		m.restoreTeamAmendmentSelection()
 		return m, nil
 	case teamDeploymentUpdated:
 		m.busy = false
@@ -692,6 +727,25 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.result != nil && msg.result.Deployment != nil {
 			m.selectedTeamDeployment = msg.result.Deployment.ID
 			m.status = fmt.Sprintf("Team is now %s at revision %d.", msg.result.Deployment.Status, msg.result.Deployment.Revision)
+		}
+		return m, m.loadTeamDeployments()
+	case teamAmendmentChanged:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. Refreshing authoritative Team governance state."
+			return m, tea.Batch(m.loadTeamDeployments(), m.loadTeamAmendments())
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.amendment != nil {
+			m.selectedTeamAmendment = msg.amendment.ID
+			m.status = fmt.Sprintf("%s recorded · %s · revision %d.", msg.action, msg.amendment.Status, msg.amendment.Revision)
+		}
+		if msg.deployment != nil {
+			m.selectedTeamDeployment = msg.deployment.ID
 		}
 		return m, m.loadTeamDeployments()
 	case objectivesLoaded:
@@ -1168,6 +1222,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitActionApproval(true)
 			case modeApprovalReject:
 				return m, m.submitActionApproval(false)
+			case modeTeamAmendmentPropose:
+				return m, m.submitTeamAmendmentProposal()
+			case modeTeamAmendmentEvaluate:
+				return m, m.submitTeamAmendmentEvaluation()
+			case modeTeamAmendmentApprove:
+				return m, m.submitTeamAmendmentDecision(true)
+			case modeTeamAmendmentReject:
+				return m, m.submitTeamAmendmentDecision(false)
+			case modeTeamAmendmentActivate:
+				return m, m.submitTeamAmendmentActivation()
 			default:
 				return m, m.submitRun()
 			}
@@ -1186,6 +1250,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if m.section == sectionChannels {
 				return m, m.loadSelectedConversation()
+			} else if m.section == sectionTeams {
+				return m, m.loadTeamAmendments()
 			}
 		case "down", "j":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
@@ -1197,6 +1263,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if m.section == sectionChannels {
 				return m, m.loadSelectedConversation()
+			} else if m.section == sectionTeams {
+				return m, m.loadTeamAmendments()
 			}
 		case "w":
 			if m.runCapability.Available {
@@ -1290,10 +1358,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "[":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(-1)
+			} else if m.section == sectionTeams {
+				m.moveTeamAmendmentSelection(-1)
 			}
 		case "]":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(1)
+			} else if m.section == sectionTeams {
+				m.moveTeamAmendmentSelection(1)
 			}
 		case "b":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
@@ -1302,6 +1374,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "m":
 			if m.section == sectionActivity && m.activityHasMore {
 				return m, m.loadActivity(true)
+			} else if m.section == sectionTeams && m.canProposeTeamPurposeAmendment() {
+				m.prepareTeamAmendmentComposer(modeTeamAmendmentPropose, "First line: concise rationale\nRemaining lines: the Team's new purpose")
 			} else if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
 				m.mode = modeChannelPost
 				m.editor.Reset()
@@ -1331,6 +1405,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareRequestComposer(modeApprovalReject, "Explain why this action must not proceed…")
 			} else if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
+			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
+				m.prepareTeamAmendmentComposer(modeTeamAmendmentReject, "Record why this exact Team amendment must not proceed…")
 			} else if m.section == sectionSkills && m.selectedClawHubRecord() != nil && m.supportsClawHub(clawhub.LifecycleUninstall) {
 				m.mode = modeSkillRemove
 				m.editor.Reset()
@@ -1348,6 +1424,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareRequestComposer(modeRequestAccept, placeholder)
 			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
 				m.prepareRequestComposer(modeApprovalApprove, "Record why this exact action is safe to approve…")
+			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
+				m.prepareTeamAmendmentComposer(modeTeamAmendmentApprove, "Record why this exact Team amendment is approved…")
 			}
 		case "?":
 			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionRequestClarification) {
@@ -1367,7 +1445,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "e", "enter":
-			if m.section == sectionAuthoring && m.canApplyWorkforce() {
+			if m.section == sectionTeams && m.canEvaluateSelectedTeamAmendment() {
+				m.prepareTeamAmendmentComposer(modeTeamAmendmentEvaluate, teamEvaluationPlaceholder(m.selectedTeamDeploymentRecord()))
+			} else if m.section == sectionAuthoring && m.canApplyWorkforce() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
 			} else if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
 				m.mode = modeObjectiveEdit
@@ -1407,7 +1487,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.updateAllClawHub()
 			}
 		case "v":
-			if m.section == sectionSkills {
+			if m.section == sectionTeams && m.canActivateSelectedTeamAmendment() {
+				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
+			} else if m.section == sectionSkills {
 				return m, m.verifySelectedClawHub()
 			}
 		}
@@ -1845,6 +1927,30 @@ func (m *Model) loadTeamDeployments() tea.Cmd {
 			return teamDeploymentsLoaded{}
 		}
 		return teamDeploymentsLoaded{items: result.Items}
+	}
+}
+
+func (m *Model) loadTeamAmendments() tea.Cmd {
+	if !m.supportsTeamDefinition(kernelapi.OperationListAmendments) {
+		m.teamAmendments = nil
+		m.selectedTeamAmendment = ""
+		m.teamAmendmentSelected = 0
+		return nil
+	}
+	entry := m.selectedTeamDeploymentRecord()
+	if entry == nil || entry.Deployment == nil {
+		return nil
+	}
+	scope, deploymentID := entry.Deployment.Scope, entry.Deployment.ID
+	return func() tea.Msg {
+		result, err := m.client.ListTeamDefinitionAmendments(m.ctx, scope, deploymentID)
+		if err != nil {
+			return teamAmendmentsLoaded{deploymentID: deploymentID, err: err}
+		}
+		if result == nil {
+			return teamAmendmentsLoaded{deploymentID: deploymentID}
+		}
+		return teamAmendmentsLoaded{deploymentID: deploymentID, items: result.Items}
 	}
 }
 
@@ -3230,8 +3336,86 @@ func (m *Model) moveTeamDeploymentSelection(delta int) {
 	}
 	m.teamDeploymentSelected = max(0, min(len(m.teamDeployments)-1, m.teamDeploymentSelected+delta))
 	if deployment := m.teamDeployments[m.teamDeploymentSelected].Deployment; deployment != nil {
+		if deployment.ID != m.selectedTeamDeployment {
+			m.teamAmendments = nil
+			m.selectedTeamAmendment = ""
+			m.teamAmendmentSelected = 0
+		}
 		m.selectedTeamDeployment = deployment.ID
 	}
+}
+
+func (m *Model) selectedTeamAmendmentRecord() *kernelteam.DefinitionAmendment {
+	if m.teamAmendmentSelected < 0 || m.teamAmendmentSelected >= len(m.teamAmendments) {
+		return nil
+	}
+	return m.teamAmendments[m.teamAmendmentSelected]
+}
+
+func (m *Model) restoreTeamAmendmentSelection() {
+	if len(m.teamAmendments) == 0 {
+		m.teamAmendmentSelected = 0
+		m.selectedTeamAmendment = ""
+		return
+	}
+	for index, amendment := range m.teamAmendments {
+		if amendment != nil && amendment.ID == m.selectedTeamAmendment {
+			m.teamAmendmentSelected = index
+			return
+		}
+	}
+	m.teamAmendmentSelected = min(m.teamAmendmentSelected, len(m.teamAmendments)-1)
+	if amendment := m.teamAmendments[m.teamAmendmentSelected]; amendment != nil {
+		m.selectedTeamAmendment = amendment.ID
+	}
+}
+
+func (m *Model) moveTeamAmendmentSelection(delta int) {
+	if len(m.teamAmendments) == 0 {
+		return
+	}
+	m.teamAmendmentSelected = max(0, min(len(m.teamAmendments)-1, m.teamAmendmentSelected+delta))
+	if amendment := m.teamAmendments[m.teamAmendmentSelected]; amendment != nil {
+		m.selectedTeamAmendment = amendment.ID
+	}
+}
+
+func (m *Model) canProposeTeamPurposeAmendment() bool {
+	entry := m.selectedTeamDeploymentRecord()
+	if entry == nil || entry.Definition == nil || !m.supportsTeamDefinition(kernelapi.OperationProposeAmendment) {
+		return false
+	}
+	for _, field := range entry.Definition.Amendments.AllowedFields {
+		if field == "purpose" {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) canResolveSelectedTeamAmendment() bool {
+	amendment := m.selectedTeamAmendmentRecord()
+	entry := m.selectedTeamDeploymentRecord()
+	if amendment == nil || amendment.Status != kernelteam.AmendmentAwaitingApproval || entry == nil || entry.Definition == nil || !m.supportsTeamDefinition(kernelapi.OperationResolveAmendment) {
+		return false
+	}
+	principal := strings.TrimSpace(m.config.Actor.Type) + ":" + strings.TrimSpace(m.config.Actor.ID)
+	for _, eligible := range entry.Definition.Amendments.ApproverPrincipals {
+		if eligible == principal {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) canEvaluateSelectedTeamAmendment() bool {
+	amendment := m.selectedTeamAmendmentRecord()
+	return amendment != nil && amendment.Status == kernelteam.AmendmentEvaluating && m.supportsTeamDefinition(kernelapi.OperationEvaluateAmendment)
+}
+
+func (m *Model) canActivateSelectedTeamAmendment() bool {
+	amendment := m.selectedTeamAmendmentRecord()
+	return amendment != nil && (amendment.Status == kernelteam.AmendmentReady || amendment.Status == kernelteam.AmendmentApproved) && m.supportsTeamDefinition(kernelapi.OperationActivateAmendment)
 }
 
 func (m *Model) pauseOrResumeTeamDeployment() tea.Cmd {
@@ -3265,6 +3449,158 @@ func (m *Model) pauseOrResumeTeamDeployment() tea.Cmd {
 		result, err := m.client.UpdateTeamDeployment(m.ctx, current.ID, request)
 		return teamDeploymentUpdated{result: result, err: err}
 	}
+}
+
+func (m *Model) submitTeamAmendmentProposal() tea.Cmd {
+	entry := m.selectedTeamDeploymentRecord()
+	prompt := strings.TrimSpace(m.editor.Value())
+	if !m.canProposeTeamPurposeAmendment() || entry == nil || entry.Deployment == nil || entry.Definition == nil || m.busy {
+		return nil
+	}
+	rationale, purpose, ok := strings.Cut(prompt, "\n")
+	rationale, purpose = strings.TrimSpace(rationale), strings.TrimSpace(purpose)
+	if !ok || rationale == "" || purpose == "" {
+		m.status = "Use the first line for rationale and the remaining lines for the new Team purpose."
+		return nil
+	}
+	if purpose == strings.TrimSpace(entry.Definition.Purpose) {
+		m.status = "The proposed purpose must change Team behavior."
+		return nil
+	}
+	candidate := *entry.Definition
+	digest := sha256.Sum256([]byte(entry.Definition.Digest + "\x00" + purpose))
+	candidate.Version = fmt.Sprintf("amend-%x", digest[:8])
+	candidate.Purpose, candidate.Digest, candidate.CreatedAt = purpose, "", time.Time{}
+	request := kernelteam.ProposeAmendmentRequest{
+		Scope: entry.Deployment.Scope, DeploymentID: entry.Deployment.ID, Candidate: &candidate,
+		ProposerType: m.config.Actor.Type, ProposerID: m.config.Actor.ID, Rationale: rationale,
+	}
+	m.busy, m.err = true, nil
+	m.status = "Recording immutable Team amendment candidate…"
+	return func() tea.Msg {
+		amendment, err := m.client.ProposeTeamDefinitionAmendment(m.ctx, request)
+		return teamAmendmentChanged{amendment: amendment, action: "Team amendment proposal", err: err}
+	}
+}
+
+func (m *Model) submitTeamAmendmentEvaluation() tea.Cmd {
+	amendment := m.selectedTeamAmendmentRecord()
+	entry := m.selectedTeamDeploymentRecord()
+	if !m.canEvaluateSelectedTeamAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || entry.Definition == nil || m.busy {
+		return nil
+	}
+	evaluations, err := parseTeamAmendmentEvaluations(m.editor.Value(), entry.Definition.Evaluations)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	request := kernelteam.SubmitAmendmentEvaluationRequest{
+		Scope: amendment.Scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Evaluations: evaluations,
+	}
+	m.busy, m.err = true, nil
+	m.status = "Recording revision-bound Team evaluation…"
+	return func() tea.Msg {
+		updated, err := m.client.SubmitTeamDefinitionAmendmentEvaluation(m.ctx, entry.Deployment.ID, request)
+		return teamAmendmentChanged{amendment: updated, action: "Team evaluation", err: err}
+	}
+}
+
+func (m *Model) submitTeamAmendmentDecision(approved bool) tea.Cmd {
+	amendment := m.selectedTeamAmendmentRecord()
+	entry := m.selectedTeamDeploymentRecord()
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canResolveSelectedTeamAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || m.busy {
+		return nil
+	}
+	if reason == "" {
+		m.status = "Record a reason for the permanent Team amendment decision."
+		return nil
+	}
+	request := kernelteam.ResolveAmendmentRequest{
+		Scope: amendment.Scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: approved,
+		ActorType: m.config.Actor.Type, ActorID: m.config.Actor.ID, Reason: reason,
+	}
+	action := "Team amendment approval"
+	if !approved {
+		action = "Team amendment rejection"
+	}
+	m.busy, m.err = true, nil
+	m.status = "Recording revision-bound Team decision…"
+	return func() tea.Msg {
+		updated, err := m.client.ResolveTeamDefinitionAmendment(m.ctx, entry.Deployment.ID, request)
+		return teamAmendmentChanged{amendment: updated, action: action, err: err}
+	}
+}
+
+func (m *Model) submitTeamAmendmentActivation() tea.Cmd {
+	amendment := m.selectedTeamAmendmentRecord()
+	entry := m.selectedTeamDeploymentRecord()
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canActivateSelectedTeamAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || m.busy {
+		return nil
+	}
+	if reason == "" {
+		m.status = "Record why this exact Team definition should become active."
+		return nil
+	}
+	request := kernelapi.ActivateTeamDefinitionAmendmentRequest{
+		Scope: amendment.Scope, ExpectedRevision: amendment.Revision,
+		ActorType: m.config.Actor.Type, ActorID: m.config.Actor.ID, Reason: reason,
+	}
+	m.busy, m.err = true, nil
+	m.status = "Atomically activating reviewed Team definition…"
+	return func() tea.Msg {
+		result, err := m.client.ActivateTeamDefinitionAmendment(m.ctx, entry.Deployment.ID, amendment.ID, request)
+		if result == nil {
+			return teamAmendmentChanged{action: "Team amendment activation", err: err}
+		}
+		return teamAmendmentChanged{amendment: result.Amendment, deployment: result.Deployment, action: "Team amendment activation", err: err}
+	}
+}
+
+func parseTeamAmendmentEvaluations(input string, criteria []workforce.EvaluationCriterion) ([]kernelteam.AmendmentEvaluation, error) {
+	byID := make(map[string]kernelteam.AmendmentEvaluation, len(criteria))
+	for _, raw := range strings.Split(strings.TrimSpace(input), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		criterionID, result, ok := strings.Cut(line, "=")
+		outcome, summary, hasSummary := strings.Cut(result, ":")
+		criterionID, outcome, summary = strings.TrimSpace(criterionID), strings.ToLower(strings.TrimSpace(outcome)), strings.TrimSpace(summary)
+		if !ok || !hasSummary || criterionID == "" || summary == "" || (outcome != "pass" && outcome != "fail") {
+			return nil, errors.New("Use one line per criterion: criterion-id=pass|fail: concise evidence summary")
+		}
+		if _, duplicate := byID[criterionID]; duplicate {
+			return nil, fmt.Errorf("evaluation criterion %q was entered more than once", criterionID)
+		}
+		byID[criterionID] = kernelteam.AmendmentEvaluation{CriterionID: criterionID, Passed: outcome == "pass", Summary: summary}
+	}
+	result := make([]kernelteam.AmendmentEvaluation, 0, len(criteria))
+	for _, criterion := range criteria {
+		evaluation, ok := byID[criterion.ID]
+		if !ok {
+			return nil, fmt.Errorf("evaluation result is required for %q", criterion.ID)
+		}
+		result = append(result, evaluation)
+		delete(byID, criterion.ID)
+	}
+	if len(byID) > 0 {
+		return nil, errors.New("evaluation contains a criterion not declared by this Team definition")
+	}
+	return result, nil
+}
+
+func teamEvaluationPlaceholder(entry *kernelapi.TeamDeploymentCatalogEntry) string {
+	if entry == nil || entry.Definition == nil || len(entry.Definition.Evaluations) == 0 {
+		return "criterion-id=pass|fail: concise evidence summary"
+	}
+	lines := make([]string, 0, len(entry.Definition.Evaluations)+1)
+	lines = append(lines, "One line per required criterion:")
+	for _, criterion := range entry.Definition.Evaluations {
+		lines = append(lines, criterion.ID+"=pass|fail: concise evidence summary")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) selectedInitiativeRecord() *runtime.Initiative {
@@ -3408,8 +3744,17 @@ func (m *Model) prepareRequestComposer(mode editorMode, placeholder string) {
 	m.focusComposerEditor()
 }
 
+func (m *Model) prepareTeamAmendmentComposer(mode editorMode, placeholder string) {
+	m.mode = mode
+	m.editor.Reset()
+	m.editor.Placeholder = placeholder
+	m.focusComposerEditor()
+}
+
 func (m *Model) prepareComposerForSection() {
 	switch {
+	case m.section == sectionTeams && m.canProposeTeamPurposeAmendment():
+		m.prepareTeamAmendmentComposer(modeTeamAmendmentPropose, "First line: concise rationale\nRemaining lines: the Team's new purpose")
 	case m.section == sectionAuthoring && m.supportsWorkforceAuthoring():
 		m.mode = modeWorkforceAuthoring
 		m.editor.Placeholder = "Describe the Agents and Team you need…"
@@ -3458,6 +3803,11 @@ func (m *Model) prepareComposerForSection() {
 }
 
 func (m *Model) resetComposerMode() {
+	if m.section == sectionTeams {
+		m.mode = modeCreate
+		m.editor.Placeholder = "Select a Team amendment to inspect its governed lifecycle."
+		return
+	}
 	if m.section == sectionAuthoring {
 		m.mode = modeWorkforceAuthoring
 		m.editor.Placeholder = "Describe the Agents and Team you need…"
