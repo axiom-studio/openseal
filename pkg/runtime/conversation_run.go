@@ -493,11 +493,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 			return &TurnOutcome{
 				NextRunStatus: AgentRunStatusCompleted,
 				OutputSummary: "Governed Team action completed",
-				RunOutput: map[string]interface{}{
-					"conversationId": conversationID, "triggerMessageId": triggerID,
-					"participationRoundId": result.Round.ID, "messageIds": messageIDs,
-					"speakerCount": len(result.Messages), "replayed": replayed,
-				},
+				RunOutput:     participationRoundRunOutput(result, conversationID, triggerID, messageIDs, replayed),
 			}, nil
 		}
 		action := *proposal.ProposedAction
@@ -510,22 +506,36 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 			OutputSummary:          "Team participant proposed a governed action",
 			ProposedActions:        []TurnAction{action},
 			ContinuationCheckpoint: cloneMap(proposal.ActionInputs),
-			RunOutput: map[string]interface{}{
-				"conversationId": conversationID, "triggerMessageId": triggerID,
-				"participationRoundId": result.Round.ID, "messageIds": messageIDs,
-				"speakerCount": len(result.Messages), "replayed": result.Replayed,
-			},
+			RunOutput:              participationRoundRunOutput(result, conversationID, triggerID, messageIDs, result.Replayed),
 		}, nil
 	}
 	return &TurnOutcome{
 		NextRunStatus: AgentRunStatusCompleted,
 		OutputSummary: "Team channel participation coordinated",
-		RunOutput: map[string]interface{}{
-			"conversationId": conversationID, "triggerMessageId": triggerID,
-			"participationRoundId": result.Round.ID, "messageIds": messageIDs,
-			"speakerCount": len(result.Messages), "replayed": result.Replayed,
-		},
+		RunOutput:     participationRoundRunOutput(result, conversationID, triggerID, messageIDs, result.Replayed),
 	}, nil
+}
+
+func participationRoundRunOutput(result *ParticipationRoundResult, conversationID, triggerID string, messageIDs []interface{}, replayed bool) map[string]interface{} {
+	participantCount, availableCount, unavailableCount := 0, 0, 0
+	if result != nil && result.Round != nil {
+		participantCount = len(result.Round.Proposals)
+		for _, proposal := range result.Round.Proposals {
+			switch proposal.Availability.Status {
+			case ParticipationUnavailable:
+				unavailableCount++
+			case "", ParticipationAvailable:
+				availableCount++
+			}
+		}
+	}
+	return map[string]interface{}{
+		"conversationId": conversationID, "triggerMessageId": triggerID,
+		"participationRoundId": result.Round.ID, "messageIds": messageIDs,
+		"speakerCount": len(result.Messages), "replayed": replayed,
+		"participantCount": participantCount, "availableParticipantCount": availableCount,
+		"unavailableParticipantCount": unavailableCount, "degraded": unavailableCount > 0,
+	}
 }
 
 func selectedParticipationAction(round *ParticipationRound) *ParticipationProposal {

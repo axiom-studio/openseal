@@ -333,6 +333,11 @@ func TestConversationCoordinatorIsolatesUnavailableParticipantAndPreservesHealth
 	if round.Round.Proposals[1].Availability.Status != ParticipationAvailable {
 		t.Fatalf("healthy availability = %#v", round.Round.Proposals[1].Availability)
 	}
+	output := participationRoundRunOutput(round, conversation.ID, "trigger", []interface{}{round.Messages[0].ID}, false)
+	if output["participantCount"] != 2 || output["availableParticipantCount"] != 1 ||
+		output["unavailableParticipantCount"] != 1 || output["degraded"] != true {
+		t.Fatalf("degraded Run output = %#v", output)
+	}
 	replay, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		MaximumConcurrency: 2, IdempotencyKey: "degraded-round",
