@@ -524,7 +524,7 @@ func (m *Model) renderSelectedEvidenceGrounding(width int) []string {
 	} else {
 		lines = appendEvidenceField(lines, "Reviewer", grounding.review.ReviewerProvider+" / "+grounding.review.ReviewerModel, width)
 		usage := grounding.review.Usage
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Usage · %d input · %d output · %.6g cost · %d ms", usage.InputTokens, usage.OutputTokens, usage.Cost, usage.DurationMS)))
+		lines = appendEvidenceField(lines, "Usage", fmt.Sprintf("%d input · %d output · %.6g cost · %d ms", usage.InputTokens, usage.OutputTokens, usage.Cost, usage.DurationMS), width)
 	}
 	pages := groundingPages(grounding)
 	if !m.groundingExpanded {

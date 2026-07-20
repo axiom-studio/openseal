@@ -24,6 +24,7 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"go.uber.org/zap"
 )
 
@@ -2077,6 +2078,23 @@ func TestEvidenceGroundingProjectsDurableRepairReviewAndPendingState(t *testing.
 	for _, expected := range []string{"REVIEW PENDING", "Reviewer · awaiting independent review", "Usage · not recorded yet"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("pending grounding projection missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestEvidenceGroundingRemainsCalmAtNarrowTerminalWidth(t *testing.T) {
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
+	model.ready = true
+	model.focus = focusPanel
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.runs = []*runtime.AgentRun{groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)}
+	model.groundingExpanded = true
+
+	const width = 42
+	for _, line := range model.renderSelectedEvidenceGrounding(width) {
+		if rendered := lipgloss.Width(line); rendered > width {
+			t.Fatalf("grounding line width %d exceeds %d: %q", rendered, width, line)
 		}
 	}
 }
