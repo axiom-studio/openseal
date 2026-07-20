@@ -221,8 +221,8 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 const (
 	minimumHostedObjectiveInputTokens    int64 = 16000
 	minimumHostedObjectiveOutputTokens   int64 = 1000
-	minimumGroundedObjectiveInputTokens  int64 = 24000
-	minimumGroundedObjectiveOutputTokens int64 = 16000
+	minimumGroundedObjectiveInputTokens  int64 = 32000
+	minimumGroundedObjectiveOutputTokens int64 = 30000
 	minimumGroundedObjectiveTurns        int64 = 4
 )
 

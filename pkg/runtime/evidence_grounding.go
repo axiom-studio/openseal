@@ -14,7 +14,7 @@ const (
 	evidenceGroundingCheckpointKey     = "_opensealEvidenceGrounding"
 	evidenceGroundingPendingReview     = "pending_review"
 	evidenceGroundingRepairRequired    = "repair_required"
-	EvidenceGroundingReviewOutputLimit = int64(2048)
+	EvidenceGroundingReviewOutputLimit = int64(8192)
 )
 
 type EvidenceClaim struct {
