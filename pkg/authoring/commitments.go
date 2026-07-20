@@ -78,10 +78,10 @@ func extractExplicitPromptCommitments(prompt string) PromptCommitments {
 		containsTokenPhrase(tokens, "keep", "inactive") || containsTokenPhrase(tokens, "without", "activation") {
 		result.Activation = ActivationCommitmentInactive
 	}
-	if explicitPublicationApproval(tokens) {
-		// Publication crosses the portable write boundary even when a host later
-		// classifies the concrete transport as external. Requiring at write means
-		// ordinary dispatch cannot bypass the user's approval commitment.
+	if explicitSideEffectApproval(tokens) {
+		// Publication and production mutation cross the portable write boundary
+		// even when a host later assigns a higher concrete risk. Requiring at write
+		// means ordinary dispatch cannot bypass the user's approval commitment.
 		result.ApprovalRequirements = []ApprovalCommitment{{
 			OwnerType: CommitmentOwnerAgent, RequireApprovalAt: capability.RiskLevelWrite,
 		}}
@@ -188,19 +188,48 @@ func containsTokenPhrase(tokens []string, phrase ...string) bool {
 	return false
 }
 
-func explicitPublicationApproval(tokens []string) bool {
+func explicitSideEffectApproval(tokens []string) bool {
 	for index := 0; index+1 < len(tokens); index++ {
-		if tokens[index] != "approval" || tokens[index+1] != "before" {
+		if (tokens[index] != "approval" && tokens[index] != "ask" && tokens[index] != "asks") || tokens[index+1] != "before" {
 			continue
 		}
 		for cursor := index + 2; cursor < len(tokens) && cursor-index <= 8 && tokens[cursor] != "|"; cursor++ {
 			switch tokens[cursor] {
-			case "publication", "publish", "publishing", "posting", "post", "external", "outbound":
+			case "publication", "publish", "publishing", "posting", "post", "external", "outbound", "production":
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// applyExtractedApprovalCommitments repairs only a safety threshold that the
+// compiler can prove directly from the prompt. It never invents an Agent or
+// widens authority; it only makes an existing Agent require approval earlier.
+func applyExtractedApprovalCommitments(candidate *WorkforceCandidate, extracted PromptCommitments) {
+	if candidate == nil {
+		return
+	}
+	agents := candidateAgentsByID(candidate)
+	for _, commitment := range extracted.ApprovalRequirements {
+		targets := candidate.Agents
+		if commitment.OwnerID != "" {
+			target := agents[commitment.OwnerID]
+			if target == nil {
+				continue
+			}
+			targets = []*agent.AgentDefinition{target}
+		}
+		for _, definition := range targets {
+			if definition == nil {
+				continue
+			}
+			current := definition.Authority.RequireApprovalAt
+			if current == "" || riskRank(current) > riskRank(commitment.RequireApprovalAt) {
+				definition.Authority.RequireApprovalAt = commitment.RequireApprovalAt
+			}
+		}
+	}
 }
 
 func validateDeclaredCommitmentCoverage(declared, extracted PromptCommitments) []ValidationIssue {
@@ -221,7 +250,7 @@ func validateDeclaredCommitmentCoverage(declared, extracted PromptCommitments) [
 	}
 	for _, expected := range extracted.ApprovalRequirements {
 		if !approvalCommitmentCovered(declared.ApprovalRequirements, expected, commitmentOwnerIsSingleton(extracted, expected.OwnerType)) {
-			issues = append(issues, issue("commitments.approvalRequirements", "prompt_commitment_missing", fmt.Sprintf("Generator must declare approval at %s risk for outward publication", expected.RequireApprovalAt)))
+			issues = append(issues, issue("commitments.approvalRequirements", "prompt_commitment_missing", fmt.Sprintf("Generator must declare approval at %s risk for the requested side effect", expected.RequireApprovalAt)))
 		}
 	}
 	return issues
