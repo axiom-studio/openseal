@@ -1469,7 +1469,7 @@ func (m *Model) renderArtifactsContent(width int) string {
 				actions = append(actions, "e expand evidence")
 			}
 		}
-		if m.supportsArtifact(kernelapi.OperationDownload) {
+		if artifact.ContentAvailability == runtime.ArtifactContentAvailable && m.supportsArtifact(kernelapi.OperationDownload) {
 			actions = append(actions, "d download")
 		}
 		if len(actions) > 0 {

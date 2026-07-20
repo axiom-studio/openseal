@@ -3912,7 +3912,7 @@ func (m *Model) moveConversationSelection(delta int) {
 
 func (m *Model) downloadSelectedArtifact() tea.Cmd {
 	artifact := m.selectedArtifactRecord()
-	if artifact == nil || m.busy || !m.supportsArtifact(kernelapi.OperationDownload) {
+	if artifact == nil || artifact.ContentAvailability != runtime.ArtifactContentAvailable || m.busy || !m.supportsArtifact(kernelapi.OperationDownload) {
 		return nil
 	}
 	m.busy = true
