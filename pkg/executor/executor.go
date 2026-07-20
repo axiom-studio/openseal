@@ -29,15 +29,15 @@ const (
 	NodeTypePGVector = "pgvector"
 
 	// K8s action types
-	NodeTypeK8sGet     = "k8s-get"
-	NodeTypeK8sList    = "k8s-list"
-	NodeTypeK8sLogs    = "k8s-logs"
-	NodeTypeK8sEvents  = "k8s-events"
-	NodeTypeK8sRestart = "k8s-restart"
-	NodeTypeK8sScale   = "k8s-scale"
-	NodeTypeK8sPatch   = "k8s-patch"
-	NodeTypeK8sDelete       = "k8s-delete"
-	NodeTypeSkillContainer  = "skill-container"
+	NodeTypeK8sGet         = "k8s-get"
+	NodeTypeK8sList        = "k8s-list"
+	NodeTypeK8sLogs        = "k8s-logs"
+	NodeTypeK8sEvents      = "k8s-events"
+	NodeTypeK8sRestart     = "k8s-restart"
+	NodeTypeK8sScale       = "k8s-scale"
+	NodeTypeK8sPatch       = "k8s-patch"
+	NodeTypeK8sDelete      = "k8s-delete"
+	NodeTypeSkillContainer = "skill-container"
 
 	// Data types
 	NodeTypeTransform = "transform"
@@ -126,9 +126,6 @@ func NewRegistry(k8sClient K8sClient) *Registry {
 			ServiceAccount:          "default",
 			TTLSecondsAfterFinished: module.GetJobTTLSecondsAfterFinished(),
 		})
-
-		// Register openclaw executor
-		r.Register(NewOpenClawExecutor(k8sClient, module.GetAgentsNamespace(), ""))
 	}
 
 	return r

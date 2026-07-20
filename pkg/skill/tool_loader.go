@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/axiom-studio/openseal/pkg/executor"
-	"github.com/axiom-studio/openseal/pkg/skill/skillmd"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
@@ -129,66 +128,4 @@ func (l *ToolLoader) ReloadSkill(ctx context.Context, skillID string) error {
 	}
 
 	return fmt.Errorf("skill not found: %s", skillID)
-}
-
-func (l *ToolLoader) LoadOpenClawSkillTools(skillDir string) error {
-	if _, err := os.Stat(skillDir); os.IsNotExist(err) {
-		l.logger.Infow("openclaw skills directory does not exist, skipping", "path", skillDir)
-		return nil
-	}
-
-	entries, err := os.ReadDir(skillDir)
-	if err != nil {
-		return fmt.Errorf("failed to read openclaw skills directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		skillPath := filepath.Join(skillDir, entry.Name())
-		skillMDPath := filepath.Join(skillPath, "SKILL.md")
-
-		if _, err := os.Stat(skillMDPath); os.IsNotExist(err) {
-			continue
-		}
-
-		data, err := os.ReadFile(skillMDPath)
-		if err != nil {
-			l.logger.Warnw("failed to read SKILL.md, skipping", "skill", entry.Name(), "error", err)
-			continue
-		}
-
-		parsed, err := skillmd.ParseSkillMD(data)
-		if err != nil {
-			l.logger.Warnw("failed to parse SKILL.md, skipping", "skill", entry.Name(), "error", err)
-			continue
-		}
-
-		availability := skillmd.CheckAvailability(parsed, nil)
-		if !availability.IsAvailable {
-			l.logger.Debugw("skill not available, skipping", "skill", parsed.Name, "reasons", availability.Reasons)
-			continue
-		}
-
-		toolName := fmt.Sprintf("openclaw::%s", parsed.Name)
-		tool := &executor.ToolDefinition{
-			Name:        toolName,
-			Description: parsed.Description,
-			Parameters:  map[string]interface{}{},
-			Config: map[string]interface{}{
-				"type":        "openclaw-skill",
-				"skill_name":  parsed.Name,
-				"version":     parsed.Version,
-				"description": parsed.Description,
-				"body":        parsed.Body,
-			},
-		}
-
-		l.registry.RegisterTool(tool)
-		l.logger.Infow("registered openclaw skill tool", "tool", toolName, "skill", parsed.Name)
-	}
-
-	return nil
 }
