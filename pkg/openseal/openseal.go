@@ -408,6 +408,8 @@ type (
 	PreparedSkillRuntime               = runtime.PreparedSkillRuntime
 	TurnRunnerResolver                 = runtime.TurnRunnerResolver
 	TurnRunnerResolverFunc             = runtime.TurnRunnerResolverFunc
+	AgentTurnCatalog                   = runtime.AgentTurnCatalog
+	CatalogTurnResolverConfig          = runtime.CatalogTurnResolverConfig
 	WorkerScopeSource                  = runtime.WorkerScopeSource
 	WorkerScopeSourceFunc              = runtime.WorkerScopeSourceFunc
 	WakeSignal                         = runtime.WakeSignal
@@ -730,6 +732,7 @@ var (
 	NewCapabilityInvocationTurnRunner = runtime.NewCapabilityInvocationTurnRunner
 	NewOutreachTurnRunner             = runtime.NewOutreachTurnRunner
 	NewOutreachActionProposalObserver = runtime.NewOutreachActionProposalObserver
+	ResolveCatalogTurnRunner          = runtime.ResolveCatalogTurnRunner
 	NewArtifactRetentionService       = runtime.NewArtifactRetentionService
 	ErrTurnHostUnavailable            = runtime.ErrTurnHostUnavailable
 	ValidateRunbook                   = runbook.Validate
