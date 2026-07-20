@@ -6,11 +6,93 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 )
+
+type exploreRegistryStub struct {
+	Registry
+	explore func(context.Context, ExploreRequest) (*SkillPage, error)
+}
+
+func (s exploreRegistryStub) ExploreSkills(ctx context.Context, request ExploreRequest) (*SkillPage, error) {
+	return s.explore(ctx, request)
+}
+
+func TestExploreCatalogTraversesThreePagesAndDeduplicatesOverlap(t *testing.T) {
+	requests := make([]ExploreRequest, 0, 3)
+	registry := exploreRegistryStub{explore: func(_ context.Context, request ExploreRequest) (*SkillPage, error) {
+		requests = append(requests, request)
+		switch request.Cursor {
+		case "":
+			return &SkillPage{Items: []SkillSummary{{Slug: "alpha"}, {Slug: "beta"}}, NextCursor: "page-2"}, nil
+		case "page-2":
+			return &SkillPage{Items: []SkillSummary{{Slug: "beta"}, {Slug: "gamma"}}, NextCursor: "page-3"}, nil
+		case "page-3":
+			return &SkillPage{Items: []SkillSummary{{Slug: "delta"}}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected cursor %q", request.Cursor)
+		}
+	}}
+
+	snapshot, err := ExploreCatalog(context.Background(), registry, ExploreRequest{Limit: 100, Sort: "updated", NonSuspiciousOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSlugs := []string{"alpha", "beta", "gamma", "delta"}
+	gotSlugs := make([]string, 0, len(snapshot.Items))
+	for _, item := range snapshot.Items {
+		gotSlugs = append(gotSlugs, item.Slug)
+	}
+	if !reflect.DeepEqual(gotSlugs, wantSlugs) || snapshot.Pages != 3 || snapshot.DuplicateItemCount != 1 {
+		t.Fatalf("snapshot = %#v; slugs = %#v", snapshot, gotSlugs)
+	}
+	if got := []string{requests[0].Cursor, requests[1].Cursor, requests[2].Cursor}; !reflect.DeepEqual(got, []string{"", "page-2", "page-3"}) {
+		t.Fatalf("requested cursors = %#v", got)
+	}
+	for _, request := range requests {
+		if request.Limit != 100 || request.Sort != "updated" || !request.NonSuspiciousOnly {
+			t.Fatalf("discovery options were not preserved: %#v", request)
+		}
+	}
+}
+
+func TestExploreCatalogReportsPartialFailureAndRejectsCursorLoops(t *testing.T) {
+	t.Run("mid traversal failure", func(t *testing.T) {
+		upstreamErr := errors.New("registry unavailable")
+		registry := exploreRegistryStub{explore: func(_ context.Context, request ExploreRequest) (*SkillPage, error) {
+			if request.Cursor == "" {
+				return &SkillPage{Items: []SkillSummary{{Slug: "alpha"}}, NextCursor: "page-2"}, nil
+			}
+			return nil, upstreamErr
+		}}
+		snapshot, err := ExploreCatalog(context.Background(), registry, ExploreRequest{Limit: 100})
+		var traversalErr *CatalogTraversalError
+		if !errors.As(err, &traversalErr) || !errors.Is(err, upstreamErr) || traversalErr.CompletedPages != 1 || traversalErr.UniqueItems != 1 || traversalErr.Cursor != "page-2" || len(snapshot.Items) != 1 {
+			t.Fatalf("snapshot = %#v, error = %#v", snapshot, err)
+		}
+	})
+
+	t.Run("cursor loop", func(t *testing.T) {
+		calls := 0
+		registry := exploreRegistryStub{explore: func(_ context.Context, request ExploreRequest) (*SkillPage, error) {
+			calls++
+			if request.Cursor == "" {
+				return &SkillPage{Items: []SkillSummary{{Slug: "alpha"}}, NextCursor: "loop"}, nil
+			}
+			return &SkillPage{Items: []SkillSummary{{Slug: "beta"}}, NextCursor: "loop"}, nil
+		}}
+		snapshot, err := ExploreCatalog(context.Background(), registry, ExploreRequest{})
+		var traversalErr *CatalogTraversalError
+		if !errors.As(err, &traversalErr) || traversalErr.CompletedPages != 2 || traversalErr.UniqueItems != 2 || traversalErr.Cursor != "loop" || calls != 2 || len(snapshot.Items) != 2 {
+			t.Fatalf("snapshot = %#v, calls = %d, error = %#v", snapshot, calls, err)
+		}
+	})
+}
 
 func TestParseSkillReferenceRejectsPathAndAmbiguousValues(t *testing.T) {
 	valid := map[string]SkillReference{

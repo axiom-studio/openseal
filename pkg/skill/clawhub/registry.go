@@ -77,6 +77,40 @@ type SkillPage struct {
 	NextCursor string         `json:"nextCursor,omitempty"`
 }
 
+// CatalogSnapshot is an authoritative, deduplicated traversal of ClawHub's
+// cursor-paginated discovery catalog. Pages is the number of successfully
+// retrieved pages, including an empty terminal page when the registry returns
+// one.
+type CatalogSnapshot struct {
+	Items              []SkillSummary `json:"items"`
+	Pages              int            `json:"pages"`
+	DuplicateItemCount int            `json:"duplicateItemCount,omitempty"`
+}
+
+// CatalogTraversalError reports how far an incomplete catalog traversal got.
+// Callers must not mistake the partial Items in CatalogSnapshot for an
+// authoritative catalog replacement.
+type CatalogTraversalError struct {
+	CompletedPages int
+	UniqueItems    int
+	Cursor         string
+	Err            error
+}
+
+func (e *CatalogTraversalError) Error() string {
+	if e == nil {
+		return "ClawHub catalog traversal failed"
+	}
+	return fmt.Sprintf("ClawHub catalog traversal failed after %d page(s) and %d unique skill(s) at cursor %q: %v", e.CompletedPages, e.UniqueItems, e.Cursor, e.Err)
+}
+
+func (e *CatalogTraversalError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 type VersionSummary struct {
 	Version         string `json:"version"`
 	CreatedAt       int64  `json:"createdAt"`
@@ -149,6 +183,57 @@ type Registry interface {
 	GetFile(context.Context, SkillReference, string, string, string) ([]byte, error)
 	VerifySkill(context.Context, SkillReference, string, string) (*Verification, error)
 	DownloadArchive(context.Context, SkillReference, string, string) (*DownloadedArchive, error)
+}
+
+// ExploreCatalog traverses ExploreSkills until the registry authoritatively
+// omits its next cursor. Overlapping pages are deduplicated by stable slug,
+// preserving the first occurrence and discovery order. Cursor reuse fails
+// closed so a faulty registry cannot make synchronization loop forever.
+func ExploreCatalog(ctx context.Context, registry Registry, request ExploreRequest) (*CatalogSnapshot, error) {
+	snapshot := &CatalogSnapshot{Items: make([]SkillSummary, 0)}
+	if registry == nil {
+		return snapshot, &CatalogTraversalError{Err: fmt.Errorf("ClawHub registry is required")}
+	}
+
+	cursor := strings.TrimSpace(request.Cursor)
+	seenCursors := make(map[string]struct{})
+	seenItems := make(map[string]struct{})
+	for {
+		if cursor != "" {
+			if _, exists := seenCursors[cursor]; exists {
+				return snapshot, &CatalogTraversalError{CompletedPages: snapshot.Pages, UniqueItems: len(snapshot.Items), Cursor: cursor, Err: fmt.Errorf("registry repeated a discovery cursor")}
+			}
+			seenCursors[cursor] = struct{}{}
+		}
+
+		request.Cursor = cursor
+		page, err := registry.ExploreSkills(ctx, request)
+		if err != nil {
+			return snapshot, &CatalogTraversalError{CompletedPages: snapshot.Pages, UniqueItems: len(snapshot.Items), Cursor: cursor, Err: err}
+		}
+		if page == nil {
+			return snapshot, &CatalogTraversalError{CompletedPages: snapshot.Pages, UniqueItems: len(snapshot.Items), Cursor: cursor, Err: fmt.Errorf("registry returned an empty discovery page envelope")}
+		}
+		snapshot.Pages++
+		for _, item := range page.Items {
+			identity := strings.ToLower(strings.TrimSpace(item.Slug))
+			if identity == "" {
+				continue
+			}
+			if _, exists := seenItems[identity]; exists {
+				snapshot.DuplicateItemCount++
+				continue
+			}
+			seenItems[identity] = struct{}{}
+			snapshot.Items = append(snapshot.Items, item)
+		}
+
+		next := strings.TrimSpace(page.NextCursor)
+		if next == "" {
+			return snapshot, nil
+		}
+		cursor = next
+	}
 }
 
 func (c *ClawHubClient) SearchSkills(ctx context.Context, request SearchRequest) (*SkillPage, error) {
