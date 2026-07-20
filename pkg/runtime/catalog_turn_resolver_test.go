@@ -106,3 +106,34 @@ func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
 		t.Fatalf("scope=%#v deployment=%q host=%#v", resolvedScope, resolvedDeployment, catalog.gotHost)
 	}
 }
+
+func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "openai-compatible", Model: "bound-model", OutputSummary: "done",
+	}}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "vault", ID: "17"}},
+		},
+		definition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Purpose: "Analyze", SystemPrompt: "Work carefully."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
+	}
+	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Analyze", Context: map[string]interface{}{}}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "vault" || host.request.ModelCredential.ID != "17" {
+		t.Fatalf("model credential = %#v", host.request.ModelCredential)
+	}
+	modelInput, _ := MarshalHostedTurnModelInput(host.request)
+	if strings.Contains(string(modelInput), "17") || strings.Contains(strings.ToLower(string(modelInput)), "credential") {
+		t.Fatalf("model input leaked credential reference: %s", modelInput)
+	}
+}
