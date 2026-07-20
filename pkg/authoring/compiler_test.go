@@ -270,7 +270,7 @@ func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
 			"type": "interval", "intervalSeconds": float64(3600),
 			"runBudget": map[string]interface{}{
 				"maxAttempts": float64(3), "maxTurns": float64(4), "maxInputTokens": float64(24000),
-				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(34000),
+				"maxOutputTokens": float64(16000), "maxTotalTokens": float64(40000),
 			},
 			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
 				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
