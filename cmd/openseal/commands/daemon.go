@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -18,7 +19,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
+	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/axiom-studio/openseal/pkg/trigger"
 	"go.uber.org/zap"
@@ -85,7 +88,13 @@ Options:
 	}
 
 	reg := executor.NewRegistry(nil)
-	pe := executor.NewPipelineExecutor(reg, sugar)
+	scope, err := parseDaemonScope(*authoringScope)
+	if err != nil {
+		sugar.Fatal(err)
+	}
+	if *standaloneOperator && !isLoopbackListenAddress(cfg.API.ListenAddr) {
+		sugar.Fatal("--standalone-operator requires the API listen address to be loopback")
+	}
 
 	// One durable store backs legacy deterministic workflows and the canonical
 	// Agent/Team run kernel. Interactive clients never own authoritative state.
@@ -96,30 +105,93 @@ Options:
 	defer store.Close()
 	sugar.Infow("durable kernel store opened", "driver", cfg.Storage.Driver, "path", storagePath)
 
-	// Worker pool for async execution
-	pool := runtime.NewWorkerPool(pe, store, sugar, 4, nil)
-	scheduler := runtime.NewScheduler(pool, store)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool.Start(ctx)
-
-	// Versioned kernel API for the TUI and embedding integrations.
-	apiServer := server.NewServerWithDir(reg, scheduler, store, cfg.WorkflowsDir, sugar)
-	apiServer.SetWorkflows(workflows)
-	if *standaloneOperator && !isLoopbackListenAddress(cfg.API.ListenAddr) {
-		sugar.Fatal("--standalone-operator requires the API listen address to be loopback")
+	policyCatalog, err := daemon.NewSourcePolicyCatalog(cfg.SourcePolicies)
+	if err != nil {
+		sugar.Fatalf("configure source policies: %v", err)
 	}
 	skillsDir := strings.TrimSpace(os.Getenv("OPENSEAL_SKILLS_DIR"))
 	if skillsDir == "" {
 		skillsDir = filepath.Join(filepath.Dir(*configPath), "skills")
 	}
-	clawHubEngine, err := opensealkernel.New(opensealkernel.WithClawHubRegistrySkillsDirectory(clawhub.RegistryURL, clawhub.NewClawHubClient(""), skillsDir, skillsDir))
-	if err != nil {
-		sugar.Fatalf("configure ClawHub lifecycle: %v", err)
+	engineOptions := []opensealkernel.Option{
+		opensealkernel.WithRegistry(reg),
+		opensealkernel.WithPersistentStore(store),
+		opensealkernel.WithWorkerConcurrencyLimit(8),
+		opensealkernel.WithClawHubRegistrySkillsDirectory(clawhub.RegistryURL, clawhub.NewClawHubClient(""), skillsDir, skillsDir),
+		opensealkernel.WithClawHubSourceArtifactScope(skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}),
 	}
-	apiServer.SetClawHubLifecycle(clawHubEngine, *standaloneOperator)
+	if *standaloneOperator {
+		engineOptions = append(engineOptions,
+			opensealkernel.WithActionPolicy(&runtime.DefaultActionPolicy{Approvers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}}),
+			opensealkernel.WithApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{}),
+		)
+	}
+	workerScopes, err := policyCatalog.ListWorkerScopes(ctx)
+	if err != nil {
+		sugar.Fatalf("resolve source-policy worker scopes: %v", err)
+	}
+	var kernel *opensealkernel.Engine
+	if len(workerScopes) > 0 {
+		turnResolver := runtime.TurnRunnerResolverFunc(func(resolveCtx context.Context, run *runtime.AgentRun) (*runtime.TurnRunnerBinding, error) {
+			if kernel == nil {
+				return nil, runtime.ErrTurnHostUnavailable
+			}
+			return runtime.ResolveCatalogTurnRunner(resolveCtx, kernel, run, runtime.CatalogTurnResolverConfig{})
+		})
+		authorizer := outreach.InvocationAuthorizerFunc(func(authorizeCtx context.Context, invocation runtime.ToolInvocation) (*outreach.InvocationAuthorization, error) {
+			if kernel == nil {
+				return nil, runtime.ErrTurnHostUnavailable
+			}
+			canonical, authorizeErr := outreach.NewCanonicalInvocationAuthorizer(kernel, policyCatalog)
+			if authorizeErr != nil {
+				return nil, authorizeErr
+			}
+			return canonical.AuthorizeOutreachInvocation(authorizeCtx, invocation)
+		})
+		invoker, invokerErr := outreach.NewWebhookInvoker(authorizer)
+		if invokerErr != nil {
+			sugar.Fatalf("configure governed outreach transport: %v", invokerErr)
+		}
+		dispatcher, dispatcherErr := runtime.NewToolActionDispatcher(invoker)
+		if dispatcherErr != nil {
+			sugar.Fatalf("configure governed action dispatcher: %v", dispatcherErr)
+		}
+		engineOptions = append(engineOptions,
+			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "standalone-agent"}, policyCatalog, turnResolver),
+			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, policyCatalog, nil, dispatcher),
+		)
+	}
+	kernel, err = opensealkernel.New(engineOptions...)
+	if err != nil {
+		sugar.Fatalf("configure OpenSeal kernel: %v", err)
+	}
+	if err := ensureCanonicalSkill(ctx, kernel, outreach.SkillDefinition()); err != nil {
+		sugar.Fatalf("register governed outreach Skill: %v", err)
+	}
+	kernel.Start(ctx)
+
+	// Versioned kernel API for the TUI and embedding integrations.
+	apiServer := server.NewServerWithDir(reg, kernel, store, cfg.WorkflowsDir, sugar)
+	apiServer.SetWorkflows(workflows)
+	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
+	if *standaloneOperator {
+		apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})
+		if len(workerScopes) > 0 {
+			apiServer.SetOutreachDeliveryDispatcher(func(dispatchCtx context.Context, request runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
+				if !policyCatalog.OutreachEnabled(request.Scope) {
+					return nil, fmt.Errorf("governed outreach workers are not configured for scope %s:%s", request.Scope.Kind, request.Scope.ID)
+				}
+				result, dispatchErr := kernel.CreateAgentRunCommand(dispatchCtx, request)
+				if dispatchErr == nil {
+					kernel.WakeAgentWorkers()
+				}
+				return result, dispatchErr
+			})
+		}
+	}
 	contentStore, contentPath, err := daemon.OpenArtifactContentStore(cfg.Storage, filepath.Dir(*configPath))
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
@@ -139,11 +211,6 @@ Options:
 		sugar.Fatal("workforce authoring requires OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY, and OPENSEAL_LLM_MODEL together")
 	}
 	if configured == 3 {
-		scopeParts := strings.SplitN(strings.TrimSpace(*authoringScope), ":", 2)
-		if len(scopeParts) != 2 || strings.TrimSpace(scopeParts[0]) == "" || strings.TrimSpace(scopeParts[1]) == "" {
-			sugar.Fatal("--scope must use kind:id format")
-		}
-		scope := runtime.Scope{Kind: strings.TrimSpace(scopeParts[0]), ID: strings.TrimSpace(scopeParts[1])}
 		generator, generatorErr := authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, nil)
 		if generatorErr != nil {
 			sugar.Fatalf("configure workforce authoring: %v", generatorErr)
@@ -223,7 +290,7 @@ Options:
 			"source": event.Source,
 			"data":   event.Payload,
 		}
-		_, err := scheduler.Schedule(ctx, entry, triggerData)
+		_, err := kernel.Schedule(ctx, entry, triggerData)
 		return err
 	})
 
@@ -257,9 +324,40 @@ Options:
 	if err := tm.Stop(ctx); err != nil {
 		sugar.Errorw("trigger stop error", "error", err)
 	}
-	pool.Stop()
+	kernel.Stop()
 	webhookServer.Shutdown(ctx)
 	apiServer.Shutdown(ctx)
+}
+
+func parseDaemonScope(value string) (runtime.Scope, error) {
+	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
+	if len(parts) != 2 {
+		return runtime.Scope{}, fmt.Errorf("--scope must use kind:id format")
+	}
+	scope := runtime.Scope{Kind: strings.TrimSpace(parts[0]), ID: strings.TrimSpace(parts[1])}
+	if err := scope.Validate(); err != nil {
+		return runtime.Scope{}, fmt.Errorf("--scope: %w", err)
+	}
+	return scope, nil
+}
+
+func ensureCanonicalSkill(ctx context.Context, kernel *opensealkernel.Engine, definition *skill.Definition) error {
+	if kernel == nil || definition == nil {
+		return fmt.Errorf("kernel and canonical Skill definition are required")
+	}
+	existing, err := kernel.GetSkillDefinition(ctx, definition.ID, definition.Version)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return kernel.RegisterSkill(ctx, definition)
+	}
+	existingJSON, existingErr := json.Marshal(existing)
+	definitionJSON, definitionErr := json.Marshal(definition)
+	if existingErr != nil || definitionErr != nil || string(existingJSON) != string(definitionJSON) {
+		return fmt.Errorf("persisted Skill %s@%s does not match the canonical definition", definition.ID, definition.Version)
+	}
+	return nil
 }
 
 func isLoopbackListenAddress(addr string) bool {

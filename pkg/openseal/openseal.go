@@ -1510,6 +1510,16 @@ func (e *Engine) ScheduleWorkflow(
 		Connections: connections,
 		StartNodeID: startNodeID,
 	}
+	return e.Schedule(ctx, entry, triggerData)
+}
+
+// Schedule enqueues an already-built deterministic workflow entry. It lets
+// compatibility API and trigger adapters share the Engine-owned worker pool
+// instead of constructing a second scheduler and lifecycle.
+func (e *Engine) Schedule(ctx context.Context, entry runtime.WorkflowEntry, triggerData map[string]interface{}) (int, error) {
+	if e == nil || e.scheduler == nil {
+		return 0, errors.New("workflow scheduler is unavailable")
+	}
 	return e.scheduler.Schedule(ctx, entry, triggerData)
 }
 
