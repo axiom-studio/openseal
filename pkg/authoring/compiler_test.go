@@ -3,6 +3,7 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,6 +237,62 @@ func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
 	}
 }
 
+func TestCompilerRejectsHostedCadenceBudgetBelowPortableFloor(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
+		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
+		Cadence: map[string]interface{}{
+			"type": "interval", "intervalSeconds": float64(3600),
+			"runBudget": map[string]interface{}{
+				"maxAttempts": float64(3), "maxTurns": float64(3), "maxInputTokens": float64(5000),
+				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(15000),
+			},
+		},
+	}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "invalid_objective_cadence") ||
+		!validationMessageContains(result.Validation, "maxInputTokens must be zero (unbounded) or at least 16000") {
+		t.Fatalf("impossible hosted budget = %#v, err = %v", result, err)
+	}
+}
+
+func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
+		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
+		Cadence: map[string]interface{}{
+			"type": "interval", "intervalSeconds": float64(3600),
+			"runBudget": map[string]interface{}{
+				"maxAttempts": float64(3), "maxTurns": float64(3), "maxInputTokens": float64(16000),
+				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(26000),
+			},
+			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
+				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
+			}},
+		},
+	}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || !result.Valid {
+		t.Fatalf("bounded hosted evidence candidate = %#v, err = %v", result, err)
+	}
+	projection := result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["evidenceProjection"].(map[string]interface{})
+	if projection["maximumObservations"] != float64(7) || projection["maximumSummaryRunes"] != float64(600) || projection["maximumTotalRunes"] != float64(4200) {
+		t.Fatalf("evidence projection did not round-trip: %#v", projection)
+	}
+}
+
 func TestCompilerRejectsEventCapabilityBudgetThatCannotComplete(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
@@ -263,6 +320,15 @@ func TestCompilerRejectsEventCapabilityBudgetThatCannotComplete(t *testing.T) {
 func hasValidationCode(issues []ValidationIssue, code string) bool {
 	for _, value := range issues {
 		if value.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func validationMessageContains(issues []ValidationIssue, fragment string) bool {
+	for _, value := range issues {
+		if strings.Contains(value.Message, fragment) {
 			return true
 		}
 	}

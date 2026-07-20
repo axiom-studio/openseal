@@ -71,6 +71,11 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"Put non-blocking choices and safe defaults in assumptions, never questions",
 		"An executable cadence is exactly one of",
 		"runBudget is an object with non-negative",
+		"runTemplate without a capability executes a hosted model turn",
+		"use at least maxInputTokens 16000 and maxOutputTokens 1000",
+		"use 16000/10000/26000 unless the user gives stricter compatible limits",
+		"Evidence projection is kernel-built from retained Initiative observations",
+		"never place evidenceSnapshot in authored context",
 		"maxItems\":<positive integer no larger than policy maximumItems>",
 	} {
 		if !strings.Contains(authoringSystemPrompt, expected) {
