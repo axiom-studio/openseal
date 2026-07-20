@@ -61,6 +61,16 @@ func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
 	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + int64(len(input)), nil
 }
 
+func EstimateEvidenceGroundingReviewInputTokens(request EvidenceGroundingRequest) (int64, error) {
+	estimate := request
+	estimate.MaxOutputTokens = 0
+	input, err := json.Marshal(estimate)
+	if err != nil {
+		return 0, err
+	}
+	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + int64(len(input)), nil
+}
+
 func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecutionContext) (BudgetUsage, error) {
 	if r == nil || input.Run == nil || input.Turn == nil || input.Run.Budget == nil {
 		return BudgetUsage{}, nil
@@ -69,7 +79,23 @@ func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecution
 	if err != nil {
 		return BudgetUsage{}, err
 	}
-	estimatedInput, err := EstimateHostedTurnInputTokens(request)
+	estimatedInput := int64(0)
+	snapshot, err := evidenceSnapshotForGrounding(input.Run.Context)
+	if err != nil {
+		return BudgetUsage{}, err
+	}
+	groundingState, err := parseEvidenceGroundingState(input.Run.Checkpoint)
+	if err != nil {
+		return BudgetUsage{}, err
+	}
+	if groundingState != nil && groundingState.Status == evidenceGroundingPendingReview {
+		if snapshot == nil || groundingState.SnapshotID != snapshot.ID {
+			return BudgetUsage{}, errors.New("evidence grounding checkpoint does not match the immutable Run snapshot")
+		}
+		estimatedInput, err = EstimateEvidenceGroundingReviewInputTokens(buildEvidenceGroundingRequest(input, snapshot, groundingState, 0))
+	} else {
+		estimatedInput, err = EstimateHostedTurnInputTokens(request)
+	}
 	if err != nil {
 		return BudgetUsage{}, fmt.Errorf("estimate hosted Turn input: %w", err)
 	}
@@ -96,6 +122,9 @@ func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecution
 		if reservation.OutputTokens == 0 || remaining.MaxOutputTokens < reservation.OutputTokens {
 			reservation.OutputTokens = remaining.MaxOutputTokens
 		}
+	}
+	if groundingState != nil && groundingState.Status == evidenceGroundingPendingReview && reservation.OutputTokens > EvidenceGroundingReviewOutputLimit {
+		reservation.OutputTokens = EvidenceGroundingReviewOutputLimit
 	}
 	if reservation.OutputTokens > 0 && reservation.OutputTokens < HostedTurnMinimumOutputTokens {
 		return BudgetUsage{}, errors.New("hosted output reservation is below the portable minimum")

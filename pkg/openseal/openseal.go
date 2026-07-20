@@ -389,6 +389,12 @@ type (
 	TurnHost                           = runtime.TurnHost
 	HostedTurnRunnerConfig             = runtime.HostedTurnRunnerConfig
 	HostedTurnRunner                   = runtime.HostedTurnRunner
+	EvidenceClaim                      = runtime.EvidenceClaim
+	EvidenceGroundingFindingStatus     = runtime.EvidenceGroundingFindingStatus
+	EvidenceGroundingFinding           = runtime.EvidenceGroundingFinding
+	EvidenceGroundingReview            = runtime.EvidenceGroundingReview
+	EvidenceGroundingRequest           = runtime.EvidenceGroundingRequest
+	EvidenceGroundingReviewer          = runtime.EvidenceGroundingReviewer
 	CapabilityInvocationTurnRunner     = runtime.CapabilityInvocationTurnRunner
 	AdvanceAgentRunRequest             = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult              = runtime.AdvanceAgentRunResult
@@ -570,6 +576,11 @@ const (
 	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
 	HostedTurnBudgetEnvelopeReserveTokens   = runtime.HostedTurnBudgetEnvelopeReserveTokens
 	HostedTurnMinimumOutputTokens           = runtime.HostedTurnMinimumOutputTokens
+	EvidenceGroundingAPIVersion             = runtime.EvidenceGroundingAPIVersion
+	EvidenceGroundingReviewOutputLimit      = runtime.EvidenceGroundingReviewOutputLimit
+	EvidenceGroundingSupported              = runtime.EvidenceGroundingSupported
+	EvidenceGroundingUnsupported            = runtime.EvidenceGroundingUnsupported
+	EvidenceGroundingUncertain              = runtime.EvidenceGroundingUncertain
 	KernelAPIVersion                        = kernelapi.APIVersion
 	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion

@@ -47,6 +47,8 @@ type TurnOutcome struct {
 	WakeCondition          *WakeCondition
 	RunOutput              map[string]interface{}
 	RunError               string
+	EvidenceClaims         []EvidenceClaim
+	EvidenceGrounding      *EvidenceGroundingReview
 }
 
 type AdvanceAgentRunRequest struct {
@@ -355,6 +357,8 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.WakeCondition = outcome.WakeCondition
 			finish.RunOutput = outcome.RunOutput
 			finish.RunError = outcome.RunError
+			finish.EvidenceClaims = outcome.EvidenceClaims
+			finish.EvidenceGrounding = outcome.EvidenceGrounding
 		}
 	}
 	if run.Budget != nil && finish.Status == AgentTurnStatusCompleted {

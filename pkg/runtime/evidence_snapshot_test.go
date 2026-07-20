@@ -254,13 +254,18 @@ func TestObjectiveSchedulerDefersInactiveInitiativeSynthesis(t *testing.T) {
 
 func TestEvidenceSnapshotProjectsToHostedInputWithoutRawSourceState(t *testing.T) {
 	snapshot := &EvidenceSnapshot{
-		APIVersion: evidenceSnapshotAPIVersion, ID: "sha256:stable", InitiativeID: "initiative-one",
+		APIVersion: evidenceSnapshotAPIVersion, InitiativeID: "initiative-one",
 		ObservationLimit: 25, SummaryRuneLimit: 1000, TotalSummaryRuneLimit: 20000, SelectedCount: 1,
 		Observations: []EvidenceSnapshotObservation{{
 			ID: "observation-one", SourceURI: "https://forum.example/thread/1", ObservedAt: time.Now().UTC(),
 			ContentDigest: "sha256:digest", Summary: "A bounded finding",
 		}},
 	}
+	identity, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.ID = hashBytes(identity)
 	projected, err := evidenceSnapshotContext(snapshot)
 	if err != nil {
 		t.Fatal(err)
