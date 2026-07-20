@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 const (
@@ -76,6 +78,9 @@ type EvidenceGroundingRequest struct {
 	DraftSummary    string                 `json:"draftSummary"`
 	DraftOutput     map[string]interface{} `json:"draftOutput"`
 	MaxOutputTokens int64                  `json:"maxOutputTokens,omitempty"`
+	// ModelCredential is transport-only host configuration and must never be
+	// included in the evidence review model input.
+	ModelCredential *capability.CredentialReference `json:"modelCredential,omitempty"`
 }
 
 type EvidenceGroundingReviewer interface {
@@ -425,6 +430,7 @@ func (r *HostedTurnRunner) runEvidenceGroundingReview(ctx context.Context, input
 		maxOutput = budget.TurnReservation.OutputTokens
 	}
 	request := buildEvidenceGroundingRequest(input, snapshot, state, maxOutput)
+	request.ModelCredential = cloneHostedCredentialReference(r.config.ModelCredential)
 	review, err := reviewer.ReviewEvidenceGrounding(ctx, request)
 	if err != nil {
 		return nil, retryableTurnHostError{cause: err}

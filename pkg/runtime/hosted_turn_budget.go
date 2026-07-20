@@ -64,11 +64,18 @@ func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
 func EstimateEvidenceGroundingReviewInputTokens(request EvidenceGroundingRequest) (int64, error) {
 	estimate := request
 	estimate.MaxOutputTokens = 0
-	input, err := json.Marshal(estimate)
+	input, err := MarshalEvidenceGroundingModelInput(estimate)
 	if err != nil {
 		return 0, err
 	}
 	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + int64(len(input)), nil
+}
+
+// MarshalEvidenceGroundingModelInput strips host-only credential selection
+// before the immutable review envelope is presented to a model.
+func MarshalEvidenceGroundingModelInput(request EvidenceGroundingRequest) ([]byte, error) {
+	request.ModelCredential = nil
+	return json.Marshal(request)
 }
 
 func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecutionContext) (BudgetUsage, error) {
