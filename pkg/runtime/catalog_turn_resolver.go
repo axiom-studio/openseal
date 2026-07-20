@@ -92,6 +92,14 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		if teamActivation == nil || strings.TrimSpace(teamActivation.SnapshotID) == "" {
 			return nil, errors.New("Team Skill activation returned no immutable snapshot")
 		}
+		authorityCatalog, ok := catalog.(TeamSkillAuthorityCatalog)
+		if !ok {
+			return nil, errors.New("Team Skill authority resolution is unavailable")
+		}
+		teamActivation, activateErr = AuthorizeTeamSkillActivation(ctx, authorityCatalog, run, teamActivation)
+		if activateErr != nil {
+			return nil, fmt.Errorf("authorize bound Skills for Team %s: %w", run.Owner.ID, activateErr)
+		}
 		teamPrompts, teamActions, teamPrepared, teamContextRefs := projectActivatedSkills(teamActivation)
 		mergedActions, shadowedBindings, mergeErr := mergeOwnerModelActions(actions, teamActions)
 		if mergeErr != nil {
@@ -100,7 +108,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		if len(shadowedBindings) > 0 {
 			filtered := prepared[:0]
 			for _, runtime := range prepared {
-				if _, shadowed := shadowedBindings[runtime.BindingID]; !shadowed {
+				if _, shadowed := shadowedBindings[ownerBindingKey(runtime.DeploymentID, runtime.BindingID)]; !shadowed {
 					filtered = append(filtered, runtime)
 				}
 			}
@@ -110,7 +118,6 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		actions = mergedActions
 		prepared = append(prepared, teamPrepared...)
 		contextRefs = append(contextRefs, teamContextRefs...)
-		actionDeploymentID = run.Owner.ID
 	}
 	base := TurnRunnerBinding{
 		DeploymentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
@@ -185,7 +192,7 @@ func mergeOwnerModelActions(existing, owner []capability.ModelAction) ([]capabil
 			if current.SkillID != action.SkillID || current.Version != action.Version || current.Action != action.Action {
 				return nil, nil, fmt.Errorf("Team and Agent Skill activations expose conflicting action %q", action.Name)
 			}
-			shadowedBindings[current.BindingID] = struct{}{}
+			shadowedBindings[ownerBindingKey(current.DeploymentID, current.BindingID)] = struct{}{}
 			merged[index] = action
 			continue
 		}
@@ -194,6 +201,8 @@ func mergeOwnerModelActions(existing, owner []capability.ModelAction) ([]capabil
 	}
 	return merged, shadowedBindings, nil
 }
+
+func ownerBindingKey(deploymentID, bindingID string) string { return deploymentID + "\x00" + bindingID }
 
 func deploymentModelCredential(deployment *kernelagent.AgentDeployment) *capability.CredentialReference {
 	if deployment == nil {
@@ -220,12 +229,17 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 			})
 			refs = append(refs, fmt.Sprintf("skill:%s@%s#binding:%s@%d", activated.SkillID, activated.SkillVersion, activated.BindingID, activated.BindingRevision))
 		}
-		actions = append(actions, activated.Actions...)
+		for _, action := range activated.Actions {
+			if strings.TrimSpace(action.DeploymentID) == "" {
+				action.DeploymentID = activation.DeploymentID
+			}
+			actions = append(actions, action)
+		}
 		if activated.PreparedRuntime != nil && len(activated.Actions) > 0 {
 			preparedRuntime := *activated.PreparedRuntime
 			preparedRuntime.Executables = append([]string(nil), activated.PreparedRuntime.Executables...)
 			prepared = append(prepared, PreparedSkillRuntime{
-				BindingID: activated.BindingID, BindingRevision: activated.BindingRevision,
+				DeploymentID: activation.DeploymentID, BindingID: activated.BindingID, BindingRevision: activated.BindingRevision,
 				SkillID: activated.SkillID, SkillVersion: activated.SkillVersion, Runtime: preparedRuntime,
 			})
 		}

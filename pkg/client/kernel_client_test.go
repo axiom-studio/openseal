@@ -575,6 +575,31 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	if err != nil || len(listed.Items) != 1 || listed.Items[0].Deployment.ID != created.Deployment.ID || listed.Items[0].Definition.ID != "research-team" {
 		t.Fatalf("listed Teams = %#v, err = %v", listed, err)
 	}
+	skillCatalog := skill.NewCatalogWithStore(store)
+	if err := skillCatalog.Register(ctx, &skill.Definition{
+		ID: "reader", Version: "1", Name: "Reader", Transport: capability.TransportReference{Kind: "local"},
+		Actions: map[string]capability.Action{"read": {Name: "read", Description: "Read", Risk: capability.RiskLevelRead, SideEffect: capability.SideEffectRead, Idempotency: capability.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	teamBinding, err := client.UpsertTeamSkillBinding(ctx, created.Deployment.ID, skill.UpsertBindingRequest{
+		Binding: &skill.Binding{ID: "reader", Scope: scope, DeploymentID: created.Deployment.ID, SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
+		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "share reader with Team",
+	})
+	if err != nil || teamBinding.Binding == nil || teamBinding.Binding.Revision != 1 {
+		t.Fatalf("created Team Skill binding = %#v, err = %v", teamBinding, err)
+	}
+	teamBindings, err := client.ListTeamSkillBindings(ctx, scope, created.Deployment.ID)
+	if err != nil || len(teamBindings.Items) != 1 || teamBindings.Items[0].DeploymentID != created.Deployment.ID {
+		t.Fatalf("listed Team Skill bindings = %#v, err = %v", teamBindings, err)
+	}
+	disabledTeamBinding, err := client.DisableTeamSkillBinding(ctx, created.Deployment.ID, skill.DisableBindingRequest{
+		Scope: scope, DeploymentID: created.Deployment.ID, BindingID: "reader", ExpectedRevision: 1,
+		Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "retire reader",
+	})
+	if err != nil || disabledTeamBinding.Binding == nil || !disabledTeamBinding.Binding.Disabled || disabledTeamBinding.Binding.Revision != 2 {
+		t.Fatalf("disabled Team Skill binding = %#v, err = %v", disabledTeamBinding, err)
+	}
 	proposed := *created.Deployment
 	proposed.Status = kernelteam.DeploymentPaused
 	proposed.Roster = append([]kernelteam.RosterAssignment(nil), created.Deployment.Roster...)

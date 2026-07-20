@@ -20,7 +20,7 @@ func TestSkillManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 	if err != nil || definition == nil || definition.Actions[SkillActionUpsertBinding].Name != SkillActionUpsertBinding {
 		t.Fatalf("built-in Skill management definition = %#v, %v", definition, err)
 	}
-	if len(engine.actionValidators) != 1 || len(engine.actionPoolSpecs) != 1 {
+	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Skill action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}
 	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*SkillBindingActionDispatcher); !ok {

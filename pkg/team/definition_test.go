@@ -62,6 +62,19 @@ func TestDefinitionAndDeploymentFailClosedOnInvalidAuthorityOrRoster(t *testing.
 	}
 
 	definition = validDefinition()
+	definition.Roles[0].SkillGrants = []RoleSkillGrant{{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"reply"}, MaximumRisk: capability.RiskLevelProduction}}
+	if err := definition.Validate(); err == nil {
+		t.Fatal("role Skill grant must not widen Team risk authority")
+	}
+	definition.Roles[0].SkillGrants = []RoleSkillGrant{
+		{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
+		{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
+	}
+	if err := definition.Validate(); err == nil {
+		t.Fatal("duplicate exact Team role Skill grants must fail")
+	}
+
+	definition = validDefinition()
 	deployment := &Deployment{
 		ID: "growth-team", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"},
 		DefinitionID: definition.ID, ActiveVersion: definition.Version, Status: DeploymentActive, Revision: 1,

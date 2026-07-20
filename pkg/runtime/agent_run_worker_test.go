@@ -278,7 +278,7 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 		return &TurnRunnerBinding{
 			DeploymentID: "release-agent", ActionDeploymentID: "release-team", DefinitionID: "release-agent", DefinitionVersion: "1", ModelActions: modelActions,
 			PreparedRuntimes: []PreparedSkillRuntime{{
-				BindingID: modelActions[0].BindingID, BindingRevision: modelActions[0].BindingRevision,
+				DeploymentID: modelActions[0].DeploymentID, BindingID: modelActions[0].BindingID, BindingRevision: modelActions[0].BindingRevision,
 				SkillID: modelActions[0].SkillID, SkillVersion: modelActions[0].Version, Runtime: prepared,
 			}},
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
