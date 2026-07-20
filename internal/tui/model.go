@@ -161,6 +161,8 @@ type Model struct {
 	authoringCredentialSelected int
 	authoringCredentialChoices  map[string]int
 	runs                        []*runtime.AgentRun
+	evidenceExpanded            bool
+	evidenceObservationSelected int
 	agentRequests               []*runtime.AgentRequest
 	agentRequestSelected        int
 	selectedAgentRequest        string
@@ -1269,6 +1271,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
+				m.resetEvidenceInspection()
 			}
 		case "R":
 			if m.requestCapability.Available {
@@ -1299,10 +1302,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "o":
 			if m.objectiveCapability.Available {
 				m.section = sectionObjectives
+				m.resetEvidenceInspection()
+				return m, tea.Batch(m.loadObjectives(), m.loadRuns())
 			}
 		case "i":
 			if m.initiativeCapability.Available {
 				m.section = sectionInitiatives
+				m.resetEvidenceInspection()
+				return m, tea.Batch(m.loadInitiatives(), m.loadRuns())
 			}
 		case "s":
 			if m.clawHubCapability.Available || m.skillActionCapability.Available {
@@ -1360,12 +1367,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceCredentialChoice(-1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(-1)
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+				m.moveEvidenceObservation(-1)
 			}
 		case "]":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(1)
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+				m.moveEvidenceObservation(1)
 			}
 		case "b":
 			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
@@ -1491,6 +1502,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
 			} else if m.section == sectionSkills {
 				return m, m.verifySelectedClawHub()
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+				if lineage := m.selectedEvidenceLineage(); lineage != nil && lineage.err == nil {
+					m.evidenceExpanded = !m.evidenceExpanded
+					m.evidenceObservationSelected = 0
+				}
 			}
 		}
 		return m, nil
@@ -2167,10 +2183,10 @@ func (m *Model) loadPanel() tea.Cmd {
 		return m.loadTeamDeployments()
 	}
 	if m.section == sectionObjectives {
-		return m.loadObjectives()
+		return tea.Batch(m.loadObjectives(), m.loadRuns())
 	}
 	if m.section == sectionInitiatives {
-		return m.loadInitiatives()
+		return tea.Batch(m.loadInitiatives(), m.loadRuns())
 	}
 	if m.section == sectionSkills {
 		return m.loadClawHubSkills()
@@ -3164,6 +3180,7 @@ func (m *Model) moveObjectiveSelection(delta int) {
 	}
 	m.objectiveSelected = max(0, min(len(m.objectives)-1, m.objectiveSelected+delta))
 	m.selectedObjective = m.objectives[m.objectiveSelected].ID
+	m.resetEvidenceInspection()
 }
 
 func (m *Model) restoreSelection() {
@@ -3190,6 +3207,7 @@ func (m *Model) moveSelection(delta int) {
 	}
 	m.selected = max(0, min(len(m.runs)-1, m.selected+delta))
 	m.selectedID = m.runs[m.selected].ID
+	m.resetEvidenceInspection()
 }
 
 func (m *Model) selectedArtifactRecord() *runtime.Artifact {
@@ -3659,6 +3677,7 @@ func (m *Model) moveInitiativeSelection(delta int) {
 	}
 	m.initiativeSelected = max(0, min(len(m.initiatives)-1, m.initiativeSelected+delta))
 	m.selectedInitiative = m.initiatives[m.initiativeSelected].ID
+	m.resetEvidenceInspection()
 }
 
 func (m *Model) selectedConversationRecord() *runtime.Conversation {
