@@ -94,6 +94,7 @@ type editorMode int
 const (
 	modeCreate editorMode = iota
 	modeWorkforceAuthoring
+	modeWorkforceRefinement
 	modeGuide
 	modeChannelCreate
 	modeChannelPost
@@ -226,6 +227,9 @@ type Model struct {
 	pendingAuthoringParentID    string
 	pendingGovernanceKey        string
 	pendingGovernanceIntent     string
+	pendingRefinementKey        string
+	pendingRefinementIntent     string
+	activeRefinementQuestionID  string
 	pendingObjectiveKey         string
 	pendingObjectivePrompt      string
 	pendingInitiativeKey        string
@@ -682,6 +686,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionTeams
 			m.focusPanelList()
 		}
+		m.activateReadyRefinement()
 		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
@@ -727,6 +732,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.authoringResult = nil
 		}
 		m.pendingGovernanceKey, m.pendingGovernanceIntent = "", ""
+		m.pendingRefinementKey, m.pendingRefinementIntent, m.activeRefinementQuestionID = "", "", ""
 		m.editor.Reset()
 		m.resetComposerMode()
 		m.status = msg.action + " recorded in the durable workforce audit."
@@ -1329,6 +1335,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitClawHubRemoval()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
+			case modeWorkforceRefinement:
+				return m, m.submitWorkforceRefinement()
 			case modeWorkforceApprove:
 				return m, m.submitWorkforceApproval(true)
 			case modeWorkforceReject:
@@ -1792,6 +1800,55 @@ func (m *Model) submitWorkforceApproval(approved bool) tea.Cmd {
 		result, err := m.client.ResolveWorkforceChangeSetApproval(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: action, err: err}
 	}
+}
+
+func (m *Model) submitWorkforceRefinement() tea.Cmd {
+	question := m.readyRefinement()
+	input := strings.TrimSpace(m.editor.Value())
+	if question == nil || m.busy || input == "" {
+		if input == "" {
+			m.status = "Answer the current workforce question before continuing."
+		}
+		return nil
+	}
+	value, err := m.parseRefinementAnswer(*question, input)
+	if err != nil {
+		m.err = err
+		m.status = "That answer does not match the requested format."
+		return nil
+	}
+	changeSet := m.authoringChangeSet
+	intent := fmt.Sprintf("refine\x00%s\x00%d\x00%s\x00%s", changeSet.ID, changeSet.Revision, question.ID, input)
+	if m.pendingRefinementKey == "" || m.pendingRefinementIntent != intent {
+		m.pendingRefinementKey, m.pendingRefinementIntent = uuid.NewString(), intent
+	}
+	request := authoring.AnswerChangeSetRefinementRequest{
+		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
+		QuestionID: question.ID, Value: value, Source: authoring.RefinementAnswerSourceUser,
+		Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+	}
+	key := m.pendingRefinementKey
+	m.busy, m.err, m.status = true, nil, "Saving the answer and regenerating the proposal…"
+	return func() tea.Msg {
+		result, err := m.client.AnswerWorkforceChangeSetRefinement(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Refinement answer", err: err}
+	}
+}
+
+func (m *Model) parseRefinementAnswer(question authoring.RefinementQuestion, input string) (authoring.RefinementAnswerValue, error) {
+	value, err := parseRefinementAnswer(question, input)
+	if err != nil || value.CredentialReference == nil {
+		return value, err
+	}
+	if m.authoringCapability.Context == nil {
+		return authoring.RefinementAnswerValue{}, errors.New("no authorized credential bindings were advertised")
+	}
+	for _, binding := range m.authoringCapability.Context.CredentialBindings {
+		if binding.Reference == *value.CredentialReference {
+			return value, nil
+		}
+	}
+	return authoring.RefinementAnswerValue{}, errors.New("credential reference is not advertised for this proposal")
 }
 
 func (m *Model) submitWorkforceApply() tea.Cmd {
@@ -3037,6 +3094,153 @@ func (m *Model) supportsWorkforceAuthoring() bool {
 	return m.supportsAuthoring(kernelapi.OperationPropose) || m.supportsAuthoring(kernelapi.OperationCompile)
 }
 
+// readyRefinement exposes exactly one server-backed question when the
+// contextual capability proves that this exact ChangeSet revision may be
+// refined. The TUI never infers authority from host-wide feature flags.
+func (m *Model) readyRefinement() *authoring.RefinementQuestion {
+	changeSet := m.authoringChangeSet
+	context := m.authoringCapability.Context
+	if changeSet == nil || context == nil || context.ChangeSetID != changeSet.ID || context.Revision != changeSet.Revision ||
+		!m.supportsAuthoring(kernelapi.OperationRefine) {
+		return nil
+	}
+	return changeSet.Refinement.NextQuestion()
+}
+
+func (m *Model) activateReadyRefinement() {
+	question := m.readyRefinement()
+	if question == nil {
+		if m.mode == modeWorkforceRefinement {
+			m.resetComposerMode()
+		}
+		return
+	}
+	m.section = sectionAuthoring
+	changed := m.activeRefinementQuestionID != question.ID
+	if changed {
+		m.editor.Reset()
+		m.pendingRefinementKey, m.pendingRefinementIntent = "", ""
+	}
+	m.activeRefinementQuestionID = question.ID
+	m.mode = modeWorkforceRefinement
+	m.editor.Placeholder = refinementAnswerPlaceholder(*question)
+	if changed {
+		m.focusComposerEditor()
+	}
+}
+
+func parseRefinementAnswer(question authoring.RefinementQuestion, input string) (authoring.RefinementAnswerValue, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return authoring.RefinementAnswerValue{}, errors.New("answer is required")
+	}
+	switch question.Answer.Kind {
+	case authoring.RefinementAnswerText:
+		return authoring.RefinementAnswerValue{Text: input}, nil
+	case authoring.RefinementAnswerStringList:
+		items := splitRefinementSelections(input)
+		if len(items) == 0 {
+			return authoring.RefinementAnswerValue{}, errors.New("at least one value is required")
+		}
+		return authoring.RefinementAnswerValue{Items: items}, nil
+	case authoring.RefinementAnswerSingleSelect, authoring.RefinementAnswerMultiSelect:
+		selected, err := matchRefinementOptions(question.Answer.Options, input)
+		if err != nil {
+			return authoring.RefinementAnswerValue{}, err
+		}
+		if question.Answer.Kind == authoring.RefinementAnswerSingleSelect && len(selected) != 1 {
+			return authoring.RefinementAnswerValue{}, errors.New("choose exactly one option")
+		}
+		return authoring.RefinementAnswerValue{OptionIDs: selected}, nil
+	case authoring.RefinementAnswerBoolean:
+		value, ok := parseRefinementBoolean(input)
+		if !ok {
+			return authoring.RefinementAnswerValue{}, errors.New("answer yes or no")
+		}
+		return authoring.RefinementAnswerValue{Boolean: &value}, nil
+	case authoring.RefinementAnswerCredentialReference:
+		kind, id, ok := strings.Cut(input, "/")
+		kind, id = strings.TrimSpace(kind), strings.TrimSpace(id)
+		if !ok || kind == "" || id == "" {
+			return authoring.RefinementAnswerValue{}, errors.New("use credential kind/id")
+		}
+		return authoring.RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: kind, ID: id}}, nil
+	case authoring.RefinementAnswerSkillSelection:
+		selected, err := matchRefinementOptions(question.Answer.Options, input)
+		if err != nil {
+			return authoring.RefinementAnswerValue{}, err
+		}
+		return authoring.RefinementAnswerValue{SkillIDs: selected}, nil
+	default:
+		return authoring.RefinementAnswerValue{}, errors.New("unsupported refinement answer kind")
+	}
+}
+
+func splitRefinementSelections(input string) []string {
+	seen := make(map[string]bool)
+	values := make([]string, 0)
+	for _, value := range strings.FieldsFunc(input, func(r rune) bool { return r == ',' || r == '\n' }) {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func matchRefinementOptions(options []authoring.RefinementQuestionOption, input string) ([]string, error) {
+	byAnswer := make(map[string]string, len(options)*2)
+	for _, option := range options {
+		byAnswer[strings.ToLower(strings.TrimSpace(option.ID))] = option.ID
+		byAnswer[strings.ToLower(strings.TrimSpace(option.Label))] = option.ID
+	}
+	selected := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, answer := range splitRefinementSelections(input) {
+		id, ok := byAnswer[strings.ToLower(answer)]
+		if !ok {
+			return nil, fmt.Errorf("unknown option %q", answer)
+		}
+		if !seen[id] {
+			seen[id] = true
+			selected = append(selected, id)
+		}
+	}
+	if len(selected) == 0 {
+		return nil, errors.New("choose at least one advertised option")
+	}
+	return selected, nil
+}
+
+func parseRefinementBoolean(input string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "yes", "y", "true":
+		return true, true
+	case "no", "n", "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func refinementAnswerPlaceholder(question authoring.RefinementQuestion) string {
+	switch question.Answer.Kind {
+	case authoring.RefinementAnswerStringList:
+		return "Enter comma-separated values…"
+	case authoring.RefinementAnswerSingleSelect:
+		return "Enter one advertised option…"
+	case authoring.RefinementAnswerMultiSelect, authoring.RefinementAnswerSkillSelection:
+		return "Enter one or more advertised options, separated by commas…"
+	case authoring.RefinementAnswerBoolean:
+		return "Answer yes or no…"
+	case authoring.RefinementAnswerCredentialReference:
+		return "Enter an authorized credential reference as kind/id…"
+	default:
+		return "Type your answer…"
+	}
+}
+
 func (m *Model) selectedWorkforceApprovalRequirement() (kernelapi.ApprovalRequirementReference, bool) {
 	if !m.canResolveWorkforceApproval() {
 		return kernelapi.ApprovalRequirementReference{}, false
@@ -3988,6 +4192,8 @@ func (m *Model) prepareTeamAmendmentComposer(mode editorMode, placeholder string
 
 func (m *Model) prepareComposerForSection() {
 	switch {
+	case m.section == sectionAuthoring && m.readyRefinement() != nil:
+		m.activateReadyRefinement()
 	case m.section == sectionTeams && m.canProposeTeamPurposeAmendment():
 		m.prepareTeamAmendmentComposer(modeTeamAmendmentPropose, "First line: concise rationale\nRemaining lines: the Team's new purpose")
 	case m.section == sectionAuthoring && m.supportsWorkforceAuthoring():
@@ -4046,6 +4252,10 @@ func (m *Model) resetComposerMode() {
 		return
 	}
 	if m.section == sectionAuthoring {
+		if m.readyRefinement() != nil {
+			m.activateReadyRefinement()
+			return
+		}
 		m.mode = modeWorkforceAuthoring
 		m.editor.Placeholder = "Describe the Agents and Team you need…"
 		return

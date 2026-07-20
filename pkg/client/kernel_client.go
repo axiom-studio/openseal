@@ -68,6 +68,7 @@ type KernelClient interface {
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
 	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
 	GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error)
+	AnswerWorkforceChangeSetRefinement(context.Context, authoring.AnswerChangeSetRefinementRequest, string) (*authoring.ChangeSet, error)
 	UpdateWorkforceChangeSetPlacement(context.Context, authoring.UpdateChangeSetPlacementRequest, string) (*authoring.ChangeSet, error)
 	RetryWorkforceChangeSetGeneration(context.Context, authoring.RetryChangeSetGenerationRequest, string) (*authoring.ChangeSet, error)
 	EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error)
@@ -89,9 +90,9 @@ type ClawHubClient interface {
 	UninstallClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
 }
 
-// WorkforceRefinementClient is separate from KernelClient until a host
-// advertises workforce-authoring v7/refine. Older hosts and clients therefore
-// fail capability negotiation instead of silently exposing a dead control.
+// WorkforceRefinementClient lets narrower embedding surfaces depend only on
+// the governed refinement operation. Interactive clients still capability-gate
+// the operation against the contextual workforce-authoring v7 document.
 type WorkforceRefinementClient interface {
 	AnswerWorkforceChangeSetRefinement(context.Context, authoring.AnswerChangeSetRefinementRequest, string) (*authoring.ChangeSet, error)
 }

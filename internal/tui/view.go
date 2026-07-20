@@ -83,6 +83,9 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeWorkforceAuthoring && !m.supportsWorkforceAuthoring() {
 		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce authoring.")
 	}
+	if m.mode == modeWorkforceRefinement && m.readyRefinement() == nil {
+		return m.renderUnavailableComposer(width, "Answer proposal question", "This exact proposal revision does not advertise refinement authority.")
+	}
 	if m.mode == modeObjectiveCreate && !m.supportsObjective(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Add an objective", "This server does not advertise objective creation.")
 	}
@@ -107,7 +110,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -146,6 +149,14 @@ func (m *Model) renderComposer(width int) string {
 			description = "Describe a change. OpenSeal will compile a new immutable candidate and show its governed diff."
 		}
 		owner = "Governed review · authoring never activates state"
+	case modeWorkforceRefinement:
+		question := m.readyRefinement()
+		title = "One question before continuing"
+		description = question.Prompt
+		owner = question.WhyNeeded
+		if guidance := m.renderRefinementGuidance(*question, max(width-8, 24)); guidance != "" {
+			owner += "\n\n" + guidance
+		}
 	case modeWorkforceApprove:
 		title = "Approve policy requirement"
 		description = "Record why the exact advertised requirement is satisfied. The decision is permanent."
@@ -598,6 +609,10 @@ func (m *Model) renderAuthoringContent(width int) string {
 	if result == nil {
 		if changeSet := m.authoringChangeSet; changeSet != nil {
 			lines := []string{title, "", mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision))}
+			if history := renderAnsweredRefinements(changeSet, max(width-8, 24)); len(history) > 0 {
+				lines = append(lines, "", mutedStyle.Render("Answered questions"))
+				lines = append(lines, history...)
+			}
 			if changeSet.Generation != nil {
 				lines = append(lines, mutedStyle.Render(fmt.Sprintf("Run %s · attempt %d", compact(changeSet.Generation.RunID, 16), changeSet.Generation.Attempt)))
 				if changeSet.Generation.LastError != "" {
@@ -628,6 +643,10 @@ func (m *Model) renderAuthoringContent(width int) string {
 	if m.authoringChangeSet != nil {
 		changeSet := m.authoringChangeSet
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision)))
+		if history := renderAnsweredRefinements(changeSet, max(width-8, 24)); len(history) > 0 {
+			lines = append(lines, "", mutedStyle.Render("Answered questions"))
+			lines = append(lines, history...)
+		}
 		if len(changeSet.Evaluations) > 0 {
 			evaluation := changeSet.Evaluations[len(changeSet.Evaluations)-1]
 			outcome := "denied"
@@ -720,8 +739,10 @@ func (m *Model) renderAuthoringContent(width int) string {
 	for _, agent := range result.Candidate.Agents {
 		lines = append(lines, fmt.Sprintf("• %s  %s · %d concurrent", compact(agent.DisplayName, max(width-28, 18)), agent.Authority.MaximumRisk, agent.Authority.MaxConcurrentRuns))
 	}
-	for _, question := range result.Questions {
-		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question, max(width-8, 24))))
+	if m.authoringChangeSet == nil {
+		for _, question := range result.Questions {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question, max(width-8, 24))))
+		}
 	}
 	for _, missing := range result.MissingRequirements {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("Connect %s %s for %s", missing.Kind, missing.ID, missing.RequiredBy)))
@@ -733,6 +754,70 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderRefinementGuidance(question authoring.RefinementQuestion, width int) string {
+	lines := make([]string, 0)
+	for _, option := range question.Answer.Options {
+		label := fmt.Sprintf("• %s — %s", option.ID, option.Label)
+		if option.Description != "" {
+			label += " · " + option.Description
+		}
+		lines = append(lines, compact(label, width))
+		if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && m.authoringChangeSet != nil {
+			if skill, ok := m.authoringChangeSet.Catalog.Skills[option.ID]; ok {
+				if skill.Readiness != "" {
+					lines = append(lines, compact("  Readiness: "+string(skill.Readiness), width))
+				}
+				for _, evidence := range skill.Compatibility {
+					lines = append(lines, compact(fmt.Sprintf("  %s: %t — %s", evidence.Requirement, evidence.Compatible, evidence.Evidence), width))
+				}
+			}
+		}
+	}
+	if question.Answer.Kind == authoring.RefinementAnswerCredentialReference && m.authoringCapability.Context != nil {
+		for _, binding := range m.authoringCapability.Context.CredentialBindings {
+			lines = append(lines, compact(fmt.Sprintf("• %s — %s/%s", binding.DisplayName, binding.Reference.Kind, binding.Reference.ID), width))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderAnsweredRefinements(changeSet *authoring.ChangeSet, width int) []string {
+	if changeSet == nil {
+		return nil
+	}
+	lines := make([]string, 0)
+	for _, question := range changeSet.Refinement.Questions {
+		answer := changeSet.Refinement.CurrentAnswer(question.ID)
+		if answer == nil {
+			continue
+		}
+		lines = append(lines, mutedStyle.Render(compact("✓ "+question.Prompt+" — "+refinementAnswerSummary(answer.Value), width)))
+	}
+	return lines
+}
+
+func refinementAnswerSummary(value authoring.RefinementAnswerValue) string {
+	switch {
+	case value.Text != "":
+		return value.Text
+	case len(value.Items) > 0:
+		return strings.Join(value.Items, ", ")
+	case len(value.OptionIDs) > 0:
+		return strings.Join(value.OptionIDs, ", ")
+	case value.Boolean != nil:
+		if *value.Boolean {
+			return "yes"
+		}
+		return "no"
+	case value.CredentialReference != nil:
+		return value.CredentialReference.Kind + " credential configured"
+	case len(value.SkillIDs) > 0:
+		return strings.Join(value.SkillIDs, ", ")
+	default:
+		return "answered"
+	}
 }
 
 func (m *Model) renderObjectivesContent(width int) string {
