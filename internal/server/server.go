@@ -41,6 +41,7 @@ type Server struct {
 	clawHub            *opensealkernel.Engine
 	clawHubMutations   bool
 	outreachDelivery   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	agentRunCreation   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 }
 
 // SetClawHubLifecycle enables the canonical registry/install engine. Mutation
@@ -193,6 +194,13 @@ func (s *Server) SetActionApprovalAuthorizer(authorizer runtime.ApprovalAuthoriz
 // work that no runtime can execute.
 func (s *Server) SetOutreachDeliveryDispatcher(dispatch func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)) {
 	s.outreachDelivery = dispatch
+}
+
+// SetAgentRunCreationDispatcher enables Run creation only after the host has
+// installed a worker capable of claiming the created work. Inspection and
+// lifecycle intervention remain available without a worker.
+func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)) {
+	s.agentRunCreation = dispatch
 }
 
 // ListenAndServe starts the server on the given address.

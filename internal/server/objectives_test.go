@@ -14,6 +14,7 @@ import (
 func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	body := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"gtm"},"title":"Launch","goal":"Create demand","status":"active","budget":{"maxAttempts":5,"maxTurns":10,"maxTotalTokens":1000,"maxDurationMs":120000}}`
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", body, "launch-objective")
 	if created.Code != http.StatusCreated {

@@ -113,7 +113,11 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(), kernelapi.ActivityCapability()}
+	runOperations := []string{kernelapi.OperationGet, kernelapi.OperationList, kernelapi.OperationPause, kernelapi.OperationResume, kernelapi.OperationCancel, kernelapi.OperationIntervene}
+	if s.agentRunCreation != nil {
+		runOperations = append(runOperations, kernelapi.OperationCreate)
+	}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActivityCapability()}
 	if _, ok := s.store.(runtime.CollaborationKernelStore); ok {
 		capabilities = append(capabilities, kernelapi.AgentRequestsCapability())
 	}

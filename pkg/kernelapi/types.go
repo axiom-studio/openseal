@@ -266,13 +266,16 @@ func (c Capability) Supports(operation string) bool {
 	return false
 }
 
-func AgentRunsCapability() Capability {
-	return Capability{
-		ID: AgentRunsCapabilityID, Version: AgentRunsCapabilityVersion, Available: true,
-		Operations: []string{
+func AgentRunsCapability(operations ...string) Capability {
+	if len(operations) == 0 {
+		operations = []string{
 			OperationCreate, OperationGet, OperationList, OperationPause,
 			OperationResume, OperationCancel, OperationIntervene,
-		},
+		}
+	}
+	return Capability{
+		ID: AgentRunsCapabilityID, Version: AgentRunsCapabilityVersion, Available: len(operations) > 0,
+		Operations: append([]string(nil), operations...),
 	}
 }
 
