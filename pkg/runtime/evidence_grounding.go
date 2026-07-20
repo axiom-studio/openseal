@@ -18,6 +18,13 @@ const (
 	evidenceGroundingDraftInstruction  = "For evidence-backed completion, put the complete human-readable report in runOutput.report and cite every EvidenceClaim using its exact observation IDs in that report. outputSummary and the claim ledger do not replace the report."
 )
 
+func applyEvidenceGroundingDraftInstruction(request *HostedTurnRequest, snapshot *EvidenceSnapshot) {
+	if request == nil || snapshot == nil || containsString(request.SystemInstructions, evidenceGroundingDraftInstruction) {
+		return
+	}
+	request.SystemInstructions = append(request.SystemInstructions, evidenceGroundingDraftInstruction)
+}
+
 type EvidenceClaim struct {
 	ID           string   `json:"id"`
 	Statement    string   `json:"statement"`
