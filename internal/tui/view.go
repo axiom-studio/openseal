@@ -94,6 +94,9 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeInitiativeEdit && !m.supportsInitiative(kernelapi.OperationPatch) {
 		return m.renderUnavailableComposer(width, "Amend Initiative", "This server does not advertise Initiative updates.")
 	}
+	if m.mode == modeOutreachCreate && !m.canCreateOutreachDraft() {
+		return m.renderUnavailableComposer(width, "Draft public outreach", "Select an Initiative, source observation, and authorized external Skill action first.")
+	}
 	if m.mode == modeSkillInstall && !m.supportsClawHub(clawhub.LifecycleInstall) {
 		return m.renderUnavailableComposer(width, "Install a Skill", "This server does not advertise governed ClawHub installation.")
 	}
@@ -103,7 +106,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -187,6 +190,10 @@ func (m *Model) renderComposer(width int) string {
 	case modeInitiativeEdit:
 		title = "Amend selected Initiative"
 		description = "Refine its purpose without losing coordination state or audit history."
+	case modeOutreachCreate:
+		title = "Draft public outreach"
+		description = "Declare a truthful identity and approval policy, then write the exact public message for the selected evidence."
+		owner = "Draft only · delivery is a separate governed Run"
 	case modeSkillInstall:
 		title = "Install a ClawHub Skill"
 		description = "Enter an owner-qualified reference. OpenSeal verifies, compiles, and activates it atomically."
@@ -261,6 +268,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionInitiatives {
 		content = m.renderInitiativesContent(width)
+	} else if m.section == sectionOutreach {
+		content = m.renderOutreachContent(width)
 	} else if m.section == sectionSkills {
 		content = m.renderClawHubSkillsContent(width)
 	} else if m.section == sectionChannels {
@@ -280,7 +289,7 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 12)
+	tabs := make([]string, 0, 13)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
@@ -320,6 +329,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.initiativeCapability.Available {
 		label := "i Initiatives"
 		if m.section == sectionInitiatives {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.outreachCapability.Available {
+		label := "O Outreach"
+		if m.section == sectionOutreach {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)

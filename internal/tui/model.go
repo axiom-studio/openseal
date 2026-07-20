@@ -79,6 +79,7 @@ const (
 	sectionTeams
 	sectionObjectives
 	sectionInitiatives
+	sectionOutreach
 	sectionSkills
 	sectionRuns
 	sectionRequests
@@ -100,6 +101,7 @@ const (
 	modeObjectiveEdit
 	modeInitiativeCreate
 	modeInitiativeEdit
+	modeOutreachCreate
 	modeSkillInstall
 	modeSkillPin
 	modeSkillRemove
@@ -145,6 +147,7 @@ type Model struct {
 	approvalCapability          kernelapi.Capability
 	objectiveCapability         kernelapi.Capability
 	initiativeCapability        kernelapi.Capability
+	outreachCapability          kernelapi.Capability
 	sourceMonitorCapability     kernelapi.Capability
 	activityCapability          kernelapi.Capability
 	clawHubCapability           kernelapi.Capability
@@ -190,6 +193,13 @@ type Model struct {
 	initiatives                 []*runtime.Initiative
 	initiativeSelected          int
 	selectedInitiative          string
+	outreachThreads             []*runtime.OutreachThread
+	outreachSelected            int
+	selectedOutreach            string
+	outreachObservations        []*runtime.SourceObservation
+	outreachObservationSelected int
+	outreachActions             []capability.ModelAction
+	outreachActionSelected      int
 	sourceMonitorStatuses       map[string]sourceMonitorStatus
 	clawHubSkills               []clawhub.InstalledState
 	skillActions                []capability.ModelAction
@@ -219,6 +229,8 @@ type Model struct {
 	pendingObjectivePrompt      string
 	pendingInitiativeKey        string
 	pendingInitiativePrompt     string
+	pendingOutreachKey          string
+	pendingOutreachPrompt       string
 	pendingClawHubPrompt        string
 	pendingConversationKey      string
 	pendingConversationTitle    string
@@ -374,6 +386,25 @@ type initiativeUpdated struct {
 	err        error
 }
 
+type outreachLoaded struct {
+	initiativeID string
+	threads      []*runtime.OutreachThread
+	observations []*runtime.SourceObservation
+	actions      []capability.ModelAction
+	err          error
+}
+
+type outreachCreated struct {
+	thread *runtime.OutreachThread
+	err    error
+}
+
+type outreachDeliveryCreated struct {
+	run      *runtime.AgentRun
+	threadID string
+	err      error
+}
+
 type clawHubSkillsLoaded struct {
 	skills []clawhub.InstalledState
 	err    error
@@ -509,6 +540,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		approvalCapability, hasApprovals := msg.document.Find(kernelapi.ActionApprovalsCapabilityID, kernelapi.ActionApprovalsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
+		outreachCapability, hasOutreach := msg.document.Find(kernelapi.OutreachCapabilityID, kernelapi.OutreachCapabilityVersion)
 		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
 		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
@@ -523,6 +555,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalCapability = approvalCapability
 		m.objectiveCapability = objectiveCapability
 		m.initiativeCapability = initiativeCapability
+		m.outreachCapability = outreachCapability
 		m.sourceMonitorCapability = sourceMonitorCapability
 		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
@@ -553,6 +586,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasInitiatives || !initiativeCapability.Available {
 			m.initiativeCapability = kernelapi.Capability{}
 		}
+		if !hasOutreach || !outreachCapability.Available || !outreachCapability.Supports(kernelapi.OperationList) || !m.initiativeCapability.Available {
+			m.outreachCapability = kernelapi.Capability{}
+		}
 		if !hasActivity || !activityCapability.Available {
 			m.activityCapability = kernelapi.Capability{}
 		}
@@ -577,7 +613,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
 			m.teamDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -634,7 +670,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionTeams
 			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -770,7 +806,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err, m.initiatives = nil, msg.initiatives
 		m.restoreInitiativeSelection()
-		return m, m.loadSourceMonitors()
+		return m, tea.Batch(m.loadSourceMonitors(), m.loadOutreach())
 	case sourceMonitorsLoaded:
 		m.sourceMonitorStatuses = msg.statuses
 		return m, nil
@@ -1117,6 +1153,49 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetComposerMode()
 		m.focusPanelList()
 		return m, m.loadInitiatives()
+	case outreachLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if initiative := m.selectedInitiativeRecord(); initiative == nil || initiative.ID != msg.initiativeID {
+			return m, nil
+		}
+		m.err = nil
+		m.outreachThreads = msg.threads
+		m.outreachObservations = msg.observations
+		m.outreachActions = msg.actions
+		m.restoreOutreachSelection()
+		m.outreachObservationSelected = min(m.outreachObservationSelected, max(0, len(m.outreachObservations)-1))
+		m.outreachActionSelected = min(m.outreachActionSelected, max(0, len(m.outreachActions)-1))
+		return m, nil
+	case outreachCreated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Outreach draft failed. Your reviewed text is preserved for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.pendingOutreachKey, m.pendingOutreachPrompt = "", ""
+		m.editor.Reset()
+		m.selectedOutreach = msg.thread.ID
+		m.status = "Evidence-linked outreach draft saved. Nothing has been sent."
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, m.loadOutreach()
+	case outreachDeliveryCreated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Delivery Run was not created. The draft remains unchanged."
+			return m, m.loadOutreach()
+		}
+		m.err = nil
+		m.selectedOutreach = msg.threadID
+		m.status = "Governed delivery Run created · " + msg.run.ID + "."
+		return m, tea.Batch(m.loadOutreach(), m.loadRuns(), m.loadActionApprovals())
 	case runCommanded:
 		m.busy = false
 		if msg.err != nil {
@@ -1136,7 +1215,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -1194,6 +1273,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitInitiative()
 			case modeInitiativeEdit:
 				return m, m.submitInitiativeAmendment()
+			case modeOutreachCreate:
+				return m, m.submitOutreachDraft()
 			case modeSkillInstall:
 				return m, m.submitClawHubInstall()
 			case modeSkillPin:
@@ -1313,6 +1394,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.resetEvidenceInspection()
 				return m, tea.Batch(m.loadInitiatives(), m.loadRuns())
 			}
+		case "O":
+			if m.outreachCapability.Available {
+				m.section = sectionOutreach
+				return m, m.loadOutreach()
+			}
 		case "s":
 			if m.clawHubCapability.Available || m.skillActionCapability.Available {
 				m.section = sectionSkills
@@ -1348,6 +1434,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the Initiative outcome…"
 				m.focusComposerEditor()
+			} else if m.section == sectionOutreach && m.canCreateOutreachDraft() {
+				m.prepareOutreachComposer()
 			} else if m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall) {
 				m.mode = modeSkillInstall
 				m.editor.Reset()
@@ -1369,6 +1457,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceCredentialChoice(-1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(-1)
+			} else if m.section == sectionOutreach {
+				m.moveOutreachObservation(-1)
+				return m, m.loadOutreach()
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveEvidenceObservation(-1)
 			}
@@ -1377,15 +1468,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceCredentialChoice(1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(1)
+			} else if m.section == sectionOutreach {
+				m.moveOutreachObservation(1)
+				return m, m.loadOutreach()
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveEvidenceObservation(1)
 			}
 		case "{":
-			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			if m.section == sectionOutreach {
+				m.moveOutreachAction(-1)
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveGroundingPage(-1)
 			}
 		case "}":
-			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			if m.section == sectionOutreach {
+				m.moveOutreachAction(1)
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
 				m.moveGroundingPage(1)
 			}
 		case "b":
@@ -1498,6 +1596,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "d":
 			if m.section == sectionArtifacts {
 				return m, m.downloadSelectedArtifact()
+			}
+		case "D":
+			if m.section == sectionOutreach {
+				return m, m.deliverSelectedOutreachDraft()
 			}
 		case "u":
 			if m.section == sectionSkills {
@@ -2205,6 +2307,9 @@ func (m *Model) loadPanel() tea.Cmd {
 	if m.section == sectionInitiatives {
 		return tea.Batch(m.loadInitiatives(), m.loadRuns())
 	}
+	if m.section == sectionOutreach {
+		return m.loadOutreach()
+	}
 	if m.section == sectionSkills {
 		return m.loadClawHubSkills()
 	}
@@ -2794,6 +2899,10 @@ func (m *Model) supportsRun(operation string) bool {
 	return m.ready && m.runCapability.Supports(operation)
 }
 
+func (m *Model) supportsOutreach(operation string) bool {
+	return m.ready && m.outreachCapability.Supports(operation)
+}
+
 func (m *Model) defaultOperationalSection() panelSection {
 	for _, candidate := range []struct {
 		section   panelSection
@@ -2803,6 +2912,7 @@ func (m *Model) defaultOperationalSection() panelSection {
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionInitiatives, m.initiativeCapability.Available},
+		{sectionOutreach, m.outreachCapability.Available},
 		{sectionRuns, m.runCapability.Available},
 		{sectionActivity, m.activityCapability.Available},
 		{sectionRequests, m.requestCapability.Available},
@@ -3312,6 +3422,10 @@ func (m *Model) movePanelSelection(delta int) {
 		m.moveInitiativeSelection(delta)
 		return
 	}
+	if m.section == sectionOutreach {
+		m.moveOutreachSelection(delta)
+		return
+	}
 	if m.section == sectionSkills {
 		m.moveClawHubSelection(delta)
 		return
@@ -3803,6 +3917,8 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeInitiativeCreate
 		m.editor.Placeholder = "Describe the Initiative outcome…"
 		m.focusComposerEditor()
+	case m.section == sectionOutreach && m.canCreateOutreachDraft():
+		m.prepareOutreachComposer()
 	case m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall):
 		m.mode = modeSkillInstall
 		m.editor.Placeholder = "Enter @owner/skill to install…"
@@ -3857,6 +3973,11 @@ func (m *Model) resetComposerMode() {
 	if m.section == sectionInitiatives {
 		m.mode = modeInitiativeCreate
 		m.editor.Placeholder = "Describe the Initiative outcome…"
+		return
+	}
+	if m.section == sectionOutreach {
+		m.mode = modeCreate
+		m.editor.Placeholder = "Select evidence and an authorized action, then press n to draft outreach."
 		return
 	}
 	if m.section == sectionSkills {
