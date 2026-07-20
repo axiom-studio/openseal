@@ -29,6 +29,9 @@ type ModelAction = capability.ModelAction
 type ModelPrompt = capability.ModelPrompt
 type BoundAction = capability.BoundAction
 type BindingReference = capability.BindingReference
+type BindingActor = capability.BindingActor
+type BindingLifecycleAction = capability.BindingLifecycleAction
+type BindingLifecycleEntry = capability.BindingLifecycleEntry
 
 const (
 	RiskLevelRead        = capability.RiskLevelRead
@@ -46,6 +49,11 @@ const (
 	IdempotencyNone      = capability.IdempotencyNone
 	IdempotencySupported = capability.IdempotencySupported
 	IdempotencyRequired  = capability.IdempotencyRequired
+
+	BindingLifecycleCreated  = capability.BindingLifecycleCreated
+	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
+	BindingLifecycleEnabled  = capability.BindingLifecycleEnabled
+	BindingLifecycleDisabled = capability.BindingLifecycleDisabled
 )
 
 type Catalog struct {
@@ -721,6 +729,35 @@ func validateBindingShape(binding *Binding) error {
 	}
 	if err := validateNonSecretConfiguration(binding.Config, ""); err != nil {
 		return err
+	}
+	if err := validateBindingLifecycle(binding); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateBindingLifecycle(binding *Binding) error {
+	if len(binding.Lifecycle) == 0 {
+		return nil
+	}
+	if binding.CreatedAt.IsZero() || binding.UpdatedAt.IsZero() || binding.UpdatedAt.Before(binding.CreatedAt) {
+		return errors.New("managed binding timestamps are invalid")
+	}
+	previous := int64(0)
+	for _, entry := range binding.Lifecycle {
+		if entry.Revision <= previous || entry.Revision > binding.Revision || entry.At.IsZero() ||
+			strings.TrimSpace(entry.Actor.Type) == "" || strings.TrimSpace(entry.Actor.ID) == "" || strings.TrimSpace(entry.Reason) == "" {
+			return errors.New("binding lifecycle entry is invalid")
+		}
+		switch entry.Action {
+		case BindingLifecycleCreated, BindingLifecycleUpdated, BindingLifecycleEnabled, BindingLifecycleDisabled:
+		default:
+			return errors.New("binding lifecycle action is invalid")
+		}
+		previous = entry.Revision
+	}
+	if previous != binding.Revision {
+		return errors.New("binding lifecycle must end at the current revision")
 	}
 	return nil
 }

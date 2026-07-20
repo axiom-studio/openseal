@@ -10,6 +10,8 @@ var (
 	ErrDefinitionAmbiguous     = errors.New("skill definition source is ambiguous")
 	ErrBindingAmbiguous        = errors.New("skill binding selection is ambiguous")
 	ErrBindingRevisionConflict = errors.New("skill binding revision conflict")
+	ErrBindingNotFound         = errors.New("skill binding not found")
+	ErrBindingAlreadyDisabled  = errors.New("skill binding is already disabled")
 )
 
 // CatalogStore persists the canonical skill control plane. Implementations
