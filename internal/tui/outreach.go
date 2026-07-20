@@ -194,6 +194,44 @@ func (m *Model) deliverSelectedOutreachDraft() tea.Cmd {
 	}
 }
 
+func (m *Model) inspectSelectedOutreachRun() tea.Cmd {
+	thread := m.selectedOutreachRecord()
+	runID := selectedOutreachRunID(thread)
+	if thread == nil || runID == "" || !m.supportsRun(kernelapi.OperationGet) || m.loading {
+		return nil
+	}
+	m.loading, m.err, m.status = true, nil, "Loading the linked delivery Run…"
+	return func() tea.Msg {
+		run, err := m.client.GetAgentRun(m.ctx, thread.Scope, runID)
+		return outreachRunLoaded{run: run, err: err}
+	}
+}
+
+func selectedOutreachRunID(thread *runtime.OutreachThread) string {
+	if thread == nil {
+		return ""
+	}
+	for index := len(thread.Messages) - 1; index >= 0; index-- {
+		if runID := strings.TrimSpace(thread.Messages[index].RunID); runID != "" {
+			return runID
+		}
+	}
+	return ""
+}
+
+func upsertRun(runs []*runtime.AgentRun, run *runtime.AgentRun) []*runtime.AgentRun {
+	if run == nil {
+		return runs
+	}
+	for index := range runs {
+		if runs[index] != nil && runs[index].ID == run.ID {
+			runs[index] = run
+			return runs
+		}
+	}
+	return append([]*runtime.AgentRun{run}, runs...)
+}
+
 func (m *Model) selectedOutreachRecord() *runtime.OutreachThread {
 	if m.outreachSelected < 0 || m.outreachSelected >= len(m.outreachThreads) {
 		return nil
@@ -330,6 +368,9 @@ func (m *Model) renderOutreachContent(width int) string {
 	}
 	if m.supportsOutreach(kernelapi.OperationDeliver) && selectedOutreachHasDraft(m.selectedOutreachRecord()) {
 		actions = append(actions, "D create delivery Run")
+	}
+	if m.supportsRun(kernelapi.OperationGet) && selectedOutreachRunID(m.selectedOutreachRecord()) != "" {
+		actions = append(actions, "Enter inspect Run")
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 	return strings.Join(lines, "\n")

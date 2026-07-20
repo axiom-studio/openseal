@@ -740,11 +740,13 @@ func (f *fakeKernelClient) UpdateAgentDeployment(_ context.Context, id string, r
 	return nil, kernelagent.ErrDeploymentNotFound
 }
 
-func (f *fakeKernelClient) GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error) {
-	if len(f.runs) == 0 {
-		return nil, runtime.ErrRunNotFound
+func (f *fakeKernelClient) GetAgentRun(_ context.Context, _ runtime.Scope, id string) (*runtime.AgentRun, error) {
+	for _, run := range f.runs {
+		if run != nil && run.ID == id {
+			return run, nil
+		}
 	}
-	return f.runs[0], nil
+	return nil, runtime.ErrRunNotFound
 }
 
 func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ runtime.Scope, id string, request kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
@@ -1844,9 +1846,10 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 	}
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(
-			kernelapi.InitiativesCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(),
+			kernelapi.InitiativesCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(), kernelapi.AgentRunsCapability(),
 		),
 		initiatives: []*runtime.Initiative{initiative}, outreachThreads: []*runtime.OutreachThread{thread},
+		runs:                []*runtime.AgentRun{{ID: "run-1", Scope: scope, Owner: initiative.Owner, AssignedAgentID: "researcher", Goal: "Deliver reviewed outreach", Status: runtime.AgentRunStatusWaitingForApproval, Revision: 3}},
 		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(initiative.ID, "forum"): {observation}},
 		skillActions: []capability.ModelAction{{
 			Name: "Reply", BindingID: "forum-account", BindingRevision: 4, SkillID: "forum", Version: "1", Action: "reply",
@@ -1862,6 +1865,30 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 			t.Fatalf("outreach view missing %q:\n%s", expected, view)
 		}
 	}
+	for _, size := range []struct{ width, height int }{{120, 36}, {100, 30}, {80, 24}} {
+		model.width, model.height = size.width, size.height
+		content := model.renderOutreachContent(size.width)
+		for _, expected := range []string{"Governed outreach", "Source policy", "Approval policy", "Identity", "Run run-1", "Receipt", "Enter inspect Run"} {
+			if !strings.Contains(content, expected) {
+				t.Fatalf("%dx%d outreach content missing %q:\n%s", size.width, size.height, expected, content)
+			}
+		}
+		for _, line := range strings.Split(content, "\n") {
+			if lipgloss.Width(line) > size.width {
+				t.Fatalf("%dx%d outreach line exceeds terminal width (%d): %q", size.width, size.height, lipgloss.Width(line), line)
+			}
+		}
+	}
+	model.width, model.height = 120, 36
+	if command := model.inspectSelectedOutreachRun(); command == nil {
+		t.Fatal("linked outreach Run inspection was unavailable")
+	} else {
+		applyCommand(t, model, command)
+	}
+	if model.section != sectionRuns || model.selectedRun() == nil || model.selectedRun().ID != "run-1" || !strings.Contains(model.status, "Inspecting governed outreach Run") {
+		t.Fatalf("linked outreach Run was not selected: section=%v selected=%#v status=%q", model.section, model.selectedRun(), model.status)
+	}
+	model.section = sectionOutreach
 	model.prepareOutreachComposer()
 	model.editor.SetValue("Name: Research\nAffiliation: OpenSeal\nProfile: profile:research\nDisclosure: " + disclosure + "\nApproval: human-review\nIntent: request_feedback\n\nCould you describe the hardest install step? " + disclosure)
 	applyCommand(t, model, model.submitOutreachDraft())
@@ -1883,6 +1910,29 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 	readOnlyModel.section = sectionOutreach
 	if view := readOnlyModel.View(); strings.Contains(view, "n draft") || strings.Contains(view, "D create delivery Run") || strings.Contains(view, "Draft basis") {
 		t.Fatalf("mutating outreach controls leaked without advertised operations:\n%s", view)
+	}
+
+	teamFake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(
+			kernelapi.InitiativesCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(),
+		),
+		initiatives:         []*runtime.Initiative{initiative},
+		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(initiative.ID, "forum"): {observation}},
+		skillActions:        fake.skillActions,
+	}
+	teamConfig := DefaultConfig()
+	teamConfig.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research-team"}
+	teamConfig.PollInterval = -1
+	teamModel, err := NewModel(context.Background(), teamFake, teamConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamModel.width, teamModel.height = 120, 36
+	applyCommand(t, teamModel, teamModel.loadCapabilities())
+	teamModel.section = sectionOutreach
+	applyCommand(t, teamModel, teamModel.loadOutreach())
+	if !teamModel.canCreateOutreachDraft() || teamModel.selectedOutreachAction() == nil || teamModel.selectedOutreachAction().BindingID != "forum-account" {
+		t.Fatalf("Team Initiative could not discover its monitor Agent's authorized action: capability=%#v actions=%#v", teamModel.skillActionCapability, teamModel.outreachActions)
 	}
 }
 
