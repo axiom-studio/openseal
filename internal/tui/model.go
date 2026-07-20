@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	"github.com/axiom-studio/openseal/pkg/source"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
@@ -73,6 +74,7 @@ type panelSection int
 const (
 	sectionAuthoring panelSection = iota
 	sectionReadiness
+	sectionTeams
 	sectionObjectives
 	sectionInitiatives
 	sectionSkills
@@ -144,6 +146,7 @@ type Model struct {
 	channelCapability           kernelapi.Capability
 	authoringCapability         kernelapi.Capability
 	agentDefinitionCapability   kernelapi.Capability
+	teamDefinitionCapability    kernelapi.Capability
 	authoringResult             *authoring.CompileResult
 	authoringChangeSet          *authoring.ChangeSet
 	authoringAmendment          bool
@@ -164,6 +167,9 @@ type Model struct {
 	activityNextCursor          string
 	activityHasMore             bool
 	compilations                []*kernelagent.DefinitionCompilation
+	teamDeployments             []kernelapi.TeamDeploymentCatalogEntry
+	teamDeploymentSelected      int
+	selectedTeamDeployment      string
 	objectives                  []*runtime.Objective
 	objectiveSelected           int
 	selectedObjective           string
@@ -235,6 +241,16 @@ type workforceGoverned struct {
 type workforceLoaded struct {
 	changeSet *authoring.ChangeSet
 	err       error
+}
+
+type teamDeploymentsLoaded struct {
+	items []kernelapi.TeamDeploymentCatalogEntry
+	err   error
+}
+
+type teamDeploymentUpdated struct {
+	result *kernelapi.TeamDeploymentResult
+	err    error
 }
 
 type runsLoaded struct {
@@ -474,6 +490,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
+		teamDefinitionCapability, hasTeamDefinitions := msg.document.Find(kernelapi.TeamDefinitionsCapabilityID, kernelapi.TeamDefinitionsCapabilityVersion)
 		m.runCapability = runCapability
 		m.requestCapability = requestCapability
 		m.approvalCapability = approvalCapability
@@ -487,6 +504,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
+		m.teamDefinitionCapability = teamDefinitionCapability
 		m.syncWorkforceCredentialChoices()
 		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
 			m.authoringApprovalSelected = 0
@@ -529,7 +547,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
 			m.agentDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available {
+		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
+			m.teamDefinitionCapability = kernelapi.Capability{}
+		}
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -582,8 +603,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.agentDefinitionCapability.Available {
 			m.section = sectionReadiness
 			m.focusPanelList()
+		} else if m.teamDefinitionCapability.Available {
+			m.section = sectionTeams
+			m.focusPanelList()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -647,6 +671,29 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.authoringResult = nil
 		}
 		return m, m.loadCapabilities()
+	case teamDeploymentsLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		m.teamDeployments = msg.items
+		m.restoreTeamDeploymentSelection()
+		return m, nil
+	case teamDeploymentUpdated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Team lifecycle update failed. Refreshing current state."
+			return m, m.loadTeamDeployments()
+		}
+		m.err = nil
+		if msg.result != nil && msg.result.Deployment != nil {
+			m.selectedTeamDeployment = msg.result.Deployment.ID
+			m.status = fmt.Sprintf("Team is now %s at revision %d.", msg.result.Deployment.Status, msg.result.Deployment.Revision)
+		}
+		return m, m.loadTeamDeployments()
 	case objectivesLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -1031,7 +1078,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -1176,6 +1223,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.section = sectionReadiness
 				return m, m.loadCompilations()
 			}
+		case "T":
+			if m.teamDefinitionCapability.Available {
+				m.section = sectionTeams
+				return m, m.loadTeamDeployments()
+			}
 		case "o":
 			if m.objectiveCapability.Available {
 				m.section = sectionObjectives
@@ -1259,6 +1311,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "p":
 			if m.section == sectionRuns {
 				return m, m.pauseOrResume()
+			} else if m.section == sectionTeams {
+				return m, m.pauseOrResumeTeamDeployment()
 			} else if m.section == sectionInitiatives {
 				return m, m.pauseOrResumeInitiative()
 			} else if m.section == sectionSkills {
@@ -1776,6 +1830,24 @@ func (m *Model) loadCompilations() tea.Cmd {
 	}
 }
 
+func (m *Model) loadTeamDeployments() tea.Cmd {
+	if !m.supportsTeamDefinition(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+	return func() tea.Msg {
+		result, err := m.client.ListTeamDeployments(m.ctx, scope)
+		if err != nil {
+			return teamDeploymentsLoaded{err: err}
+		}
+		if result == nil {
+			return teamDeploymentsLoaded{}
+		}
+		return teamDeploymentsLoaded{items: result.Items}
+	}
+}
+
 func (m *Model) loadObjectives() tea.Cmd {
 	if !m.supportsObjective(kernelapi.OperationList) {
 		return nil
@@ -1984,6 +2056,9 @@ func (m *Model) loadPanel() tea.Cmd {
 	}
 	if m.section == sectionReadiness {
 		return m.loadCompilations()
+	}
+	if m.section == sectionTeams {
+		return m.loadTeamDeployments()
 	}
 	if m.section == sectionObjectives {
 		return m.loadObjectives()
@@ -2586,6 +2661,7 @@ func (m *Model) defaultOperationalSection() panelSection {
 		available bool
 	}{
 		{sectionAuthoring, m.authoringCapability.Available},
+		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionInitiatives, m.initiativeCapability.Available},
 		{sectionRuns, m.runCapability.Available},
@@ -2612,6 +2688,10 @@ func (m *Model) supportsActionApproval(operation string) bool {
 
 func (m *Model) supportsAgentDefinition(operation string) bool {
 	return m.ready && m.agentDefinitionCapability.Supports(operation)
+}
+
+func (m *Model) supportsTeamDefinition(operation string) bool {
+	return m.ready && m.teamDefinitionCapability.Supports(operation)
 }
 
 func (m *Model) supportsObjective(operation string) bool {
@@ -3079,6 +3159,10 @@ func (m *Model) moveActivitySelection(delta int) {
 }
 
 func (m *Model) movePanelSelection(delta int) {
+	if m.section == sectionTeams {
+		m.moveTeamDeploymentSelection(delta)
+		return
+	}
 	if m.section == sectionObjectives {
 		m.moveObjectiveSelection(delta)
 		return
@@ -3112,6 +3196,75 @@ func (m *Model) movePanelSelection(delta int) {
 		return
 	}
 	m.moveSelection(delta)
+}
+
+func (m *Model) selectedTeamDeploymentRecord() *kernelapi.TeamDeploymentCatalogEntry {
+	if m.teamDeploymentSelected < 0 || m.teamDeploymentSelected >= len(m.teamDeployments) {
+		return nil
+	}
+	return &m.teamDeployments[m.teamDeploymentSelected]
+}
+
+func (m *Model) restoreTeamDeploymentSelection() {
+	if len(m.teamDeployments) == 0 {
+		m.teamDeploymentSelected = 0
+		m.selectedTeamDeployment = ""
+		return
+	}
+	for index := range m.teamDeployments {
+		deployment := m.teamDeployments[index].Deployment
+		if deployment != nil && deployment.ID == m.selectedTeamDeployment {
+			m.teamDeploymentSelected = index
+			return
+		}
+	}
+	m.teamDeploymentSelected = min(m.teamDeploymentSelected, len(m.teamDeployments)-1)
+	if deployment := m.teamDeployments[m.teamDeploymentSelected].Deployment; deployment != nil {
+		m.selectedTeamDeployment = deployment.ID
+	}
+}
+
+func (m *Model) moveTeamDeploymentSelection(delta int) {
+	if len(m.teamDeployments) == 0 {
+		return
+	}
+	m.teamDeploymentSelected = max(0, min(len(m.teamDeployments)-1, m.teamDeploymentSelected+delta))
+	if deployment := m.teamDeployments[m.teamDeploymentSelected].Deployment; deployment != nil {
+		m.selectedTeamDeployment = deployment.ID
+	}
+}
+
+func (m *Model) pauseOrResumeTeamDeployment() tea.Cmd {
+	entry := m.selectedTeamDeploymentRecord()
+	if entry == nil || entry.Deployment == nil || m.busy || !m.supportsTeamDefinition(kernelapi.OperationUpdate) {
+		return nil
+	}
+	current := entry.Deployment
+	nextStatus := kernelteam.DeploymentPaused
+	verb := "Pause"
+	if current.Status == kernelteam.DeploymentPaused {
+		nextStatus = kernelteam.DeploymentActive
+		verb = "Resume"
+	} else if current.Status != kernelteam.DeploymentActive {
+		m.status = "Only active or paused Team deployments can be paused or resumed."
+		return nil
+	}
+	updated := *current
+	updated.Roster = append([]kernelteam.RosterAssignment(nil), current.Roster...)
+	updated.Restrictions.AllowedSkillIDs = append([]string(nil), current.Restrictions.AllowedSkillIDs...)
+	updated.Status = nextStatus
+	m.busy = true
+	m.err = nil
+	m.status = verb + " Team deployment…"
+	request := kernelapi.UpdateTeamDeploymentRequest{
+		Deployment: &updated, ExpectedRevision: current.Revision,
+		ActorType: m.config.Actor.Type, ActorID: m.config.Actor.ID,
+		Reason: verb + " Team from the terminal",
+	}
+	return func() tea.Msg {
+		result, err := m.client.UpdateTeamDeployment(m.ctx, current.ID, request)
+		return teamDeploymentUpdated{result: result, err: err}
+	}
 }
 
 func (m *Model) selectedInitiativeRecord() *runtime.Initiative {

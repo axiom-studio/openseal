@@ -222,6 +222,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderAuthoringContent(width)
 	} else if m.section == sectionReadiness {
 		content = m.renderReadinessContent(width)
+	} else if m.section == sectionTeams {
+		content = m.renderTeamsContent(width)
 	} else if m.section == sectionObjectives {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionInitiatives {
@@ -245,7 +247,7 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 11)
+	tabs := make([]string, 0, 12)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
@@ -258,6 +260,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.agentDefinitionCapability.Available {
 		label := "h Runtime"
 		if m.section == sectionReadiness {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.teamDefinitionCapability.Available {
+		label := "T Teams"
+		if m.section == sectionTeams {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -371,6 +382,72 @@ func (m *Model) renderReadinessContent(width int) string {
 		}
 	}
 	lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Candidate %s · source %s %s · %d immutable record(s)", compact(latest.CandidateVersion, 20), latest.Source.Kind, latest.Source.Version, len(m.compilations))))
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderTeamsContent(width int) string {
+	title := headerStyle.Render("Team deployments")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, ""}
+	if len(m.teamDeployments) == 0 {
+		lines = append(lines, mutedStyle.Render("No deployed Teams yet. Use Workforce to describe the outcomes and roles you need."))
+		return strings.Join(lines, "\n")
+	}
+	visible := max(3, min(len(m.teamDeployments), max(m.height-18, 5)))
+	start := max(0, min(m.teamDeploymentSelected-visible/2, len(m.teamDeployments)-visible))
+	for index := start; index < min(len(m.teamDeployments), start+visible); index++ {
+		entry := m.teamDeployments[index]
+		if entry.Deployment == nil {
+			continue
+		}
+		name := entry.Deployment.ID
+		if entry.Definition != nil && strings.TrimSpace(entry.Definition.DisplayName) != "" {
+			name = entry.Definition.DisplayName
+		}
+		prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+		if index == m.teamDeploymentSelected {
+			prefix, style = "› ", selectedStyle
+		}
+		lines = append(lines, style.Render(fmt.Sprintf("%s%-9s %s", prefix, entry.Deployment.Status, compact(name, max(width-17, 20)))))
+	}
+	entry := m.selectedTeamDeploymentRecord()
+	if entry == nil || entry.Deployment == nil {
+		return strings.Join(lines, "\n")
+	}
+	deployment := entry.Deployment
+	definition := entry.Definition
+	lines = append(lines, "", mutedStyle.Render("Selected"))
+	if definition != nil {
+		lines = append(lines, compact(definition.Purpose, max(width-8, 24)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Definition %s@%s · %s coordination", definition.ID, definition.Version, definition.Coordination.Mode)))
+	} else {
+		lines = append(lines, mutedStyle.Render("Definition metadata is unavailable."))
+	}
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("Deployment %s · revision %d · %d member(s)", deployment.ID, deployment.Revision, len(deployment.Roster))))
+	if deployment.Restrictions.MaximumConcurrency > 0 || deployment.Restrictions.MaximumRisk != "" {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Bounds · %d concurrent · maximum risk %s", deployment.Restrictions.MaximumConcurrency, deployment.Restrictions.MaximumRisk)))
+	}
+	if len(deployment.Roster) > 0 {
+		lines = append(lines, "", mutedStyle.Render("Roster"))
+		for _, assignment := range deployment.Roster {
+			name := assignment.DisplayName
+			if strings.TrimSpace(name) == "" {
+				name = assignment.AgentDeploymentID
+			}
+			lines = append(lines, compact(fmt.Sprintf("• %s · %s · Agent %s", name, assignment.RoleID, assignment.AgentDeploymentID), max(width-6, 24)))
+		}
+	}
+	if definition != nil && len(definition.ObjectiveTemplates) > 0 {
+		lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Objective portfolio · %d template(s)", len(definition.ObjectiveTemplates))))
+		for _, objective := range definition.ObjectiveTemplates[:min(3, len(definition.ObjectiveTemplates))] {
+			lines = append(lines, compact("• "+objective.Title, max(width-6, 24)))
+		}
+	}
+	if m.supportsTeamDefinition(kernelapi.OperationUpdate) && (deployment.Status == "active" || deployment.Status == "paused") {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("p pause/resume · r refresh"))
+	}
 	return strings.Join(lines, "\n")
 }
 

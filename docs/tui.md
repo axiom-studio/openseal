@@ -28,7 +28,9 @@ read-only.
 ## Workspaces
 
 Standalone OpenSeal defaults to the `local:default` scope and the
-`agent:operator` owner. Both are explicit and configurable:
+`agent:operator` owner. Both are explicit and configurable. Team deployments
+are listed from the selected scope and retain their immutable definition
+version, semantic roster, policy bounds, status, and optimistic revision:
 
 ```bash
 openseal tui \
@@ -55,10 +57,10 @@ terminal testing.
 | `Ctrl+S` | Start work or submit guidance from the composer |
 | `Tab` | Move between the composer and current work |
 | `↑` / `↓` or `k` / `j` | Select an item or approval requirement |
-| `f` / `o` / `w` / `c` / `a` | Open Workforce, Objectives, Work, Channels, or Evidence |
+| `f` / `T` / `o` / `w` / `c` / `a` | Open Workforce, Teams, Objectives, Work, Channels, or Evidence |
 | `n` | Compose a new objective, Run, or Team channel in the current section |
 | `r` | Refresh from the kernel |
-| `p` | Pause or resume selected work when advertised |
+| `p` | Pause or resume selected Team deployment or work when advertised |
 | `g` | Guide selected work when advertised |
 | `x` | Stop selected work when advertised |
 | `m` | Message the selected Team channel when advertised |
@@ -74,7 +76,9 @@ Creation and governed mutations use client-generated idempotency keys. A failed
 request preserves the intent and key, so retrying cannot duplicate work or a
 permanent approval. Lifecycle commands bind the selected resource revision and
 candidate digest and refresh after conflicts rather than overwriting concurrent
-changes. Apply additionally requires an explicit audit reason.
+changes. Team pause/resume preserves its definition, roster, and restrictions,
+binds the exact deployment revision, records an actor and reason, and reloads
+the authoritative result. Apply additionally requires an explicit audit reason.
 
 Artifact downloads stream directly from the kernel into a temporary file,
 verify the catalog size and SHA-256 digest, and are atomically published with
