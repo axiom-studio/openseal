@@ -927,8 +927,14 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 		}
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 	}
-	lines = append(lines, "", mutedStyle.Render("Authorized for this Agent"))
-	if !m.skillActionCapability.Available {
+	actionsTitle := "Authorized for this Agent"
+	if m.config.Owner.Type != runtime.OwnerTypeAgent {
+		actionsTitle = "Authorized actions"
+	}
+	lines = append(lines, "", mutedStyle.Render(actionsTitle))
+	if m.config.Owner.Type != runtime.OwnerTypeAgent {
+		lines = append(lines, mutedStyle.Render("Open an Agent-owned workspace to browse its complete action catalog."))
+	} else if !m.skillActionCapability.Available {
 		lines = append(lines, mutedStyle.Render("The kernel does not advertise owner-scoped action discovery."))
 	} else if len(m.skillActions) == 0 {
 		lines = append(lines,

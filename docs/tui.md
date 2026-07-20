@@ -67,7 +67,7 @@ terminal testing.
 | `y` / `x` | Approve or reject the selected eligible Workforce requirement |
 | `[` / `]` | Select an authorized credential choice for the highlighted Workforce requirement |
 | `b` | Save the selected typed Workforce credential bindings |
-| `e` / `Enter` | Apply a ready Workforce, edit an objective, or expand selected evidence/audit |
+| `e` / `Enter` | Apply a ready Workforce, edit an objective, expand selected evidence/audit, or inspect an Outreach delivery Run |
 | `d` | Download selected artifact when advertised |
 | `D` | Create a governed delivery Run for the selected outreach draft when advertised |
 | `[` / `]` and `{` / `}` | In Outreach, select exact source evidence and an authorized external Skill action |

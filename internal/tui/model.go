@@ -412,6 +412,11 @@ type outreachDeliveryCreated struct {
 	err      error
 }
 
+type outreachRunLoaded struct {
+	run *runtime.AgentRun
+	err error
+}
+
 type clawHubSkillsLoaded struct {
 	skills []clawhub.InstalledState
 	err    error
@@ -602,7 +607,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasClawHub || !clawHubCapability.Available || m.clawHubClient == nil {
 			m.clawHubCapability = kernelapi.Capability{}
 		}
-		if !hasSkillActions || !skillActionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
+		if !hasSkillActions || !skillActionCapability.Available {
 			m.skillActionCapability = kernelapi.Capability{}
 		}
 		if !hasArtifacts || !artifactCapability.Available {
@@ -1220,6 +1225,23 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedOutreach = msg.threadID
 		m.status = "Governed delivery Run created · " + msg.run.ID + "."
 		return m, tea.Batch(m.loadOutreach(), m.loadRuns(), m.loadActionApprovals())
+	case outreachRunLoaded:
+		m.loading = false
+		if msg.err != nil || msg.run == nil {
+			if msg.err == nil {
+				msg.err = errors.New("kernel returned an empty outreach Run")
+			}
+			m.err = msg.err
+			m.status = "The linked delivery Run could not be loaded."
+			return m, nil
+		}
+		m.err = nil
+		m.runs = upsertRun(m.runs, msg.run)
+		m.selectedID = msg.run.ID
+		m.restoreSelection()
+		m.section = sectionRuns
+		m.status = "Inspecting governed outreach Run · " + msg.run.ID + "."
+		return m, nil
 	case runCommanded:
 		m.busy = false
 		if msg.err != nil {
@@ -1604,6 +1626,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the amended Initiative purpose…"
 				m.focusComposerEditor()
+			} else if m.section == sectionOutreach {
+				return m, m.inspectSelectedOutreachRun()
 			} else if m.section == sectionRequests && m.canCompleteSelectedAgentRequest() {
 				m.prepareRequestComposer(modeRequestComplete, "Summarize the completed outcome…")
 			} else if m.section == sectionActivity && m.selectedActivityRecord() != nil {
