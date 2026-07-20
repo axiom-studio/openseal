@@ -472,6 +472,8 @@ type (
 	ActionPolicyDecision               = runtime.ActionPolicyDecision
 	ActionPolicyEvaluator              = runtime.ActionPolicyEvaluator
 	ActionPolicyEvaluatorFunc          = runtime.ActionPolicyEvaluatorFunc
+	ActionProposalValidator            = runtime.ActionProposalValidator
+	ActionProposalValidationInput      = runtime.ActionProposalValidationInput
 	ProposeActionRequest               = runtime.ProposeActionRequest
 	ActionProposalResult               = runtime.ActionProposalResult
 	ApprovalCheckpoint                 = runtime.ApprovalCheckpoint
@@ -751,6 +753,9 @@ var (
 	ValidateRunbook                    = runbook.Validate
 	NewRunbookTurnRunner               = runtime.NewRunbookTurnRunner
 	NewRunForkCoordinator              = runtime.NewRunForkCoordinator
+	ObjectiveManagementSkill           = runtime.ObjectiveManagementSkill
+	NewObjectiveActionValidator        = runtime.NewObjectiveActionValidator
+	NewObjectiveActionDispatcher       = runtime.NewObjectiveActionDispatcher
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -1314,6 +1319,7 @@ type Engine struct {
 	approvals                     *runtime.ApprovalCoordinator
 	artifacts                     *runtime.ArtifactCatalog
 	actionPolicy                  runtime.ActionPolicyEvaluator
+	actionValidators              []runtime.ActionProposalValidator
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
 	clawHubRegistry               clawhub.Registry
@@ -1916,6 +1922,21 @@ func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
 	}
 }
 
+// WithActionProposalValidators adds deterministic, kernel-owned validation to
+// the governed action proposal path. Validators run before policy evaluation
+// and before an ApprovalCheckpoint is persisted.
+func WithActionProposalValidators(validators ...runtime.ActionProposalValidator) Option {
+	return func(e *Engine) error {
+		for _, validator := range validators {
+			if validator == nil {
+				return fmt.Errorf("action proposal validator is required")
+			}
+			e.actionValidators = append(e.actionValidators, validator)
+		}
+		return nil
+	}
+}
+
 func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if dispatcher == nil {
@@ -1994,7 +2015,7 @@ func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 }
 
 func (e *Engine) rebuildGovernance() {
-	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy)
+	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators...)
 	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
 }
 
