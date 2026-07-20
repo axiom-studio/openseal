@@ -93,8 +93,47 @@ type RepairGenerator interface {
 
 type GenerationResponse struct {
 	Candidate   WorkforceCandidate `json:"candidate"`
+	Commitments PromptCommitments  `json:"commitments"`
 	Assumptions []string           `json:"assumptions,omitempty"`
 	Questions   []string           `json:"questions,omitempty"`
+}
+
+// PromptCommitments is the generator's typed, reviewable account of concrete
+// facts it claims to have preserved from the user's prompt. The Compiler
+// validates these facts against the candidate and independently extracts only
+// a deliberately small grammar of unambiguous count, placement, inactivity,
+// and approval clauses. Open-ended semantic equivalence remains outside this
+// deterministic contract.
+type PromptCommitments struct {
+	AgentCount           *int                       `json:"agentCount,omitempty"`
+	TeamCount            *int                       `json:"teamCount,omitempty"`
+	ObjectiveCounts      []ObjectiveCountCommitment `json:"objectiveCounts,omitempty"`
+	Activation           ActivationCommitment       `json:"activation,omitempty"`
+	ApprovalRequirements []ApprovalCommitment       `json:"approvalRequirements,omitempty"`
+}
+
+type CommitmentOwnerType string
+
+const (
+	CommitmentOwnerWorkforce CommitmentOwnerType = "workforce"
+	CommitmentOwnerAgent     CommitmentOwnerType = "agent"
+	CommitmentOwnerTeam      CommitmentOwnerType = "team"
+)
+
+type ObjectiveCountCommitment struct {
+	OwnerType CommitmentOwnerType `json:"ownerType"`
+	OwnerID   string              `json:"ownerId,omitempty"`
+	Count     int                 `json:"count"`
+}
+
+type ActivationCommitment string
+
+const ActivationCommitmentInactive ActivationCommitment = "inactive"
+
+type ApprovalCommitment struct {
+	OwnerType         CommitmentOwnerType  `json:"ownerType"`
+	OwnerID           string               `json:"ownerId,omitempty"`
+	RequireApprovalAt capability.RiskLevel `json:"requireApprovalAt"`
 }
 
 type ValidationIssue struct {
@@ -125,6 +164,7 @@ type FieldDiff struct {
 type CompileResult struct {
 	Candidate           WorkforceCandidate   `json:"candidate"`
 	Valid               bool                 `json:"valid"`
+	Commitments         PromptCommitments    `json:"commitments"`
 	Assumptions         []string             `json:"assumptions,omitempty"`
 	Questions           []string             `json:"questions,omitempty"`
 	Validation          []ValidationIssue    `json:"validation,omitempty"`

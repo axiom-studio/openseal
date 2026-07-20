@@ -81,6 +81,14 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"Evidence projection is kernel-built from retained Initiative observations",
 		"never place evidenceSnapshot in authored context",
 		"maxItems\":<positive integer no larger than policy maximumItems>",
+		"commitments is required and is the typed account of only concrete prompt facts",
+		"Commitments are deterministic and reviewable, not a summary or hidden reasoning",
+		"Record explicit numeric or number-word Agent and Team counts",
+		"Record each explicit Objective count",
+		"Record activation:\"inactive\" when the prompt says not to activate",
+		"approval requirement at write risk",
+		"never claim semantic equivalence",
+		"never weaken or omit an explicit commitment",
 	} {
 		if !strings.Contains(authoringSystemPrompt, expected) {
 			t.Fatalf("authoring schema missing %q", expected)

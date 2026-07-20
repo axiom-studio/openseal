@@ -71,7 +71,9 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		}
 		repairUsed = true
 	}
-	validation := validateCandidate(&generated.Candidate, request.Existing)
+	commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
+	validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+	validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 	missing := missingRequirements(&generated.Candidate, request.Catalog)
 	if !repairUsed && (len(validation) > 0 || len(missing) > 0) {
 		if repairer, ok := c.generator.(RepairGenerator); ok {
@@ -83,10 +85,16 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 			}
 		}
 	}
-	result := &CompileResult{
-		Candidate: generated.Candidate, Assumptions: normalized(generated.Assumptions), Questions: normalized(generated.Questions),
+	commitments, commitmentIssues = effectivePromptCommitments(request.Prompt, generated.Commitments)
+	assumptions := normalized(generated.Assumptions)
+	if commitments.Activation == ActivationCommitmentInactive {
+		assumptions = normalized(append(assumptions, "Compilation remains inactive; activation requires a separate governed apply operation."))
 	}
-	result.Validation = validateCandidate(&result.Candidate, request.Existing)
+	result := &CompileResult{
+		Candidate: generated.Candidate, Commitments: commitments, Assumptions: assumptions, Questions: normalized(generated.Questions),
+	}
+	result.Validation = append(validateCandidate(&result.Candidate, request.Existing), commitmentIssues...)
+	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.RiskChanges = riskChanges(request.Existing, &result.Candidate)
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
