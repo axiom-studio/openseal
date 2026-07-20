@@ -410,6 +410,8 @@ type (
 	TurnRunnerResolverFunc             = runtime.TurnRunnerResolverFunc
 	AgentTurnCatalog                   = runtime.AgentTurnCatalog
 	CatalogTurnResolverConfig          = runtime.CatalogTurnResolverConfig
+	SkillHostCapabilityResolver        = runtime.SkillHostCapabilityResolver
+	SkillHostCapabilityResolverFunc    = runtime.SkillHostCapabilityResolverFunc
 	WorkerScopeSource                  = runtime.WorkerScopeSource
 	WorkerScopeSourceFunc              = runtime.WorkerScopeSourceFunc
 	WakeSignal                         = runtime.WakeSignal
