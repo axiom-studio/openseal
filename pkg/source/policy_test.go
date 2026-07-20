@@ -52,3 +52,69 @@ func TestSourcePolicyWildcardMatchesSubdomainsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSourcePolicyAuthorizesExplicitOutreachOnly(t *testing.T) {
+	policy := Policy{
+		ID: "community-research", Version: "1", Enabled: true, MaximumItems: 5,
+		Sources:  []PolicySource{{Host: "hooks.example.com", PathPrefixes: []string{"/community/replies"}}},
+		Outreach: &OutreachPolicy{Enabled: true, ApprovalPolicy: "human-review", MaximumBytes: 500},
+	}
+	decision, err := policy.AuthorizeOutreach("https://hooks.example.com/community/replies/thread-1?reply=1", 120, "human-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.PolicyID != policy.ID || decision.PolicyVersion != policy.Version || decision.SourceHost != "hooks.example.com" ||
+		decision.PathPrefix != "/community/replies" || decision.ApprovalPolicy != "human-review" || decision.MaximumBytes != 500 {
+		t.Fatalf("outreach decision mismatch: %#v", decision)
+	}
+	if err := decision.Authorize("https://hooks.example.com/community/replies/thread-1", 500, "human-review"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourcePolicyOutreachFailsClosed(t *testing.T) {
+	base := Policy{
+		ID: "community-research", Version: "1", Enabled: true, MaximumItems: 5,
+		Sources: []PolicySource{{Host: "hooks.example.com", PathPrefixes: []string{"/community/replies"}}},
+	}
+	if _, err := base.AuthorizeOutreach("https://hooks.example.com/community/replies/thread-1", 10, "human-review"); err == nil {
+		t.Fatal("read authorization silently granted write authority")
+	}
+	disabled := base
+	disabled.Outreach = &OutreachPolicy{}
+	if err := disabled.Validate(); err != nil {
+		t.Fatalf("explicit disabled outreach should not require write policy fields: %v", err)
+	}
+
+	policy := base
+	policy.Outreach = &OutreachPolicy{Enabled: true, ApprovalPolicy: "human-review", MaximumBytes: 500}
+	tests := []struct {
+		name, target, approval string
+		bodyBytes              int
+	}{
+		{name: "wrong host", target: "https://attacker.example/community/replies/thread-1", approval: "human-review", bodyBytes: 10},
+		{name: "prefix confusion", target: "https://hooks.example.com/community/replies-evil/thread-1", approval: "human-review", bodyBytes: 10},
+		{name: "userinfo", target: "https://hooks.example.com@attacker.example/community/replies/thread-1", approval: "human-review", bodyBytes: 10},
+		{name: "fragment", target: "https://hooks.example.com/community/replies/thread-1#secret", approval: "human-review", bodyBytes: 10},
+		{name: "wrong approval", target: "https://hooks.example.com/community/replies/thread-1", approval: "auto", bodyBytes: 10},
+		{name: "empty body", target: "https://hooks.example.com/community/replies/thread-1", approval: "human-review", bodyBytes: 0},
+		{name: "oversized body", target: "https://hooks.example.com/community/replies/thread-1", approval: "human-review", bodyBytes: 501},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := policy.AuthorizeOutreach(test.target, test.bodyBytes, test.approval); err == nil {
+				t.Fatal("disallowed outreach was authorized")
+			}
+		})
+	}
+
+	invalid := base
+	invalid.Outreach = &OutreachPolicy{Enabled: true, MaximumBytes: 100}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("enabled outreach without approval policy was accepted")
+	}
+	invalid.Outreach = &OutreachPolicy{Enabled: true, ApprovalPolicy: "human-review", MaximumBytes: 20001}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("outreach body limit above the portable maximum was accepted")
+	}
+}

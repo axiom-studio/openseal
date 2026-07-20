@@ -24,13 +24,20 @@ const CursorTransportKey = "_opensealSourceCursor"
 // host owns storage, tenancy, authorization, rate limiting, and audit; OpenSeal
 // owns deterministic validation and URL decisions.
 type Policy struct {
-	ID             string         `json:"id"`
-	Version        string         `json:"version"`
-	Enabled        bool           `json:"enabled"`
-	Sources        []PolicySource `json:"sources"`
-	MaximumItems   int            `json:"maximumItems,omitempty"`
-	RetentionDays  int            `json:"retentionDays,omitempty"`
-	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
+	ID             string          `json:"id"`
+	Version        string          `json:"version"`
+	Enabled        bool            `json:"enabled"`
+	Sources        []PolicySource  `json:"sources"`
+	MaximumItems   int             `json:"maximumItems,omitempty"`
+	RetentionDays  int             `json:"retentionDays,omitempty"`
+	ApprovalPolicy string          `json:"approvalPolicy,omitempty"`
+	Outreach       *OutreachPolicy `json:"outreach,omitempty"`
+}
+
+type OutreachPolicy struct {
+	Enabled        bool   `json:"enabled"`
+	ApprovalPolicy string `json:"approvalPolicy"`
+	MaximumBytes   int    `json:"maximumBytes,omitempty"`
 }
 
 type PolicySource struct {
@@ -44,6 +51,38 @@ type PolicyDecision struct {
 	SourceHost    string `json:"sourceHost"`
 	PathPrefix    string `json:"pathPrefix"`
 	MaximumItems  int    `json:"maximumItems"`
+}
+
+type OutreachPolicyDecision struct {
+	PolicyID       string `json:"policyId"`
+	PolicyVersion  string `json:"policyVersion"`
+	SourceHost     string `json:"sourceHost"`
+	PathPrefix     string `json:"pathPrefix"`
+	ApprovalPolicy string `json:"approvalPolicy"`
+	MaximumBytes   int    `json:"maximumBytes"`
+}
+
+func (d OutreachPolicyDecision) Authorize(rawURL string, bodyBytes int, approvalPolicy string) error {
+	if strings.TrimSpace(d.PolicyID) == "" || strings.TrimSpace(d.PolicyVersion) == "" ||
+		validatePolicyHost(strings.ToLower(strings.TrimSpace(d.SourceHost))) != nil || validatePathPrefix(d.PathPrefix) != nil ||
+		strings.TrimSpace(d.ApprovalPolicy) == "" || d.MaximumBytes < 1 || d.MaximumBytes > 20000 {
+		return errors.New("outreach policy decision is invalid")
+	}
+	target, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || target.Scheme != "https" || target.User != nil || target.Fragment != "" ||
+		strings.ToLower(target.Hostname()) != strings.ToLower(d.SourceHost) || (target.Port() != "" && target.Port() != "443") {
+		return errors.New("outreach target is outside the authorized policy decision")
+	}
+	if bodyBytes < 1 || bodyBytes > d.MaximumBytes {
+		return errors.New("outreach body exceeds the authorized policy decision")
+	}
+	if strings.TrimSpace(approvalPolicy) != d.ApprovalPolicy {
+		return errors.New("outreach approval policy does not match the authorized policy decision")
+	}
+	if _, allowed := authorizedPathPrefix([]string{d.PathPrefix}, target.EscapedPath()); !allowed {
+		return errors.New("outreach target path is outside the authorized policy decision")
+	}
+	return nil
 }
 
 // Authorize constrains host execution and redirects to the exact source scope
@@ -82,6 +121,14 @@ func (p Policy) Validate() error {
 	if p.RetentionDays < 0 || p.RetentionDays > 3650 {
 		return errors.New("source policy retentionDays must be between 0 and 3650")
 	}
+	if p.Outreach != nil && p.Outreach.Enabled {
+		if strings.TrimSpace(p.Outreach.ApprovalPolicy) == "" || len(p.Outreach.ApprovalPolicy) > 256 {
+			return errors.New("outreach policy requires an approvalPolicy")
+		}
+		if p.Outreach.MaximumBytes < 1 || p.Outreach.MaximumBytes > 20000 {
+			return errors.New("outreach policy maximumBytes must be between 1 and 20000")
+		}
+	}
 	seen := make(map[string]bool)
 	for _, source := range p.Sources {
 		host := strings.ToLower(strings.TrimSpace(source.Host))
@@ -99,6 +146,39 @@ func (p Policy) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (p Policy) AuthorizeOutreach(rawURL string, bodyBytes int, approvalPolicy string) (*OutreachPolicyDecision, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	if !p.Enabled || p.Outreach == nil || !p.Outreach.Enabled {
+		return nil, errors.New("outreach is disabled by source policy")
+	}
+	target, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || target.Scheme != "https" || target.Hostname() == "" || target.User != nil || target.Fragment != "" ||
+		(target.Port() != "" && target.Port() != "443") {
+		return nil, errors.New("outreach target must be an absolute credential-free HTTPS URL")
+	}
+	host := strings.ToLower(target.Hostname())
+	for _, candidate := range p.Sources {
+		if !policyHostMatches(strings.ToLower(strings.TrimSpace(candidate.Host)), host) {
+			continue
+		}
+		prefix, ok := authorizedPathPrefix(candidate.PathPrefixes, target.EscapedPath())
+		if !ok {
+			continue
+		}
+		decision := &OutreachPolicyDecision{
+			PolicyID: p.ID, PolicyVersion: p.Version, SourceHost: host, PathPrefix: prefix,
+			ApprovalPolicy: p.Outreach.ApprovalPolicy, MaximumBytes: p.Outreach.MaximumBytes,
+		}
+		if err := decision.Authorize(rawURL, bodyBytes, approvalPolicy); err != nil {
+			return nil, err
+		}
+		return decision, nil
+	}
+	return nil, errors.New("outreach target is not allowed by policy")
 }
 
 // Authorize returns the exact policy facts a host must carry through dispatch
