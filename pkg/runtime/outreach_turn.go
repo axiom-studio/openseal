@@ -99,7 +99,7 @@ func (r *OutreachTurnRunner) RunTurn(ctx context.Context, input TurnExecutionCon
 		return r.consumeAction(ctx, input.Run, thread, message, selected, checkpoint, last)
 	}
 	if message.Status != OutreachMessageDraft {
-		return nil, fmt.Errorf("outreach message cannot start execution from %s", message.Status)
+		return r.reconcileLinkedAction(ctx, input.Run, thread, message, checkpoint)
 	}
 	checkpoint["outreachActionInputs"] = map[string]interface{}{"reviewed": cloneMap(message.Capability.Arguments)}
 	return &TurnOutcome{
@@ -113,6 +113,43 @@ func (r *OutreachTurnRunner) RunTurn(ctx context.Context, input TurnExecutionCon
 		OutputSummary: "Requested governed outreach delivery", ContinuationCheckpoint: checkpoint,
 		NextRunStatus: AgentRunStatusRunning,
 	}, nil
+}
+
+// A denied or canceled ActionCall never executes, so there is intentionally no
+// lastAction result in the Run checkpoint. Approval resolution still wakes the
+// Run. Reconcile the already-linked durable ActionCall directly so its terminal
+// disposition is projected into the OutreachThread instead of treating the
+// pending message as a new delivery attempt.
+func (r *OutreachTurnRunner) reconcileLinkedAction(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage, checkpoint map[string]interface{}) (*TurnOutcome, error) {
+	if strings.TrimSpace(message.ActionCallID) == "" {
+		return nil, fmt.Errorf("outreach message cannot resume from %s without a linked action", message.Status)
+	}
+	reconciled, err := r.lifecycle.ReconcileOutreachAction(ctx, run.Scope, thread.ID, ReconcileOutreachActionRequest{
+		MessageID: message.ID, ActionCallID: message.ActionCallID, Actor: ActivityActor{Type: "worker", ID: "outreach-reconciler"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if reconciled == nil || reconciled.Thread == nil {
+		return nil, errors.New("outreach action reconciliation returned no thread")
+	}
+	message = findOutreachMessage(reconciled.Thread, message.ID)
+	if message == nil {
+		return nil, errors.New("outreach action reconciliation lost the selected message")
+	}
+	switch message.Status {
+	case OutreachMessageDeclined:
+		delete(checkpoint, "outreachActionInputs")
+		return &TurnOutcome{OutputSummary: "Governed outreach delivery declined", RunError: "governed outreach delivery declined", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
+	case OutreachMessageFailed:
+		delete(checkpoint, "outreachActionInputs")
+		return &TurnOutcome{OutputSummary: "Governed outreach delivery failed", RunError: "governed outreach delivery failed", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
+	case OutreachMessageCanceled:
+		delete(checkpoint, "outreachActionInputs")
+		return &TurnOutcome{OutputSummary: "Governed outreach delivery canceled", RunError: "governed outreach delivery canceled", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
+	default:
+		return nil, fmt.Errorf("linked outreach action remains in non-terminal message state %s", message.Status)
+	}
 }
 
 func (r *OutreachTurnRunner) consumeAction(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage, selected *capability.ModelAction, checkpoint map[string]interface{}, last map[string]interface{}) (*TurnOutcome, error) {
