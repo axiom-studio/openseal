@@ -35,6 +35,7 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		SystemInstructions: []string{"Preserve evidence."},
 		SkillPrompts:       []HostedSkillPrompt{{SkillID: "summarize", Version: "1.0.0", Name: "summarize", Instructions: "Summarize sources."}},
 		Actions:            []capability.ModelAction{{Name: "web.search", SkillID: "web", Version: "1", Action: "search"}},
+		ModelCredential:    &capability.CredentialReference{Kind: "vault", ID: "credential-17"},
 		ModelProvider:      "openai-compatible", Model: "deepseek-v4-flash",
 	})
 	if err != nil {
@@ -63,14 +64,27 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	if host.request.DependencyResults["group-1"].(map[string]interface{})["status"] != "satisfied" {
 		t.Fatalf("dependency results = %#v", host.request.DependencyResults)
 	}
+	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "vault" || host.request.ModelCredential.ID != "credential-17" {
+		t.Fatalf("model credential reference = %#v", host.request.ModelCredential)
+	}
 	if len(host.request.SkillPrompts) != 1 || host.request.SkillPrompts[0].Instructions != "Summarize sources." || host.request.SkillPrompts[0].Reference != "skill:summarize@1.0.0" || outcome.RunOutput["answer"] != "done" || len(outcome.Decisions) != 1 || outcome.Decisions[0].EvidenceRefs[0] != "skill:summarize@1.0.0" || outcome.ModelProvider != "openai-compatible" || outcome.Model != "deepseek-v4-flash" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
 	}
-	encoded, _ := json.Marshal(host.request)
+	encoded, _ := MarshalHostedTurnModelInput(host.request)
 	for _, forbidden := range []string{"apiKey", "credential", "secret", "vault"} {
 		if strings.Contains(strings.ToLower(string(encoded)), strings.ToLower(forbidden)) {
 			t.Fatalf("host envelope exposes forbidden credential surface %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestHostedTurnRunnerRejectsIncompleteModelCredentialReference(t *testing.T) {
+	_, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+		ModelCredential: &capability.CredentialReference{Kind: "vault"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "model credential reference") {
+		t.Fatalf("incomplete model credential error = %v", err)
 	}
 }
 

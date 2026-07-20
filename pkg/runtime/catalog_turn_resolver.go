@@ -131,12 +131,25 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
 		AgentID: deployment.ID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		SystemInstructions: instructions, SkillPrompts: prompts, Actions: actions,
+		ModelCredential: deploymentModelCredential(deployment),
 	})
 	if err != nil {
 		return nil, err
 	}
 	base.Runner = runner
 	return &base, nil
+}
+
+func deploymentModelCredential(deployment *kernelagent.AgentDeployment) *capability.CredentialReference {
+	if deployment == nil {
+		return nil
+	}
+	reference, ok := deployment.Credentials["MODEL_PROVIDER"]
+	if !ok {
+		return nil
+	}
+	cloned := reference
+	return &cloned
 }
 
 func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkillPrompt, []capability.ModelAction, []PreparedSkillRuntime, []string) {

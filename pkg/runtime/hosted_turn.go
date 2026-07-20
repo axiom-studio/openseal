@@ -82,8 +82,12 @@ type HostedTurnRequest struct {
 	DependencyResults      map[string]interface{}   `json:"dependencyResults,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
 	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
-	ModelProvider          string                   `json:"modelProvider,omitempty"`
-	Model                  string                   `json:"model,omitempty"`
+	// ModelCredential is an opaque, host-resolved binding. It crosses only the
+	// trusted TurnHost transport boundary and is deliberately excluded from
+	// HostedTurnModelInput, durable checkpoints, and model-visible context.
+	ModelCredential *capability.CredentialReference `json:"modelCredential,omitempty"`
+	ModelProvider   string                          `json:"modelProvider,omitempty"`
+	Model           string                          `json:"model,omitempty"`
 }
 
 type HostedTurnResponse struct {
@@ -118,6 +122,7 @@ type HostedTurnRunnerConfig struct {
 	SystemInstructions []string
 	SkillPrompts       []HostedSkillPrompt
 	Actions            []capability.ModelAction
+	ModelCredential    *capability.CredentialReference
 	ModelProvider      string
 	Model              string
 }
@@ -130,6 +135,9 @@ type HostedTurnRunner struct {
 func NewHostedTurnRunner(host TurnHost, config HostedTurnRunnerConfig) (*HostedTurnRunner, error) {
 	if host == nil || strings.TrimSpace(config.AgentID) == "" || strings.TrimSpace(config.DefinitionID) == "" || strings.TrimSpace(config.DefinitionVersion) == "" {
 		return nil, errors.New("turn host and Agent definition identity are required")
+	}
+	if config.ModelCredential != nil && (strings.TrimSpace(config.ModelCredential.Kind) == "" || strings.TrimSpace(config.ModelCredential.ID) == "") {
+		return nil, errors.New("model credential reference requires kind and id")
 	}
 	seenPromptReferences := make(map[string]bool, len(config.SkillPrompts))
 	for _, prompt := range config.SkillPrompts {
@@ -350,12 +358,21 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		DependencyResults:      dependencyResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
+		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
 	for index := range request.SkillPrompts {
 		request.SkillPrompts[index].Reference = hostedSkillPromptReference(request.SkillPrompts[index])
 	}
 	return request, nil
+}
+
+func cloneHostedCredentialReference(reference *capability.CredentialReference) *capability.CredentialReference {
+	if reference == nil {
+		return nil
+	}
+	cloned := *reference
+	return &cloned
 }
 
 func hostedSkillPromptReference(prompt HostedSkillPrompt) string {
