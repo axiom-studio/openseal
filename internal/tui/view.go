@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -411,28 +412,58 @@ func (m *Model) renderPanelTabs() string {
 }
 
 func (m *Model) renderReadinessContent(width int) string {
-	title := headerStyle.Render("Native runtime readiness")
-	if m.loading && len(m.compilations) == 0 {
-		return title + "\n\n" + mutedStyle.Render("Loading immutable compilation evidence…")
+	title := headerStyle.Render("Agent runtime & placement")
+	if m.loading && m.agentDeployment == nil {
+		return title + "\n\n" + mutedStyle.Render("Loading the active Agent and immutable compilation evidence…")
 	}
-	if len(m.compilations) == 0 {
-		return title + "\n\n" + mutedStyle.Render("No compilation record exists for this Agent. Runtime readiness is unverified.")
+	entry := m.agentDeployment
+	if entry == nil || entry.Deployment == nil {
+		return title + "\n\n" + mutedStyle.Render("This Agent deployment is unavailable in the selected scope.")
 	}
-	latest := m.compilations[0]
+	deployment := entry.Deployment
 	lines := []string{title, ""}
-	if latest.Status == "clean" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(success).Bold(true).Render("READY")+"  Behavior compiled to the native Agent runtime.")
-	} else {
-		lines = append(lines, lipgloss.NewStyle().Foreground(danger).Bold(true).Render("NEEDS ATTENTION")+"  This candidate was not activated because behavior could not be preserved.")
-		for _, diagnostic := range latest.Diagnostics {
-			location := diagnostic.Path
-			if diagnostic.NodeID != "" {
-				location = "Node " + diagnostic.NodeID + " · " + location
-			}
-			lines = append(lines, "", "• "+compact(diagnostic.Message, max(width-10, 24)), mutedStyle.Render("  "+location+" · "+diagnostic.Code))
-		}
+	name, purpose := deployment.ID, ""
+	if entry.Definition != nil {
+		name, purpose = entry.Definition.DisplayName, entry.Definition.Purpose
 	}
-	lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Candidate %s · source %s %s · %d immutable record(s)", compact(latest.CandidateVersion, 20), latest.Source.Kind, latest.Source.Version, len(m.compilations))))
+	lines = append(lines, headerStyle.Render(compact(name, max(width-8, 24))))
+	if purpose != "" {
+		lines = append(lines, compact(purpose, max(width-8, 24)))
+	}
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s · definition %s@%s · revision %d", deployment.RolloutStatus, deployment.DefinitionID, deployment.ActiveVersion, deployment.Revision)))
+	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s · %d concurrent · %d queued", deployment.Environment, deployment.Capacity.MaxConcurrentRuns, deployment.Capacity.MaxQueuedRuns)))
+	if len(deployment.Credentials) > 0 {
+		kinds := make([]string, 0, len(deployment.Credentials))
+		for _, reference := range deployment.Credentials {
+			kinds = append(kinds, reference.Kind)
+		}
+		sort.Strings(kinds)
+		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Credentials · %d opaque reference(s) · %s", len(kinds), strings.Join(kinds, ", ")), max(width-8, 24))))
+	}
+	lines = append(lines, "", mutedStyle.Render("Native runtime readiness"))
+	if len(m.compilations) == 0 {
+		lines = append(lines, mutedStyle.Render("No compilation record exists for this Agent. Runtime readiness is unverified."))
+	} else {
+		latest := m.compilations[0]
+		if latest.Status == "clean" {
+			lines = append(lines, lipgloss.NewStyle().Foreground(success).Bold(true).Render("READY")+"  Behavior compiled to the native Agent runtime.")
+		} else {
+			lines = append(lines, lipgloss.NewStyle().Foreground(danger).Bold(true).Render("NEEDS ATTENTION")+"  This candidate was not activated because behavior could not be preserved.")
+			for _, diagnostic := range latest.Diagnostics {
+				location := diagnostic.Path
+				if diagnostic.NodeID != "" {
+					location = "Node " + diagnostic.NodeID + " · " + location
+				}
+				lines = append(lines, "", "• "+compact(diagnostic.Message, max(width-10, 24)), mutedStyle.Render("  "+location+" · "+diagnostic.Code))
+			}
+		}
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Candidate %s · source %s %s · %d immutable record(s)", compact(latest.CandidateVersion, 20), latest.Source.Kind, latest.Source.Version, len(m.compilations))))
+	}
+	actions := []string{"r refresh"}
+	if m.supportsAgentDefinition(kernelapi.OperationUpdate) && (deployment.RolloutStatus == kernelagent.RolloutActive || deployment.RolloutStatus == kernelagent.RolloutPaused) {
+		actions = append(actions, "p pause/resume")
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, " · ")))
 	return strings.Join(lines, "\n")
 }
 

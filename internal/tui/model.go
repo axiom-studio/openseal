@@ -181,6 +181,7 @@ type Model struct {
 	activityNextCursor          string
 	activityHasMore             bool
 	compilations                []*kernelagent.DefinitionCompilation
+	agentDeployment             *kernelapi.AgentDeploymentCatalogEntry
 	teamDeployments             []kernelapi.TeamDeploymentCatalogEntry
 	teamDeploymentSelected      int
 	selectedTeamDeployment      string
@@ -342,7 +343,13 @@ type activityDetailLoaded struct {
 
 type compilationsLoaded struct {
 	compilations []*kernelagent.DefinitionCompilation
+	deployment   *kernelapi.AgentDeploymentCatalogEntry
 	err          error
+}
+
+type agentDeploymentUpdated struct {
+	result *kernelapi.AgentDeploymentUpdateResult
+	err    error
 }
 
 type objectivesLoaded struct {
@@ -994,6 +1001,23 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.compilations = msg.compilations
+		m.agentDeployment = msg.deployment
+		return m, nil
+	case agentDeploymentUpdated:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Agent deployment changed elsewhere or the update violates its definition bounds. Refresh and try again."
+			return m, m.loadCompilations()
+		}
+		m.err = nil
+		if msg.result != nil && msg.result.Deployment != nil {
+			if m.agentDeployment == nil {
+				m.agentDeployment = &kernelapi.AgentDeploymentCatalogEntry{}
+			}
+			m.agentDeployment.Deployment = msg.result.Deployment
+		}
+		m.status = "Agent deployment operating state updated with an immutable audit record."
 		return m, nil
 	case artifactsLoaded:
 		m.loading = false
@@ -1504,6 +1528,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "p":
 			if m.section == sectionRuns {
 				return m, m.pauseOrResume()
+			} else if m.section == sectionReadiness {
+				return m, m.pauseOrResumeAgentDeployment()
 			} else if m.section == sectionTeams {
 				return m, m.pauseOrResumeTeamDeployment()
 			} else if m.section == sectionInitiatives {
@@ -2037,13 +2063,21 @@ func (m *Model) loadActionApprovals() tea.Cmd {
 }
 
 func (m *Model) loadCompilations() tea.Cmd {
-	if !m.supportsAgentDefinition(kernelapi.OperationListCompilations) || m.config.Owner.Type != runtime.OwnerTypeAgent {
+	if !m.supportsAgentDefinition(kernelapi.OperationGet) || m.config.Owner.Type != runtime.OwnerTypeAgent {
 		return nil
 	}
 	m.loading = true
 	return func() tea.Msg {
-		values, err := m.client.ListAgentDefinitionCompilations(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.config.Owner.ID)
-		return compilationsLoaded{compilations: values, err: err}
+		scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+		deployment, err := m.client.GetAgentDeployment(m.ctx, scope, m.config.Owner.ID)
+		if err != nil {
+			return compilationsLoaded{err: err}
+		}
+		var values []*kernelagent.DefinitionCompilation
+		if m.supportsAgentDefinition(kernelapi.OperationListCompilations) {
+			values, err = m.client.ListAgentDefinitionCompilations(m.ctx, scope, m.config.Owner.ID)
+		}
+		return compilationsLoaded{compilations: values, deployment: deployment, err: err}
 	}
 }
 
@@ -3139,6 +3173,33 @@ func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunComma
 		return m.supportsRun(kernelapi.OperationIntervene)
 	default:
 		return false
+	}
+}
+
+func (m *Model) pauseOrResumeAgentDeployment() tea.Cmd {
+	entry := m.agentDeployment
+	if entry == nil || entry.Deployment == nil || m.busy || !m.supportsAgentDefinition(kernelapi.OperationUpdate) {
+		return nil
+	}
+	current := entry.Deployment
+	nextStatus, verb := kernelagent.RolloutPaused, "Pause"
+	if current.RolloutStatus == kernelagent.RolloutPaused {
+		nextStatus, verb = kernelagent.RolloutActive, "Resume"
+	} else if current.RolloutStatus != kernelagent.RolloutActive {
+		m.status = "Only active or paused Agent deployments can be paused or resumed."
+		return nil
+	}
+	updated := *current
+	updated.RolloutStatus = nextStatus
+	request := kernelapi.UpdateAgentDeploymentRequest{
+		Deployment: &updated, ExpectedRevision: current.Revision,
+		ActorType: m.config.Actor.Type, ActorID: m.config.Actor.ID, Reason: verb + " Agent from the terminal",
+	}
+	m.busy, m.err = true, nil
+	m.status = verb + " Agent deployment…"
+	return func() tea.Msg {
+		result, err := m.client.UpdateAgentDeployment(m.ctx, current.ID, request)
+		return agentDeploymentUpdated{result: result, err: err}
 	}
 }
 

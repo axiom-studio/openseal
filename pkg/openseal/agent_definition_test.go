@@ -37,8 +37,16 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	if err != nil || deployed.ActiveVersion != "1.1.0" || activation.FromVersion != "1.0.0" {
 		t.Fatalf("public rollout = %#v %#v, %v", deployed, activation, err)
 	}
+	placement := *deployed
+	placement.RolloutStatus = AgentRolloutPaused
+	placement.Credentials = map[string]SkillCredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://tenant-one/provider"}}
+	deployed, placementAudit, err := engine.UpdateAgentDeployment(ctx, &placement, deployed.Revision, "system", "reconciler", "place model provider")
+	if err != nil || deployed.RolloutStatus != AgentRolloutPaused || deployed.Credentials["MODEL_PROVIDER"].ID != "vault://tenant-one/provider" ||
+		placementAudit.ChangeKind != DeploymentChangeConfigurationUpdated || placementAudit.FromVersion != placementAudit.ToVersion {
+		t.Fatalf("public placement update = %#v %#v, %v", deployed, placementAudit, err)
+	}
 	history, err := engine.ListAgentDefinitionActivations(ctx, scope, deployment.ID)
-	if err != nil || len(history) != 2 {
+	if err != nil || len(history) != 3 || history[2].ChangeKind != DeploymentChangeConfigurationUpdated {
 		t.Fatalf("public activation history = %#v, %v", history, err)
 	}
 	compilation, err := engine.RecordAgentDefinitionCompilation(ctx, &AgentDefinitionCompilation{
