@@ -157,6 +157,7 @@ type ChangeSet struct {
 	Status              ChangeSetStatus             `json:"status"`
 	Actor               ChangeSetActor              `json:"actor"`
 	Generation          *ChangeSetGeneration        `json:"generation,omitempty"`
+	Refinement          ChangeSetRefinement         `json:"refinement,omitempty"`
 	Evaluations         []ChangeSetEvaluation       `json:"evaluations,omitempty"`
 	ApprovalDecisions   []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
 	PlacementUpdates    []ChangeSetPlacementUpdate  `json:"placementUpdates,omitempty"`
@@ -172,13 +173,16 @@ type ChangeSet struct {
 // Run scheduler after Prepare returns; the prompt request does not need to stay
 // connected while generation is in flight.
 type ChangeSetGeneration struct {
-	Request     GenerateRequest            `json:"request"`
-	RunID       string                     `json:"runId,omitempty"`
-	Attempt     int                        `json:"attempt"`
-	FailureCode string                     `json:"failureCode,omitempty"`
-	LastError   string                     `json:"lastError,omitempty"`
-	CompletedAt *time.Time                 `json:"completedAt,omitempty"`
-	Retries     []ChangeSetGenerationRetry `json:"retries,omitempty"`
+	Request GenerateRequest `json:"request"`
+	RunID   string          `json:"runId,omitempty"`
+	// PreviousCandidateDigest is empty for initial generation and pins the
+	// reviewed candidate being refined on subsequent generations.
+	PreviousCandidateDigest string                     `json:"previousCandidateDigest,omitempty"`
+	Attempt                 int                        `json:"attempt"`
+	FailureCode             string                     `json:"failureCode,omitempty"`
+	LastError               string                     `json:"lastError,omitempty"`
+	CompletedAt             *time.Time                 `json:"completedAt,omitempty"`
+	Retries                 []ChangeSetGenerationRetry `json:"retries,omitempty"`
 }
 
 type ChangeSetGenerationRetry struct {
@@ -196,6 +200,17 @@ type RetryChangeSetGenerationRequest struct {
 	ChangeSetID      string                    `json:"changeSetId"`
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	Reason           string                    `json:"reason"`
+	Actor            ChangeSetActor            `json:"actor"`
+	IdempotencyKey   string                    `json:"idempotencyKey"`
+}
+
+type AnswerChangeSetRefinementRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ChangeSetID      string                    `json:"changeSetId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	QuestionID       string                    `json:"questionId"`
+	Value            RefinementAnswerValue     `json:"value"`
+	Source           RefinementAnswerSource    `json:"source"`
 	Actor            ChangeSetActor            `json:"actor"`
 	IdempotencyKey   string                    `json:"idempotencyKey"`
 }
@@ -343,7 +358,13 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
+	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
+		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+	}
+	if err := validateRefinementCatalog(result.UnresolvedQuestions, request.Catalog); err != nil {
+		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+	}
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, false, fmt.Errorf("digest workforce candidate: %w", err)
@@ -359,6 +380,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement), RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog), Status: status, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	changeSet.Refinement = reconcileRefinement(ChangeSetRefinement{}, result)
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: "candidate_compiled", Actor: request.Actor, At: now}}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
 }
@@ -447,7 +469,13 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
+	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
+		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+	}
+	if err := validateRefinementCatalog(result.UnresolvedQuestions, changeSet.Catalog); err != nil {
+		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+	}
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, fmt.Errorf("digest workforce candidate: %w", err)
@@ -459,6 +487,7 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	}
 	changeSet.CandidateDigest = candidateDigest
 	changeSet.Result = *result
+	changeSet.Refinement = reconcileRefinement(changeSet.Refinement, result)
 	changeSet.RequiredCredentials = requiredCredentials(result.Candidate, changeSet.Catalog)
 	changeSet.Status = status
 	changeSet.Revision++
@@ -470,6 +499,112 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	return s.store.CompleteChangeSetGeneration(persistCtx, changeSet, expectedRevision)
+}
+
+// AnswerRefinement appends an immutable answer event and requeues generation
+// against the last reviewed candidate. A first answer must target NextQuestion;
+// an earlier answer may be revised explicitly without losing history.
+func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerChangeSetRefinementRequest) (*ChangeSet, bool, error) {
+	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
+	request.QuestionID = strings.TrimSpace(request.QuestionID)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
+	if request.Source == "" {
+		request.Source = RefinementAnswerSourceUser
+	}
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" ||
+		request.ExpectedRevision < 1 || request.QuestionID == "" || request.Actor.Type == "" || request.Actor.ID == "" || request.IdempotencyKey == "" {
+		return nil, false, errors.New("refinement scope, change set, revision, question, actor, and idempotency key are required")
+	}
+	if request.Source != RefinementAnswerSourceUser && request.Source != RefinementAnswerSourceRuntime {
+		return nil, false, errors.New("refinement answer source must be user or runtime")
+	}
+	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
+	if err != nil {
+		return nil, false, err
+	}
+	request.Value = normalizeRefinementAnswerValue(request.Value)
+	requestDigest, err := digestJSON(struct {
+		QuestionID string
+		Value      RefinementAnswerValue
+		Source     RefinementAnswerSource
+		Actor      ChangeSetActor
+	}{request.QuestionID, request.Value, request.Source, request.Actor})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, answer := range current.Refinement.Answers {
+		if answer.IdempotencyKey != request.IdempotencyKey {
+			continue
+		}
+		if answer.RequestDigest != requestDigest {
+			return nil, false, ErrChangeSetIdempotency
+		}
+		return current, true, nil
+	}
+	if current.Revision != request.ExpectedRevision {
+		return nil, false, ErrChangeSetRevision
+	}
+	if current.Status == ChangeSetEvaluating || current.Status == ChangeSetApplied || current.Status == ChangeSetFailed {
+		return nil, false, fmt.Errorf("%w: cannot answer refinement in status %s", ErrChangeSetTransition, current.Status)
+	}
+	var question *RefinementQuestion
+	for i := range current.Refinement.Questions {
+		if current.Refinement.Questions[i].ID == request.QuestionID {
+			question = &current.Refinement.Questions[i]
+			break
+		}
+	}
+	if question == nil {
+		return nil, false, errors.New("refinement question not found")
+	}
+	prior := current.Refinement.CurrentAnswer(request.QuestionID)
+	if prior == nil {
+		next := current.Refinement.NextQuestion()
+		if next == nil || next.ID != request.QuestionID {
+			return nil, false, errors.New("refinement question is not currently answerable")
+		}
+	}
+	if request.Source == RefinementAnswerSourceRuntime && !question.AutoResolvable {
+		return nil, false, errors.New("refinement question requires a user answer")
+	}
+	if err := validateRefinementAnswer(*question, request.Value); err != nil {
+		return nil, false, err
+	}
+	if question.Answer.Kind == RefinementAnswerSkillSelection {
+		for _, skillID := range request.Value.SkillIDs {
+			if _, available := current.Catalog.Skills[skillID]; !available {
+				return nil, false, fmt.Errorf("selected Skill %s is not present in the authorized catalog", skillID)
+			}
+		}
+	}
+	next := cloneChangeSet(current)
+	now := s.now().UTC()
+	next.Refinement.Answers = append(next.Refinement.Answers, RefinementAnswerEvent{
+		ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, RequestDigest: requestDigest,
+		QuestionID: request.QuestionID, QuestionRevision: current.Revision, Value: request.Value,
+		Source: request.Source, Actor: request.Actor, AnsweredAt: now,
+	})
+	next.Status, next.Revision, next.UpdatedAt = ChangeSetEvaluating, current.Revision+1, now
+	next.Generation = &ChangeSetGeneration{
+		Request: GenerateRequest{Mode: ModeAmend, Prompt: current.Prompt, Existing: &current.Result.Candidate,
+			Catalog: cloneCapabilityCatalog(current.Catalog), Refinement: providerRefinementContext(next.Refinement)},
+		Attempt: generationAttempt(current), PreviousCandidateDigest: current.CandidateDigest,
+	}
+	next.Generation.Request.InvocationKey = generationInvocationKey(next.ID, next.Generation.Attempt)
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetEvaluating, Reason: "refinement_answered", Actor: request.Actor, At: now})
+	updated, err := s.store.UpdateChangeSet(ctx, next, current.Revision)
+	if errors.Is(err, ErrChangeSetRevision) {
+		return s.AnswerRefinement(ctx, request)
+	}
+	return updated, false, err
+}
+
+func generationAttempt(value *ChangeSet) int {
+	if value.Generation == nil {
+		return 1
+	}
+	return value.Generation.Attempt
 }
 
 func (s *ChangeSetService) Get(ctx context.Context, scope capability.ScopeReference, id string) (*ChangeSet, error) {

@@ -203,7 +203,11 @@ func (s *MemoryChangeSetStore) CompleteChangeSetGeneration(_ context.Context, va
 	if current == nil {
 		return nil, ErrChangeSetNotFound
 	}
-	if current.Revision != expectedRevision || current.Status != ChangeSetEvaluating || current.CandidateDigest != "" || value.CandidateDigest == "" {
+	expectedDigest := ""
+	if value.Generation != nil {
+		expectedDigest = value.Generation.PreviousCandidateDigest
+	}
+	if current.Revision != expectedRevision || current.Status != ChangeSetEvaluating || current.CandidateDigest != expectedDigest || value.CandidateDigest == "" {
 		return nil, ErrChangeSetRevision
 	}
 	copy := cloneChangeSet(value)

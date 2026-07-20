@@ -109,9 +109,13 @@ func (s *SQLiteStore) CompleteChangeSetGeneration(ctx context.Context, value *au
 	if err != nil {
 		return nil, err
 	}
+	expectedDigest := ""
+	if value.Generation != nil {
+		expectedDigest = value.Generation.PreviousCandidateDigest
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE workforce_change_sets SET status = ?, revision = ?, candidate_digest = ?, updated_at = ?, payload = ?
-		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND status = ? AND candidate_digest = ''`,
-		value.Status, value.Revision, value.CandidateDigest, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetEvaluating)
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND status = ? AND candidate_digest = ?`,
+		value.Status, value.Revision, value.CandidateDigest, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetEvaluating, expectedDigest)
 	if err != nil {
 		return nil, err
 	}

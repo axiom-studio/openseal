@@ -27,6 +27,26 @@ type SkillCapability struct {
 	Credentials     []SkillCredential    `json:"credentials,omitempty"`
 	PromptAvailable bool                 `json:"promptAvailable,omitempty"`
 	MaximumRisk     capability.RiskLevel `json:"maximumRisk,omitempty"`
+	Readiness       SkillReadiness       `json:"readiness,omitempty"`
+	Compatibility   []SkillCompatibility `json:"compatibility,omitempty"`
+}
+
+type SkillReadiness string
+
+const (
+	SkillReadinessReady             SkillReadiness = "ready"
+	SkillReadinessNeedsBinding      SkillReadiness = "needs_binding"
+	SkillReadinessNeedsInstallation SkillReadiness = "needs_installation"
+	SkillReadinessUnavailable       SkillReadiness = "unavailable"
+)
+
+// SkillCompatibility is host-supplied, credential-free evidence. Catalog
+// consumers may rank it but must not infer compatibility absent this fact.
+type SkillCompatibility struct {
+	Requirement string `json:"requirement"`
+	Compatible  bool   `json:"compatible"`
+	Evidence    string `json:"evidence"`
+	Reference   string `json:"reference,omitempty"`
 }
 
 type SkillCredential struct {
@@ -77,6 +97,7 @@ type GenerateRequest struct {
 	Prompt        string              `json:"prompt"`
 	Existing      *WorkforceCandidate `json:"existing,omitempty"`
 	Catalog       CapabilityCatalog   `json:"catalog"`
+	Refinement    *RefinementContext  `json:"refinement,omitempty"`
 	InvocationKey string              `json:"invocationKey,omitempty"`
 }
 
@@ -92,10 +113,11 @@ type RepairGenerator interface {
 }
 
 type GenerationResponse struct {
-	Candidate   WorkforceCandidate `json:"candidate"`
-	Commitments PromptCommitments  `json:"commitments"`
-	Assumptions []string           `json:"assumptions,omitempty"`
-	Questions   []string           `json:"questions,omitempty"`
+	Candidate           WorkforceCandidate   `json:"candidate"`
+	Commitments         PromptCommitments    `json:"commitments"`
+	Assumptions         []string             `json:"assumptions,omitempty"`
+	Questions           []string             `json:"questions,omitempty"`
+	UnresolvedQuestions []RefinementQuestion `json:"unresolvedQuestions,omitempty"`
 }
 
 // PromptCommitments is the generator's typed, reviewable account of concrete
@@ -167,6 +189,7 @@ type CompileResult struct {
 	Commitments         PromptCommitments    `json:"commitments"`
 	Assumptions         []string             `json:"assumptions,omitempty"`
 	Questions           []string             `json:"questions,omitempty"`
+	UnresolvedQuestions []RefinementQuestion `json:"unresolvedQuestions,omitempty"`
 	Validation          []ValidationIssue    `json:"validation,omitempty"`
 	MissingRequirements []MissingRequirement `json:"missingRequirements,omitempty"`
 	RiskChanges         []RiskChange         `json:"riskChanges,omitempty"`

@@ -77,6 +77,12 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 	validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
 	validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
+	if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
+		validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+	}
+	if err := validateRefinementCatalog(generated.UnresolvedQuestions, request.Catalog); err != nil {
+		validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+	}
 	missing := missingRequirements(&generated.Candidate, request.Catalog)
 	if !repairUsed && (len(validation) > 0 || len(missing) > 0) {
 		if repairer, ok := c.generator.(RepairGenerator); ok {
@@ -96,13 +102,20 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	}
 	result := &CompileResult{
 		Candidate: generated.Candidate, Commitments: commitments, Assumptions: assumptions, Questions: normalized(generated.Questions),
+		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
+	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
+		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+	}
+	if err := validateRefinementCatalog(result.UnresolvedQuestions, request.Catalog); err != nil {
+		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+	}
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.RiskChanges = riskChanges(request.Existing, &result.Candidate)
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
 }
 
@@ -318,6 +331,14 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				missing[key] = MissingRequirement{Kind: "skill", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
 				continue
 			}
+			if capability.Readiness == SkillReadinessNeedsInstallation || capability.Readiness == SkillReadinessUnavailable {
+				kind := "skill_installation"
+				if capability.Readiness == SkillReadinessUnavailable {
+					kind = "skill_unavailable"
+				}
+				key := kind + ":" + requirement.SkillID + ":" + definition.ID
+				missing[key] = MissingRequirement{Kind: kind, ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
+			}
 			if requirement.PromptRequired && !capability.PromptAvailable {
 				key := "prompt:" + requirement.SkillID + ":" + definition.ID
 				missing[key] = MissingRequirement{Kind: "prompt", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
@@ -346,6 +367,14 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				key := "skill:" + monitor.SkillID + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: "skill", ID: monitor.SkillID, RequiredBy: requiredBy}
 				continue
+			}
+			if available.Readiness == SkillReadinessNeedsInstallation || available.Readiness == SkillReadinessUnavailable {
+				kind := "skill_installation"
+				if available.Readiness == SkillReadinessUnavailable {
+					kind = "skill_unavailable"
+				}
+				key := kind + ":" + monitor.SkillID + ":" + requiredBy
+				missing[key] = MissingRequirement{Kind: kind, ID: monitor.SkillID, RequiredBy: requiredBy}
 			}
 			if available.Version != monitor.SkillVersion {
 				key := "version:" + monitor.SkillID + "@" + monitor.SkillVersion + ":" + requiredBy

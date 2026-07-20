@@ -114,9 +114,13 @@ func (s *PostgresStore) CompleteChangeSetGeneration(ctx context.Context, value *
 	if err != nil {
 		return nil, err
 	}
+	expectedDigest := ""
+	if value.Generation != nil {
+		expectedDigest = value.Generation.PreviousCandidateDigest
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("workforce_change_sets")+` SET status = $1, revision = $2, candidate_digest = $3, updated_at = $4, payload = $5::jsonb
-		WHERE scope_kind = $6 AND scope_id = $7 AND id = $8 AND revision = $9 AND status = $10 AND candidate_digest = ''`,
-		value.Status, value.Revision, value.CandidateDigest, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetEvaluating)
+		WHERE scope_kind = $6 AND scope_id = $7 AND id = $8 AND revision = $9 AND status = $10 AND candidate_digest = $11`,
+		value.Status, value.Revision, value.CandidateDigest, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetEvaluating, expectedDigest)
 	if err != nil {
 		return nil, err
 	}
