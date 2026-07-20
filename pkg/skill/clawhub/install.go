@@ -60,6 +60,10 @@ type InstallRequest struct {
 	Tag              string
 	Force            bool
 	SkipVerification bool
+	// PreviewReceipt pins installation to an artifact previously compiled by
+	// Preview. Hosts should persist this secret-free receipt with their catalog
+	// projection and pass it back when the operator chooses to install.
+	PreviewReceipt *CompilationReceipt
 }
 
 type InstalledSkill struct {
@@ -187,6 +191,9 @@ func (m *InstallManager) install(ctx context.Context, req InstallRequest, valida
 		return nil, err
 	}
 	defer os.RemoveAll(stage)
+	if err := verifyCompilationReceipt(req.PreviewReceipt, m.identity(req.Reference), req.Reference, resolvedVersion, archive, bundle); err != nil {
+		return nil, err
+	}
 	if validate != nil {
 		if err := validate(bundle); err != nil {
 			return nil, fmt.Errorf("validate compiled skill: %w", err)
@@ -544,10 +551,20 @@ func (m *InstallManager) List() (Lockfile, error) {
 }
 
 func (m *InstallManager) stageArchive(ref SkillReference, version string, archive *DownloadedArchive, verification *Verification) (string, *opensealclaw.Compilation, string, error) {
+	return m.stageArchiveIn(m.skillsDir, ref, version, archive, verification)
+}
+
+func (m *InstallManager) stageArchiveIn(parent string, ref SkillReference, version string, archive *DownloadedArchive, verification *Verification) (string, *opensealclaw.Compilation, string, error) {
 	if archive == nil || len(archive.Bytes) == 0 {
 		return "", nil, "", errors.New("downloaded archive is empty")
 	}
-	stage, err := os.MkdirTemp(m.skillsDir, ".install-"+ref.Slug+"-")
+	actualArchiveDigest := sha256.Sum256(archive.Bytes)
+	actualArchiveSHA256 := hex.EncodeToString(actualArchiveDigest[:])
+	if declared := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(archive.SHA256)), "sha256:"); declared != "" && declared != actualArchiveSHA256 {
+		return "", nil, "", errors.New("downloaded archive digest does not match its contents")
+	}
+	archive.SHA256 = actualArchiveSHA256
+	stage, err := os.MkdirTemp(parent, ".install-"+ref.Slug+"-")
 	if err != nil {
 		return "", nil, "", err
 	}

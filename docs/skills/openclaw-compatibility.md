@@ -39,6 +39,7 @@ envelope.
 | workspace/project/personal/managed/bundled/plugin/extra roots | secure source catalog | Declared-name conflicts use documented precedence; one grouping level is supported |
 | directory refresh | debounced effective-source watcher | Emits only when the winning skill surface changes; shadowed edits stay quiet |
 | ClawHub search, explore, detail, versions, files, verify, archive | typed registry client | Native |
+| verified preview before installation | secret-free compilation projection plus source, archive, and compilation digests | Native; install can require the exact reviewed receipt |
 | ClawHub install, update, update-all, pin, verify, uninstall | verified atomic installer and lockfile | Native with local-modification and rollback protection |
 | registry slug differing from declared skill name | source reference plus declared definition identity | Supported; registry identity remains provenance |
 | local or Git acquisition | compiler bundle input | Acquisition adapter boundary; compilation semantics are identical |

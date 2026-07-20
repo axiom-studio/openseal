@@ -539,6 +539,9 @@ type (
 	ClawHubSkillPage                   = clawhub.SkillPage
 	ClawHubSkillSummary                = clawhub.SkillSummary
 	ClawHubSkillDetail                 = clawhub.SkillDetail
+	ClawHubPreviewRequest              = clawhub.PreviewRequest
+	ClawHubCompilationReceipt          = clawhub.CompilationReceipt
+	ClawHubCompilationPreview          = clawhub.CompilationPreview
 	ClawHubInstallRequest              = clawhub.InstallRequest
 	ClawHubInstalledSkill              = clawhub.InstalledSkill
 	ClawHubVerification                = clawhub.Verification
@@ -559,7 +562,10 @@ type (
 	ClawHubInstalledState              = clawhub.InstalledState
 )
 
-const SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
+const (
+	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
+	ClawHubCompilationPreviewAPIVersion = clawhub.CompilationPreviewAPIVersion
+)
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
@@ -3248,6 +3254,17 @@ func (e *Engine) VerifyClawHubSkill(ctx context.Context, reference clawhub.Skill
 		return nil, fmt.Errorf("ClawHub registry is not configured")
 	}
 	return e.clawHubRegistry.VerifySkill(ctx, reference, version, tag)
+}
+
+// PreviewClawHubSkill fetches and verifies one immutable registry artifact and
+// compiles its secret-free capability projection without installing,
+// activating, or executing it. Pass the returned receipt to installation to
+// reject registry or compiler drift between review and install.
+func (e *Engine) PreviewClawHubSkill(ctx context.Context, request clawhub.PreviewRequest) (*clawhub.CompilationPreview, error) {
+	if e == nil || e.clawHub == nil {
+		return nil, fmt.Errorf("ClawHub compilation preview is not configured")
+	}
+	return e.clawHub.PreviewValidated(ctx, request, e.validateClawHubCompilation)
 }
 
 func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.InstallRequest) (*clawhub.InstalledSkill, error) {
