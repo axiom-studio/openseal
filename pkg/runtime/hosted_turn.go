@@ -87,22 +87,24 @@ type HostedTurnRequest struct {
 }
 
 type HostedTurnResponse struct {
-	APIVersion             string                  `json:"apiVersion"`
-	InvocationID           string                  `json:"invocationId"`
-	ModelProvider          string                  `json:"modelProvider"`
-	Model                  string                  `json:"model"`
-	SkillSelections        []HostedSkillSelection  `json:"skillSelections,omitempty"`
-	Decisions              []TurnDecision          `json:"decisions,omitempty"`
-	ProposedActions        []TurnAction            `json:"proposedActions,omitempty"`
-	ProposedFork           *TurnForkProposal       `json:"proposedFork,omitempty"`
-	ProposedDelegation     *TurnDelegationProposal `json:"proposedDelegation,omitempty"`
-	OutputSummary          string                  `json:"outputSummary"`
-	Usage                  TurnUsage               `json:"usage,omitempty"`
-	ContinuationCheckpoint map[string]interface{}  `json:"continuationCheckpoint,omitempty"`
-	NextRunStatus          AgentRunStatus          `json:"nextRunStatus"`
-	WakeCondition          *WakeCondition          `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{}  `json:"runOutput,omitempty"`
-	RunError               string                  `json:"runError,omitempty"`
+	APIVersion             string                   `json:"apiVersion"`
+	InvocationID           string                   `json:"invocationId"`
+	ModelProvider          string                   `json:"modelProvider"`
+	Model                  string                   `json:"model"`
+	SkillSelections        []HostedSkillSelection   `json:"skillSelections,omitempty"`
+	Decisions              []TurnDecision           `json:"decisions,omitempty"`
+	ProposedActions        []TurnAction             `json:"proposedActions,omitempty"`
+	ProposedFork           *TurnForkProposal        `json:"proposedFork,omitempty"`
+	ProposedDelegation     *TurnDelegationProposal  `json:"proposedDelegation,omitempty"`
+	OutputSummary          string                   `json:"outputSummary"`
+	Usage                  TurnUsage                `json:"usage,omitempty"`
+	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
+	NextRunStatus          AgentRunStatus           `json:"nextRunStatus"`
+	WakeCondition          *WakeCondition           `json:"wakeCondition,omitempty"`
+	RunOutput              map[string]interface{}   `json:"runOutput,omitempty"`
+	RunError               string                   `json:"runError,omitempty"`
+	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
+	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
 }
 
 type TurnHost interface {
@@ -150,6 +152,20 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if r == nil || r.host == nil || input.Run == nil || input.Turn == nil {
 		return nil, errors.New("hosted turn requires a durable Run and Turn")
 	}
+	snapshot, err := evidenceSnapshotForGrounding(input.Run.Context)
+	if err != nil {
+		return nil, err
+	}
+	groundingState, err := parseEvidenceGroundingState(input.Run.Checkpoint)
+	if err != nil {
+		return nil, err
+	}
+	if groundingState != nil && groundingState.SnapshotID != evidenceSnapshotID(snapshot) {
+		return nil, errors.New("evidence grounding checkpoint does not match the immutable Run snapshot")
+	}
+	if groundingState != nil && groundingState.Status == evidenceGroundingPendingReview {
+		return r.runEvidenceGroundingReview(ctx, input, snapshot, groundingState)
+	}
 	request, err := r.buildRequest(input)
 	if err != nil {
 		return nil, err
@@ -190,6 +206,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		}
 	}
 	response.ContinuationCheckpoint = preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
+	response.ContinuationCheckpoint = preserveKernelEvidenceGrounding(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
 	if len(response.ProposedActions) == 1 {
 		if reused, reuseErr := r.reuseSucceededAction(response.ProposedActions[0], response.ContinuationCheckpoint); reuseErr != nil {
 			return nil, reuseErr
@@ -271,6 +288,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			}
 		}
 	}
+	if snapshot != nil && response.NextRunStatus == AgentRunStatusCompleted {
+		stageEvidenceGrounding(response, snapshot)
+	}
 	return &TurnOutcome{
 		ModelProvider: response.ModelProvider, Model: response.Model,
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
@@ -279,6 +299,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
+		EvidenceClaims: append([]EvidenceClaim(nil), response.EvidenceClaims...), EvidenceGrounding: cloneEvidenceGroundingReview(response.EvidenceGrounding),
 	}, nil
 }
 
