@@ -142,6 +142,16 @@ type ActionApprovalCapabilityFeatures struct {
 	Resolution bool
 }
 
+// CapabilityBlockingRequirement is a safe, server-authored explanation of
+// configuration that must be supplied before an operation can run. Codes and
+// credential keys are stable machine fields; Message is operator-facing and
+// must never contain credential material.
+type CapabilityBlockingRequirement struct {
+	Code          string `json:"code"`
+	CredentialKey string `json:"credentialKey,omitempty"`
+	Message       string `json:"message"`
+}
+
 // CapabilityContext is server-authored authorization state for one explicitly
 // requested resource. It is never durable policy input and clients must not
 // infer authority from the underlying resource itself.
@@ -150,6 +160,7 @@ type CapabilityContext struct {
 	Revision                     int64                                `json:"revision,omitempty"`
 	EligibleApprovalRequirements []ApprovalRequirementReference       `json:"eligibleApprovalRequirements,omitempty"`
 	CredentialBindings           []capability.CredentialBindingChoice `json:"credentialBindings,omitempty"`
+	BlockingRequirements         []CapabilityBlockingRequirement      `json:"blockingRequirements,omitempty"`
 }
 
 type ClawHubVersionRequest struct {

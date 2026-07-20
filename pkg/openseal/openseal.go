@@ -571,6 +571,7 @@ type (
 	KernelCapability                      = kernelapi.Capability
 	KernelCapabilityDocument              = kernelapi.CapabilityDocument
 	KernelCapabilityContext               = kernelapi.CapabilityContext
+	KernelCapabilityBlockingRequirement   = kernelapi.CapabilityBlockingRequirement
 	CredentialBindingChoice               = capability.CredentialBindingChoice
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	KernelSkillActionList                 = kernelapi.SkillActionList
