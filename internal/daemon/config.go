@@ -1,10 +1,17 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 
+	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/source"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,6 +55,15 @@ type DaemonConfig struct {
 
 	// Storage configures the durable canonical kernel store.
 	Storage StorageConfig `yaml:"storage"`
+
+	// SourcePolicies are credential-free, scope-bound network authorities.
+	// No source access or outreach delivery is exposed for an unlisted scope.
+	SourcePolicies []ScopedSourcePolicy `yaml:"sourcePolicies,omitempty"`
+}
+
+type ScopedSourcePolicy struct {
+	Scope  runtime.Scope `yaml:"scope"`
+	Policy source.Policy `yaml:"policy"`
 }
 
 // StorageConfig configures standalone OpenSeal persistence. SQLite is the
@@ -194,5 +210,112 @@ func (c *DaemonConfig) Validate() error {
 		}
 	}
 
+	seenPolicies := make(map[string]bool, len(c.SourcePolicies))
+	for index := range c.SourcePolicies {
+		configured := &c.SourcePolicies[index]
+		if err := configured.Scope.Validate(); err != nil {
+			return fmt.Errorf("source policy %d scope: %w", index, err)
+		}
+		if err := configured.Policy.Validate(); err != nil {
+			return fmt.Errorf("source policy %d: %w", index, err)
+		}
+		key := scopedSourcePolicyKey(configured.Scope, configured.Policy.ID+"@"+configured.Policy.Version)
+		if seenPolicies[key] {
+			return fmt.Errorf("source policy %s is duplicated in scope %s:%s", configured.Policy.ID+"@"+configured.Policy.Version, configured.Scope.Kind, configured.Scope.ID)
+		}
+		seenPolicies[key] = true
+	}
+
 	return nil
+}
+
+// SourcePolicyCatalog is immutable after construction, so worker scope
+// reconciliation and authorization can read it concurrently without copying
+// secrets or consulting model-visible state.
+type SourcePolicyCatalog struct {
+	mu       sync.RWMutex
+	policies map[string]source.Policy
+	scopes   map[string]runtime.Scope
+}
+
+func NewSourcePolicyCatalog(configured []ScopedSourcePolicy) (*SourcePolicyCatalog, error) {
+	catalog := &SourcePolicyCatalog{policies: make(map[string]source.Policy, len(configured)), scopes: make(map[string]runtime.Scope)}
+	for index := range configured {
+		entry := configured[index]
+		if err := entry.Scope.Validate(); err != nil {
+			return nil, fmt.Errorf("source policy %d scope: %w", index, err)
+		}
+		if err := entry.Policy.Validate(); err != nil {
+			return nil, fmt.Errorf("source policy %d: %w", index, err)
+		}
+		reference := entry.Policy.ID + "@" + entry.Policy.Version
+		key := scopedSourcePolicyKey(entry.Scope, reference)
+		if _, exists := catalog.policies[key]; exists {
+			return nil, fmt.Errorf("source policy %s is duplicated in scope %s:%s", reference, entry.Scope.Kind, entry.Scope.ID)
+		}
+		catalog.policies[key] = entry.Policy
+		if entry.Policy.Enabled && entry.Policy.Outreach != nil && entry.Policy.Outreach.Enabled {
+			catalog.scopes[workerScopeKey(entry.Scope)] = entry.Scope
+		}
+	}
+	return catalog, nil
+}
+
+func (c *SourcePolicyCatalog) ResolveOutreachPolicy(_ context.Context, scope skill.ScopeReference, reference string) (*source.Policy, error) {
+	if c == nil {
+		return nil, fmt.Errorf("source policy catalog is unavailable")
+	}
+	c.mu.RLock()
+	policy, ok := c.policies[scopedSourcePolicyKey(runtime.Scope{Kind: scope.Kind, ID: scope.ID}, reference)]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("source policy %q is not configured in scope %s:%s", strings.TrimSpace(reference), scope.Kind, scope.ID)
+	}
+	copy := policy
+	copy.Sources = append([]source.PolicySource(nil), policy.Sources...)
+	for index := range copy.Sources {
+		copy.Sources[index].PathPrefixes = append([]string(nil), policy.Sources[index].PathPrefixes...)
+	}
+	if policy.Outreach != nil {
+		outreachCopy := *policy.Outreach
+		copy.Outreach = &outreachCopy
+	}
+	return &copy, nil
+}
+
+func (c *SourcePolicyCatalog) ListWorkerScopes(context.Context) ([]runtime.Scope, error) {
+	if c == nil {
+		return nil, fmt.Errorf("source policy catalog is unavailable")
+	}
+	c.mu.RLock()
+	result := make([]runtime.Scope, 0, len(c.scopes))
+	for _, scope := range c.scopes {
+		result = append(result, scope)
+	}
+	c.mu.RUnlock()
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].Kind == result[right].Kind {
+			return result[left].ID < result[right].ID
+		}
+		return result[left].Kind < result[right].Kind
+	})
+	return result, nil
+}
+
+func (c *SourcePolicyCatalog) OutreachEnabled(scope runtime.Scope) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	_, ok := c.scopes[workerScopeKey(scope)]
+	c.mu.RUnlock()
+	return ok
+}
+
+func scopedSourcePolicyKey(scope runtime.Scope, reference string) string {
+	return workerScopeKey(scope) + "\x00" + strings.TrimSpace(reference)
+}
+
+func workerScopeKey(scope runtime.Scope) string {
+	return strings.TrimSpace(scope.Kind) + "\x00" + strings.TrimSpace(scope.ID)
 }
