@@ -108,6 +108,40 @@ func TestTeamSkillActionValidatorRechecksAuthorityWithoutWideningAgentBindings(t
 	}
 }
 
+func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "one"}
+	catalog := teamSkillAuthorityFixture(scope)
+	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
+	bound := &skill.BoundAction{
+		Binding: &skill.Binding{Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research", SkillID: "forum", SkillVersion: "1"},
+		Action:  capability.Action{Name: "search", Risk: capability.RiskLevelRead},
+	}
+	dispatched := 0
+	dispatcher, err := NewTeamSkillActionDispatcher(catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		dispatched++
+		return map[string]interface{}{"ok": true}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound}); err != nil {
+		t.Fatal(err)
+	}
+	if dispatched != 1 {
+		t.Fatalf("authorized dispatches = %d, want 1", dispatched)
+	}
+
+	// Simulate removal after proposal/approval but before the worker reaches the
+	// transport. The final authority check must fail closed without invoking it.
+	catalog.deployment.Roster = nil
+	if _, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound}); err == nil {
+		t.Fatal("expected revoked roster membership to stop dispatch")
+	}
+	if dispatched != 1 {
+		t.Fatalf("transport ran after authority revocation: %d dispatches", dispatched)
+	}
+}
+
 func TestTeamSkillAuthoritySelectsOneExactSourcedVariantBehindCatalogIdentity(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 	catalog := teamSkillAuthorityFixture(scope)

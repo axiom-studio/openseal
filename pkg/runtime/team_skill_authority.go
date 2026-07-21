@@ -123,6 +123,39 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 	return nil, nil
 }
 
+// TeamSkillActionDispatcher revalidates Team membership and role authority at
+// the final execution boundary. Approval is intentionally not a permanent
+// capability grant: an Agent removed from the roster, a paused Team, or a
+// narrowed role must stop an already-approved call before any external tool is
+// invoked.
+type TeamSkillActionDispatcher struct {
+	validator *TeamSkillActionValidator
+	next      ActionDispatcher
+}
+
+func NewTeamSkillActionDispatcher(catalog TeamSkillAuthorityCatalog, next ActionDispatcher) (*TeamSkillActionDispatcher, error) {
+	if next == nil {
+		return nil, errors.New("next action dispatcher is required")
+	}
+	validator, err := NewTeamSkillActionValidator(catalog)
+	if err != nil {
+		return nil, err
+	}
+	return &TeamSkillActionDispatcher{validator: validator, next: next}, nil
+}
+
+func (d *TeamSkillActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+	if d == nil || d.validator == nil || d.next == nil {
+		return nil, errors.New("Team Skill action dispatcher is not configured")
+	}
+	if _, err := d.validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		Run: input.Run, Bound: input.Bound, Arguments: input.Arguments,
+	}); err != nil {
+		return nil, fmt.Errorf("revalidate Team Skill authority before dispatch: %w", err)
+	}
+	return d.next.DispatchAction(ctx, input)
+}
+
 type teamSkillAuthority struct {
 	deployment      *kernelteam.Deployment
 	definition      *kernelteam.Definition
