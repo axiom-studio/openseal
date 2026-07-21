@@ -273,7 +273,25 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		}
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
+	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
+}
+
+// normalizeGeneratedCredentialReferenceOptions removes provider-authored
+// credential choices at the strict decode boundary. A model can identify the
+// credential kind that work requires, but only the authorized host may resolve
+// that requirement to an opaque Vault binding. Retaining option IDs here would
+// let untrusted output invent or disclose credential identities.
+func normalizeGeneratedCredentialReferenceOptions(generated *GenerationResponse) {
+	if generated == nil {
+		return
+	}
+	for index := range generated.UnresolvedQuestions {
+		answer := &generated.UnresolvedQuestions[index].Answer
+		if answer.Kind == RefinementAnswerCredentialReference {
+			answer.Options = nil
+		}
+	}
 }
 
 // normalizeGeneratedRefinementBlocking accepts a single canonical blocking
