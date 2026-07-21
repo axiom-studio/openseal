@@ -15,6 +15,7 @@ import (
 const (
 	SkillManagementSkillID      = "openseal.skills"
 	SkillManagementSkillVersion = "1.0.0"
+	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
 	SkillManagementEndpoint     = "kernel://skills"
@@ -56,6 +57,7 @@ func SkillManagementSkill() *skill.Definition {
 		Name: "Skills", Description: "Propose governed changes to the current Agent's Skill access.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: SkillManagementEndpoint},
 		Actions: map[string]skill.Action{
+			SkillActionDiscoverBinding: skillDiscoveryAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
 				"Propose enabling or updating an exact registered Skill for this Agent. Credential values are never accepted; credentials must be opaque references.",
@@ -71,6 +73,72 @@ func SkillManagementSkill() *skill.Definition {
 				},
 				[]interface{}{"bindingId", "expectedRevision"},
 			),
+		},
+	}
+}
+
+func skillDiscoveryAction() skill.Action {
+	riskValues := []interface{}{string(skill.RiskLevelRead), string(skill.RiskLevelWrite), string(skill.RiskLevelExternal), string(skill.RiskLevelProduction), string(skill.RiskLevelDestructive)}
+	actionSchema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"name": map[string]interface{}{"type": "string"}, "description": map[string]interface{}{"type": "string"},
+			"risk": map[string]interface{}{"type": "string", "enum": riskValues},
+		},
+		"required": []interface{}{"name", "risk"},
+	}
+	credentialSchema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"name": map[string]interface{}{"type": "string"}, "kind": map[string]interface{}{"type": "string"},
+			"optional": map[string]interface{}{"type": "boolean"}, "configured": map[string]interface{}{"type": "boolean"},
+		},
+		"required": []interface{}{"name", "kind", "configured"},
+	}
+	compatibilitySchema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"requirement": map[string]interface{}{"type": "string"}, "compatible": map[string]interface{}{"type": "boolean"},
+			"evidence": map[string]interface{}{"type": "string"}, "reference": map[string]interface{}{"type": "string"},
+		},
+		"required": []interface{}{"requirement", "compatible", "evidence"},
+	}
+	candidateSchema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string"}, "version": map[string]interface{}{"type": "string"},
+			"sourceIdentity": map[string]interface{}{"type": "string"}, "name": map[string]interface{}{"type": "string"},
+			"description": map[string]interface{}{"type": "string"}, "actions": map[string]interface{}{"type": "array", "items": actionSchema},
+			"credentials": map[string]interface{}{"type": "array", "items": credentialSchema}, "promptAvailable": map[string]interface{}{"type": "boolean"},
+			"maximumRisk":   map[string]interface{}{"type": "string", "enum": riskValues},
+			"readiness":     map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.DiscoveryReadinessBindable), string(skill.DiscoveryReadinessNeedsInstallation), string(skill.DiscoveryReadinessUnavailable)}},
+			"compatibility": map[string]interface{}{"type": "array", "items": compatibilitySchema},
+		},
+		"required": []interface{}{"id", "version", "name", "readiness"},
+	}
+	return skill.Action{
+		Name:        SkillActionDiscoverBinding,
+		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Results contain no credential references or values and do not install or activate anything.",
+		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported,
+		Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+		InputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"query":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512},
+				"requiredActions": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}, "uniqueItems": true, "maxItems": 32},
+				"maximumRisk":     map[string]interface{}{"type": "string", "enum": riskValues},
+				"cursor":          map[string]interface{}{"type": "string", "maxLength": 1024},
+				"limit":           map[string]interface{}{"type": "integer", "minimum": 1, "maximum": skill.MaximumDiscoveryLimit},
+			},
+			"required": []interface{}{"query"},
+		},
+		OutputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"items":      map[string]interface{}{"type": "array", "items": candidateSchema},
+				"nextCursor": map[string]interface{}{"type": "string"},
+			},
+			"required": []interface{}{"items"},
 		},
 	}
 }
@@ -112,6 +180,14 @@ type skillBindingDisableArguments struct {
 	ExpectedRevision int64  `json:"expectedRevision"`
 }
 
+type skillDiscoveryArguments struct {
+	Query           string          `json:"query"`
+	RequiredActions []string        `json:"requiredActions,omitempty"`
+	MaximumRisk     skill.RiskLevel `json:"maximumRisk,omitempty"`
+	Cursor          string          `json:"cursor,omitempty"`
+	Limit           int             `json:"limit,omitempty"`
+}
+
 // SkillBindingActionValidator resolves both deployment authority and the
 // exact registered Skill before a proposal can become an approval request.
 type SkillBindingActionValidator struct{ catalog *skill.Catalog }
@@ -142,6 +218,8 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": deploymentID,
 	}
 	switch input.Bound.Action.Name {
+	case SkillActionDiscoverBinding:
+		return nil, nil
 	case SkillActionUpsertBinding:
 		args, definition, current, resolveErr := resolveSkillBindingUpsert(ctx, v.catalog, scope, deploymentID, input.Arguments)
 		if resolveErr != nil {
@@ -173,16 +251,27 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 // SkillBindingActionDispatcher materializes approved proposals through the
 // existing CAS-protected, audited Skill binding lifecycle.
 type SkillBindingActionDispatcher struct {
-	store    KernelStore
-	catalog  *skill.Catalog
-	fallback ActionDispatcher
+	store     KernelStore
+	catalog   *skill.Catalog
+	discovery skill.DiscoveryProvider
+	fallback  ActionDispatcher
 }
 
-func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback ActionDispatcher) (*SkillBindingActionDispatcher, error) {
+func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
 	if store == nil || catalog == nil {
 		return nil, errors.New("kernel store and skill catalog are required")
 	}
-	return &SkillBindingActionDispatcher{store: store, catalog: catalog, fallback: fallback}, nil
+	if len(discovery) > 1 {
+		return nil, errors.New("only one Skill discovery provider can be configured")
+	}
+	var provider skill.DiscoveryProvider
+	if len(discovery) == 1 {
+		provider = discovery[0]
+		if provider == nil {
+			return nil, errors.New("Skill discovery provider is required when configured")
+		}
+	}
+	return &SkillBindingActionDispatcher{store: store, catalog: catalog, discovery: provider, fallback: fallback}, nil
 }
 
 func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
@@ -219,6 +308,38 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	}
 	scope := skill.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}
 	switch input.Bound.Action.Name {
+	case SkillActionDiscoverBinding:
+		if d.discovery == nil {
+			return nil, errors.New("authorized Skill discovery is unavailable")
+		}
+		var args skillDiscoveryArguments
+		if err := decodeSkillBindingArguments(input.Arguments, &args); err != nil {
+			return nil, err
+		}
+		request, err := skill.NormalizeDiscoveryRequest(skill.DiscoveryRequest{
+			Scope: scope, DeploymentID: deploymentID, Query: args.Query, RequiredActions: args.RequiredActions,
+			MaximumRisk: args.MaximumRisk, Cursor: args.Cursor, Limit: args.Limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		page, err := d.discovery.DiscoverSkills(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := skill.NormalizeDiscoveryPage(request, page)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("encode Skill discovery result: %w", err)
+		}
+		var result map[string]interface{}
+		if err := json.Unmarshal(encoded, &result); err != nil {
+			return nil, fmt.Errorf("decode Skill discovery result: %w", err)
+		}
+		return result, nil
 	case SkillActionUpsertBinding:
 		args, _, _, resolveErr := resolveSkillBindingUpsert(ctx, d.catalog, scope, deploymentID, input.Arguments)
 		if errors.Is(resolveErr, skill.ErrBindingRevisionConflict) {
@@ -522,5 +643,5 @@ func isSkillBindingAction(bound *skill.BoundAction) bool {
 	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID || bound.Definition.Version != SkillManagementSkillVersion {
 		return false
 	}
-	return bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
+	return bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
 }

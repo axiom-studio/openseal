@@ -125,6 +125,84 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	}
 }
 
+func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(20)
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	deploymentID := "research-agent"
+	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	var received skill.DiscoveryRequest
+	provider := skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+		received = request
+		return &skill.DiscoveryPage{
+			Items: []skill.DiscoveryCandidate{{
+				ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader", Description: "Read configured communities.",
+				Actions:     []skill.DiscoveryAction{{Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead}},
+				Credentials: []skill.DiscoveryCredential{{Name: "reddit", Kind: "reddit-oauth", Configured: true}},
+				MaximumRisk: skill.RiskLevelRead, Readiness: skill.DiscoveryReadinessBindable,
+				Compatibility: []skill.DiscoveryCompatibility{{Requirement: "reddit research", Compatible: true, Evidence: "native read action"}},
+			}},
+			NextCursor: "page-2",
+		}, nil
+	})
+	validator, err := NewSkillBindingActionValidator(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
+	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover")
+	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-discover", DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDiscoverBinding,
+		Arguments: map[string]interface{}{
+			"query": "reddit research", "requiredActions": []interface{}{"read"}, "maximumRisk": "read", "limit": 4,
+		},
+		Summary: "Find a Reddit research Skill",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
+		t.Fatalf("read-only discovery proposal = %#v", proposal)
+	}
+	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["nextCursor"] != "page-2" {
+		t.Fatalf("discovery execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
+	}
+	if received.Scope != (skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}) || received.DeploymentID != deploymentID || received.Limit != 4 || len(received.RequiredActions) != 1 || received.RequiredActions[0] != "read" {
+		t.Fatalf("discovery authority was not derived from the Run: %#v", received)
+	}
+	encoded, _ := json.Marshal(executed.Call.Output)
+	if strings.Contains(string(encoded), "vault://") || strings.Contains(string(encoded), "credentialId") || strings.Contains(string(encoded), "secret") {
+		t.Fatalf("discovery exposed credential identity or material: %s", encoded)
+	}
+}
+
+func TestSkillDiscoveryRejectsInvalidProviderPages(t *testing.T) {
+	request, err := skill.NormalizeDiscoveryRequest(skill.DiscoveryRequest{
+		Scope: skill.ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "agent", Query: "research", Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := skill.DiscoveryCandidate{ID: "reader", Version: "1", Name: "Reader", Readiness: skill.DiscoveryReadinessBindable}
+	if _, err := skill.NormalizeDiscoveryPage(request, &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{duplicate, duplicate}}); err == nil {
+		t.Fatal("duplicate exact Skill identities were accepted")
+	}
+	if _, err := skill.NormalizeDiscoveryPage(request, &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{
+		{ID: "reader", Version: "1", Name: "Reader", Readiness: "invented"},
+	}}); err == nil {
+		t.Fatal("invented readiness was accepted")
+	}
+}
+
 func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeApproval(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
@@ -215,7 +293,7 @@ func skillActionCatalog(t *testing.T, ctx context.Context, scope Scope, deployme
 	if err := catalog.Bind(ctx, &skill.Binding{
 		ID: "skills", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
 		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
-		AllowedActions: []string{SkillActionUpsertBinding, SkillActionDisableBinding}, MaximumRisk: skill.RiskLevelWrite,
+		AllowedActions: []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}

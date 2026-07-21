@@ -475,6 +475,15 @@ type (
 	ActivatedSkill                     = skill.ActivatedSkill
 	UnavailableSkill                   = skill.UnavailableSkill
 	SkillActivationSnapshot            = skill.ActivationSnapshot
+	SkillDiscoveryReadiness            = skill.DiscoveryReadiness
+	SkillDiscoveryRequest              = skill.DiscoveryRequest
+	SkillDiscoveryAction               = skill.DiscoveryAction
+	SkillDiscoveryCredential           = skill.DiscoveryCredential
+	SkillDiscoveryCompatibility        = skill.DiscoveryCompatibility
+	SkillDiscoveryCandidate            = skill.DiscoveryCandidate
+	SkillDiscoveryPage                 = skill.DiscoveryPage
+	SkillDiscoveryProvider             = skill.DiscoveryProvider
+	SkillDiscoveryProviderFunc         = skill.DiscoveryProviderFunc
 	HTTPActionParameter                = httpaction.Parameter
 	HTTPActionInvocation               = httpaction.Invocation
 	HTTPActionRequestPolicy            = httpaction.RequestPolicy
@@ -1020,6 +1029,7 @@ const (
 	TeamActionUpdateRole             = runtime.TeamActionUpdateRole
 	SkillManagementSkillID           = runtime.SkillManagementSkillID
 	SkillManagementSkillVersion      = runtime.SkillManagementSkillVersion
+	SkillActionDiscover              = runtime.SkillActionDiscoverBinding
 	SkillActionUpsertBinding         = runtime.SkillActionUpsertBinding
 	SkillActionDisableBinding        = runtime.SkillActionDisableBinding
 	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
@@ -1245,6 +1255,10 @@ const (
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
 
+	SkillDiscoveryBindable          = skill.DiscoveryReadinessBindable
+	SkillDiscoveryNeedsInstallation = skill.DiscoveryReadinessNeedsInstallation
+	SkillDiscoveryUnavailable       = skill.DiscoveryReadinessUnavailable
+
 	SkillSideEffectNone        = skill.SideEffectNone
 	SkillSideEffectRead        = skill.SideEffectRead
 	SkillSideEffectWrite       = skill.SideEffectWrite
@@ -1402,6 +1416,7 @@ type Engine struct {
 	actionValidators              []runtime.ActionProposalValidator
 	teamManagementActions         bool
 	skillManagementActions        bool
+	skillDiscovery                skill.DiscoveryProvider
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
 	clawHubRegistry               clawhub.Registry
@@ -2057,8 +2072,17 @@ func WithTeamManagementActions() Option {
 // WithSkillManagementActions enables the portable, governed Agent Skill
 // binding action layer. The Engine owns both catalog and durable runtime, so
 // hosts do not compose private validators or dispatchers.
-func WithSkillManagementActions() Option {
+func WithSkillManagementActions(discovery ...skill.DiscoveryProvider) Option {
 	return func(e *Engine) error {
+		if len(discovery) > 1 {
+			return fmt.Errorf("only one Skill discovery provider can be configured")
+		}
+		if len(discovery) == 1 {
+			if discovery[0] == nil {
+				return fmt.Errorf("Skill discovery provider is required when configured")
+			}
+			e.skillDiscovery = discovery[0]
+		}
 		e.skillManagementActions = true
 		return nil
 	}
@@ -2077,20 +2101,27 @@ func (e *Engine) configureSkillManagementActions() error {
 	}
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil
+}
+
+func optionalSkillDiscovery(provider skill.DiscoveryProvider) []skill.DiscoveryProvider {
+	if provider == nil {
+		return nil
+	}
+	return []skill.DiscoveryProvider{provider}
 }
 
 func (e *Engine) configureTeamManagementActions() error {
