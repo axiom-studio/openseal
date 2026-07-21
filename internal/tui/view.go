@@ -546,6 +546,22 @@ func (m *Model) renderTeamsContent(width int) string {
 			lines = append(lines, compact(fmt.Sprintf("• %s · %s · Agent %s", name, assignment.RoleID, assignment.AgentDeploymentID), max(width-6, 24)))
 		}
 	}
+	if definition != nil && len(definition.Roles) > 0 {
+		lines = append(lines, "", mutedStyle.Render("Role authority"))
+		for _, role := range definition.Roles {
+			lines = append(lines, compact(fmt.Sprintf("• %s · %d Skill grant(s)", role.DisplayName, len(role.SkillGrants)), max(width-6, 24)))
+			for _, grant := range role.SkillGrants[:min(3, len(role.SkillGrants))] {
+				label := grant.SkillID + "@" + grant.SkillVersion
+				if grant.CatalogID != "" {
+					label = grant.CatalogID + " → " + label
+				}
+				if grant.RuntimeIdentity != nil {
+					label += " · exact source variant"
+				}
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  %s · %d action(s)", label, len(grant.AllowedActions)), max(width-8, 24))))
+			}
+		}
+	}
 	if definition != nil && len(definition.ObjectiveTemplates) > 0 {
 		lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Objective portfolio · %d template(s)", len(definition.ObjectiveTemplates))))
 		for _, objective := range definition.ObjectiveTemplates[:min(3, len(definition.ObjectiveTemplates))] {
