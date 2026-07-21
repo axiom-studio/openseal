@@ -108,6 +108,12 @@ func TestFilesystemStagerFailsClosedOnUnsafeOrChangedContent(t *testing.T) {
 	if _, err := stager.StageResources(context.Background(), unsafe); err == nil {
 		t.Fatal("unsafe resource path was accepted")
 	}
+	for _, resourcePath := range []string{"references/../escape", "references//escape", "references/./escape", `C:\escape`, "assets/file.txt:stream"} {
+		unsafe = stageRequest(source, []capability.Resource{declaredResource(resourcePath, capability.ResourceKindFile, content)})
+		if _, err := stager.StageResources(context.Background(), unsafe); err == nil {
+			t.Fatalf("unsafe resource path %q was accepted", resourcePath)
+		}
+	}
 
 	request := stageRequest(source, []capability.Resource{declaredResource("safe.txt", "resource", content)})
 	stage, err := stager.StageResources(context.Background(), request)

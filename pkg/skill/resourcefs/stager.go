@@ -167,10 +167,11 @@ func normalizeResources(input []capability.Resource) ([]capability.Resource, str
 	total := int64(0)
 	seen := make(map[string]bool, len(resources))
 	for index := range resources {
-		clean := path.Clean(strings.ReplaceAll(strings.TrimSpace(resources[index].Path), "\\", "/"))
-		if clean == "." || clean == "" || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || strings.ContainsRune(clean, '\x00') {
+		raw := strings.ReplaceAll(strings.TrimSpace(resources[index].Path), "\\", "/")
+		if !portableRelativeResourcePath(raw) {
 			return nil, "", fmt.Errorf("resource path %q is not a safe relative path", resources[index].Path)
 		}
+		clean := path.Clean(raw)
 		if seen[clean] {
 			return nil, "", fmt.Errorf("duplicate resource path %q", clean)
 		}
@@ -195,6 +196,22 @@ func normalizeResources(input []capability.Resource) ([]capability.Resource, str
 	encoded, _ := json.Marshal(resources)
 	digest := sha256.Sum256(encoded)
 	return resources, hex.EncodeToString(digest[:]), nil
+}
+
+func portableRelativeResourcePath(value string) bool {
+	if value == "" || path.IsAbs(value) || strings.ContainsRune(value, '\x00') {
+		return false
+	}
+	for _, segment := range strings.Split(value, "/") {
+		// Empty and dot segments are rejected before path.Clean so traversal or
+		// aliasing can never be hidden by normalization. Colons make the path a
+		// drive/volume or alternate-data-stream form on Windows and are excluded
+		// from the portable resource contract on every host OS.
+		if segment == "" || segment == "." || segment == ".." || strings.ContainsRune(segment, ':') {
+			return false
+		}
+	}
+	return true
 }
 
 func verifyContent(resource capability.Resource, content []byte) error {
