@@ -600,12 +600,13 @@ func validRefinementBlockingScope(scope RefinementBlockingScope) bool {
 	}
 }
 
-// normalizeGeneratedRefinementProvenance accepts the unambiguous shorthand
-// forms "prompt" and ["prompt", "catalog"] at the one schema location where
-// each value maps losslessly to a provenance object with no reference or
-// evidence. Providers frequently collapse arrays of single-field objects even
-// after schema repair. Unknown strings and object shapes remain untouched so
-// the strict decoder and refinement validator continue to fail closed.
+// normalizeGeneratedRefinementProvenance accepts unambiguous provider aliases
+// only at the refinement provenance boundary. The shorthand forms "prompt"
+// and ["prompt", "catalog"] map to objects without reference or evidence. An
+// object may use "type" instead of canonical "kind" only when it contains no
+// other fields beyond reference and evidence and names a known provenance
+// kind. Unknown or ambiguous shapes remain untouched so strict decoding and
+// refinement validation continue to fail closed.
 func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
@@ -632,11 +633,24 @@ func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 			continue
 		}
 		normalized, ok := normalizedRefinementProvenanceShorthand(question["provenance"])
+		if ok {
+			question["provenance"] = normalized
+			changed = true
+			continue
+		}
+		provenance, ok := question["provenance"].([]interface{})
 		if !ok {
 			continue
 		}
-		question["provenance"] = normalized
-		changed = true
+		for _, rawEntry := range provenance {
+			entry, ok := rawEntry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if normalizeRefinementProvenanceSourceAlias(entry) || normalizeRefinementProvenanceTypeAlias(entry) {
+				changed = true
+			}
+		}
 	}
 	if !changed {
 		return payload
@@ -646,6 +660,63 @@ func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 		return payload
 	}
 	return normalized
+}
+
+// normalizeRefinementProvenanceSourceAlias handles the exact live provider
+// shape {"source":"prompt"}. Unlike the older type alias, source is accepted
+// only as a single-field object: reference/evidence or any other sibling would
+// make the provider's intended semantics ambiguous and must remain a strict
+// unknown-field failure.
+func normalizeRefinementProvenanceSourceAlias(entry map[string]interface{}) bool {
+	if len(entry) != 1 {
+		return false
+	}
+	if _, hasKind := entry["kind"]; hasKind {
+		return false
+	}
+	rawSource, hasSource := entry["source"]
+	if !hasSource {
+		return false
+	}
+	source, ok := rawSource.(string)
+	if !ok || source != strings.TrimSpace(source) {
+		return false
+	}
+	kind := RefinementProvenanceKind(source)
+	if !validRefinementProvenanceKind(kind) {
+		return false
+	}
+	delete(entry, "source")
+	entry["kind"] = string(kind)
+	return true
+}
+
+func normalizeRefinementProvenanceTypeAlias(entry map[string]interface{}) bool {
+	if _, hasKind := entry["kind"]; hasKind {
+		return false
+	}
+	rawType, hasType := entry["type"]
+	if !hasType || len(entry) > 3 {
+		return false
+	}
+	for key := range entry {
+		switch key {
+		case "type", "reference", "evidence":
+		default:
+			return false
+		}
+	}
+	typeName, ok := rawType.(string)
+	if !ok || typeName != strings.TrimSpace(typeName) {
+		return false
+	}
+	kind := RefinementProvenanceKind(typeName)
+	if !validRefinementProvenanceKind(kind) {
+		return false
+	}
+	delete(entry, "type")
+	entry["kind"] = string(kind)
+	return true
 }
 
 func normalizedRefinementProvenanceShorthand(raw interface{}) ([]interface{}, bool) {
