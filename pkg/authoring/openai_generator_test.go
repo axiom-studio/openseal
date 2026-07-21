@@ -49,6 +49,56 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 	}
 }
 
+func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testing.T) {
+	var modelRequest GenerateRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body struct {
+			Messages []map[string]string `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Messages) != 2 || json.Unmarshal([]byte(body.Messages[1]["content"]), &modelRequest) != nil {
+			t.Fatalf("messages = %#v", body.Messages)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"candidate\":{\"agents\":[]},\"commitments\":{}}"}}]}`))
+	}))
+	defer server.Close()
+	catalog := CapabilityCatalog{
+		Skills: map[string]SkillCapability{"source": {
+			ID: "source", Version: "1.2.3", SourceIdentity: "registry::publisher/source", Actions: []string{"read"},
+			Readiness: SkillReadinessNeedsBinding, CredentialKinds: []string{"oauth"},
+			Compatibility: []SkillCompatibility{
+				{Requirement: "action:read", Compatible: true, Evidence: "verified declaration", Reference: "receipt"},
+				{Requirement: "credential:oauth", Compatible: false, Evidence: "binding required"},
+			},
+		}},
+		CapabilityNeeds: []CapabilityNeed{{ID: "source-choice", Prompt: "Choose a source", WhyNeeded: "Source is required", SkillIDs: []string{"source"}, Priority: 1}},
+	}
+	generator, _ := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if _, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a source Agent", Catalog: catalog}); err != nil {
+		t.Fatal(err)
+	}
+	projected := modelRequest.Catalog.Skills["source"]
+	if projected.ID != "source" || projected.Version != "1.2.3" || projected.SourceIdentity != "registry::publisher/source" ||
+		len(projected.Actions) != 1 || projected.Actions[0] != "read" || projected.Readiness != SkillReadinessNeedsBinding ||
+		len(projected.CredentialKinds) != 1 || len(projected.Compatibility) != 1 || projected.Compatibility[0].Requirement != "credential:oauth" {
+		t.Fatalf("projected Skill = %#v", projected)
+	}
+	if len(modelRequest.Catalog.CapabilityNeeds) != 0 {
+		t.Fatalf("model-visible capability needs = %#v", modelRequest.Catalog.CapabilityNeeds)
+	}
+	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.CapabilityNeeds) != 1 {
+		t.Fatalf("canonical catalog was mutated = %#v", catalog)
+	}
+	canonicalBytes, _ := json.Marshal(catalog)
+	projectedBytes, _ := json.Marshal(modelRequest.Catalog)
+	if len(projectedBytes) >= len(canonicalBytes) {
+		t.Fatalf("model catalog was not compacted: canonical=%d projected=%d", len(canonicalBytes), len(projectedBytes))
+	}
+}
+
 func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 	for _, expected := range []string{
 		"domainContext is a JSON object, never a string or array",
@@ -77,7 +127,8 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"Skill readiness is ready, needs_binding, needs_installation, or unavailable",
 		"catalog.diagnostics are bounded host facts",
 		"never infer a candidate from them",
-		"Rank only catalog Skills whose compatibility evidence supports the required actions",
+		"Catalog actions are exact verified host facts",
+		"compatibility entries report additional incompatibilities or readiness constraints",
 		"Put non-blocking choices and safe defaults in assumptions, never questions",
 		"An executable cadence is exactly one of",
 		"runBudget is an object with non-negative",
