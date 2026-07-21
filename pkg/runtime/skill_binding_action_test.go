@@ -281,6 +281,26 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	}
 }
 
+func TestSkillManagementSkillMakesPromptOnlyAuthorityExplicit(t *testing.T) {
+	action := SkillManagementSkill().Actions[SkillActionUpsertBinding]
+	properties, ok := action.InputSchema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("upsert properties = %#v", action.InputSchema["properties"])
+	}
+	allowed, ok := properties["allowedActions"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("allowedActions schema = %#v", properties["allowedActions"])
+	}
+	description, _ := allowed["description"].(string)
+	if !strings.Contains(description, "empty array for prompt-only access") || !strings.Contains(description, "Wildcards") {
+		t.Fatalf("allowedActions description does not explain prompt-only authority: %q", description)
+	}
+	items, ok := allowed["items"].(map[string]interface{})
+	if !ok || items["pattern"] != `^[^*]+$` {
+		t.Fatalf("allowedActions item schema permits wildcard authority: %#v", allowed["items"])
+	}
+}
+
 func skillActionCatalog(t *testing.T, ctx context.Context, scope Scope, deploymentID string) *skill.Catalog {
 	t.Helper()
 	catalog := skill.NewCatalog()
