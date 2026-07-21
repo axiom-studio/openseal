@@ -213,6 +213,35 @@ func TestRefinementSkillOptionsMustBeTruthfulAuthorizedCatalogEntries(t *testing
 	}
 }
 
+func TestBindingConfigurationIsAnExplicitSkillLifecycleGap(t *testing.T) {
+	skill := SkillCapability{
+		ID: "openseal.kubernetes", Version: "1.1.0", Readiness: SkillReadinessNeedsBinding,
+		Compatibility: []SkillCompatibility{
+			{Requirement: "action:list_events", Compatible: true, Evidence: "declared by the canonical Skill"},
+			{Requirement: "binding_configuration", Compatible: false, Evidence: "reviewed cluster selection is required"},
+		},
+	}
+	catalog := CapabilityCatalog{
+		Skills: map[string]SkillCapability{skill.ID: skill},
+		CapabilityNeeds: []CapabilityNeed{{
+			ID: "kubernetes-operations", Prompt: "Which Kubernetes Skill should be used?", WhyNeeded: "Cluster work requires an authorized capability.",
+			SkillIDs: []string{skill.ID}, Priority: 50,
+		}},
+	}
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		t.Fatalf("typed binding configuration was treated as semantic incompatibility: %v", err)
+	}
+	question := RefinementQuestion{
+		ID: "skill", Category: RefinementCategorySkill, Prompt: "Choose Skill", WhyNeeded: "Capability required",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Options: []RefinementQuestionOption{{ID: skill.ID, Label: "Kubernetes operations"}}},
+		Priority: 1, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	if err := validateRefinementCatalog([]RefinementQuestion{question}, catalog); err != nil {
+		t.Fatalf("typed binding configuration option was rejected: %v", err)
+	}
+}
+
 func TestInstallableSkillOptionsRequireExactReceiptBackedEvidence(t *testing.T) {
 	question := RefinementQuestion{
 		ID: "skill", Category: RefinementCategorySkill, Prompt: "Choose Skill", WhyNeeded: "Capability required",
