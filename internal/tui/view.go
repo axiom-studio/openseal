@@ -175,6 +175,10 @@ func (m *Model) renderComposer(width int) string {
 		title = "Create reviewed workforce"
 		description = "Record why this exact candidate should now create its Agents, Team, and objectives atomically."
 		owner = "Atomic Apply · permanent audit receipt"
+		if m.authoringResult != nil && m.authoringResult.Candidate.Activation == authoring.WorkforceActivationInactive {
+			description = "Create this exact candidate atomically in a non-executing state. Activate each reviewed resource later through governed commands."
+			owner = "Inactive Apply · permanent audit receipt"
+		}
 	case modeWorkforceRetry:
 		title = "Retry proposal generation"
 		description = "Record why the failed generation should be resumed as a new durable attempt."
@@ -670,6 +674,8 @@ func (m *Model) renderAuthoringContent(width int) string {
 		roles, objectives = len(result.Candidate.Team.Roles), len(result.Candidate.Team.ObjectiveTemplates)
 	}
 	lines := []string{title, state, "", headerStyle.Render(compact(teamName, max(width-8, 24)))}
+	activation, _ := authoring.EffectiveWorkforceActivationIntent(result.Candidate.Activation)
+	lines = append(lines, mutedStyle.Render("Activation intent · "+string(activation)))
 	if m.authoringChangeSet != nil {
 		changeSet := m.authoringChangeSet
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision)))
@@ -702,7 +708,11 @@ func (m *Model) renderAuthoringContent(width int) string {
 		}
 		if changeSet.ApplyReceipt != nil {
 			receipt := changeSet.ApplyReceipt
-			lines = append(lines, lipgloss.NewStyle().Foreground(success).Render(fmt.Sprintf("Created atomically · %d resources · receipt %s", len(receipt.Resources), compact(receipt.ID, 12))))
+			appliedState := "active"
+			if receipt.Activation == authoring.WorkforceActivationInactive {
+				appliedState = "inactive"
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(success).Render(fmt.Sprintf("Created atomically · %s · %d resources · receipt %s", appliedState, len(receipt.Resources), compact(receipt.ID, 12))))
 			lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s · %s:%s · %s", compact(receipt.Reason, max(width-24, 24)), receipt.Actor.Type, receipt.Actor.ID, receipt.AppliedAt.Format(time.RFC3339))))
 			for _, resource := range receipt.Resources {
 				detail := resource.Version
@@ -780,7 +790,9 @@ func (m *Model) renderAuthoringContent(width int) string {
 	for _, issue := range result.Validation {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
 	}
-	if m.authoringChangeSet == nil || m.authoringChangeSet.Status != authoring.ChangeSetApplied {
+	if m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetApplied && m.authoringChangeSet.ApplyReceipt != nil && m.authoringChangeSet.ApplyReceipt.Activation == authoring.WorkforceActivationInactive {
+		lines = append(lines, "", mutedStyle.Render("Resources are created but remain inactive until separate governed activation commands succeed."))
+	} else if m.authoringChangeSet == nil || m.authoringChangeSet.Status != authoring.ChangeSetApplied {
 		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	}
 	return strings.Join(lines, "\n")
