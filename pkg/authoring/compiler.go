@@ -116,6 +116,10 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	}
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 	synthesizeCapabilityNeedRefinements(&generated, request)
+	scheduleIntentIssues := enforceScheduleIntentAuthority(&generated, request)
+	if hasScheduleIntentQuestion(generated.UnresolvedQuestions) {
+		materializationIssues = deferScheduleBlockedMaterializationIssues(materializationIssues)
+	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
 		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
@@ -124,8 +128,9 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		applyActivationCommitment(&generated.Candidate, commitments)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
 		validation = append(validation, materializationIssues...)
+		validation = append(validation, scheduleIntentIssues...)
 		validation = append(validation, validateAnsweredCapabilityNeeds(&generated.Candidate, request)...)
-		if len(materializationIssues) == 0 {
+		if len(materializationIssues) == 0 && !hasScheduleIntentQuestion(generated.UnresolvedQuestions) {
 			validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
 		}
 		validation = append(validation, validateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
@@ -165,6 +170,10 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 			generated = candidate
 			materializationIssues = materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 			synthesizeCapabilityNeedRefinements(&generated, request)
+			scheduleIntentIssues = enforceScheduleIntentAuthority(&generated, request)
+			if hasScheduleIntentQuestion(generated.UnresolvedQuestions) {
+				materializationIssues = deferScheduleBlockedMaterializationIssues(materializationIssues)
+			}
 			commitments, validation, missing = validateGenerated()
 			repairReason = deterministicContractError(validation, missing)
 		}
@@ -179,8 +188,9 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
 	result.Validation = append(result.Validation, materializationIssues...)
+	result.Validation = append(result.Validation, scheduleIntentIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, request)...)
-	if len(materializationIssues) == 0 {
+	if len(materializationIssues) == 0 && !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
 	}
 	result.Validation = append(result.Validation, validateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
