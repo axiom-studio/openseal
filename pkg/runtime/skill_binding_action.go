@@ -14,7 +14,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.1.1"
+	SkillManagementSkillVersion = "1.2.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -115,9 +115,10 @@ func skillDiscoveryAction() skill.Action {
 			"sourceIdentity": map[string]interface{}{"type": "string"}, "name": map[string]interface{}{"type": "string"},
 			"description": map[string]interface{}{"type": "string"}, "actions": map[string]interface{}{"type": "array", "items": actionSchema},
 			"credentials": map[string]interface{}{"type": "array", "items": credentialSchema}, "promptAvailable": map[string]interface{}{"type": "boolean"},
-			"maximumRisk":   map[string]interface{}{"type": "string", "enum": riskValues},
-			"readiness":     map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.DiscoveryReadinessBindable), string(skill.DiscoveryReadinessNeedsInstallation), string(skill.DiscoveryReadinessUnavailable)}},
-			"compatibility": map[string]interface{}{"type": "array", "items": compatibilitySchema},
+			"bindingConfigSchema": map[string]interface{}{"type": "object"},
+			"maximumRisk":         map[string]interface{}{"type": "string", "enum": riskValues},
+			"readiness":           map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.DiscoveryReadinessBindable), string(skill.DiscoveryReadinessNeedsInstallation), string(skill.DiscoveryReadinessUnavailable)}},
+			"compatibility":       map[string]interface{}{"type": "array", "items": compatibilitySchema},
 		},
 		"required": []interface{}{"id", "version", "name", "readiness"},
 	}

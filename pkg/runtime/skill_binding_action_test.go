@@ -137,9 +137,10 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 		return &skill.DiscoveryPage{
 			Items: []skill.DiscoveryCandidate{{
 				ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader", Description: "Read configured communities.",
-				Actions:     []skill.DiscoveryAction{{Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead}},
-				Credentials: []skill.DiscoveryCredential{{Name: "reddit", Kind: "reddit-oauth", Configured: true}},
-				MaximumRisk: skill.RiskLevelRead, Readiness: skill.DiscoveryReadinessBindable,
+				Actions:             []skill.DiscoveryAction{{Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead}},
+				Credentials:         []skill.DiscoveryCredential{{Name: "reddit", Kind: "reddit-oauth", Configured: true}},
+				BindingConfigSchema: map[string]interface{}{"type": "object", "required": []interface{}{"community"}, "properties": map[string]interface{}{"community": map[string]interface{}{"type": "string"}}},
+				MaximumRisk:         skill.RiskLevelRead, Readiness: skill.DiscoveryReadinessBindable,
 				Compatibility: []skill.DiscoveryCompatibility{{Requirement: "reddit research", Compatible: true, Evidence: "native read action"}},
 			}},
 			NextCursor: "page-2",
@@ -183,6 +184,9 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	if strings.Contains(string(encoded), "vault://") || strings.Contains(string(encoded), "credentialId") || strings.Contains(string(encoded), "secret") {
 		t.Fatalf("discovery exposed credential identity or material: %s", encoded)
 	}
+	if !strings.Contains(string(encoded), `"bindingConfigSchema":{"properties":{"community"`) {
+		t.Fatalf("discovery omitted reviewed binding configuration constraints: %s", encoded)
+	}
 }
 
 func TestSkillDiscoveryRejectsInvalidProviderPages(t *testing.T) {
@@ -200,6 +204,12 @@ func TestSkillDiscoveryRejectsInvalidProviderPages(t *testing.T) {
 		{ID: "reader", Version: "1", Name: "Reader", Readiness: "invented"},
 	}}); err == nil {
 		t.Fatal("invented readiness was accepted")
+	}
+	if _, err := skill.NormalizeDiscoveryPage(request, &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{
+		ID: "reader", Version: "1", Name: "Reader", Readiness: skill.DiscoveryReadinessBindable,
+		BindingConfigSchema: map[string]interface{}{"$ref": "https://attacker.invalid/schema.json"},
+	}}}); err == nil {
+		t.Fatal("external binding configuration schema was accepted")
 	}
 }
 
@@ -324,6 +334,10 @@ func redditSkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader", Description: "Read configured communities.",
 		Transport: skill.TransportReference{Kind: "http", Endpoint: "https://reddit.example"},
+		BindingConfigSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{"subreddits": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}},
+		},
 		Prompt: &capability.PromptModule{
 			Instructions: "Use Reddit evidence.", UserInvocable: true,
 			Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}},

@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -68,17 +69,21 @@ type DiscoveryCompatibility struct {
 // SourceIdentity is mandatory for sourced variants so a later binding cannot
 // silently select a different publisher with the same declared ID/version.
 type DiscoveryCandidate struct {
-	ID              string                   `json:"id"`
-	Version         string                   `json:"version"`
-	SourceIdentity  string                   `json:"sourceIdentity,omitempty"`
-	Name            string                   `json:"name"`
-	Description     string                   `json:"description,omitempty"`
-	Actions         []DiscoveryAction        `json:"actions,omitempty"`
-	Credentials     []DiscoveryCredential    `json:"credentials,omitempty"`
-	PromptAvailable bool                     `json:"promptAvailable,omitempty"`
-	MaximumRisk     RiskLevel                `json:"maximumRisk,omitempty"`
-	Readiness       DiscoveryReadiness       `json:"readiness"`
-	Compatibility   []DiscoveryCompatibility `json:"compatibility,omitempty"`
+	ID             string                `json:"id"`
+	Version        string                `json:"version"`
+	SourceIdentity string                `json:"sourceIdentity,omitempty"`
+	Name           string                `json:"name"`
+	Description    string                `json:"description,omitempty"`
+	Actions        []DiscoveryAction     `json:"actions,omitempty"`
+	Credentials    []DiscoveryCredential `json:"credentials,omitempty"`
+	// BindingConfigSchema contains non-secret constraints for host-owned
+	// configuration that must be reviewed before binding. It never contains
+	// configured values.
+	BindingConfigSchema map[string]interface{}   `json:"bindingConfigSchema,omitempty"`
+	PromptAvailable     bool                     `json:"promptAvailable,omitempty"`
+	MaximumRisk         RiskLevel                `json:"maximumRisk,omitempty"`
+	Readiness           DiscoveryReadiness       `json:"readiness"`
+	Compatibility       []DiscoveryCompatibility `json:"compatibility,omitempty"`
 }
 
 type DiscoveryPage struct {
@@ -190,6 +195,16 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 			credentialNames[credential.Name] = struct{}{}
 		}
 		sort.Slice(value.Credentials, func(i, j int) bool { return value.Credentials[i].Name < value.Credentials[j].Name })
+		if value.BindingConfigSchema != nil {
+			encoded, err := json.Marshal(value.BindingConfigSchema)
+			if err != nil || len(encoded) > 64<<10 {
+				return nil, fmt.Errorf("discovery candidate %d binding config schema is invalid", index)
+			}
+			if _, err := compileSchema(value.ID+"-"+value.Version+"-discovery-binding-config.json", value.BindingConfigSchema); err != nil {
+				return nil, fmt.Errorf("discovery candidate %d binding config schema is invalid: %w", index, err)
+			}
+			value.BindingConfigSchema = cloneMap(value.BindingConfigSchema)
+		}
 		for compatibilityIndex := range value.Compatibility {
 			compatibility := &value.Compatibility[compatibilityIndex]
 			compatibility.Requirement = strings.TrimSpace(compatibility.Requirement)
