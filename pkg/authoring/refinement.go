@@ -434,7 +434,7 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 				return fmt.Errorf("refinement question %s presents unavailable Skill %s", question.ID, option.ID)
 			}
 			for _, evidence := range skill.Compatibility {
-				if !evidence.Compatible {
+				if !evidence.Compatible && !refinementLifecycleGap(skill.Readiness, evidence.Requirement) {
 					return fmt.Errorf("refinement question %s presents incompatibility-proven Skill %s (%s)", question.ID, option.ID, evidence.Requirement)
 				}
 			}
@@ -456,6 +456,20 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 		}
 	}
 	return nil
+}
+
+// Lifecycle gaps are not compatibility failures: they are the explicit work a
+// refinement is proposing. Keep this allowlist narrow so action, platform,
+// source, compilation, and other semantic incompatibilities still fail closed.
+func refinementLifecycleGap(readiness SkillReadiness, requirement string) bool {
+	requirement = strings.TrimSpace(requirement)
+	if requirement == "installation" {
+		return readiness == SkillReadinessNeedsInstallation
+	}
+	if strings.HasPrefix(requirement, "credential:") {
+		return readiness == SkillReadinessNeedsBinding || readiness == SkillReadinessNeedsInstallation
+	}
+	return false
 }
 
 func refinementCatalogOptionError(questionID, optionID string, skills map[string]SkillCapability) error {
