@@ -1,0 +1,153 @@
+# Getting started
+
+This guide starts one standalone OpenSeal daemon with durable local storage and
+connects the terminal workspace to it.
+
+## Requirements
+
+- Go 1.26
+- Git
+- A C compiler and SQLite development toolchain (`gcc` or `clang`)
+- A terminal with color and keyboard input for the TUI
+
+Docker is optional.
+
+## Build and verify
+
+```bash
+git clone https://github.com/axiom-studio/openseal.git
+cd openseal
+go version
+make build
+./openseal version
+```
+
+`make build` produces `./openseal`. Run the deterministic test and static
+analysis gates when developing:
+
+```bash
+make test
+make vet
+```
+
+## Start the daemon
+
+Pass a path that does not yet exist to create a default local configuration:
+
+```bash
+./openseal daemon --config ./local.yaml
+```
+
+The generated file listens on `:8080`, loads workflows from `workflows`, stores
+kernel state in `data/openseal.db`, and stores artifact bytes in
+`data/artifacts`. Relative paths are resolved from the configuration file's
+directory.
+
+Check the process from another terminal:
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/v1/health
+curl -fsS http://127.0.0.1:8080/api/v1/capabilities
+```
+
+The first response is `{"status":"ok"}`. The second response is authoritative:
+it lists the capability versions and operations available in this particular
+daemon. An operation omitted from that document is not available.
+
+> The repository's checked-in `daemon.yaml` uses port `18080`. Either use the
+> generated `local.yaml` above or pass `--endpoint http://127.0.0.1:18080` to
+> clients when using the checked-in file.
+
+## Open the terminal workspace
+
+```bash
+./openseal
+```
+
+No subcommand is equivalent to `./openseal tui`. Explicit configuration looks
+like this:
+
+```bash
+./openseal tui \
+  --endpoint http://127.0.0.1:8080 \
+  --scope local:research \
+  --owner team:research \
+  --download-dir ./downloads
+```
+
+The workspace reads and mutates server state; it does not run a second kernel.
+Exiting the TUI leaves the daemon and its durable work running. See the
+[TUI guide](tui.md) for all sections and keys.
+
+## Enable prompt-first workforce authoring
+
+The standalone daemon enables its workforce authoring compiler only when all
+three model settings are present:
+
+```bash
+export OPENSEAL_LLM_BASE_URL=https://provider.example/v1/chat/completions
+export OPENAI_API_KEY='replace-with-a-real-secret'
+export OPENSEAL_LLM_MODEL='provider-model-name'
+# Set api.listenAddr to 127.0.0.1:8080 in local.yaml first.
+./openseal daemon --config ./local.yaml --standalone-operator
+```
+
+`OPENSEAL_LLM_BASE_URL` must be an absolute HTTP or HTTPS endpoint accepted by
+the OpenAI-compatible generator. Never place the API key in a prompt, a daemon
+configuration file, a Skill definition, or a Git commit.
+
+`--standalone-operator` enables local refinement answers and generation retry
+only when the API listen address is explicitly loopback, such as
+`127.0.0.1:8080`. The default `:8080` wildcard is intentionally rejected. This
+mode also enables trusted local ClawHub mutations; it is not an authentication
+system. Evaluation, approval, credential placement, and Apply still require an
+embedding host with explicit lifecycle authority. Networked and multi-user
+deployments must supply identity and authorization adapters through that
+boundary.
+
+Authoring is a review process:
+
+```mermaid
+sequenceDiagram
+    participant U as Operator
+    participant C as TUI or API client
+    participant K as OpenSeal kernel
+    participant W as Durable authoring worker
+
+    U->>C: Describe an outcome
+    C->>K: Create ChangeSet
+    K-->>C: Persisted proposal Run
+    W->>K: Claim and compile
+    K-->>C: Candidate or next refinement
+    U->>C: Answer / place credentials / review
+    C->>K: Evaluate and decide requirements
+    U->>C: Apply reviewed digest (authorized host)
+    C->>K: Atomic apply
+    K-->>C: Receipt with created resources
+```
+
+The model produces a candidate. OpenSeal validates it, records missing
+requirements, and applies it only after required refinements, placement,
+evaluation, and approvals resolve. The expected revision, candidate digest,
+actor, reason, and idempotency key protect each governed transition.
+
+## Use Docker Compose
+
+```bash
+make docker-up
+curl -fsS http://127.0.0.1:8080/api/v1/health
+make docker-logs
+make docker-down
+```
+
+Compose mounts `docker/daemon.yaml`, the `workflows` directory, and a named
+volume for `/app/data`. `make docker-down` uses `docker compose down -v` and
+therefore removes the named data volume.
+
+## Next steps
+
+- Learn the resource model in [Core concepts](concepts.md).
+- Use every command from the [CLI reference](cli.md).
+- Integrate through the [REST API](api.md).
+- Configure durable deployments using [Operations](operations.md).
+- Import third-party Skills using [OpenClaw compatibility](skills/openclaw-compatibility.md).

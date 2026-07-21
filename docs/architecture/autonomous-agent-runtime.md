@@ -1,491 +1,233 @@
-# OpenSeal Autonomous Agent Runtime Architecture
+# Autonomous agent runtime architecture
 
-**Status:** Accepted target architecture
+This document describes the OpenSeal architecture implemented in this
+repository. It separates portable kernel guarantees from optional standalone
+and embedding adapters.
 
-**Date:** 2026-07-10
+## Runtime layers
 
-## Decision
+```mermaid
+flowchart TB
+    subgraph Interfaces
+        TUI[Prompt-first TUI]
+        HTTP[Versioned HTTP API]
+        Go[Public Go facade]
+        Trigger[Cron / webhook / event adapters]
+    end
 
-OpenSeal agents are prompt-first, durable autonomous workers that may own and pursue
-multiple objectives concurrently. Skills are typed, governed capabilities. A
-workflow node is an optional adapter for composing or visualizing a skill; it is
-not the canonical capability model.
+    subgraph Kernel
+        Authoring[Workforce ChangeSets]
+        Registry[Agent / Team registries]
+        Portfolio[Objectives / Initiatives]
+        Runs[Runs / turns / dependencies]
+        Collaboration[Requests / channels / activity]
+        Governance[Skills / actions / approvals]
+        Evidence[Artifacts / observations / outreach]
+        Runbooks[Deterministic runbooks]
+    end
 
-OpenSeal is the agent kernel and canonical implementation of portable execution
-semantics. It exposes the runtime as a stable Go library and as a standalone
-daemon over the same `Engine`. Embedding applications can register persistence,
-policy, identity, secret, event, model, artifact, and capability extensions
-without forking or bypassing the kernel.
+    subgraph Adapters
+        Store[(Memory / SQLite / PostgreSQL)]
+        Model[Model provider]
+        Secrets[Credential resolver]
+        Transport[Skill transport / sandbox]
+        Content[Artifact content store]
+        Policy[Identity / policy / authorization]
+    end
 
-All work enters one execution model:
-
-```text
-AgentDefinition + AgentDeployment
-                 |
-                 v
-        Objective portfolio
-                 |
-     event / chat / schedule / API / handoff
-                 |
-                 v
-              Run DAG
-                 |
-        leased durable worker
-                 |
-    plan -> decide -> skill -> checkpoint
-                 |
-     wait / delegate / approve / continue
-                 |
-                 v
-        outcome + artifacts + evaluation
+    TUI --> HTTP
+    HTTP --> Kernel
+    Go --> Kernel
+    Trigger --> Kernel
+    Kernel --> Store
+    Kernel --> Model
+    Kernel --> Secrets
+    Kernel --> Transport
+    Kernel --> Content
+    Kernel --> Policy
 ```
 
-Agent chat and team chat are command and observation surfaces over this model.
-They do not own separate execution engines, task types, or audit histories.
+`github.com/axiom-studio/openseal/pkg/openseal` is the supported embedding
+facade. The standalone daemon constructs the same `Engine`, adds SQLite and
+local artifact storage, registers its optional adapters, and exposes it through
+`/api/v1`. Downstream programs should not import OpenSeal `internal` packages.
 
-## Packaging and extension boundaries
+## Canonical resource graph
 
-```text
-OpenSeal
-  Portable models and contracts
-  Engine, scheduler, workers, checkpoints, local stores
-  Agent brain, skills, workflows, triggers, collaboration
-  Standalone daemon, API, CLI, and prompt-first TUI
-       |
-       +-- embedded through github.com/axiom-studio/openseal/pkg/openseal
-       +-- extended through public kernel interfaces and capability contracts
+```mermaid
+erDiagram
+    AGENT_DEFINITION ||--o{ AGENT_DEPLOYMENT : activates
+    TEAM_DEFINITION ||--o{ TEAM_DEPLOYMENT : activates
+    TEAM_DEPLOYMENT ||--o{ ROSTER_ASSIGNMENT : contains
+    AGENT_DEPLOYMENT ||--o{ ROSTER_ASSIGNMENT : fills
+    AGENT_DEPLOYMENT ||--o{ OBJECTIVE : owns
+    TEAM_DEPLOYMENT ||--o{ OBJECTIVE : owns
+    OBJECTIVE ||--o{ RUN : advances
+    RUN ||--o{ TURN : checkpoints
+    RUN ||--o{ ACTION_CALL : proposes
+    ACTION_CALL ||--o| APPROVAL_CHECKPOINT : may_require
+    SKILL_DEFINITION ||--o{ SKILL_BINDING : narrows
+    AGENT_DEPLOYMENT ||--o{ SKILL_BINDING : owns
+    TEAM_DEPLOYMENT ||--o{ SKILL_BINDING : owns
+    RUN ||--o{ ACTIVITY_EVENT : emits
+    RUN ||--o{ ARTIFACT : produces
 ```
 
-The public facade must cover runtime construction, definitions, objectives,
-runs, skill contracts, activity subscriptions, and extension registration. A
-downstream consumer must not need to import OpenSeal `internal` packages or copy
-OpenSeal implementation packages into its own repository.
+References are validated inside an explicit scope. Definitions are immutable
+and versioned. Deployments are mutable activations with optimistic revisions.
+Agents and Teams are peer owners of objectives, Runs, Skills, activity, and
+artifacts; Teams additionally add roster and collaboration policy.
 
-Extensions fall into two categories:
+## Prompt-first authoring
 
-- **Adapters** implement OpenSeal interfaces for persistence, scope/identity,
-  authorization and policy, secrets, artifacts, event publication, models, and
-  skill transport.
-- **Capabilities** register additional skills and event sources without changing
-  kernel execution semantics.
+Natural-language authoring compiles to a durable **Workforce ChangeSet**, not a
+direct registry mutation. The ChangeSet stores the original request,
+generation Run, candidate, typed refinements, exact Skill placement,
+validation diagnostics, policy findings, approval requirements, decisions,
+revision, digest, and apply receipt.
 
-Clients obtain the active capability catalog and schemas from the engine. They
-must not assume every OpenSeal deployment has an identical capability set. The
-same API envelope and activity projection render built-in and extended
-capabilities.
+Generation is claimed by a leased worker and can recover after process failure.
+The candidate may contain one Agent, several Agents, a Team, objective
+templates, Skill requirements, and an Initiative blueprint. The compiler never
+invents a credential value, source allowlist, or approval authority.
 
-## Product principles
+Application is atomic in persistent stores: reviewed Agent/Team definitions,
+deployments, objective instances, Skill bindings, Initiative records, and the
+receipt commit together. Expected revision, candidate digest, and idempotency
+key prevent stale or duplicate application.
 
-1. **Prompts describe intent; contracts govern execution.** Users should be able
-   to create and change agents using natural language. The compiler produces
-   versioned definitions, typed skill bindings, policies, objectives, and event
-   subscriptions that can be validated before activation.
-2. **Long-running work is durable.** Work that matters never depends on an HTTP
-   request, process-local map, goroutine, pod, or LLM response remaining alive.
-3. **Agents own portfolios, not one task.** An agent can pursue many independent
-   objectives and several runs at once, subject to priority, budget, policy, and
-   concurrency limits.
-4. **Everything important is observable.** Plans, decisions, skill calls,
-   approvals, handoffs, artifacts, failures, retries, and outcomes share one
-   ordered activity model that can be projected anywhere.
-5. **Authority is explicit and least-privileged.** Skills execute with the
-   receiving agent's tenant-scoped bindings. Agents request outcomes from one
-   another; they do not exchange raw credentials.
-6. **Collaboration is composition.** A team adds roster, delegation, review,
-   memory, and escalation policy over the same objectives and runs used by an
-   individual agent.
-7. **Behavior changes are versioned.** An agent may learn and propose changes to
-   its instructions, skills, heuristics, and objectives. Activation follows the
-   definition's amendment policy and remains auditable and reversible.
-8. **The visual UI is optional for authoring.** The primary interactive surface
-   is a prompt-first TUI backed by the same API used by graphical clients.
+## Durable execution
 
-## Canonical entities
+OpenSeal models continuous autonomy as a sequence of bounded durable Runs and
+turns, not one immortal model request.
 
-Every persisted entity below belongs to an explicit scope. Cross-entity
-references must be validated in that scope by repositories and services, not
-only handlers.
+1. A prompt, objective cadence, event, conversation command, request, or API
+   call creates or wakes a Run.
+2. The scheduler selects an eligible Run subject to status, dependencies,
+   wake conditions, priority, budget, and concurrency.
+3. A worker claims it with a bounded lease.
+4. The worker loads the exact Agent/Team definition versions, checkpoint,
+   objective, policy, and active Skill surface.
+5. One turn records a bounded result: continue, wait, request, propose an
+   action, complete, or fail.
+6. State and activity commit before the next claim.
+7. Waiting work holds no worker. Lease expiry makes interrupted work
+   reclaimable from its last checkpoint.
 
-### AgentDefinition
+Independent Runs and child Runs provide concurrency. One claimed Run remains
+single-writer. Budget reservations and idempotent action records prevent
+duplicate spend and duplicate side effects across retries.
 
-An immutable, versioned description of what an agent is and how it should
-behave. It contains:
+## Multi-objective scheduling and events
 
-- identity, purpose, personality, and system instructions;
-- operating principles and domain context;
-- declared skill requirements;
-- default authority, risk, budget, memory, and escalation policies;
-- objective templates and evaluation criteria;
-- allowed self-amendments and the approval policy for activating them.
+Each Agent or Team can own a portfolio of objectives. Objective cadence
+reconciliation uses a persisted schedule cursor and deterministic occurrence
+keys. A due cadence creates the configured bounded Run template. Normalized
+event routing matches active objective subscriptions and applies persisted
+deduplication keys before creating or waking Runs.
 
-The definition must not contain live credentials, environment placement, or
-mutable execution state.
+Source monitors use the same model: a long-lived monitor definition and
+checkpoint produce bounded observations and Runs. Kubernetes informers, message
+streams, or other external listeners are host adapters that submit normalized
+events; they are not alternate execution engines.
 
-### AgentDeployment
+## Skills and action governance
 
-A tenant-local activation of an `AgentDefinition` version. This replaces the
-overloaded runtime meaning of `AgentInstance`. It owns:
+The canonical Skill catalog is source-aware. Two definitions with the same ID
+and version but different source identities remain distinct variants. Bindings
+select the exact source-qualified definition, allowed actions, prompt exposure,
+risk ceiling, configuration, constraints, and opaque credential references.
 
-- environment and runtime placement;
-- enabled skill bindings and credential references;
-- active definition version and rollout state;
-- capacity, concurrency, and operational health;
-- deployment-specific policy restrictions.
+Action execution follows this order:
 
-Deployment policy can only narrow the definition's authority unless an
-explicitly authorized amendment widens it.
+```mermaid
+sequenceDiagram
+    participant Turn as Agent turn
+    participant K as Kernel
+    participant P as Policy
+    participant A as Approval store
+    participant C as Credential boundary
+    participant X as Action dispatcher
 
-### Objective
-
-A persistent desired outcome owned by one agent or team. An agent owns a
-portfolio of objectives. Examples include:
-
-- keep a production service healthy;
-- turn shipped product changes into marketing material;
-- follow up with qualified leads;
-- monitor transactions for anomalous financial behavior.
-
-An objective contains purpose, status, priority, scheduling and event rules,
-success measures, budgets, constraints, review cadence, dependencies, and its
-current progress summary. Objectives may be long-lived and may generate many
-runs. The term `standing_goal` is a legacy storage/API name and will be migrated
-to `Objective`; `mandate` is accepted product language for an objective with an
-explicit operating charter.
-
-Objective states are `draft`, `active`, `paused`, `satisfied`, `failed`, and
-`retired`. Satisfied objectives can be reactivated when their desired condition
-ceases to hold.
-
-### Run
-
-A durable, bounded workstream created to advance an objective or satisfy a
-one-off request. Runs form a DAG through parent/child and dependency links. A
-run owns:
-
-- goal and source envelope;
-- assignment and lease state;
-- priority and scheduling metadata;
-- plan and durable checkpoint;
-- budget consumption;
-- policy snapshot;
-- activity events, skill calls, decisions, approvals, handoffs, and artifacts;
-- outcome and evaluation.
-
-Run states are `queued`, `planning`, `running`, `sleeping`,
-`waiting_for_dependency`, `waiting_for_agent`, `waiting_for_approval`,
-`waiting_for_event`, `completed`, `failed`, and `canceled`.
-
-A waiting run holds no worker. Its checkpoint and wake condition are persisted.
-
-### AgentTurn
-
-One resumable reasoning step within a run. It records the input context
-references, definition and model configuration used, plan revision, decisions,
-requested actions, compacted output, token usage, and continuation checkpoint.
-Raw provider chain-of-thought is neither required nor exposed. The audit trail
-records concise decision rationale and evidence suitable for operators.
-
-### Skill and SkillBinding
-
-A `Skill` is a versioned capability contract. Each action declares:
-
-- semantic name and description;
-- typed input and output schemas;
-- side-effect and risk classification;
-- required permissions and credential kinds;
-- timeout, retry, idempotency, and concurrency semantics;
-- dry-run and compensation support;
-- emitted artifacts and events;
-- execution endpoint and health metadata.
-
-A `SkillBinding` enables selected actions for an `AgentDeployment`, applies
-field restrictions, and references tenant-owned credentials. The runtime
-provides the model only the allowed action schemas; it resolves secrets at the
-execution boundary and never places secret values in prompts or activity
-events.
-
-### AgentRequest and Handoff
-
-An agent collaborates by sending a typed `AgentRequest` to an agent or team. It
-contains the requested outcome, context references, acceptance criteria,
-priority, deadline, budget offer, and artifact references. The receiver may
-accept, reject, ask for clarification, or negotiate constraints.
-
-Acceptance creates a child run assigned to the receiver. Completion returns a
-typed result and artifacts to the requesting run. The receiver executes using
-its own skill bindings and credentials. Credential references cannot be copied
-between deployments through a request.
-
-A `Handoff` transfers responsibility for an existing workstream. An
-`AgentRequest` asks another agent to perform related work while preserving the
-requester's responsibility. Both use the same lineage and event primitives.
-
-### ApprovalCheckpoint
-
-An approval is a persisted policy checkpoint on a proposed decision or skill
-call. It includes the exact proposed action, diff or dry-run when available,
-risk, evidence, expiration, eligible approvers, and continuation checkpoint.
-
-Approvals can be requested from a person, policy group, or another agent that
-has explicit approval authority. Approval authority is a permission, not an
-incidental team role. Approving never grants access to the approver's
-credentials; the original executor resumes under its existing binding.
-
-### Artifact
-
-Artifacts are durable outputs such as pull requests, patches, reports,
-dashboards, campaign drafts, messages, datasets, or investigation bundles.
-Large content lives in an object or domain store; the run stores a typed,
-tenant-owned reference, content hash, provenance, and retention policy.
-
-### ActivityEvent
-
-Every meaningful state change appends an immutable activity event. The common
-envelope contains:
-
-```text
-id, tenant_id, timestamp, event_type, severity
-agent_deployment_id, objective_id, run_id, turn_id
-parent_run_id, team_id, conversation_refs
-actor_type, actor_id, summary, payload_ref
-visibility, correlation_id, causation_id
+    Turn->>K: Propose typed action
+    K->>K: Resolve exact binding and validate schema
+    K->>P: Evaluate authority, risk, and budget
+    alt approval required
+        K->>A: Persist checkpoint
+        A-->>K: Eligible decision
+    end
+    K->>C: Resolve opaque credential reference
+    C-->>K: Worker-only material or lease
+    K->>X: Dispatch validated action
+    X-->>K: Result / receipt
+    K->>K: Persist result, activity, checkpoint
 ```
 
-Events are append-only and ordered per run. Producers may publish them through
-NATS after the database commit, using an outbox or equivalent delivery
-guarantee. Consumers must be idempotent.
+The model never receives resolved secret values. A host dispatcher is guarded
+at the final external boundary as well as at proposal time. Team-owned actions
+also validate the Team role grant and assigned Agent authority.
 
-## Multi-objective scheduling
+## Collaboration
 
-Each deployment has an objective portfolio and a scheduler policy. The default
-policy considers:
+Agent requests and handoffs create durable relationships between Runs. A Team
+request can be assigned to one roster Agent under delegation policy. The
+receiver keeps its own Skills, credentials, budgets, and policy.
 
-- explicit objective and run priority;
-- deadlines and event urgency;
-- objective dependencies;
-- fairness and starvation age;
-- current skill, model, token, monetary, and time budgets;
-- per-agent, per-skill, and per-environment concurrency;
-- risk and approval availability;
-- team commitments and accepted agent requests.
+Conversations persist messages, reply and mention structure, participant
+cursors, leased presence, incremental change sequences, and participation
+rounds. Arbitration records who was eligible, who was suppressed, and why. A
+conversation Run reconciler can turn accepted channel participation into
+ordinary Runs; messages remain a projection and command surface over canonical
+work.
 
-An agent may run several workstreams concurrently, but one run is single-writer:
-only the worker holding its lease may advance its checkpoint. Child runs and
-independent objectives provide parallelism. The scheduler can preempt between
-turns, never in the middle of a non-idempotent skill call.
+## Evidence and delivery
 
-Objective progress is derived from runs and evaluations, then stored as a
-compact current summary for planning. It is not inferred from chat history.
+Activity is append-only and scoped. Run, action, approval, request, Team,
+conversation, source, and artifact services emit the same activity envelope.
+Clients can request compact projections and fetch detailed events without
+exposing provider chain-of-thought.
 
-## Durable execution protocol
+Artifacts store immutable metadata, versions, hashes, provenance, retention,
+and an opaque content reference. Content upload/download is an optional adapter.
+Source monitoring stores normalized observations and monotonic checkpoints.
+Governed outreach requires source evidence, a truthful public identity, an
+external Skill action, policy, and an approval-aware delivery Run.
 
-1. An initiator resolves the tenant and creates or selects an objective.
-2. It appends a run and initial activity event in one transaction.
-3. A worker atomically claims an eligible run with a bounded lease.
-4. The worker loads the definition version, deployment policy, objective,
-   checkpoint, compacted memory, and available skill contracts.
-5. One `AgentTurn` plans the next bounded set of actions.
-6. Each proposed action passes authorization, policy, budget, schema, and
-   idempotency checks.
-7. Skill calls and approval checkpoints are persisted before dispatch.
-8. Results and artifacts are persisted before the run checkpoint advances.
-9. The worker renews its lease while active and releases it when waiting.
-10. Lease expiry makes the run reclaimable from its last durable checkpoint.
-11. Completion evaluates the outcome against objective/run acceptance criteria
-    and updates objective progress.
+## Storage implementations
 
-Provider response IDs may optimize a turn but are not the sole durable state.
-The platform must be able to reconstruct the next turn from its own persisted
-checkpoint and referenced artifacts.
+- **Memory** is the default for programmatic construction and tests. It is not
+  durable across process exit.
+- **SQLite** is the standalone store. It persists the complete kernel surface
+  in one database and is used by the daemon.
+- **PostgreSQL** is the shared embedded store. It applies timestamp-versioned
+  schema migrations under a migration lock and supports configurable pooling
+  and schema names.
 
-## Event subscriptions and continuous agents
+All stores implement the same scoped service contracts. Recovery tests cover
+leases, retries, idempotency, cancellation, action state, collaboration,
+conversation changes, source checkpoints, ChangeSet application, and artifacts.
 
-Kubernetes watches, schedules, webhooks, message streams, analytics thresholds,
-and domain events are `EventSubscription` resources. A subscription routes a
-normalized event to an objective and applies deduplication, coalescing,
-rate-limiting, and severity policy before creating a run.
+## Capability truth
 
-Continuous monitoring is not one immortal LLM call. The subscription is
-long-lived; each actionable event creates or wakes a bounded durable run. This
-allows an SRE agent to operate indefinitely without keeping reasoning state in
-an informer callback or goroutine.
+The HTTP server exposes a static route set but constructs its capability
+document from the stores and adapters actually installed. Optional operations
+such as Run creation, action approval resolution, workforce lifecycle
+decisions, artifact content, ClawHub mutation, source policy lifecycle, and
+outreach delivery are advertised only when wired.
 
-## Teams
+The TUI loads that document before rendering its workspace. It does not
+manufacture permissions, statuses, approval eligibility, or durable state. An
+embedding graphical client must follow the same rule.
 
-A team is a durable roster plus collaboration policy:
+## Extension boundary
 
-- members and functional roles;
-- owned objectives;
-- routing and delegation rules;
-- planning, execution, and review responsibilities;
-- shared memory and artifact visibility;
-- concurrency, budget, escalation, and approval authority.
+The public facade exposes types and configuration options for persistent
+stores, dynamic worker scopes, turn runners, action policy, approval
+authorization, credential resolvers or leases, action dispatch, Skill discovery,
+ClawHub registries, source artifact storage, conversation coordination, Team
+management, and Skill management.
 
-Roles are extensible semantic labels such as `finance-lead` or
-`release-reviewer`. Permissions and approval authority are separate typed
-policy fields. Runtime code must not silently collapse unknown semantic roles
-to `worker`.
-
-Team planning creates runs and agent requests. It does not invoke a separate
-team-specific brain. Team chat renders the same events as agent chat with team
-and member filters.
-
-## Unified activity in chat and operations
-
-Conversations store human and agent messages plus references to objectives and
-runs. They do not duplicate execution logs. Any run may reference several
-conversation surfaces, and any surface may show the same canonical activity.
-
-The default compact projection groups events into collapsible activity blocks:
-
-```text
-Investigating failed checkout deployment                    running
-  3 decisions · 5 skill calls · 1 artifact · 8m 24s
-
-  Plan        Inspect rollout, logs, recent GitOps changes
-  Evidence    CrashLoopBackOff began after image update
-  Action      Opened rollback PR #1842
-  Waiting     Release reviewer approval
-```
-
-Operators can expand to the full event sequence, inputs with secrets redacted,
-outputs, policy decisions, costs, artifacts, lineage, and approval history.
-Agent detail, objective detail, team chat, agent chat, and run detail consume
-the same projection API and streaming event contract.
-
-## Prompt-first definition compiler
-
-Natural-language creation and editing produce a candidate definition change,
-not an unvalidated database mutation. The compiler:
-
-1. resolves requested outcomes into identity, instructions, skills, policies,
-   objective templates, subscriptions, and evaluations;
-2. identifies missing skills, credentials, permissions, and ambiguous authority;
-3. generates a structured version and human-readable change summary;
-4. validates schemas, tenant references, RBAC, policy, and deployability;
-5. simulates representative scenarios when evaluations exist;
-6. activates immediately only when the amendment policy permits it.
-
-The structured definition is canonical. Prompts and conversation are retained
-as provenance.
-
-## Current-component disposition
-
-| Current component | Decision |
-| --- | --- |
-| OpenSeal `pkg/runtime` store, scheduler, worker, retries | Evolve into the Objective/Run kernel; replace channel-authoritative work items with store-driven claims, leases, and checkpoints |
-| OpenSeal `pkg/openseal` public facade | Retain and expand as the supported embedding API |
-| OpenSeal daemon REST execution goroutines | Route through the same `Engine` and durable scheduler used by embedded consumers |
-| OpenSeal workflow executor and graph | Retain as deterministic runbook execution beneath the agent runtime |
-| OpenSeal agent brain, persona, skills, triggers, and LLM packages | Consolidate behind canonical definition, skill, subscription, and turn contracts |
-| legacy standing-goal or mandate concepts | Normalize to Objective; preserve temporary import adapters only when needed |
-| `AgentInstance` compatibility types | Migrate runtime responsibilities to AgentDeployment and remove after data/API migration |
-| `Persona` shared primary key and persona CRUD | Move versioned behavior into AgentDefinition; deployment keeps only activation/runtime overrides; remove separate public persona lifecycle |
-| `AgentLibrary` and versions | Evolve into AgentDefinition catalog and immutable versions |
-| `AgentWorkflow` and visual node graph | Retain as optional deterministic runbook/skill composition, not required agent identity |
-| `PersonaTool` workflow wrappers | Replace with SkillBinding and explicit runbook-as-skill adapters |
-| skill manifests and skill-node adapters | Consolidate into the canonical Skill contract and remove legacy global/direct-address paths |
-| trigger manager and Kubernetes informers | Adapt into scoped EventSubscriptions that create or wake Runs |
-| process-local runtime task map | Delete after durable Run checkpoints and status APIs replace it |
-| direct background trigger goroutines | Delete after all trigger paths enqueue durable Runs |
-| agent chat, team chat, builder chat histories | Keep conversational UX; converge execution and activity on shared Run APIs/events |
-| team chat turn/token/cooldown policies | Reuse as scheduler/team policy where generally useful; remove chat-only execution ownership |
-| collaboration teams | Retain roster/context value; separate semantic roles from permissions and build delegation on AgentRequest |
-| approval service | Retain concept; migrate to ApprovalCheckpoint tied to runs/skill calls and policy authority |
-| agent/team manifests | Evolve schema to definitions, objectives, subscriptions, policies, skill requirements, and evaluations |
-| workflow-centric embedded web GUI | Removed after its useful coverage moved to the prompt-first TUI and public API |
-
-No legacy path is deleted before scope-safe migration, compatibility reads, and
-rollback are proven. Compatibility adapters may not become new extension
-points.
-
-## Delivery phases
-
-### Phase 1: kernel
-
-Expand OpenSeal's public facade and introduce Objective, durable Run
-checkpoints, worker leases, wake conditions, and the canonical activity
-envelope by evolving OpenSeal `pkg/runtime`. Make the standalone daemon use the
-same `Engine`. Add recovery, idempotency, scope isolation, and worker lifecycle
-tests. Downstream deployments can supply their own implementations of the
-portable store and policy interfaces.
-
-### Phase 2: execution convergence
-
-Route schedules, Kubernetes events, webhooks, one-off chat work, mandates, and
-handoffs through OpenSeal Run creation. Replace OpenSeal daemon goroutines,
-direct trigger goroutines, and process-local task status. Attach skill-call
-traces and artifacts directly to runs.
-
-### Phase 3: capability and policy convergence
-
-Ship the canonical Skill/SkillBinding contract, credential boundary, policy
-engine integration, and ApprovalCheckpoint. Remove legacy global skill exposure
-and direct endpoint discovery.
-
-### Phase 4: agent and team model
-
-Add versioned AgentDefinition and AgentDeployment compatibility views. Migrate
-Persona and AgentLibrary behavior. Add objective portfolios, AgentRequest, team
-delegation, extensible roles, and shared evaluation.
-
-### Phase 5: product surfaces and removal
-
-Ship prompt-first creation and amendment, compact activity projections, and
-unified chat/run streaming. Migrate published definitions. Delete superseded
-routes, tables, services, and UI components once usage and rollback gates are
-satisfied.
-
-## Operational requirements
-
-- Every user-facing row, event, child record, join, callback, and cache belongs
-  to an explicit scope or is documented as process-internal.
-- Repository and service APIs fail closed without scope context.
-- Authorization distinguishes reading definitions/activity, changing behavior, managing
-  objectives, executing work, approving risk, binding credentials, and
-  administering deployments.
-- Every external callback authenticates before resolving its tenant-owned
-  subscription.
-- Secrets are redacted from prompts, events, logs, errors, and artifacts.
-- Worker claim, checkpoint, skill dispatch, outbox publication, and wake-up
-  paths have crash and duplicate-delivery tests.
-- Run and objective APIs support bounded pagination and retention/compaction.
-- The runtime publishes latency, queue age, lease loss, retry, budget, skill,
-  model, approval wait, outcome, and evaluation metrics.
-- Rollouts support compatibility reads, backfill verification, feature gates,
-  and rollback without losing run lineage.
-
-## Embedding and extension contracts
-
-The OpenSeal public package owns small interfaces rather than enterprise data
-models. At minimum, the `Engine` accepts implementations for:
-
-- `ExecutionStore`: transactional objective, run, checkpoint, lease, event,
-  approval, request, handoff, and artifact metadata persistence;
-- `ScopeProvider`: portable ownership/scope identity attached to every command;
-- `Authorizer` and `PolicyEvaluator`: permission and risk decisions;
-- `SecretResolver`: opaque credential references resolved only at execution;
-- `ArtifactStore`: large typed content and provenance;
-- `EventPublisher`: post-commit activity and wake notification publication;
-- `ModelProvider`: model invocation and accounting;
-- `SkillTransport`: local, gRPC, Kubernetes, or enterprise execution transport;
-- `Clock` and ID generation for deterministic recovery tests.
-
-OpenSeal supplies local implementations, including memory and SQLite storage.
-Embedding applications can supply database, secrets, event bus, remote
-execution, and authorization adapters. Scope remains generic but mandatory on
-persisted user-facing records.
-
-The embedded and daemon modes must pass the same conformance suite. HTTP
-handlers, CLI commands, trigger callbacks, and embedding applications call the
-`Engine`; none may execute a pipeline or brain loop directly.
-
-## Non-goals
-
-- Keeping an LLM request alive for hours.
-- Allowing prompts to bypass typed policy or authorization.
-- Sharing raw credentials between agents.
-- Exposing private chain-of-thought as an audit feature.
-- Requiring a visual graph to create an agent.
-- Encoding business roles as a fixed authorization enum.
-- Building a second execution kernel specifically for teams or chat.
+OpenSeal validates portable semantics and fails closed when a necessary adapter
+is absent. It does not pretend to provide tenant identity, a secret vault,
+remote sandbox provisioning, external network credentials, or organization
+policy in standalone defaults.

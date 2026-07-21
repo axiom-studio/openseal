@@ -5,11 +5,53 @@ not as a separate execution runtime. The importer preserves the source artifact
 and compiles behavior into native prompt, requirement, installer, resource,
 transport, credential, policy, and provenance contracts.
 
+```mermaid
+flowchart LR
+    Source[SKILL.md and source files] --> Verify[Acquire, verify, and hash]
+    Verify --> Compile[Compile portable semantics]
+    Compile --> Definition[Source-qualified Skill definition]
+    Compile --> Diagnostics[Actionable diagnostics]
+    Definition --> Install[Atomic installed state and lockfile]
+    Install --> Binding[Agent or Team Skill binding]
+    Binding --> Activate[Host eligibility snapshot]
+    Activate --> Execute[Governed native action]
+```
+
 The upstream references for this boundary are the current
 [OpenClaw skills specification](https://docs.openclaw.ai/tools/skills) and
 [OpenClaw skills CLI](https://docs.openclaw.ai/cli/skills). Registry operations
 follow the versioned ClawHub API and its `clawhub.skill.verify.v1` verification
 envelope.
+
+## Use from standalone OpenSeal
+
+Start the daemon in trusted loopback operator mode to enable registry
+mutations, then open the Skills workspace:
+
+```bash
+# Set api.listenAddr to 127.0.0.1:8080 in local.yaml first.
+openseal daemon --config ./local.yaml --standalone-operator
+openseal tui --endpoint http://127.0.0.1:8080
+```
+
+Press `s` to open Skills. When the server advertises install authority, press
+`n`, enter an exact registry reference such as `@owner/skill`, and submit with
+`Ctrl+S`. The workspace shows installed state, verification, pins, and the
+deployment bindings separately. Installing a Skill does not authorize an
+Agent: create or edit an exact binding for the selected deployment before its
+prompt or actions can activate.
+
+The REST surface supports catalog detail, cursor-paginated versions, individual
+files, verification, installation, installed-state inspection, update,
+update-all, pin, unpin, installed verification, and uninstall. See the
+[REST API guide](../api.md#skills-and-clawhub). The public Go facade additionally
+exposes cursor-paginated search and explore clients, verified preview, source
+artifact import/export, and the lifecycle methods used by the server.
+
+The `openseal skill install <git-url>` command is an older Git-repository sync
+helper. It neither runs the ClawHub verifier/compiler lifecycle nor grants a
+deployment binding; do not use it as evidence that an OpenClaw Skill is ready
+to execute.
 
 ## Compatibility guarantees
 
@@ -69,3 +111,38 @@ acquisition, and plugin discovery still depend on the host environment.
 OpenSeal exposes typed contracts for these concerns without pretending that a
 particular host implementation exists. An embedding application must advertise
 and test each adapter it enables.
+
+## Compiler result
+
+A successful compilation contains a canonical definition, source provenance,
+an immutable resource index, preserved installer candidates, and a round-trip
+source artifact. Version identity incorporates source, origin, verification
+trust, and process semantics so different registry or local sources cannot
+silently collapse into one executable definition.
+
+The compiler lowers deterministic constructs where their semantics are exact:
+
+- Skill instructions become a native prompt module with invocation policy.
+- Tool dispatch becomes a typed tool action and argument projection.
+- Safe OpenAPI-described read operations can become typed HTTP actions.
+- Declared command processes become argument-safe process contracts.
+- Requirements, configuration, credentials, resources, and installers remain
+  typed inputs to activation and host policy.
+
+If safe native execution requires a host adapter that is not present, the
+compiled action remains unavailable with an explicit diagnostic. Unknown
+dispatch modes, unsafe paths, ambiguous source mutations, digest mismatches,
+unsupported archives, and semantics that cannot be preserved fail closed.
+
+## Lifecycle and updates
+
+Installation writes to a staging area, verifies the archive and compilation,
+then atomically publishes the installed directory and lockfile. Update compares
+the installed source, verification, and local state; local modifications and
+pins prevent an unreviewed replacement. Update-all reports each result instead
+of hiding partial failures. Uninstall refuses unsafe or referenced removal
+unless the caller uses the explicit governed force contract.
+
+On Engine restart, installed Skills are reverified against their lockfile,
+recompiled, and restored to the source-aware catalog. Existing bindings keep
+their exact source-qualified identity rather than drifting to another variant.
