@@ -902,6 +902,7 @@ var (
 	ErrNoConversationParticipants          = runtime.ErrNoConversationParticipants
 	ErrAgentDefinitionNotFound             = kernelagent.ErrDefinitionNotFound
 	ErrAgentDeploymentNotFound             = kernelagent.ErrDeploymentNotFound
+	ErrAgentAmendmentNotFound              = kernelagent.ErrAmendmentNotFound
 	ErrAgentDeploymentRevisionConflict     = kernelagent.ErrRevisionConflict
 	ErrTeamDefinitionNotFound              = kernelteam.ErrDefinitionNotFound
 	ErrTeamDeploymentNotFound              = kernelteam.ErrDeploymentNotFound
