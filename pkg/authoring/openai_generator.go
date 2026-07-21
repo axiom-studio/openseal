@@ -87,6 +87,10 @@ func (g *OpenAICompatibleGenerator) Repair(ctx context.Context, request Generate
 
 func promptGenerateRequest(request GenerateRequest) GenerateRequest {
 	request.InvocationKey = ""
+	// Capability needs are verified server decisions used by the deterministic
+	// compiler refinement layer. They are not model instructions. The selected
+	// Skill reaches refinement-mode generation through the audited answer.
+	request.Catalog.CapabilityNeeds = nil
 	return request
 }
 
