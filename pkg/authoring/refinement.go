@@ -204,21 +204,53 @@ func validateCapabilitySourceScopeFulfillment(candidate *WorkforceCandidate, req
 	if request.Refinement == nil {
 		return nil
 	}
-	answered := make(map[string]bool, len(request.Refinement.Answers))
+	answered := make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
 	for _, answer := range request.Refinement.Answers {
-		answered[strings.TrimSpace(answer.QuestionID)] = true
+		answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
 	}
 	issues := make([]ValidationIssue, 0)
 	for _, need := range request.Catalog.CapabilityNeeds {
 		requirement := need.SourceScope
-		if requirement == nil || !requirement.RequireSourceMonitor || !answered[CapabilitySourceScopeQuestionID(need.ID)] {
+		answer, exists := answered[CapabilitySourceScopeQuestionID(need.ID)]
+		if requirement == nil || len(requirement.MaterializationInputKeys) == 0 || !exists {
 			continue
 		}
-		if candidate == nil || candidate.Initiative == nil || len(candidate.Initiative.SourceMonitors) == 0 {
-			issues = append(issues, issue("initiative.sourceMonitors", "source_scope_not_materialized", "The answered source scope requires at least one durable source monitor"))
+		if !capabilitySourceScopeMaterialized(candidate, need, answer.Items, requirement.MaterializationInputKeys) {
+			issues = append(issues, issue("objectives.cadence.runTemplate.capability.inputs", "source_scope_not_materialized", "Every answered source target must be present in a durable capability action input"))
 		}
 	}
 	return issues
+}
+
+func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need CapabilityNeed, targets, inputKeys []string) bool {
+	targets = nonEmptyUnique(targets)
+	if candidate == nil || len(targets) == 0 {
+		return false
+	}
+	allowedSkills := stringSet(need.SkillIDs)
+	allowedKeys := stringSet(inputKeys)
+	found := make(map[string]bool, len(targets))
+	for _, objective := range candidateObjectiveTemplates(candidate) {
+		runTemplate, _ := objective.Cadence["runTemplate"].(map[string]interface{})
+		invocation, _ := runTemplate["capability"].(map[string]interface{})
+		skillID, _ := invocation["skillId"].(string)
+		if !allowedSkills[strings.TrimSpace(skillID)] {
+			continue
+		}
+		inputs, _ := invocation["inputs"].(map[string]interface{})
+		for key, value := range inputs {
+			if !allowedKeys[key] {
+				continue
+			}
+			materialized := strings.ToLower(fmt.Sprint(value))
+			for _, target := range targets {
+				if strings.Contains(materialized, strings.ToLower(target)) {
+					found[target] = true
+				}
+			}
+		}
+	}
+	return len(found) == len(targets)
 }
 
 func refinementDependencyMatchesAnswer(dependency RefinementQuestionDependency, value RefinementProviderAnswerValue) bool {
@@ -692,6 +724,13 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				strings.ContainsAny(scope.Prompt+scope.WhyNeeded, "\r\n\t") || scope.Minimum < 1 || scope.Maximum < scope.Minimum ||
 				scope.Maximum > 100 || scope.Priority < 1 || scope.Priority > 1000 {
 				return fmt.Errorf("capability catalog need %d source scope is invalid", index)
+			}
+			seenInputKeys := make(map[string]bool, len(scope.MaterializationInputKeys))
+			for _, key := range scope.MaterializationInputKeys {
+				if key != strings.TrimSpace(key) || !catalogDiagnosticCodePattern.MatchString(key) || seenInputKeys[key] {
+					return fmt.Errorf("capability catalog need %d source scope has invalid materialization input keys", index)
+				}
+				seenInputKeys[key] = true
 			}
 		}
 		if needIDs[need.ID] {

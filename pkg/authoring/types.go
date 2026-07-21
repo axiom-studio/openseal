@@ -122,12 +122,12 @@ type CapabilityNeed struct {
 // derives this fact from deterministic intent matching; the provider cannot
 // omit it or turn an empty monitoring plan into a ready ChangeSet.
 type CapabilitySourceScopeRequirement struct {
-	Prompt               string `json:"prompt"`
-	WhyNeeded            string `json:"whyNeeded"`
-	Minimum              int    `json:"minimum"`
-	Maximum              int    `json:"maximum"`
-	Priority             int    `json:"priority"`
-	RequireSourceMonitor bool   `json:"requireSourceMonitor,omitempty"`
+	Prompt                   string   `json:"prompt"`
+	WhyNeeded                string   `json:"whyNeeded"`
+	Minimum                  int      `json:"minimum"`
+	Maximum                  int      `json:"maximum"`
+	Priority                 int      `json:"priority"`
+	MaterializationInputKeys []string `json:"materializationInputKeys,omitempty"`
 }
 
 const (

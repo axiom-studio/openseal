@@ -179,7 +179,7 @@ func TestCompilerSynthesizesSourceScopeAfterSkillAndCredentialPrerequisites(t *t
 	catalog := capabilityNeedCatalog(false, "openseal.source", "reddit-post-search")
 	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
 		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
-		Minimum: 1, Maximum: 20, Priority: 950, RequireSourceMonitor: true,
+		Minimum: 1, Maximum: 20, Priority: 950, MaterializationInputKeys: []string{"subreddits", "query", "url"},
 	}
 	credential := RefinementQuestion{
 		ID: "reddit-credential", Category: RefinementCategoryCredential,
@@ -213,11 +213,11 @@ func TestCompilerSynthesizesSourceScopeAfterSkillAndCredentialPrerequisites(t *t
 	}
 }
 
-func TestAnsweredSourceScopeCannotProduceCandidateWithoutMonitor(t *testing.T) {
+func TestAnsweredSourceScopeCannotProduceCandidateWithoutMaterializedAction(t *testing.T) {
 	catalog := capabilityNeedCatalog(false, "openseal.source")
 	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
 		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
-		Minimum: 1, Maximum: 20, Priority: 950, RequireSourceMonitor: true,
+		Minimum: 1, Maximum: 20, Priority: 950, MaterializationInputKeys: []string{"subreddits", "query", "url"},
 	}
 	payload, err := json.Marshal(GenerationResponse{Candidate: capabilityNeedCandidate()})
 	if err != nil {
@@ -241,10 +241,24 @@ func TestAnsweredSourceScopeCannotProduceCandidateWithoutMonitor(t *testing.T) {
 	}
 	found := false
 	for _, issue := range result.Validation {
-		found = found || issue.Code == "source_scope_not_materialized" && issue.Path == "initiative.sourceMonitors"
+		found = found || issue.Code == "source_scope_not_materialized" && issue.Path == "objectives.cadence.runTemplate.capability.inputs"
 	}
 	if !found || result.Valid {
 		t.Fatalf("missing source monitor did not fail closed: valid=%v validation=%#v", result.Valid, result.Validation)
+	}
+}
+
+func TestAnsweredSourceScopeAcceptsAPIActionMaterializationWithoutRSSMonitor(t *testing.T) {
+	candidate := capabilityNeedCandidate()
+	candidate.Agents[0].ObjectiveTemplates = []agent.ObjectiveTemplate{{
+		ID: "listen", Title: "Listen", Goal: "Monitor the selected communities",
+		Cadence: map[string]interface{}{"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
+			"skillId": "reddit-post-search", "action": "search", "inputs": map[string]interface{}{"query": "subreddit:openclaw OR subreddit:selfhosted"},
+		}}},
+	}}
+	need := CapabilityNeed{ID: "reddit-access", SkillIDs: []string{"openseal.source", "reddit-post-search"}}
+	if !capabilitySourceScopeMaterialized(&candidate, need, []string{"openclaw", "selfhosted"}, []string{"subreddits", "query", "url"}) {
+		t.Fatal("API-backed source scope was incorrectly required to use an Initiative source monitor")
 	}
 }
 
