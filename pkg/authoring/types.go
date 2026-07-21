@@ -36,8 +36,11 @@ type SkillCapability struct {
 type SkillReadiness string
 
 const (
-	SkillReadinessReady             SkillReadiness = "ready"
-	SkillReadinessNeedsBinding      SkillReadiness = "needs_binding"
+	SkillReadinessReady        SkillReadiness = "ready"
+	SkillReadinessNeedsBinding SkillReadiness = "needs_binding"
+	// NeedsInstallation is safe to offer only with exact version/source
+	// identity and referenced positive compatibility evidence. The reference
+	// is opaque and host-owned (for example, a compilation preview receipt).
 	SkillReadinessNeedsInstallation SkillReadiness = "needs_installation"
 	SkillReadinessUnavailable       SkillReadiness = "unavailable"
 )

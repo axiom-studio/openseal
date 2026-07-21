@@ -433,6 +433,26 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 			if skill.Readiness == SkillReadinessUnavailable {
 				return fmt.Errorf("refinement question %s presents unavailable Skill %s", question.ID, option.ID)
 			}
+			for _, evidence := range skill.Compatibility {
+				if !evidence.Compatible {
+					return fmt.Errorf("refinement question %s presents incompatibility-proven Skill %s (%s)", question.ID, option.ID, evidence.Requirement)
+				}
+			}
+			if skill.Readiness == SkillReadinessNeedsInstallation {
+				if strings.TrimSpace(skill.Version) == "" || strings.TrimSpace(skill.SourceIdentity) == "" {
+					return fmt.Errorf("refinement question %s presents installable Skill %s without exact version and source identity", question.ID, option.ID)
+				}
+				verified := false
+				for _, evidence := range skill.Compatibility {
+					if evidence.Compatible && strings.TrimSpace(evidence.Reference) != "" {
+						verified = true
+						break
+					}
+				}
+				if !verified {
+					return fmt.Errorf("refinement question %s presents installable Skill %s without referenced positive compatibility evidence", question.ID, option.ID)
+				}
+			}
 		}
 	}
 	return nil
