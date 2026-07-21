@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,8 +18,10 @@ const (
 )
 
 // BudgetPolicy is a portable, provider-neutral ceiling for autonomous work.
-// Zero values are unlimited. Cost is represented in micros to keep accounting
-// deterministic across stores and process restarts.
+// Omitted JSON dimensions are unbounded; supplied limits must be positive.
+// Programmatic zero values retain the same unbounded meaning. Cost is
+// represented in micros to keep accounting deterministic across stores and
+// process restarts.
 type BudgetPolicy struct {
 	MaxAttempts     int64 `json:"maxAttempts,omitempty"`
 	MaxTurns        int64 `json:"maxTurns,omitempty"`
@@ -31,15 +34,70 @@ type BudgetPolicy struct {
 	WarningPermille int64 `json:"warningPermille,omitempty"`
 }
 
+// UnmarshalJSON preserves the only portable interpretation of an omitted
+// ceiling: that dimension is unbounded. An explicitly supplied zero is
+// rejected because it is otherwise indistinguishable from omission after Go
+// decoding and can be misread by an execution host as either "unbounded" or
+// "exhausted". Callers that do not want to bound a dimension must omit it.
+func (p *BudgetPolicy) UnmarshalJSON(data []byte) error {
+	if p == nil {
+		return errors.New("budget policy is required")
+	}
+	type wireBudgetPolicy BudgetPolicy
+	var decoded wireBudgetPolicy
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	allowed := map[string]struct{}{"warningPermille": {}}
+	for _, dimension := range budgetLimitFields(BudgetPolicy(decoded)) {
+		allowed[dimension.jsonName] = struct{}{}
+	}
+	for name := range fields {
+		if _, ok := allowed[name]; !ok {
+			return fmt.Errorf("json: unknown field %q", name)
+		}
+	}
+	for _, dimension := range budgetLimitFields(BudgetPolicy(decoded)) {
+		if _, specified := fields[dimension.jsonName]; specified && dimension.value == 0 {
+			return fmt.Errorf("budget %s must be positive when specified; omit it for an unbounded dimension", dimension.jsonName)
+		}
+	}
+	*p = BudgetPolicy(decoded)
+	return p.Validate()
+}
+
 func (p BudgetPolicy) Validate() error {
-	if p.MaxAttempts < 0 || p.MaxTurns < 0 || p.MaxInputTokens < 0 || p.MaxOutputTokens < 0 || p.MaxTotalTokens < 0 ||
-		p.MaxCostMicros < 0 || p.MaxDurationMS < 0 || p.MaxActions < 0 {
-		return errors.New("budget limits cannot be negative")
+	for _, dimension := range budgetLimitFields(p) {
+		if dimension.value < 0 {
+			return fmt.Errorf("budget %s cannot be negative", dimension.jsonName)
+		}
 	}
 	if p.WarningPermille < 0 || p.WarningPermille > 1000 {
 		return errors.New("budget warning threshold must be between 0 and 1000 permille")
 	}
 	return nil
+}
+
+type budgetLimitField struct {
+	jsonName string
+	value    int64
+}
+
+func budgetLimitFields(policy BudgetPolicy) []budgetLimitField {
+	return []budgetLimitField{
+		{"maxAttempts", policy.MaxAttempts},
+		{"maxTurns", policy.MaxTurns},
+		{"maxInputTokens", policy.MaxInputTokens},
+		{"maxOutputTokens", policy.MaxOutputTokens},
+		{"maxTotalTokens", policy.MaxTotalTokens},
+		{"maxCostMicros", policy.MaxCostMicros},
+		{"maxDurationMs", policy.MaxDurationMS},
+		{"maxActions", policy.MaxActions},
+	}
 }
 
 type BudgetUsage struct {
