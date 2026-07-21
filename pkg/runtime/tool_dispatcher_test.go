@@ -71,7 +71,7 @@ Publish the requested release.
 func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields,
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-transport-00000001",
 	})
 	if err != nil {
@@ -125,6 +125,18 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	})
 	if err == nil || !strings.Contains(err.Error(), "do not match") {
 		t.Fatalf("substituted opaque reference was accepted: %v", err)
+	}
+
+	otherBound := *bound
+	otherDefinition := *definition
+	otherDefinition.Transport.Endpoint = "other_tool"
+	otherBound.Definition = &otherDefinition
+	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+		Call: call, Run: run, Bound: &otherBound, Arguments: map[string]interface{}{}, CredentialLease: envelope,
+		CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("credential lease was paired with another tool endpoint: %v", err)
 	}
 }
 
@@ -180,5 +192,26 @@ func TestToolActionDispatcherRejectsBindingConfigCollision(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("binding config collision was accepted")
+	}
+}
+
+func TestBoundActionToolTransportUsesActionOverrideAndRejectsNonTool(t *testing.T) {
+	override := skill.TransportReference{Kind: "tool", Endpoint: "action_tool"}
+	bound := &skill.BoundAction{
+		Definition: &skill.Definition{Transport: skill.TransportReference{Kind: "tool", Endpoint: "definition_tool"}},
+		Action:     skill.Action{Transport: &override},
+	}
+	endpoint, err := boundActionToolTransport(bound)
+	if err != nil || endpoint != "action_tool" {
+		t.Fatalf("action transport override = %q, %v", endpoint, err)
+	}
+	bound.Action.Transport = nil
+	bound.Definition.Transport = skill.TransportReference{Kind: "http", Endpoint: "https://example.invalid"}
+	if _, err := boundActionToolTransport(bound); err == nil {
+		t.Fatal("non-tool delegated transport was accepted")
+	}
+	bound.Definition.Transport = skill.TransportReference{Kind: "tool"}
+	if _, err := boundActionToolTransport(bound); err == nil {
+		t.Fatal("empty delegated tool endpoint was accepted")
 	}
 }

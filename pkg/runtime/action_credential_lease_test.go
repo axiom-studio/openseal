@@ -15,6 +15,8 @@ import (
 
 type testCredentialLeaseSigner struct{ key []byte }
 
+const testActionCredentialLeaseTransport = "reddit_search"
+
 func (s testCredentialLeaseSigner) SignActionCredentialLease(_ context.Context, payload []byte) (ActionCredentialLeaseSignature, error) {
 	mac := hmac.New(sha256.New, s.key)
 	_, _ = mac.Write(payload)
@@ -48,7 +50,7 @@ func (g *testCredentialLeaseReplayGuard) ConsumeActionCredentialLeaseNonce(_ con
 func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields,
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000001",
 	})
 	if err != nil {
@@ -61,7 +63,7 @@ func TestSignedActionCredentialLeaseBindsExactDurableAuthority(t *testing.T) {
 	}
 	replay := &testCredentialLeaseReplayGuard{seen: map[string]bool{}}
 	validator, err := NewActionCredentialLeaseValidator(signer, ActionCredentialLeaseAuthorityFunc(func(_ context.Context, candidate ActionCredentialLease) error {
-		return MatchActionCredentialLease(candidate, call, run, fields)
+		return MatchActionCredentialLease(candidate, call, run, testActionCredentialLeaseTransport, fields)
 	}), replay)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +89,7 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 	newEnvelope := func(t *testing.T) (*SignedActionCredentialLease, testCredentialLeaseSigner) {
 		t.Helper()
 		lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-			TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields,
+			TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 			Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000002",
 		})
 		if err != nil {
@@ -134,7 +136,7 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 			req := request(envelope)
 			test.mutate(envelope, &req)
 			validator, err := NewActionCredentialLeaseValidator(signer, ActionCredentialLeaseAuthorityFunc(func(_ context.Context, candidate ActionCredentialLease) error {
-				return MatchActionCredentialLease(candidate, call, run, fields)
+				return MatchActionCredentialLease(candidate, call, run, testActionCredentialLeaseTransport, fields)
 			}), &testCredentialLeaseReplayGuard{seen: map[string]bool{}})
 			if err != nil {
 				t.Fatal(err)
@@ -149,7 +151,7 @@ func TestActionCredentialLeaseValidationFailsClosed(t *testing.T) {
 func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields,
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000003",
 	})
 	if err != nil {
@@ -165,6 +167,7 @@ func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t
 		}},
 		{"binding revision drift", func(_ *ActionCredentialLease, durable *ActionCall) { durable.BindingRevision++ }},
 		{"assigned agent drift", func(candidate *ActionCredentialLease, _ *ActionCall) { candidate.AssignedAgentID = "agent-other" }},
+		{"transport drift", func(candidate *ActionCredentialLease, _ *ActionCall) { candidate.Transport = "other_tool" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			candidate, durable := *lease, cloneActionCall(call)
@@ -175,7 +178,7 @@ func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t
 				t.Fatal(err)
 			}
 			validator, _ := NewActionCredentialLeaseValidator(signer, ActionCredentialLeaseAuthorityFunc(func(_ context.Context, signed ActionCredentialLease) error {
-				return MatchActionCredentialLease(signed, durable, run, fields)
+				return MatchActionCredentialLease(signed, durable, run, testActionCredentialLeaseTransport, fields)
 			}), &testCredentialLeaseReplayGuard{seen: map[string]bool{}})
 			if _, err := validator.Validate(t.Context(), ActionCredentialLeaseValidationRequest{Envelope: envelope, TenantID: "tenant-7", Scope: call.Scope, TrustedIssuer: "control-plane", Audience: "execution-host", Now: now.Add(time.Second)}); err == nil {
 				t.Fatal("signed authority drift was accepted")
@@ -187,7 +190,7 @@ func TestActionCredentialLeaseAuthorityRejectsSignedExtraFieldsAndBindingDrift(t
 func TestActionCredentialLeaseAuthorityAcceptsHeartbeatButRejectsReclaim(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields,
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000006",
 	})
 	if err != nil {
@@ -197,14 +200,14 @@ func TestActionCredentialLeaseAuthorityAcceptsHeartbeatButRejectsReclaim(t *test
 	renewed.Revision += 2
 	renewedExpiry := call.LeaseExpiresAt.Add(time.Minute)
 	renewed.LeaseExpiresAt = &renewedExpiry
-	if err := MatchActionCredentialLease(*lease, renewed, run, fields); err != nil {
+	if err := MatchActionCredentialLease(*lease, renewed, run, testActionCredentialLeaseTransport, fields); err != nil {
 		t.Fatalf("same-owner heartbeat renewal was rejected: %v", err)
 	}
 
 	reclaimed := cloneActionCall(renewed)
 	reclaimed.Attempt++
 	reclaimed.LeaseOwner = "worker-atlas-2"
-	if err := MatchActionCredentialLease(*lease, reclaimed, run, fields); err == nil {
+	if err := MatchActionCredentialLease(*lease, reclaimed, run, testActionCredentialLeaseTransport, fields); err == nil {
 		t.Fatal("reclaimed ActionCall accepted an earlier credential lease")
 	}
 }
@@ -212,7 +215,7 @@ func TestActionCredentialLeaseAuthorityAcceptsHeartbeatButRejectsReclaim(t *test
 func TestNewActionCredentialLeaseRejectsIncompleteOrOverbroadRequests(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	valid := func() CreateActionCredentialLeaseRequest {
-		return CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000004"}
+		return CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000004"}
 	}
 	for _, test := range []struct {
 		name   string
@@ -224,6 +227,7 @@ func TestNewActionCredentialLeaseRejectsIncompleteOrOverbroadRequests(t *testing
 		}},
 		{"wrong run", func(req *CreateActionCredentialLeaseRequest) { req.Run = cloneAgentRun(run); req.Run.ID = "run-other" }},
 		{"missing fields", func(req *CreateActionCredentialLeaseRequest) { req.CredentialFields = map[string][]string{} }},
+		{"missing transport", func(req *CreateActionCredentialLeaseRequest) { req.Transport = "" }},
 		{"short nonce", func(req *CreateActionCredentialLeaseRequest) { req.Nonce = "short" }},
 		{"extra credential", func(req *CreateActionCredentialLeaseRequest) {
 			req.CredentialFields = map[string][]string{"reddit": {"api.token"}, "other": {"token"}}
@@ -248,7 +252,7 @@ func TestNewActionCredentialLeaseRejectsIncompleteOrOverbroadRequests(t *testing
 
 func TestActionCredentialLeaseContainsOnlyOpaqueReferences(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000005"})
+	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport, Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000005"})
 	if err != nil {
 		t.Fatal(err)
 	}

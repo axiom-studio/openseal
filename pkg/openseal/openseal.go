@@ -965,12 +965,12 @@ func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVe
 	return runtime.NewActionCredentialLeaseValidator(verifier, authority, replay)
 }
 
-func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, credentialFields map[string][]string) error {
-	return runtime.MatchActionCredentialLease(lease, call, run, credentialFields)
+func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
+	return runtime.MatchActionCredentialLease(lease, call, run, transport, credentialFields)
 }
 
-func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease, call *ActionCall, run *AgentRun) error {
-	return runtime.MatchActionCredentialLeaseReferences(envelope, call, run)
+func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
+	return runtime.MatchActionCredentialLeaseReferences(envelope, call, run, transport)
 }
 
 func ValidateCredentialFreeContext(value interface{}) error {

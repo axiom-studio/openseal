@@ -63,6 +63,10 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	if d == nil || d.invoker == nil || input.Bound == nil || input.Bound.Definition == nil {
 		return nil, errors.New("tool action dispatcher is not configured")
 	}
+	transportEndpoint, transportErr := boundActionToolTransport(input.Bound)
+	if transportErr != nil {
+		return nil, transportErr
+	}
 	if len(input.Credentials) > 0 && input.CredentialLease != nil {
 		return nil, errors.New("plaintext credentials and an opaque credential lease are mutually exclusive")
 	}
@@ -70,19 +74,12 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		if input.Call == nil || input.Run == nil {
 			return nil, errors.New("opaque credential lease requires its durable ActionCall and Run")
 		}
-		if err := MatchActionCredentialLeaseReferences(input.CredentialLease, input.Call, input.Run); err != nil {
+		if err := MatchActionCredentialLeaseReferences(input.CredentialLease, input.Call, input.Run, transportEndpoint); err != nil {
 			return nil, fmt.Errorf("validate opaque credential lease transport: %w", err)
 		}
 		if !reflect.DeepEqual(input.CredentialReferences, input.Call.CredentialRefs) {
 			return nil, errors.New("opaque credential references do not match the durable ActionCall")
 		}
-	}
-	transport := input.Bound.Definition.Transport
-	if input.Bound.Action.Transport != nil {
-		transport = *input.Bound.Action.Transport
-	}
-	if transport.Kind != "tool" || strings.TrimSpace(transport.Endpoint) == "" {
-		return nil, fmt.Errorf("unsupported tool transport %q", transport.Kind)
 	}
 	arguments, err := skill.MaterializeTransportArguments(input.Bound, input.Arguments)
 	if err != nil {
@@ -102,7 +99,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		executionDeploymentID = input.Run.AssignedAgentID
 	}
 	invocation := ToolInvocation{
-		Name: transport.Endpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
+		Name: transportEndpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		Action: input.Bound.Action.Name, Arguments: arguments, Credentials: input.Credentials,
@@ -114,4 +111,19 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		invocation.PreparedRuntime = clonePreparedRuntime(input.Call.PreparedRuntime)
 	}
 	return d.invoker.InvokeTool(ctx, invocation)
+}
+
+func boundActionToolTransport(bound *skill.BoundAction) (string, error) {
+	if bound == nil || bound.Definition == nil {
+		return "", errors.New("bound action is required")
+	}
+	transport := bound.Definition.Transport
+	if bound.Action.Transport != nil {
+		transport = *bound.Action.Transport
+	}
+	endpoint := strings.TrimSpace(transport.Endpoint)
+	if transport.Kind != "tool" || endpoint == "" {
+		return "", fmt.Errorf("unsupported tool transport %q", transport.Kind)
+	}
+	return endpoint, nil
 }
