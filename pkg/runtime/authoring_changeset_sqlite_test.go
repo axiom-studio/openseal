@@ -542,6 +542,19 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 	if err != nil || len(bindings) != 1 || !capability.NewSkillIdentity(bindings[0].SkillID, bindings[0].SkillVersion, bindings[0].SourceIdentity).Equal(identity) {
 		t.Fatalf("exact persisted binding = %#v, %v", bindings, err)
 	}
+	teamBindings, err := restored.ListSkillBindings(ctx, value.Scope, "team-live")
+	if err != nil || len(teamBindings) != 1 || teamBindings[0].DeploymentID != "team-live" ||
+		!capability.NewSkillIdentity(teamBindings[0].SkillID, teamBindings[0].SkillVersion, teamBindings[0].SourceIdentity).Equal(identity) ||
+		len(teamBindings[0].AllowedActions) != 1 || teamBindings[0].AllowedActions[0] != "execute" {
+		t.Fatalf("exact persisted Team binding = %#v, %v", teamBindings, err)
+	}
+	foundTeamBinding := false
+	for _, resource := range applied.ApplyReceipt.Resources {
+		foundTeamBinding = foundTeamBinding || resource.Kind == "skill_binding" && resource.ID == "workforce:team-live:"+catalogID
+	}
+	if !foundTeamBinding {
+		t.Fatalf("Team binding missing from apply receipt: %#v", applied.ApplyReceipt.Resources)
+	}
 }
 
 func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testing.T) {
