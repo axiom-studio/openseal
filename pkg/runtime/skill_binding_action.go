@@ -14,7 +14,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.1.0"
+	SkillManagementSkillVersion = "1.1.1"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -39,8 +39,13 @@ func SkillManagementSkill() *skill.Definition {
 		"skillId":          map[string]interface{}{"type": "string", "minLength": 1},
 		"skillVersion":     map[string]interface{}{"type": "string", "minLength": 1},
 		"sourceIdentity":   map[string]interface{}{"type": "string"},
-		"allowedActions":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
-		"enablePrompt":     map[string]interface{}{"type": "boolean"},
+		"allowedActions": map[string]interface{}{
+			"type":        "array",
+			"description": "Exact action names from the selected Skill definition. Use an empty array for prompt-only access. Wildcards such as * are invalid and never grant authority.",
+			"items":       map[string]interface{}{"type": "string", "minLength": 1, "pattern": `^[^*]+$`},
+			"uniqueItems": true,
+		},
+		"enablePrompt": map[string]interface{}{"type": "boolean"},
 		"maximumRisk": map[string]interface{}{"type": "string", "enum": []interface{}{
 			string(skill.RiskLevelRead), string(skill.RiskLevelWrite), string(skill.RiskLevelExternal), string(skill.RiskLevelProduction), string(skill.RiskLevelDestructive),
 		}},
