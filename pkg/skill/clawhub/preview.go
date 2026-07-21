@@ -73,6 +73,20 @@ func (m *InstallManager) PreviewValidated(ctx context.Context, request PreviewRe
 	return m.preview(ctx, request, validate)
 }
 
+func (m *PreviewManager) Preview(ctx context.Context, request PreviewRequest) (*CompilationPreview, error) {
+	if m == nil {
+		return nil, errors.New("ClawHub preview manager is required")
+	}
+	return m.compiler.preview(ctx, request, nil)
+}
+
+func (m *PreviewManager) PreviewValidated(ctx context.Context, request PreviewRequest, validate CompilationValidator) (*CompilationPreview, error) {
+	if m == nil {
+		return nil, errors.New("ClawHub preview manager is required")
+	}
+	return m.compiler.preview(ctx, request, validate)
+}
+
 func (m *InstallManager) preview(ctx context.Context, request PreviewRequest, validate CompilationValidator) (*CompilationPreview, error) {
 	if m == nil || m.registry == nil {
 		return nil, errors.New("ClawHub install manager is required")

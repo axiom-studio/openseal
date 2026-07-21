@@ -1420,7 +1420,7 @@ type Engine struct {
 	skillDiscovery                skill.DiscoveryProvider
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
-	clawHubPreview                *clawhub.InstallManager
+	clawHubPreview                *clawhub.PreviewManager
 	clawHubRegistry               clawhub.Registry
 	skillSources                  *sourceartifact.Service
 	clawHubSourceScope            skill.ScopeReference
@@ -2186,7 +2186,11 @@ func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace
 		if err != nil {
 			return err
 		}
-		e.clawHub, e.clawHubPreview = manager, manager
+		preview, err := clawhub.NewPreviewManager(registryID, registry)
+		if err != nil {
+			return err
+		}
+		e.clawHub, e.clawHubPreview = manager, preview
 		e.clawHubRegistry = registry
 		return nil
 	}
@@ -2230,7 +2234,11 @@ func WithClawHubRegistrySkillsDirectory(registryID string, registry clawhub.Regi
 		if err != nil {
 			return err
 		}
-		e.clawHub, e.clawHubPreview, e.clawHubRegistry = manager, manager, registry
+		preview, err := clawhub.NewPreviewManager(registryID, registry)
+		if err != nil {
+			return err
+		}
+		e.clawHub, e.clawHubPreview, e.clawHubRegistry = manager, preview, registry
 		return nil
 	}
 }

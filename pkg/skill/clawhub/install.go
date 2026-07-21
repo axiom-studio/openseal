@@ -93,6 +93,12 @@ type InstallManager struct {
 	mu         sync.Mutex
 }
 
+// PreviewManager exposes only verified compilation previews. It deliberately
+// has no installation or installed-state lifecycle methods.
+type PreviewManager struct {
+	compiler *InstallManager
+}
+
 type CompilationValidator func(*opensealclaw.Compilation) error
 
 func NewInstallManager(registryID string, registry Registry, workspace string) (*InstallManager, error) {
@@ -104,12 +110,12 @@ func NewInstallManager(registryID string, registry Registry, workspace string) (
 // deliberately incapable of lifecycle operations: callers may only use the
 // side-effect-free Preview methods, whose bounded archive staging is removed
 // before the call returns.
-func NewPreviewManager(registryID string, registry Registry) (*InstallManager, error) {
+func NewPreviewManager(registryID string, registry Registry) (*PreviewManager, error) {
 	registryID = strings.TrimRight(strings.TrimSpace(registryID), "/")
 	if registry == nil || registryID == "" {
 		return nil, errors.New("registry id and registry are required")
 	}
-	return &InstallManager{registryID: registryID, registry: registry, now: time.Now}, nil
+	return &PreviewManager{compiler: &InstallManager{registryID: registryID, registry: registry, now: time.Now}}, nil
 }
 
 // NewInstallManagerWithSkillsDirectory creates an installer whose lock and
