@@ -135,6 +135,7 @@ type Model struct {
 	conversationClient          client.ConversationClient
 	clawHubClient               client.ClawHubClient
 	skillBindingClient          client.SkillBindingClient
+	sourcePolicyClient          client.SourcePolicyLifecycleClient
 	config                      Config
 	editor                      textarea.Model
 	focus                       focusArea
@@ -164,6 +165,7 @@ type Model struct {
 	authoringCapability         kernelapi.Capability
 	agentDefinitionCapability   kernelapi.Capability
 	teamDefinitionCapability    kernelapi.Capability
+	sourcePolicyCapability      kernelapi.Capability
 	authoringResult             *authoring.CompileResult
 	authoringChangeSet          *authoring.ChangeSet
 	authoringAmendment          bool
@@ -212,6 +214,7 @@ type Model struct {
 	clawHubSkills               []clawhub.InstalledState
 	skillActions                []capability.ModelAction
 	skillBindings               []*capability.Binding
+	sourcePolicies              []*source.Lifecycle
 	skillBindingSelected        int
 	selectedSkillBinding        string
 	clawHubSelected             int
@@ -442,6 +445,11 @@ type skillBindingsLoaded struct {
 	bindings []*capability.Binding
 	err      error
 }
+
+type sourcePoliciesLoaded struct {
+	policies []*source.Lifecycle
+	err      error
+}
 type skillBindingChanged struct {
 	binding *capability.Binding
 	action  string
@@ -533,6 +541,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		conversationClient: conversationClient(kernelClient),
 		clawHubClient:      clawHubClient(kernelClient),
 		skillBindingClient: skillBindingClient(kernelClient),
+		sourcePolicyClient: sourcePolicyClient(kernelClient),
 	}, nil
 }
 
@@ -586,6 +595,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
 		teamDefinitionCapability, hasTeamDefinitions := msg.document.Find(kernelapi.TeamDefinitionsCapabilityID, kernelapi.TeamDefinitionsCapabilityVersion)
+		sourcePolicyCapability, hasSourcePolicies := msg.document.Find(kernelapi.SourcePoliciesCapabilityID, kernelapi.SourcePoliciesCapabilityVersion)
 		m.runCapability = runCapability
 		m.requestCapability = requestCapability
 		m.approvalCapability = approvalCapability
@@ -602,6 +612,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.authoringCapability = authoringCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
 		m.teamDefinitionCapability = teamDefinitionCapability
+		m.sourcePolicyCapability = sourcePolicyCapability
 		m.syncWorkforceCredentialChoices()
 		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
 			m.authoringApprovalSelected = 0
@@ -653,7 +664,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
 			m.teamDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
+			m.sourcePolicyCapability = kernelapi.Capability{}
+		}
+		if !m.objectiveCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -677,7 +691,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionInitiatives
 			m.mode = modeInitiativeCreate
 			m.editor.Placeholder = "Describe the Initiative outcome…"
-		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
+		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
 			m.section = sectionSkills
 			if m.clawHubCapability.Available {
 				m.mode = modeSkillInstall
@@ -711,7 +725,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 		}
 		m.activateReadyRefinement()
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -879,6 +893,14 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err, m.skillBindings = nil, msg.bindings
 		m.restoreSkillBindingSelection()
+		return m, nil
+	case sourcePoliciesLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err, m.sourcePolicies = nil, msg.policies
 		return m, nil
 	case skillBindingChanged:
 		m.busy = false
@@ -1320,7 +1342,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -1513,7 +1535,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "s":
 			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
 				m.section = sectionSkills
-				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions())
+				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies())
 			}
 		case "a":
 			if m.artifactCapability.Available {
@@ -2432,6 +2454,20 @@ func (m *Model) loadSkillBindings() tea.Cmd {
 	}
 }
 
+func (m *Model) loadSourcePolicies() tea.Cmd {
+	if !m.sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationList) {
+		return nil
+	}
+	m.loading = true
+	return func() tea.Msg {
+		result, err := m.sourcePolicyClient.ListSourcePolicies(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID})
+		if err != nil {
+			return sourcePoliciesLoaded{err: err}
+		}
+		return sourcePoliciesLoaded{policies: result.Items}
+	}
+}
+
 func (m *Model) loadArtifacts() tea.Cmd {
 	if !m.supportsArtifact(kernelapi.OperationList) {
 		return nil
@@ -2514,7 +2550,7 @@ func (m *Model) loadPanel() tea.Cmd {
 		return m.loadOutreach()
 	}
 	if m.section == sectionSkills {
-		return tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions())
+		return tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies())
 	}
 	if m.section == sectionRequests {
 		return m.loadAgentRequests()
@@ -4621,6 +4657,11 @@ func clawHubClient(kernelClient client.KernelClient) client.ClawHubClient {
 
 func skillBindingClient(kernelClient client.KernelClient) client.SkillBindingClient {
 	value, _ := kernelClient.(client.SkillBindingClient)
+	return value
+}
+
+func sourcePolicyClient(kernelClient client.KernelClient) client.SourcePolicyLifecycleClient {
+	value, _ := kernelClient.(client.SourcePolicyLifecycleClient)
 	return value
 }
 
