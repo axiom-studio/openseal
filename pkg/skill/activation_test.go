@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/httpaction"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 )
 
@@ -297,5 +298,37 @@ func TestAlwaysAvailableSkipsHostRequirementGates(t *testing.T) {
 	snapshot, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux"})
 	if err != nil || len(snapshot.Skills) != 1 || len(snapshot.Unavailable) != 0 {
 		t.Fatalf("always-available skill was gated: %#v, %v", snapshot, err)
+	}
+}
+
+func TestActivationRequiresExplicitGovernedHTTPAdapter(t *testing.T) {
+	catalog := NewCatalog()
+	definition := &Definition{
+		ID: "research", Version: "1", Name: "Research", Prompt: &PromptModule{Instructions: "Use search.", UserInvocable: true},
+		Actions: map[string]Action{"search": {
+			Name: "search", Description: "Search", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+			Risk: RiskLevelRead, SideEffect: SideEffectRead, Idempotency: IdempotencySupported,
+			Transport: &TransportReference{Kind: "tool", Endpoint: httpaction.TransportName},
+		}},
+	}
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(context.Background(), &Binding{
+		ID: "research", Scope: scope, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version,
+		EnablePrompt: true, AllowedActions: []string{"search"}, MaximumRisk: RiskLevelRead, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{})
+	if err != nil || len(missing.Skills) != 0 || len(missing.Unavailable) != 1 || missing.Unavailable[0].Reasons[0].Code != "action_adapter_unavailable" {
+		t.Fatalf("missing adapter snapshot = %#v, %v", missing, err)
+	}
+	ready, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{Adapters: map[string]AdapterCapability{
+		AdapterHTTPAction: {State: AdapterStateAvailable, Version: "egress-policy/v1"},
+	}})
+	if err != nil || len(ready.Skills) != 1 || len(ready.Skills[0].Actions) != 1 || len(ready.Unavailable) != 0 {
+		t.Fatalf("available adapter snapshot = %#v, %v", ready, err)
 	}
 }

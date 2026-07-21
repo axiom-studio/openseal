@@ -50,6 +50,7 @@ const (
 	AdapterRemoteNode      = "remote-node"
 	AdapterResourceStaging = "resource-staging"
 	AdapterPreparedRuntime = "prepared-runtime"
+	AdapterHTTPAction      = "openseal.http.request"
 )
 
 type AdapterCapability struct {
@@ -338,6 +339,17 @@ func evaluateAvailability(definition *Definition, binding *Binding, host HostCap
 			reasons = append(reasons, AvailabilityReason{Code: "process_action_unavailable", Requirement: opensealprocess.TransportName, Message: "authorized process actions are unavailable on this host"})
 		}
 	}
+	if binding.EnablePrompt && definitionHasTransport(definition, AdapterHTTPAction) && !bindingUsesTransport(definition, binding, AdapterHTTPAction) {
+		reasons = append(reasons, AvailabilityReason{
+			Code: "action_adapter_unbound", Requirement: AdapterHTTPAction,
+			Message: "skill instructions require an explicitly authorized governed HTTP action",
+		})
+	} else if bindingUsesTransport(definition, binding, AdapterHTTPAction) && !adapterAvailable(host.Adapters, AdapterHTTPAction) {
+		reasons = append(reasons, AvailabilityReason{
+			Code: "action_adapter_unavailable", Requirement: AdapterHTTPAction,
+			Message: "the governed HTTP action adapter is unavailable on this host",
+		})
+	}
 	if len(definition.Requirements.OperatingSystems) > 0 && !containsOperatingSystem(definition.Requirements.OperatingSystems, host.OperatingSystem) {
 		reasons = append(reasons, AvailabilityReason{Code: "operating_system_unavailable", Requirement: strings.TrimSpace(host.OperatingSystem), Message: "host operating system is not supported"})
 	}
@@ -367,6 +379,31 @@ func evaluateAvailability(definition *Definition, binding *Binding, host HostCap
 		}
 	}
 	return reasons
+}
+
+func bindingUsesTransport(definition *Definition, binding *Binding, endpoint string) bool {
+	if definition == nil || binding == nil {
+		return false
+	}
+	for _, name := range binding.AllowedActions {
+		action, ok := definition.Actions[name]
+		if ok && action.Transport != nil && action.Transport.Kind == "tool" && action.Transport.Endpoint == endpoint {
+			return true
+		}
+	}
+	return false
+}
+
+func definitionHasTransport(definition *Definition, endpoint string) bool {
+	if definition == nil {
+		return false
+	}
+	for _, action := range definition.Actions {
+		if action.Transport != nil && action.Transport.Kind == "tool" && action.Transport.Endpoint == endpoint {
+			return true
+		}
+	}
+	return false
 }
 
 func definitionHasProcessActions(definition *Definition) bool {
