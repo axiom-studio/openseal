@@ -399,9 +399,13 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	}
 	canonicalizeCandidateScope(&result.Candidate, request.Scope)
 	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
+	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
 	result.Validation = validateCandidate(&result.Candidate, existing)
+	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, compileRequest)...)
-	result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
+	if len(materializationIssues) == 0 {
+		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
+	}
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
@@ -515,9 +519,13 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	existing := changeSet.Generation.Request.Existing
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
+	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
 	result.Validation = validateCandidate(&result.Candidate, existing)
+	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, changeSet.Generation.Request)...)
-	result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
+	if len(materializationIssues) == 0 {
+		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
+	}
 	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Catalog)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)

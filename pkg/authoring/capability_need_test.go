@@ -311,7 +311,7 @@ func TestAnsweredSourceScopeCannotProduceCandidateWithoutMaterializedAction(t *t
 	}
 	found := false
 	for _, issue := range result.Validation {
-		found = found || issue.Code == "source_scope_not_materialized" && issue.Path == "objectives.cadence.runTemplate.capability.inputs"
+		found = found || issue.Code == "source_scope_action_not_found" && issue.Path == "objectives.cadence.runTemplate.capability"
 	}
 	if !found || result.Valid {
 		t.Fatalf("missing source monitor did not fail closed: valid=%v validation=%#v", result.Valid, result.Validation)

@@ -113,6 +113,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		}
 		generated, decodeErr = decodeGenerationResponse(payload)
 	}
+	materializationIssues := materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 	synthesizeCapabilityNeedRefinements(&generated, request)
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
@@ -121,8 +122,11 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 		applyActivationCommitment(&generated.Candidate, commitments)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+		validation = append(validation, materializationIssues...)
 		validation = append(validation, validateAnsweredCapabilityNeeds(&generated.Candidate, request)...)
-		validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
+		if len(materializationIssues) == 0 {
+			validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
+		}
 		validation = append(validation, validateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
@@ -158,6 +162,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 				continue
 			}
 			generated = candidate
+			materializationIssues = materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 			synthesizeCapabilityNeedRefinements(&generated, request)
 			commitments, validation, missing = validateGenerated()
 			repairReason = deterministicContractError(validation, missing)
@@ -172,8 +177,11 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
+	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, request)...)
-	result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
+	if len(materializationIssues) == 0 {
+		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
+	}
 	result.Validation = append(result.Validation, validateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
 	refinementValidation := make([]ValidationIssue, 0, 2)
