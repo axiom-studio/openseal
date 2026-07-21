@@ -24,6 +24,26 @@ type countedWorkforceGenerator struct {
 	err     error
 }
 
+type cancellationBoundaryWorkforceGenerator struct {
+	payload          []byte
+	started          chan struct{}
+	returnPayload    bool
+	loseCancellation bool
+	startedOnce      sync.Once
+}
+
+func (g *cancellationBoundaryWorkforceGenerator) Generate(ctx context.Context, _ authoring.GenerateRequest) ([]byte, error) {
+	g.startedOnce.Do(func() { close(g.started) })
+	<-ctx.Done()
+	if g.returnPayload {
+		return g.payload, nil
+	}
+	if g.loseCancellation {
+		return nil, errors.New("provider transport closed")
+	}
+	return nil, ctx.Err()
+}
+
 func (g *countedWorkforceGenerator) Generate(ctx context.Context, _ authoring.GenerateRequest) ([]byte, error) {
 	g.calls.Add(1)
 	if g.started != nil {
@@ -438,6 +458,89 @@ func TestWorkforceAuthoringShutdownYieldsRunForImmediateReplicaRecovery(t *testi
 	completed, _ := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
 	if completed.Status != authoring.ChangeSetReview || generator.calls.Load() != 2 {
 		t.Fatalf("completed=%#v provider invocations=%d", completed, generator.calls.Load())
+	}
+}
+
+func TestWorkforceAuthoringWorkerStopYieldsWhenProviderLosesCancellationCause(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	payload := testAuthoringGenerator(t).payload
+	generator := &cancellationBoundaryWorkforceGenerator{payload: payload, started: make(chan struct{}), loseCancellation: true}
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "terminating-host", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
+	if err := worker.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-generator.started
+	stopped := make(chan struct{})
+	go func() {
+		worker.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("worker Stop did not cancel and join the provider call")
+	}
+	interrupted, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || interrupted.Status != AgentRunStatusQueued || interrupted.Checkpoint["phase"] != "interrupted" || interrupted.LeaseOwner != "" {
+		t.Fatalf("interrupted run = %#v, err = %v", interrupted, err)
+	}
+	pending, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || pending.Status != authoring.ChangeSetEvaluating || pending.Generation.Attempt != 0 {
+		t.Fatalf("pending change set = %#v, err = %v", pending, err)
+	}
+}
+
+func TestWorkforceAuthoringShutdownReconcilesProviderSuccessAtCancellationBoundary(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	payload := testAuthoringGenerator(t).payload
+	generator := &cancellationBoundaryWorkforceGenerator{payload: payload, started: make(chan struct{}), returnPayload: true}
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "boundary-host", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, runErr := worker.RunOnce(ctx)
+		result <- runErr
+	}()
+	<-generator.started
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("shutdown result = %v", err)
+	}
+	generated, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || generated.Status != authoring.ChangeSetReview {
+		t.Fatalf("generated change set = %#v, err = %v", generated, err)
+	}
+	completed, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || completed.Status != AgentRunStatusCompleted || completed.LeaseOwner != "" || completed.Output["changeSetId"] != changeSet.ID {
+		t.Fatalf("reconciled run = %#v, err = %v", completed, err)
 	}
 }
 

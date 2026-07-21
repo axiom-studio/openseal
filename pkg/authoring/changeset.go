@@ -502,9 +502,11 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	if err != nil {
 		// Host shutdown is not a candidate failure. The leased Run worker yields
 		// this unchanged evaluating intent so another process can resume it with
-		// the same stable provider invocation key.
-		if errors.Is(err, context.Canceled) {
-			return nil, err
+		// the same stable provider invocation key. Some HTTP transports wrap a
+		// canceled request as a connection error without preserving
+		// context.Canceled, so the authoritative signal is the caller context.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, context.Cause(ctx)
 		}
 		failureCode, publicMessage := classifyGenerationFailure(err)
 		failed := cloneChangeSet(changeSet)
