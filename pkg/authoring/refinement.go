@@ -276,6 +276,7 @@ func validateCapabilitySourceScopeFulfillment(candidate *WorkforceCandidate, req
 		if requirement == nil || len(requirement.MaterializationInputKeys) == 0 || !exists {
 			continue
 		}
+		need = selectedCapabilityNeed(need, answered)
 		if !capabilitySourceScopeMaterialized(candidate, need, answer.Items, requirement.MaterializationInputKeys) {
 			issues = append(issues, issue("objectives.cadence.runTemplate.capability.inputs", "source_scope_not_materialized", "Every answered source target must be present in a durable capability action input"))
 		}
@@ -291,9 +292,8 @@ func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need Capab
 	allowedSkills := stringSet(need.SkillIDs)
 	allowedKeys := stringSet(inputKeys)
 	found := make(map[string]bool, len(targets))
-	for _, objective := range candidateObjectiveTemplates(candidate) {
-		runTemplate, _ := objective.Cadence["runTemplate"].(map[string]interface{})
-		invocation, _ := runTemplate["capability"].(map[string]interface{})
+	for _, candidateInvocation := range candidateObjectiveCapabilityInvocations(candidate) {
+		invocation := candidateInvocation.invocation
 		skillID, _ := invocation["skillId"].(string)
 		if !allowedSkills[strings.TrimSpace(skillID)] {
 			continue
