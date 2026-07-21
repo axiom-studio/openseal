@@ -1446,7 +1446,7 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	if len(fake.authoringRequests) != 1 || fake.authoringRequests[0].Catalog.Skills != nil {
 		t.Fatalf("authoring requests = %#v", fake.authoringRequests)
 	}
-	for _, expected := range []string{"Research Team", "1 Agents", "Which sources are authorized?", "Nothing is active"} {
+	for _, expected := range []string{"Research Team", "Activation intent · active", "1 Agents", "Which sources are authorized?", "Nothing is active"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("authoring preview missing %q:\n%s", expected, view)
 		}
@@ -1617,12 +1617,12 @@ func TestParseRefinementAnswerUsesOnlyAdvertisedTypedChoices(t *testing.T) {
 func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
 	evaluation := authoring.ChangeSetEvaluation{ID: "evaluation-1", Allowed: true, ApprovalRequirements: []authoring.ChangeSetApprovalRequirement{{PolicyID: "production", Role: "operator", Count: 1}, {PolicyID: "outreach", Role: "reviewer", Count: 1}}}
-	awaiting := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetAwaitingApproval, Revision: 2, CandidateDigest: "digest-1", Evaluations: []authoring.ChangeSetEvaluation{evaluation}, Result: authoring.CompileResult{Valid: true}}
+	awaiting := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetAwaitingApproval, Revision: 2, CandidateDigest: "digest-1", Evaluations: []authoring.ChangeSetEvaluation{evaluation}, Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{Activation: authoring.WorkforceActivationInactive}}}
 	ready := *awaiting
 	ready.Status, ready.Revision = authoring.ChangeSetReady, 3
 	applied := ready
 	applied.Status, applied.Revision = authoring.ChangeSetApplied, 4
-	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-1", CandidateDigest: ready.CandidateDigest, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "user", ID: "server-operator"}, AppliedAt: time.Now(), Resources: []authoring.AppliedResourceReference{{Kind: "agent_definition", ID: "researcher", Version: "1"}, {Kind: "team_deployment", ID: "research-live", Revision: 1}}}
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-1", CandidateDigest: ready.CandidateDigest, Activation: authoring.WorkforceActivationInactive, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "user", ID: "server-operator"}, AppliedAt: time.Now(), Resources: []authoring.AppliedResourceReference{{Kind: "agent_definition", ID: "researcher", Version: "1"}, {Kind: "team_deployment", ID: "research-live", Revision: 1}}}
 	approvalCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
 	approvalCapability.Operations = append(approvalCapability.Operations, kernelapi.OperationApprove)
 	approvalCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: awaiting.ID, Revision: awaiting.Revision, EligibleApprovalRequirements: []kernelapi.ApprovalRequirementReference{
@@ -1672,7 +1672,7 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 	if len(fake.applyRequests) != 1 || fake.applyRequests[0].ExpectedRevision != ready.Revision || fake.applyRequests[0].CandidateDigest != ready.CandidateDigest || fake.applyRequests[0].Reason != "Create the reviewed workforce" || fake.applyKeys[0] == "" {
 		t.Fatalf("Apply requests=%#v keys=%#v", fake.applyRequests, fake.applyKeys)
 	}
-	if !strings.Contains(model.View(), "Created atomically") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") {
+	if !strings.Contains(model.View(), "Created atomically · inactive") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") || !strings.Contains(model.View(), "remain inactive") {
 		t.Fatalf("Apply receipt was not rendered:\n%s", model.View())
 	}
 }
