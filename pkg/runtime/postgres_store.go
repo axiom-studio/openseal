@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/executor"
@@ -17,19 +18,52 @@ import (
 const defaultPostgresSchema = "openseal"
 
 const (
-	defaultPostgresMaxOpenConnections = 16
-	defaultPostgresMaxIdleConnections = 4
-	defaultPostgresConnectionLifetime = 30 * time.Minute
-	defaultPostgresConnectionIdleTime = 5 * time.Minute
+	defaultPostgresMaxOpenConnections        = 16
+	defaultPostgresMaxIdleConnections        = 4
+	defaultPostgresConnectionLifetime        = 30 * time.Minute
+	defaultPostgresConnectionIdleTime        = 5 * time.Minute
+	defaultPostgresMigrationLockTimeout      = 20 * time.Second
+	defaultPostgresMigrationLockPollInterval = 100 * time.Millisecond
 )
 
 var postgresIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
 
+var ErrPostgresMigrationLockTimeout = errors.New("PostgreSQL migration lock wait timed out")
+
+type PostgresMigrationPhase string
+
+const (
+	PostgresMigrationWaiting  PostgresMigrationPhase = "waiting"
+	PostgresMigrationAcquired PostgresMigrationPhase = "acquired"
+	PostgresMigrationComplete PostgresMigrationPhase = "complete"
+	PostgresMigrationTimeout  PostgresMigrationPhase = "timeout"
+)
+
+// PostgresMigrationEvent is a credential-free lifecycle projection suitable
+// for host logs and metrics. It intentionally excludes the DSN and schema.
+type PostgresMigrationEvent struct {
+	Phase         PostgresMigrationPhase
+	WaitDuration  time.Duration
+	TotalDuration time.Duration
+	SchemaVersion int64
+}
+
+type PostgresMigrationObserver func(PostgresMigrationEvent)
+
+type PostgresMigrationStats struct {
+	WaitDuration  time.Duration
+	TotalDuration time.Duration
+	SchemaVersion int64
+}
+
 type PostgresStoreOption func(*postgresStoreConfig) error
 
 type postgresStoreConfig struct {
-	schema string
-	pool   PostgresPoolConfig
+	schema                    string
+	pool                      PostgresPoolConfig
+	migrationLockTimeout      time.Duration
+	migrationLockPollInterval time.Duration
+	migrationObserver         PostgresMigrationObserver
 }
 
 // PostgresPoolConfig bounds the process-local database/sql pool. OpenSeal
@@ -102,11 +136,42 @@ func WithPostgresSchema(schema string) PostgresStoreOption {
 	}
 }
 
+// WithPostgresMigrationLock bounds database-native migration leadership
+// election. Every process opening the same schema waits on the same PostgreSQL
+// advisory lock, so only one process can execute DDL at a time.
+func WithPostgresMigrationLock(timeout, pollInterval time.Duration) PostgresStoreOption {
+	return func(config *postgresStoreConfig) error {
+		if timeout <= 0 || timeout > 10*time.Minute {
+			return errors.New("PostgreSQL migration lock timeout must be between zero and ten minutes")
+		}
+		if pollInterval <= 0 || pollInterval > timeout {
+			return errors.New("PostgreSQL migration lock poll interval must be positive and no greater than the timeout")
+		}
+		config.migrationLockTimeout = timeout
+		config.migrationLockPollInterval = pollInterval
+		return nil
+	}
+}
+
+// WithPostgresMigrationObserver projects migration leadership without making
+// a logging or telemetry implementation part of the OpenSeal kernel.
+func WithPostgresMigrationObserver(observer PostgresMigrationObserver) PostgresStoreOption {
+	return func(config *postgresStoreConfig) error {
+		config.migrationObserver = observer
+		return nil
+	}
+}
+
 // PostgresStore is the shared, horizontally safe OpenSeal persistence adapter.
 // Additional kernel contracts are implemented on this type in focused slices.
 type PostgresStore struct {
-	db     *sql.DB
-	schema string
+	db                        *sql.DB
+	schema                    string
+	migrationLockTimeout      time.Duration
+	migrationLockPollInterval time.Duration
+	migrationObserver         PostgresMigrationObserver
+	migrationMu               sync.RWMutex
+	migrationStats            PostgresMigrationStats
 }
 
 var _ KernelStore = (*PostgresStore)(nil)
@@ -116,7 +181,11 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("PostgreSQL DSN is required")
 	}
-	config := postgresStoreConfig{schema: defaultPostgresSchema, pool: DefaultPostgresPoolConfig()}
+	config := postgresStoreConfig{
+		schema: defaultPostgresSchema, pool: DefaultPostgresPoolConfig(),
+		migrationLockTimeout:      defaultPostgresMigrationLockTimeout,
+		migrationLockPollInterval: defaultPostgresMigrationLockPollInterval,
+	}
 	for _, option := range options {
 		if option == nil {
 			continue
@@ -133,7 +202,12 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	db.SetMaxIdleConns(config.pool.MaxIdleConnections)
 	db.SetConnMaxLifetime(config.pool.ConnectionLifetime)
 	db.SetConnMaxIdleTime(config.pool.ConnectionIdleTime)
-	store := &PostgresStore{db: db, schema: config.schema}
+	store := &PostgresStore{
+		db: db, schema: config.schema,
+		migrationLockTimeout:      config.migrationLockTimeout,
+		migrationLockPollInterval: config.migrationLockPollInterval,
+		migrationObserver:         config.migrationObserver,
+	}
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("connect PostgreSQL: %w", err)
@@ -143,6 +217,15 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 		return nil, fmt.Errorf("migrate PostgreSQL: %w", err)
 	}
 	return store, nil
+}
+
+func (s *PostgresStore) MigrationStats() PostgresMigrationStats {
+	if s == nil {
+		return PostgresMigrationStats{}
+	}
+	s.migrationMu.RLock()
+	defer s.migrationMu.RUnlock()
+	return s.migrationStats
 }
 
 func (s *PostgresStore) PoolStats() PostgresPoolStats {
@@ -164,12 +247,14 @@ func (s *PostgresStore) PoolStats() PostgresPoolStats {
 }
 
 func (s *PostgresStore) migrate(ctx context.Context) error {
+	startedAt := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:migrate:"+s.schema); err != nil {
+	waitDuration, err := s.acquireMigrationLock(ctx, tx)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+s.quotedSchema()); err != nil {
@@ -264,7 +349,70 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateSourceQualifiedSkillVariants(ctx, tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	var schemaVersion int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	stats := PostgresMigrationStats{WaitDuration: waitDuration, TotalDuration: time.Since(startedAt), SchemaVersion: schemaVersion}
+	s.migrationMu.Lock()
+	s.migrationStats = stats
+	s.migrationMu.Unlock()
+	s.observeMigration(PostgresMigrationEvent{Phase: PostgresMigrationComplete, WaitDuration: stats.WaitDuration, TotalDuration: stats.TotalDuration, SchemaVersion: stats.SchemaVersion})
+	return nil
+}
+
+func (s *PostgresStore) acquireMigrationLock(ctx context.Context, tx *sql.Tx) (time.Duration, error) {
+	startedAt := time.Now()
+	lockContext, cancel := context.WithTimeout(ctx, s.migrationLockTimeout)
+	defer cancel()
+	waitingReported := false
+	for {
+		var acquired bool
+		if err := tx.QueryRowContext(lockContext, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, "openseal:migrate:"+s.schema).Scan(&acquired); err != nil {
+			if errors.Is(lockContext.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				waited := time.Since(startedAt)
+				s.observeMigration(PostgresMigrationEvent{Phase: PostgresMigrationTimeout, WaitDuration: waited})
+				return waited, fmt.Errorf("%w after %s", ErrPostgresMigrationLockTimeout, waited.Round(time.Millisecond))
+			}
+			return time.Since(startedAt), err
+		}
+		if acquired {
+			waited := time.Since(startedAt)
+			s.observeMigration(PostgresMigrationEvent{Phase: PostgresMigrationAcquired, WaitDuration: waited})
+			return waited, nil
+		}
+		if !waitingReported {
+			waitingReported = true
+			s.observeMigration(PostgresMigrationEvent{Phase: PostgresMigrationWaiting})
+		}
+		timer := time.NewTimer(s.migrationLockPollInterval)
+		select {
+		case <-lockContext.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			waited := time.Since(startedAt)
+			if errors.Is(lockContext.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				s.observeMigration(PostgresMigrationEvent{Phase: PostgresMigrationTimeout, WaitDuration: waited})
+				return waited, fmt.Errorf("%w after %s", ErrPostgresMigrationLockTimeout, waited.Round(time.Millisecond))
+			}
+			return waited, lockContext.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *PostgresStore) observeMigration(event PostgresMigrationEvent) {
+	if s == nil || s.migrationObserver == nil {
+		return
+	}
+	func() {
+		defer func() { _ = recover() }()
+		s.migrationObserver(event)
+	}()
 }
 
 func (s *PostgresStore) CreateRun(ctx context.Context, workflow WorkflowEntry, triggerData map[string]interface{}) (int, error) {

@@ -38,6 +38,21 @@ func TestDefaultPostgresPoolConfigIsBounded(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreRejectsInvalidMigrationLockBudgetsBeforeConnecting(t *testing.T) {
+	tests := [][2]time.Duration{
+		{0, time.Millisecond},
+		{11 * time.Minute, time.Millisecond},
+		{time.Second, 0},
+		{time.Second, 2 * time.Second},
+	}
+	for _, budget := range tests {
+		_, err := NewPostgresStore(context.Background(), "postgres://unused", WithPostgresMigrationLock(budget[0], budget[1]))
+		if err == nil || !strings.Contains(err.Error(), "migration lock") {
+			t.Fatalf("budget=%v error=%v", budget, err)
+		}
+	}
+}
+
 func TestPostgresMigrationRollbackRejectsInvalidTarget(t *testing.T) {
 	store := &PostgresStore{}
 	if err := store.RollbackPostgresMigrations(context.Background(), currentPostgresSchemaVersion+1); err == nil {

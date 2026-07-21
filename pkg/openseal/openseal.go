@@ -954,6 +954,19 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...runtime.Postgr
 	return runtime.NewPostgresStore(ctx, dsn, options...)
 }
 
+type PostgresMigrationEvent = runtime.PostgresMigrationEvent
+type PostgresMigrationPhase = runtime.PostgresMigrationPhase
+type PostgresMigrationStats = runtime.PostgresMigrationStats
+
+const (
+	PostgresMigrationWaiting  = runtime.PostgresMigrationWaiting
+	PostgresMigrationAcquired = runtime.PostgresMigrationAcquired
+	PostgresMigrationComplete = runtime.PostgresMigrationComplete
+	PostgresMigrationTimeout  = runtime.PostgresMigrationTimeout
+)
+
+var ErrPostgresMigrationLockTimeout = runtime.ErrPostgresMigrationLockTimeout
+
 // NewSQLiteStore opens the standalone durable kernel store.
 func NewSQLiteStore(path string) (*runtime.SQLiteStore, error) {
 	return runtime.NewSQLiteStore(path)
@@ -969,6 +982,14 @@ func DefaultPostgresPoolConfig() runtime.PostgresPoolConfig {
 
 func WithPostgresPool(pool runtime.PostgresPoolConfig) runtime.PostgresStoreOption {
 	return runtime.WithPostgresPool(pool)
+}
+
+func WithPostgresMigrationLock(timeout, pollInterval time.Duration) runtime.PostgresStoreOption {
+	return runtime.WithPostgresMigrationLock(timeout, pollInterval)
+}
+
+func WithPostgresMigrationObserver(observer runtime.PostgresMigrationObserver) runtime.PostgresStoreOption {
+	return runtime.WithPostgresMigrationObserver(observer)
 }
 
 func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilation, error) {
