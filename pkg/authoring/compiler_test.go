@@ -359,6 +359,42 @@ func TestCompilerNormalizesOnlyCanonicalRefinementBlockingShorthand(t *testing.T
 	}
 }
 
+func TestCompilerNormalizesOnlyCanonicalRefinementDependencyShorthand(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":["apply"],"answer":{"kind":"string_list"},"provenance":[{"kind":"prompt"}],"priority":100},{"id":"analysis-skill","category":"skill","prompt":"Which Skill should analyze the evidence?","whyNeeded":"Analysis requires an authorized Skill.","blocking":["apply"],"answer":{"kind":"skill_selection","options":[{"id":"reddit-research","label":"Reddit research"}]},"dependsOn":["communities"],"provenance":[{"kind":"catalog"}],"priority":90}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || result == nil || len(result.UnresolvedQuestions) != 2 {
+		t.Fatalf("normalized dependency result = %#v, err = %v", result, err)
+	}
+	if got := result.UnresolvedQuestions[1].DependsOn; len(got) != 1 || got[0].QuestionID != "communities" || len(got[0].RequiredOptionIDs) != 0 {
+		t.Fatalf("dependency shorthand = %#v", got)
+	}
+
+	// Conversion does not make an invented reference authoritative: the normal
+	// dependency validator must still reject it.
+	missing := bytes.Replace(payload, []byte(`"dependsOn":["communities"]`), []byte(`"dependsOn":["invented"]`), 1)
+	strict, _ := NewCompiler(staticGenerator{payload: missing})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"}); err == nil || !strings.Contains(err.Error(), "invalid dependency") {
+		t.Fatalf("invented dependency shorthand must fail closed, got %v", err)
+	}
+
+	// Whitespace changes the identifier and is not an exact shorthand.
+	malformed := bytes.Replace(payload, []byte(`"dependsOn":["communities"]`), []byte(`"dependsOn":[" communities "]`), 1)
+	strict, _ = NewCompiler(staticGenerator{payload: malformed})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"}); err == nil || !strings.Contains(err.Error(), "dependsOn") {
+		t.Fatalf("ambiguous dependency shorthand must remain strict, got %v", err)
+	}
+}
+
 func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	payload, err := json.Marshal(GenerationResponse{
