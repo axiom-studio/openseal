@@ -121,6 +121,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 		applyActivationCommitment(&generated.Candidate, commitments)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+		validation = append(validation, validateAnsweredCapabilityNeeds(&generated.Candidate, request)...)
 		validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
 		validation = append(validation, validateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
@@ -171,6 +172,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
+	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, request)...)
 	result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
 	result.Validation = append(result.Validation, validateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)

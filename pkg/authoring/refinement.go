@@ -94,7 +94,7 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 	activeIDs := make(map[string]bool, len(request.Catalog.CapabilityNeeds))
 	for _, need := range request.Catalog.CapabilityNeeds {
 		questionID := CapabilityNeedQuestionID(need.ID)
-		if _, exists := answered[questionID]; exists || len(need.SkillIDs) < 2 && !need.ChoiceRequired {
+		if _, exists := answered[questionID]; exists || !need.ChoiceRequired && candidateSatisfiesCapabilityNeed(&generated.Candidate, need, request.Catalog) {
 			continue
 		}
 		options := make([]RefinementQuestionOption, 0, len(need.SkillIDs))
@@ -139,6 +139,10 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 		for _, dependency := range question.DependsOn {
 			value, exists := answered[strings.TrimSpace(dependency.QuestionID)]
 			if !exists {
+				if need := capabilityNeedForQuestionID(request.Catalog.CapabilityNeeds, dependency.QuestionID); need != nil &&
+					candidateSatisfiesCapabilityNeed(&generated.Candidate, *need, request.Catalog) {
+					continue
+				}
 				dependencies = append(dependencies, dependency)
 				continue
 			}
@@ -189,6 +193,63 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 		})
 	}
 	generated.UnresolvedQuestions = questions
+}
+
+func capabilityNeedForQuestionID(needs []CapabilityNeed, questionID string) *CapabilityNeed {
+	for index := range needs {
+		if CapabilityNeedQuestionID(needs[index].ID) == strings.TrimSpace(questionID) {
+			return &needs[index]
+		}
+	}
+	return nil
+}
+
+func candidateSatisfiesCapabilityNeed(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) bool {
+	if candidate == nil {
+		return false
+	}
+	allowed := stringSet(need.SkillIDs)
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		for _, requirement := range definition.SkillRequirements {
+			if !allowed[requirement.SkillID] {
+				continue
+			}
+			available, exists := catalog.Skills[requirement.SkillID]
+			if exists && strings.TrimSpace(requirement.VersionConstraint) == strings.TrimSpace(available.Version) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validateAnsweredCapabilityNeeds(candidate *WorkforceCandidate, request GenerateRequest) []ValidationIssue {
+	if request.Refinement == nil {
+		return nil
+	}
+	answered := make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
+	for _, answer := range request.Refinement.Answers {
+		answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
+	}
+	issues := make([]ValidationIssue, 0)
+	for _, need := range request.Catalog.CapabilityNeeds {
+		answer, exists := answered[CapabilityNeedQuestionID(need.ID)]
+		if !exists {
+			continue
+		}
+		selected := need
+		if len(answer.SkillIDs) > 0 {
+			selected.SkillIDs = append([]string(nil), answer.SkillIDs...)
+		}
+		if candidateSatisfiesCapabilityNeed(candidate, selected, request.Catalog) {
+			continue
+		}
+		issues = append(issues, issue("agents.skillRequirements", "capability_need_not_materialized", fmt.Sprintf("Answered capability need %s must be bound as an exact Agent Skill requirement", need.ID)))
+	}
+	return issues
 }
 
 func capabilityNeedsHaveSourceScope(needs []CapabilityNeed) bool {

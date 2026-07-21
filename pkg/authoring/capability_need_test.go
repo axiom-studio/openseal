@@ -125,9 +125,25 @@ func TestCapabilityNeedAnswerSurvivesRecompileAndUnlocksScope(t *testing.T) {
 	}
 }
 
-func TestCapabilityNeedOnlyAsksForOneChoiceWhenHostRequiresIt(t *testing.T) {
+func TestCapabilityNeedAcceptsOneCandidateOnlyWhenCandidateBindsItExactly(t *testing.T) {
 	payload := capabilityNeedPayload(t)
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	missing, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Monitor RSS", Catalog: capabilityNeedCatalog(false, "openseal.source"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing.UnresolvedQuestions) != 2 || missing.UnresolvedQuestions[0].ID != CapabilityNeedQuestionID("reddit-access") {
+		t.Fatalf("unbound single Skill did not produce a choice = %#v", missing.UnresolvedQuestions)
+	}
+	boundResponse := GenerationResponse{Candidate: capabilityNeedCandidate(), UnresolvedQuestions: []RefinementQuestion{missing.UnresolvedQuestions[1]}}
+	boundResponse.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "openseal.source", VersionConstraint: "1.0.0"}}
+	boundPayload, err := json.Marshal(boundResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ = NewCompiler(staticGenerator{payload: boundPayload})
 	implicit, err := compiler.Compile(context.Background(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Monitor RSS", Catalog: capabilityNeedCatalog(false, "openseal.source"),
 	})
@@ -135,7 +151,7 @@ func TestCapabilityNeedOnlyAsksForOneChoiceWhenHostRequiresIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(implicit.UnresolvedQuestions) != 1 || implicit.UnresolvedQuestions[0].ID != "subreddits" {
-		t.Fatalf("single unambiguous Skill produced a choice = %#v", implicit.UnresolvedQuestions)
+		t.Fatalf("exactly bound single Skill still produced a choice = %#v", implicit.UnresolvedQuestions)
 	}
 	explicit, err := compiler.Compile(context.Background(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Let me choose the source", Catalog: capabilityNeedCatalog(true, "openseal.source"),
@@ -145,6 +161,58 @@ func TestCapabilityNeedOnlyAsksForOneChoiceWhenHostRequiresIt(t *testing.T) {
 	}
 	if len(explicit.UnresolvedQuestions) != 2 || explicit.UnresolvedQuestions[0].ID != CapabilityNeedQuestionID("reddit-access") {
 		t.Fatalf("explicit server choice = %#v", explicit.UnresolvedQuestions)
+	}
+}
+
+func TestAnsweredCapabilityNeedCannotDisappearWithoutExactAgentRequirement(t *testing.T) {
+	catalog := capabilityNeedCatalog(false, "reddit-post-search")
+	payload, err := json.Marshal(GenerationResponse{Candidate: capabilityNeedCandidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Analyze Reddit", Catalog: catalog,
+		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: CapabilityNeedQuestionID("reddit-access"), Value: RefinementProviderAnswerValue{SkillIDs: []string{"reddit-post-search"}}, Source: RefinementAnswerSourceUser,
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range result.Validation {
+		found = found || issue.Code == "capability_need_not_materialized"
+	}
+	if !found || result.Valid {
+		t.Fatalf("answered but unbound need did not fail closed: valid=%v validation=%#v", result.Valid, result.Validation)
+	}
+}
+
+func TestAnsweredCapabilityNeedRequiresTheSelectedSkill(t *testing.T) {
+	catalog := capabilityNeedCatalog(false, "openseal.source", "reddit-post-search")
+	candidate := capabilityNeedCandidate()
+	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "openseal.source", VersionConstraint: "1.0.0"}}
+	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Analyze Reddit", Catalog: catalog,
+		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: CapabilityNeedQuestionID("reddit-access"), Value: RefinementProviderAnswerValue{SkillIDs: []string{"reddit-post-search"}}, Source: RefinementAnswerSourceUser,
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range result.Validation {
+		found = found || issue.Code == "capability_need_not_materialized"
+	}
+	if !found || result.Valid {
+		t.Fatalf("a different need Skill was accepted instead of the selected Skill: valid=%v validation=%#v", result.Valid, result.Validation)
 	}
 }
 
@@ -219,7 +287,9 @@ func TestAnsweredSourceScopeCannotProduceCandidateWithoutMaterializedAction(t *t
 		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
 		Minimum: 1, Maximum: 20, Priority: 950, MaterializationInputKeys: []string{"subreddits", "query", "url"},
 	}
-	payload, err := json.Marshal(GenerationResponse{Candidate: capabilityNeedCandidate()})
+	boundCandidate := capabilityNeedCandidate()
+	boundCandidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "openseal.source", VersionConstraint: "1.0.0"}}
+	payload, err := json.Marshal(GenerationResponse{Candidate: boundCandidate})
 	if err != nil {
 		t.Fatal(err)
 	}
