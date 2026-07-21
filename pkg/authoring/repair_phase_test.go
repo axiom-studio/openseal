@@ -60,6 +60,36 @@ func TestCompilerRevalidatesAndRepairsStillInvalidSemanticResponse(t *testing.T)
 	}
 }
 
+func TestCompilerRepairsPlaintextCredentialQuestionIntoVaultReference(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	invalidQuestion := RefinementQuestion{
+		ID: "reddit-credential", Category: RefinementCategoryCredential,
+		Prompt: "Provide the Reddit API client secret.", WhyNeeded: "Reddit access requires authorization.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksApply},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerText},
+		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}},
+	}
+	validQuestion := invalidQuestion
+	validQuestion.Prompt = "Which authorized Reddit credential should be bound from Vault?"
+	validQuestion.Answer.Kind = RefinementAnswerCredentialReference
+	semanticInvalid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{invalidQuestion}})
+	semanticValid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{validQuestion}})
+	generator := &repairingGenerator{generated: semanticInvalid, repairSequence: [][]byte{semanticValid}}
+	compiler, _ := NewCompiler(generator)
+
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a Reddit research Agent.", InvocationKey: "change-set:credential:0",
+		Catalog: repairPhaseCatalog(),
+	})
+	if err != nil || generator.repairs != 1 || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	question := result.UnresolvedQuestions[0]
+	if question.Answer.Kind != RefinementAnswerCredentialReference || strings.Contains(strings.ToLower(question.Prompt), "secret") {
+		t.Fatalf("credential question=%#v", question)
+	}
+}
+
 func TestCompilerRejectsQuestionThatFailsBoundedContractRepairBeforePersistence(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	invalidQuestion := repairPhaseSkillQuestion("")
