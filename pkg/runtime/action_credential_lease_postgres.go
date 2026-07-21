@@ -161,15 +161,6 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	return tx.Commit()
 }
 
-func digestActionCredentialFields(fields []ActionCredentialFieldReference) (string, error) {
-	payload, err := json.Marshal(cloneActionCredentialFieldReferences(fields))
-	if err != nil {
-		return "", err
-	}
-	digest := sha256.Sum256(payload)
-	return hex.EncodeToString(digest[:]), nil
-}
-
 func digestActionCredentialFieldSelection(fields map[string][]string) (string, error) {
 	type fieldSelection struct {
 		Name   string   `json:"name"`
