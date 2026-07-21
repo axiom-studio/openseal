@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/httpaction"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/progression"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -121,6 +122,16 @@ type (
 	SubmitTeamAmendmentEvaluationRequest      = kernelteam.SubmitAmendmentEvaluationRequest
 	ResolveTeamAmendmentRequest               = kernelteam.ResolveAmendmentRequest
 	TeamRegistryStore                         = kernelteam.Store
+	AuthorityProgressionOwnerKind             = progression.OwnerKind
+	AuthorityProgressionDirection             = progression.Direction
+	AuthorityProgressionCriterionOutcome      = progression.CriterionOutcome
+	AuthorityProgressionEvaluationPolicy      = progression.EvaluationPolicy
+	AuthorityProgressionEvaluationRequest     = progression.EvaluationRequest
+	AuthorityProgressionRecommendation        = progression.Recommendation
+	AgentAuthorityProgressionCeiling          = progression.AgentPolicyCeiling
+	TeamAuthorityProgressionCeiling           = progression.TeamPolicyCeiling
+	ProposeAgentAuthorityProgressionRequest   = progression.ProposeAgentRequest
+	ProposeTeamAuthorityProgressionRequest    = progression.ProposeTeamRequest
 	WorkforceSharedContextPolicy              = workforce.SharedContextPolicy
 	WorkforceObjectiveTemplate                = workforce.ObjectiveTemplate
 	WorkforceEvaluationCriterion              = workforce.EvaluationCriterion
@@ -1185,6 +1196,11 @@ const (
 	TeamAmendmentRejected             = kernelteam.AmendmentRejected
 	TeamAmendmentEvaluationFailed     = kernelteam.AmendmentEvaluationFailed
 	TeamAmendmentActivated            = kernelteam.AmendmentActivated
+	AuthorityProgressionOwnerAgent    = progression.OwnerAgent
+	AuthorityProgressionOwnerTeam     = progression.OwnerTeam
+	AuthorityProgressionPromote       = progression.DirectionPromote
+	AuthorityProgressionNoChange      = progression.DirectionNoChange
+	AuthorityProgressionRegress       = progression.DirectionRegress
 
 	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
 	AgentRunOrderScheduler             = runtime.AgentRunOrderScheduler
@@ -1449,6 +1465,10 @@ var (
 	ErrOutreachThreadIdempotency     = runtime.ErrOutreachThreadIdempotency
 	ErrInvalidOutreachThread         = runtime.ErrInvalidOutreachThread
 	ErrInvalidObjectiveEventRules    = runtime.ErrInvalidObjectiveEventRules
+	ErrInvalidAuthorityEvaluation    = progression.ErrInvalidEvaluation
+	ErrAuthorityPolicyCeiling        = progression.ErrPolicyCeiling
+	ErrAuthorityRecommendationStale  = progression.ErrRecommendationStale
+	ErrAuthorityProgressionNoChange  = progression.ErrNoChange
 )
 
 // Engine is the primary entry point for OpenSeal.
@@ -1505,6 +1525,7 @@ type Engine struct {
 	skills                        *skill.Catalog
 	agents                        *kernelagent.Registry
 	teams                         *kernelteam.Registry
+	progression                   *progression.Service
 	authoring                     *authoring.Compiler
 	authoringChanges              *authoring.ChangeSetService
 	authoringRuns                 *runtime.WorkforceAuthoringRunService
@@ -1596,6 +1617,7 @@ func New(opts ...Option) (*Engine, error) {
 		approvalAuth:        runtime.EligibleApprovalAuthorizer{},
 		logger:              sugar,
 	}
+	e.progression = progression.NewService(e.agents, e.teams)
 
 	for _, opt := range opts {
 		if err := opt(e); err != nil {
@@ -1842,6 +1864,7 @@ func WithStore(store runtime.KernelStore) Option {
 		if teamStore, ok := store.(kernelteam.Store); ok && e.agents != nil {
 			e.teams = kernelteam.NewRegistryWithStore(teamStore, e.agents)
 		}
+		e.progression = progression.NewService(e.agents, e.teams)
 		if skillStore, ok := store.(skill.CatalogStore); ok {
 			e.skills = skill.NewCatalogWithStore(skillStore)
 		}
@@ -3260,6 +3283,12 @@ func ValidateSkillPreparedRuntimeReference(runtime *skill.PreparedRuntime) error
 	return skill.ValidatePreparedRuntimeReference(runtime)
 }
 
+// EvaluateAuthorityProgression exposes the portable pure evaluator for hosts
+// that already resolved an exact deployment revision and immutable base.
+func EvaluateAuthorityProgression(request progression.EvaluationRequest) (*progression.Recommendation, error) {
+	return progression.Evaluate(request)
+}
+
 func (e *Engine) RegisterAgentDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) (*kernelagent.AgentDefinition, error) {
 	return e.agents.RegisterDefinition(ctx, definition)
 }
@@ -3334,6 +3363,24 @@ func (e *Engine) ResolveAgentDefinitionAmendment(ctx context.Context, request ke
 
 func (e *Engine) ActivateAgentDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.DefinitionAmendment, *kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	return e.agents.ActivateAmendment(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason)
+}
+
+// RecommendAgentAuthority deterministically evaluates retained outcomes
+// against the currently active immutable Agent definition. It creates no
+// authority; callers must separately submit the recommendation as a governed
+// amendment proposal.
+func (e *Engine) RecommendAgentAuthority(ctx context.Context, scope skill.ScopeReference, deploymentID string, expectedRevision int64, policy progression.EvaluationPolicy, outcomes []progression.CriterionOutcome) (*progression.Recommendation, error) {
+	if e == nil || e.progression == nil {
+		return nil, errors.New("authority progression is not configured")
+	}
+	return e.progression.RecommendAgent(ctx, scope, deploymentID, expectedRevision, policy, outcomes)
+}
+
+func (e *Engine) ProposeAgentAuthorityProgression(ctx context.Context, request progression.ProposeAgentRequest) (*kernelagent.DefinitionAmendment, error) {
+	if e == nil || e.progression == nil {
+		return nil, errors.New("authority progression is not configured")
+	}
+	return e.progression.ProposeAgent(ctx, request)
 }
 
 func (e *Engine) RegisterTeamDefinition(ctx context.Context, definition *kernelteam.Definition) (*kernelteam.Definition, error) {
@@ -3498,6 +3545,22 @@ func (e *Engine) ResolveTeamDefinitionAmendment(ctx context.Context, request ker
 
 func (e *Engine) ActivateTeamDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.DefinitionAmendment, *kernelteam.Deployment, *workforce.DefinitionActivation, error) {
 	return e.teams.ActivateAmendment(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason)
+}
+
+// RecommendTeamAuthority is the Team peer of RecommendAgentAuthority and uses
+// the same evidence, policy, CAS, and deterministic recommendation contract.
+func (e *Engine) RecommendTeamAuthority(ctx context.Context, scope skill.ScopeReference, deploymentID string, expectedRevision int64, policy progression.EvaluationPolicy, outcomes []progression.CriterionOutcome) (*progression.Recommendation, error) {
+	if e == nil || e.progression == nil {
+		return nil, errors.New("authority progression is not configured")
+	}
+	return e.progression.RecommendTeam(ctx, scope, deploymentID, expectedRevision, policy, outcomes)
+}
+
+func (e *Engine) ProposeTeamAuthorityProgression(ctx context.Context, request progression.ProposeTeamRequest) (*kernelteam.DefinitionAmendment, error) {
+	if e == nil || e.progression == nil {
+		return nil, errors.New("authority progression is not configured")
+	}
+	return e.progression.ProposeTeam(ctx, request)
 }
 
 func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundAction, input map[string]interface{}) error {

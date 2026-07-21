@@ -40,23 +40,30 @@ type DefinitionAmendment struct {
 	ProposerID   string                    `json:"proposerId"`
 	Rationale    string                    `json:"rationale"`
 	EvidenceRefs []string                  `json:"evidenceRefs,omitempty"`
-	Status       AmendmentStatus           `json:"status"`
-	Evaluations  []AmendmentEvaluation     `json:"evaluations,omitempty"`
-	Decision     *AmendmentDecision        `json:"decision,omitempty"`
-	ActivationID string                    `json:"activationId,omitempty"`
-	Revision     int64                     `json:"revision"`
-	CreatedAt    time.Time                 `json:"createdAt"`
-	UpdatedAt    time.Time                 `json:"updatedAt"`
+	// IdempotencyKey identifies one reviewed proposal command. It is persisted
+	// with the amendment so retries across host or worker restarts cannot create
+	// duplicate governance work.
+	IdempotencyKey string                `json:"idempotencyKey,omitempty"`
+	RequestDigest  string                `json:"requestDigest,omitempty"`
+	Status         AmendmentStatus       `json:"status"`
+	Evaluations    []AmendmentEvaluation `json:"evaluations,omitempty"`
+	Decision       *AmendmentDecision    `json:"decision,omitempty"`
+	ActivationID   string                `json:"activationId,omitempty"`
+	Revision       int64                 `json:"revision"`
+	CreatedAt      time.Time             `json:"createdAt"`
+	UpdatedAt      time.Time             `json:"updatedAt"`
 }
 
 type ProposeAmendmentRequest struct {
-	Scope        capability.ScopeReference `json:"scope"`
-	DeploymentID string                    `json:"deploymentId"`
-	Candidate    *Definition               `json:"candidate"`
-	ProposerType string                    `json:"proposerType"`
-	ProposerID   string                    `json:"proposerId"`
-	Rationale    string                    `json:"rationale"`
-	EvidenceRefs []string                  `json:"evidenceRefs,omitempty"`
+	Scope                      capability.ScopeReference `json:"scope"`
+	DeploymentID               string                    `json:"deploymentId"`
+	Candidate                  *Definition               `json:"candidate"`
+	ProposerType               string                    `json:"proposerType"`
+	ProposerID                 string                    `json:"proposerId"`
+	Rationale                  string                    `json:"rationale"`
+	EvidenceRefs               []string                  `json:"evidenceRefs,omitempty"`
+	IdempotencyKey             string                    `json:"idempotencyKey,omitempty"`
+	ExpectedDeploymentRevision int64                     `json:"expectedDeploymentRevision,omitempty"`
 }
 
 type SubmitAmendmentEvaluationRequest struct {

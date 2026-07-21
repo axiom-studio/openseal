@@ -22,6 +22,7 @@ var (
 	ErrCompilationNotFound  = errors.New("agent definition compilation not found")
 	ErrCompilationImmutable = errors.New("agent definition compilation is immutable")
 	ErrRevisionConflict     = errors.New("agent deployment revision conflict")
+	ErrIdempotencyConflict  = errors.New("agent amendment idempotency key was already used for a different proposal")
 )
 
 type Registry struct {
@@ -299,6 +300,9 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	if err != nil {
 		return nil, err
 	}
+	if req.ExpectedDeploymentRevision > 0 && deployment.Revision != req.ExpectedDeploymentRevision {
+		return nil, ErrRevisionConflict
+	}
 	base, err := r.store.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil {
 		return nil, err
@@ -316,14 +320,29 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	if candidate.ID != base.ID || candidate.Version == base.Version {
 		return nil, errors.New("amendment candidate must use the same definition id and a new version")
 	}
+	candidate.Provenance.DerivedFrom = base.Digest
+	candidate.Provenance.CreatedBy = strings.TrimSpace(req.ProposerType) + ":" + strings.TrimSpace(req.ProposerID)
+	candidate.Digest = definitionDigest(candidate)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	evidenceRefs := normalizedStrings(req.EvidenceRefs)
+	requestDigest := amendmentRequestDigest(deployment.ID, base.Digest, candidate.Digest, req.ProposerType, req.ProposerID, req.Rationale, evidenceRefs)
+	amendmentID := r.newID()
+	if idempotencyKey != "" {
+		amendmentID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+deployment.ID+"\x00"+idempotencyKey)).String()
+		if existing, lookupErr := r.store.GetAmendment(ctx, req.Scope, amendmentID); lookupErr == nil {
+			if existing.IdempotencyKey != idempotencyKey || existing.RequestDigest != requestDigest {
+				return nil, ErrIdempotencyConflict
+			}
+			return existing, nil
+		} else if !errors.Is(lookupErr, ErrAmendmentNotFound) {
+			return nil, lookupErr
+		}
+	}
 	if existing, lookupErr := r.store.GetDefinition(ctx, candidate.ID, candidate.Version); lookupErr == nil && existing != nil {
 		return nil, errors.New("amendment candidate version already exists")
 	} else if lookupErr != nil && !errors.Is(lookupErr, ErrDefinitionNotFound) {
 		return nil, lookupErr
 	}
-	candidate.Provenance.DerivedFrom = base.Digest
-	candidate.Provenance.CreatedBy = strings.TrimSpace(req.ProposerType) + ":" + strings.TrimSpace(req.ProposerID)
-	candidate.Digest = definitionDigest(candidate)
 	changes := definitionChanges(base, candidate)
 	if len(changes) == 0 {
 		return nil, errors.New("amendment candidate does not change behavior")
@@ -347,18 +366,32 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	}
 	now := r.now().UTC()
 	amendment := &DefinitionAmendment{
-		ID: r.newID(), Scope: req.Scope, DeploymentID: deployment.ID, DefinitionID: base.ID,
+		ID: amendmentID, Scope: req.Scope, DeploymentID: deployment.ID, DefinitionID: base.ID,
 		BaseVersion: base.Version, BaseDigest: base.Digest, Candidate: *candidate, Changes: changes, RiskWidening: riskWidening,
 		ProposerType: strings.TrimSpace(req.ProposerType), ProposerID: strings.TrimSpace(req.ProposerID), Rationale: strings.TrimSpace(req.Rationale),
-		EvidenceRefs: normalizedStrings(req.EvidenceRefs), Status: status, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		EvidenceRefs: evidenceRefs, IdempotencyKey: idempotencyKey, RequestDigest: requestDigest, Status: status, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := amendment.Validate(); err != nil {
 		return nil, err
 	}
 	if err := r.store.CreateAmendment(ctx, amendment); err != nil {
+		if idempotencyKey != "" {
+			if existing, lookupErr := r.store.GetAmendment(ctx, req.Scope, amendmentID); lookupErr == nil && existing.IdempotencyKey == idempotencyKey && existing.RequestDigest == requestDigest {
+				return existing, nil
+			}
+		}
 		return nil, err
 	}
 	return cloneAmendment(amendment), nil
+}
+
+func amendmentRequestDigest(deploymentID, baseDigest, candidateDigest, proposerType, proposerID, rationale string, evidenceRefs []string) string {
+	payload, _ := json.Marshal(struct {
+		DeploymentID, BaseDigest, CandidateDigest, ProposerType, ProposerID, Rationale string
+		EvidenceRefs                                                                   []string
+	}{strings.TrimSpace(deploymentID), strings.TrimSpace(baseDigest), strings.TrimSpace(candidateDigest), strings.TrimSpace(proposerType), strings.TrimSpace(proposerID), strings.TrimSpace(rationale), evidenceRefs})
+	digest := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func (r *Registry) GetAmendment(ctx context.Context, scope capability.ScopeReference, amendmentID string) (*DefinitionAmendment, error) {
