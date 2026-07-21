@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/axiom-studio/openseal/internal/server"
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -1555,9 +1557,6 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 	view := model.View()
 	for _, expected := range []string{
 		"Which available Skills", "Reddit and language analysis?", "Reddit Monitor",
-		"reddit-monitor@2.1.0", "https://clawhub.ai::@acme/", "reddit-monitor", "needs_installation",
-		"Actions: read, search", "Prompt guidance: available", "Maximum risk: read",
-		"REDDIT_API_TOKEN (environment-", "secret; read, search)", "verified compilation", "receipt:sha256:abc123",
 		"Capability availability", "capability_discovery_stale", "newer catalog revision", "language-analysis",
 		"Answered questions", scopeQuestion.Prompt,
 	} {
@@ -1568,6 +1567,30 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 	if strings.Contains(view, credentialQuestion.Prompt) {
 		t.Fatalf("later question was rendered with the ready question:\n%s", view)
 	}
+	for _, terminalWidth := range []int{120, 88} {
+		t.Run(fmt.Sprintf("width_%d", terminalWidth), func(t *testing.T) {
+			model.width = terminalWidth
+			view := model.View()
+			guidance := model.renderRefinementGuidance(skillQuestion, max(model.composerWidth()-8, 24))
+			assertSemanticTextContains(t, guidance,
+				"Exact Skill: reddit-monitor@2.1.0",
+				"Source: https://clawhub.ai::@acme/reddit-monitor",
+				"Readiness: needs_installation",
+				"Actions: read, search",
+				"Prompt guidance: available",
+				"Maximum risk: read",
+				"Credential: REDDIT_API_TOKEN (environment-secret; read, search)",
+				"reddit.read: true — verified compilation",
+				"Evidence reference: receipt:sha256:abc123",
+			)
+			for _, line := range strings.Split(view, "\n") {
+				if rendered := lipgloss.Width(line); rendered > terminalWidth {
+					t.Fatalf("rendered line width %d exceeds terminal width %d: %q", rendered, terminalWidth, line)
+				}
+			}
+		})
+	}
+	model.width = 120
 
 	model.editor.SetValue("Reddit Monitor")
 	applyCommand(t, model, model.submitWorkforceRefinement())
@@ -1581,6 +1604,26 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 	}
 	if model.authoringChangeSet != &evaluating || model.mode != modeWorkforceAuthoring {
 		t.Fatalf("successful refinement did not resume evaluation: change=%#v mode=%v", model.authoringChangeSet, model.mode)
+	}
+}
+
+// assertSemanticTextContains ignores presentation whitespace so responsive
+// line wrapping cannot turn exact capability facts into brittle test fragments.
+func assertSemanticTextContains(t *testing.T, rendered string, expected ...string) {
+	t.Helper()
+	normalize := func(value string) string {
+		return strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return -1
+			}
+			return r
+		}, value)
+	}
+	semantic := normalize(rendered)
+	for _, value := range expected {
+		if !strings.Contains(semantic, normalize(value)) {
+			t.Fatalf("rendered view missing semantic text %q:\n%s", value, rendered)
+		}
 	}
 }
 
