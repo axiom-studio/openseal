@@ -251,6 +251,11 @@ func (w *WorkforceAuthoringWorker) loop(ctx context.Context) {
 		if err != nil && ctx.Err() == nil {
 			w.logger.Errorw("workforce authoring run failed", "error", err)
 		}
+		// A canceled worker may just have yielded its claim. Exit before the
+		// eager-work path can reclaim that same Run during shutdown.
+		if ctx.Err() != nil {
+			return
+		}
 		if worked {
 			continue
 		}
@@ -322,13 +327,13 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 			w.logger.Warnw("workforce generation progress persistence failed", "changeSetId", changeSet.ID, "runId", run.ID, "phase", progress.Phase, "error", progressErr)
 		}
 	})
+	if ctx.Err() != nil {
+		settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer settleCancel()
+		settleErr := w.settleInterruptedRun(settleCtx, run, scope, changeSet.ID)
+		return errors.Join(context.Cause(ctx), settleErr)
+	}
 	if generateErr != nil {
-		if errors.Is(generateErr, context.Canceled) && ctx.Err() != nil {
-			yieldCtx, yieldCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			defer yieldCancel()
-			yieldErr := w.yieldInterruptedRun(yieldCtx, run)
-			return errors.Join(generateErr, yieldErr)
-		}
 		if errors.Is(generateErr, authoring.ErrChangeSetRevision) {
 			current, getErr := w.service.changeSets.Get(ctx, scope, changeSet.ID)
 			if getErr == nil && current.Status != authoring.ChangeSetEvaluating {
@@ -348,6 +353,28 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 		"changeSetId": generated.ID, "changeSetStatus": generated.Status, "candidateDigest": generated.CandidateDigest,
 	}, "", "workforce.generation.completed")
+}
+
+// settleInterruptedRun releases the lease even when cancellation races the
+// provider response. If candidate persistence already committed, the Run is
+// reconciled terminally; otherwise the unchanged intent is queued for another
+// replica. This prevents a successful boundary response from retaining a lease
+// until expiry while preserving ChangeSet CAS and the stable invocation key.
+func (w *WorkforceAuthoringWorker) settleInterruptedRun(ctx context.Context, claimed *AgentRun, scope capability.ScopeReference, changeSetID string) error {
+	current, err := w.service.changeSets.Get(ctx, scope, changeSetID)
+	if err != nil || current == nil || current.Status == authoring.ChangeSetEvaluating {
+		return errors.Join(err, w.yieldInterruptedRun(ctx, claimed))
+	}
+	if current.Status == authoring.ChangeSetFailed {
+		publicError := "Workforce generation failed"
+		if current.Generation != nil && current.Generation.LastError != "" {
+			publicError = current.Generation.LastError
+		}
+		return w.finishRun(ctx, claimed, AgentRunStatusFailed, nil, publicError, "workforce.generation.failed")
+	}
+	return w.finishRun(ctx, claimed, AgentRunStatusCompleted, map[string]interface{}{
+		"changeSetId": current.ID, "changeSetStatus": current.Status, "candidateDigest": current.CandidateDigest,
+	}, "", "workforce.generation.reconciled")
 }
 
 func (w *WorkforceAuthoringWorker) recordGenerationProgress(ctx context.Context, claimed *AgentRun, changeSet *authoring.ChangeSet, progress authoring.CompileProgress) error {
