@@ -121,7 +121,7 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
 	}
-	credentialFieldsDigest, err := digestActionCredentialFields(request.Lease.Credentials)
+	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
 	if err != nil {
 		return err
 	}
