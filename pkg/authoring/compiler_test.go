@@ -539,7 +539,7 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	}, SourcePolicies: map[string]SourcePolicyCapability{
 		"approved-communities": {Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5},
 	}}
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a continuing market research initiative", Catalog: catalog})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a continuing market research initiative that runs every hour", Catalog: catalog})
 	if err != nil || !result.Valid || len(result.Validation) != 0 || len(result.MissingRequirements) != 0 {
 		t.Fatalf("valid Initiative compile = %#v, err = %v", result, err)
 	}
@@ -548,14 +548,14 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	wrongOwner.Initiative.SourceMonitors[0].ObjectiveRef = WorkforceObjectiveKey(InitiativeOwnerAgent, "community-researcher", "collect")
 	wrongOwnerPayload, _ := json.Marshal(GenerationResponse{Candidate: wrongOwner})
 	compiler, _ = NewCompiler(staticGenerator{payload: wrongOwnerPayload})
-	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: catalog})
 	if err != nil || result.Valid || !hasValidationCode(result.Validation, "source_monitor_owner_mismatch") {
 		t.Fatalf("wrong monitor owner = %#v, err = %v", result, err)
 	}
 
 	compiler, _ = NewCompiler(staticGenerator{payload: payload})
 	catalog.Skills["community-source"] = SkillCapability{ID: "community-source", Version: "2.0.0", Actions: []string{"observe"}}
-	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: catalog})
 	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "version" || result.MissingRequirements[0].ID != "community-source@1.2.3" {
 		t.Fatalf("monitor version mismatch = %#v, err = %v", result, err)
 	}
@@ -563,7 +563,7 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	compiler, _ = NewCompiler(staticGenerator{payload: payload})
 	catalog.Skills["community-source"] = SkillCapability{ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}}
 	delete(catalog.SourcePolicies, "approved-communities")
-	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: catalog})
 	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_policy" || result.MissingRequirements[0].ID != "approved-communities" {
 		t.Fatalf("missing source policy = %#v, err = %v", result, err)
 	}
@@ -576,7 +576,7 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	outOfScopePayload, _ := json.Marshal(GenerationResponse{Candidate: outOfScope})
 	compiler, _ = NewCompiler(staticGenerator{payload: outOfScopePayload})
 	catalog.SourcePolicies["approved-communities"] = SourcePolicyCapability{Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5}
-	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create", Catalog: catalog})
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: catalog})
 	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_scope" {
 		t.Fatalf("out-of-policy monitor source = %#v, err = %v", result, err)
 	}
@@ -591,7 +591,7 @@ func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+		Mode: ModeCreate, Prompt: "Create it every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
 			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
 		}},
 	})
@@ -615,7 +615,7 @@ func TestCompilerRejectsHostedCadenceBudgetBelowPortableFloor(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+		Mode: ModeCreate, Prompt: "Create it every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
 			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
 		}},
 	})
@@ -643,7 +643,7 @@ func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+		Mode: ModeCreate, Prompt: "Create it every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
 			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
 		}},
 	})
@@ -673,7 +673,7 @@ func TestCompilerRejectsEvidenceProjectionBudgetWithoutReviewAndRepairCapacity(t
 	}}
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour"})
 	if err != nil || result.Valid || !validationMessageContains(result.Validation, "maxTurns must be zero (unbounded) or at least 4") {
 		t.Fatalf("insufficient evidence-grounding budget = %#v, err = %v", result, err)
 	}
@@ -696,7 +696,7 @@ func TestCompilerRejectsEvidenceProjectionBudgetWithoutRetryCapacity(t *testing.
 	}}
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour"})
 	if err != nil || result.Valid || !validationMessageContains(result.Validation, "maxAttempts must be zero (unbounded) or at least 5") {
 		t.Fatalf("insufficient evidence-grounding attempt budget = %#v, err = %v", result, err)
 	}

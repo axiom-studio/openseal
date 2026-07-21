@@ -51,7 +51,7 @@ func sourceScopeCadenceObjective(id string, inputs map[string]interface{}) workf
 
 func sourceScopeRequest(existing *WorkforceCandidate) GenerateRequest {
 	return GenerateRequest{
-		Mode: ModeAmend, Prompt: "Monitor Reddit", Existing: existing, Catalog: sourceScopeCatalog(),
+		Mode: ModeAmend, Prompt: "Monitor Reddit every 5 minutes", Existing: existing, Catalog: sourceScopeCatalog(),
 		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
 			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"),
 			Value:      RefinementProviderAnswerValue{Items: []string{"openclaw"}},
@@ -110,7 +110,9 @@ func TestCompilerMaterializesAnsweredSourceScopeIntoEventRule(t *testing.T) {
 	generated := GenerationResponse{Candidate: WorkforceCandidate{Agents: []*agent.AgentDefinition{sourceScopeAgent("1.1.0", objective)}}}
 	payload, _ := json.Marshal(generated)
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), sourceScopeRequest(&existing))
+	request := sourceScopeRequest(&existing)
+	request.Prompt = "Handle permitted Reddit source events"
+	result, err := compiler.Compile(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +167,7 @@ func TestChangeSetPersistsMaterializedSourceScopeAcrossRegeneration(t *testing.T
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 
 	created, replay, err := service.Create(context.Background(), CreateChangeSetRequest{
-		Scope: scope, Prompt: "Monitor Reddit", Catalog: sourceScopeCatalog(),
+		Scope: scope, Prompt: "Monitor Reddit every 5 minutes", Catalog: sourceScopeCatalog(),
 		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-source-monitor",
 	})
 	if err != nil || replay || created.Status != ChangeSetBlocked || created.Refinement.NextQuestion() == nil ||

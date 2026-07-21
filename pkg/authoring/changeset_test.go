@@ -502,7 +502,7 @@ func TestAtomicMemoryApplyComposesInitiativeWithPortableDefaultPlacement(t *test
 	}, SourcePolicies: map[string]SourcePolicyCapability{
 		"approved-communities": {Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5},
 	}}
-	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "Create a continuing research Initiative", Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-initiative"})
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "Create a continuing research Initiative that runs every hour", Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-initiative"})
 	if err != nil || !created.Result.Valid || created.Result.Candidate.Initiative == nil {
 		t.Fatalf("created Initiative ChangeSet=%#v err=%v", created, err)
 	}
