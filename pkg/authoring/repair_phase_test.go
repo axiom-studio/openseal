@@ -3,6 +3,8 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -36,13 +38,35 @@ func TestCompilerSeparatelyRepairsSchemaThenRefinementContract(t *testing.T) {
 	}
 }
 
-func TestChangeSetDoesNotExposeQuestionThatFailsBoundedContractRepair(t *testing.T) {
+func TestCompilerRevalidatesAndRepairsStillInvalidSemanticResponse(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	invalidQuestion := repairPhaseSkillQuestion("")
+	validQuestion := repairPhaseSkillQuestion(RefinementAnswerSkillSelection)
+	semanticInvalid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{invalidQuestion}})
+	semanticValid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{validQuestion}})
+	generator := &repairingGenerator{generated: semanticInvalid, repairSequence: [][]byte{semanticInvalid, semanticValid}}
+	compiler, _ := NewCompiler(generator)
+
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research Team and ask which reporting Skill to use.",
+		InvocationKey: "change-set:01548b54:0", Catalog: repairPhaseCatalog(),
+	})
+	if err != nil || generator.repairs != 2 || len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].Answer.Kind != RefinementAnswerSkillSelection {
+		t.Fatalf("result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	wantKeys := []string{"change-set:01548b54:0:contract:1", "change-set:01548b54:0:contract:2"}
+	if len(generator.repairInvocationKeys) != 2 || generator.repairInvocationKeys[0] != wantKeys[0] || generator.repairInvocationKeys[1] != wantKeys[1] {
+		t.Fatalf("repair invocation keys=%#v want=%#v", generator.repairInvocationKeys, wantKeys)
+	}
+}
+
+func TestCompilerRejectsQuestionThatFailsBoundedContractRepairBeforePersistence(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	invalidQuestion := repairPhaseSkillQuestion("")
 	semanticInvalid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{invalidQuestion}})
 	generator := &repairingGenerator{
 		generated:      []byte(`{"unknown":true}`),
-		repairSequence: [][]byte{semanticInvalid, semanticInvalid},
+		repairSequence: [][]byte{semanticInvalid, semanticInvalid, semanticInvalid},
 	}
 	compiler, _ := NewCompiler(generator)
 	service, _ := NewChangeSetService(compiler, NewMemoryChangeSetStore())
@@ -51,14 +75,39 @@ func TestChangeSetDoesNotExposeQuestionThatFailsBoundedContractRepair(t *testing
 		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create a research Team and ask which reporting Skill to use.",
 		Catalog: repairPhaseCatalog(), Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "invalid-after-contract-repair",
 	})
-	if err != nil || replay || generator.repairs != 2 || created.Status != ChangeSetBlocked {
+	var contractError *ContractGenerationError
+	if !errors.As(err, &contractError) || replay || created != nil || generator.repairs != 3 {
 		t.Fatalf("created=%#v replay=%t repairs=%d err=%v", created, replay, generator.repairs, err)
 	}
-	if !hasValidationCode(created.Result.Validation, "invalid_refinement_question") {
-		t.Fatalf("validation=%#v", created.Result.Validation)
+	if contractError.RepairAttempts != 2 || !strings.Contains(contractError.Diagnostic, "invalid_refinement_question") {
+		t.Fatalf("contract error=%#v", contractError)
 	}
-	if len(created.Refinement.Questions) != 0 || created.Refinement.NextQuestion() != nil {
-		t.Fatalf("invalid question became actionable: %#v", created.Refinement)
+}
+
+func TestPreparedGenerationPersistsFailureWithoutInvalidRefinementPayload(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	invalidQuestion := repairPhaseSkillQuestion("")
+	semanticInvalid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{invalidQuestion}})
+	generator := &repairingGenerator{
+		generated:      []byte(`{"unknown":true}`),
+		repairSequence: [][]byte{semanticInvalid, semanticInvalid, semanticInvalid},
+	}
+	compiler, _ := NewCompiler(generator)
+	service, _ := NewChangeSetService(compiler, NewMemoryChangeSetStore())
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create a research Team and ask which reporting Skill to use.",
+		Catalog: repairPhaseCatalog(), Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "prepared-invalid-contract",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
+	var contractError *ContractGenerationError
+	if !errors.As(err, &contractError) || failed == nil || failed.Status != ChangeSetFailed || failed.Generation.FailureCode != "contract_failed" {
+		t.Fatalf("failed=%#v err=%v", failed, err)
+	}
+	if len(failed.Result.UnresolvedQuestions) != 0 || len(failed.Refinement.Questions) != 0 {
+		t.Fatalf("invalid refinement payload persisted: result=%#v refinement=%#v", failed.Result.UnresolvedQuestions, failed.Refinement.Questions)
 	}
 }
 

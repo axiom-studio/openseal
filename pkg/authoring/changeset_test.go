@@ -106,6 +106,13 @@ func TestSchemaGenerationFailureClassificationIsActionable(t *testing.T) {
 	}
 }
 
+func TestContractGenerationFailureClassificationIsActionable(t *testing.T) {
+	code, message := classifyGenerationFailure(&ContractGenerationError{RepairAttempts: 1, Diagnostic: "invalid_refinement_question: answer kind is required"})
+	if code != "contract_failed" || !strings.Contains(message, "1 bounded contract repairs") || !strings.Contains(message, "invalid_refinement_question") {
+		t.Fatalf("contract failure classification = %q / %q", code, message)
+	}
+}
+
 func TestChangeSetRepairsGenericSkillQuestionAndPersistsCanonicalSelection(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	question := RefinementQuestion{

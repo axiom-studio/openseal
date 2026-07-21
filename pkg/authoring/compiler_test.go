@@ -232,7 +232,7 @@ func TestCompilerNormalizesOnlyCanonicalRefinementBlockingShorthand(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":"apply","answer":{"kind":"string_list"},"priority":100}]}`)
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":"apply","answer":{"kind":"string_list"},"provenance":"prompt","priority":100}]}`)
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
 	if err != nil || len(result.UnresolvedQuestions) != 1 {
