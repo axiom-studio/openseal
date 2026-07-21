@@ -606,10 +606,9 @@ type (
 	CreateActionCredentialLeaseRequest     = runtime.CreateActionCredentialLeaseRequest
 	ActionCredentialLeaseSigner            = runtime.ActionCredentialLeaseSigner
 	ActionCredentialLeaseSignatureVerifier = runtime.ActionCredentialLeaseSignatureVerifier
-	ActionCredentialLeaseAuthority         = runtime.ActionCredentialLeaseAuthority
-	ActionCredentialLeaseAuthorityFunc     = runtime.ActionCredentialLeaseAuthorityFunc
-	ActionCredentialLeaseReplayGuard       = runtime.ActionCredentialLeaseReplayGuard
 	ActionCredentialLeaseValidationRequest = runtime.ActionCredentialLeaseValidationRequest
+	ActionCredentialLeaseRedemptionRequest = runtime.ActionCredentialLeaseRedemptionRequest
+	ActionCredentialLeaseRedeemer          = runtime.ActionCredentialLeaseRedeemer
 	ActionCredentialLeaseValidator         = runtime.ActionCredentialLeaseValidator
 )
 
@@ -915,6 +914,7 @@ var (
 	ErrActionCredentialLeaseInvalid        = runtime.ErrActionCredentialLeaseInvalid
 	ErrActionCredentialLeaseExpired        = runtime.ErrActionCredentialLeaseExpired
 	ErrActionCredentialLeaseMismatch       = runtime.ErrActionCredentialLeaseMismatch
+	ErrActionCredentialLeaseReplay         = runtime.ErrActionCredentialLeaseReplay
 	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
@@ -961,8 +961,8 @@ func SignActionCredentialLease(ctx context.Context, lease ActionCredentialLease,
 	return runtime.SignActionCredentialLease(ctx, lease, signer)
 }
 
-func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, authority ActionCredentialLeaseAuthority, replay ActionCredentialLeaseReplayGuard) (*ActionCredentialLeaseValidator, error) {
-	return runtime.NewActionCredentialLeaseValidator(verifier, authority, replay)
+func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, redeemer ActionCredentialLeaseRedeemer) (*ActionCredentialLeaseValidator, error) {
+	return runtime.NewActionCredentialLeaseValidator(verifier, redeemer)
 }
 
 func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {

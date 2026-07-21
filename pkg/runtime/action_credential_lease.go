@@ -25,6 +25,7 @@ var (
 	ErrActionCredentialLeaseInvalid  = errors.New("action credential lease is invalid")
 	ErrActionCredentialLeaseExpired  = errors.New("action credential lease is expired")
 	ErrActionCredentialLeaseMismatch = errors.New("action credential lease does not match the expected authority")
+	ErrActionCredentialLeaseReplay   = errors.New("action credential lease was already consumed")
 )
 
 // ActionLeaseIdentity binds credential resolution to one immutable snapshot of
@@ -190,20 +191,6 @@ type ActionCredentialLeaseSignatureVerifier interface {
 	VerifyActionCredentialLease(context.Context, []byte, ActionCredentialLeaseSignature) error
 }
 
-type ActionCredentialLeaseAuthority interface {
-	AuthorizeActionCredentialLease(context.Context, ActionCredentialLease) error
-}
-
-type ActionCredentialLeaseAuthorityFunc func(context.Context, ActionCredentialLease) error
-
-func (f ActionCredentialLeaseAuthorityFunc) AuthorizeActionCredentialLease(ctx context.Context, lease ActionCredentialLease) error {
-	return f(ctx, lease)
-}
-
-type ActionCredentialLeaseReplayGuard interface {
-	ConsumeActionCredentialLeaseNonce(context.Context, string, string, string, time.Time) error
-}
-
 func SignActionCredentialLease(ctx context.Context, lease ActionCredentialLease, signer ActionCredentialLeaseSigner) (*SignedActionCredentialLease, error) {
 	if signer == nil {
 		return nil, errors.New("action credential lease signer is required")
@@ -229,30 +216,55 @@ type ActionCredentialLeaseValidationRequest struct {
 	TrustedIssuer string
 	Audience      string
 	Now           time.Time
+	Transport     string
+	// CredentialFields is the exact host-derived field allowlist for the
+	// current action definition. It contains field names only.
+	CredentialFields map[string][]string
+}
+
+// ActionCredentialLeaseRedemptionRequest contains the host-authorized inputs
+// required to atomically revalidate and consume an already signature-verified
+// credential lease. CredentialFields contains field names only; resolved
+// credential values must never cross this persistence boundary.
+type ActionCredentialLeaseRedemptionRequest struct {
+	Lease ActionCredentialLease
+	// Transport and CredentialFields are derived by the trusted host from the
+	// exact current action definition. They are rechecked against durable
+	// ActionCall and SkillBinding authority inside the store transaction.
+	Transport        string
+	CredentialFields map[string][]string
+}
+
+// ActionCredentialLeaseRedeemer is the durable, product-neutral
+// single-use authority boundary for credential resolution. Implementations
+// must revalidate current action, Run, and Skill binding authority and consume
+// the nonce in one transaction before any credential value is resolved.
+type ActionCredentialLeaseRedeemer interface {
+	RedeemActionCredentialLease(context.Context, ActionCredentialLeaseRedemptionRequest) error
 }
 
 type ActionCredentialLeaseValidator struct {
-	verifier  ActionCredentialLeaseSignatureVerifier
-	authority ActionCredentialLeaseAuthority
-	replay    ActionCredentialLeaseReplayGuard
+	verifier ActionCredentialLeaseSignatureVerifier
+	redeemer ActionCredentialLeaseRedeemer
 }
 
-func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, authority ActionCredentialLeaseAuthority, replay ActionCredentialLeaseReplayGuard) (*ActionCredentialLeaseValidator, error) {
-	if verifier == nil || authority == nil || replay == nil {
-		return nil, errors.New("action credential lease signature, authority, and replay validators are required")
+func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, redeemer ActionCredentialLeaseRedeemer) (*ActionCredentialLeaseValidator, error) {
+	if verifier == nil || redeemer == nil {
+		return nil, errors.New("action credential lease signature verifier and atomic redeemer are required")
 	}
-	return &ActionCredentialLeaseValidator{verifier: verifier, authority: authority, replay: replay}, nil
+	return &ActionCredentialLeaseValidator{verifier: verifier, redeemer: redeemer}, nil
 }
 
 // Validate authenticates the signed envelope, checks the receiving tenant,
-// scope, issuer, audience, and expiry, revalidates durable authority through
-// the host hook, and consumes the nonce exactly once. Replay consumption is
-// last so malformed or unauthorized traffic cannot burn a valid lease.
+// scope, issuer, audience, and expiry, then atomically revalidates durable
+// authority and consumes the nonce through the redeemer. Redemption is last so
+// malformed or unauthenticated traffic cannot burn a valid lease.
 func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request ActionCredentialLeaseValidationRequest) (*ActionCredentialLease, error) {
-	if v == nil || v.verifier == nil || v.authority == nil || v.replay == nil || request.Envelope == nil {
+	if v == nil || v.verifier == nil || v.redeemer == nil || request.Envelope == nil {
 		return nil, errors.New("action credential lease validator is not configured")
 	}
 	lease := request.Envelope.Lease
+	lease.Credentials = cloneActionCredentialFieldReferences(lease.Credentials)
 	payload, err := canonicalActionCredentialLeasePayload(lease)
 	if err != nil {
 		return nil, err
@@ -273,11 +285,10 @@ func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request A
 	if err := v.verifier.VerifyActionCredentialLease(ctx, payload, cloneActionCredentialLeaseSignature(request.Envelope.Signature)); err != nil {
 		return nil, fmt.Errorf("verify action credential lease signature: %w", err)
 	}
-	if err := v.authority.AuthorizeActionCredentialLease(ctx, lease); err != nil {
-		return nil, fmt.Errorf("authorize action credential lease: %w", err)
-	}
-	if err := v.replay.ConsumeActionCredentialLeaseNonce(ctx, lease.Issuer, lease.Audience, lease.Nonce, lease.ExpiresAt); err != nil {
-		return nil, fmt.Errorf("consume action credential lease nonce: %w", err)
+	if err := v.redeemer.RedeemActionCredentialLease(ctx, ActionCredentialLeaseRedemptionRequest{
+		Lease: lease, Transport: request.Transport, CredentialFields: cloneActionCredentialFields(request.CredentialFields),
+	}); err != nil {
+		return nil, fmt.Errorf("redeem action credential lease: %w", err)
 	}
 	result := lease
 	result.Credentials = cloneActionCredentialFieldReferences(lease.Credentials)
@@ -286,7 +297,7 @@ func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request A
 
 // MatchActionCredentialLease rechecks a signed lease against current durable
 // state and the host's exact field allowlist. It is suitable for an
-// ActionCredentialLeaseAuthority implementation.
+// ActionCredentialLeaseRedeemer implementation inside its atomic boundary.
 func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
 	if err := lease.Validate(); err != nil {
 		return err
@@ -429,6 +440,17 @@ func cloneActionCredentialFieldReferences(values []ActionCredentialFieldReferenc
 	for index, value := range values {
 		result[index] = value
 		result[index].Fields = append([]string(nil), value.Fields...)
+	}
+	return result
+}
+
+func cloneActionCredentialFields(values map[string][]string) map[string][]string {
+	if values == nil {
+		return nil
+	}
+	result := make(map[string][]string, len(values))
+	for name, fields := range values {
+		result[name] = append([]string(nil), fields...)
 	}
 	return result
 }
