@@ -304,6 +304,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 }
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
+	payload = normalizeGeneratedDefinitionVersions(payload)
 	payload = normalizeGeneratedDurations(payload)
 	payload = normalizeGeneratedRefinementBlocking(payload)
 	payload = normalizeGeneratedRefinementProvenance(payload)
@@ -322,6 +323,59 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	}
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
+}
+
+// normalizeGeneratedDefinitionVersions accepts JSON numbers only at the two
+// immutable definition-version fields authored by the provider. A JSON number
+// has one lossless textual representation under UseNumber, while the runtime
+// contract deliberately models versions as opaque strings. All other scalar
+// mismatches remain untouched and fail strict decoding.
+func normalizeGeneratedDefinitionVersions(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return payload
+	}
+	root, ok := document.(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	candidate, ok := root["candidate"].(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	changed := false
+	if agents, ok := candidate["agents"].([]interface{}); ok {
+		for _, rawAgent := range agents {
+			agent, ok := rawAgent.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if version, ok := agent["version"].(json.Number); ok {
+				agent["version"] = version.String()
+				changed = true
+			}
+		}
+	}
+	if team, ok := candidate["team"].(map[string]interface{}); ok {
+		if version, ok := team["version"].(json.Number); ok {
+			team["version"] = version.String()
+			changed = true
+		}
+	}
+	if !changed {
+		return payload
+	}
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
 }
 
 // normalizeGeneratedCredentialReferenceOptions removes provider-authored
