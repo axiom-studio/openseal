@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
@@ -61,7 +62,10 @@ func TestTeamManagementOptionOwnsValidationAndDispatcherComposition(t *testing.T
 	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Team action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}
-	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*TeamRoleActionDispatcher); !ok {
-		t.Fatalf("Team dispatcher was not composed over the host fallback: %T", engine.actionPoolSpecs[0].dispatcher)
+	// Team Skill authority is the mandatory outer dispatcher for every action
+	// pool. WithTeamManagementActions composes Team role mutations immediately
+	// inside it; runtime dispatcher tests exercise that inner dispatch path.
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*runtime.TeamSkillActionDispatcher); !ok {
+		t.Fatalf("Team authority was not composed outside Team management: %T", engine.actionPoolSpecs[0].dispatcher)
 	}
 }

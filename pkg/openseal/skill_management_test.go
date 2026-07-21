@@ -19,7 +19,7 @@ func TestSkillManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 		t.Fatal(err)
 	}
 	definition, err := engine.GetSkillDefinition(context.Background(), SkillManagementSkillID, SkillManagementSkillVersion)
-	if err != nil || definition == nil || definition.Version != "1.1.0" ||
+	if err != nil || definition == nil || definition.Version != SkillManagementSkillVersion ||
 		definition.Actions[SkillActionDiscover].Name != SkillActionDiscover ||
 		definition.Actions[SkillActionUpsertBinding].Name != SkillActionUpsertBinding {
 		t.Fatalf("built-in Skill management definition = %#v, %v", definition, err)
