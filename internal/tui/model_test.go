@@ -1617,7 +1617,7 @@ func TestParseRefinementAnswerUsesOnlyAdvertisedTypedChoices(t *testing.T) {
 func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
 	evaluation := authoring.ChangeSetEvaluation{ID: "evaluation-1", Allowed: true, ApprovalRequirements: []authoring.ChangeSetApprovalRequirement{{PolicyID: "production", Role: "operator", Count: 1}, {PolicyID: "outreach", Role: "reviewer", Count: 1}}}
-	awaiting := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetAwaitingApproval, Revision: 2, CandidateDigest: "digest-1", Evaluations: []authoring.ChangeSetEvaluation{evaluation}, Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{Activation: authoring.WorkforceActivationInactive}}}
+	awaiting := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetAwaitingApproval, Revision: 2, CandidateDigest: "digest-1", Evaluations: []authoring.ChangeSetEvaluation{evaluation}, Result: authoring.CompileResult{Valid: true, Commitments: authoring.PromptCommitments{Activation: authoring.ActivationCommitmentInactive}}}
 	ready := *awaiting
 	ready.Status, ready.Revision = authoring.ChangeSetReady, 3
 	applied := ready
