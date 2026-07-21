@@ -94,6 +94,12 @@ type (
 	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
 	KernelUpdateAgentDeploymentRequest        = kernelapi.UpdateAgentDeploymentRequest
 	KernelAgentDeploymentUpdateResult         = kernelapi.AgentDeploymentUpdateResult
+	KernelActivateAgentDefinitionRequest      = kernelapi.ActivateAgentDefinitionRequest
+	KernelRollbackAgentDefinitionRequest      = kernelapi.RollbackAgentDefinitionRequest
+	KernelAgentDefinitionActivationResult     = kernelapi.AgentDefinitionActivationResult
+	KernelAgentDefinitionAmendmentList        = kernelapi.AgentDefinitionAmendmentList
+	KernelActivateAgentAmendmentRequest       = kernelapi.ActivateAgentDefinitionAmendmentRequest
+	KernelAgentAmendmentActivationResult      = kernelapi.AgentDefinitionAmendmentActivationResult
 	KernelAgentDefinitionCompilationHistory   = kernelapi.AgentDefinitionCompilationHistory
 	TeamDefinition                            = kernelteam.Definition
 	TeamRoleSlot                              = kernelteam.RoleSlot
@@ -604,6 +610,7 @@ type (
 	KernelTeamDeploymentList              = kernelapi.TeamDeploymentList
 	KernelTeamDeploymentCatalogEntry      = kernelapi.TeamDeploymentCatalogEntry
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
+	AgentDefinitionCapabilityFeatures     = kernelapi.AgentDefinitionCapabilityFeatures
 	TeamDefinitionCapabilityFeatures      = kernelapi.TeamDefinitionCapabilityFeatures
 	WorkforceAuthoringCapabilityFeatures  = kernelapi.WorkforceAuthoringCapabilityFeatures
 	ActionApprovalCapabilityFeatures      = kernelapi.ActionApprovalCapabilityFeatures
@@ -638,6 +645,15 @@ const (
 	KernelOperationResume                   = kernelapi.OperationResume
 	KernelOperationRetire                   = kernelapi.OperationRetire
 	KernelOperationListCompilations         = kernelapi.OperationListCompilations
+	KernelOperationActivate                 = kernelapi.OperationActivate
+	KernelOperationRollback                 = kernelapi.OperationRollback
+	KernelOperationListActivations          = kernelapi.OperationListActivations
+	KernelOperationProposeAmendment         = kernelapi.OperationProposeAmendment
+	KernelOperationListAmendments           = kernelapi.OperationListAmendments
+	KernelOperationGetAmendment             = kernelapi.OperationGetAmendment
+	KernelOperationEvaluateAmendment        = kernelapi.OperationEvaluateAmendment
+	KernelOperationResolveAmendment         = kernelapi.OperationResolveAmendment
+	KernelOperationActivateAmendment        = kernelapi.OperationActivateAmendment
 	KernelOperationRoute                    = kernelapi.OperationRoute
 	KernelOperationUpsert                   = kernelapi.OperationUpsert
 	KernelOperationDisable                  = kernelapi.OperationDisable
@@ -739,8 +755,8 @@ func ActivityCapability() KernelCapability {
 	return kernelapi.ActivityCapability()
 }
 
-func AgentDefinitionsCapability() KernelCapability {
-	return kernelapi.AgentDefinitionsCapability()
+func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) KernelCapability {
+	return kernelapi.AgentDefinitionsCapability(features...)
 }
 
 func AgentRequestsCapability() KernelCapability {
@@ -3109,6 +3125,10 @@ func (e *Engine) ProposeAgentDefinitionAmendment(ctx context.Context, request ke
 
 func (e *Engine) GetAgentDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string) (*kernelagent.DefinitionAmendment, error) {
 	return e.agents.GetAmendment(ctx, scope, amendmentID)
+}
+
+func (e *Engine) ListAgentDefinitionAmendments(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionAmendment, error) {
+	return e.agents.ListAmendments(ctx, scope, deploymentID)
 }
 
 func (e *Engine) SubmitAgentDefinitionAmendmentEvaluation(ctx context.Context, request kernelagent.SubmitAmendmentEvaluationRequest) (*kernelagent.DefinitionAmendment, error) {

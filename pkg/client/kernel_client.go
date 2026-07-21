@@ -100,6 +100,24 @@ type WorkforceRefinementClient interface {
 
 var _ WorkforceRefinementClient = (*KernelHTTPClient)(nil)
 
+// AgentDefinitionLifecycleClient is the narrow public boundary for governed
+// immutable definition rollout, rollback, and amendment review. Read-only
+// Agent browsers can keep depending on KernelClient without acquiring these
+// mutation methods.
+type AgentDefinitionLifecycleClient interface {
+	ActivateAgentDefinition(context.Context, string, kernelapi.ActivateAgentDefinitionRequest) (*kernelapi.AgentDefinitionActivationResult, error)
+	RollbackAgentDefinition(context.Context, string, kernelapi.RollbackAgentDefinitionRequest) (*kernelapi.AgentDefinitionActivationResult, error)
+	ListAgentDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error)
+	ProposeAgentDefinitionAmendment(context.Context, kernelagent.ProposeAmendmentRequest) (*kernelagent.DefinitionAmendment, error)
+	GetAgentDefinitionAmendment(context.Context, capability.ScopeReference, string, string) (*kernelagent.DefinitionAmendment, error)
+	ListAgentDefinitionAmendments(context.Context, capability.ScopeReference, string) (*kernelapi.AgentDefinitionAmendmentList, error)
+	SubmitAgentDefinitionAmendmentEvaluation(context.Context, string, kernelagent.SubmitAmendmentEvaluationRequest) (*kernelagent.DefinitionAmendment, error)
+	ResolveAgentDefinitionAmendment(context.Context, string, kernelagent.ResolveAmendmentRequest) (*kernelagent.DefinitionAmendment, error)
+	ActivateAgentDefinitionAmendment(context.Context, string, string, kernelapi.ActivateAgentDefinitionAmendmentRequest) (*kernelapi.AgentDefinitionAmendmentActivationResult, error)
+}
+
+var _ AgentDefinitionLifecycleClient = (*KernelHTTPClient)(nil)
+
 type TeamClient interface {
 	RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error)
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
@@ -256,6 +274,87 @@ func (c *KernelHTTPClient) UpdateAgentDeployment(ctx context.Context, deployment
 	var result kernelapi.AgentDeploymentUpdateResult
 	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID))
 	if err := c.do(ctx, http.MethodPut, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ActivateAgentDefinition(ctx context.Context, deploymentID string, request kernelapi.ActivateAgentDefinitionRequest) (*kernelapi.AgentDefinitionActivationResult, error) {
+	var result kernelapi.AgentDefinitionActivationResult
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/activations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) RollbackAgentDefinition(ctx context.Context, deploymentID string, request kernelapi.RollbackAgentDefinitionRequest) (*kernelapi.AgentDefinitionActivationResult, error) {
+	var result kernelapi.AgentDefinitionActivationResult
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/rollbacks"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListAgentDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
+	var result []workforce.DefinitionActivation
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/activations?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *KernelHTTPClient) ProposeAgentDefinitionAmendment(ctx context.Context, request kernelagent.ProposeAmendmentRequest) (*kernelagent.DefinitionAmendment, error) {
+	var result kernelagent.DefinitionAmendment
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(request.DeploymentID)) + "/amendments"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) GetAgentDefinitionAmendment(ctx context.Context, scope capability.ScopeReference, deploymentID, amendmentID string) (*kernelagent.DefinitionAmendment, error) {
+	var result kernelagent.DefinitionAmendment
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(amendmentID)) + "?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListAgentDefinitionAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.AgentDefinitionAmendmentList, error) {
+	var result kernelapi.AgentDefinitionAmendmentList
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) SubmitAgentDefinitionAmendmentEvaluation(ctx context.Context, deploymentID string, request kernelagent.SubmitAmendmentEvaluationRequest) (*kernelagent.DefinitionAmendment, error) {
+	var result kernelagent.DefinitionAmendment
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(request.AmendmentID)) + "/evaluations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ResolveAgentDefinitionAmendment(ctx context.Context, deploymentID string, request kernelagent.ResolveAmendmentRequest) (*kernelagent.DefinitionAmendment, error) {
+	var result kernelagent.DefinitionAmendment
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(request.AmendmentID)) + "/decisions"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ActivateAgentDefinitionAmendment(ctx context.Context, deploymentID, amendmentID string, request kernelapi.ActivateAgentDefinitionAmendmentRequest) (*kernelapi.AgentDefinitionAmendmentActivationResult, error) {
+	var result kernelapi.AgentDefinitionAmendmentActivationResult
+	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/amendments/" + url.PathEscape(strings.TrimSpace(amendmentID)) + "/activations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

@@ -407,6 +407,80 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 	}
 }
 
+func TestKernelHTTPClientGovernsAgentDefinitionLifecycle(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	httpServer := httptest.NewServer(api.Handler())
+	defer httpServer.Close()
+	ctx := context.Background()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	registry := kernelagent.NewRegistryWithStore(store)
+	base := &kernelagent.AgentDefinition{
+		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate", SystemPrompt: "Inspect before acting.",
+		Authority:  kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1},
+		Amendments: kernelagent.AmendmentPolicy{AllowedFields: []string{"systemPrompt"}},
+	}
+	registered, err := registry.RegisterDefinition(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := *registered
+	second.Version, second.SystemPrompt, second.Digest, second.CreatedAt = "2", "Inspect and verify before acting.", "", time.Time{}
+	if _, err := registry.RegisterDefinition(ctx, &second); err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployed, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "operator", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "production", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "operator", "initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, err := client.ActivateAgentDefinition(ctx, deployed.ID, kernelapi.ActivateAgentDefinitionRequest{
+		Scope: scope, Version: "2", ExpectedRevision: deployed.Revision, ActorType: "user", ActorID: "operator", Reason: "validated",
+	})
+	if err != nil || activated.Deployment.ActiveVersion != "2" || activated.Activation.FromVersion != "1" {
+		t.Fatalf("activated Agent definition = %#v, %v", activated, err)
+	}
+	history, err := client.ListAgentDefinitionActivations(ctx, scope, deployed.ID)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("Agent definition history = %#v, %v", history, err)
+	}
+	rolledBack, err := client.RollbackAgentDefinition(ctx, deployed.ID, kernelapi.RollbackAgentDefinitionRequest{
+		Scope: scope, ExpectedRevision: activated.Deployment.Revision, ActorType: "user", ActorID: "operator", Reason: "regression",
+	})
+	if err != nil || rolledBack.Deployment.ActiveVersion != "1" {
+		t.Fatalf("rolled back Agent definition = %#v, %v", rolledBack, err)
+	}
+	candidate := *registered
+	candidate.Version, candidate.SystemPrompt, candidate.Digest, candidate.CreatedAt = "1.1", "Inspect evidence before acting.", "", time.Time{}
+	amendment, err := client.ProposeAgentDefinitionAmendment(ctx, kernelagent.ProposeAmendmentRequest{
+		Scope: scope, DeploymentID: deployed.ID, Candidate: &candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Require evidence",
+	})
+	if err != nil || amendment.Status != kernelagent.AmendmentReady {
+		t.Fatalf("proposed Agent amendment = %#v, %v", amendment, err)
+	}
+	amendments, err := client.ListAgentDefinitionAmendments(ctx, scope, deployed.ID)
+	if err != nil || len(amendments.Items) != 1 || amendments.Items[0].ID != amendment.ID {
+		t.Fatalf("listed Agent amendments = %#v, %v", amendments, err)
+	}
+	inspected, err := client.GetAgentDefinitionAmendment(ctx, scope, deployed.ID, amendment.ID)
+	if err != nil || inspected.Revision != amendment.Revision {
+		t.Fatalf("inspected Agent amendment = %#v, %v", inspected, err)
+	}
+	amended, err := client.ActivateAgentDefinitionAmendment(ctx, deployed.ID, amendment.ID, kernelapi.ActivateAgentDefinitionAmendmentRequest{
+		Scope: scope, ExpectedRevision: amendment.Revision, ActorType: "user", ActorID: "operator", Reason: "reviewed",
+	})
+	if err != nil || amended.Amendment.Status != kernelagent.AmendmentActivated || amended.Deployment.ActiveVersion != "1.1" {
+		t.Fatalf("activated Agent amendment = %#v, %v", amended, err)
+	}
+}
+
 func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "skills.db"))
 	if err != nil {

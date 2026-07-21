@@ -60,9 +60,19 @@ func TestOutreachAdvertisesReviewedDeliveryLifecycle(t *testing.T) {
 
 func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	capability := AgentDefinitionsCapability()
-	if capability.Version != "5" || !capability.Supports(OperationGet) || !capability.Supports(OperationList) || !capability.Supports(OperationUpdate) ||
+	if capability.Version != "6" || !capability.Supports(OperationGet) || !capability.Supports(OperationList) || !capability.Supports(OperationUpdate) ||
 		!capability.Supports("list-compilations") || capability.Supports("list_compilations") {
 		t.Fatalf("agent definition capability = %#v", capability)
+	}
+	if capability.Supports(OperationActivate) || capability.Supports(OperationProposeAmendment) {
+		t.Fatalf("unconfigured lifecycle advertised: %#v", capability.Operations)
+	}
+	governed := AgentDefinitionsCapability(AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true})
+	for _, operation := range []string{OperationActivate, OperationRollback, OperationListActivations, OperationProposeAmendment,
+		OperationListAmendments, OperationGetAmendment, OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment} {
+		if !governed.Supports(operation) {
+			t.Fatalf("governed Agent definition operation %q not advertised: %#v", operation, governed.Operations)
+		}
 	}
 }
 

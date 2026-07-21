@@ -76,6 +76,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}", s.handleGetAgentDeployment)
 	s.mux.HandleFunc("PUT /api/v1/agent-deployments/{id}", s.handleUpdateAgentDeployment)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/compilations", s.handleListAgentDefinitionCompilations)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/activations", s.handleActivateAgentDefinition)
+	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/activations", s.handleListAgentDefinitionActivations)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/rollbacks", s.handleRollbackAgentDefinition)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/amendments", s.handleProposeAgentDefinitionAmendment)
+	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/amendments", s.handleListAgentDefinitionAmendments)
+	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/amendments/{amendmentId}", s.handleGetAgentDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/amendments/{amendmentId}/evaluations", s.handleEvaluateAgentDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/amendments/{amendmentId}/decisions", s.handleResolveAgentDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/agent-deployments/{id}/amendments/{amendmentId}/activations", s.handleActivateAgentDefinitionAmendment)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{deploymentId}/skill-actions", s.handleListSkillActions)
 	s.mux.HandleFunc("POST /api/v1/artifacts", s.handleRegisterArtifact)
 	s.mux.HandleFunc("GET /api/v1/artifacts", s.handleListArtifacts)
@@ -167,7 +176,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
-		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability())
+		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true}))
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
 			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{Amendments: true}))
 		}
