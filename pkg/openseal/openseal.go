@@ -3146,6 +3146,13 @@ func PreviewSkillBindingActivation(definition *skill.Definition, binding *skill.
 	return skill.PreviewBindingActivation(definition, binding, host)
 }
 
+// ValidateSkillResourceStageRequest exposes the portable host-boundary
+// validation without requiring embedding runtimes to import an internal Skill
+// package alongside the stable OpenSeal facade.
+func ValidateSkillResourceStageRequest(request skill.ResourceStageRequest) error {
+	return skill.ValidateResourceStageRequest(request)
+}
+
 func SkillRuntimePreparationID(request skill.RuntimePreparationRequest) (string, error) {
 	return skill.RuntimePreparationID(request)
 }
