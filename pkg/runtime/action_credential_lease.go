@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	ActionCredentialLeaseVersion    = "openseal.action-credential-lease/v1"
+	ActionCredentialLeaseVersion    = "openseal.action-credential-lease/v2"
 	MaximumActionCredentialLeaseTTL = 5 * time.Minute
 )
 
@@ -61,6 +61,7 @@ type ActionCredentialLease struct {
 	SkillID         string                           `json:"skillId"`
 	SkillVersion    string                           `json:"skillVersion"`
 	Action          string                           `json:"action"`
+	Transport       string                           `json:"transport"`
 	BindingOwnerID  string                           `json:"bindingOwnerId"`
 	BindingID       string                           `json:"bindingId"`
 	BindingRevision int64                            `json:"bindingRevision"`
@@ -89,6 +90,7 @@ type CreateActionCredentialLeaseRequest struct {
 	Call             *ActionCall
 	Run              *AgentRun
 	CredentialFields map[string][]string
+	Transport        string
 	Issuer           string
 	Audience         string
 	IssuedAt         time.Time
@@ -97,9 +99,9 @@ type CreateActionCredentialLeaseRequest struct {
 }
 
 // NewActionCredentialLease derives every authority field from the durable Run
-// and currently claimed ActionCall. Callers select only exact field names and
-// transport metadata; they cannot substitute Skill, binding, owner, or Agent
-// identity.
+// and currently claimed ActionCall. Credential workers supply Transport from
+// the already resolved BoundAction; callers cannot substitute Skill, binding,
+// owner, or Agent identity.
 func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*ActionCredentialLease, error) {
 	call, run := request.Call, request.Run
 	if call == nil || run == nil || call.Status != ActionCallStatusRunning || strings.TrimSpace(call.LeaseOwner) == "" || call.LeaseExpiresAt == nil {
@@ -124,7 +126,7 @@ func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*Acti
 	lease := &ActionCredentialLease{
 		Version: ActionCredentialLeaseVersion, TenantID: strings.TrimSpace(request.TenantID), Scope: call.Scope,
 		RunID: call.RunID, ActionCallID: call.ID, ActionLease: actionLease,
-		SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action,
+		SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action, Transport: strings.TrimSpace(request.Transport),
 		BindingOwnerID: call.DeploymentID, BindingID: call.BindingID, BindingRevision: call.BindingRevision,
 		AssignedAgentID: run.AssignedAgentID, Credentials: credentials,
 		Issuer: strings.TrimSpace(request.Issuer), Audience: strings.TrimSpace(request.Audience), IssuedAt: issuedAt, ExpiresAt: expiresAt, Nonce: strings.TrimSpace(request.Nonce),
@@ -139,7 +141,7 @@ func (l *ActionCredentialLease) Validate() error {
 	if l == nil || l.Version != ActionCredentialLeaseVersion || l.Scope.Validate() != nil {
 		return fmt.Errorf("%w: version and scope are required", ErrActionCredentialLeaseInvalid)
 	}
-	identifiers := []string{l.TenantID, l.RunID, l.ActionCallID, l.ActionLease.ID, l.ActionLease.WorkerID, l.SkillID, l.SkillVersion, l.Action, l.BindingOwnerID, l.BindingID, l.AssignedAgentID, l.Issuer, l.Audience, l.Nonce}
+	identifiers := []string{l.TenantID, l.RunID, l.ActionCallID, l.ActionLease.ID, l.ActionLease.WorkerID, l.SkillID, l.SkillVersion, l.Action, l.Transport, l.BindingOwnerID, l.BindingID, l.AssignedAgentID, l.Issuer, l.Audience, l.Nonce}
 	for _, value := range identifiers {
 		if !validLeaseIdentifier(value, 512) {
 			return fmt.Errorf("%w: an identity field is empty or malformed", ErrActionCredentialLeaseInvalid)
@@ -285,11 +287,11 @@ func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request A
 // MatchActionCredentialLease rechecks a signed lease against current durable
 // state and the host's exact field allowlist. It is suitable for an
 // ActionCredentialLeaseAuthority implementation.
-func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, credentialFields map[string][]string) error {
+func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
 	if err := lease.Validate(); err != nil {
 		return err
 	}
-	if err := matchActionCredentialLeaseCore(lease, call, run); err != nil {
+	if err := matchActionCredentialLeaseCore(lease, call, run, transport); err != nil {
 		return err
 	}
 	expectedFields, err := actionCredentialFields(call.CredentialRefs, credentialFields)
@@ -305,7 +307,7 @@ func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, r
 // MatchActionCredentialLeaseReferences lets the kernel verify that an issuer
 // did not substitute or add an opaque reference before dispatch. Exact fields
 // remain host-authorized by MatchActionCredentialLease at resolution time.
-func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease, call *ActionCall, run *AgentRun) error {
+func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
 	if envelope == nil {
 		return ErrActionCredentialLeaseMismatch
 	}
@@ -316,7 +318,7 @@ func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease,
 	if err := validateActionCredentialLeaseSignature(envelope.Signature); err != nil {
 		return err
 	}
-	if err := matchActionCredentialLeaseCore(lease, call, run); err != nil {
+	if err := matchActionCredentialLeaseCore(lease, call, run, transport); err != nil {
 		return err
 	}
 	if len(lease.Credentials) != len(call.CredentialRefs) {
@@ -331,7 +333,7 @@ func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease,
 	return nil
 }
 
-func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun) error {
+func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
 	if call == nil || run == nil || call.Status != ActionCallStatusRunning || call.LeaseExpiresAt == nil || call.Scope != run.Scope || call.RunID != run.ID {
 		return ErrActionCredentialLeaseMismatch
 	}
@@ -341,7 +343,7 @@ func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCal
 	// status and therefore still fails closed.
 	if lease.Scope != call.Scope || lease.RunID != call.RunID || lease.ActionCallID != call.ID ||
 		call.Revision < lease.ActionLease.ActionCallRevision || lease.ActionLease.Attempt != call.Attempt || lease.ActionLease.WorkerID != strings.TrimSpace(call.LeaseOwner) || canonicalLeaseTime(*call.LeaseExpiresAt).Before(lease.ActionLease.ExpiresAt) ||
-		lease.SkillID != call.SkillID || lease.SkillVersion != call.SkillVersion || lease.Action != call.Action || lease.BindingOwnerID != call.DeploymentID ||
+		lease.SkillID != call.SkillID || lease.SkillVersion != call.SkillVersion || lease.Action != call.Action || lease.Transport != strings.TrimSpace(transport) || lease.BindingOwnerID != call.DeploymentID ||
 		lease.BindingID != call.BindingID || lease.BindingRevision != call.BindingRevision || lease.AssignedAgentID != run.AssignedAgentID {
 		return ErrActionCredentialLeaseMismatch
 	}

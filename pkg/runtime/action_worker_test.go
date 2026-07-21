@@ -95,16 +95,17 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *testing.T) {
 	store := NewMemoryStore(20)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	catalog, proposal := createRunnableAction(t, store, now)
+	baseCatalog, proposal := createRunnableAction(t, store, now)
+	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
 	signer := testCredentialLeaseSigner{key: []byte("lease-signing-key")}
 	issuerCalls := 0
 	worker := NewActionWorkerWithCredentialLeaseIssuer(store, catalog, ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*SignedActionCredentialLease, error) {
 		issuerCalls++
-		if request.Call == nil || request.Run == nil || request.Call.ID != proposal.Call.ID || request.Run.ID != proposal.Call.RunID || request.Run.AssignedAgentID == "" || request.References["token"] != proposal.Call.CredentialRefs["token"] {
+		if request.Call == nil || request.Run == nil || request.Call.ID != proposal.Call.ID || request.Run.ID != proposal.Call.RunID || request.Run.AssignedAgentID == "" || request.References["token"] != proposal.Call.CredentialRefs["token"] || request.Transport != "release_deploy" {
 			t.Fatalf("credential lease issue request = %#v", request)
 		}
 		lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-			TenantID: request.Call.Scope.ID, Call: request.Call, Run: request.Run, CredentialFields: map[string][]string{"token": {"value"}},
+			TenantID: request.Call.Scope.ID, Call: request.Call, Run: request.Run, CredentialFields: map[string][]string{"token": {"value"}}, Transport: request.Transport,
 			Issuer: "control-plane", Audience: "execution-host", IssuedAt: now.Add(2 * time.Second), ExpiresAt: now.Add(30 * time.Second), Nonce: "nonce-worker-0000000001",
 		})
 		if err != nil {
@@ -129,6 +130,22 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 	if issuerCalls != 1 || result.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("opaque credential execution = calls %d result %#v", issuerCalls, result)
 	}
+}
+
+type toolTransportActionCatalog struct {
+	ActionExecutionCatalog
+	endpoint string
+}
+
+func (c *toolTransportActionCatalog) Resolve(ctx context.Context, scope skill.ScopeReference, deploymentID, skillID, version, action string, bindings ...skill.BindingReference) (*skill.BoundAction, error) {
+	bound, err := c.ActionExecutionCatalog.Resolve(ctx, scope, deploymentID, skillID, version, action, bindings...)
+	if err != nil {
+		return nil, err
+	}
+	definition := *bound.Definition
+	definition.Transport = skill.TransportReference{Kind: "tool", Endpoint: c.endpoint}
+	bound.Definition = &definition
+	return bound, nil
 }
 
 func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {

@@ -59,6 +59,7 @@ type ActionCredentialLeaseIssueRequest struct {
 	Call       *ActionCall
 	Run        *AgentRun
 	References map[string]skill.CredentialReference
+	Transport  string
 }
 
 type ActionDispatchInput struct {
@@ -138,12 +139,17 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	credentialReferences := map[string]skill.CredentialReference(nil)
 	if executionErr == nil && len(call.CredentialRefs) > 0 {
 		if w.leaseIssuer != nil {
-			credentialReferences = cloneCredentialReferences(call.CredentialRefs)
-			credentialLease, executionErr = w.leaseIssuer.IssueActionCredentialLease(executionCtx, ActionCredentialLeaseIssueRequest{
-				Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), References: cloneCredentialReferences(call.CredentialRefs),
-			})
+			credentialTransport, transportErr := boundActionToolTransport(bound)
+			if transportErr != nil {
+				executionErr = fmt.Errorf("delegated credential lease transport: %w", transportErr)
+			} else {
+				credentialReferences = cloneCredentialReferences(call.CredentialRefs)
+				credentialLease, executionErr = w.leaseIssuer.IssueActionCredentialLease(executionCtx, ActionCredentialLeaseIssueRequest{
+					Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), References: cloneCredentialReferences(call.CredentialRefs), Transport: credentialTransport,
+				})
+			}
 			if executionErr == nil {
-				executionErr = MatchActionCredentialLeaseReferences(credentialLease, call, sourceRun)
+				executionErr = MatchActionCredentialLeaseReferences(credentialLease, call, sourceRun, credentialTransport)
 			}
 		} else if w.credentials != nil {
 			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, CredentialResolutionRequest{
