@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -53,7 +54,7 @@ func TestFilesystemStagerIsContainedAtomicAndRestartStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Adapter != AdapterID || first.Revision == "" || !withinRoot(root, first.Root) {
+	if first.Adapter != AdapterID || first.Revision == "" || first.SourceDigest != source || first.ResourceCount != len(resources) || !withinRoot(root, first.Root) {
 		t.Fatalf("invalid stage result: %#v", first)
 	}
 	if got, err := os.ReadFile(filepath.Join(first.Root, "references", "guide.md")); err != nil || string(got) != string(guide) {
@@ -121,5 +122,48 @@ func TestFilesystemStagerFailsClosedOnUnsafeOrChangedContent(t *testing.T) {
 	}
 	if _, err := stager.StageResources(context.Background(), request); err == nil {
 		t.Fatal("tampered resource stage was silently reused")
+	}
+}
+
+func TestFilesystemStagerRejectsUnsupportedKindsAndUnexpectedEntries(t *testing.T) {
+	source := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	content := []byte("trusted")
+	provider := contentProvider{source + ":safe.txt": content}
+	root := filepath.Join(t.TempDir(), "sandbox")
+	stager, err := New(root, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsupported := stageRequest(source, []capability.Resource{declaredResource("safe.txt", "executable-ish", content)})
+	if _, err := stager.StageResources(context.Background(), unsupported); err == nil {
+		t.Fatal("unsupported resource kind was accepted")
+	}
+
+	request := stageRequest(source, []capability.Resource{declaredResource("safe.txt", capability.ResourceKindFile, content)})
+	stage, err := stager.StageResources(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage.Root, "injected.txt"), []byte("unexpected"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stager.StageResources(context.Background(), request); err == nil {
+		t.Fatal("stage containing an undeclared entry was silently reused")
+	}
+}
+
+func TestFilesystemStagerNormalizesSourceDigestIdentity(t *testing.T) {
+	source := "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+	content := []byte("trusted")
+	provider := contentProvider{strings.ToLower(source) + ":safe.txt": content}
+	stager, err := New(filepath.Join(t.TempDir(), "sandbox"), provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, err := stager.StageResources(context.Background(), stageRequest(source, []capability.Resource{
+		declaredResource("safe.txt", capability.ResourceKindFile, content),
+	}))
+	if err != nil || stage.SourceDigest != strings.ToLower(source) {
+		t.Fatalf("normalized stage=%#v err=%v", stage, err)
 	}
 }

@@ -142,6 +142,15 @@ type Resource struct {
 	Size      int64  `json:"size,omitempty"`
 }
 
+// Resource kinds are deliberately closed so a host can apply predictable
+// permissions without guessing whether an imported artifact is executable.
+const (
+	ResourceKindFile      = "resource"
+	ResourceKindScript    = "script"
+	ResourceKindReference = "reference"
+	ResourceKindAsset     = "asset"
+)
+
 type SourceProvenance struct {
 	Identity        string                 `json:"identity,omitempty"`
 	Format          string                 `json:"format"`
