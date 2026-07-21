@@ -2,125 +2,138 @@
 
 ![OpenSeal - autonomous agent kernel](./openseal.jpeg)
 
-A prompt-first, durable kernel for autonomous Agents and Teams. OpenSeal keeps
-multi-objective work, collaboration, skills, approvals, activity, and recovery
-semantics portable across standalone and embedded deployments. Deterministic
-workflows remain an optional runbook layer rather than the primary authoring
-model.
+OpenSeal is a prompt-first, durable kernel for autonomous Agents and Teams. It
+provides one portable execution model for objectives, long-running Runs,
+collaboration, governed Skills, approvals, activity, artifacts, and recovery.
+Deterministic workflows remain available as an optional runbook layer.
 
-## Quick Start
+```mermaid
+flowchart LR
+    Intent[Prompt or event] --> Owner[Agent or Team]
+    Owner --> Objective[Objective portfolio]
+    Objective --> Run[Durable Run]
+    Run --> Turn[Bounded turn]
+    Turn --> Skill[Governed Skill action]
+    Skill -->|allowed| Result[Activity and artifacts]
+    Skill -->|approval required| Approval[Durable checkpoint]
+    Approval --> Turn
+```
 
-Build OpenSeal and start its durable local daemon:
+## Start locally
+
+Prerequisites: Go 1.26 and a C toolchain for SQLite (`gcc` or `clang`).
 
 ```bash
 git clone https://github.com/axiom-studio/openseal.git
 cd openseal
 make build
-./openseal daemon
+
+# A missing config is created with API port 8080 and durable SQLite paths.
+./openseal daemon --config ./local.yaml
 ```
 
-In another terminal, open the prompt-first workspace:
+In another terminal:
 
 ```bash
 ./openseal
 ```
 
-Running the binary without a subcommand opens the TUI. It discovers the
-server's versioned capabilities before rendering actions and stores no
-authoritative state of its own. Canonical work and immutable artifact evidence
-are persisted by default in `data/openseal.db`, so they remain available after
-either terminal exits or the daemon restarts. The TUI can inspect provenance,
-expand evidence, and perform verified content downloads when advertised. See
-[Terminal UI](docs/tui.md) for workspace and keyboard options.
+Running `openseal` without a subcommand opens the TUI. The TUI is a thin client:
+closing it does not stop work. The generated configuration stores kernel state
+in `data/openseal.db` and artifact content in `data/artifacts`, relative to the
+configuration file.
 
-To run the daemon through Docker Compose instead:
+The checked-in `daemon.yaml` intentionally uses API port `18080`. When using
+that file, connect with `./openseal tui --endpoint http://127.0.0.1:18080`.
+
+Docker Compose is also supported:
 
 ```bash
 make docker-up
 make docker-logs
+# API: http://localhost:8080/api/v1
+# Webhook listener: http://localhost:9090
 make docker-down
 ```
 
-**What's included:**
-- Durable OpenSeal kernel and worker pool
-- Prompt-first terminal workspace
-- REST API at `http://localhost:8080/api/v1`
-- Webhook server at `http://localhost:9090`
-- SQLite persistence
-- Optional deterministic runbooks and triggers
+## What is implemented
 
-## Manual Build
+- Versioned Agent definitions and durable Agent deployments
+- First-class Teams with semantic roles, roster assignments, policy, and
+  Team-owned Skill bindings
+- Multi-objective portfolios, Initiatives, schedules, event routing, and
+  durable Runs with bounded leases and checkpoints
+- Typed Skill definitions, least-privilege deployment bindings, action
+  approvals, credential references, and execution-time secret boundaries
+- OpenClaw/ClawHub source compilation, verified installation, updates, pins,
+  uninstall, provenance, and restart restoration
+- Agent requests, handoffs, dependency groups, Team channels, participation
+  arbitration, cursors, presence, and shared activity
+- Immutable artifact metadata, verified local content storage, source evidence,
+  and governed outreach records
+- SQLite for standalone durability and PostgreSQL for embedded deployments
+- Capability-discovered REST API, prompt-first TUI, and stable Go facade
+- Optional HCL workflows, cron triggers, and webhook triggers
 
-```bash
-# Build the binary
-make build
+The standalone daemon deliberately advertises only the operations it has been
+configured to execute. For example, prompt-to-workforce authoring appears only
+when its model settings are complete, and an embedding host must wire real
+identity, credential, policy, and action adapters before those operations are
+available. Clients should read `/api/v1/capabilities` instead of assuming a
+fixed surface.
 
-# Run daemon
-./openseal daemon --config docker/daemon.yaml
+## Documentation
 
-# Open the TUI (also the default with no subcommand)
-./openseal tui --owner team:platform
+- [Documentation index](docs/README.md) — recommended reading order
+- [Getting started](docs/getting-started.md) — install, configure, start, and
+  verify a local daemon
+- [Core concepts](docs/concepts.md) — Agents, Teams, objectives, Runs, Skills,
+  approvals, conversations, evidence, and recovery
+- [Architecture](docs/architecture/autonomous-agent-runtime.md) — implemented
+  layers, execution lifecycle, and extension boundaries
+- [Terminal UI](docs/tui.md) — workspace configuration and keyboard model
+- [CLI reference](docs/cli.md) — every implemented command and option
+- [REST API](docs/api.md) — capability discovery, conventions, and route groups
+- [Operations](docs/operations.md) — persistence, model setup, recovery, and
+  production embedding
+- [OpenClaw compatibility](docs/skills/openclaw-compatibility.md) — compilation,
+  lifecycle, guarantees, and security boundaries
 
-# Validate a workflow
-./openseal validate workflows/hello.hcl
+## Library embedding
 
-# Run a workflow directly
-./openseal run workflows/hello.hcl
+Use `github.com/axiom-studio/openseal/pkg/openseal` as the supported Go facade.
+Do not import `internal` packages.
+
+```go
+store, err := openseal.NewSQLiteStore("openseal.db")
+if err != nil {
+    return err
+}
+defer store.Close()
+
+engine, err := openseal.New(openseal.WithPersistentStore(store))
+if err != nil {
+    return err
+}
+engine.Start(ctx)
+defer engine.Stop()
 ```
 
-## Project Structure
-
-```
-openseal/
-├── cmd/              # Binary entrypoints
-├── pkg/              # Core packages
-│   ├── executor/     # Workflow execution engine
-│   ├── runtime/      # Objectives, Runs, recovery, policy, collaboration
-│   ├── kernelapi/    # Versioned public HTTP contract
-│   ├── client/       # Thin kernel API clients
-│   ├── validation/   # HCL workflow validation
-├── internal/         # Internal utilities
-│   ├── server/       # Versioned REST API
-│   ├── daemon/       # Daemon config and trigger manager
-│   ├── tui/          # Prompt-first terminal client
-│   └── workflow/     # HCL parser
-├── docker/           # Docker config files
-├── workflows/        # Sample workflows
-├── charts/           # Helm charts
-├── skills/           # Core skills
-└── embedded_nodes/   # Node schema definitions
-```
-
-## REST API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/health` | GET | Health check |
-| `/api/v1/capabilities` | GET | Discover versioned operations |
-| `/api/v1/agent-runs` | POST, GET | Create or list canonical durable work |
-| `/api/v1/agent-runs/{id}` | GET | Inspect canonical work |
-| `/api/v1/agent-runs/{id}/commands` | POST | Pause, resume, stop, or guide work |
-| `/api/v1/artifacts` | POST, GET | Register or list immutable artifact evidence |
-| `/api/v1/artifacts/{id}` | GET | Inspect an artifact version and provenance |
-| `/api/v1/artifact-content` | POST | Stream content into a configured content store |
-| `/api/v1/artifacts/{id}/content` | GET | Stream verified artifact content |
-| `/api/v1/skills` | GET | List available skills |
-| `/api/v1/workflows` | GET | List loaded workflows |
-| `/api/v1/workflows/{id}/run` | POST | Trigger execution |
-| `/api/v1/runs` | GET | List execution runs |
-| `/api/v1/runs/{id}` | GET | Get run detail |
+An engine defaults to an in-memory store, four workflow workers, and the
+default retry policy. Use an explicit persistent store for durable work. See
+the [architecture guide](docs/architecture/autonomous-agent-runtime.md) for the
+adapter boundary.
 
 ## Development
 
 ```bash
-# Run tests
 make test
-
-# Run vet
 make vet
-
 ```
+
+Optional live tests are documented in [Operations](docs/operations.md). They
+are not part of the default deterministic test suite.
 
 ## License
 
-Apache License 2.0 - see LICENSE file for details.
+Apache License 2.0 — see [LICENSE](LICENSE).

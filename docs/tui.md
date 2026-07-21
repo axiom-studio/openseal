@@ -1,36 +1,20 @@
-# OpenSeal Terminal UI
+# Terminal UI
 
 The OpenSeal TUI is the primary standalone interactive surface. It is a thin
-client over the versioned kernel HTTP API: closing the TUI does not stop work,
-and the TUI never maintains a second execution or persistence layer.
+client over the versioned kernel API: closing it does not stop work, and the TUI
+never maintains a second execution or persistence layer.
 
-Start the daemon first, then launch the workspace:
+Start the daemon, then launch the workspace:
 
 ```bash
-openseal daemon
+openseal daemon --config ./local.yaml
 openseal
 ```
 
-The workspace composes and operates canonical Agents, Teams, objectives, Runs,
-Initiatives, governed outreach, Team channels, and the durable Artifact/Evidence catalog. Workforce authoring
-starts with an outcome prompt and persists a reviewable ChangeSet. When the
-connected host advertises the exact contextual authority, the TUI can resolve a
-specific approval requirement and atomically Apply the reviewed Agent, Team,
-and standing-objective resources. It then shows the durable policy decisions,
-lifecycle, actor, reason, receipt, and created resource references.
+## Connect and select context
 
-Every control comes from the server's versioned capability document, including
-resource-specific revision and approval eligibility. The TUI does not infer
-authority from a ChangeSet or manufacture a local policy evaluator. An
-unavailable, unauthorized, stale, or incompatible operation remains visibly
-read-only.
-
-## Workspaces
-
-Standalone OpenSeal defaults to the `local:default` scope and the
-`agent:operator` owner. Both are explicit and configurable. Team deployments
-are listed from the selected scope and retain their immutable definition
-version, semantic roster, policy bounds, status, and optimistic revision:
+Standalone OpenSeal defaults to scope `local:default` and owner
+`agent:operator`. Both are explicit and configurable:
 
 ```bash
 openseal tui \
@@ -40,62 +24,117 @@ openseal tui \
   --download-dir ./research-artifacts
 ```
 
-`--endpoint` accepts either a standalone server origin or an explicit
-versioned kernel API root mounted by a host. Hosts that require non-secret
-scope-routing metadata can be reached with repeatable `--header name=value`
-selectors. Authentication secrets belong in an authorization-aware HTTP
-transport or local proxy, not command-line headers.
+`--endpoint` accepts a server origin or an explicit versioned API root.
+`OPENSEAL_API_URL` supplies its default. Repeatable `--header name=value`
+options carry non-secret host selectors. Authentication secrets belong in an
+authorization-aware transport or local proxy, not command history.
 
-`OPENSEAL_API_URL` can supply the default endpoint. The TUI refreshes work every
-five seconds; `--poll=-1s` disables automatic refresh for deterministic
-terminal testing.
+The TUI refreshes every five seconds. `--poll=-1s` disables polling for
+deterministic terminal testing.
 
-## Keyboard model
+## Capability-driven workspace
+
+At connection time the TUI reads `/api/v1/capabilities`. Only advertised
+sections and actions become interactive. An unavailable, unauthorized, stale,
+or incompatible operation remains read-only instead of falling back to local
+state.
+
+Depending on the connected server, the workspace can expose:
+
+- **Workforce** — describe Agents and Teams, answer sequential refinements,
+  place approved credential references and binding configuration, inspect
+  evaluation, resolve eligible requirements, and apply a reviewed ChangeSet
+- **Readiness** — Agent deployment state and compilation history
+- **Teams** — Team definitions, roster, lifecycle, and governed amendments
+- **Objectives / Initiatives** — multi-objective portfolios and project context
+- **Work** — Runs, lifecycle commands, guidance, evidence, and grounding
+- **Requests / Approvals** — delegation, handoffs, clarification, completion,
+  and exact action decisions
+- **Channels** — durable Team conversations, coordination audit, read cursors,
+  and presence
+- **Skills** — ClawHub lifecycle, deployment bindings, model-visible actions,
+  and source policy readiness
+- **Outreach** — evidence-linked drafts and governed delivery Runs
+- **Activity / Evidence** — canonical audit projection and artifact downloads
+
+Workforce authoring persists a reviewable ChangeSet. The TUI displays the
+server-provided lifecycle, actor, reason, policy decisions, approval
+eligibility, exact candidate digest, receipt, and created resource references.
+It does not infer authority from candidate content.
+
+## Navigation keys
+
+Section shortcuts work while the list panel is focused:
+
+| Key | Section |
+| --- | --- |
+| `f` | Workforce authoring |
+| `h` | Agent readiness |
+| `T` | Teams |
+| `o` | Objectives |
+| `i` | Initiatives |
+| `O` | Outreach |
+| `s` | Skills |
+| `w` | Work / Runs |
+| `R` | Agent requests |
+| `A` | Action approvals |
+| `t` | Activity |
+| `c` | Channels |
+| `a` | Artifacts / evidence |
+
+Common controls:
 
 | Key | Result |
-|---|---|
-| `Ctrl+S` | Start work or submit guidance from the composer |
-| `Tab` | Move between the composer and current work |
-| `↑` / `↓` or `k` / `j` | Select an item or approval requirement |
-| `f` / `T` / `o` / `i` / `O` / `w` / `c` / `a` | Open Workforce, Teams, Objectives, Initiatives, Outreach, Work, Channels, or Evidence |
-| `n` | Compose a new resource or evidence-linked outreach draft in the current section |
-| `r` | Refresh from the kernel |
-| `p` | Pause or resume selected Team deployment or work when advertised |
-| `g` | Guide selected work when advertised |
-| `x` | Stop selected work when advertised |
-| `m` | Message the selected Team channel when advertised |
-| `y` / `x` | Approve or reject the selected eligible Workforce requirement |
-| `[` / `]` | Select an authorized credential choice for the highlighted Workforce requirement |
-| `b` | Save the selected typed Workforce credential bindings |
-| `e` / `Enter` | Apply a ready Workforce, edit an objective, expand selected evidence/audit, or inspect an Outreach delivery Run |
-| `d` | Download selected artifact when advertised |
-| `D` | Create a governed delivery Run for the selected outreach draft when advertised |
-| `[` / `]` and `{` / `}` | In Outreach, select exact source evidence and an authorized external Skill action |
-| `Esc` | Cancel guidance composition |
-| `Ctrl+C` | Exit the TUI without stopping work |
+| --- | --- |
+| `Tab` | Move between composer and current list |
+| `Ctrl+S` | Submit the current composer operation |
+| `↑` / `↓` or `k` / `j` | Select an item or current requirement |
+| `n` | Begin a supported creation or install operation in the section |
+| `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
+| `p` | Pause/resume selected Run, Agent, Team, or Initiative; pin/unpin a Skill |
+| `g` | Guide a selected active Run |
+| `m` | Post to a selected channel, propose a Team purpose amendment, or load more activity |
+| `y` / `x` | Approve/accept or reject the selected eligible governed item |
+| `?` / `M` | Request or provide clarification for an Agent request |
+| `e` / `Enter` | Apply, edit, evaluate, complete, or expand according to current section |
+| `[` / `]` | Move among relevant credential, configuration, amendment, Skill, or evidence choices |
+| `{` / `}` | Move among outreach actions or grounding pages |
+| `b` | Save selected Workforce placement or begin a Skill binding |
+| `v` / `V` | Verify/activate or expand evidence/grounding according to section |
+| `u` / `U` | Update selected or all installed ClawHub Skills |
+| `d` | Download selected artifact |
+| `D` | Create a delivery Run for a selected outreach draft |
+| `Esc` | Cancel the current composer mode |
+| `Ctrl+C` | Exit without stopping server work |
+
+The footer shows only actions meaningful for the current selection and
+advertised capability. `Ctrl+S` is the consistent commit key for text entered
+in the composer.
+
+## Safety and retry behavior
 
 Creation and governed mutations use client-generated idempotency keys. A failed
 request preserves the intent and key, so retrying cannot duplicate work or a
-permanent approval. Lifecycle commands bind the selected resource revision and
-candidate digest and refresh after conflicts rather than overwriting concurrent
-changes. Team pause/resume preserves its definition, roster, and restrictions,
-binds the exact deployment revision, records an actor and reason, and reloads
-the authoritative result. Apply additionally requires an explicit audit reason.
+permanent decision. Lifecycle commands bind the selected revision and refresh
+after a conflict rather than overwriting concurrent changes. Applying a
+Workforce additionally binds the candidate digest and requires an audit reason.
 
-Artifact downloads stream directly from the kernel into a temporary file,
-verify the catalog size and SHA-256 digest, and are atomically published with
-private file permissions. Failed or corrupted transfers leave no partial file.
-The TUI never persists content URLs or treats an opaque content reference as a
-filesystem path.
+Credential choices displayed by the TUI are opaque server-authored references.
+Secret values are never entered into the authoring prompt or stored in TUI
+state.
 
-Outreach drafting requires an immutable source observation, an external Skill
-action whose schema declares `target` and `body` semantics, a public profile,
-truthful affiliation and disclosure, and an explicit approval policy. Drafting
-does not send anything. Delivery creates a canonical durable Run; message status,
-Run, ActionCall, approval, terminal outcome, and provider receipt are reloaded
-from kernel state and survive TUI or daemon restarts.
+## Artifact downloads
 
-Skills remain capability inputs to Workforce authoring and runtime execution;
-the TUI does not render lifecycle controls that the connected server has not
-advertised. The same rule applies to every future surface: no placeholder
-production controls or client-only durable state.
+Downloads stream from the kernel into a temporary file, verify catalog size and
+SHA-256 digest, and publish atomically with private file permissions. A failed
+or corrupted transfer leaves no partial destination. The TUI does not persist
+content URLs or interpret an opaque content reference as a filesystem path.
+
+## Governed outreach
+
+Drafting requires an immutable source observation, an external Skill action
+whose schema declares target and body semantics, a public profile, truthful
+affiliation and disclosure, and an explicit approval policy. Drafting does not
+send anything. Delivery creates a canonical durable Run; message status, Run,
+ActionCall, approval, terminal outcome, and provider receipt reload from kernel
+state after reconnect or restart.
