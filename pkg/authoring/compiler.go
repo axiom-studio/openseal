@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -260,6 +261,10 @@ func publicContractDiagnostic(validation []ValidationIssue) string {
 }
 
 func publicSchemaDiagnostic(err error) string {
+	var contextual *strictJSONSchemaError
+	if errors.As(err, &contextual) {
+		return truncateSchemaDiagnostic(contextual.diagnostic)
+	}
 	switch value := err.(type) {
 	case *json.SyntaxError:
 		return fmt.Sprintf("malformed JSON at byte %d", value.Offset)
@@ -322,7 +327,7 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&generated); err != nil {
-		return GenerationResponse{}, err
+		return GenerationResponse{}, contextualizeStrictJSONError(payload, err)
 	}
 	var trailing interface{}
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
@@ -333,6 +338,135 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	}
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
+}
+
+// strictJSONSchemaError preserves the decoder failure for errors.Is/As while
+// giving the bounded repair provider an exact, value-free location. Go's JSON
+// decoder reports only an unknown field name, which is ambiguous in a deeply
+// nested workforce document (for example, "id" is valid in many objects but
+// not in Agent skill requirements).
+type strictJSONSchemaError struct {
+	cause      error
+	diagnostic string
+}
+
+func (e *strictJSONSchemaError) Error() string { return e.diagnostic }
+func (e *strictJSONSchemaError) Unwrap() error { return e.cause }
+
+type unknownJSONFieldLocation struct {
+	path    string
+	allowed []string
+}
+
+func contextualizeStrictJSONError(payload []byte, decodeErr error) error {
+	if decodeErr == nil {
+		return nil
+	}
+	message := strings.TrimSpace(decodeErr.Error())
+	const unknownPrefix = "json: unknown field \""
+	if !strings.HasPrefix(message, unknownPrefix) || !strings.HasSuffix(message, "\"") {
+		return decodeErr
+	}
+	field := strings.TrimSuffix(strings.TrimPrefix(message, unknownPrefix), "\"")
+	if !validSchemaFieldName(field) {
+		return decodeErr
+	}
+	locations := locateUnknownJSONFields(payload, field, reflect.TypeOf(GenerationResponse{}))
+	if len(locations) == 0 {
+		return decodeErr
+	}
+	sort.Slice(locations, func(i, j int) bool { return locations[i].path < locations[j].path })
+	parts := make([]string, 0, len(locations))
+	for _, location := range locations {
+		part := location.path
+		if len(location.allowed) > 0 {
+			part += " (allowed: " + strings.Join(location.allowed, ", ") + ")"
+		}
+		parts = append(parts, part)
+	}
+	diagnostic := "unknown field " + field + " at " + strings.Join(parts, "; ")
+	return &strictJSONSchemaError{cause: decodeErr, diagnostic: diagnostic}
+}
+
+// locateUnknownJSONFields walks only statically typed JSON objects. Maps and
+// interface values are intentionally opaque because their keys are permitted
+// by the portable contract. It returns paths and field names, never values.
+func locateUnknownJSONFields(payload []byte, field string, rootType reflect.Type) []unknownJSONFieldLocation {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return nil
+	}
+	locations := make([]unknownJSONFieldLocation, 0, 2)
+	var walk func(interface{}, reflect.Type, string, int)
+	walk = func(value interface{}, expected reflect.Type, path string, depth int) {
+		if depth > 64 || len(locations) >= 8 || expected == nil {
+			return
+		}
+		for expected.Kind() == reflect.Pointer {
+			expected = expected.Elem()
+		}
+		switch expected.Kind() {
+		case reflect.Struct:
+			object, ok := value.(map[string]interface{})
+			if !ok {
+				return
+			}
+			fields := jsonStructFields(expected)
+			allowed := make([]string, 0, len(fields))
+			for name := range fields {
+				allowed = append(allowed, name)
+			}
+			sort.Strings(allowed)
+			for name, child := range object {
+				childType, known := fields[name]
+				childPath := name
+				if path != "" {
+					childPath = path + "." + name
+				}
+				if !known {
+					if name == field {
+						locations = append(locations, unknownJSONFieldLocation{path: childPath, allowed: allowed})
+					}
+					continue
+				}
+				walk(child, childType, childPath, depth+1)
+			}
+		case reflect.Slice, reflect.Array:
+			items, ok := value.([]interface{})
+			if !ok {
+				return
+			}
+			for index, child := range items {
+				walk(child, expected.Elem(), fmt.Sprintf("%s[%d]", path, index), depth+1)
+			}
+		case reflect.Map, reflect.Interface:
+			// Arbitrary keys are part of this field's declared schema.
+			return
+		}
+	}
+	walk(document, rootType, "", 0)
+	return locations
+}
+
+func jsonStructFields(structType reflect.Type) map[string]reflect.Type {
+	fields := make(map[string]reflect.Type, structType.NumField())
+	for index := 0; index < structType.NumField(); index++ {
+		field := structType.Field(index)
+		if field.PkgPath != "" { // unexported
+			continue
+		}
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		fields[name] = field.Type
+	}
+	return fields
 }
 
 // normalizeGeneratedDefinitionVersions accepts JSON numbers only at the two

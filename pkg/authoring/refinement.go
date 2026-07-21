@@ -607,8 +607,21 @@ func validateRefinementQuestions(questions []RefinementQuestion) error {
 	for i := range questions {
 		q := &questions[i]
 		q.ID, q.Prompt, q.WhyNeeded = strings.TrimSpace(q.ID), strings.TrimSpace(q.Prompt), strings.TrimSpace(q.WhyNeeded)
-		if q.ID == "" || q.Prompt == "" || q.WhyNeeded == "" || q.Priority < 1 || q.Priority > 1000 {
-			return errors.New("refinement questions require id, prompt, why-needed, and positive priority")
+		missing := make([]string, 0, 4)
+		if q.ID == "" {
+			missing = append(missing, "id")
+		}
+		if q.Prompt == "" {
+			missing = append(missing, "prompt")
+		}
+		if q.WhyNeeded == "" {
+			missing = append(missing, "whyNeeded")
+		}
+		if q.Priority < 1 || q.Priority > 1000 {
+			missing = append(missing, "priority (integer 1..1000)")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("unresolvedQuestions[%d] missing or invalid required fields: %s", i, strings.Join(missing, ", "))
 		}
 		if ids[q.ID] {
 			return fmt.Errorf("duplicate refinement question %s", q.ID)

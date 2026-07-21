@@ -26,6 +26,7 @@ type repairingGenerator struct {
 	repairSequence       [][]byte
 	repairs              int
 	lastError            error
+	repairErrors         []error
 	repairInvocationKeys []string
 }
 
@@ -36,6 +37,7 @@ func (g *repairingGenerator) Generate(context.Context, GenerateRequest) ([]byte,
 func (g *repairingGenerator) Repair(_ context.Context, request GenerateRequest, _ []byte, repairError error) ([]byte, error) {
 	g.repairs++
 	g.lastError = repairError
+	g.repairErrors = append(g.repairErrors, repairError)
 	g.repairInvocationKeys = append(g.repairInvocationKeys, request.InvocationKey)
 	if len(g.repairSequence) >= g.repairs {
 		return g.repairSequence[g.repairs-1], nil
@@ -164,9 +166,98 @@ func TestCompilerPerformsBoundedStrictSchemaRepair(t *testing.T) {
 		t.Fatalf("schema repair budget was not enforced, repairs = %d, err = %v", generator.repairs, err)
 	} else {
 		var schemaError *SchemaGenerationError
-		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || schemaError.Diagnostic != "unknown field alsoUnknown" {
+		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || !strings.Contains(schemaError.Diagnostic, "unknown field alsoUnknown at alsoUnknown") {
 			t.Fatalf("schema failure diagnostic = %#v, err = %v", schemaError, err)
 		}
+	}
+}
+
+func TestCompilerRepairsLiveUnknownIDWithExactSchemaPath(t *testing.T) {
+	valid, err := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduces the live provider's ambiguous `unknown field id` response. ID
+	// is valid throughout the document, but not in a SkillRequirement.
+	invalid := bytes.Replace(valid, []byte(`"skillId":"reddit-research"`), []byte(`"id":"reddit-research"`), 1)
+	generator := &repairingGenerator{generated: invalid, repaired: valid}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a market research Team", InvocationKey: "change-set:live-unknown-id:0",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || result == nil || !result.Valid || generator.repairs != 1 {
+		t.Fatalf("path-guided repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	diagnostic := generator.repairErrors[0].Error()
+	if !strings.Contains(diagnostic, "candidate.agents[0].skillRequirements[0].id") ||
+		!strings.Contains(diagnostic, "allowed:") || !strings.Contains(diagnostic, "skillId") {
+		t.Fatalf("unknown-field repair diagnostic = %q", diagnostic)
+	}
+	if strings.Contains(string(valid), "vault://") || strings.Contains(diagnostic, "vault://") {
+		t.Fatal("schema repair diagnostic exposed credential material")
+	}
+}
+
+func TestCompilerRepairsLiveRefinementMissingFieldsWithExactQuestionPath(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	invalid, err := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		UnresolvedQuestions: []RefinementQuestion{{
+			Prompt:   "Which authorized communities should be monitored?",
+			Blocking: []RefinementBlockingScope{RefinementBlocksApply},
+			Answer:   RefinementAnswerSchema{Kind: RefinementAnswerStringList},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stillInvalid, err := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		UnresolvedQuestions: []RefinementQuestion{{
+			ID: "communities", Category: RefinementCategoryScope,
+			Prompt:    "Which authorized communities should be monitored?",
+			WhyNeeded: "Monitoring targets must remain bounded.",
+			Blocking:  []RefinementBlockingScope{RefinementBlocksApply},
+			Answer:    RefinementAnswerSchema{Kind: RefinementAnswerStringList},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		UnresolvedQuestions: []RefinementQuestion{{
+			ID: "communities", Category: RefinementCategoryScope,
+			Prompt:     "Which authorized communities should be monitored?",
+			WhyNeeded:  "Monitoring targets must remain bounded.",
+			Blocking:   []RefinementBlockingScope{RefinementBlocksApply},
+			Answer:     RefinementAnswerSchema{Kind: RefinementAnswerStringList},
+			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}},
+			Priority:   100,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{stillInvalid, repaired}}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research Team that summarizes product feedback", InvocationKey: "change-set:live-refinement:0",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || result == nil || result.Valid || len(result.UnresolvedQuestions) != 1 || generator.repairs != 2 {
+		t.Fatalf("question-path repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	if first := generator.repairErrors[0].Error(); !strings.Contains(first, "unresolvedQuestions[0] missing or invalid required fields: id, whyNeeded, priority") {
+		t.Fatalf("first refinement diagnostic = %q", first)
+	}
+	if second := generator.repairErrors[1].Error(); !strings.Contains(second, "unresolvedQuestions[0] missing or invalid required fields: priority") {
+		t.Fatalf("second refinement diagnostic = %q", second)
 	}
 }
 

@@ -3,6 +3,7 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,5 +116,47 @@ func TestOpenAICompatibleGeneratorRedactsProviderErrorsAndRejectsMultipleChoices
 	_, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"})
 	if err == nil || strings.Contains(err.Error(), "provider-secret-detail") {
 		t.Fatalf("provider error = %v", err)
+	}
+}
+
+func TestOpenAICompatibleRepairSuppliesExactStrictContractChecklist(t *testing.T) {
+	var messages []map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body struct {
+			Messages []map[string]string `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		messages = body.Messages
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"candidate\":{\"agents\":[]}}"}}]}`))
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = generator.Repair(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"},
+		[]byte(`{"candidate":{"agents":[{"skillRequirements":[{"id":"source"}]}]}}`),
+		errors.New("unknown field id at candidate.agents[0].skillRequirements[0].id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("repair messages = %#v", messages)
+	}
+	repair := messages[2]["content"]
+	for _, expected := range []string{
+		"value-free authoritative paths", "skillRequirements entries use skillId (never id)",
+		"Every unresolvedQuestions entry must include all required fields", "whyNeeded", "priority (integer 1..1000)",
+		"unknown field id at candidate.agents[0].skillRequirements[0].id",
+	} {
+		if !strings.Contains(repair, expected) {
+			t.Fatalf("repair prompt missing %q:\n%s", expected, repair)
+		}
+	}
+	if strings.Contains(repair, "secret") {
+		t.Fatal("repair prompt exposed transport credential")
 	}
 }
