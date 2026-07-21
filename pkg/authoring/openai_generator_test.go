@@ -74,6 +74,8 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"In refinement mode, use refinement.answers as authoritative",
 		"Never place an opaque credential binding identifier in question provenance or model output",
 		"Skill readiness is ready, needs_binding, needs_installation, or unavailable",
+		"catalog.diagnostics are bounded host facts",
+		"never infer a candidate from them",
 		"Rank only catalog Skills whose compatibility evidence supports the required actions",
 		"Put non-blocking choices and safe defaults in assumptions, never questions",
 		"An executable cadence is exactly one of",

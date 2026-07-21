@@ -1538,7 +1538,7 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 			Actions: []string{"search", "read"}, Credentials: []authoring.SkillCredential{{Name: "REDDIT_API_TOKEN", Kind: "environment-secret", Actions: []string{"search", "read"}}},
 			PromptAvailable: true, MaximumRisk: capability.RiskLevelRead, Readiness: authoring.SkillReadinessNeedsInstallation,
 			Compatibility: []authoring.SkillCompatibility{{Requirement: "reddit.read", Compatible: true, Evidence: "verified compilation", Reference: "receipt:sha256:abc123"}},
-		}}},
+		}}, Diagnostics: []authoring.CatalogDiagnostic{{Code: authoring.CatalogDiagnosticDiscoveryStale, Message: "A newer catalog revision must be verified before additional Skills can be offered.", Reference: "language-analysis"}}},
 		Refinement: authoring.ChangeSetRefinement{Questions: []authoring.RefinementQuestion{scopeQuestion, skillQuestion, credentialQuestion}, Answers: []authoring.RefinementAnswerEvent{{QuestionID: scopeQuestion.ID, Value: authoring.RefinementAnswerValue{OptionIDs: []string{"sre"}}, AnsweredAt: time.Now()}}},
 	}
 	evaluating := *blocked
@@ -1558,6 +1558,7 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 		"reddit-monitor@2.1.0", "https://clawhub.ai::@acme/", "reddit-monitor", "needs_installation",
 		"Actions: read, search", "Prompt guidance: available", "Maximum risk: read",
 		"REDDIT_API_TOKEN (environment-", "secret; read, search)", "verified compilation", "receipt:sha256:abc123",
+		"Capability availability", "capability_discovery_stale", "newer catalog revision", "language-analysis",
 		"Answered questions", scopeQuestion.Prompt,
 	} {
 		if !strings.Contains(view, expected) {

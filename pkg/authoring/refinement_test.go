@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -240,6 +241,59 @@ func TestInstallableSkillOptionsRequireExactReceiptBackedEvidence(t *testing.T) 
 	skill.Compatibility = append(skill.Compatibility, SkillCompatibility{Requirement: "action_adapter", Compatible: false, Evidence: "governed adapter unavailable", Reference: "diagnostic:needs_action_adapter"})
 	if err := validate(); err == nil || !strings.Contains(err.Error(), "incompatibility-proven") {
 		t.Fatalf("incompatible option error=%v", err)
+	}
+}
+
+func TestCapabilityCatalogDiagnosticsAreBoundedAndValidatedBeforeGeneration(t *testing.T) {
+	catalog := CapabilityCatalog{Diagnostics: []CatalogDiagnostic{
+		{Code: CatalogDiagnosticNoCompatibleCapability, Message: "No compatible capability was verified.", Reference: "reddit-research"},
+		{Code: CatalogDiagnosticDiscoveryUnavailable, Message: "Authorized capability discovery is unavailable.", Reference: "language-analysis"},
+		{Code: CatalogDiagnosticDiscoveryTimeout, Message: "The bounded verification deadline elapsed.", Reference: "reddit-research"},
+		{Code: CatalogDiagnosticDiscoveryStale, Message: "Only stale verification evidence was found.", Reference: "language-analysis"},
+	}}
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		t.Fatalf("valid catalog diagnostics: %v", err)
+	}
+
+	tests := map[string]CapabilityCatalog{
+		"invalid code":      {Diagnostics: []CatalogDiagnostic{{Code: "Timeout Now", Message: "Unavailable"}}},
+		"empty message":     {Diagnostics: []CatalogDiagnostic{{Code: CatalogDiagnosticDiscoveryTimeout}}},
+		"multiline message": {Diagnostics: []CatalogDiagnostic{{Code: CatalogDiagnosticDiscoveryTimeout, Message: "provider error\nraw detail"}}},
+		"oversized message": {Diagnostics: []CatalogDiagnostic{{Code: CatalogDiagnosticDiscoveryTimeout, Message: strings.Repeat("x", 1025)}}},
+		"raw URL reference": {Diagnostics: []CatalogDiagnostic{{Code: CatalogDiagnosticDiscoveryTimeout, Message: "Unavailable", Reference: "https://registry.example/private?q=raw"}}},
+		"padded reference":  {Diagnostics: []CatalogDiagnostic{{Code: CatalogDiagnosticDiscoveryTimeout, Message: "Unavailable", Reference: " reddit-research "}}},
+		"duplicate": {Diagnostics: []CatalogDiagnostic{
+			{Code: CatalogDiagnosticDiscoveryTimeout, Message: "First", Reference: "reddit-research"},
+			{Code: CatalogDiagnosticDiscoveryTimeout, Message: "Second", Reference: "reddit-research"},
+		}},
+	}
+	tooMany := CapabilityCatalog{Diagnostics: make([]CatalogDiagnostic, MaximumCatalogDiagnostics+1)}
+	for index := range tooMany.Diagnostics {
+		tooMany.Diagnostics[index] = CatalogDiagnostic{Code: CatalogDiagnosticDiscoveryTimeout, Message: "Unavailable", Reference: fmt.Sprintf("intent-%d", index)}
+	}
+	tests["too many"] = tooMany
+	for name, invalid := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateCapabilityCatalog(invalid); err == nil {
+				t.Fatal("invalid catalog diagnostics were accepted")
+			}
+		})
+	}
+
+	generator := &refinementGenerator{payloads: [][]byte{refinementPayload(t, "1")}}
+	compiler, _ := NewCompiler(generator)
+	if _, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Agent", Catalog: tests["invalid code"]}); err == nil {
+		t.Fatal("invalid host catalog reached generation")
+	}
+	if len(generator.requests) != 0 {
+		t.Fatalf("generator received an invalid host catalog: %#v", generator.requests)
+	}
+	service, _ := NewChangeSetService(compiler, NewMemoryChangeSetStore())
+	if _, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create a research Agent", Catalog: tests["invalid code"],
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "invalid-catalog",
+	}); err == nil {
+		t.Fatal("invalid host catalog was durably prepared")
 	}
 }
 

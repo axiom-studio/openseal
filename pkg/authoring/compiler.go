@@ -81,6 +81,9 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	if request.Mode == ModeAmend && request.Existing == nil {
 		return nil, errors.New("amend authoring requires the existing workforce candidate")
 	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, fmt.Errorf("authoring capability catalog: %w", err)
+	}
 	payload, err := c.generator.Generate(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("generate workforce candidate: %w", err)
