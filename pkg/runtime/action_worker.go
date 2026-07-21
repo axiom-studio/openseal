@@ -41,6 +41,26 @@ func (f CredentialResolverFunc) ResolveCredentials(ctx context.Context, request 
 	return f(ctx, request)
 }
 
+// ActionCredentialLeaseIssuer creates a signed, one-time opaque credential
+// lease for a remote execution host. It receives durable identity and opaque
+// references only; implementations select exact fields and sign through the
+// ActionCredentialLease contract.
+type ActionCredentialLeaseIssuer interface {
+	IssueActionCredentialLease(context.Context, ActionCredentialLeaseIssueRequest) (*SignedActionCredentialLease, error)
+}
+
+type ActionCredentialLeaseIssuerFunc func(context.Context, ActionCredentialLeaseIssueRequest) (*SignedActionCredentialLease, error)
+
+func (f ActionCredentialLeaseIssuerFunc) IssueActionCredentialLease(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*SignedActionCredentialLease, error) {
+	return f(ctx, request)
+}
+
+type ActionCredentialLeaseIssueRequest struct {
+	Call       *ActionCall
+	Run        *AgentRun
+	References map[string]skill.CredentialReference
+}
+
 type ActionDispatchInput struct {
 	Call *ActionCall
 	// Run is the durable, kernel-owned execution context for the call. It is
@@ -51,6 +71,10 @@ type ActionDispatchInput struct {
 	Bound       *skill.BoundAction
 	Arguments   map[string]interface{}
 	Credentials map[string]string
+	// CredentialLease and CredentialReferences are the remote-resolution path.
+	// They are mutually exclusive with plaintext Credentials.
+	CredentialLease      *SignedActionCredentialLease
+	CredentialReferences map[string]skill.CredentialReference
 }
 
 type ActionDispatcher interface {
@@ -67,6 +91,7 @@ type ActionWorker struct {
 	store       KernelStore
 	catalog     ActionExecutionCatalog
 	credentials CredentialResolver
+	leaseIssuer ActionCredentialLeaseIssuer
 	dispatcher  ActionDispatcher
 	now         func() time.Time
 	newID       func() string
@@ -74,6 +99,10 @@ type ActionWorker struct {
 
 func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher) *ActionWorker {
 	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString}
+}
+
+func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher) *ActionWorker {
+	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString}
 }
 
 func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string, leaseDuration time.Duration) (*ActionExecutionResult, error) {
@@ -97,11 +126,26 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if executionErr == nil {
 		executionErr = w.catalog.ValidateInput(executionCtx, bound, call.Arguments)
 	}
+	var sourceRun *AgentRun
+	if executionErr == nil {
+		sourceRun, executionErr = w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
+		if executionErr == nil && sourceRun == nil {
+			executionErr = ErrRunNotFound
+		}
+	}
 	credentials := map[string]string(nil)
+	var credentialLease *SignedActionCredentialLease
+	credentialReferences := map[string]skill.CredentialReference(nil)
 	if executionErr == nil && len(call.CredentialRefs) > 0 {
-		if w.credentials == nil {
-			executionErr = errors.New("action credentials cannot be resolved")
-		} else {
+		if w.leaseIssuer != nil {
+			credentialReferences = cloneCredentialReferences(call.CredentialRefs)
+			credentialLease, executionErr = w.leaseIssuer.IssueActionCredentialLease(executionCtx, ActionCredentialLeaseIssueRequest{
+				Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), References: cloneCredentialReferences(call.CredentialRefs),
+			})
+			if executionErr == nil {
+				executionErr = MatchActionCredentialLeaseReferences(credentialLease, call, sourceRun)
+			}
+		} else if w.credentials != nil {
 			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, CredentialResolutionRequest{
 				Scope: call.Scope, DeploymentID: call.DeploymentID, SkillID: call.SkillID, SkillVersion: call.SkillVersion,
 				Action: call.Action, ActionCallID: call.ID, RunID: call.RunID, References: cloneCredentialReferences(call.CredentialRefs),
@@ -114,13 +158,8 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 					}
 				}
 			}
-		}
-	}
-	var sourceRun *AgentRun
-	if executionErr == nil {
-		sourceRun, executionErr = w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
-		if executionErr == nil && sourceRun == nil {
-			executionErr = ErrRunNotFound
+		} else {
+			executionErr = errors.New("action credentials cannot be resolved")
 		}
 	}
 	var output map[string]interface{}
@@ -132,6 +171,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		output, executionErr = w.dispatcher.DispatchAction(dispatchCtx, ActionDispatchInput{
 			Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), Bound: bound, Arguments: cloneMap(call.Arguments), Credentials: credentials,
+			CredentialLease: credentialLease, CredentialReferences: credentialReferences,
 		})
 		cancel()
 	}

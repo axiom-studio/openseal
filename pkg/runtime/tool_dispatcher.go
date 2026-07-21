@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -29,6 +30,8 @@ type ToolInvocation struct {
 	RunID                 string
 	Arguments             map[string]interface{}
 	Credentials           map[string]string
+	CredentialLease       *SignedActionCredentialLease
+	CredentialReferences  map[string]skill.CredentialReference
 	PreparedRuntime       *skill.PreparedRuntime
 }
 
@@ -60,6 +63,20 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	if d == nil || d.invoker == nil || input.Bound == nil || input.Bound.Definition == nil {
 		return nil, errors.New("tool action dispatcher is not configured")
 	}
+	if len(input.Credentials) > 0 && input.CredentialLease != nil {
+		return nil, errors.New("plaintext credentials and an opaque credential lease are mutually exclusive")
+	}
+	if input.CredentialLease != nil {
+		if input.Call == nil || input.Run == nil {
+			return nil, errors.New("opaque credential lease requires its durable ActionCall and Run")
+		}
+		if err := MatchActionCredentialLeaseReferences(input.CredentialLease, input.Call, input.Run); err != nil {
+			return nil, fmt.Errorf("validate opaque credential lease transport: %w", err)
+		}
+		if !reflect.DeepEqual(input.CredentialReferences, input.Call.CredentialRefs) {
+			return nil, errors.New("opaque credential references do not match the durable ActionCall")
+		}
+	}
 	transport := input.Bound.Definition.Transport
 	if input.Bound.Action.Transport != nil {
 		transport = *input.Bound.Action.Transport
@@ -89,6 +106,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		Action: input.Bound.Action.Name, Arguments: arguments, Credentials: input.Credentials,
+		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
 	}
 	if input.Call != nil {
 		invocation.ActionCallID = input.Call.ID

@@ -92,6 +92,45 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 	}
 }
 
+func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *testing.T) {
+	store := NewMemoryStore(20)
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	catalog, proposal := createRunnableAction(t, store, now)
+	signer := testCredentialLeaseSigner{key: []byte("lease-signing-key")}
+	issuerCalls := 0
+	worker := NewActionWorkerWithCredentialLeaseIssuer(store, catalog, ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*SignedActionCredentialLease, error) {
+		issuerCalls++
+		if request.Call == nil || request.Run == nil || request.Call.ID != proposal.Call.ID || request.Run.ID != proposal.Call.RunID || request.Run.AssignedAgentID == "" || request.References["token"] != proposal.Call.CredentialRefs["token"] {
+			t.Fatalf("credential lease issue request = %#v", request)
+		}
+		lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+			TenantID: request.Call.Scope.ID, Call: request.Call, Run: request.Run, CredentialFields: map[string][]string{"token": {"value"}},
+			Issuer: "control-plane", Audience: "execution-host", IssuedAt: now.Add(2 * time.Second), ExpiresAt: now.Add(30 * time.Second), Nonce: "nonce-worker-0000000001",
+		})
+		if err != nil {
+			return nil, err
+		}
+		return SignActionCredentialLease(ctx, *lease, signer)
+	}), ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		if len(input.Credentials) != 0 || input.CredentialLease == nil || input.CredentialLease.Lease.ActionCallID != proposal.Call.ID || input.CredentialReferences["token"] != proposal.Call.CredentialRefs["token"] {
+			t.Fatalf("opaque dispatch input = %#v", input)
+		}
+		if input.Run == nil || input.Run.ID != proposal.Call.RunID || input.Call == nil || input.Call.LeaseOwner != "lease-worker" {
+			t.Fatalf("durable dispatch authority = call %#v run %#v", input.Call, input.Run)
+		}
+		return map[string]interface{}{"ok": true}, nil
+	}))
+	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	worker.newID = func() string { return "opaque-lease-execution" }
+	result, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "lease-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issuerCalls != 1 || result.Call.Status != ActionCallStatusSucceeded {
+		t.Fatalf("opaque credential execution = calls %d result %#v", issuerCalls, result)
+	}
+}
+
 func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
 	store := NewMemoryStore(20)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

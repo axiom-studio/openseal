@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
@@ -64,6 +65,66 @@ Publish the requested release.
 	}
 	if invocation.PreparedRuntime == nil || invocation.PreparedRuntime.RuntimeID != "oci://runtime.test/publisher@sha256:"+strings.Repeat("b", 64) {
 		t.Fatalf("prepared runtime was not dispatched: %#v", invocation.PreparedRuntime)
+	}
+}
+
+func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *testing.T) {
+	now, call, run, fields := actionCredentialLeaseFixture()
+	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields,
+		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-transport-00000001",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := SignActionCredentialLease(t.Context(), *lease, testCredentialLeaseSigner{key: []byte("lease-signing-key")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := &skill.Definition{
+		ID: call.SkillID, Version: call.SkillVersion, Name: "Reddit research", Transport: skill.TransportReference{Kind: "tool", Endpoint: "reddit_search"},
+		Actions: map[string]skill.Action{call.Action: {Name: call.Action, Description: "Search", InputSchema: map[string]interface{}{"type": "object"}, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported}},
+	}
+	bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[call.Action], Binding: &skill.Binding{
+		ID: call.BindingID, Revision: call.BindingRevision, Scope: skill.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID}, DeploymentID: call.DeploymentID,
+	}}
+	var invocation ToolInvocation
+	dispatcher, err := NewToolActionDispatcher(ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+		invocation = value
+		return map[string]interface{}{"ok": true}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{},
+		CredentialLease: envelope, CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invocation.Credentials) != 0 || invocation.CredentialLease == nil || invocation.CredentialLease.Lease.ActionCallID != call.ID || invocation.CredentialReferences["reddit"] != call.CredentialRefs["reddit"] {
+		t.Fatalf("opaque credential transport = %#v", invocation)
+	}
+	invocation.CredentialLease.Signature.Value[0] ^= 0xff
+	if envelope.Signature.Value[0] == invocation.CredentialLease.Signature.Value[0] {
+		t.Fatal("tool invocation aliases the caller's signed envelope")
+	}
+
+	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{}, Credentials: map[string]string{"reddit": "plaintext"},
+		CredentialLease: envelope, CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
+	})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("mixed plaintext and opaque authority was accepted: %v", err)
+	}
+
+	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{}, CredentialLease: envelope,
+		CredentialReferences: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant-7/other"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "do not match") {
+		t.Fatalf("substituted opaque reference was accepted: %v", err)
 	}
 }
 

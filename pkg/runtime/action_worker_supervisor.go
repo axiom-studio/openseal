@@ -51,6 +51,7 @@ type ActionWorkerSupervisor struct {
 	store       KernelStore
 	catalog     ActionExecutionCatalog
 	credentials CredentialResolver
+	leaseIssuer ActionCredentialLeaseIssuer
 	dispatcher  ActionDispatcher
 	source      WorkerScopeSource
 	config      DynamicActionWorkerConfig
@@ -72,6 +73,34 @@ func NewActionWorkerSupervisor(
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
 ) (*ActionWorkerSupervisor, error) {
+	return newActionWorkerSupervisor(store, catalog, credentials, nil, dispatcher, source, logger, config)
+}
+
+func NewActionCredentialLeaseWorkerSupervisor(
+	store KernelStore,
+	catalog ActionExecutionCatalog,
+	issuer ActionCredentialLeaseIssuer,
+	dispatcher ActionDispatcher,
+	source WorkerScopeSource,
+	logger *zap.SugaredLogger,
+	config DynamicActionWorkerConfig,
+) (*ActionWorkerSupervisor, error) {
+	if issuer == nil {
+		return nil, errors.New("action credential lease issuer is required")
+	}
+	return newActionWorkerSupervisor(store, catalog, nil, issuer, dispatcher, source, logger, config)
+}
+
+func newActionWorkerSupervisor(
+	store KernelStore,
+	catalog ActionExecutionCatalog,
+	credentials CredentialResolver,
+	issuer ActionCredentialLeaseIssuer,
+	dispatcher ActionDispatcher,
+	source WorkerScopeSource,
+	logger *zap.SugaredLogger,
+	config DynamicActionWorkerConfig,
+) (*ActionWorkerSupervisor, error) {
 	if store == nil || catalog == nil || dispatcher == nil || source == nil {
 		return nil, errors.New("action store, catalog, dispatcher, and scope source are required")
 	}
@@ -82,7 +111,7 @@ func NewActionWorkerSupervisor(
 		logger = zap.NewNop().Sugar()
 	}
 	return &ActionWorkerSupervisor{
-		store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher,
+		store: store, catalog: catalog, credentials: credentials, leaseIssuer: issuer, dispatcher: dispatcher,
 		source: source, config: config, logger: logger, pools: make(map[string]*ActionWorkerPool),
 	}, nil
 }
@@ -192,7 +221,7 @@ func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
 			continue
 		}
 		scope := desired[key]
-		pool, err := NewActionWorkerPool(s.store, s.catalog, s.credentials, s.dispatcher, s.logger, ActionWorkerConfig{
+		pool, err := newActionWorkerPool(s.store, s.catalog, s.credentials, s.leaseIssuer, s.dispatcher, s.logger, ActionWorkerConfig{
 			Scope: scope, Concurrency: s.config.Concurrency, PollInterval: s.config.PollInterval,
 			LeaseDuration:  s.config.LeaseDuration,
 			WorkerIDPrefix: fmt.Sprintf("%s-%s-%s", s.config.WorkerIDPrefix, scope.Kind, scope.ID),
