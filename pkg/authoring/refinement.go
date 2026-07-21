@@ -331,6 +331,9 @@ func validateRefinementQuestions(questions []RefinementQuestion) error {
 		if q.Category == RefinementCategorySkill && q.Answer.Kind != RefinementAnswerSkillSelection {
 			return fmt.Errorf("refinement question %s has category skill and must use answer kind skill_selection", q.ID)
 		}
+		if q.Category == RefinementCategoryCredential && q.Answer.Kind != RefinementAnswerCredentialReference {
+			return fmt.Errorf("refinement question %s has category credential and must use answer kind credential_reference", q.ID)
+		}
 		for _, scope := range q.Blocking {
 			if scope != RefinementBlocksCandidate && scope != RefinementBlocksEvaluation && scope != RefinementBlocksApply {
 				return fmt.Errorf("refinement question %s has an invalid blocking scope", q.ID)
