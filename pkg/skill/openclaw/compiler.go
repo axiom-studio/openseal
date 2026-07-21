@@ -6,17 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	opensealhttp "github.com/axiom-studio/openseal/pkg/httpaction"
 	opensealprocess "github.com/axiom-studio/openseal/pkg/process"
 	"github.com/axiom-studio/openseal/pkg/skill/skillmd"
 )
 
 const processCompilationRevision = "process.1"
+
+const httpCompilationRevision = "http.1"
 
 const NeedsActionAdapterDiagnostic = "needs_action_adapter"
 
@@ -103,7 +108,30 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		definition.Prompt = nil
 	}
 
-	if parsed.CommandDispatch != nil {
+	adapterCandidate := openAPIHelperCandidate(parsed)
+	if adapterCandidate {
+		adapterActions, adapterErr := compileOpenAPIHelperActions(bundle, parsed, definition)
+		if adapterErr != nil {
+			diagnostics = append(diagnostics, Diagnostic{
+				Severity: "warning", Code: NeedsActionAdapterDiagnostic, Path: "SKILL.md",
+				Message: "the declared OpenAPI helper could not be compiled safely: " + adapterErr.Error(),
+			})
+		} else {
+			definition.Actions = adapterActions
+			definition.Prompt.Instructions = optimizeOpenAPIHelperPrompt(definition.Prompt.Instructions, adapterActions)
+			definition.Prompt.AllowedTools = nil
+			definition.Requirements.Executables = nil
+			definition.Requirements.AnyExecutables = nil
+			definition.Requirements.Environment = nil
+			definition.Requirements.OperatingSystems = nil
+			definition.Installers = nil
+			definition.Version += "." + httpCompilationRevision
+			diagnostics = append(diagnostics, Diagnostic{
+				Severity: "info", Code: "openapi_http.compiled", Path: "bin/run.mjs",
+				Message: fmt.Sprintf("compiled %d source-declared read operation(s) as typed governed HTTP actions", len(adapterActions)),
+			})
+		}
+	} else if parsed.CommandDispatch != nil {
 		definition.Transport = capability.TransportReference{
 			Kind: "tool", Endpoint: parsed.CommandDispatch.ToolName,
 			Arguments: map[string]capability.TransportArgument{
@@ -139,7 +167,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		if definition.Prompt == nil {
 			return nil, fmt.Errorf("skill contains neither instructions nor a deterministic command dispatch")
 		}
-		if promptRequiresGovernedAction(parsed, definition) {
+		if promptRequiresGovernedAction(parsed, definition) && !hasDiagnostic(diagnostics, NeedsActionAdapterDiagnostic) {
 			diagnostics = append(diagnostics, Diagnostic{
 				Severity: "warning", Code: NeedsActionAdapterDiagnostic, Path: "SKILL.md",
 				Message: "this Skill declares external tools or credentials but no governed action; add deterministic command dispatch, a declared executable, or a host action adapter before activation",
@@ -152,6 +180,230 @@ func Compile(bundle Bundle) (*Compilation, error) {
 		diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "resources.indexed", Message: fmt.Sprintf("indexed %d supporting resources for progressive disclosure", len(bundle.Files))})
 	}
 	return &Compilation{Definition: definition, Parsed: parsed, Diagnostics: diagnostics, SourceDigest: digest, Artifact: cloneBundle(bundle)}, nil
+}
+
+var openAPIHelperReference = regexp.MustCompile(`(?m)\{baseDir\}/bin/run\.mjs\b`)
+
+func openAPIHelperCandidate(parsed *skillmd.ParsedSkill) bool {
+	return parsed != nil && parsed.Metadata.PrimaryEnv != "" && openAPIHelperReference.MatchString(parsed.Body)
+}
+
+type openAPIHelperManifest struct {
+	BaseURL    string                   `json:"baseUrl"`
+	Slug       string                   `json:"slug"`
+	Operations []openAPIHelperOperation `json:"operations"`
+}
+
+type openAPIHelperOperation struct {
+	Description string                   `json:"description"`
+	Method      string                   `json:"method"`
+	OperationID string                   `json:"operationId"`
+	Parameters  []openAPIHelperParameter `json:"parameters"`
+	Path        string                   `json:"path"`
+	RequestBody interface{}              `json:"requestBody"`
+	Summary     string                   `json:"summary"`
+}
+
+type openAPIHelperParameter struct {
+	DefaultValue interface{}   `json:"defaultValue"`
+	Description  string        `json:"description"`
+	EnumValues   []interface{} `json:"enumValues"`
+	Location     string        `json:"location"`
+	Name         string        `json:"name"`
+	Required     bool          `json:"required"`
+	SchemaType   string        `json:"schemaType"`
+}
+
+func compileOpenAPIHelperActions(bundle Bundle, parsed *skillmd.ParsedSkill, definition *capability.Definition) (map[string]capability.Action, error) {
+	manifest, err := parseOpenAPIHelperManifest(bundle)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(manifest.Slug) != parsed.CanonicalName {
+		return nil, fmt.Errorf("helper manifest slug %q does not match canonical Skill identity %q", manifest.Slug, parsed.CanonicalName)
+	}
+	if len(manifest.Operations) == 0 || len(manifest.Operations) > 64 {
+		return nil, fmt.Errorf("helper manifest must declare between 1 and 64 operations")
+	}
+	credentialName := strings.TrimSpace(parsed.Metadata.PrimaryEnv)
+	actions := make(map[string]capability.Action, len(manifest.Operations))
+	for _, operation := range manifest.Operations {
+		name := strings.TrimSpace(operation.OperationID)
+		if !openAPIActionName.MatchString(name) || actions[name].Name != "" {
+			return nil, fmt.Errorf("helper manifest contains an invalid or duplicate operationId")
+		}
+		if !strings.Contains(parsed.Body, name) {
+			return nil, fmt.Errorf("operation %s is not declared by SKILL.md", name)
+		}
+		if err := opensealhttp.ValidateEndpoint(manifest.BaseURL, operation.Method, operation.Path); err != nil {
+			return nil, fmt.Errorf("operation %s: %w", name, err)
+		}
+		if operation.RequestBody != nil {
+			return nil, fmt.Errorf("operation %s declares an unsupported request body", name)
+		}
+		properties := make(map[string]interface{})
+		required := make([]interface{}, 0)
+		contract := make([]opensealhttp.Parameter, 0, len(operation.Parameters))
+		credentialParameter := ""
+		seen := make(map[string]bool, len(operation.Parameters))
+		for _, parameter := range operation.Parameters {
+			parameter.Name = strings.TrimSpace(parameter.Name)
+			parameter.Location = strings.ToLower(strings.TrimSpace(parameter.Location))
+			if parameter.Name == "" || seen[parameter.Name] {
+				return nil, fmt.Errorf("operation %s contains an invalid or duplicate parameter", name)
+			}
+			seen[parameter.Name] = true
+			if parameter.Name == "token" {
+				if !parameter.Required || parameter.Location != "query" || credentialParameter != "" {
+					return nil, fmt.Errorf("operation %s has an unsupported credential mapping", name)
+				}
+				credentialParameter = parameter.Name
+				continue
+			}
+			if parameter.Location != "query" && parameter.Location != "path" {
+				return nil, fmt.Errorf("operation %s parameter %s uses unsupported location %q", name, parameter.Name, parameter.Location)
+			}
+			property, schemaErr := openAPIParameterSchema(parameter)
+			if schemaErr != nil {
+				return nil, fmt.Errorf("operation %s parameter %s: %w", name, parameter.Name, schemaErr)
+			}
+			properties[parameter.Name] = property
+			if parameter.Required && parameter.DefaultValue == nil {
+				required = append(required, parameter.Name)
+			}
+			contract = append(contract, opensealhttp.Parameter{
+				Name: parameter.Name, Location: parameter.Location, Required: parameter.Required, Default: parameter.DefaultValue,
+			})
+		}
+		if credentialParameter == "" {
+			return nil, fmt.Errorf("operation %s does not map primary credential %s to a required token query parameter", name, credentialName)
+		}
+		parameterSchema := map[string]interface{}{"type": "object", "properties": properties, "additionalProperties": false}
+		if len(required) > 0 {
+			parameterSchema["required"] = required
+		}
+		description := strings.TrimSpace(operation.Description)
+		if description == "" {
+			description = strings.TrimSpace(operation.Summary)
+		}
+		if description == "" {
+			description = definition.Description
+		}
+		actions[name] = capability.Action{
+			Name: name, Description: description,
+			InputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{"parameters": parameterSchema}, "required": []interface{}{"parameters"},
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": true,
+				"properties": map[string]interface{}{
+					"statusCode": map[string]interface{}{"type": "integer"},
+					"body":       map[string]interface{}{},
+					"provenance": map[string]interface{}{"type": "object"},
+				},
+				"required": []interface{}{"statusCode", "body", "provenance"},
+			},
+			SideEffect: capability.SideEffectRead, Risk: capability.RiskLevelRead,
+			Permissions: []string{"network.read:" + mustEndpointHost(manifest.BaseURL)},
+			Credentials: []capability.CredentialRequirement{{Name: credentialName, Kind: "environment-secret"}},
+			Timeout:     capability.Duration(30 * time.Second), Retry: capability.ActionRetryPolicy{MaxAttempts: 2},
+			Idempotency: capability.IdempotencySupported,
+			Transport: &capability.TransportReference{Kind: "tool", Endpoint: opensealhttp.TransportName, Arguments: map[string]capability.TransportArgument{
+				opensealhttp.BaseURLKey:             {Literal: strings.TrimRight(strings.TrimSpace(manifest.BaseURL), "/")},
+				opensealhttp.MethodKey:              {Literal: strings.ToUpper(strings.TrimSpace(operation.Method))},
+				opensealhttp.PathKey:                {Literal: strings.TrimSpace(operation.Path)},
+				opensealhttp.ParametersKey:          {SourceArgument: "parameters"},
+				opensealhttp.ParameterContractKey:   {Literal: contract},
+				opensealhttp.CredentialNameKey:      {Literal: credentialName},
+				opensealhttp.CredentialParameterKey: {Literal: credentialParameter},
+			}},
+		}
+	}
+	return actions, nil
+}
+
+var openAPIActionName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,127}$`)
+
+func parseOpenAPIHelperManifest(bundle Bundle) (*openAPIHelperManifest, error) {
+	var script []byte
+	for _, file := range bundle.Files {
+		if filepath.ToSlash(filepath.Clean(file.Path)) == "bin/run.mjs" {
+			script = file.Content
+			break
+		}
+	}
+	if len(script) == 0 {
+		return nil, fmt.Errorf("referenced bin/run.mjs resource is missing")
+	}
+	const marker = "const manifest ="
+	index := strings.Index(string(script), marker)
+	if index < 0 {
+		return nil, fmt.Errorf("bin/run.mjs does not contain a declarative manifest")
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(script[index+len(marker):])))
+	var manifest openAPIHelperManifest
+	if err := decoder.Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("parse bin/run.mjs manifest: %w", err)
+	}
+	return &manifest, nil
+}
+
+func optimizeOpenAPIHelperPrompt(instructions string, actions map[string]capability.Action) string {
+	lines := strings.Split(instructions, "\n")
+	result := make([]string, 0, len(lines)+2)
+	for _, line := range lines {
+		if openAPIHelperReference.MatchString(line) {
+			continue
+		}
+		result = append(result, line)
+	}
+	names := make([]string, 0, len(actions))
+	for name := range actions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	optimized := strings.TrimSpace(strings.Join(result, "\n"))
+	if optimized != "" {
+		optimized += "\n\n"
+	}
+	return optimized + "Use only the governed OpenSeal action(s) " + strings.Join(names, ", ") + " for external requests. Credentials are injected out of band; never request or include them in action input."
+}
+
+func openAPIParameterSchema(parameter openAPIHelperParameter) (map[string]interface{}, error) {
+	typeName := strings.ToLower(strings.TrimSpace(parameter.SchemaType))
+	switch typeName {
+	case "string", "integer", "number", "boolean", "object", "array":
+	case "":
+		typeName = "string"
+	default:
+		return nil, fmt.Errorf("unsupported schema type %q", parameter.SchemaType)
+	}
+	result := map[string]interface{}{"type": typeName}
+	if description := strings.TrimSpace(parameter.Description); description != "" {
+		result["description"] = description
+	}
+	if len(parameter.EnumValues) > 0 {
+		result["enum"] = append([]interface{}(nil), parameter.EnumValues...)
+	}
+	if parameter.DefaultValue != nil {
+		result["default"] = parameter.DefaultValue
+	}
+	return result, nil
+}
+
+func mustEndpointHost(baseURL string) string {
+	parsed, _ := url.Parse(baseURL)
+	return strings.ToLower(parsed.Hostname())
+}
+
+func hasDiagnostic(diagnostics []Diagnostic, code string) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func promptRequiresGovernedAction(parsed *skillmd.ParsedSkill, definition *capability.Definition) bool {
