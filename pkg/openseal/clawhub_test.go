@@ -162,6 +162,27 @@ func TestRegistryOnlyClawHubEngineAdvertisesReadOnlyLifecycleWithoutWorkspace(t 
 	}
 }
 
+func TestPreviewOnlyClawHubEngineCompilesWithoutLifecycleWorkspace(t *testing.T) {
+	registry := &facadeClawHubRegistry{archive: facadeSkillZip(t)}
+	engine, err := New(WithClawHubRegistryPreview("https://registry.test", registry))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := engine.PreviewClawHubSkill(context.Background(), ClawHubPreviewRequest{
+		Reference: ClawHubSkillReference{Owner: "acme", Slug: "research"},
+	})
+	if err != nil || preview == nil || !preview.Compatible || preview.Receipt.SourceIdentity != "https://registry.test::@acme/research" {
+		t.Fatalf("preview = %#v, %v", preview, err)
+	}
+	capability := engine.ClawHubLifecycleCapabilities()
+	if len(capability.Operations) != 5 {
+		t.Fatalf("preview-only lifecycle capability = %#v", capability)
+	}
+	if _, err := engine.ListInstalledClawHubSkillStates(); err == nil {
+		t.Fatal("preview-only engine unexpectedly exposed installed lifecycle state")
+	}
+}
+
 func TestClawHubLifecycleBatchDoesNotExposeRegistryErrorsOrSkillContent(t *testing.T) {
 	const secret = "registry-secret-token"
 	registry := &facadeClawHubRegistry{archive: facadeSkillZip(t), version: "1.0.0"}
