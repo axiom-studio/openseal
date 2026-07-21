@@ -113,6 +113,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		}
 		generated, decodeErr = decodeGenerationResponse(payload)
 	}
+	synthesizeCapabilityNeedRefinements(&generated, request)
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
@@ -153,6 +154,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 				continue
 			}
 			generated = candidate
+			synthesizeCapabilityNeedRefinements(&generated, request)
 			commitments, validation, missing = validateGenerated()
 			repairReason = deterministicContractError(validation, missing)
 		}

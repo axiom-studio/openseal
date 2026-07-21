@@ -79,10 +79,30 @@ type SourcePolicySourceCapability struct {
 
 type CapabilityCatalog struct {
 	Skills               map[string]SkillCapability        `json:"skills,omitempty"`
+	CapabilityNeeds      []CapabilityNeed                  `json:"capabilityNeeds,omitempty"`
 	AvailableCredentials map[string]bool                   `json:"availableCredentials,omitempty"`
 	SourcePolicies       map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
 	Diagnostics          []CatalogDiagnostic               `json:"diagnostics,omitempty"`
 }
+
+// CapabilityNeed is a server-owned, prompt-matched choice between exact
+// verified Skill catalog entries. It contains no registry query, credential,
+// or model-authored inference. The compiler turns it into one deterministic
+// refinement question when more than one viable Skill can satisfy the need,
+// or when the host explicitly requires the operator to choose.
+type CapabilityNeed struct {
+	ID             string   `json:"id"`
+	Prompt         string   `json:"prompt"`
+	WhyNeeded      string   `json:"whyNeeded"`
+	SkillIDs       []string `json:"skillIds"`
+	ChoiceRequired bool     `json:"choiceRequired,omitempty"`
+	Priority       int      `json:"priority"`
+}
+
+const (
+	MaximumCapabilityNeeds            = 16
+	MaximumCapabilityNeedSkillChoices = 16
+)
 
 const MaximumCatalogDiagnostics = 16
 

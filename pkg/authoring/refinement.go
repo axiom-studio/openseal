@@ -58,6 +58,92 @@ func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) Cha
 	return ChangeSetRefinement{Questions: merged, Answers: append([]RefinementAnswerEvent(nil), current.Answers...)}
 }
 
+const capabilityNeedQuestionPrefix = "server-skill-choice-"
+
+// CapabilityNeedQuestionID is stable across generation retries and process
+// restarts. Hosts may use it to correlate a server-owned capability need with
+// the resulting audited refinement answer.
+func CapabilityNeedQuestionID(needID string) string {
+	return capabilityNeedQuestionPrefix + strings.TrimSpace(needID)
+}
+
+// synthesizeCapabilityNeedRefinements makes prompt-matched Skill choice a
+// deterministic compiler concern instead of relying on the provider to decide
+// whether the operator should be asked. Existing provider scope questions are
+// gated behind every currently unanswered Skill choice so only one sequential
+// decision is actionable at a time.
+func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request GenerateRequest) {
+	if generated == nil || len(request.Catalog.CapabilityNeeds) == 0 {
+		return
+	}
+	answered := make(map[string]bool)
+	if request.Refinement != nil {
+		for _, answer := range request.Refinement.Answers {
+			answered[strings.TrimSpace(answer.QuestionID)] = true
+		}
+	}
+	active := make([]RefinementQuestion, 0, len(request.Catalog.CapabilityNeeds))
+	activeIDs := make(map[string]bool, len(request.Catalog.CapabilityNeeds))
+	for _, need := range request.Catalog.CapabilityNeeds {
+		questionID := CapabilityNeedQuestionID(need.ID)
+		if answered[questionID] || len(need.SkillIDs) < 2 && !need.ChoiceRequired {
+			continue
+		}
+		options := make([]RefinementQuestionOption, 0, len(need.SkillIDs))
+		for _, skillID := range need.SkillIDs {
+			skill := request.Catalog.Skills[skillID]
+			label := strings.TrimSpace(skill.Name)
+			if label == "" {
+				label = skillID
+			}
+			options = append(options, RefinementQuestionOption{
+				ID: skillID, Label: label, Description: strings.TrimSpace(skill.Description),
+			})
+		}
+		activeIDs[questionID] = true
+		active = append(active, RefinementQuestion{
+			ID: questionID, Category: RefinementCategorySkill,
+			Prompt: need.Prompt, WhyNeeded: need.WhyNeeded,
+			Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+			Answer:   RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Options: options, Minimum: 1, Maximum: 1},
+			Provenance: []RefinementQuestionProvenance{{
+				Kind: RefinementProvenanceCatalog, Reference: need.ID,
+				Evidence: "Prompt-matched Skills were verified by the server-owned capability catalog.",
+			}},
+			Priority: need.Priority,
+		})
+	}
+	// A server-owned need is the sole authority for Skill-choice questions in
+	// this request. Drop provider-authored Skill questions before validation;
+	// they may be malformed, alias catalog entries, or duplicate a verified
+	// choice under an unstable ID. Non-Skill questions remain provider-owned.
+	questions := make([]RefinementQuestion, 0, len(active)+len(generated.UnresolvedQuestions))
+	questions = append(questions, active...)
+	for _, question := range generated.UnresolvedQuestions {
+		if activeIDs[question.ID] || question.Category == RefinementCategorySkill {
+			continue
+		}
+		if question.Category == RefinementCategoryScope {
+			for _, choice := range active {
+				if !refinementHasDependency(question, choice.ID) {
+					question.DependsOn = append(question.DependsOn, RefinementQuestionDependency{QuestionID: choice.ID})
+				}
+			}
+		}
+		questions = append(questions, question)
+	}
+	generated.UnresolvedQuestions = questions
+}
+
+func refinementHasDependency(question RefinementQuestion, questionID string) bool {
+	for _, dependency := range question.DependsOn {
+		if dependency.QuestionID == questionID {
+			return true
+		}
+	}
+	return false
+}
+
 func refinementQuestionsAreActionable(questions []RefinementQuestion, validation []ValidationIssue) bool {
 	for _, question := range questions {
 		if strings.TrimSpace(question.ID) == "" || strings.TrimSpace(question.Prompt) == "" || strings.TrimSpace(question.WhyNeeded) == "" ||
@@ -469,6 +555,36 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 			}
 		}
 	}
+	if len(catalog.CapabilityNeeds) > MaximumCapabilityNeeds {
+		return fmt.Errorf("capability catalog has more than %d capability needs", MaximumCapabilityNeeds)
+	}
+	needIDs := make(map[string]bool, len(catalog.CapabilityNeeds))
+	for index, need := range catalog.CapabilityNeeds {
+		need.ID, need.Prompt, need.WhyNeeded = strings.TrimSpace(need.ID), strings.TrimSpace(need.Prompt), strings.TrimSpace(need.WhyNeeded)
+		if !catalogDiagnosticReferencePattern.MatchString(need.ID) || need.Prompt == "" || need.WhyNeeded == "" ||
+			len(need.Prompt) > 1024 || len(need.WhyNeeded) > 1024 || strings.ContainsAny(need.Prompt+need.WhyNeeded, "\r\n\t") ||
+			need.Priority < 1 || need.Priority > 1000 {
+			return fmt.Errorf("capability catalog need %d is invalid", index)
+		}
+		if needIDs[need.ID] {
+			return fmt.Errorf("capability catalog need %d duplicates id %s", index, need.ID)
+		}
+		needIDs[need.ID] = true
+		if len(need.SkillIDs) == 0 || len(need.SkillIDs) > MaximumCapabilityNeedSkillChoices {
+			return fmt.Errorf("capability catalog need %s must contain between 1 and %d Skill choices", need.ID, MaximumCapabilityNeedSkillChoices)
+		}
+		seenSkills := make(map[string]bool, len(need.SkillIDs))
+		for _, skillID := range need.SkillIDs {
+			if skillID != strings.TrimSpace(skillID) || skillID == "" || seenSkills[skillID] {
+				return fmt.Errorf("capability catalog need %s contains an invalid or duplicate Skill id", need.ID)
+			}
+			seenSkills[skillID] = true
+			skill, exists := catalog.Skills[skillID]
+			if !exists || !refinementSkillChoiceViable(skill) {
+				return fmt.Errorf("capability catalog need %s references unavailable or incompatible Skill %s", need.ID, skillID)
+			}
+		}
+	}
 	if len(catalog.Diagnostics) > MaximumCatalogDiagnostics {
 		return fmt.Errorf("capability catalog has more than %d diagnostics", MaximumCatalogDiagnostics)
 	}
@@ -487,6 +603,18 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		seenDiagnostics[identity] = true
 	}
 	return nil
+}
+
+func refinementSkillChoiceViable(skill SkillCapability) bool {
+	if skill.Readiness == SkillReadinessUnavailable {
+		return false
+	}
+	for _, evidence := range skill.Compatibility {
+		if !evidence.Compatible && !refinementLifecycleGap(skill.Readiness, evidence.Requirement) {
+			return false
+		}
+	}
+	return true
 }
 
 // Lifecycle gaps are not compatibility failures: they are the explicit work a

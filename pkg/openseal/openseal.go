@@ -133,6 +133,7 @@ type (
 	WorkforceSkillCredential                  = authoring.SkillCredential
 	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
+	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
