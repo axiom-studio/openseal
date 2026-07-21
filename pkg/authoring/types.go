@@ -108,12 +108,26 @@ type AuthorityConstraint struct {
 // refinement question when more than one viable Skill can satisfy the need,
 // or when the host explicitly requires the operator to choose.
 type CapabilityNeed struct {
-	ID             string   `json:"id"`
-	Prompt         string   `json:"prompt"`
-	WhyNeeded      string   `json:"whyNeeded"`
-	SkillIDs       []string `json:"skillIds"`
-	ChoiceRequired bool     `json:"choiceRequired,omitempty"`
-	Priority       int      `json:"priority"`
+	ID             string                            `json:"id"`
+	Prompt         string                            `json:"prompt"`
+	WhyNeeded      string                            `json:"whyNeeded"`
+	SkillIDs       []string                          `json:"skillIds"`
+	ChoiceRequired bool                              `json:"choiceRequired,omitempty"`
+	Priority       int                               `json:"priority"`
+	SourceScope    *CapabilitySourceScopeRequirement `json:"sourceScope,omitempty"`
+}
+
+// CapabilitySourceScopeRequirement declares that a source-oriented capability
+// cannot be authored safely until its concrete targets are supplied. The host
+// derives this fact from deterministic intent matching; the provider cannot
+// omit it or turn an empty monitoring plan into a ready ChangeSet.
+type CapabilitySourceScopeRequirement struct {
+	Prompt               string `json:"prompt"`
+	WhyNeeded            string `json:"whyNeeded"`
+	Minimum              int    `json:"minimum"`
+	Maximum              int    `json:"maximum"`
+	Priority             int    `json:"priority"`
+	RequireSourceMonitor bool   `json:"requireSourceMonitor,omitempty"`
 }
 
 const (

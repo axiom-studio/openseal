@@ -60,12 +60,19 @@ func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) Cha
 }
 
 const capabilityNeedQuestionPrefix = "server-skill-choice-"
+const capabilitySourceScopeQuestionPrefix = "server-source-scope-"
 
 // CapabilityNeedQuestionID is stable across generation retries and process
 // restarts. Hosts may use it to correlate a server-owned capability need with
 // the resulting audited refinement answer.
 func CapabilityNeedQuestionID(needID string) string {
 	return capabilityNeedQuestionPrefix + strings.TrimSpace(needID)
+}
+
+// CapabilitySourceScopeQuestionID is stable across retries and lets hosts and
+// clients correlate an audited target list without owning authoring state.
+func CapabilitySourceScopeQuestionID(needID string) string {
+	return capabilitySourceScopeQuestionPrefix + strings.TrimSpace(needID)
 }
 
 // synthesizeCapabilityNeedRefinements makes prompt-matched Skill choice a
@@ -118,10 +125,13 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 	// this request. Drop provider-authored Skill questions before validation;
 	// they may be malformed, alias catalog entries, or duplicate a verified
 	// choice under an unstable ID. Non-Skill questions remain provider-owned.
-	questions := make([]RefinementQuestion, 0, len(active)+len(generated.UnresolvedQuestions))
+	questions := make([]RefinementQuestion, 0, len(active)+len(generated.UnresolvedQuestions)+len(request.Catalog.CapabilityNeeds))
 	questions = append(questions, active...)
 	for _, question := range generated.UnresolvedQuestions {
 		if activeIDs[question.ID] || question.Category == RefinementCategorySkill {
+			continue
+		}
+		if question.Category == RefinementCategoryScope && capabilityNeedsHaveSourceScope(request.Catalog.CapabilityNeeds) {
 			continue
 		}
 		dependencies := make([]RefinementQuestionDependency, 0, len(question.DependsOn))
@@ -141,7 +151,7 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 			continue
 		}
 		question.DependsOn = dependencies
-		if question.Category == RefinementCategoryScope {
+		if question.Category == RefinementCategoryScope || question.Category == RefinementCategoryCredential {
 			for _, choice := range active {
 				if !refinementHasDependency(question, choice.ID) {
 					question.DependsOn = append(question.DependsOn, RefinementQuestionDependency{QuestionID: choice.ID})
@@ -150,7 +160,65 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 		}
 		questions = append(questions, question)
 	}
+	for _, need := range request.Catalog.CapabilityNeeds {
+		requirement := need.SourceScope
+		if requirement == nil {
+			continue
+		}
+		questionID := CapabilitySourceScopeQuestionID(need.ID)
+		if _, exists := answered[questionID]; exists {
+			continue
+		}
+		dependencies := make([]RefinementQuestionDependency, 0, len(questions))
+		for _, prerequisite := range questions {
+			if prerequisite.Category == RefinementCategorySkill || prerequisite.Category == RefinementCategoryCredential {
+				dependencies = append(dependencies, RefinementQuestionDependency{QuestionID: prerequisite.ID})
+			}
+		}
+		questions = append(questions, RefinementQuestion{
+			ID: questionID, Category: RefinementCategoryScope,
+			Prompt: requirement.Prompt, WhyNeeded: requirement.WhyNeeded,
+			Blocking:  []RefinementBlockingScope{RefinementBlocksCandidate},
+			Answer:    RefinementAnswerSchema{Kind: RefinementAnswerStringList, Minimum: requirement.Minimum, Maximum: requirement.Maximum},
+			DependsOn: dependencies,
+			Provenance: []RefinementQuestionProvenance{{
+				Kind: RefinementProvenanceCatalog, Reference: need.ID,
+				Evidence: "The host matched a monitored-source capability that requires explicit target scope.",
+			}},
+			Priority: requirement.Priority,
+		})
+	}
 	generated.UnresolvedQuestions = questions
+}
+
+func capabilityNeedsHaveSourceScope(needs []CapabilityNeed) bool {
+	for _, need := range needs {
+		if need.SourceScope != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func validateCapabilitySourceScopeFulfillment(candidate *WorkforceCandidate, request GenerateRequest) []ValidationIssue {
+	if request.Refinement == nil {
+		return nil
+	}
+	answered := make(map[string]bool, len(request.Refinement.Answers))
+	for _, answer := range request.Refinement.Answers {
+		answered[strings.TrimSpace(answer.QuestionID)] = true
+	}
+	issues := make([]ValidationIssue, 0)
+	for _, need := range request.Catalog.CapabilityNeeds {
+		requirement := need.SourceScope
+		if requirement == nil || !requirement.RequireSourceMonitor || !answered[CapabilitySourceScopeQuestionID(need.ID)] {
+			continue
+		}
+		if candidate == nil || candidate.Initiative == nil || len(candidate.Initiative.SourceMonitors) == 0 {
+			issues = append(issues, issue("initiative.sourceMonitors", "source_scope_not_materialized", "The answered source scope requires at least one durable source monitor"))
+		}
+	}
+	return issues
 }
 
 func refinementDependencyMatchesAnswer(dependency RefinementQuestionDependency, value RefinementProviderAnswerValue) bool {
@@ -617,6 +685,14 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 			len(need.Prompt) > 1024 || len(need.WhyNeeded) > 1024 || strings.ContainsAny(need.Prompt+need.WhyNeeded, "\r\n\t") ||
 			need.Priority < 1 || need.Priority > 1000 {
 			return fmt.Errorf("capability catalog need %d is invalid", index)
+		}
+		if scope := need.SourceScope; scope != nil {
+			scope.Prompt, scope.WhyNeeded = strings.TrimSpace(scope.Prompt), strings.TrimSpace(scope.WhyNeeded)
+			if scope.Prompt == "" || scope.WhyNeeded == "" || len(scope.Prompt) > 1024 || len(scope.WhyNeeded) > 1024 ||
+				strings.ContainsAny(scope.Prompt+scope.WhyNeeded, "\r\n\t") || scope.Minimum < 1 || scope.Maximum < scope.Minimum ||
+				scope.Maximum > 100 || scope.Priority < 1 || scope.Priority > 1000 {
+				return fmt.Errorf("capability catalog need %d source scope is invalid", index)
+			}
 		}
 		if needIDs[need.ID] {
 			return fmt.Errorf("capability catalog need %d duplicates id %s", index, need.ID)

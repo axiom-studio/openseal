@@ -134,6 +134,7 @@ type (
 	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
 	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
+	WorkforceCapabilitySourceScopeRequirement = authoring.CapabilitySourceScopeRequirement
 	WorkforceAuthorityConstraint              = authoring.AuthorityConstraint
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
