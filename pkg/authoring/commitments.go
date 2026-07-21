@@ -232,6 +232,19 @@ func applyExtractedApprovalCommitments(candidate *WorkforceCandidate, extracted 
 	}
 }
 
+// applyActivationCommitment turns the reviewed commitment into candidate
+// state before the candidate digest is computed. Apply consumes only this
+// typed field; it never reparses prompt prose or trusts a mutable UI choice.
+func applyActivationCommitment(candidate *WorkforceCandidate, commitments PromptCommitments) {
+	if candidate == nil {
+		return
+	}
+	candidate.Activation = WorkforceActivationActive
+	if commitments.Activation == ActivationCommitmentInactive {
+		candidate.Activation = WorkforceActivationInactive
+	}
+}
+
 func validateDeclaredCommitmentCoverage(declared, extracted PromptCommitments) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	if extracted.AgentCount != nil && (declared.AgentCount == nil || *declared.AgentCount != *extracted.AgentCount) {

@@ -138,6 +138,7 @@ type ChangeSetApplyReceipt struct {
 	ID              string                     `json:"id"`
 	IdempotencyKey  string                     `json:"idempotencyKey"`
 	CandidateDigest string                     `json:"candidateDigest"`
+	Activation      WorkforceActivationIntent  `json:"activation"`
 	Reason          string                     `json:"reason"`
 	Resources       []AppliedResourceReference `json:"resources"`
 	Actor           ChangeSetActor             `json:"actor"`
@@ -884,10 +885,14 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	if err := validateApplyPlacement(current); err != nil {
 		return nil, false, err
 	}
+	activation, err := EffectiveWorkforceActivationIntent(current.Result.Candidate.Activation)
+	if err != nil {
+		return nil, false, err
+	}
 	now := s.now().UTC()
 	next := cloneChangeSet(current)
 	next.Status, next.Revision, next.UpdatedAt = ChangeSetApplied, current.Revision+1, now
-	next.ApplyReceipt = &ChangeSetApplyReceipt{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, CandidateDigest: current.CandidateDigest, Reason: request.Reason, Actor: request.Actor, AppliedAt: now}
+	next.ApplyReceipt = &ChangeSetApplyReceipt{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey, CandidateDigest: current.CandidateDigest, Activation: activation, Reason: request.Reason, Actor: request.Actor, AppliedAt: now}
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetApplied, Reason: request.Reason, Actor: request.Actor, At: now})
 	applied, err := store.ApplyChangeSet(ctx, next, current.Revision)
 	return applied, false, err

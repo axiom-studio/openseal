@@ -254,7 +254,7 @@ func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	}
 	var receipt string
 	for value := range results {
-		if value.Status != ChangeSetApplied || value.ApplyReceipt == nil || len(value.ApplyReceipt.Resources) < 4 {
+		if value.Status != ChangeSetApplied || value.ApplyReceipt == nil || value.ApplyReceipt.Activation != WorkforceActivationActive || len(value.ApplyReceipt.Resources) < 4 {
 			t.Fatalf("applied=%#v", value)
 		}
 		if value.ApplyReceipt.Reason != req.Reason || value.Lifecycle[len(value.Lifecycle)-1].Reason != req.Reason {

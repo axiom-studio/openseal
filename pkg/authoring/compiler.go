@@ -114,6 +114,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
+		applyActivationCommitment(&generated.Candidate, commitments)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
@@ -155,7 +156,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	}
 	assumptions := normalized(generated.Assumptions)
 	if commitments.Activation == ActivationCommitmentInactive {
-		assumptions = normalized(append(assumptions, "Compilation remains inactive; activation requires a separate governed apply operation."))
+		assumptions = normalized(append(assumptions, "Atomic apply remains inactive by creating non-executing resources; activation requires a separate governed command."))
 	}
 	result := &CompileResult{
 		Candidate: generated.Candidate, Commitments: commitments, Assumptions: assumptions, Questions: normalized(generated.Questions),
@@ -496,6 +497,9 @@ func parseGeneratedDuration(raw string) (time.Duration, error) {
 
 func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandidate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
+	if _, err := EffectiveWorkforceActivationIntent(candidate.Activation); err != nil {
+		issues = append(issues, issue("activation", "invalid_activation_intent", err.Error()))
+	}
 	agents := make(map[string]*agent.AgentDefinition, len(candidate.Agents))
 	for index, definition := range candidate.Agents {
 		path := fmt.Sprintf("agents[%d]", index)
