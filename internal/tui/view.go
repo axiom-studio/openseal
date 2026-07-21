@@ -643,6 +643,10 @@ func (m *Model) renderAuthoringContent(width int) string {
 	if result == nil {
 		if changeSet := m.authoringChangeSet; changeSet != nil {
 			lines := []string{title, "", mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision))}
+			if diagnostics := renderCatalogDiagnostics(changeSet.Catalog, max(width-8, 24)); len(diagnostics) > 0 {
+				lines = append(lines, "")
+				lines = append(lines, diagnostics...)
+			}
 			if history := renderAnsweredRefinements(changeSet, max(width-8, 24)); len(history) > 0 {
 				lines = append(lines, "", mutedStyle.Render("Answered questions"))
 				lines = append(lines, history...)
@@ -679,6 +683,10 @@ func (m *Model) renderAuthoringContent(width int) string {
 	if m.authoringChangeSet != nil {
 		changeSet := m.authoringChangeSet
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision)))
+		if diagnostics := renderCatalogDiagnostics(changeSet.Catalog, max(width-8, 24)); len(diagnostics) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, diagnostics...)
+		}
 		if history := renderAnsweredRefinements(changeSet, max(width-8, 24)); len(history) > 0 {
 			lines = append(lines, "", mutedStyle.Render("Answered questions"))
 			lines = append(lines, history...)
@@ -895,6 +903,28 @@ func refinementDetail(label, value string, width int) []string {
 		}
 		prefix = continuation
 	}
+}
+
+func renderCatalogDiagnostics(catalog authoring.CapabilityCatalog, width int) []string {
+	if len(catalog.Diagnostics) == 0 {
+		return nil
+	}
+	diagnostics := append([]authoring.CatalogDiagnostic(nil), catalog.Diagnostics...)
+	sort.Slice(diagnostics, func(i, j int) bool {
+		if diagnostics[i].Code == diagnostics[j].Code {
+			return diagnostics[i].Reference < diagnostics[j].Reference
+		}
+		return diagnostics[i].Code < diagnostics[j].Code
+	})
+	lines := []string{lipgloss.NewStyle().Foreground(accentSoft).Render("Capability availability")}
+	for _, diagnostic := range diagnostics {
+		lines = append(lines, refinementDetail("Diagnostic", diagnostic.Code, width)...)
+		lines = append(lines, refinementDetail("Guidance", diagnostic.Message, width)...)
+		if diagnostic.Reference != "" {
+			lines = append(lines, refinementDetail("Intent", diagnostic.Reference, width)...)
+		}
+	}
+	return lines
 }
 
 func renderAnsweredRefinements(changeSet *authoring.ChangeSet, width int) []string {

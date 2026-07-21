@@ -357,6 +357,9 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		strings.TrimSpace(request.Actor.Type) == "" || strings.TrimSpace(request.Actor.ID) == "" || request.IdempotencyKey == "" {
 		return nil, false, errors.New("change set scope, prompt, actor, and idempotency key are required")
 	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, false, fmt.Errorf("authoring capability catalog: %w", err)
+	}
 	mode := ModeCreate
 	var existing *WorkforceCandidate
 	if request.ParentID != "" {
@@ -423,6 +426,9 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.Prompt == "" ||
 		strings.TrimSpace(request.Actor.Type) == "" || strings.TrimSpace(request.Actor.ID) == "" || request.IdempotencyKey == "" {
 		return nil, false, errors.New("change set scope, prompt, actor, and idempotency key are required")
+	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, false, fmt.Errorf("authoring capability catalog: %w", err)
 	}
 	mode := ModeCreate
 	var existing *WorkforceCandidate

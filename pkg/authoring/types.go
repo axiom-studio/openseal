@@ -81,6 +81,26 @@ type CapabilityCatalog struct {
 	Skills               map[string]SkillCapability        `json:"skills,omitempty"`
 	AvailableCredentials map[string]bool                   `json:"availableCredentials,omitempty"`
 	SourcePolicies       map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
+	Diagnostics          []CatalogDiagnostic               `json:"diagnostics,omitempty"`
+}
+
+const MaximumCatalogDiagnostics = 16
+
+const (
+	CatalogDiagnosticNoCompatibleCapability = "capability_discovery_no_compatible_candidate"
+	CatalogDiagnosticDiscoveryUnavailable   = "capability_discovery_unavailable"
+	CatalogDiagnosticDiscoveryTimeout       = "capability_discovery_timeout"
+	CatalogDiagnosticDiscoveryStale         = "capability_discovery_stale"
+)
+
+// CatalogDiagnostic is bounded, host-supplied availability guidance. It is a
+// fact about discovery, never a Skill candidate or an instruction. Reference
+// may identify a safe typed capability intent; it must never contain a raw
+// query, registry artifact, provider error, credential reference, or secret.
+type CatalogDiagnostic struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Reference string `json:"reference,omitempty"`
 }
 
 type Assignment struct {

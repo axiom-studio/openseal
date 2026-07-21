@@ -14,6 +14,11 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
+var (
+	catalogDiagnosticCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
+	catalogDiagnosticReferencePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,255}$`)
+)
+
 func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) ChangeSetRefinement {
 	questions := make([]RefinementQuestion, 0, len(result.UnresolvedQuestions)+len(result.Questions))
 	if refinementQuestionsAreActionable(result.UnresolvedQuestions, result.Validation) {
@@ -403,23 +408,8 @@ func validProvenanceKind(kind RefinementProvenanceKind) bool {
 }
 
 func validateRefinementCatalog(questions []RefinementQuestion, catalog CapabilityCatalog) error {
-	for id, skill := range catalog.Skills {
-		if strings.TrimSpace(id) == "" || strings.TrimSpace(skill.ID) == "" || id != skill.ID {
-			return errors.New("Skill catalog keys must match non-empty Skill ids")
-		}
-		if len(strings.TrimSpace(skill.SourceIdentity)) > 1024 {
-			return fmt.Errorf("Skill %s source identity is too long", id)
-		}
-		switch skill.Readiness {
-		case "", SkillReadinessReady, SkillReadinessNeedsBinding, SkillReadinessNeedsInstallation, SkillReadinessUnavailable:
-		default:
-			return fmt.Errorf("Skill %s has invalid readiness", id)
-		}
-		for _, evidence := range skill.Compatibility {
-			if strings.TrimSpace(evidence.Requirement) == "" || strings.TrimSpace(evidence.Evidence) == "" {
-				return fmt.Errorf("Skill %s compatibility requires a requirement and evidence", id)
-			}
-		}
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		return err
 	}
 	for _, question := range questions {
 		if question.Answer.Kind != RefinementAnswerSkillSelection {
@@ -454,6 +444,47 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateCapabilityCatalog rejects malformed host projections before they are
+// persisted or placed in model context.
+func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
+	for id, skill := range catalog.Skills {
+		if strings.TrimSpace(id) == "" || strings.TrimSpace(skill.ID) == "" || id != skill.ID {
+			return errors.New("Skill catalog keys must match non-empty Skill ids")
+		}
+		if len(strings.TrimSpace(skill.SourceIdentity)) > 1024 {
+			return fmt.Errorf("Skill %s source identity is too long", id)
+		}
+		switch skill.Readiness {
+		case "", SkillReadinessReady, SkillReadinessNeedsBinding, SkillReadinessNeedsInstallation, SkillReadinessUnavailable:
+		default:
+			return fmt.Errorf("Skill %s has invalid readiness", id)
+		}
+		for _, evidence := range skill.Compatibility {
+			if strings.TrimSpace(evidence.Requirement) == "" || strings.TrimSpace(evidence.Evidence) == "" {
+				return fmt.Errorf("Skill %s compatibility requires a requirement and evidence", id)
+			}
+		}
+	}
+	if len(catalog.Diagnostics) > MaximumCatalogDiagnostics {
+		return fmt.Errorf("capability catalog has more than %d diagnostics", MaximumCatalogDiagnostics)
+	}
+	seenDiagnostics := make(map[string]bool, len(catalog.Diagnostics))
+	for index, diagnostic := range catalog.Diagnostics {
+		code, message, reference := strings.TrimSpace(diagnostic.Code), strings.TrimSpace(diagnostic.Message), strings.TrimSpace(diagnostic.Reference)
+		if code != diagnostic.Code || message != diagnostic.Message || reference != diagnostic.Reference ||
+			!catalogDiagnosticCodePattern.MatchString(code) || message == "" || len(message) > 1024 || strings.ContainsAny(message, "\r\n\t") ||
+			(reference != "" && !catalogDiagnosticReferencePattern.MatchString(reference)) {
+			return fmt.Errorf("capability catalog diagnostic %d is invalid", index)
+		}
+		identity := code + "\x00" + reference
+		if seenDiagnostics[identity] {
+			return fmt.Errorf("capability catalog diagnostic %d duplicates code and reference", index)
+		}
+		seenDiagnostics[identity] = true
 	}
 	return nil
 }
