@@ -35,7 +35,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:migrate:"+s.schema); err != nil {
+	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
 	down := map[int64][]string{

@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"sync"
@@ -15,6 +16,156 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
+
+func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	schema := "openseal_migration_race_" + uuid.NewString()[:8]
+	cleanup, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = cleanup.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`)
+		_ = cleanup.Close()
+	})
+
+	const replicas = 6
+	start := make(chan struct{})
+	stores := make(chan *PostgresStore, replicas)
+	errorsFound := make(chan error, replicas)
+	var wait sync.WaitGroup
+	for range replicas {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			store, openErr := NewPostgresStore(ctx, dsn,
+				WithPostgresSchema(schema),
+				WithPostgresMigrationLock(30*time.Second, 10*time.Millisecond),
+			)
+			if openErr != nil {
+				errorsFound <- openErr
+				return
+			}
+			stores <- store
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(stores)
+	close(errorsFound)
+	for openErr := range errorsFound {
+		t.Errorf("concurrent startup: %v", openErr)
+	}
+	opened := 0
+	for store := range stores {
+		opened++
+		if stats := store.MigrationStats(); stats.SchemaVersion != currentPostgresSchemaVersion || stats.TotalDuration <= 0 {
+			t.Errorf("migration stats = %#v", stats)
+		}
+		if version, versionErr := store.PostgresSchemaVersion(ctx); versionErr != nil || version != currentPostgresSchemaVersion {
+			t.Errorf("schema version = %d, err = %v", version, versionErr)
+		}
+		_ = store.Close()
+	}
+	if opened != replicas {
+		t.Fatalf("opened replicas = %d, want %d", opened, replicas)
+	}
+}
+
+func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	schema := "openseal_migration_wait_" + uuid.NewString()[:8]
+	blocker, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := blocker.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockName := "openseal:migrate:" + schema
+	if _, err := connection.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, lockName); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = connection.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, lockName)
+		_ = connection.Close()
+		_ = blocker.Close()
+	})
+
+	events := make(chan PostgresMigrationEvent, 8)
+	result := make(chan *PostgresStore, 1)
+	openErrors := make(chan error, 1)
+	go func() {
+		store, openErr := NewPostgresStore(ctx, dsn,
+			WithPostgresSchema(schema),
+			WithPostgresMigrationLock(5*time.Second, 10*time.Millisecond),
+			WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { events <- event }),
+		)
+		result <- store
+		openErrors <- openErr
+	}()
+	select {
+	case event := <-events:
+		if event.Phase != PostgresMigrationWaiting {
+			t.Fatalf("first event = %#v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("migration contention was not observed")
+	}
+	if _, err := connection.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, lockName); err != nil {
+		t.Fatal(err)
+	}
+	store := <-result
+	if err := <-openErrors; err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if stats := store.MigrationStats(); stats.WaitDuration <= 0 || stats.SchemaVersion != currentPostgresSchemaVersion {
+		t.Fatalf("migration stats = %#v", stats)
+	}
+	phases := []PostgresMigrationPhase{PostgresMigrationAcquired, PostgresMigrationComplete}
+	for _, phase := range phases {
+		select {
+		case event := <-events:
+			if event.Phase != phase {
+				t.Fatalf("event = %#v, want phase %q", event, phase)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("missing migration phase %q", phase)
+		}
+	}
+
+	timeoutSchema := "openseal_migration_timeout_" + uuid.NewString()[:8]
+	timeoutLock := "openseal:migrate:" + timeoutSchema
+	if _, err := connection.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, timeoutLock); err != nil {
+		t.Fatal(err)
+	}
+	defer connection.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, timeoutLock)
+	timeoutEvents := make(chan PostgresMigrationEvent, 4)
+	_, err = NewPostgresStore(ctx, dsn,
+		WithPostgresSchema(timeoutSchema),
+		WithPostgresMigrationLock(150*time.Millisecond, 10*time.Millisecond),
+		WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { timeoutEvents <- event }),
+	)
+	if !errors.Is(err, ErrPostgresMigrationLockTimeout) {
+		t.Fatalf("timeout error = %v", err)
+	}
+	if first, second := <-timeoutEvents, <-timeoutEvents; first.Phase != PostgresMigrationWaiting || second.Phase != PostgresMigrationTimeout {
+		t.Fatalf("timeout events = %#v, %#v", first, second)
+	}
+}
 
 func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
