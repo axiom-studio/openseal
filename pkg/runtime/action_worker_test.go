@@ -44,6 +44,9 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 				if input.Credentials["token"] != "resolved-super-secret" || input.Arguments["environment"] != "production" {
 					t.Fatalf("dispatch input mismatch: %#v", input)
 				}
+				if input.Run == nil || input.Run.ID != proposal.Call.RunID || input.Run.AssignedAgentID == "" {
+					t.Fatalf("dispatch omitted durable Run execution context: %#v", input.Run)
+				}
 				return map[string]interface{}{
 					"deploymentId": "deploy-123", "status": "healthy",
 					"nested": map[string]interface{}{"echo": "Bearer resolved-super-secret"},

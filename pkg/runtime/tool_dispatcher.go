@@ -13,17 +13,23 @@ import (
 // credentials are deliberately separate from model-visible arguments and must
 // never be persisted or logged by an invoker.
 type ToolInvocation struct {
-	Name            string
-	Scope           skill.ScopeReference
-	DeploymentID    string
-	SkillID         string
-	SkillVersion    string
-	Action          string
-	ActionCallID    string
-	RunID           string
-	Arguments       map[string]interface{}
-	Credentials     map[string]string
-	PreparedRuntime *skill.PreparedRuntime
+	Name  string
+	Scope skill.ScopeReference
+	// DeploymentID is the Skill binding authority owner. For Team-owned
+	// bindings it remains the Team deployment throughout policy, credential,
+	// idempotency, and audit handling.
+	DeploymentID string
+	// ExecutionDeploymentID is the kernel-derived Agent deployment that
+	// supplies placement for this invocation. It is never model writable.
+	ExecutionDeploymentID string
+	SkillID               string
+	SkillVersion          string
+	Action                string
+	ActionCallID          string
+	RunID                 string
+	Arguments             map[string]interface{}
+	Credentials           map[string]string
+	PreparedRuntime       *skill.PreparedRuntime
 }
 
 // ToolInvoker is the product-neutral boundary for a registered typed tool.
@@ -65,9 +71,23 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	if err != nil {
 		return nil, err
 	}
+	executionDeploymentID := input.Bound.Binding.DeploymentID
+	if input.Run != nil {
+		if input.Run.Scope != (Scope{Kind: input.Bound.Binding.Scope.Kind, ID: input.Bound.Binding.Scope.ID}) {
+			return nil, errors.New("action Run scope does not match the Skill binding")
+		}
+		if strings.TrimSpace(input.Run.AssignedAgentID) == "" {
+			return nil, errors.New("action Run has no assigned execution Agent")
+		}
+		if input.Run.Owner.Type == OwnerTypeTeam && input.Bound.Binding.DeploymentID != input.Run.Owner.ID && input.Bound.Binding.DeploymentID != input.Run.AssignedAgentID {
+			return nil, errors.New("Team Run cannot execute a Skill binding owned outside its Team or assigned Agent")
+		}
+		executionDeploymentID = input.Run.AssignedAgentID
+	}
 	invocation := ToolInvocation{
 		Name: transport.Endpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
-		SkillID: input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
+		ExecutionDeploymentID: executionDeploymentID,
+		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		Action: input.Bound.Action.Name, Arguments: arguments, Credentials: input.Credentials,
 	}
 	if input.Call != nil {

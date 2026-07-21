@@ -1509,6 +1509,20 @@ func New(opts ...Option) (*Engine, error) {
 		return nil, fmt.Errorf("Team Skill authority configuration: %w", err)
 	}
 	e.actionValidators = append(e.actionValidators, teamSkillValidator)
+	for index := range e.actionPoolSpecs {
+		dispatcher, dispatchErr := runtime.NewTeamSkillActionDispatcher(e, e.actionPoolSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return nil, fmt.Errorf("Team Skill action worker configuration: %w", dispatchErr)
+		}
+		e.actionPoolSpecs[index].dispatcher = dispatcher
+	}
+	for index := range e.actionSupervisorSpecs {
+		dispatcher, dispatchErr := runtime.NewTeamSkillActionDispatcher(e, e.actionSupervisorSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return nil, fmt.Errorf("Team Skill dynamic action worker configuration: %w", dispatchErr)
+		}
+		e.actionSupervisorSpecs[index].dispatcher = dispatcher
+	}
 	e.rebuildGovernance()
 	if err := e.rebuildActionWorkerPools(); err != nil {
 		return nil, fmt.Errorf("action worker configuration: %w", err)

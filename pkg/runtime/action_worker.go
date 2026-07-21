@@ -42,7 +42,12 @@ func (f CredentialResolverFunc) ResolveCredentials(ctx context.Context, request 
 }
 
 type ActionDispatchInput struct {
-	Call        *ActionCall
+	Call *ActionCall
+	// Run is the durable, kernel-owned execution context for the call. It is
+	// deliberately unavailable to model arguments. Dispatchers use it to keep
+	// authority ownership (for example, a Team Skill binding) separate from the
+	// roster Agent that supplies execution placement.
+	Run         *AgentRun
 	Bound       *skill.BoundAction
 	Arguments   map[string]interface{}
 	Credentials map[string]string
@@ -111,6 +116,13 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 			}
 		}
 	}
+	var sourceRun *AgentRun
+	if executionErr == nil {
+		sourceRun, executionErr = w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
+		if executionErr == nil && sourceRun == nil {
+			executionErr = ErrRunNotFound
+		}
+	}
 	var output map[string]interface{}
 	if executionErr == nil {
 		dispatchCtx := executionCtx
@@ -119,7 +131,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 			dispatchCtx, cancel = context.WithTimeout(executionCtx, timeout)
 		}
 		output, executionErr = w.dispatcher.DispatchAction(dispatchCtx, ActionDispatchInput{
-			Call: cloneActionCall(call), Bound: bound, Arguments: cloneMap(call.Arguments), Credentials: credentials,
+			Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), Bound: bound, Arguments: cloneMap(call.Arguments), Credentials: credentials,
 		})
 		cancel()
 	}
