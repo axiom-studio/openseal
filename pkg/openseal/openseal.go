@@ -1420,6 +1420,7 @@ type Engine struct {
 	skillDiscovery                skill.DiscoveryProvider
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
+	clawHubPreview                *clawhub.InstallManager
 	clawHubRegistry               clawhub.Registry
 	skillSources                  *sourceartifact.Service
 	clawHubSourceScope            skill.ScopeReference
@@ -2185,8 +2186,24 @@ func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace
 		if err != nil {
 			return err
 		}
-		e.clawHub = manager
+		e.clawHub, e.clawHubPreview = manager, manager
 		e.clawHubRegistry = registry
+		return nil
+	}
+}
+
+// WithClawHubRegistryPreview enables catalog inspection plus verified,
+// credential-free compilation previews without configuring an installation
+// workspace. Engine construction therefore never restores, installs, or
+// activates Skills. Preview archive staging is bounded by the canonical
+// compiler limits and removed before the preview call returns.
+func WithClawHubRegistryPreview(registryID string, registry clawhub.Registry) Option {
+	return func(e *Engine) error {
+		manager, err := clawhub.NewPreviewManager(registryID, registry)
+		if err != nil {
+			return err
+		}
+		e.clawHubPreview, e.clawHubRegistry = manager, registry
 		return nil
 	}
 }
@@ -2213,7 +2230,7 @@ func WithClawHubRegistrySkillsDirectory(registryID string, registry clawhub.Regi
 		if err != nil {
 			return err
 		}
-		e.clawHub, e.clawHubRegistry = manager, registry
+		e.clawHub, e.clawHubPreview, e.clawHubRegistry = manager, manager, registry
 		return nil
 	}
 }
@@ -3442,10 +3459,10 @@ func (e *Engine) VerifyClawHubSkill(ctx context.Context, reference clawhub.Skill
 // activating, or executing it. Pass the returned receipt to installation to
 // reject registry or compiler drift between review and install.
 func (e *Engine) PreviewClawHubSkill(ctx context.Context, request clawhub.PreviewRequest) (*clawhub.CompilationPreview, error) {
-	if e == nil || e.clawHub == nil {
+	if e == nil || e.clawHubPreview == nil {
 		return nil, fmt.Errorf("ClawHub compilation preview is not configured")
 	}
-	return e.clawHub.PreviewValidated(ctx, request, e.validateClawHubCompilation)
+	return e.clawHubPreview.PreviewValidated(ctx, request, e.validateClawHubCompilation)
 }
 
 func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.InstallRequest) (*clawhub.InstalledSkill, error) {
