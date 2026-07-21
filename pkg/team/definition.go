@@ -32,11 +32,26 @@ type RoleSlot struct {
 // configuration; this grant only narrows which version, prompt, actions, and
 // risk a semantic role may exercise. It never copies a binding onto an Agent.
 type RoleSkillGrant struct {
-	SkillID        string               `json:"skillId"`
-	SkillVersion   string               `json:"skillVersion"`
-	AllowedActions []string             `json:"allowedActions,omitempty"`
-	EnablePrompt   bool                 `json:"enablePrompt,omitempty"`
-	MaximumRisk    capability.RiskLevel `json:"maximumRisk"`
+	SkillID      string `json:"skillId"`
+	SkillVersion string `json:"skillVersion"`
+	// CatalogID preserves the exact catalog selection used by authoring. It may
+	// differ from the compiled definition id (for example a source-qualified
+	// marketplace listing). RuntimeIdentity remains the sole authority key.
+	CatalogID       string                    `json:"catalogId,omitempty"`
+	RuntimeIdentity *capability.SkillIdentity `json:"runtimeIdentity,omitempty"`
+	AllowedActions  []string                  `json:"allowedActions,omitempty"`
+	EnablePrompt    bool                      `json:"enablePrompt,omitempty"`
+	MaximumRisk     capability.RiskLevel      `json:"maximumRisk"`
+}
+
+// ExactIdentity returns the source-qualified runtime authority represented by
+// the grant. Legacy/native grants remain exact id+version identities with an
+// empty source; consequently they cannot authorize a sourced variant.
+func (g RoleSkillGrant) ExactIdentity() capability.SkillIdentity {
+	if g.RuntimeIdentity != nil {
+		return g.RuntimeIdentity.Normalized()
+	}
+	return capability.NewSkillIdentity(g.SkillID, g.SkillVersion, "")
 }
 
 type RoleChannelParticipation string
@@ -125,10 +140,15 @@ func (d *Definition) Validate() error {
 		roles[id] = true
 		grants := make(map[string]bool, len(role.SkillGrants))
 		for _, grant := range role.SkillGrants {
-			key := strings.TrimSpace(grant.SkillID) + "\x00" + strings.TrimSpace(grant.SkillVersion)
+			identity := grant.ExactIdentity()
+			key := identity.Key()
 			if strings.TrimSpace(grant.SkillID) == "" || !versionPattern.MatchString(strings.TrimSpace(grant.SkillVersion)) ||
+				strings.TrimSpace(grant.CatalogID) != grant.CatalogID || !identity.Valid() ||
 				!validRisk(grant.MaximumRisk) || riskRank(grant.MaximumRisk) > riskRank(d.Approvals.MaximumRisk) || grants[key] {
 				return errors.New("team role Skill grants require unique Skill versions and valid risk boundaries")
+			}
+			if grant.RuntimeIdentity != nil && *grant.RuntimeIdentity != identity {
+				return errors.New("team role Skill runtime identities must be canonical")
 			}
 			grants[key] = true
 			actions := make(map[string]bool, len(grant.AllowedActions))

@@ -108,6 +108,65 @@ func TestTeamSkillActionValidatorRechecksAuthorityWithoutWideningAgentBindings(t
 	}
 }
 
+func TestTeamSkillAuthoritySelectsOneExactSourcedVariantBehindCatalogIdentity(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "one"}
+	catalog := teamSkillAuthorityFixture(scope)
+	const (
+		catalogID = "clawhub-aHR0cHM6Ly9jbGF3aHViLmFpL0BhbGljZS9zdW1tYXJpemU"
+		versionA  = "1.0.0+source.aaaaaaaaaaaa"
+		versionB  = "1.0.0+source.bbbbbbbbbbbb"
+		sourceA   = "https://clawhub.ai::@alice/summarize"
+		sourceB   = "https://clawhub.ai::@bob/summarize"
+	)
+	runtimeIdentity := capability.NewSkillIdentity("summarize", versionA, sourceA)
+	catalog.definition.Roles[0].SkillGrants = []kernelteam.RoleSkillGrant{{
+		SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: catalogID, RuntimeIdentity: &runtimeIdentity,
+		AllowedActions: []string{"execute"}, EnablePrompt: true, MaximumRisk: capability.RiskLevelExternal,
+	}}
+	// The authored Agent allowlist retains the catalog listing id. The exact
+	// runtime identity in the role grant prevents that alias from widening
+	// authority to another publisher's identically named release.
+	catalog.agentDefinition.Authority.AllowedSkillIDs = []string{catalogID}
+	catalog.deployment.Restrictions.AllowedSkillIDs = []string{catalogID}
+	catalog.agent.Restrictions.AllowedSkillIDs = []string{catalogID}
+	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
+	snapshot := &skill.ActivationSnapshot{
+		SnapshotID: "source-variants", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research",
+		Skills: []skill.ActivatedSkill{
+			{BindingID: "alice", SkillID: "summarize", SkillVersion: versionA, SourceIdentity: sourceA, Prompt: &skill.PromptModule{Instructions: "Summarize."}, Actions: []capability.ModelAction{{Action: "execute", Risk: capability.RiskLevelExternal}}},
+			{BindingID: "bob", SkillID: "summarize", SkillVersion: versionB, SourceIdentity: sourceB, Prompt: &skill.PromptModule{Instructions: "Summarize."}, Actions: []capability.ModelAction{{Action: "execute", Risk: capability.RiskLevelExternal}}},
+		},
+	}
+	projected, err := AuthorizeTeamSkillActivation(t.Context(), catalog, run, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected.Skills) != 1 || projected.Skills[0].BindingID != "alice" || projected.Skills[0].SourceIdentity != sourceA {
+		t.Fatalf("source-qualified projection = %#v", projected.Skills)
+	}
+
+	validator, err := NewTeamSkillActionValidator(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		version string
+		source  string
+		allowed bool
+	}{{"selected", versionA, sourceA, true}, {"foreign publisher", versionB, sourceB, false}, {"same bytes without source", versionA, "", false}} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: &skill.BoundAction{
+				Binding: &skill.Binding{Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research", SkillID: "summarize", SkillVersion: test.version, SourceIdentity: test.source},
+				Action:  capability.Action{Name: "execute", Risk: capability.RiskLevelExternal},
+			}})
+			if (err == nil) != test.allowed {
+				t.Fatalf("allowed=%t error=%v", test.allowed, err)
+			}
+		})
+	}
+}
+
 func teamSkillAuthorityFixture(scope Scope) teamSkillAuthorityCatalogStub {
 	return teamSkillAuthorityCatalogStub{
 		agent:           &kernelagent.AgentDeployment{ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
