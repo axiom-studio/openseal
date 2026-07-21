@@ -58,7 +58,7 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	if value == nil || value.ApplyReceipt == nil {
 		return nil, fmt.Errorf("applied workforce aggregate is incomplete")
 	}
-	activation, err := authoring.EffectiveWorkforceActivationIntent(value.Result.Candidate.Activation)
+	activation, err := authoring.EffectiveChangeSetActivationIntent(value)
 	if err != nil {
 		return nil, err
 	}
@@ -439,8 +439,12 @@ func synchronizeWorkforceSkillBindingResources(application *workforceApplication
 
 func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate, deploymentByDefinition map[string]string) ([]workforceObjectiveApplication, error) {
 	result := make([]workforceObjectiveApplication, 0, len(templates))
+	activation, err := authoring.EffectiveChangeSetActivationIntent(value)
+	if err != nil {
+		return nil, err
+	}
 	status := ObjectiveStatusActive
-	if value.Result.Candidate.Activation == authoring.WorkforceActivationInactive {
+	if activation == authoring.WorkforceActivationInactive {
 		status = ObjectiveStatusDraft
 	}
 	for _, template := range templates {
@@ -545,8 +549,12 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 		return nil, err
 	}
 	now := value.ApplyReceipt.AppliedAt
+	activation, err := authoring.EffectiveChangeSetActivationIntent(value)
+	if err != nil {
+		return nil, err
+	}
 	status := InitiativeStatusActive
-	if value.Result.Candidate.Activation == authoring.WorkforceActivationInactive {
+	if activation == authoring.WorkforceActivationInactive {
 		status = InitiativeStatusDraft
 	}
 	initiative := &Initiative{

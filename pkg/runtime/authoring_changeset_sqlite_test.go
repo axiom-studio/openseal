@@ -611,6 +611,8 @@ func TestSQLiteAtomicWorkforceInitiativeAmendUsesCASWithoutPartialState(t *testi
 	}
 
 	amend := initiativeAmendChangeSet(created, "amend-valid", 1)
+	amend.Result.Candidate.Activation = authoring.WorkforceActivationInactive
+	amend.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
 	if _, _, err = store.CreateChangeSet(ctx, amend, "amend-valid", "amend-valid"); err != nil {
 		t.Fatal(err)
 	}
@@ -619,8 +621,24 @@ func TestSQLiteAtomicWorkforceInitiativeAmendUsesCASWithoutPartialState(t *testi
 		t.Fatal(err)
 	}
 	updated, err := store.GetInitiative(ctx, Scope{Kind: "tenant", ID: "one"}, created.Placement.InitiativeID)
-	if err != nil || updated.Revision != 2 || updated.Title != "Research program v2" || !updated.CreatedAt.Equal(current.CreatedAt) || updated.IdempotencyKeyHash != current.IdempotencyKeyHash {
+	if err != nil || updated.Revision != 2 || updated.Title != "Research program v2" || updated.Status != InitiativeStatusDraft || !updated.CreatedAt.Equal(current.CreatedAt) || updated.IdempotencyKeyHash != current.IdempotencyKeyHash {
 		t.Fatalf("amended Initiative=%#v err=%v", updated, err)
+	}
+	agents := agent.NewRegistryWithStore(store)
+	teams := team.NewRegistryWithStore(store, agents)
+	agentDeployment, err := agents.GetDeployment(ctx, created.Scope, "agent-live")
+	if err != nil || agentDeployment.RolloutStatus != agent.RolloutPaused || agentDeployment.Revision != 2 {
+		t.Fatalf("inactive amended Agent=%#v err=%v", agentDeployment, err)
+	}
+	teamDeployment, err := teams.GetDeployment(ctx, created.Scope, "team-live")
+	if err != nil || teamDeployment.Status != team.DeploymentPaused || teamDeployment.Revision != 2 {
+		t.Fatalf("inactive amended Team=%#v err=%v", teamDeployment, err)
+	}
+	if activations, err := agents.ListActivations(ctx, created.Scope, agentDeployment.ID); err != nil || len(activations) != 1 {
+		t.Fatalf("inactive amended Agent activations=%#v err=%v", activations, err)
+	}
+	if activations, err := teams.ListActivations(ctx, created.Scope, teamDeployment.ID); err != nil || len(activations) != 1 {
+		t.Fatalf("inactive amended Team activations=%#v err=%v", activations, err)
 	}
 }
 
