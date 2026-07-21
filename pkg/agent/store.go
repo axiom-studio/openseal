@@ -23,6 +23,7 @@ type Store interface {
 	ListActivations(context.Context, capability.ScopeReference, string) ([]DefinitionActivation, error)
 	CreateAmendment(context.Context, *DefinitionAmendment) error
 	GetAmendment(context.Context, capability.ScopeReference, string) (*DefinitionAmendment, error)
+	ListAmendments(context.Context, capability.ScopeReference, string) ([]*DefinitionAmendment, error)
 	UpdateAmendment(context.Context, *DefinitionAmendment, int64) error
 	ActivateAmendment(context.Context, *DefinitionAmendment, int64, *AgentDefinition, *AgentDeployment, int64, DefinitionActivation) error
 }
@@ -93,6 +94,24 @@ func (s *MemoryStore) GetAmendment(_ context.Context, scope capability.ScopeRefe
 		return nil, ErrAmendmentNotFound
 	}
 	return cloneAmendment(value), nil
+}
+
+func (s *MemoryStore) ListAmendments(_ context.Context, scope capability.ScopeReference, deploymentID string) ([]*DefinitionAmendment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*DefinitionAmendment, 0)
+	for _, value := range s.amendments {
+		if value.Scope == scope && (deploymentID == "" || value.DeploymentID == deploymentID) {
+			result = append(result, cloneAmendment(value))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].UpdatedAt.Equal(result[j].UpdatedAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+	return result, nil
 }
 
 func (s *MemoryStore) UpdateAmendment(_ context.Context, amendment *DefinitionAmendment, expectedRevision int64) error {

@@ -210,6 +210,14 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 	if err != nil || restored.Status != kernelagent.AmendmentAwaitingApproval {
 		t.Fatalf("restored amendment = %#v, %v", restored, err)
 	}
+	listed, err := restarted.ListAmendments(context.Background(), scope, deployment.ID)
+	if err != nil || len(listed) != 1 || listed[0].ID != amendment.ID {
+		t.Fatalf("listed restarted amendments = %#v, %v", listed, err)
+	}
+	foreign, err := restarted.ListAmendments(context.Background(), capability.ScopeReference{Kind: "tenant", ID: "other"}, deployment.ID)
+	if err == nil || !errors.Is(err, kernelagent.ErrDeploymentNotFound) || len(foreign) != 0 {
+		t.Fatalf("foreign amendments = %#v, %v", foreign, err)
+	}
 	approved, err := restarted.ResolveAmendment(context.Background(), kernelagent.ResolveAmendmentRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: restored.Revision, Approved: true, ActorType: "user", ActorID: "admin"})
 	if err != nil {
 		t.Fatal(err)
