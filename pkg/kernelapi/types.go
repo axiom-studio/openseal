@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
+	"github.com/axiom-studio/openseal/pkg/source"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -49,6 +50,8 @@ const (
 	ActivityCapabilityVersion           = "1"
 	EventRoutingCapabilityID            = "event-routing"
 	EventRoutingCapabilityVersion       = "1"
+	SourcePoliciesCapabilityID          = "source-policies"
+	SourcePoliciesCapabilityVersion     = source.LifecycleAPIVersion
 )
 
 const (
@@ -101,6 +104,8 @@ const (
 	OperationUpsert            = "upsert"
 	OperationDisable           = "disable"
 	OperationRefine            = "refine"
+	OperationRevoke            = "revoke"
+	OperationListVersions      = "list-versions"
 )
 
 // CapabilityDocument is the authoritative product surface advertised by an
@@ -422,6 +427,13 @@ func Capabilities() CapabilityDocument {
 // Raw append authority is deliberately not part of the interactive contract.
 func ActivityCapability() Capability {
 	return Capability{ID: ActivityCapabilityID, Version: ActivityCapabilityVersion, Available: true, Operations: []string{OperationList}}
+}
+
+// SourcePoliciesCapability is the portable, credential-free governance
+// contract for immutable source policy versions and their live authority.
+func SourcePoliciesCapability() Capability {
+	return Capability{ID: SourcePoliciesCapabilityID, Version: SourcePoliciesCapabilityVersion, Available: true,
+		Operations: []string{OperationRegister, OperationGet, OperationList, OperationListVersions, OperationActivate, OperationRevoke, OperationListActivations}}
 }
 
 func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) Capability {

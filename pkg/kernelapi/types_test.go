@@ -76,6 +76,21 @@ func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	}
 }
 
+func TestSourcePoliciesAdvertiseExactGovernedLifecycle(t *testing.T) {
+	capability := SourcePoliciesCapability()
+	if capability.Version != SourcePoliciesCapabilityVersion {
+		t.Fatalf("source policy capability version = %q", capability.Version)
+	}
+	for _, operation := range []string{OperationRegister, OperationGet, OperationList, OperationListVersions, OperationActivate, OperationRevoke, OperationListActivations} {
+		if !capability.Supports(operation) {
+			t.Fatalf("source policy operation %q not advertised: %#v", operation, capability.Operations)
+		}
+	}
+	if capability.Supports(OperationUpdate) || capability.Supports(OperationApply) {
+		t.Fatalf("source policy capability invented mutable version authority: %#v", capability.Operations)
+	}
+}
+
 func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
 	readOnly := SkillBindingsCapability(false)
 	if readOnly.ID != SkillBindingsCapabilityID || readOnly.Version != "1" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationUpsert) {
