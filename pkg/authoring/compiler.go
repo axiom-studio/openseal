@@ -116,10 +116,12 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	synthesizeCapabilityNeedRefinements(&generated, request)
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
+		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 		applyActivationCommitment(&generated.Candidate, commitments)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+		validation = append(validation, validateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
 			validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
@@ -168,6 +170,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
+	result.Validation = append(result.Validation, validateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
 	refinementValidation := make([]ValidationIssue, 0, 2)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
@@ -187,6 +190,43 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+// applyAuthorityConstraint narrows only the approval threshold that can be
+// derived without interpretation from a validated host projection. It never
+// creates Agents, increases authority, or silently lowers maximum risk.
+func applyAuthorityConstraint(candidate *WorkforceCandidate, constraint *AuthorityConstraint) {
+	if candidate == nil || constraint == nil || riskRank(constraint.RequireApprovalAt) < 0 {
+		return
+	}
+	requiredRank := riskRank(constraint.RequireApprovalAt)
+	for _, definition := range candidate.Agents {
+		if definition == nil || riskRank(definition.Authority.MaximumRisk) < requiredRank {
+			continue
+		}
+		current := definition.Authority.RequireApprovalAt
+		if current == "" || riskRank(current) > requiredRank {
+			definition.Authority.RequireApprovalAt = constraint.RequireApprovalAt
+		}
+	}
+}
+
+func validateCandidateAuthorityConstraint(candidate *WorkforceCandidate, constraint *AuthorityConstraint) []ValidationIssue {
+	if candidate == nil || constraint == nil || riskRank(constraint.MaximumRisk) < 0 {
+		return nil
+	}
+	maximumRank := riskRank(constraint.MaximumRisk)
+	issues := make([]ValidationIssue, 0)
+	for index, definition := range candidate.Agents {
+		if definition != nil && riskRank(definition.Authority.MaximumRisk) > maximumRank {
+			issues = append(issues, issue(
+				fmt.Sprintf("agents[%d].authority.maximumRisk", index),
+				"authority_maximum_risk_exceeded",
+				fmt.Sprintf("Host authority constraint %s@%s permits maximum risk %s", constraint.ID, constraint.Version, constraint.MaximumRisk),
+			))
+		}
+	}
+	return issues
 }
 
 func publicContractDiagnostic(validation []ValidationIssue) string {

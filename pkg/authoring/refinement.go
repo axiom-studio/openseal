@@ -17,6 +17,7 @@ import (
 var (
 	catalogDiagnosticCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 	catalogDiagnosticReferencePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,255}$`)
+	authorityConstraintVersionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
 )
 
 func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) ChangeSetRefinement {
@@ -573,6 +574,21 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 // ValidateCapabilityCatalog rejects malformed host projections before they are
 // persisted or placed in model context.
 func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
+	if constraint := catalog.AuthorityConstraint; constraint != nil {
+		if constraint.ID != strings.TrimSpace(constraint.ID) || constraint.Version != strings.TrimSpace(constraint.Version) ||
+			!catalogDiagnosticReferencePattern.MatchString(constraint.ID) || !authorityConstraintVersionPattern.MatchString(constraint.Version) {
+			return errors.New("authority constraint requires a valid id and version")
+		}
+		if constraint.MaximumRisk != "" && riskRank(constraint.MaximumRisk) < 0 {
+			return errors.New("authority constraint maximum risk is invalid")
+		}
+		if constraint.RequireApprovalAt != "" && riskRank(constraint.RequireApprovalAt) < 0 {
+			return errors.New("authority constraint approval risk is invalid")
+		}
+		if constraint.MaximumRisk != "" && constraint.RequireApprovalAt != "" && riskRank(constraint.RequireApprovalAt) > riskRank(constraint.MaximumRisk) {
+			return errors.New("authority constraint approval risk cannot exceed maximum risk")
+		}
+	}
 	for id, skill := range catalog.Skills {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(skill.ID) == "" || id != skill.ID {
 			return errors.New("Skill catalog keys must match non-empty Skill ids")

@@ -82,7 +82,24 @@ type CapabilityCatalog struct {
 	CapabilityNeeds      []CapabilityNeed                  `json:"capabilityNeeds,omitempty"`
 	AvailableCredentials map[string]bool                   `json:"availableCredentials,omitempty"`
 	SourcePolicies       map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
+	AuthorityConstraint  *AuthorityConstraint              `json:"authorityConstraint,omitempty"`
 	Diagnostics          []CatalogDiagnostic               `json:"diagnostics,omitempty"`
+}
+
+// AuthorityConstraint is the credential-free, versioned projection of the
+// host policy that bounds authored Agent authority. The host remains the
+// policy owner and enforcer; OpenSeal uses this projection to prevent a model
+// candidate from reaching evaluation with authority that the host will reject.
+//
+// RequireApprovalAt is a ceiling on the approval threshold: an Agent capable
+// of that risk (or a higher risk) must require approval at this threshold or
+// earlier. MaximumRisk is optional; when present, candidates above it fail
+// closed because silently reducing requested authority could change intent.
+type AuthorityConstraint struct {
+	ID                string               `json:"id"`
+	Version           string               `json:"version"`
+	MaximumRisk       capability.RiskLevel `json:"maximumRisk,omitempty"`
+	RequireApprovalAt capability.RiskLevel `json:"requireApprovalAt,omitempty"`
 }
 
 // CapabilityNeed is a server-owned, prompt-matched choice between exact
