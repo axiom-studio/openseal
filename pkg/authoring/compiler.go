@@ -24,6 +24,7 @@ import (
 const (
 	maximumGenerationBytes        = 1 << 20
 	maximumSchemaRepairAttempts   = 2
+	maximumContractRepairAttempts = 2
 	maximumPublicSchemaDiagnostic = 256
 )
 
@@ -40,6 +41,22 @@ func (e *SchemaGenerationError) Error() string {
 		return "decode repaired workforce candidate"
 	}
 	return fmt.Sprintf("decode repaired workforce candidate after %d schema repair attempts: %s", e.RepairAttempts, e.Diagnostic)
+}
+
+// ContractGenerationError is a credential-free account of provider output
+// that remained semantically unsafe after bounded deterministic repair. Unlike
+// an incomplete but well-formed candidate, an invalid typed refinement cannot
+// be persisted because clients cannot answer or faithfully project it.
+type ContractGenerationError struct {
+	RepairAttempts int
+	Diagnostic     string
+}
+
+func (e *ContractGenerationError) Error() string {
+	if e == nil {
+		return "repair workforce candidate contract"
+	}
+	return fmt.Sprintf("repair workforce candidate contract after %d repair attempts: %s", e.RepairAttempts, e.Diagnostic)
 }
 
 type Compiler struct {
@@ -94,36 +111,48 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		generated, decodeErr = decodeGenerationResponse(payload)
 	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
-	applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
-	commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
-	validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
-	validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
-	if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
-		validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
+		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
+		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
+		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
+		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
+			validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+		}
+		if err := validateRefinementCatalog(generated.UnresolvedQuestions, request.Catalog); err != nil {
+			validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+		}
+		return commitments, validation, missingRequirements(&generated.Candidate, request.Catalog)
 	}
-	if err := validateRefinementCatalog(generated.UnresolvedQuestions, request.Catalog); err != nil {
-		validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
-	}
-	missing := missingRequirements(&generated.Candidate, request.Catalog)
+	commitments, validation, missing := validateGenerated()
 	// Structural schema repair and deterministic contract repair have separate,
-	// bounded budgets. A structurally repaired response must still receive the
-	// same one semantic repair opportunity as an initially decodable response.
-	if len(validation) > 0 || len(missing) > 0 {
-		if repairer, ok := c.generator.(RepairGenerator); ok {
-			repairReason := deterministicContractError(validation, missing)
+	// bounded budgets. Every semantic repair is revalidated before it can replace
+	// the canonical result; a second bounded attempt receives the new diagnostic
+	// instead of persisting a still-invalid typed refinement.
+	contractRepairAttempts := 0
+	if repairer, ok := c.generator.(RepairGenerator); ok {
+		repairReason := deterministicContractError(validation, missing)
+		for attempt := 1; attempt <= maximumContractRepairAttempts && (len(validation) > 0 || len(missing) > 0); attempt++ {
+			contractRepairAttempts = attempt
 			repairRequest := request
 			if repairRequest.InvocationKey != "" {
-				repairRequest.InvocationKey += ":contract:1"
+				repairRequest.InvocationKey = fmt.Sprintf("%s:contract:%d", repairRequest.InvocationKey, attempt)
 			}
-			if repaired, repairErr := repairer.Repair(ctx, repairRequest, payload, repairReason); repairErr == nil && len(repaired) > 0 && len(repaired) <= maximumGenerationBytes {
-				if candidate, candidateErr := decodeGenerationResponse(repaired); candidateErr == nil {
-					generated = candidate
-				}
+			repaired, repairErr := repairer.Repair(ctx, repairRequest, payload, repairReason)
+			if repairErr != nil || len(repaired) == 0 || len(repaired) > maximumGenerationBytes {
+				break
 			}
+			payload = repaired
+			candidate, candidateErr := decodeGenerationResponse(repaired)
+			if candidateErr != nil {
+				repairReason = candidateErr
+				continue
+			}
+			generated = candidate
+			commitments, validation, missing = validateGenerated()
+			repairReason = deterministicContractError(validation, missing)
 		}
 	}
-	applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
-	commitments, _ = effectivePromptCommitments(request.Prompt, generated.Commitments)
 	assumptions := normalized(generated.Assumptions)
 	if commitments.Activation == ActivationCommitmentInactive {
 		assumptions = normalized(append(assumptions, "Compilation remains inactive; activation requires a separate governed apply operation."))
@@ -134,17 +163,42 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
+	refinementValidation := make([]ValidationIssue, 0, 2)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
-		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+		refinementValidation = append(refinementValidation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
 	}
 	if err := validateRefinementCatalog(result.UnresolvedQuestions, request.Catalog); err != nil {
-		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+		refinementValidation = append(refinementValidation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+	}
+	if len(refinementValidation) > 0 {
+		return nil, &ContractGenerationError{
+			RepairAttempts: contractRepairAttempts,
+			Diagnostic:     publicContractDiagnostic(refinementValidation),
+		}
 	}
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.RiskChanges = riskChanges(request.Existing, &result.Candidate)
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+func publicContractDiagnostic(validation []ValidationIssue) string {
+	if len(validation) == 0 {
+		return "deterministic contract mismatch"
+	}
+	first := validation[0]
+	diagnostic := strings.TrimSpace(first.Code)
+	if message := strings.TrimSpace(first.Message); message != "" {
+		if diagnostic != "" {
+			diagnostic += ": "
+		}
+		diagnostic += message
+	}
+	if diagnostic == "" {
+		diagnostic = "deterministic contract mismatch"
+	}
+	return truncateSchemaDiagnostic(diagnostic)
 }
 
 func publicSchemaDiagnostic(err error) string {

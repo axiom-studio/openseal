@@ -52,9 +52,11 @@ func TestChangeSetRefinementIsSequentialAuditedAndRestartSafe(t *testing.T) {
 		DependsOn: []RefinementQuestionDependency{{QuestionID: skillQuestion.ID}}, Priority: 80,
 		Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}},
 	}
+	scopeQuestionAfterSkill := scopeQuestion
+	scopeQuestionAfterSkill.DependsOn = nil
 	generator := &refinementGenerator{payloads: [][]byte{
 		refinementPayload(t, "1", skillQuestion, scopeQuestion),
-		refinementPayload(t, "2", scopeQuestion),
+		refinementPayload(t, "2", scopeQuestionAfterSkill),
 		refinementPayload(t, "3"),
 		refinementPayload(t, "4"),
 	}}
