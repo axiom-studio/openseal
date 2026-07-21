@@ -371,6 +371,81 @@ func TestSQLiteWorkforceApplyBindsImmutableSourceVersionBehindDeclaredContract(t
 	}
 }
 
+func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const (
+		catalogID        = "clawhub-aHR0cHM6Ly9jbGF3aHViLmFpL0BhbGljZS9zdW1tYXJpemU"
+		definitionID     = "summarize"
+		immutableVersion = "1.0.0+source.0123456789ab"
+		sourceIdentity   = "https://clawhub.ai::@alice/summarize"
+	)
+	catalog := skill.NewCatalogWithStore(store)
+	if err := catalog.Register(ctx, &skill.Definition{
+		ID: definitionID, Version: immutableVersion, Name: "Summarize",
+		Source:    &skill.SourceProvenance{Identity: sourceIdentity, Format: "openclaw.skill.v1", ResolvedVersion: "1.0.0"},
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: "process"},
+		Actions: map[string]skill.Action{"execute": {
+			Name: "execute", Description: "Summarize evidence", InputSchema: map[string]interface{}{"type": "object"},
+			Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	value := testApplicableWorkforceChangeSet()
+	agentDefinition := value.Result.Candidate.Agents[0]
+	agentDefinition.SkillRequirements = []agent.SkillRequirement{{SkillID: catalogID, VersionConstraint: "1.0.0", RequiredActions: []string{"execute"}}}
+	agentDefinition.Authority.AllowedSkillIDs = []string{catalogID}
+	value.Result.Candidate.Team.Roles[0].RequiredSkillIDs = []string{catalogID}
+	value.Result.Candidate.Team.Roles[0].SkillGrants = []team.RoleSkillGrant{{
+		SkillID: catalogID, SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
+	}}
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		catalogID: {ID: catalogID, Version: "1.0.0", Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead},
+	}}
+	identity := capability.NewSkillIdentity(definitionID, immutableVersion, sourceIdentity)
+	value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{"agent": {catalogID: identity}}
+	if _, _, err := store.CreateChangeSet(ctx, value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	applied := appliedRuntimeChangeSet(value, "receipt", "apply", value.UpdatedAt.Add(time.Minute))
+	if _, err := store.ApplyChangeSet(ctx, applied, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restored, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	agents := agent.NewRegistryWithStore(restored)
+	teams := team.NewRegistryWithStore(restored, agents)
+	storedAgent, err := agents.GetDefinition(ctx, "agent", "1")
+	if err != nil || len(storedAgent.SkillRequirements) != 1 || storedAgent.SkillRequirements[0].SkillID != definitionID ||
+		len(storedAgent.Authority.AllowedSkillIDs) != 1 || storedAgent.Authority.AllowedSkillIDs[0] != definitionID {
+		t.Fatalf("resolved Agent definition = %#v, %v", storedAgent, err)
+	}
+	storedTeam, err := teams.GetDefinition(ctx, "team", "1")
+	if err != nil || len(storedTeam.Roles[0].SkillGrants) != 1 {
+		t.Fatalf("resolved Team definition = %#v, %v", storedTeam, err)
+	}
+	grant := storedTeam.Roles[0].SkillGrants[0]
+	if grant.CatalogID != catalogID || !grant.ExactIdentity().Equal(identity) || storedTeam.Roles[0].RequiredSkillIDs[0] != definitionID {
+		t.Fatalf("exact persisted Team grant = %#v", grant)
+	}
+	bindings, err := restored.ListSkillBindings(ctx, value.Scope, "agent-live")
+	if err != nil || len(bindings) != 1 || !capability.NewSkillIdentity(bindings[0].SkillID, bindings[0].SkillVersion, bindings[0].SourceIdentity).Equal(identity) {
+		t.Fatalf("exact persisted binding = %#v, %v", bindings, err)
+	}
+}
+
 func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := NewSQLiteStore(path)

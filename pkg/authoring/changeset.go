@@ -112,9 +112,14 @@ type ChangeSetPlacement struct {
 	// SkillSourceVersions pins the immutable compiled version selected by the
 	// host for each source-qualified Skill. The declared catalog version remains
 	// model-visible; this version is deterministic placement and audit metadata.
-	SkillSourceVersions map[string]map[string]string  `json:"skillSourceVersions,omitempty"`
-	Objectives          map[string]ObjectivePlacement `json:"objectives,omitempty"`
-	Environment         string                        `json:"environment,omitempty"`
+	SkillSourceVersions map[string]map[string]string `json:"skillSourceVersions,omitempty"`
+	// SkillRuntimeIdentities is the canonical host-resolved authority mapping
+	// from each model-visible catalog Skill id to one immutable installed
+	// definition variant. It is placement metadata: models select catalog ids,
+	// while apply and runtime authority consume only these exact identities.
+	SkillRuntimeIdentities map[string]map[string]capability.SkillIdentity `json:"skillRuntimeIdentities,omitempty"`
+	Objectives             map[string]ObjectivePlacement                  `json:"objectives,omitempty"`
+	Environment            string                                         `json:"environment,omitempty"`
 }
 
 type ObjectivePlacement struct {
@@ -816,6 +821,31 @@ func validatePlacementReferences(placement ChangeSetPlacement, candidate *Workfo
 			}
 		}
 	}
+	for agentID, identities := range placement.SkillRuntimeIdentities {
+		definition := agents[agentID]
+		if definition == nil {
+			return fmt.Errorf("Skill runtime identity placement references unknown Agent %s", agentID)
+		}
+		required := make(map[string]struct{}, len(definition.SkillRequirements))
+		for _, requirement := range definition.SkillRequirements {
+			required[strings.TrimSpace(requirement.SkillID)] = struct{}{}
+		}
+		for catalogID, identity := range identities {
+			catalogID = strings.TrimSpace(catalogID)
+			if _, ok := required[catalogID]; !ok {
+				return fmt.Errorf("Skill runtime identity placement references undeclared Skill %s for Agent %s", catalogID, agentID)
+			}
+			if identity != identity.Normalized() || !identity.Valid() {
+				return fmt.Errorf("Skill runtime identity for Agent %s Skill %s is invalid", agentID, catalogID)
+			}
+			if source := strings.TrimSpace(placement.SkillSourceIdentities[agentID][catalogID]); source != "" && source != identity.SourceIdentity {
+				return fmt.Errorf("Skill runtime identity for Agent %s Skill %s conflicts with selected source", agentID, catalogID)
+			}
+			if version := strings.TrimSpace(placement.SkillSourceVersions[agentID][catalogID]); version != "" && version != identity.Version {
+				return fmt.Errorf("Skill runtime identity for Agent %s Skill %s conflicts with immutable version", agentID, catalogID)
+			}
+		}
+	}
 	return nil
 }
 
@@ -863,6 +893,9 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 func validateApplyPlacement(value *ChangeSet) error {
 	if !value.Result.Valid || len(value.Result.MissingRequirements) > 0 {
 		return errors.New("workforce candidate has unresolved requirements")
+	}
+	if err := validatePlacementReferences(value.Placement, &value.Result.Candidate); err != nil {
+		return err
 	}
 	if strings.TrimSpace(value.Placement.Environment) == "" {
 		return errors.New("deployment environment placement is required")
@@ -1041,6 +1074,15 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		}
 	}
 	placement.SkillSourceVersions = skillVersions
+	skillIdentities := map[string]map[string]capability.SkillIdentity{}
+	for id, values := range placement.SkillRuntimeIdentities {
+		qualified := canonicalIdentity(scope, id)
+		skillIdentities[qualified] = make(map[string]capability.SkillIdentity, len(values))
+		for skillID, identity := range values {
+			skillIdentities[qualified][strings.TrimSpace(skillID)] = identity.Normalized()
+		}
+	}
+	placement.SkillRuntimeIdentities = skillIdentities
 	if strings.TrimSpace(placement.Environment) == "" {
 		placement.Environment = "default"
 	}
@@ -1167,6 +1209,19 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 	}
 	if placement.SkillSourceVersions == nil {
 		placement.SkillSourceVersions = map[string]map[string]string{}
+	}
+	if placement.SkillRuntimeIdentities == nil {
+		placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{}
+	}
+	for definitionID, inherited := range parentPlacement.SkillRuntimeIdentities {
+		if placement.SkillRuntimeIdentities[definitionID] == nil {
+			placement.SkillRuntimeIdentities[definitionID] = map[string]capability.SkillIdentity{}
+		}
+		for skillID, identity := range inherited {
+			if _, exists := placement.SkillRuntimeIdentities[definitionID][skillID]; !exists {
+				placement.SkillRuntimeIdentities[definitionID][skillID] = identity
+			}
+		}
 	}
 	for definitionID, inherited := range parentPlacement.SkillSourceVersions {
 		if placement.SkillSourceVersions[definitionID] == nil {
@@ -1524,6 +1579,16 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 				nested[skillID] = version
 			}
 			copy.SkillSourceVersions[agentID] = nested
+		}
+	}
+	if value.SkillRuntimeIdentities != nil {
+		copy.SkillRuntimeIdentities = make(map[string]map[string]capability.SkillIdentity, len(value.SkillRuntimeIdentities))
+		for agentID, identities := range value.SkillRuntimeIdentities {
+			nested := make(map[string]capability.SkillIdentity, len(identities))
+			for skillID, identity := range identities {
+				nested[skillID] = identity
+			}
+			copy.SkillRuntimeIdentities[agentID] = nested
 		}
 	}
 	if value.Objectives != nil {
