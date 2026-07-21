@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -49,6 +50,11 @@ func workforceBindingReconciliationDeployments(value *authoring.ChangeSet) map[s
 			if deploymentID := strings.TrimSpace(value.Placement.AgentDeploymentIDs[definitionID]); deploymentID != "" {
 				deployments[deploymentID] = true
 			}
+		}
+	}
+	if value.Placement.TeamExpectedRevision > 0 {
+		if deploymentID := strings.TrimSpace(value.Placement.TeamDeploymentID); deploymentID != "" {
+			deployments[deploymentID] = true
 		}
 	}
 	return deployments
@@ -148,6 +154,14 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	if err := application.teamDeployment.Validate(definition); err != nil {
 		return nil, err
 	}
+	teamBindings, err := materializeWorkforceTeamSkillBindings(value, definition, application.teamDeployment.ID, deploymentByDefinition, application.skillBindings, activate)
+	if err != nil {
+		return nil, err
+	}
+	application.skillBindings = append(application.skillBindings, teamBindings...)
+	for _, binding := range teamBindings {
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "skill_binding", ID: binding.ID, Version: binding.SkillVersion, Revision: binding.Revision})
+	}
 	application.teamActivation = workforce.DefinitionActivation{ID: value.ApplyReceipt.ID + ":team", Scope: scope, DeploymentID: application.teamDeployment.ID, DefinitionID: definition.ID, ToVersion: definition.Version, DeploymentRevision: revision, Reason: "workforce_change_set:" + value.ID, ActorType: value.ApplyReceipt.Actor.Type, ActorID: value.ApplyReceipt.Actor.ID, CreatedAt: now}
 	application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "team_definition", ID: definition.ID, Version: definition.Version}, authoring.AppliedResourceReference{Kind: "team_deployment", ID: application.teamDeployment.ID, Version: definition.Version, Revision: revision})
 	objectives, err := materializeObjectives(value, "team", definition.ID, application.teamDeployment.ID, definition.ObjectiveTemplates, deploymentByDefinition)
@@ -230,6 +244,147 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		})
 	}
 	return bindings, nil
+}
+
+type workforceTeamBindingAggregate struct {
+	identity     capability.SkillIdentity
+	catalogIDs   map[string]bool
+	actions      map[string]bool
+	enablePrompt bool
+	maximumRisk  capability.RiskLevel
+	credentials  map[string]capability.CredentialReference
+	config       map[string]interface{}
+}
+
+// materializeWorkforceTeamSkillBindings creates the Team-owned authority that
+// role grants narrow at runtime. The source Agent bindings are independent
+// resources; they are used only to prove that the same reviewed placement,
+// credentials, and non-secret configuration back every roster member granted
+// this exact Skill variant.
+func materializeWorkforceTeamSkillBindings(value *authoring.ChangeSet, definition *team.Definition, deploymentID string, deploymentByDefinition map[string]string, agentBindings []*capability.Binding, activate bool) ([]*capability.Binding, error) {
+	if value == nil || definition == nil {
+		return nil, nil
+	}
+	bindingsByDeployment := make(map[string]map[string]*capability.Binding)
+	for _, binding := range agentBindings {
+		if binding == nil || binding.DeploymentID == deploymentID {
+			continue
+		}
+		identity := capability.NewSkillIdentity(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+		if !identity.Valid() {
+			continue
+		}
+		if bindingsByDeployment[binding.DeploymentID] == nil {
+			bindingsByDeployment[binding.DeploymentID] = map[string]*capability.Binding{}
+		}
+		bindingsByDeployment[binding.DeploymentID][identity.Key()] = binding
+	}
+	assignmentsByRole := make(map[string][]string)
+	for _, assignment := range value.Result.Candidate.Assignments {
+		if assigned := strings.TrimSpace(deploymentByDefinition[assignment.AgentDefinitionID]); assigned != "" {
+			assignmentsByRole[assignment.RoleID] = append(assignmentsByRole[assignment.RoleID], assigned)
+		}
+	}
+	aggregates := make(map[string]*workforceTeamBindingAggregate)
+	for _, role := range definition.Roles {
+		for _, grant := range role.SkillGrants {
+			identity := grant.ExactIdentity()
+			if !identity.Valid() {
+				return nil, fmt.Errorf("Team role %s Skill grant has no exact runtime identity", role.ID)
+			}
+			var source *capability.Binding
+			for _, assignedDeploymentID := range assignmentsByRole[role.ID] {
+				candidate := bindingsByDeployment[assignedDeploymentID][identity.Key()]
+				if candidate == nil {
+					return nil, fmt.Errorf("Team role %s Agent %s has no reviewed binding for exact Skill %s", role.ID, assignedDeploymentID, identity)
+				}
+				if source == nil {
+					source = candidate
+					continue
+				}
+				if !reflect.DeepEqual(source.Credentials, candidate.Credentials) || !reflect.DeepEqual(source.Config, candidate.Config) {
+					return nil, fmt.Errorf("Team role %s exact Skill %s has conflicting roster binding configuration", role.ID, identity)
+				}
+			}
+			if source == nil {
+				return nil, fmt.Errorf("Team role %s exact Skill %s has no assigned roster binding", role.ID, identity)
+			}
+			authorizedActions := make(map[string]bool, len(source.AllowedActions))
+			for _, action := range source.AllowedActions {
+				authorizedActions[action] = true
+			}
+			for _, action := range grant.AllowedActions {
+				if !authorizedActions[action] {
+					return nil, fmt.Errorf("Team role %s action %s exceeds its reviewed Agent binding for Skill %s", role.ID, action, identity)
+				}
+			}
+			if grant.EnablePrompt && !source.EnablePrompt {
+				return nil, fmt.Errorf("Team role %s prompt authority exceeds its reviewed Agent binding for Skill %s", role.ID, identity)
+			}
+			if workforceRiskRank(grant.MaximumRisk) > workforceRiskRank(source.MaximumRisk) {
+				return nil, fmt.Errorf("Team role %s risk exceeds its reviewed Agent binding for Skill %s", role.ID, identity)
+			}
+			aggregate := aggregates[identity.Key()]
+			if aggregate == nil {
+				aggregate = &workforceTeamBindingAggregate{
+					identity: identity, catalogIDs: map[string]bool{}, actions: map[string]bool{},
+					credentials: cloneCredentialReferences(source.Credentials), config: cloneMap(source.Config),
+				}
+				aggregates[identity.Key()] = aggregate
+			} else if !reflect.DeepEqual(aggregate.credentials, source.Credentials) || !reflect.DeepEqual(aggregate.config, source.Config) {
+				return nil, fmt.Errorf("Team exact Skill %s has conflicting role binding configuration", identity)
+			}
+			catalogID := strings.TrimSpace(grant.CatalogID)
+			if catalogID == "" {
+				catalogID = strings.TrimSpace(grant.SkillID)
+			}
+			aggregate.catalogIDs[catalogID] = true
+			for _, action := range grant.AllowedActions {
+				aggregate.actions[action] = true
+			}
+			aggregate.enablePrompt = aggregate.enablePrompt || grant.EnablePrompt
+			if workforceRiskRank(grant.MaximumRisk) > workforceRiskRank(aggregate.maximumRisk) {
+				aggregate.maximumRisk = grant.MaximumRisk
+			}
+		}
+	}
+	keys := make([]string, 0, len(aggregates))
+	for key := range aggregates {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	catalogUse := map[string]int{}
+	for _, key := range keys {
+		for catalogID := range aggregates[key].catalogIDs {
+			catalogUse[catalogID]++
+		}
+	}
+	result := make([]*capability.Binding, 0, len(keys))
+	for _, key := range keys {
+		aggregate := aggregates[key]
+		catalogIDs := make([]string, 0, len(aggregate.catalogIDs))
+		for catalogID := range aggregate.catalogIDs {
+			catalogIDs = append(catalogIDs, catalogID)
+		}
+		sort.Strings(catalogIDs)
+		catalogID := catalogIDs[0]
+		bindingID := "workforce:" + deploymentID + ":" + catalogID
+		if catalogUse[catalogID] > 1 {
+			bindingID += ":" + portableDigest(aggregate.identity)[7:19]
+		}
+		actions := make([]string, 0, len(aggregate.actions))
+		for action := range aggregate.actions {
+			actions = append(actions, action)
+		}
+		sort.Strings(actions)
+		result = append(result, &capability.Binding{
+			ID: bindingID, Scope: value.Scope, DeploymentID: deploymentID,
+			SkillID: aggregate.identity.ID, SkillVersion: aggregate.identity.Version, SourceIdentity: aggregate.identity.SourceIdentity,
+			AllowedActions: actions, Disabled: !activate, EnablePrompt: aggregate.enablePrompt, MaximumRisk: aggregate.maximumRisk,
+			Credentials: cloneCredentialReferences(aggregate.credentials), Config: cloneMap(aggregate.config), Revision: 1,
+		})
+	}
+	return result, nil
 }
 
 func workforceSkillRuntimeIdentity(value *authoring.ChangeSet, agentID, catalogID, catalogVersion string) capability.SkillIdentity {
