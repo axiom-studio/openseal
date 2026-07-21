@@ -866,7 +866,7 @@ func refinementLifecycleGap(readiness SkillReadiness, requirement string) bool {
 	if requirement == "installation" {
 		return readiness == SkillReadinessNeedsInstallation
 	}
-	if strings.HasPrefix(requirement, "credential:") {
+	if requirement == "binding_configuration" || strings.HasPrefix(requirement, "credential:") {
 		return readiness == SkillReadinessNeedsBinding || readiness == SkillReadinessNeedsInstallation
 	}
 	return false
