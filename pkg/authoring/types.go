@@ -4,6 +4,7 @@ package authoring
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -90,6 +91,31 @@ type WorkforceCandidate struct {
 	Team        *team.Definition         `json:"team,omitempty"`
 	Assignments []Assignment             `json:"assignments,omitempty"`
 	Initiative  *InitiativeBlueprint     `json:"initiative,omitempty"`
+	// Activation is the reviewed, digest-bound operating state that atomic
+	// apply must materialize. The Compiler derives it from typed commitments;
+	// apply never infers it from prompt prose.
+	Activation WorkforceActivationIntent `json:"activation"`
+}
+
+type WorkforceActivationIntent string
+
+const (
+	WorkforceActivationActive   WorkforceActivationIntent = "active"
+	WorkforceActivationInactive WorkforceActivationIntent = "inactive"
+)
+
+// EffectiveWorkforceActivationIntent preserves active apply for ChangeSets
+// persisted before activation became an explicit candidate field. Every newly
+// compiled candidate records one of the two concrete values above.
+func EffectiveWorkforceActivationIntent(value WorkforceActivationIntent) (WorkforceActivationIntent, error) {
+	switch value {
+	case "", WorkforceActivationActive:
+		return WorkforceActivationActive, nil
+	case WorkforceActivationInactive:
+		return WorkforceActivationInactive, nil
+	default:
+		return "", fmt.Errorf("workforce activation intent %q is invalid", value)
+	}
 }
 
 type GenerateRequest struct {

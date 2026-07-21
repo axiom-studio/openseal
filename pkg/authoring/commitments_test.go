@@ -99,10 +99,11 @@ func TestCompilerValidatesMultiAgentTeamCountsObjectivePlacementAndInactivity(t 
 		Mode: ModeCreate, Prompt: "Create exactly three Agents and one Team with exactly two Team objectives. Do not activate.",
 	})
 	if err != nil || !result.Valid || result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 3 ||
-		result.Commitments.TeamCount == nil || *result.Commitments.TeamCount != 1 || result.Commitments.Activation != ActivationCommitmentInactive {
+		result.Commitments.TeamCount == nil || *result.Commitments.TeamCount != 1 || result.Commitments.Activation != ActivationCommitmentInactive ||
+		result.Candidate.Activation != WorkforceActivationInactive {
 		t.Fatalf("multi-Agent commitments = %#v, err = %v", result, err)
 	}
-	if !containsString(result.Assumptions, "Compilation remains inactive; activation requires a separate governed apply operation.") {
+	if !containsString(result.Assumptions, "Atomic apply remains inactive by creating non-executing resources; activation requires a separate governed command.") {
 		t.Fatalf("inactive assumption = %#v", result.Assumptions)
 	}
 
