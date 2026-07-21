@@ -1,6 +1,7 @@
 package authoring
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -166,6 +167,24 @@ func TestCompilerPerformsBoundedStrictSchemaRepair(t *testing.T) {
 		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || schemaError.Diagnostic != "unknown field alsoUnknown" {
 			t.Fatalf("schema failure diagnostic = %#v, err = %v", schemaError, err)
 		}
+	}
+}
+
+func TestCompilerNormalizesOnlyDefinitionVersionNumbers(t *testing.T) {
+	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":1.0,"displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"team":{"id":"workers","version":2,"displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker"}]}}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"})
+	if err != nil || !result.Valid {
+		t.Fatalf("normalized definition versions compile = %#v, err = %v", result, err)
+	}
+	if result.Candidate.Agents[0].Version != "1.0" || result.Candidate.Team.Version != "2" {
+		t.Fatalf("definition versions = agent %q, team %q", result.Candidate.Agents[0].Version, result.Candidate.Team.Version)
+	}
+
+	strictPayload := bytes.Replace(payload, []byte(`"displayName":"Worker"`), []byte(`"displayName":7`), 1)
+	strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"}); err == nil || !strings.Contains(err.Error(), "displayName") {
+		t.Fatalf("non-version scalar mismatch must remain strict, got %v", err)
 	}
 }
 
