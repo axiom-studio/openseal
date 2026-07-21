@@ -48,6 +48,10 @@ Read {baseDir}/references/policy.md before searching.
 	if err != nil {
 		t.Fatal(err)
 	}
+	compilation.Definition.BindingConfigSchema = map[string]interface{}{
+		"type": "object", "additionalProperties": false, "required": []interface{}{"resultLimit"},
+		"properties": map[string]interface{}{"resultLimit": map[string]interface{}{"type": "integer", "minimum": 1}},
+	}
 	scope := ScopeReference{Kind: "tenant", ID: "one"}
 	definitionVersion := compilation.Definition.Version
 	bind := func(catalog *Catalog, deployment string, credentialID string) {
