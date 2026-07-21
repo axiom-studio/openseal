@@ -1533,7 +1533,12 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 	credentialQuestion := authoring.RefinementQuestion{ID: "credential", Prompt: "Which Reddit credential should be bound?", WhyNeeded: "API access requires a binding.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerCredentialReference}, Priority: 1}
 	blocked := &authoring.ChangeSet{
 		ID: "change-refine", Scope: scope, Status: authoring.ChangeSetBlocked, Revision: 3, Result: authoring.CompileResult{Valid: false},
-		Catalog:    authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{"reddit-monitor": {ID: "reddit-monitor", Name: "Reddit Monitor", Readiness: authoring.SkillReadinessNeedsBinding, Compatibility: []authoring.SkillCompatibility{{Requirement: "reddit.read", Compatible: true, Evidence: "declared action"}}}}},
+		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{"reddit-monitor": {
+			ID: "reddit-monitor", Version: "2.1.0", SourceIdentity: "https://clawhub.ai::@acme/reddit-monitor", Name: "Reddit Monitor",
+			Actions: []string{"search", "read"}, Credentials: []authoring.SkillCredential{{Name: "REDDIT_API_TOKEN", Kind: "environment-secret", Actions: []string{"search", "read"}}},
+			PromptAvailable: true, MaximumRisk: capability.RiskLevelRead, Readiness: authoring.SkillReadinessNeedsInstallation,
+			Compatibility: []authoring.SkillCompatibility{{Requirement: "reddit.read", Compatible: true, Evidence: "verified compilation", Reference: "receipt:sha256:abc123"}},
+		}}},
 		Refinement: authoring.ChangeSetRefinement{Questions: []authoring.RefinementQuestion{scopeQuestion, skillQuestion, credentialQuestion}, Answers: []authoring.RefinementAnswerEvent{{QuestionID: scopeQuestion.ID, Value: authoring.RefinementAnswerValue{OptionIDs: []string{"sre"}}, AnsweredAt: time.Now()}}},
 	}
 	evaluating := *blocked
@@ -1548,7 +1553,13 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 		t.Fatalf("ready refinement = mode %v question %#v", model.mode, model.readyRefinement())
 	}
 	view := model.View()
-	for _, expected := range []string{"Which available Skills", "Reddit and language analysis?", "Reddit Monitor", "needs_binding", "declared action", "Answered questions", scopeQuestion.Prompt} {
+	for _, expected := range []string{
+		"Which available Skills", "Reddit and language analysis?", "Reddit Monitor",
+		"reddit-monitor@2.1.0", "https://clawhub.ai::@acme/", "reddit-monitor", "needs_installation",
+		"Actions: read, search", "Prompt guidance: available", "Maximum risk: read",
+		"REDDIT_API_TOKEN (environment-", "secret; read, search)", "verified compilation", "receipt:sha256:abc123",
+		"Answered questions", scopeQuestion.Prompt,
+	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("refinement view missing %q:\n%s", expected, view)
 		}

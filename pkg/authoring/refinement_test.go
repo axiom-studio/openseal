@@ -132,6 +132,39 @@ func TestChangeSetRefinementIsSequentialAuditedAndRestartSafe(t *testing.T) {
 	}
 }
 
+func TestRefinementSequenceCanGateSkillsAndScopeOnCredentialConfiguration(t *testing.T) {
+	credential := RefinementQuestion{
+		ID: "reddit-credential", Category: RefinementCategoryCredential, Prompt: "Which authorized Reddit credential should be used?", WhyNeeded: "Reddit access requires an authorized credential.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference},
+		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}},
+	}
+	skills := RefinementQuestion{
+		ID: "reddit-skills", Category: RefinementCategorySkill, Prompt: "Which verified Reddit and language Skills should be used?", WhyNeeded: "The workforce needs compatible capabilities.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Minimum: 1, Maximum: 2, Options: []RefinementQuestionOption{{ID: "reddit-research", Label: "Reddit research"}, {ID: "language-analysis", Label: "Language analysis"}}},
+		DependsOn: []RefinementQuestionDependency{{QuestionID: credential.ID}}, Priority: 90, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	subreddits := RefinementQuestion{
+		ID: "subreddits", Category: RefinementCategoryScope, Prompt: "Which subreddits should be monitored?", WhyNeeded: "The source scope must be explicit.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerStringList, Minimum: 1, Maximum: 20},
+		DependsOn: []RefinementQuestionDependency{{QuestionID: skills.ID}}, Priority: 80, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}},
+	}
+	refinement := ChangeSetRefinement{Questions: []RefinementQuestion{credential, skills, subreddits}}
+	if err := validateRefinementQuestions(refinement.Questions); err != nil {
+		t.Fatalf("valid sequential refinement contract: %v", err)
+	}
+	if next := refinement.NextQuestion(); next == nil || next.ID != credential.ID {
+		t.Fatalf("first question = %#v", next)
+	}
+	refinement.Answers = append(refinement.Answers, RefinementAnswerEvent{QuestionID: credential.ID, Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: "oauth", ID: "opaque-vault-reference"}}})
+	if next := refinement.NextQuestion(); next == nil || next.ID != skills.ID {
+		t.Fatalf("second question = %#v", next)
+	}
+	refinement.Answers = append(refinement.Answers, RefinementAnswerEvent{QuestionID: skills.ID, Value: RefinementAnswerValue{SkillIDs: []string{"reddit-research", "language-analysis"}}})
+	if next := refinement.NextQuestion(); next == nil || next.ID != subreddits.ID {
+		t.Fatalf("third question = %#v", next)
+	}
+}
+
 func TestRefinementQuestionsRejectCyclesAndSecretShapedAnswers(t *testing.T) {
 	first := RefinementQuestion{ID: "first", Category: RefinementCategoryScope, Prompt: "First?", WhyNeeded: "Needed", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerText}, Priority: 1, DependsOn: []RefinementQuestionDependency{{QuestionID: "second"}}, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}}}
 	second := RefinementQuestion{ID: "second", Category: RefinementCategoryCredential, Prompt: "Credential?", WhyNeeded: "Needed", Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference}, Priority: 2, DependsOn: []RefinementQuestionDependency{{QuestionID: "first"}}, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}}}
