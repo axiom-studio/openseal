@@ -229,14 +229,17 @@ func TestInstallableSkillOptionsRequireExactReceiptBackedEvidence(t *testing.T) 
 	if err := validate(); err == nil || !strings.Contains(err.Error(), "referenced positive compatibility evidence") {
 		t.Fatalf("missing receipt evidence error=%v", err)
 	}
-	skill.Compatibility = []SkillCompatibility{{Requirement: "reddit.read", Compatible: false, Evidence: "host executable unavailable", Reference: "receipt:sha256:incompatible"}}
+	skill.Compatibility = []SkillCompatibility{
+		{Requirement: "installation", Compatible: false, Evidence: "verified artifact is not installed", Reference: "needs_installation"},
+		{Requirement: "credential:reddit-oauth", Compatible: false, Evidence: "authorized credential still needs binding"},
+		{Requirement: "source_digest", Compatible: true, Evidence: "verified compilation", Reference: "receipt:sha256:verified"},
+	}
+	if err := validate(); err != nil {
+		t.Fatalf("receipt-backed option with truthful lifecycle gaps: %v", err)
+	}
+	skill.Compatibility = append(skill.Compatibility, SkillCompatibility{Requirement: "action_adapter", Compatible: false, Evidence: "governed adapter unavailable", Reference: "diagnostic:needs_action_adapter"})
 	if err := validate(); err == nil || !strings.Contains(err.Error(), "incompatibility-proven") {
 		t.Fatalf("incompatible option error=%v", err)
-	}
-	skill.Compatibility[0].Compatible = true
-	skill.Compatibility[0].Evidence = "verified compilation"
-	if err := validate(); err != nil {
-		t.Fatalf("exact receipt-backed installable option: %v", err)
 	}
 }
 
