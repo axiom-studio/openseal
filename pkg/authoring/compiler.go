@@ -72,7 +72,6 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		return nil, errors.New("generated workforce candidate must be between 1 byte and 1 MiB")
 	}
 	generated, decodeErr := decodeGenerationResponse(payload)
-	repairUsed := false
 	for attempt := 1; decodeErr != nil; attempt++ {
 		repairer, ok := c.generator.(RepairGenerator)
 		if !ok {
@@ -93,7 +92,6 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 			return nil, errors.New("repaired workforce candidate must be between 1 byte and 1 MiB")
 		}
 		generated, decodeErr = decodeGenerationResponse(payload)
-		repairUsed = true
 	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
@@ -107,10 +105,17 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
 	}
 	missing := missingRequirements(&generated.Candidate, request.Catalog)
-	if !repairUsed && (len(validation) > 0 || len(missing) > 0) {
+	// Structural schema repair and deterministic contract repair have separate,
+	// bounded budgets. A structurally repaired response must still receive the
+	// same one semantic repair opportunity as an initially decodable response.
+	if len(validation) > 0 || len(missing) > 0 {
 		if repairer, ok := c.generator.(RepairGenerator); ok {
 			repairReason := deterministicContractError(validation, missing)
-			if repaired, repairErr := repairer.Repair(ctx, request, payload, repairReason); repairErr == nil && len(repaired) > 0 && len(repaired) <= maximumGenerationBytes {
+			repairRequest := request
+			if repairRequest.InvocationKey != "" {
+				repairRequest.InvocationKey += ":contract:1"
+			}
+			if repaired, repairErr := repairer.Repair(ctx, repairRequest, payload, repairReason); repairErr == nil && len(repaired) > 0 && len(repaired) <= maximumGenerationBytes {
 				if candidate, candidateErr := decodeGenerationResponse(repaired); candidateErr == nil {
 					generated = candidate
 				}
