@@ -175,7 +175,7 @@ func (m *Model) renderComposer(width int) string {
 		title = "Create reviewed workforce"
 		description = "Record why this exact candidate should now create its Agents, Team, and objectives atomically."
 		owner = "Atomic Apply · permanent audit receipt"
-		if m.authoringResult != nil && m.authoringResult.Candidate.Activation == authoring.WorkforceActivationInactive {
+		if m.authoringActivationIntent() == authoring.WorkforceActivationInactive {
 			description = "Create this exact candidate atomically in a non-executing state. Activate each reviewed resource later through governed commands."
 			owner = "Inactive Apply · permanent audit receipt"
 		}
@@ -674,7 +674,7 @@ func (m *Model) renderAuthoringContent(width int) string {
 		roles, objectives = len(result.Candidate.Team.Roles), len(result.Candidate.Team.ObjectiveTemplates)
 	}
 	lines := []string{title, state, "", headerStyle.Render(compact(teamName, max(width-8, 24)))}
-	activation, _ := authoring.EffectiveWorkforceActivationIntent(result.Candidate.Activation)
+	activation := m.authoringActivationIntent()
 	lines = append(lines, mutedStyle.Render("Activation intent · "+string(activation)))
 	if m.authoringChangeSet != nil {
 		changeSet := m.authoringChangeSet
@@ -796,6 +796,20 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) authoringActivationIntent() authoring.WorkforceActivationIntent {
+	if m != nil && m.authoringChangeSet != nil {
+		if intent, err := authoring.EffectiveChangeSetActivationIntent(m.authoringChangeSet); err == nil {
+			return intent
+		}
+	}
+	if m != nil && m.authoringResult != nil {
+		if intent, err := authoring.EffectiveWorkforceActivationIntent(m.authoringResult.Candidate.Activation); err == nil {
+			return intent
+		}
+	}
+	return authoring.WorkforceActivationActive
 }
 
 func (m *Model) renderRefinementGuidance(question authoring.RefinementQuestion, width int) string {
