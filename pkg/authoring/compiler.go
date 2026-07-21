@@ -323,6 +323,7 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	payload = normalizeGeneratedDurations(payload)
 	payload = normalizeGeneratedRefinementBlocking(payload)
 	payload = normalizeGeneratedRefinementProvenance(payload)
+	payload = normalizeGeneratedRefinementDependencies(payload)
 	var generated GenerationResponse
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
@@ -685,6 +686,59 @@ func validRefinementProvenanceKind(kind RefinementProvenanceKind) bool {
 	default:
 		return false
 	}
+}
+
+// normalizeGeneratedRefinementDependencies accepts the provider shorthand
+// dependsOn:["scope"] only at the typed dependency-array boundary. Each
+// non-empty string maps losslessly to {"questionId":"scope"}. Dependency
+// existence, option constraints, and cycle checks remain authoritative in the
+// refinement validator; unknown and mixed invalid shapes still fail closed.
+func normalizeGeneratedRefinementDependencies(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return payload
+	}
+	root, ok := document.(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	questions, ok := root["unresolvedQuestions"].([]interface{})
+	if !ok {
+		return payload
+	}
+	changed := false
+	for _, rawQuestion := range questions {
+		question, ok := rawQuestion.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		dependencies, ok := question["dependsOn"].([]interface{})
+		if !ok {
+			continue
+		}
+		for index, rawDependency := range dependencies {
+			questionID, ok := rawDependency.(string)
+			if !ok || strings.TrimSpace(questionID) == "" || questionID != strings.TrimSpace(questionID) {
+				continue
+			}
+			dependencies[index] = map[string]interface{}{"questionId": questionID}
+			changed = true
+		}
+	}
+	if !changed {
+		return payload
+	}
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
 }
 
 // normalizeGeneratedDurations accepts unambiguous human duration strings only
