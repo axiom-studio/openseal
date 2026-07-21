@@ -100,6 +100,13 @@ func TestCapabilityNeedAnswerSurvivesRecompileAndUnlocksScope(t *testing.T) {
 		Questions: first.UnresolvedQuestions,
 		Answers:   []RefinementAnswerEvent{{QuestionID: choiceID, Value: RefinementAnswerValue{SkillIDs: []string{"openseal.source"}}}},
 	}
+	repeatedPayload, err := json.Marshal(GenerationResponse{
+		Candidate: capabilityNeedCandidate(), UnresolvedQuestions: []RefinementQuestion{first.UnresolvedQuestions[1]},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ = NewCompiler(staticGenerator{payload: repeatedPayload})
 	second, err := compiler.Compile(context.Background(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Monitor Reddit", Catalog: catalog, Refinement: providerRefinementContext(current),
 	})
