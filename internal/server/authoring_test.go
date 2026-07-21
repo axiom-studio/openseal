@@ -101,8 +101,9 @@ func (governedAuthoringGenerator) Generate(context.Context, authoring.GenerateRe
 }
 
 type governedFixtureAuthority struct {
-	role  string
-	actor string
+	role          string
+	actor         string
+	bindingFields []capability.BindingConfigurationFieldChoice
 }
 
 func (a governedFixtureAuthority) AuthorizeWorkforceLifecycle(_ context.Context, operation string, changeSet *authoring.ChangeSet) (WorkforceLifecycleAuthorization, error) {
@@ -119,12 +120,27 @@ func (a governedFixtureAuthority) AuthorizeWorkforceLifecycle(_ context.Context,
 	case kernelapi.OperationApply:
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
 	case kernelapi.OperationPatch:
-		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
+		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}, BindingConfigurationFields: a.bindingFields}, nil
 	case kernelapi.OperationRefine:
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
 	default:
 		return WorkforceLifecycleAuthorization{}, errors.New("unsupported operation")
 	}
+}
+
+type bindingConfigAuthoringGenerator struct{}
+
+func (bindingConfigAuthoringGenerator) Generate(ctx context.Context, request authoring.GenerateRequest) ([]byte, error) {
+	encoded, err := (governedAuthoringGenerator{}).Generate(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	var response authoring.GenerationResponse
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		return nil, err
+	}
+	response.Candidate.Agents[0].SkillRequirements = []kernelagent.SkillRequirement{{SkillID: "openseal.kubernetes", VersionConstraint: "1.1.0", RequiredActions: []string{"list_events"}}}
+	return json.Marshal(response)
 }
 
 func TestWorkforcePlacementPatchIsContextualAuthorizedAndIdempotent(t *testing.T) {
@@ -165,6 +181,54 @@ func TestWorkforcePlacementPatchIsContextualAuthorizedAndIdempotent(t *testing.T
 	replay := performAgentRunRequest(t, api.Handler(), http.MethodPatch, path, mustJSON(t, request), "placement-stable")
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), updated.PlacementUpdates[0].ID) {
 		t.Fatalf("placement replay = %d %s", replay.Code, replay.Body.String())
+	}
+}
+
+func TestWorkforceCapabilityAdvertisesOnlySchemaMatchedBindingConfigurationFields(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "binding-config-capability.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(bindingConfigAuthoringGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	development := int64(7)
+	field := capability.BindingConfigurationFieldChoice{
+		CatalogSkillID: "openseal.kubernetes",
+		Skill:          capability.NewSkillIdentity("openseal.kubernetes", "1.1.0", "builtin:openseal.kubernetes"),
+		Key:            "clusterId", Type: "integer", Required: true, Prompt: "Which Kubernetes cluster should this Agent operate?",
+		Options: []capability.BindingConfigurationOption{{Label: "Development", Value: capability.BindingConfigurationValue{Integer: &development}}},
+	}
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{actor: "configured-operator", bindingFields: []capability.BindingConfigurationFieldChoice{field}})
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	created, _, err := api.authoringChanges.Create(context.Background(), authoring.CreateChangeSetRequest{
+		Scope: scope, Prompt: "Create an SRE Team", IdempotencyKey: "create-binding-config-capability",
+		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{"openseal.kubernetes": {
+			ID: "openseal.kubernetes", Version: "1.1.0", SourceIdentity: "builtin:openseal.kubernetes", Readiness: authoring.SkillReadinessReady,
+			Actions: []string{"list_events"}, BindingConfigSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false, "required": []interface{}{"clusterId"},
+				"properties": map[string]interface{}{"clusterId": map[string]interface{}{"type": "integer", "minimum": 1}},
+			},
+		}}},
+		Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}, Environment: "development"},
+		Actor:     authoring.ChangeSetActor{Type: "user", ID: "requester"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId=" + created.ID
+	response := performAgentRunRequest(t, api.Handler(), http.MethodGet, path, "", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"bindingConfigurationFields"`) || !strings.Contains(response.Body.String(), `"integer":7`) || strings.Contains(response.Body.String(), `"credentialBindings"`) {
+		t.Fatalf("binding configuration capability = %d %s", response.Code, response.Body.String())
+	}
+
+	invalid := field
+	invalid.Key = "apiToken"
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{actor: "configured-operator", bindingFields: []capability.BindingConfigurationFieldChoice{invalid}})
+	response = performAgentRunRequest(t, api.Handler(), http.MethodGet, path, "", "")
+	if strings.Contains(response.Body.String(), `"bindingConfigurationFields"`) || !strings.Contains(response.Body.String(), `"patch"`) {
+		t.Fatalf("invalid binding configuration capability was not filtered = %s", response.Body.String())
 	}
 }
 

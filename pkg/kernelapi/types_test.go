@@ -257,3 +257,24 @@ func TestContextualCredentialBindingsExposeOnlyOpaqueOperatorChoices(t *testing.
 		t.Fatalf("credential binding context = %s", encoded)
 	}
 }
+
+func TestContextualBindingConfigurationFieldsExposeTypedAuthorizedChoices(t *testing.T) {
+	clusterID := int64(7)
+	context := CapabilityContext{BindingConfigurationFields: []kernelcapability.BindingConfigurationFieldChoice{{
+		CatalogSkillID: "openseal.kubernetes",
+		Skill:          kernelcapability.NewSkillIdentity("openseal.kubernetes", "1.1.0", "builtin:openseal.kubernetes"),
+		Key:            "clusterId", Type: "integer", Required: true, Prompt: "Which Kubernetes cluster should this Agent operate?",
+		Options: []kernelcapability.BindingConfigurationOption{{Label: "Development", Value: kernelcapability.BindingConfigurationValue{Integer: &clusterID}}},
+	}}}
+	if err := kernelcapability.ValidateBindingConfigurationFields(context.BindingConfigurationFields); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(encoded)
+	if !strings.Contains(value, `"bindingConfigurationFields"`) || !strings.Contains(value, `"clusterId"`) || !strings.Contains(value, `"integer":7`) || strings.Contains(strings.ToLower(value), "credential") {
+		t.Fatalf("binding configuration context = %s", encoded)
+	}
+}
