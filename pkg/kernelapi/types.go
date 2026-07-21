@@ -40,7 +40,7 @@ const (
 	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID        = "agent-definitions"
-	AgentDefinitionsCapabilityVersion   = "5"
+	AgentDefinitionsCapabilityVersion   = "6"
 	AgentRequestsCapabilityID           = "agent-requests"
 	AgentRequestsCapabilityVersion      = "1"
 	ActionApprovalsCapabilityID         = "action-approvals"
@@ -78,6 +78,8 @@ const (
 	OperationStream            = "stream"
 	OperationDeploy            = "deploy"
 	OperationActivate          = "activate"
+	OperationRollback          = "rollback"
+	OperationListActivations   = "list-activations"
 	OperationCompile           = "compile"
 	OperationPropose           = "propose"
 	OperationEvaluate          = "evaluate"
@@ -144,6 +146,14 @@ type ChannelCapabilityFeatures struct {
 }
 
 type TeamDefinitionCapabilityFeatures struct {
+	Amendments bool
+}
+
+// AgentDefinitionCapabilityFeatures describes optional lifecycle services
+// backed by the same immutable definition and deployment registry. Hosts still
+// remove individual operations after composing tenant authorization.
+type AgentDefinitionCapabilityFeatures struct {
+	Lifecycle  bool
 	Amendments bool
 }
 
@@ -276,6 +286,46 @@ type AgentDeploymentUpdateResult struct {
 	Audit      *workforce.DefinitionActivation `json:"audit"`
 }
 
+type ActivateAgentDefinitionRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	Version          string                    `json:"version"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	ActorType        string                    `json:"actorType"`
+	ActorID          string                    `json:"actorId"`
+	Reason           string                    `json:"reason,omitempty"`
+}
+
+type RollbackAgentDefinitionRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	ActorType        string                    `json:"actorType"`
+	ActorID          string                    `json:"actorId"`
+	Reason           string                    `json:"reason,omitempty"`
+}
+
+type AgentDefinitionActivationResult struct {
+	Deployment *kernelagent.AgentDeployment    `json:"deployment"`
+	Activation *workforce.DefinitionActivation `json:"activation"`
+}
+
+type AgentDefinitionAmendmentList struct {
+	Items []*kernelagent.DefinitionAmendment `json:"items"`
+}
+
+type ActivateAgentDefinitionAmendmentRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	ActorType        string                    `json:"actorType"`
+	ActorID          string                    `json:"actorId"`
+	Reason           string                    `json:"reason,omitempty"`
+}
+
+type AgentDefinitionAmendmentActivationResult struct {
+	Amendment  *kernelagent.DefinitionAmendment `json:"amendment"`
+	Deployment *kernelagent.AgentDeployment     `json:"deployment"`
+	Activation *workforce.DefinitionActivation  `json:"activation"`
+}
+
 // AgentDefinitionCompilationHistory is the canonical readiness history for an
 // Agent deployment. Latest is projected explicitly so interactive clients do
 // not need to infer ordering, while Items preserves the complete bounded
@@ -374,8 +424,16 @@ func ActivityCapability() Capability {
 	return Capability{ID: ActivityCapabilityID, Version: ActivityCapabilityVersion, Available: true, Operations: []string{OperationList}}
 }
 
-func AgentDefinitionsCapability() Capability {
-	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList, OperationUpdate, OperationListCompilations}}
+func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) Capability {
+	operations := []string{OperationGet, OperationList, OperationUpdate, OperationListCompilations}
+	if len(features) > 0 && features[0].Lifecycle {
+		operations = append(operations, OperationActivate, OperationRollback, OperationListActivations)
+	}
+	if len(features) > 0 && features[0].Amendments {
+		operations = append(operations, OperationProposeAmendment, OperationListAmendments, OperationGetAmendment,
+			OperationEvaluateAmendment, OperationResolveAmendment, OperationActivateAmendment)
+	}
+	return Capability{ID: AgentDefinitionsCapabilityID, Version: AgentDefinitionsCapabilityVersion, Available: true, Operations: operations}
 }
 
 func SkillBindingsCapability(management bool) Capability {
