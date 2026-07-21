@@ -24,9 +24,10 @@ const (
 )
 
 type PGVectorExecutor struct {
-	client   *http.Client
-	connPool map[string]*sql.DB
-	mu       sync.RWMutex
+	client         *http.Client
+	connPool       map[string]*sql.DB
+	openConnection func(string) (*sql.DB, error)
+	mu             sync.RWMutex
 }
 
 type VectorConfig struct {
@@ -36,9 +37,14 @@ type VectorConfig struct {
 
 func NewPGVectorExecutor() *PGVectorExecutor {
 	return &PGVectorExecutor{
-		client:   &http.Client{Timeout: 60 * time.Second},
-		connPool: make(map[string]*sql.DB),
+		client:         &http.Client{Timeout: 60 * time.Second},
+		connPool:       make(map[string]*sql.DB),
+		openConnection: openPGVectorConnection,
 	}
+}
+
+func openPGVectorConnection(connStr string) (*sql.DB, error) {
+	return sql.Open("postgres", connStr)
 }
 
 func parseVectorConfigs(config map[string]interface{}) ([]VectorConfig, error) {
@@ -187,7 +193,11 @@ func (e *PGVectorExecutor) getConnection(connStr string) (*sql.DB, error) {
 		e.mu.RUnlock()
 	}
 
-	db, err := sql.Open("postgres", connStr)
+	openConnection := e.openConnection
+	if openConnection == nil {
+		openConnection = openPGVectorConnection
+	}
+	db, err := openConnection(connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
