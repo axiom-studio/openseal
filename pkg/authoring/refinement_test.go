@@ -212,6 +212,34 @@ func TestRefinementSkillOptionsMustBeTruthfulAuthorizedCatalogEntries(t *testing
 	}
 }
 
+func TestInstallableSkillOptionsRequireExactReceiptBackedEvidence(t *testing.T) {
+	question := RefinementQuestion{
+		ID: "skill", Category: RefinementCategorySkill, Prompt: "Choose Skill", WhyNeeded: "Capability required",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Options: []RefinementQuestionOption{{ID: "reddit", Label: "Reddit"}}},
+		Priority: 1, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	skill := SkillCapability{ID: "reddit", Readiness: SkillReadinessNeedsInstallation}
+	validate := func() error {
+		return validateRefinementCatalog([]RefinementQuestion{question}, CapabilityCatalog{Skills: map[string]SkillCapability{"reddit": skill}})
+	}
+	if err := validate(); err == nil || !strings.Contains(err.Error(), "exact version and source identity") {
+		t.Fatalf("missing exact identity error=%v", err)
+	}
+	skill.Version, skill.SourceIdentity = "1.2.3", "https://registry.example/@publisher/reddit"
+	if err := validate(); err == nil || !strings.Contains(err.Error(), "referenced positive compatibility evidence") {
+		t.Fatalf("missing receipt evidence error=%v", err)
+	}
+	skill.Compatibility = []SkillCompatibility{{Requirement: "reddit.read", Compatible: false, Evidence: "host executable unavailable", Reference: "receipt:sha256:incompatible"}}
+	if err := validate(); err == nil || !strings.Contains(err.Error(), "incompatibility-proven") {
+		t.Fatalf("incompatible option error=%v", err)
+	}
+	skill.Compatibility[0].Compatible = true
+	skill.Compatibility[0].Evidence = "verified compilation"
+	if err := validate(); err != nil {
+		t.Fatalf("exact receipt-backed installable option: %v", err)
+	}
+}
+
 func TestRefinementSkillCategoryRequiresSkillSelectionAnswer(t *testing.T) {
 	question := RefinementQuestion{
 		ID: "skills", Category: RefinementCategorySkill, Prompt: "Choose Skills", WhyNeeded: "Capabilities are required",
