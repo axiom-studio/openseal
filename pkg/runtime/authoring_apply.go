@@ -389,33 +389,14 @@ func workforceRiskRank(risk capability.RiskLevel) int {
 }
 
 func validateWorkforceBindingDefinition(binding *capability.Binding, definition *capability.Definition) error {
-	if binding == nil || definition == nil || definition.ID != binding.SkillID || definition.Version != binding.SkillVersion {
+	if binding == nil {
+		return fmt.Errorf("Skill binding is required")
+	}
+	if definition == nil {
 		return fmt.Errorf("Skill binding %s does not match an installed immutable Skill definition", binding.ID)
 	}
-	definitionSourceIdentity := ""
-	if definition.Source != nil {
-		definitionSourceIdentity = strings.TrimSpace(definition.Source.Identity)
-	}
-	if strings.TrimSpace(binding.SourceIdentity) != definitionSourceIdentity {
-		return fmt.Errorf("Skill binding %s does not match the selected immutable Skill source", binding.ID)
-	}
-	if binding.EnablePrompt && definition.Prompt == nil {
-		return fmt.Errorf("Skill binding %s requires a prompt the Skill does not define", binding.ID)
-	}
-	for _, actionName := range binding.AllowedActions {
-		action, ok := definition.Actions[actionName]
-		if !ok || workforceRiskRank(action.Risk) > workforceRiskRank(binding.MaximumRisk) {
-			return fmt.Errorf("Skill binding %s cannot authorize action %s", binding.ID, actionName)
-		}
-		for _, requirement := range action.Credentials {
-			reference, exists := binding.Credentials[requirement.Name]
-			if requirement.Optional && !exists {
-				continue
-			}
-			if !exists || reference.Kind != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
-				return fmt.Errorf("Skill binding %s is missing credential %s", binding.ID, requirement.Name)
-			}
-		}
+	if issue := workforceBindingDefinitionIssue("skillBindings."+binding.ID, binding.DeploymentID, binding.SkillID, binding, definition); issue != nil {
+		return fmt.Errorf("%s: %s", issue.Code, issue.Message)
 	}
 	return nil
 }

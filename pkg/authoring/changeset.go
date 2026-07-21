@@ -297,6 +297,15 @@ type AtomicChangeSetStore interface {
 	ApplyChangeSet(context.Context, *ChangeSet, int64) (*ChangeSet, error)
 }
 
+// ChangeSetReadinessValidator is an optional host boundary for deterministic
+// checks that require installed, source-qualified resources. The compiler only
+// sees a credential-free catalog projection; stores implementing this contract
+// verify the exact resources selected by placement before a ChangeSet can be
+// advertised as ready. Atomic apply repeats the checks as defense in depth.
+type ChangeSetReadinessValidator interface {
+	ValidateChangeSetReadiness(context.Context, *ChangeSet) ([]ValidationIssue, error)
+}
+
 type CreateChangeSetRequest struct {
 	Scope          capability.ScopeReference `json:"scope"`
 	ParentID       string                    `json:"parentId,omitempty"`
@@ -804,6 +813,11 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	now := s.now().UTC()
 	next := cloneChangeSet(current)
 	next.Placement = clonePlacement(request.Placement)
+	// Readiness findings are derived from the exact placement. Clear the stale
+	// projection when placement changes; the next governed ready transition
+	// recomputes it against the newly selected immutable resources.
+	next.Result.Validation = replaceReadinessValidation(next.Result.Validation, nil)
+	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.Questions) == 0 && len(next.Result.UnresolvedQuestions) == 0
 	next.Status = ChangeSetReview
 	if !next.Result.Valid {
 		next.Status = ChangeSetBlocked
@@ -1399,12 +1413,23 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 	now := s.now().UTC()
 	nextStatus := ChangeSetRejected
 	reason := "policy_denied"
-	if request.Allowed && len(request.ApprovalRequirements) > 0 {
+	// Approval may proceed while deterministic placement is still being
+	// configured. Validate only at the transition that would advertise ready;
+	// ResolveApproval repeats this immediately before its final transition.
+	readinessIssues, err := s.validateReadiness(ctx, current, request.Allowed && len(request.ApprovalRequirements) == 0)
+	if err != nil {
+		return nil, false, err
+	}
+	if request.Allowed && len(readinessIssues) > 0 {
+		nextStatus, reason = ChangeSetBlocked, "binding_validation_failed"
+	} else if request.Allowed && len(request.ApprovalRequirements) > 0 {
 		nextStatus, reason = ChangeSetAwaitingApproval, "policy_requires_approval"
 	} else if request.Allowed {
 		nextStatus, reason = ChangeSetReady, "policy_allowed"
 	}
 	next := cloneChangeSet(current)
+	next.Result.Validation = replaceReadinessValidation(next.Result.Validation, readinessIssues)
+	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.Questions) == 0 && len(next.Result.UnresolvedQuestions) == 0
 	next.Evaluations = append(next.Evaluations, ChangeSetEvaluation{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey,
 		CandidateDigest: request.CandidateDigest, Allowed: request.Allowed, Findings: append([]ChangeSetPolicyFinding(nil), request.Findings...),
 		ApprovalRequirements: append([]ChangeSetApprovalRequirement(nil), request.ApprovalRequirements...), Actor: request.Actor, SubmittedAt: now})
@@ -1418,6 +1443,42 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 		return s.SubmitEvaluation(ctx, request)
 	}
 	return updated, false, err
+}
+
+const readinessValidationCodePrefix = "skill_binding_"
+
+func (s *ChangeSetService) validateReadiness(ctx context.Context, value *ChangeSet, enabled bool) ([]ValidationIssue, error) {
+	if !enabled {
+		return nil, nil
+	}
+	validator, ok := s.store.(ChangeSetReadinessValidator)
+	if !ok {
+		return nil, nil
+	}
+	issues, err := validator.ValidateChangeSetReadiness(ctx, value)
+	if err != nil {
+		return nil, fmt.Errorf("validate workforce readiness: %w", err)
+	}
+	sort.SliceStable(issues, func(i, j int) bool {
+		if issues[i].Path != issues[j].Path {
+			return issues[i].Path < issues[j].Path
+		}
+		if issues[i].Code != issues[j].Code {
+			return issues[i].Code < issues[j].Code
+		}
+		return issues[i].Message < issues[j].Message
+	})
+	return issues, nil
+}
+
+func replaceReadinessValidation(existing, readiness []ValidationIssue) []ValidationIssue {
+	result := make([]ValidationIssue, 0, len(existing)+len(readiness))
+	for _, issue := range existing {
+		if !strings.HasPrefix(issue.Code, readinessValidationCodePrefix) {
+			result = append(result, issue)
+		}
+	}
+	return append(result, readiness...)
 }
 
 func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveChangeSetApprovalRequest) (*ChangeSet, bool, error) {
@@ -1521,7 +1582,17 @@ func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveC
 	if !request.Approved {
 		nextStatus, lifecycleReason = ChangeSetRejected, "approval_rejected"
 	} else if approvalRequirementsSatisfied(evaluation.ApprovalRequirements, next.ApprovalDecisions, request.EvaluationID) {
-		nextStatus, lifecycleReason = ChangeSetReady, "approvals_satisfied"
+		readinessIssues, err := s.validateReadiness(ctx, next, true)
+		if err != nil {
+			return nil, false, err
+		}
+		next.Result.Validation = replaceReadinessValidation(next.Result.Validation, readinessIssues)
+		next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.Questions) == 0 && len(next.Result.UnresolvedQuestions) == 0
+		if len(readinessIssues) > 0 {
+			nextStatus, lifecycleReason = ChangeSetBlocked, "binding_validation_failed"
+		} else {
+			nextStatus, lifecycleReason = ChangeSetReady, "approvals_satisfied"
+		}
 	}
 	next.Status, next.Revision, next.UpdatedAt = nextStatus, current.Revision+1, now
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: nextStatus, Reason: lifecycleReason, Actor: request.Actor, At: now})

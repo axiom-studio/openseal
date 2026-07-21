@@ -258,6 +258,98 @@ func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	}
 }
 
+func TestSQLiteWorkforceEvaluationValidatesExactSkillAuthorityBeforeReady(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		definition  *skill.Definition
+		catalogID   string
+		action      string
+		catalogRisk capability.RiskLevel
+		credentials []authoring.SkillCredential
+		references  map[string]capability.CredentialReference
+		wantStatus  authoring.ChangeSetStatus
+		wantCode    string
+	}{
+		{
+			name:      "external summarize action is blocked by read-only Agent authority",
+			catalogID: "clawhub-summarize", action: "execute", catalogRisk: capability.RiskLevelExternal,
+			definition: &skill.Definition{
+				ID: "summarize", Version: "1.0.0+source.aaaa", Name: "Summarize",
+				Source:    &skill.SourceProvenance{Identity: "https://clawhub.ai::@alice/summarize", Format: "openclaw.skill.v1"},
+				Transport: skill.TransportReference{Kind: "tool", Endpoint: "summarize"},
+				Actions:   map[string]skill.Action{"execute": {Name: "execute", Description: "Summarize evidence", Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, InputSchema: map[string]interface{}{"type": "object"}, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported}},
+			},
+			wantStatus: authoring.ChangeSetBlocked, wantCode: "skill_binding_action_risk_exceeded",
+		},
+		{
+			name:      "read-only Reddit action reaches ready",
+			catalogID: "clawhub-reddit", action: "read", catalogRisk: capability.RiskLevelRead,
+			definition: &skill.Definition{
+				ID: "reddit.reader", Version: "2.0.0+source.bbbb", Name: "Reddit Reader",
+				Source:    &skill.SourceProvenance{Identity: "https://clawhub.ai::@alice/reddit", Format: "openclaw.skill.v1"},
+				Transport: skill.TransportReference{Kind: "tool", Endpoint: "reddit_read"},
+				Actions:   map[string]skill.Action{"read": {Name: "read", Description: "Read Reddit posts", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, InputSchema: map[string]interface{}{"type": "object"}, Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}}, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported}},
+			},
+			credentials: []authoring.SkillCredential{{Name: "reddit", Kind: "reddit-oauth", Actions: []string{"read"}}},
+			references:  map[string]capability.CredentialReference{"reddit-oauth": {Kind: "reddit-oauth", ID: "vault://tenant/reddit"}},
+			wantStatus:  authoring.ChangeSetReady,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			if err := skill.NewCatalogWithStore(store).Register(ctx, test.definition); err != nil {
+				t.Fatal(err)
+			}
+			value := testApplicableWorkforceChangeSet()
+			value.Status, value.Revision = authoring.ChangeSetReview, 1
+			value.Result.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: test.catalogID, VersionConstraint: "1.0.0", RequiredActions: []string{test.action}}}
+			value.Result.Candidate.Agents[0].Authority.AllowedSkillIDs = []string{test.catalogID}
+			value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+				test.catalogID: {ID: test.catalogID, Version: "1.0.0", Actions: []string{test.action}, MaximumRisk: test.catalogRisk, Credentials: test.credentials},
+			}}
+			identity := capability.NewSkillIdentity(test.definition.ID, test.definition.Version, test.definition.Source.Identity)
+			value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{"agent": {test.catalogID: identity}}
+			if test.references != nil {
+				value.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{"agent": test.references}
+			}
+			if _, _, err := store.CreateChangeSet(ctx, value, "create-"+test.name, "digest"); err != nil {
+				t.Fatal(err)
+			}
+			compiler, err := authoring.NewCompiler(&countedWorkforceGenerator{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service, err := authoring.NewChangeSetService(compiler, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, _, err := service.SubmitEvaluation(ctx, authoring.SubmitChangeSetEvaluationRequest{
+				Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: value.Revision, CandidateDigest: value.CandidateDigest,
+				Allowed: true, Actor: authoring.ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow",
+			})
+			if err != nil || result.Status != test.wantStatus {
+				t.Fatalf("evaluation = %#v, err = %v", result, err)
+			}
+			if test.wantCode == "" {
+				if len(result.Result.Validation) != 0 || !result.Result.Valid {
+					t.Fatalf("valid Reddit readiness = %#v", result.Result)
+				}
+				return
+			}
+			if len(result.Result.Validation) != 1 || result.Result.Validation[0].Code != test.wantCode ||
+				!strings.Contains(result.Result.Validation[0].Message, "requires external risk") || result.Result.Valid ||
+				result.Lifecycle[len(result.Lifecycle)-1].Reason != "binding_validation_failed" {
+				t.Fatalf("blocked readiness = %#v", result)
+			}
+		})
+	}
+}
+
 func TestSQLiteWorkforceApplyRequiresExactSourceForCollidingSkills(t *testing.T) {
 	for _, test := range []struct {
 		name           string
