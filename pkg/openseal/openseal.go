@@ -1564,17 +1564,11 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
 	}
-	if err := e.configureSkillManagementActions(); err != nil {
-		return nil, fmt.Errorf("Skill management action configuration: %w", err)
-	}
-	if err := e.configureTeamManagementActions(); err != nil {
-		return nil, fmt.Errorf("Team management action configuration: %w", err)
-	}
-	teamSkillValidator, err := runtime.NewTeamSkillActionValidator(e)
-	if err != nil {
-		return nil, fmt.Errorf("Team Skill authority configuration: %w", err)
-	}
-	e.actionValidators = append(e.actionValidators, teamSkillValidator)
+	// Guard the host dispatcher at the final external execution boundary before
+	// adding kernel-owned management routes. Skill and Team management actions
+	// enforce their own resource authority and must retain their fallthrough to
+	// the host chain; ordinary Agent and Team Skill calls still pass through this
+	// guard immediately before the embedding host is invoked.
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewTeamSkillActionDispatcher(e, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
@@ -1589,6 +1583,17 @@ func New(opts ...Option) (*Engine, error) {
 		}
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
+	if err := e.configureSkillManagementActions(); err != nil {
+		return nil, fmt.Errorf("Skill management action configuration: %w", err)
+	}
+	if err := e.configureTeamManagementActions(); err != nil {
+		return nil, fmt.Errorf("Team management action configuration: %w", err)
+	}
+	teamSkillValidator, err := runtime.NewTeamSkillActionValidator(e)
+	if err != nil {
+		return nil, fmt.Errorf("Team Skill authority configuration: %w", err)
+	}
+	e.actionValidators = append(e.actionValidators, teamSkillValidator)
 	e.rebuildGovernance()
 	if err := e.rebuildActionWorkerPools(); err != nil {
 		return nil, fmt.Errorf("action worker configuration: %w", err)
