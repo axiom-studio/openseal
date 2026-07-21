@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
+	"github.com/axiom-studio/openseal/pkg/source"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -117,6 +118,22 @@ type AgentDefinitionLifecycleClient interface {
 }
 
 var _ AgentDefinitionLifecycleClient = (*KernelHTTPClient)(nil)
+
+// SourcePolicyLifecycleClient is the narrow credential-free governance
+// boundary. Hosts may wrap it with tenant RBAC without exposing other kernel
+// mutation APIs.
+type SourcePolicyLifecycleClient interface {
+	RegisterSourcePolicyVersion(context.Context, source.RegisterVersionRequest) (*source.PolicyVersion, error)
+	GetSourcePolicy(context.Context, capability.ScopeReference, string) (*source.LifecycleDetail, error)
+	ListSourcePolicies(context.Context, capability.ScopeReference) (*source.LifecycleList, error)
+	GetSourcePolicyVersion(context.Context, capability.ScopeReference, string, string) (*source.PolicyVersion, error)
+	ListSourcePolicyVersions(context.Context, capability.ScopeReference, string) (*source.PolicyVersionList, error)
+	ActivateSourcePolicy(context.Context, string, source.ActivateRequest) (*source.LifecycleResult, error)
+	RevokeSourcePolicy(context.Context, string, source.RevokeRequest) (*source.LifecycleResult, error)
+	ListSourcePolicyActivations(context.Context, capability.ScopeReference, string) (*source.LifecycleEventList, error)
+}
+
+var _ SourcePolicyLifecycleClient = (*KernelHTTPClient)(nil)
 
 type TeamClient interface {
 	RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error)
@@ -236,6 +253,113 @@ func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.Capabili
 	var document kernelapi.CapabilityDocument
 	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities", nil, "", &document)
 	return document, err
+}
+
+func (c *KernelHTTPClient) RegisterSourcePolicyVersion(ctx context.Context, request source.RegisterVersionRequest) (*source.PolicyVersion, error) {
+	var result source.PolicyVersionResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/source-policies/versions", request, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	if result.Version == nil {
+		return nil, errors.New("source policy registration returned no policy")
+	}
+	return result.Version, nil
+}
+
+func (c *KernelHTTPClient) GetSourcePolicy(ctx context.Context, scope capability.ScopeReference, policyID string) (*source.LifecycleDetail, error) {
+	var result source.LifecycleDetail
+	path := "/api/v1/source-policies/" + url.PathEscape(strings.TrimSpace(policyID)) + "?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListSourcePolicies(ctx context.Context, scope capability.ScopeReference) (*source.LifecycleList, error) {
+	var result source.LifecycleList
+	if err := c.do(ctx, http.MethodGet, "/api/v1/source-policies?"+capabilityScopeQuery(scope).Encode(), nil, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) GetSourcePolicyVersion(ctx context.Context, scope capability.ScopeReference, policyID, version string) (*source.PolicyVersion, error) {
+	var result source.PolicyVersionResult
+	path := "/api/v1/source-policies/" + url.PathEscape(strings.TrimSpace(policyID)) + "/versions/" + url.PathEscape(strings.TrimSpace(version)) + "?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	if result.Version == nil {
+		return nil, errors.New("source policy version response returned no policy")
+	}
+	return result.Version, nil
+}
+
+func (c *KernelHTTPClient) ListSourcePolicyVersions(ctx context.Context, scope capability.ScopeReference, policyID string) (*source.PolicyVersionList, error) {
+	var result source.PolicyVersionList
+	path := "/api/v1/source-policies/" + url.PathEscape(strings.TrimSpace(policyID)) + "/versions?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ActivateSourcePolicy(ctx context.Context, policyID string, request source.ActivateRequest) (*source.LifecycleResult, error) {
+	var result source.LifecycleResult
+	path := "/api/v1/source-policies/" + url.PathEscape(strings.TrimSpace(policyID)) + "/activations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) RevokeSourcePolicy(ctx context.Context, policyID string, request source.RevokeRequest) (*source.LifecycleResult, error) {
+	var result source.LifecycleResult
+	path := "/api/v1/source-policies/" + url.PathEscape(strings.TrimSpace(policyID)) + "/revocations"
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListSourcePolicyActivations(ctx context.Context, scope capability.ScopeReference, policyID string) (*source.LifecycleEventList, error) {
+	var result source.LifecycleEventList
+	path := "/api/v1/source-policies/" + url.PathEscape(strings.TrimSpace(policyID)) + "/activations?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	if err := requireSourcePolicyVersion(result.APIVersion); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func requireSourcePolicyVersion(version string) error {
+	if version != source.LifecycleAPIVersion {
+		return fmt.Errorf("unsupported source policy lifecycle contract %q", version)
+	}
+	return nil
 }
 
 func (c *KernelHTTPClient) ListAgentDefinitionCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {

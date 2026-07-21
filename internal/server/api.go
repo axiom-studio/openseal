@@ -127,6 +127,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments/{amendmentId}/evaluations", s.handleEvaluateTeamDefinitionAmendment)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments/{amendmentId}/decisions", s.handleResolveTeamDefinitionAmendment)
 	s.mux.HandleFunc("POST /api/v1/team-deployments/{id}/amendments/{amendmentId}/activations", s.handleActivateTeamDefinitionAmendment)
+	s.mux.HandleFunc("POST /api/v1/source-policies/versions", s.handleRegisterSourcePolicyVersion)
+	s.mux.HandleFunc("GET /api/v1/source-policies", s.handleListSourcePolicies)
+	s.mux.HandleFunc("GET /api/v1/source-policies/{id}", s.handleGetSourcePolicy)
+	s.mux.HandleFunc("GET /api/v1/source-policies/{id}/versions", s.handleListSourcePolicyVersions)
+	s.mux.HandleFunc("GET /api/v1/source-policies/{id}/versions/{version}", s.handleGetSourcePolicyVersion)
+	s.mux.HandleFunc("POST /api/v1/source-policies/{id}/activations", s.handleActivateSourcePolicy)
+	s.mux.HandleFunc("POST /api/v1/source-policies/{id}/revocations", s.handleRevokeSourcePolicy)
+	s.mux.HandleFunc("GET /api/v1/source-policies/{id}/activations", s.handleListSourcePolicyEvents)
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +143,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
 	}
 	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActivityCapability()}
+	if s.sourcePolicies != nil {
+		capabilities = append(capabilities, kernelapi.SourcePoliciesCapability())
+	}
 	if _, ok := s.store.(runtime.CollaborationKernelStore); ok {
 		capabilities = append(capabilities, kernelapi.AgentRequestsCapability())
 	}

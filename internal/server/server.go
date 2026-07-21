@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/executor"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/source"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +43,7 @@ type Server struct {
 	clawHubMutations   bool
 	outreachDelivery   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 	agentRunCreation   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	sourcePolicies     *source.LifecycleService
 }
 
 type workflowScheduler interface {
@@ -205,6 +207,12 @@ func (s *Server) SetOutreachDeliveryDispatcher(dispatch func(context.Context, ru
 // lifecycle intervention remain available without a worker.
 func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)) {
 	s.agentRunCreation = dispatch
+}
+
+// SetSourcePolicyLifecycle installs the host-selected persistence boundary for
+// governed source authority. Without it, routes and capabilities fail closed.
+func (s *Server) SetSourcePolicyLifecycle(service *source.LifecycleService) {
+	s.sourcePolicies = service
 }
 
 // ListenAndServe starts the server on the given address.
