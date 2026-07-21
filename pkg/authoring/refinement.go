@@ -76,17 +76,17 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 	if generated == nil || len(request.Catalog.CapabilityNeeds) == 0 {
 		return
 	}
-	answered := make(map[string]bool)
+	answered := make(map[string]RefinementProviderAnswerValue)
 	if request.Refinement != nil {
 		for _, answer := range request.Refinement.Answers {
-			answered[strings.TrimSpace(answer.QuestionID)] = true
+			answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
 		}
 	}
 	active := make([]RefinementQuestion, 0, len(request.Catalog.CapabilityNeeds))
 	activeIDs := make(map[string]bool, len(request.Catalog.CapabilityNeeds))
 	for _, need := range request.Catalog.CapabilityNeeds {
 		questionID := CapabilityNeedQuestionID(need.ID)
-		if answered[questionID] || len(need.SkillIDs) < 2 && !need.ChoiceRequired {
+		if _, exists := answered[questionID]; exists || len(need.SkillIDs) < 2 && !need.ChoiceRequired {
 			continue
 		}
 		options := make([]RefinementQuestionOption, 0, len(need.SkillIDs))
@@ -123,6 +123,23 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 		if activeIDs[question.ID] || question.Category == RefinementCategorySkill {
 			continue
 		}
+		dependencies := make([]RefinementQuestionDependency, 0, len(question.DependsOn))
+		applicable := true
+		for _, dependency := range question.DependsOn {
+			value, exists := answered[strings.TrimSpace(dependency.QuestionID)]
+			if !exists {
+				dependencies = append(dependencies, dependency)
+				continue
+			}
+			if !refinementDependencyMatchesAnswer(dependency, value) {
+				applicable = false
+				break
+			}
+		}
+		if !applicable {
+			continue
+		}
+		question.DependsOn = dependencies
 		if question.Category == RefinementCategoryScope {
 			for _, choice := range active {
 				if !refinementHasDependency(question, choice.ID) {
@@ -133,6 +150,25 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 		questions = append(questions, question)
 	}
 	generated.UnresolvedQuestions = questions
+}
+
+func refinementDependencyMatchesAnswer(dependency RefinementQuestionDependency, value RefinementProviderAnswerValue) bool {
+	if len(dependency.RequiredOptionIDs) == 0 {
+		return true
+	}
+	selected := make(map[string]bool, len(value.OptionIDs)+len(value.SkillIDs))
+	for _, id := range value.OptionIDs {
+		selected[id] = true
+	}
+	for _, id := range value.SkillIDs {
+		selected[id] = true
+	}
+	for _, id := range dependency.RequiredOptionIDs {
+		if !selected[id] {
+			return false
+		}
+	}
+	return true
 }
 
 func refinementHasDependency(question RefinementQuestion, questionID string) bool {
