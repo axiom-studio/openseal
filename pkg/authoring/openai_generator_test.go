@@ -29,6 +29,9 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 		if body["model"] != "deepseek-v4-flash" || body["temperature"].(float64) != 0 || body["response_format"].(map[string]interface{})["type"] != "json_object" {
 			t.Fatalf("request body = %#v", body)
 		}
+		if _, exists := body["thinking"]; exists {
+			t.Fatalf("default transport emitted provider-specific thinking field: %#v", body["thinking"])
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"candidate\":{\"agents\":[],\"assignments\":[]},\"questions\":[\"Which Team should be created?\"]}"}}]}`))
 	}))
@@ -46,6 +49,38 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 	}
 	if strings.Contains(requestBody, "change-set:one:0") {
 		t.Fatal("transport idempotency token should not become model-visible prompt data")
+	}
+}
+
+func TestOpenAICompatibleGeneratorEmitsExplicitThinkingMode(t *testing.T) {
+	var observed map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&observed); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"}}]}`))
+	}))
+	defer server.Close()
+
+	generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "deepseek-v4-flash", server.Client(), OpenAICompatibleGeneratorOptions{
+		ThinkingMode: OpenAICompatibleThinkingDisabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"}); err != nil {
+		t.Fatal(err)
+	}
+	thinking, ok := observed["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("thinking transport = %#v", observed["thinking"])
+	}
+
+	if _, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{
+		ThinkingMode: "invented",
+	}); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("invalid thinking mode error = %v", err)
 	}
 }
 
