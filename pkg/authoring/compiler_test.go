@@ -846,6 +846,16 @@ func TestTeamRoleSkillGrantsUseCatalogIdentityAndRejectModelRuntimeIdentity(t *t
 	if missing := missingRequirements(&candidate, catalog); len(missing) != 0 {
 		t.Fatalf("truthful role grant missing=%#v", missing)
 	}
+	candidate.Team.Roles[0].SkillGrants[0].EnablePrompt = true
+	if missing := missingRequirements(&candidate, catalog); len(missing) != 1 || missing[0].Kind != "prompt" || missing[0].ID != "clawhub-listing" {
+		t.Fatalf("unsupported role prompt missing=%#v", missing)
+	}
+	capabilityWithPrompt := catalog.Skills["clawhub-listing"]
+	capabilityWithPrompt.PromptAvailable = true
+	catalog.Skills["clawhub-listing"] = capabilityWithPrompt
+	if missing := missingRequirements(&candidate, catalog); len(missing) != 0 {
+		t.Fatalf("supported role prompt missing=%#v", missing)
+	}
 	candidate.Team.Roles[0].SkillGrants[0].AllowedActions = []string{"publish"}
 	if missing := missingRequirements(&candidate, catalog); len(missing) != 1 || missing[0].Kind != "action" {
 		t.Fatalf("unsupported role action missing=%#v", missing)

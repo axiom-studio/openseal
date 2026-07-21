@@ -318,9 +318,6 @@ func materializeWorkforceTeamSkillBindings(value *authoring.ChangeSet, definitio
 					return nil, fmt.Errorf("Team role %s action %s exceeds its reviewed Agent binding for Skill %s", role.ID, action, identity)
 				}
 			}
-			if grant.EnablePrompt && !source.EnablePrompt {
-				return nil, fmt.Errorf("Team role %s prompt authority exceeds its reviewed Agent binding for Skill %s", role.ID, identity)
-			}
 			if workforceRiskRank(grant.MaximumRisk) > workforceRiskRank(source.MaximumRisk) {
 				return nil, fmt.Errorf("Team role %s risk exceeds its reviewed Agent binding for Skill %s", role.ID, identity)
 			}

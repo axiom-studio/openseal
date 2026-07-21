@@ -1092,6 +1092,10 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 						missing[key] = MissingRequirement{Kind: "action", ID: catalogID + "/" + action, RequiredBy: requiredBy}
 					}
 				}
+				if grant.EnablePrompt && !available.PromptAvailable {
+					key := "prompt:" + catalogID + ":" + requiredBy
+					missing[key] = MissingRequirement{Kind: "prompt", ID: catalogID, RequiredBy: requiredBy}
+				}
 			}
 		}
 	}
