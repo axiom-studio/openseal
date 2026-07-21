@@ -360,6 +360,34 @@ func (s *PostgresStore) GetAmendment(ctx context.Context, scope capability.Scope
 	return &amendment, nil
 }
 
+func (s *PostgresStore) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionAmendment, error) {
+	query := `SELECT payload FROM ` + s.table("agent_definition_amendments") + ` WHERE scope_kind = $1 AND scope_id = $2`
+	args := []interface{}{scope.Kind, scope.ID}
+	if deploymentID != "" {
+		query += ` AND deployment_id = $3`
+		args = append(args, deploymentID)
+	}
+	query += ` ORDER BY updated_at DESC, id ASC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*kernelagent.DefinitionAmendment, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var amendment kernelagent.DefinitionAmendment
+		if err := json.Unmarshal([]byte(payload), &amendment); err != nil {
+			return nil, err
+		}
+		result = append(result, &amendment)
+	}
+	return result, rows.Err()
+}
+
 func (s *PostgresStore) UpdateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedRevision int64) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {

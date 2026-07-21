@@ -365,6 +365,19 @@ func (r *Registry) GetAmendment(ctx context.Context, scope capability.ScopeRefer
 	return r.store.GetAmendment(ctx, scope, amendmentID)
 }
 
+// ListAmendments returns the complete scoped governance history for one Agent
+// deployment, newest first. The deployment selector is required so callers do
+// not accidentally turn tenant-wide amendment history into an unbounded UI.
+func (r *Registry) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*DefinitionAmendment, error) {
+	if strings.TrimSpace(scope.Kind) == "" || strings.TrimSpace(scope.ID) == "" || strings.TrimSpace(deploymentID) == "" {
+		return nil, errors.New("amendment scope and deployment id are required")
+	}
+	if _, err := r.store.GetDeployment(ctx, scope, strings.TrimSpace(deploymentID)); err != nil {
+		return nil, err
+	}
+	return r.store.ListAmendments(ctx, scope, strings.TrimSpace(deploymentID))
+}
+
 func (r *Registry) SubmitAmendmentEvaluation(ctx context.Context, req SubmitAmendmentEvaluationRequest) (*DefinitionAmendment, error) {
 	current, err := r.store.GetAmendment(ctx, req.Scope, req.AmendmentID)
 	if err != nil {
