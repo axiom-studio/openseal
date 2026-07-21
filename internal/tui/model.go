@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -172,6 +173,8 @@ type Model struct {
 	authoringApprovalSelected   int
 	authoringCredentialSelected int
 	authoringCredentialChoices  map[string]int
+	authoringConfigSelected     int
+	authoringConfigChoices      map[string]int
 	runs                        []*runtime.AgentRun
 	evidenceExpanded            bool
 	evidenceObservationSelected int
@@ -614,6 +617,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.teamDefinitionCapability = teamDefinitionCapability
 		m.sourcePolicyCapability = sourcePolicyCapability
 		m.syncWorkforceCredentialChoices()
+		m.syncWorkforceBindingConfigurationChoices()
 		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
 			m.authoringApprovalSelected = 0
 		} else {
@@ -1461,6 +1465,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.moveWorkforceApprovalSelection(-1)
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
+				m.moveWorkforceBindingConfigurationSelection(-1)
 			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialSelection(-1)
 			} else {
@@ -1474,6 +1480,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.moveWorkforceApprovalSelection(1)
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
+				m.moveWorkforceBindingConfigurationSelection(1)
 			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialSelection(1)
 			} else {
@@ -1586,7 +1594,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.loadPanel()
 		case "[":
-			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+			if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
+				m.moveWorkforceBindingConfigurationChoice(-1)
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(-1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(-1)
@@ -1599,7 +1609,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveEvidenceObservation(-1)
 			}
 		case "]":
-			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+			if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
+				m.moveWorkforceBindingConfigurationChoice(1)
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(1)
@@ -1624,7 +1636,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveGroundingPage(1)
 			}
 		case "b":
-			if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
+			if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
+				return m, m.submitWorkforceBindingConfigurationPlacement()
+			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				return m, m.submitWorkforceCredentialPlacement()
 			} else if m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert) {
 				m.prepareSkillBindingComposer(nil)
@@ -2037,6 +2051,65 @@ func (m *Model) submitWorkforceCredentialPlacement() tea.Cmd {
 		result, err := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: "Credential placement", err: err}
 	}
+}
+
+func (m *Model) submitWorkforceBindingConfigurationPlacement() tea.Cmd {
+	rows := m.workforceBindingConfigurationRows()
+	if !m.canPlaceWorkforceBindingConfigurations() || m.busy || len(rows) == 0 {
+		return nil
+	}
+	bindingConfigs := cloneWorkforceBindingConfigs(m.authoringChangeSet.Placement.BindingConfigs)
+	labels := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selected := m.authoringConfigChoices[row.Key]
+		if selected < 0 || selected >= len(row.Field.Options) {
+			selected = 0
+		}
+		option := row.Field.Options[selected]
+		value, _, err := option.Value.Value()
+		if err != nil {
+			m.err, m.status = err, "The server advertised an invalid binding configuration choice."
+			return nil
+		}
+		if bindingConfigs[row.AgentID] == nil {
+			bindingConfigs[row.AgentID] = make(map[string]map[string]interface{})
+		}
+		if bindingConfigs[row.AgentID][row.Field.CatalogSkillID] == nil {
+			bindingConfigs[row.AgentID][row.Field.CatalogSkillID] = make(map[string]interface{})
+		}
+		bindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key] = value
+		labels = append(labels, row.AgentName+" / "+row.Field.Prompt+" → "+option.Label)
+	}
+	placement := m.authoringChangeSet.Placement
+	placement.BindingConfigs = bindingConfigs
+	intent := fmt.Sprintf("binding-config\x00%s\x00%d\x00%s", m.authoringChangeSet.ID, m.authoringChangeSet.Revision, strings.Join(labels, "\x00"))
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.UpdateChangeSetPlacementRequest{
+		Scope: m.authoringChangeSet.Scope, ChangeSetID: m.authoringChangeSet.ID, ExpectedRevision: m.authoringChangeSet.Revision,
+		Placement: placement, Reason: "Selected authorized Skill configuration: " + strings.Join(labels, "; "),
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err, m.status = true, nil, "Saving reviewed Skill configuration…"
+	return func() tea.Msg {
+		result, err := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Skill configuration placement", err: err}
+	}
+}
+
+func cloneWorkforceBindingConfigs(value map[string]map[string]map[string]interface{}) map[string]map[string]map[string]interface{} {
+	result := make(map[string]map[string]map[string]interface{}, len(value))
+	for agentID, skills := range value {
+		result[agentID] = make(map[string]map[string]interface{}, len(skills))
+		for skillID, config := range skills {
+			result[agentID][skillID] = make(map[string]interface{}, len(config))
+			for key, item := range config {
+				result[agentID][skillID][key] = item
+			}
+		}
+	}
+	return result
 }
 
 func (m *Model) loadRuns() tea.Cmd {
@@ -3545,6 +3618,130 @@ type workforceCredentialRow struct {
 	AgentName string
 	Kind      string
 	Choices   []capability.CredentialBindingChoice
+}
+
+type workforceBindingConfigurationRow struct {
+	Key       string
+	AgentID   string
+	AgentName string
+	Field     capability.BindingConfigurationFieldChoice
+}
+
+func (m *Model) workforceBindingConfigurationRows() []workforceBindingConfigurationRow {
+	if m.authoringChangeSet == nil || m.authoringCapability.Context == nil {
+		return nil
+	}
+	fields := m.authoringCapability.Context.BindingConfigurationFields
+	if capability.ValidateBindingConfigurationFields(fields) != nil {
+		return nil
+	}
+	fieldsBySkill := make(map[string][]capability.BindingConfigurationFieldChoice)
+	for _, field := range fields {
+		catalogSkill, exists := m.authoringChangeSet.Catalog.Skills[field.CatalogSkillID]
+		if !field.Required || !exists || !bindingConfigurationFieldMatchesCatalog(field, catalogSkill) {
+			continue
+		}
+		fieldsBySkill[field.CatalogSkillID] = append(fieldsBySkill[field.CatalogSkillID], field)
+	}
+	rows := make([]workforceBindingConfigurationRow, 0)
+	for _, definition := range m.authoringChangeSet.Result.Candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		name := strings.TrimSpace(definition.DisplayName)
+		if name == "" {
+			name = definition.ID
+		}
+		for _, requirement := range definition.SkillRequirements {
+			for _, field := range fieldsBySkill[requirement.SkillID] {
+				if identity := m.authoringChangeSet.Placement.SkillRuntimeIdentities[definition.ID][requirement.SkillID]; identity.Valid() && !identity.Equal(field.Skill) {
+					continue
+				}
+				rows = append(rows, workforceBindingConfigurationRow{
+					Key:     definition.ID + "\x00" + requirement.SkillID + "\x00" + field.Key,
+					AgentID: definition.ID, AgentName: name, Field: field,
+				})
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].AgentName != rows[j].AgentName {
+			return rows[i].AgentName < rows[j].AgentName
+		}
+		if rows[i].Field.CatalogSkillID != rows[j].Field.CatalogSkillID {
+			return rows[i].Field.CatalogSkillID < rows[j].Field.CatalogSkillID
+		}
+		return rows[i].Field.Key < rows[j].Field.Key
+	})
+	return rows
+}
+
+func bindingConfigurationFieldMatchesCatalog(field capability.BindingConfigurationFieldChoice, catalogSkill authoring.SkillCapability) bool {
+	if field.Skill.ID != catalogSkill.ID || field.Skill.Version != catalogSkill.Version || field.Skill.SourceIdentity != catalogSkill.SourceIdentity {
+		return false
+	}
+	return capability.ValidateBindingConfigurationFieldSchema(field, catalogSkill.BindingConfigSchema) == nil
+}
+
+func (m *Model) syncWorkforceBindingConfigurationChoices() {
+	rows := m.workforceBindingConfigurationRows()
+	m.authoringConfigChoices = make(map[string]int, len(rows))
+	for _, row := range rows {
+		selected := 0
+		current := m.authoringChangeSet.Placement.BindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key]
+		for index, option := range row.Field.Options {
+			value, _, err := option.Value.Value()
+			if err == nil && reflect.DeepEqual(current, value) {
+				selected = index
+				break
+			}
+		}
+		m.authoringConfigChoices[row.Key] = selected
+	}
+	if len(rows) == 0 {
+		m.authoringConfigSelected = 0
+	} else {
+		m.authoringConfigSelected = min(m.authoringConfigSelected, len(rows)-1)
+	}
+}
+
+func (m *Model) canPlaceWorkforceBindingConfigurations() bool {
+	if m.authoringChangeSet == nil || m.authoringCapability.Context == nil ||
+		m.authoringCapability.Context.ChangeSetID != m.authoringChangeSet.ID ||
+		m.authoringCapability.Context.Revision != m.authoringChangeSet.Revision || !m.supportsAuthoring(kernelapi.OperationPatch) {
+		return false
+	}
+	rows := m.workforceBindingConfigurationRows()
+	for _, row := range rows {
+		selected := m.authoringConfigChoices[row.Key]
+		if selected < 0 || selected >= len(row.Field.Options) {
+			return true
+		}
+		value, _, err := row.Field.Options[selected].Value.Value()
+		if err != nil || !reflect.DeepEqual(m.authoringChangeSet.Placement.BindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key], value) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) moveWorkforceBindingConfigurationSelection(delta int) {
+	rows := m.workforceBindingConfigurationRows()
+	if len(rows) == 0 {
+		m.authoringConfigSelected = 0
+		return
+	}
+	m.authoringConfigSelected = (m.authoringConfigSelected + delta + len(rows)) % len(rows)
+}
+
+func (m *Model) moveWorkforceBindingConfigurationChoice(delta int) {
+	rows := m.workforceBindingConfigurationRows()
+	if len(rows) == 0 {
+		return
+	}
+	row := rows[min(m.authoringConfigSelected, len(rows)-1)]
+	selected := m.authoringConfigChoices[row.Key]
+	m.authoringConfigChoices[row.Key] = (selected + delta + len(row.Field.Options)) % len(row.Field.Options)
 }
 
 func (m *Model) workforceCredentialRows() []workforceCredentialRow {

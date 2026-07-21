@@ -14,6 +14,10 @@ import (
 type WorkforceLifecycleAuthorization struct {
 	Actor                        authoring.ChangeSetActor
 	EligibleApprovalRequirements []kernelapi.ApprovalRequirementReference
+	// BindingConfigurationFields are host-authorized, non-secret choices for
+	// the exact Skill identities in this proposal. They are advertised only
+	// after the portable contract validates them.
+	BindingConfigurationFields []capability.BindingConfigurationFieldChoice
 }
 
 // WorkforceLifecycleAuthorizer is the host-owned identity and policy boundary
@@ -182,8 +186,11 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 		return
 	}
 	if changeSet.CandidateDigest != "" && changeSet.Status != authoring.ChangeSetEvaluating && changeSet.Status != authoring.ChangeSetApplied && changeSet.Status != authoring.ChangeSetFailed {
-		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationPatch, changeSet); err == nil {
+		if authorization, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationPatch, changeSet); err == nil {
 			result.Operations = append(result.Operations, kernelapi.OperationPatch)
+			if bindingConfigurationFieldsMatchChangeSet(changeSet, authorization.BindingConfigurationFields) {
+				result.Context.BindingConfigurationFields = append([]capability.BindingConfigurationFieldChoice(nil), authorization.BindingConfigurationFields...)
+			}
 		}
 	}
 	if changeSet.Status != authoring.ChangeSetEvaluating && changeSet.Status != authoring.ChangeSetApplied && changeSet.Status != authoring.ChangeSetFailed &&
@@ -214,6 +221,32 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 			result.Operations = append(result.Operations, kernelapi.OperationApply)
 		}
 	}
+}
+
+func bindingConfigurationFieldsMatchChangeSet(changeSet *authoring.ChangeSet, fields []capability.BindingConfigurationFieldChoice) bool {
+	if len(fields) == 0 {
+		return true
+	}
+	if changeSet == nil || capability.ValidateBindingConfigurationFields(fields) != nil {
+		return false
+	}
+	requiredBySkill := make(map[string]bool)
+	for _, definition := range changeSet.Result.Candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		for _, requirement := range definition.SkillRequirements {
+			requiredBySkill[strings.TrimSpace(requirement.SkillID)] = true
+		}
+	}
+	for _, field := range fields {
+		catalogSkill, exists := changeSet.Catalog.Skills[field.CatalogSkillID]
+		if !exists || !requiredBySkill[field.CatalogSkillID] || field.Skill.ID != catalogSkill.ID || field.Skill.Version != catalogSkill.Version ||
+			field.Skill.SourceIdentity != catalogSkill.SourceIdentity || capability.ValidateBindingConfigurationFieldSchema(field, catalogSkill.BindingConfigSchema) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleEvaluateWorkforceChangeSet(w http.ResponseWriter, r *http.Request) {

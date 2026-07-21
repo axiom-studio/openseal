@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -745,6 +746,35 @@ func (m *Model) renderAuthoringContent(width int) string {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter create this exact reviewed workforce"))
 		} else if m.supportsAuthoring(kernelapi.OperationEvaluate) {
 			lines = append(lines, "", mutedStyle.Render("Waiting for the configured policy evaluator to submit its decision."))
+		}
+		if m.canPlaceWorkforceBindingConfigurations() {
+			rows := m.workforceBindingConfigurationRows()
+			lines = append(lines, "", mutedStyle.Render("Configure required Skill targets (one question at a time · j/k move · [/] choose)"))
+			for index, row := range rows {
+				prefix, style := "  ", mutedStyle
+				if index == m.authoringConfigSelected {
+					prefix, style = "› ", selectedStyle
+				}
+				selected := m.authoringConfigChoices[row.Key]
+				if selected < 0 || selected >= len(row.Field.Options) {
+					selected = 0
+				}
+				option := row.Field.Options[selected]
+				label := option.Label
+				value, _, err := option.Value.Value()
+				if err == nil && reflect.DeepEqual(m.authoringChangeSet.Placement.BindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key], value) {
+					label += " · saved"
+				}
+				required := ""
+				if row.Field.Required {
+					required = " · required"
+				}
+				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s%s → %s", prefix, compact(row.AgentName, max(width-38, 16)), compact(row.Field.Prompt, max(width-44, 18)), required, compact(label, max(width-38, 18)))))
+				if index == m.authoringConfigSelected && option.Description != "" {
+					lines = append(lines, mutedStyle.Render("    "+compact(option.Description, max(width-12, 24))))
+				}
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("b save Skill configuration"))
 		}
 		if m.canPlaceWorkforceCredentials() {
 			rows := m.workforceCredentialRows()

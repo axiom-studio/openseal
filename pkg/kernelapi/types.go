@@ -187,11 +187,12 @@ type CapabilityBlockingRequirement struct {
 // requested resource. It is never durable policy input and clients must not
 // infer authority from the underlying resource itself.
 type CapabilityContext struct {
-	ChangeSetID                  string                               `json:"changeSetId,omitempty"`
-	Revision                     int64                                `json:"revision,omitempty"`
-	EligibleApprovalRequirements []ApprovalRequirementReference       `json:"eligibleApprovalRequirements,omitempty"`
-	CredentialBindings           []capability.CredentialBindingChoice `json:"credentialBindings,omitempty"`
-	BlockingRequirements         []CapabilityBlockingRequirement      `json:"blockingRequirements,omitempty"`
+	ChangeSetID                  string                                       `json:"changeSetId,omitempty"`
+	Revision                     int64                                        `json:"revision,omitempty"`
+	EligibleApprovalRequirements []ApprovalRequirementReference               `json:"eligibleApprovalRequirements,omitempty"`
+	CredentialBindings           []capability.CredentialBindingChoice         `json:"credentialBindings,omitempty"`
+	BindingConfigurationFields   []capability.BindingConfigurationFieldChoice `json:"bindingConfigurationFields,omitempty"`
+	BlockingRequirements         []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
 }
 
 type ClawHubVersionRequest struct {

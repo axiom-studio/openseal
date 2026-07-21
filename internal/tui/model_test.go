@@ -1775,6 +1775,68 @@ func TestWorkforceCredentialPlacementUsesTypedAuthorizedChoices(t *testing.T) {
 	}
 }
 
+func TestWorkforceBindingConfigurationUsesSequentialTypedAuthorizedChoices(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	definition := &kernelagent.AgentDefinition{
+		ID: "sre", DisplayName: "SRE Agent",
+		SkillRequirements: []kernelagent.SkillRequirement{{SkillID: "openseal.kubernetes", VersionConstraint: "1.1.0", RequiredActions: []string{"list_events"}}},
+	}
+	changeSet := &authoring.ChangeSet{
+		ID: "binding-config-change", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest",
+		Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{definition}}},
+		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+			"openseal.kubernetes": {
+				ID: "openseal.kubernetes", Version: "1.1.0", SourceIdentity: "builtin:openseal.kubernetes",
+				BindingConfigSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false, "required": []interface{}{"clusterId"},
+					"properties": map[string]interface{}{"clusterId": map[string]interface{}{"type": "integer", "minimum": 1}},
+				},
+			},
+		}},
+		Placement: authoring.ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"sre": "sre-live"}, Environment: "development"},
+	}
+	development, production := int64(7), int64(8)
+	field := capability.BindingConfigurationFieldChoice{
+		CatalogSkillID: "openseal.kubernetes",
+		Skill:          capability.NewSkillIdentity("openseal.kubernetes", "1.1.0", "builtin:openseal.kubernetes"),
+		Key:            "clusterId", Type: "integer", Required: true, Prompt: "Which Kubernetes cluster should this Agent operate?",
+		Options: []capability.BindingConfigurationOption{
+			{Label: "Development", Description: "Tenant development cluster", Value: capability.BindingConfigurationValue{Integer: &development}},
+			{Label: "Production", Description: "Tenant production cluster", Value: capability.BindingConfigurationValue{Integer: &production}},
+		},
+	}
+	updated := *changeSet
+	updated.Revision = 4
+	updated.Placement.BindingConfigs = map[string]map[string]map[string]interface{}{"sre": {"openseal.kubernetes": {"clusterId": production}}}
+	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
+	capabilityDocument.Context = &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: changeSet.Revision, BindingConfigurationFields: []capability.BindingConfigurationFieldChoice{field}}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument), governanceResults: []*authoring.ChangeSet{&updated}}
+	model := newTestModel(t, fake)
+	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	for _, expected := range []string{"Configure required Skill targets", "Which Kubernetes clust", "Development", "Tenant development cluster"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("binding configuration view missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "clusterId\":7") || strings.Contains(strings.ToLower(view), "credential") {
+		t.Fatalf("binding configuration exposed implementation or credential detail:\n%s", view)
+	}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	applyCommand(t, model, command)
+	if len(fake.placementRequests) != 1 || len(fake.placementKeys) != 1 || fake.placementKeys[0] == "" {
+		t.Fatalf("placement calls=%#v keys=%#v", fake.placementRequests, fake.placementKeys)
+	}
+	config := fake.placementRequests[0].Placement.BindingConfigs["sre"]["openseal.kubernetes"]
+	if config["clusterId"] != production || len(fake.placementRequests[0].Placement.CredentialReferences) != 0 {
+		t.Fatalf("typed binding configuration placement = %#v credentials=%#v", config, fake.placementRequests[0].Placement.CredentialReferences)
+	}
+}
+
 func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
 	model := newTestModel(t, fake)
