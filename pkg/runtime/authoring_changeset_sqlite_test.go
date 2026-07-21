@@ -486,6 +486,7 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 	if err := catalog.Register(ctx, &skill.Definition{
 		ID: definitionID, Version: immutableVersion, Name: "Summarize",
 		Source:    &skill.SourceProvenance{Identity: sourceIdentity, Format: "openclaw.skill.v1", ResolvedVersion: "1.0.0"},
+		Prompt:    &skill.PromptModule{Instructions: "Summarize evidence without changing it."},
 		Transport: skill.TransportReference{Kind: "tool", Endpoint: "process"},
 		Actions: map[string]skill.Action{"execute": {
 			Name: "execute", Description: "Summarize evidence", InputSchema: map[string]interface{}{"type": "object"},
@@ -500,10 +501,10 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 	agentDefinition.Authority.AllowedSkillIDs = []string{catalogID}
 	value.Result.Candidate.Team.Roles[0].RequiredSkillIDs = []string{catalogID}
 	value.Result.Candidate.Team.Roles[0].SkillGrants = []team.RoleSkillGrant{{
-		SkillID: catalogID, SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
+		SkillID: catalogID, SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, EnablePrompt: true, MaximumRisk: capability.RiskLevelRead,
 	}}
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
-		catalogID: {ID: catalogID, Version: "1.0.0", Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead},
+		catalogID: {ID: catalogID, Version: "1.0.0", Actions: []string{"execute"}, PromptAvailable: true, MaximumRisk: capability.RiskLevelRead},
 	}}
 	identity := capability.NewSkillIdentity(definitionID, immutableVersion, sourceIdentity)
 	value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{"agent": {catalogID: identity}}
@@ -539,13 +540,13 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 		t.Fatalf("exact persisted Team grant = %#v", grant)
 	}
 	bindings, err := restored.ListSkillBindings(ctx, value.Scope, "agent-live")
-	if err != nil || len(bindings) != 1 || !capability.NewSkillIdentity(bindings[0].SkillID, bindings[0].SkillVersion, bindings[0].SourceIdentity).Equal(identity) {
+	if err != nil || len(bindings) != 1 || bindings[0].EnablePrompt || !capability.NewSkillIdentity(bindings[0].SkillID, bindings[0].SkillVersion, bindings[0].SourceIdentity).Equal(identity) {
 		t.Fatalf("exact persisted binding = %#v, %v", bindings, err)
 	}
 	teamBindings, err := restored.ListSkillBindings(ctx, value.Scope, "team-live")
 	if err != nil || len(teamBindings) != 1 || teamBindings[0].DeploymentID != "team-live" ||
 		!capability.NewSkillIdentity(teamBindings[0].SkillID, teamBindings[0].SkillVersion, teamBindings[0].SourceIdentity).Equal(identity) ||
-		len(teamBindings[0].AllowedActions) != 1 || teamBindings[0].AllowedActions[0] != "execute" {
+		len(teamBindings[0].AllowedActions) != 1 || teamBindings[0].AllowedActions[0] != "execute" || !teamBindings[0].EnablePrompt {
 		t.Fatalf("exact persisted Team binding = %#v, %v", teamBindings, err)
 	}
 	foundTeamBinding := false
