@@ -822,11 +822,50 @@ func (m *Model) renderRefinementGuidance(question authoring.RefinementQuestion, 
 		lines = append(lines, compact(label, width))
 		if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && m.authoringChangeSet != nil {
 			if skill, ok := m.authoringChangeSet.Catalog.Skills[option.ID]; ok {
+				identity := skill.ID
+				if skill.Version != "" {
+					identity += "@" + skill.Version
+				}
+				lines = append(lines, refinementDetail("Exact Skill", identity, width)...)
+				if skill.SourceIdentity != "" {
+					lines = append(lines, refinementDetail("Source", skill.SourceIdentity, width)...)
+				}
 				if skill.Readiness != "" {
-					lines = append(lines, compact("  Readiness: "+string(skill.Readiness), width))
+					lines = append(lines, refinementDetail("Readiness", string(skill.Readiness), width)...)
+				}
+				if len(skill.Actions) > 0 {
+					actions := append([]string(nil), skill.Actions...)
+					sort.Strings(actions)
+					lines = append(lines, refinementDetail("Actions", strings.Join(actions, ", "), width)...)
+				}
+				if skill.PromptAvailable {
+					lines = append(lines, "  Prompt guidance: available")
+				}
+				if skill.MaximumRisk != "" {
+					lines = append(lines, refinementDetail("Maximum risk", string(skill.MaximumRisk), width)...)
+				}
+				for _, credential := range skill.Credentials {
+					detail := credential.Name + " (" + credential.Kind
+					if credential.Optional {
+						detail += ", optional"
+					}
+					if len(credential.Actions) > 0 {
+						actions := append([]string(nil), credential.Actions...)
+						sort.Strings(actions)
+						detail += "; " + strings.Join(actions, ", ")
+					}
+					lines = append(lines, refinementDetail("Credential", detail+")", width)...)
+				}
+				if len(skill.Credentials) == 0 && len(skill.CredentialKinds) > 0 {
+					kinds := append([]string(nil), skill.CredentialKinds...)
+					sort.Strings(kinds)
+					lines = append(lines, refinementDetail("Credential kinds", strings.Join(kinds, ", "), width)...)
 				}
 				for _, evidence := range skill.Compatibility {
-					lines = append(lines, compact(fmt.Sprintf("  %s: %t — %s", evidence.Requirement, evidence.Compatible, evidence.Evidence), width))
+					lines = append(lines, refinementDetail(evidence.Requirement, fmt.Sprintf("%t — %s", evidence.Compatible, evidence.Evidence), width)...)
+					if evidence.Reference != "" {
+						lines = append(lines, refinementDetail("Evidence reference", evidence.Reference, width)...)
+					}
 				}
 			}
 		}
@@ -837,6 +876,25 @@ func (m *Model) renderRefinementGuidance(question authoring.RefinementQuestion, 
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// refinementDetail wraps immutable identity and evidence values instead of
+// truncating them. An operator must be able to distinguish exact sourced Skill
+// variants and receipt references even in the TUI's narrow question pane.
+func refinementDetail(label, value string, width int) []string {
+	prefix, continuation := "  "+label+": ", "    "
+	remaining := []rune(value)
+	lines := make([]string, 0, 1)
+	for {
+		available := max(width-len([]rune(prefix)), 1)
+		count := min(available, len(remaining))
+		lines = append(lines, prefix+string(remaining[:count]))
+		remaining = remaining[count:]
+		if len(remaining) == 0 {
+			return lines
+		}
+		prefix = continuation
+	}
 }
 
 func renderAnsweredRefinements(changeSet *authoring.ChangeSet, width int) []string {
