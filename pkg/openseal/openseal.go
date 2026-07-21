@@ -472,6 +472,7 @@ type (
 	SkillRuntimePreparationResult      = skill.RuntimePreparationResult
 	SkillRuntimePreparer               = skill.RuntimePreparer
 	SkillAvailabilityReason            = skill.AvailabilityReason
+	SkillBindingActivationPreview      = skill.BindingActivationPreview
 	ActivatedSkill                     = skill.ActivatedSkill
 	UnavailableSkill                   = skill.UnavailableSkill
 	SkillActivationSnapshot            = skill.ActivationSnapshot
@@ -3085,6 +3086,18 @@ func (e *Engine) ValidateSkillActionInput(ctx context.Context, bound *skill.Boun
 
 func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	return e.skills.Activate(ctx, scope, deploymentID, host)
+}
+
+// PreviewSkillBindingActivation evaluates one exact proposed binding against
+// the execution host without persisting or invoking host lifecycle adapters.
+func (e *Engine) PreviewSkillBindingActivation(ctx context.Context, binding *skill.Binding, host skill.HostCapabilityState) (*skill.BindingActivationPreview, error) {
+	return e.skills.PreviewBindingActivation(ctx, binding, host)
+}
+
+// PreviewSkillBindingActivation evaluates an already-resolved immutable Skill
+// definition without requiring it to be installed in an Engine catalog.
+func PreviewSkillBindingActivation(definition *skill.Definition, binding *skill.Binding, host skill.HostCapabilityState) (*skill.BindingActivationPreview, error) {
+	return skill.PreviewBindingActivation(definition, binding, host)
 }
 
 func SkillRuntimePreparationID(request skill.RuntimePreparationRequest) (string, error) {
