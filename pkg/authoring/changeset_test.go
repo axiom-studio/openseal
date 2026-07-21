@@ -278,6 +278,50 @@ func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	}
 }
 
+func TestAtomicMemoryApplyCarriesInactiveCommitmentIntoReceipt(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate:   marketingCandidate("1", capability.RiskLevelRead),
+		Commitments: PromptCommitments{Activation: ActivationCommitmentInactive},
+	})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: scope, Prompt: "Create this workforce and do not activate it.",
+		Catalog:   CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
+		Placement: ChangeSetPlacement{TeamDeploymentID: "marketing-live", AgentDeploymentIDs: map[string]string{"community-researcher": "researcher-live"}, Environment: "production"},
+		Actor:     ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-inactive",
+	})
+	if err != nil || created.Result.Candidate.Activation != WorkforceActivationInactive {
+		t.Fatalf("inactive candidate=%#v err=%v", created, err)
+	}
+	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow-inactive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: "Create inactive for review", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply-inactive"})
+	if err != nil || applied.ApplyReceipt == nil || applied.ApplyReceipt.Activation != WorkforceActivationInactive || applied.ApplyReceipt.CandidateDigest != created.CandidateDigest {
+		t.Fatalf("inactive receipt=%#v err=%v", applied, err)
+	}
+}
+
+func TestEffectiveChangeSetActivationIntentMigratesTypedCommitmentWithoutPromptParsing(t *testing.T) {
+	legacy := &ChangeSet{Result: CompileResult{Commitments: PromptCommitments{Activation: ActivationCommitmentInactive}}}
+	if intent, err := EffectiveChangeSetActivationIntent(legacy); err != nil || intent != WorkforceActivationInactive {
+		t.Fatalf("legacy inactive intent=%q err=%v", intent, err)
+	}
+	legacy.Result.Commitments.Activation = ""
+	if intent, err := EffectiveChangeSetActivationIntent(legacy); err != nil || intent != WorkforceActivationActive {
+		t.Fatalf("legacy active intent=%q err=%v", intent, err)
+	}
+	legacy.Result.Commitments.Activation = ActivationCommitmentInactive
+	legacy.Result.Candidate.Activation = WorkforceActivationActive
+	if _, err := EffectiveChangeSetActivationIntent(legacy); err == nil {
+		t.Fatal("conflicting candidate and commitment activation was accepted")
+	}
+}
+
 func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})

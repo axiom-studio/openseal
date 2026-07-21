@@ -174,6 +174,29 @@ type ChangeSet struct {
 	UpdatedAt           time.Time                   `json:"updatedAt"`
 }
 
+// EffectiveChangeSetActivationIntent reads the digest-bound candidate field
+// for current ChangeSets and the persisted typed commitment for pre-v8
+// ChangeSets. It never derives lifecycle state from prompt text.
+func EffectiveChangeSetActivationIntent(value *ChangeSet) (WorkforceActivationIntent, error) {
+	if value == nil {
+		return "", errors.New("change set is required")
+	}
+	if value.Result.Candidate.Activation == "" {
+		if value.Result.Commitments.Activation == ActivationCommitmentInactive {
+			return WorkforceActivationInactive, nil
+		}
+		return WorkforceActivationActive, nil
+	}
+	intent, err := EffectiveWorkforceActivationIntent(value.Result.Candidate.Activation)
+	if err != nil {
+		return "", err
+	}
+	if value.Result.Commitments.Activation == ActivationCommitmentInactive && intent != WorkforceActivationInactive {
+		return "", errors.New("candidate activation conflicts with its inactive commitment")
+	}
+	return intent, nil
+}
+
 // ChangeSetGeneration is the durable, credential-free input and progress for
 // probabilistic candidate generation. Hosts may enqueue it into their canonical
 // Run scheduler after Prepare returns; the prompt request does not need to stay
@@ -885,7 +908,7 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	if err := validateApplyPlacement(current); err != nil {
 		return nil, false, err
 	}
-	activation, err := EffectiveWorkforceActivationIntent(current.Result.Candidate.Activation)
+	activation, err := EffectiveChangeSetActivationIntent(current)
 	if err != nil {
 		return nil, false, err
 	}
