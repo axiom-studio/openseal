@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	SkillID      = "openseal.kubernetes"
-	SkillVersion = "1.0.1"
+	SkillID          = "openseal.kubernetes"
+	SkillVersion     = "1.1.0"
+	ClusterConfigKey = "clusterId"
 
 	GetResource     = "get_resource"
 	ListResources   = "list_resources"
@@ -23,9 +24,6 @@ const (
 	ScaleWorkload   = "scale_workload"
 	PatchResource   = "patch_resource"
 	DeleteResource  = "delete_resource"
-
-	ClusterCredentialName = "clusterId"
-	ClusterCredentialKind = "kubernetes-cluster"
 )
 
 const (
@@ -51,12 +49,16 @@ var restartableKinds = []interface{}{"Deployment", "StatefulSet", "DaemonSet"}
 
 // SkillDefinition returns the immutable portable contract. clusterId is
 // deliberately absent from every model-visible schema: the embedding host
-// resolves an opaque, tenant-authorized cluster reference out of band.
+// selects and validates it as trusted binding configuration.
 func SkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Kubernetes operations",
 		Description: "Inspect Kubernetes resources and events, read bounded logs, and perform governed workload changes.",
 		Transport:   skill.TransportReference{Kind: "tool", Endpoint: SkillID},
+		BindingConfigSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false, "required": []interface{}{ClusterConfigKey},
+			"properties": map[string]interface{}{ClusterConfigKey: map[string]interface{}{"type": "integer", "minimum": 1}},
+		},
 		Actions: map[string]skill.Action{
 			GetResource:     readAction(GetResource, "Inspect one Kubernetes resource.", transportGet, resourceIdentitySchema(true), objectOutput("object"), "kubernetes:resources:read"),
 			ListResources:   readAction(ListResources, "List Kubernetes resources using optional label and field selectors.", transportList, listResourcesInput(), listOutput("list"), "kubernetes:resources:read"),
@@ -79,8 +81,7 @@ func readAction(name, description, endpoint string, input, output map[string]int
 	return skill.Action{
 		Name: name, Description: description, InputSchema: input, OutputSchema: output,
 		SideEffect: skill.SideEffectRead, Risk: skill.RiskLevelRead, Permissions: []string{permission},
-		Credentials: []capability.CredentialRequirement{{Name: ClusterCredentialName, Kind: ClusterCredentialKind}},
-		Timeout:     capability.Duration(30 * time.Second), Retry: skill.ActionRetryPolicy{MaxAttempts: 3, InitialBackoff: capability.Duration(time.Second), MaxBackoff: capability.Duration(10 * time.Second)},
+		Timeout: capability.Duration(30 * time.Second), Retry: skill.ActionRetryPolicy{MaxAttempts: 3, InitialBackoff: capability.Duration(time.Second), MaxBackoff: capability.Duration(10 * time.Second)},
 		Idempotency: skill.IdempotencySupported, Transport: &skill.TransportReference{Kind: "tool", Endpoint: endpoint},
 	}
 }
@@ -89,8 +90,7 @@ func mutationAction(name, description, endpoint string, input, output map[string
 	return skill.Action{
 		Name: name, Description: description, InputSchema: input, OutputSchema: output,
 		SideEffect: sideEffect, Risk: risk, Permissions: []string{permission},
-		Credentials: []capability.CredentialRequirement{{Name: ClusterCredentialName, Kind: ClusterCredentialKind}},
-		Timeout:     capability.Duration(time.Minute), Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
+		Timeout: capability.Duration(time.Minute), Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		Idempotency: skill.IdempotencyRequired, Transport: &skill.TransportReference{Kind: "tool", Endpoint: endpoint},
 	}
 }

@@ -280,6 +280,48 @@ func TestMaterializeTransportArgumentsKeepsCredentialsOutOfEnvelope(t *testing.T
 	}
 }
 
+func TestBindingConfigurationMustBeDeclaredAndMatchSchema(t *testing.T) {
+	ctx := context.Background()
+	definition := testSkillDefinition()
+	definition.BindingConfigSchema = map[string]interface{}{
+		"type": "object", "additionalProperties": false, "required": []interface{}{"targetId"},
+		"properties": map[string]interface{}{"targetId": map[string]interface{}{"type": "integer", "minimum": 1}},
+	}
+	catalog := NewCatalog()
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &Binding{
+		ID: "release", Scope: ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "agent",
+		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
+		Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "opaque://git"}}, Config: map[string]interface{}{"targetId": 7}, Revision: 1,
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	for name, config := range map[string]map[string]interface{}{
+		"missing": {}, "zero": {"targetId": 0}, "fractional": {"targetId": 1.5}, "string": {"targetId": "7"}, "extra": {"targetId": 7, "other": true},
+	} {
+		invalid := *binding
+		invalid.ID = "invalid-" + name
+		invalid.Config = config
+		if err := catalog.Bind(ctx, &invalid); err == nil {
+			t.Fatalf("%s binding config unexpectedly validated: %#v", name, config)
+		}
+	}
+
+	undeclared := testSkillDefinition()
+	undeclared.Version = "1.0.1"
+	if err := catalog.Register(ctx, undeclared); err != nil {
+		t.Fatal(err)
+	}
+	invalid := *binding
+	invalid.ID, invalid.SkillVersion = "undeclared", undeclared.Version
+	if err := catalog.Bind(ctx, &invalid); err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Fatalf("undeclared binding config was accepted: %v", err)
+	}
+}
+
 func TestDefinitionAllowsDistinctPerActionTransports(t *testing.T) {
 	definition := &Definition{ID: "builtin", Version: "1", Name: "Builtin", Actions: map[string]Action{
 		"fetch":    {Name: "fetch", Description: "Fetch URL", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}, Risk: RiskLevelRead, SideEffect: SideEffectRead, Idempotency: IdempotencySupported, Transport: &TransportReference{Kind: "tool", Endpoint: "fetch-url"}},

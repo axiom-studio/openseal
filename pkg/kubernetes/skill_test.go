@@ -15,7 +15,7 @@ func TestSkillDefinitionPublishesCompleteGovernedKubernetesSurface(t *testing.T)
 	}
 	for _, name := range []string{GetResource, ListResources, ListEvents, GetLogs} {
 		action := definition.Actions[name]
-		if action.Risk != skill.RiskLevelRead || action.SideEffect != skill.SideEffectRead || action.Transport == nil || action.Transport.Kind != "tool" || action.Idempotency != skill.IdempotencySupported || len(action.Credentials) != 1 || action.Credentials[0].Kind != ClusterCredentialKind {
+		if action.Risk != skill.RiskLevelRead || action.SideEffect != skill.SideEffectRead || action.Transport == nil || action.Transport.Kind != "tool" || action.Idempotency != skill.IdempotencySupported || len(action.Credentials) != 0 {
 			t.Fatalf("read action %s is not governed correctly: %#v", name, action)
 		}
 	}
@@ -41,7 +41,7 @@ func TestSkillDefinitionPinsClusterThroughOpaqueBindingNotModelInput(t *testing.
 	binding := &skill.Binding{
 		ID: "cluster-one", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
 		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{ListEvents, RestartWorkload},
-		MaximumRisk: skill.RiskLevelProduction, Credentials: map[string]skill.CredentialReference{ClusterCredentialName: {Kind: ClusterCredentialKind, ID: "cluster://tenant-7/one"}}, Revision: 1,
+		MaximumRisk: skill.RiskLevelProduction, Config: map[string]interface{}{ClusterConfigKey: 17}, Revision: 1,
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
@@ -54,8 +54,8 @@ func TestSkillDefinitionPinsClusterThroughOpaqueBindingNotModelInput(t *testing.
 	if err := catalog.ValidateInput(ctx, bound, input); err != nil {
 		t.Fatal(err)
 	}
-	if reference := bound.Binding.Credentials[ClusterCredentialName]; reference.Kind != ClusterCredentialKind || reference.ID != "cluster://tenant-7/one" {
-		t.Fatalf("opaque cluster binding was not preserved: %#v", reference)
+	if clusterID := bound.Binding.Config[ClusterConfigKey]; clusterID != float64(17) {
+		t.Fatalf("cluster binding was not preserved: %#v", bound.Binding.Config)
 	}
 	properties := definition.Actions[ListEvents].InputSchema["properties"].(map[string]interface{})
 	if _, modelVisible := properties["clusterId"]; modelVisible {
@@ -66,7 +66,7 @@ func TestSkillDefinitionPinsClusterThroughOpaqueBindingNotModelInput(t *testing.
 	}
 }
 
-func TestSkillActivationUsesTypedClusterCredentialWithoutHostConfiguration(t *testing.T) {
+func TestSkillActivationUsesTypedClusterBindingConfiguration(t *testing.T) {
 	ctx := context.Background()
 	catalog := skill.NewCatalog()
 	definition := SkillDefinition()
@@ -79,7 +79,7 @@ func TestSkillActivationUsesTypedClusterCredentialWithoutHostConfiguration(t *te
 	binding := &skill.Binding{
 		ID: "cluster-activation", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
 		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{ListEvents},
-		MaximumRisk: skill.RiskLevelRead, Credentials: map[string]skill.CredentialReference{ClusterCredentialName: {Kind: ClusterCredentialKind, ID: "cluster://tenant-7/one"}}, Revision: 1,
+		MaximumRisk: skill.RiskLevelRead, Config: map[string]interface{}{ClusterConfigKey: 17}, Revision: 1,
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
@@ -101,6 +101,28 @@ func TestSkillActivationUsesTypedClusterCredentialWithoutHostConfiguration(t *te
 	}
 }
 
+func TestSkillBindingRejectsMissingOrMalformedClusterTargets(t *testing.T) {
+	ctx := context.Background()
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(ctx, SkillDefinition()); err != nil {
+		t.Fatal(err)
+	}
+	base := skill.Binding{
+		ID: "cluster", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
+		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{ListEvents}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+	}
+	for name, config := range map[string]map[string]interface{}{
+		"missing": {}, "zero": {ClusterConfigKey: 0}, "fractional": {ClusterConfigKey: 1.5}, "string": {ClusterConfigKey: "17"}, "extra": {ClusterConfigKey: 17, "namespace": "default"},
+	} {
+		binding := base
+		binding.ID = name
+		binding.Config = config
+		if err := catalog.Bind(ctx, &binding); err == nil {
+			t.Fatalf("%s target unexpectedly validated: %#v", name, config)
+		}
+	}
+}
+
 func TestSkillSchemasRejectUnsafeOrUnboundedInputs(t *testing.T) {
 	ctx := context.Background()
 	catalog := skill.NewCatalog()
@@ -111,7 +133,7 @@ func TestSkillSchemasRejectUnsafeOrUnboundedInputs(t *testing.T) {
 	binding := &skill.Binding{
 		ID: "cluster", Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "sre",
 		SkillID: SkillID, SkillVersion: SkillVersion, AllowedActions: []string{GetLogs, ScaleWorkload, PatchResource},
-		MaximumRisk: skill.RiskLevelProduction, Credentials: map[string]skill.CredentialReference{ClusterCredentialName: {Kind: ClusterCredentialKind, ID: "cluster://tenant-7/one"}}, Revision: 1,
+		MaximumRisk: skill.RiskLevelProduction, Config: map[string]interface{}{ClusterConfigKey: 17}, Revision: 1,
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)

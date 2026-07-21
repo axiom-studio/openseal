@@ -165,19 +165,23 @@ type SourceProvenance struct {
 }
 
 type Definition struct {
-	ID               string             `json:"id"`
-	Version          string             `json:"version"`
-	Name             string             `json:"name"`
-	Description      string             `json:"description,omitempty"`
-	Icon             string             `json:"icon,omitempty"`
-	ConfigurationKey string             `json:"configurationKey,omitempty"`
-	Actions          map[string]Action  `json:"actions"`
-	Transport        TransportReference `json:"transport"`
-	Prompt           *PromptModule      `json:"prompt,omitempty"`
-	Requirements     Requirements       `json:"requirements,omitempty"`
-	Installers       []Installer        `json:"installers,omitempty"`
-	Resources        []Resource         `json:"resources,omitempty"`
-	Source           *SourceProvenance  `json:"source,omitempty"`
+	ID               string `json:"id"`
+	Version          string `json:"version"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	Icon             string `json:"icon,omitempty"`
+	ConfigurationKey string `json:"configurationKey,omitempty"`
+	// BindingConfigSchema defines non-secret, host-owned configuration that is
+	// fixed when a Skill is bound. It is never part of model-visible action
+	// input and is delivered to tool hosts separately from action arguments.
+	BindingConfigSchema map[string]interface{} `json:"bindingConfigSchema,omitempty"`
+	Actions             map[string]Action      `json:"actions"`
+	Transport           TransportReference     `json:"transport"`
+	Prompt              *PromptModule          `json:"prompt,omitempty"`
+	Requirements        Requirements           `json:"requirements,omitempty"`
+	Installers          []Installer            `json:"installers,omitempty"`
+	Resources           []Resource             `json:"resources,omitempty"`
+	Source              *SourceProvenance      `json:"source,omitempty"`
 }
 
 type ArgumentRule struct {
