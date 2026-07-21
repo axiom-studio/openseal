@@ -463,7 +463,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-initiative", IdempotencyKey: "apply-initiative", CandidateDigest: value.CandidateDigest, Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute)}
 	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
 	result, err := store.ApplyChangeSet(ctx, applied, 2)
-	if err != nil || len(result.ApplyReceipt.Resources) != 8 {
+	if err != nil || len(result.ApplyReceipt.Resources) != 8 || result.ApplyReceipt.Activation != authoring.WorkforceActivationActive {
 		t.Fatalf("apply result=%#v err=%v", result, err)
 	}
 	initiative, err := store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
@@ -506,6 +506,71 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 	restored, err := restarted.GetInitiative(ctx, initiative.Scope, initiative.ID)
 	if err != nil || restored.Revision != 1 || restored.SourceMonitors[0] != initiative.SourceMonitors[0] || restored.CreationFingerprint == "" || restored.IdempotencyKeyHash == "" {
 		t.Fatalf("restored Initiative=%#v err=%v", restored, err)
+	}
+}
+
+func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	registerInitiativeSourceSkill(t, store)
+	value := testInitiativeWorkforceChangeSet()
+	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
+	value.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
+	if _, _, err = store.CreateChangeSet(ctx, value, "create-inactive", "digest-inactive"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(value)
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-inactive", IdempotencyKey: "apply-inactive", CandidateDigest: value.CandidateDigest, Activation: authoring.WorkforceActivationInactive, Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute)}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	result, err := store.ApplyChangeSet(ctx, applied, 2)
+	if err != nil || result.ApplyReceipt.Activation != authoring.WorkforceActivationInactive {
+		t.Fatalf("inactive apply result=%#v err=%v", result, err)
+	}
+	agents := agent.NewRegistryWithStore(store)
+	teams := team.NewRegistryWithStore(store, agents)
+	agentDeployment, err := agents.GetDeployment(ctx, value.Scope, "agent-live")
+	if err != nil || agentDeployment.RolloutStatus != agent.RolloutPending {
+		t.Fatalf("inactive Agent deployment=%#v err=%v", agentDeployment, err)
+	}
+	teamDeployment, err := teams.GetDeployment(ctx, value.Scope, "team-live")
+	if err != nil || teamDeployment.Status != team.DeploymentDraft {
+		t.Fatalf("inactive Team deployment=%#v err=%v", teamDeployment, err)
+	}
+	if activations, err := agents.ListActivations(ctx, value.Scope, agentDeployment.ID); err != nil || len(activations) != 0 {
+		t.Fatalf("inactive Agent activations=%#v err=%v", activations, err)
+	}
+	if activations, err := teams.ListActivations(ctx, value.Scope, teamDeployment.ID); err != nil || len(activations) != 0 {
+		t.Fatalf("inactive Team activations=%#v err=%v", activations, err)
+	}
+	bindings, err := store.ListSkillBindings(ctx, value.Scope, agentDeployment.ID)
+	if err != nil || len(bindings) != 1 || !bindings[0].Disabled {
+		t.Fatalf("inactive Skill bindings=%#v err=%v", bindings, err)
+	}
+	objectives, err := store.ListObjectives(ctx, ObjectiveFilter{Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}})
+	if err != nil || len(objectives) != 2 {
+		t.Fatalf("inactive Objectives=%#v err=%v", objectives, err)
+	}
+	for _, objective := range objectives {
+		if objective.Status != ObjectiveStatusDraft {
+			t.Fatalf("Objective %s status=%s", objective.ID, objective.Status)
+		}
+	}
+	initiative, err := store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
+	if err != nil || initiative.Status != InitiativeStatusDraft {
+		t.Fatalf("inactive Initiative=%#v err=%v", initiative, err)
+	}
+	schedule, err := NewObjectiveScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
+	if err != nil || schedule.Examined != 0 || schedule.Scheduled != 0 {
+		t.Fatalf("inactive schedule=%#v err=%v", schedule, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: initiative.Scope})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("inactive Runs=%#v err=%v", runs, err)
 	}
 }
 
