@@ -2,7 +2,10 @@ package executor
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +22,48 @@ func generateLongText(wordCount int) string {
 		result.WriteString(words[i%len(words)])
 	}
 	return result.String()
+}
+
+type pgVectorChunkingTestConnector struct{}
+
+func (pgVectorChunkingTestConnector) Connect(context.Context) (driver.Conn, error) {
+	return pgVectorChunkingTestConn{}, nil
+}
+
+func (pgVectorChunkingTestConnector) Driver() driver.Driver {
+	return pgVectorChunkingTestDriver{}
+}
+
+type pgVectorChunkingTestDriver struct{}
+
+func (pgVectorChunkingTestDriver) Open(string) (driver.Conn, error) {
+	return pgVectorChunkingTestConn{}, nil
+}
+
+type pgVectorChunkingTestConn struct{}
+
+func (pgVectorChunkingTestConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("unexpected prepared statement")
+}
+
+func (pgVectorChunkingTestConn) Close() error { return nil }
+
+func (pgVectorChunkingTestConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("unexpected transaction")
+}
+
+func (pgVectorChunkingTestConn) Ping(context.Context) error { return nil }
+
+func (pgVectorChunkingTestConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(1), nil
+}
+
+func newHermeticPGVectorExecutor() *PGVectorExecutor {
+	executor := NewPGVectorExecutor()
+	executor.openConnection = func(string) (*sql.DB, error) {
+		return sql.OpenDB(pgVectorChunkingTestConnector{}), nil
+	}
+	return executor
 }
 
 func TestPGVectorChunkingWithTokenLimit(t *testing.T) {
@@ -40,7 +85,7 @@ func TestPGVectorChunkingWithTokenLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	executor := NewPGVectorExecutor()
+	executor := newHermeticPGVectorExecutor()
 	resolver := &mockResolver{}
 	longText := generateLongText(3000)
 
@@ -66,16 +111,15 @@ func TestPGVectorChunkingWithTokenLimit(t *testing.T) {
 		},
 	}
 
-	_, err := executor.Execute(context.Background(), step, resolver)
-
+	result, err := executor.Execute(context.Background(), step, resolver)
 	if err != nil {
-		if strings.Contains(err.Error(), "failed to get vector") &&
-			strings.Contains(err.Error(), "must have less than 512 tokens") {
+		if strings.Contains(err.Error(), "failed to get vector") && strings.Contains(err.Error(), "must have less than 512 tokens") {
 			t.Fatal("getVector called when chunking enabled")
 		}
-		if !strings.Contains(err.Error(), "pq:") && !strings.Contains(err.Error(), "SSL") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count := result.Output["count"]; count == nil {
+		t.Fatalf("chunked upsert did not report a count: %#v", result.Output)
 	}
 
 	if callCount < 20 || callCount > 30 {
@@ -89,7 +133,7 @@ func TestPGVectorChunkingDisabled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	executor := NewPGVectorExecutor()
+	executor := newHermeticPGVectorExecutor()
 	resolver := &mockResolver{}
 
 	step := &StepDefinition{
@@ -110,9 +154,14 @@ func TestPGVectorChunkingDisabled(t *testing.T) {
 		},
 	}
 
-	_, err := executor.Execute(context.Background(), step, resolver)
-
-	if err != nil && !strings.Contains(err.Error(), "pq:") && !strings.Contains(err.Error(), "SSL") {
+	result, err := executor.Execute(context.Background(), step, resolver)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if success, _ := result.Output["success"].(bool); !success {
+		t.Fatalf("unchunked upsert did not succeed: %#v", result.Output)
+	}
+	if upserted, _ := result.Output["upserted"].(map[string]interface{}); upserted["content"] != "short text" {
+		t.Fatalf("unchunked upsert payload = %#v", result.Output)
 	}
 }
