@@ -1,8 +1,11 @@
 package runtime
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestEvaluateBudgetUsesWarningAndExhaustedStates(t *testing.T) {
@@ -18,14 +21,63 @@ func TestEvaluateBudgetUsesWarningAndExhaustedStates(t *testing.T) {
 }
 
 func TestBudgetRejectsInvalidPolicyAndUsage(t *testing.T) {
-	if _, _, err := EvaluateBudget(BudgetPolicy{MaxTurns: -1}, BudgetUsage{}); err == nil {
-		t.Fatal("negative policy was accepted")
+	if _, _, err := EvaluateBudget(BudgetPolicy{MaxTurns: -1}, BudgetUsage{}); err == nil || !strings.Contains(err.Error(), "maxTurns") {
+		t.Fatalf("negative policy error = %v", err)
 	}
 	if _, _, err := EvaluateBudget(BudgetPolicy{}, BudgetUsage{CostMicros: -1}); err == nil {
 		t.Fatal("negative usage was accepted")
 	}
 	if _, _, err := EvaluateBudget(BudgetPolicy{MaxAttempts: -1}, BudgetUsage{}); err == nil {
 		t.Fatal("negative attempt policy was accepted")
+	}
+}
+
+func TestBudgetJSONDistinguishesOmittedFromExplicitZeroLimits(t *testing.T) {
+	var partial BudgetPolicy
+	if err := json.Unmarshal([]byte(`{"maxAttempts":3,"maxTurns":3,"maxInputTokens":50000,"maxOutputTokens":10000,"maxTotalTokens":60000,"maxDurationMs":120000}`), &partial); err != nil {
+		t.Fatal(err)
+	}
+	if partial.MaxActions != 0 || partial.MaxCostMicros != 0 {
+		t.Fatalf("omitted dimensions were not unbounded: %#v", partial)
+	}
+	for _, body := range []string{
+		`{"maxActions":0}`,
+		`{"maxCostMicros":0}`,
+		`{"maxTurns":0}`,
+	} {
+		var policy BudgetPolicy
+		err := json.Unmarshal([]byte(body), &policy)
+		if err == nil || !strings.Contains(err.Error(), "must be positive when specified") || !strings.Contains(err.Error(), "omit it for an unbounded dimension") {
+			t.Fatalf("explicit zero %s error = %v", body, err)
+		}
+	}
+	var unknown BudgetPolicy
+	if err := json.Unmarshal([]byte(`{"maxTurns":3,"maxUnknown":1}`), &unknown); err == nil || !strings.Contains(err.Error(), `unknown field "maxUnknown"`) {
+		t.Fatalf("unknown budget field error = %v", err)
+	}
+}
+
+func TestPartialBudgetAllowsFirstTurnAndUnboundedAction(t *testing.T) {
+	run := &AgentRun{
+		Budget: &BudgetPolicy{
+			MaxAttempts: 3, MaxTurns: 3, MaxInputTokens: 50000, MaxOutputTokens: 10000,
+			MaxTotalTokens: 60000, MaxDurationMS: 120000,
+		},
+		BudgetState: BudgetStateActive,
+	}
+	turn := BudgetReservation{ID: "turn-1", Usage: BudgetUsage{Turns: 1, InputTokens: 12000, OutputTokens: 1000, DurationMS: 500}, CreatedAt: time.Now()}
+	if err := reserveRunBudget(run, turn); err != nil {
+		t.Fatalf("reserve first turn: %v", err)
+	}
+	if err := settleRunBudgetReservation(run, turn.ID, turn.Usage); err != nil {
+		t.Fatalf("settle first turn: %v", err)
+	}
+	action := BudgetReservation{ID: "action-1", Usage: BudgetUsage{Actions: 1}, CreatedAt: time.Now()}
+	if err := reserveRunBudget(run, action); err != nil {
+		t.Fatalf("reserve action on omitted unbounded maxActions: %v", err)
+	}
+	if run.BudgetState != BudgetStateActive {
+		t.Fatalf("partial budget state = %s", run.BudgetState)
 	}
 }
 

@@ -57,7 +57,10 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	scope := Scope{Kind: "tenant", ID: "7"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+		Goal: "Do bounded work", Budget: &BudgetPolicy{
+			MaxAttempts: 3, MaxTurns: 3, MaxInputTokens: 8000, MaxOutputTokens: 2000,
+			MaxTotalTokens: 10000, MaxDurationMS: 120000,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +85,10 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	}
 	if host.request.Budget.Remaining.MaxTotalTokens != 10000 || host.request.Budget.Remaining.MaxOutputTokens != 2000 {
 		t.Fatalf("remaining budget must exclude current reservation: %#v", host.request.Budget.Remaining)
+	}
+	if host.request.Budget.Policy.MaxActions != 0 || host.request.Budget.Policy.MaxCostMicros != 0 ||
+		host.request.Budget.Remaining.MaxActions != 0 || host.request.Budget.Remaining.MaxCostMicros != 0 {
+		t.Fatalf("omitted action and cost dimensions must remain unbounded: %#v", host.request.Budget)
 	}
 	if result.Run.Status != AgentRunStatusCompleted || result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.InputTokens != 100 || result.Run.BudgetUsage.OutputTokens != 20 || len(result.Run.BudgetReservations) != 0 {
 		t.Fatalf("settled run=%#v", result.Run)

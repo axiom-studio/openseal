@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,6 +93,23 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	invalid := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", strings.TrimSuffix(createBody, "}")+`,"unknown":true}`, "")
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestAgentRunAPIRejectsExplicitZeroBudgetLimitButAcceptsOmission(t *testing.T) {
+	store := runtime.NewMemoryStore(10)
+	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	base := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"agent"},"assignedAgentId":"agent","goal":"Read one source","source":"manual","budget":%s}`
+
+	accepted := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", fmt.Sprintf(base, `{"maxAttempts":3,"maxTurns":3,"maxInputTokens":50000,"maxOutputTokens":10000,"maxTotalTokens":60000,"maxDurationMs":120000}`), "")
+	if accepted.Code != http.StatusCreated {
+		t.Fatalf("partial budget status = %d, body = %s", accepted.Code, accepted.Body.String())
+	}
+
+	rejected := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", fmt.Sprintf(base, `{"maxTurns":3,"maxActions":0}`), "")
+	if rejected.Code != http.StatusBadRequest || !strings.Contains(rejected.Body.String(), "budget maxActions must be positive when specified") {
+		t.Fatalf("explicit zero status = %d, body = %s", rejected.Code, rejected.Body.String())
 	}
 }
 
