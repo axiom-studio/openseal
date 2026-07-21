@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/executor"
+	"github.com/axiom-studio/openseal/pkg/httpaction"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -468,6 +469,11 @@ type (
 	ActivatedSkill                     = skill.ActivatedSkill
 	UnavailableSkill                   = skill.UnavailableSkill
 	SkillActivationSnapshot            = skill.ActivationSnapshot
+	HTTPActionParameter                = httpaction.Parameter
+	HTTPActionInvocation               = httpaction.Invocation
+	HTTPActionRequestPolicy            = httpaction.RequestPolicy
+	HTTPActionRequestPolicyFunc        = httpaction.RequestPolicyFunc
+	HTTPActionExecutor                 = httpaction.Executor
 	SkillCatalogStore                  = skill.CatalogStore
 	ActionStore                        = runtime.ActionStore
 	ActionCall                         = runtime.ActionCall
@@ -795,6 +801,8 @@ var (
 	SkillManagementSkill               = runtime.SkillManagementSkill
 	NewSkillBindingActionValidator     = runtime.NewSkillBindingActionValidator
 	NewSkillBindingActionDispatcher    = runtime.NewSkillBindingActionDispatcher
+	NewHTTPActionExecutor              = httpaction.NewExecutor
+	DecodeHTTPActionInvocation         = httpaction.DecodeInvocation
 )
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
@@ -1242,6 +1250,8 @@ const (
 	SkillAdapterRemoteNode      = skill.AdapterRemoteNode
 	SkillAdapterResourceStaging = skill.AdapterResourceStaging
 	SkillAdapterPreparedRuntime = skill.AdapterPreparedRuntime
+	SkillAdapterHTTPAction      = skill.AdapterHTTPAction
+	HTTPActionTransportName     = httpaction.TransportName
 
 	SkillRuntimePreparing   = skill.RuntimePreparationPreparing
 	SkillRuntimeReady       = skill.RuntimePreparationReady
