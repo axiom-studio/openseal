@@ -21,6 +21,7 @@ const (
 type SkillCapability struct {
 	ID              string               `json:"id"`
 	Version         string               `json:"version,omitempty"`
+	SourceIdentity  string               `json:"sourceIdentity,omitempty"`
 	Name            string               `json:"name,omitempty"`
 	Description     string               `json:"description,omitempty"`
 	Actions         []string             `json:"actions,omitempty"`

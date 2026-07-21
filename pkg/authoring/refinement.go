@@ -404,6 +404,9 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(skill.ID) == "" || id != skill.ID {
 			return errors.New("Skill catalog keys must match non-empty Skill ids")
 		}
+		if len(strings.TrimSpace(skill.SourceIdentity)) > 1024 {
+			return fmt.Errorf("Skill %s source identity is too long", id)
+		}
 		switch skill.Readiness {
 		case "", SkillReadinessReady, SkillReadinessNeedsBinding, SkillReadinessNeedsInstallation, SkillReadinessUnavailable:
 		default:
