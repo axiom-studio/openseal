@@ -71,6 +71,7 @@ func (s *Stager) StageResources(ctx context.Context, request kernelskill.Resourc
 	if err := kernelskill.ValidateResourceStageRequest(request); err != nil {
 		return nil, err
 	}
+	request.SourceDigest = strings.ToLower(strings.TrimSpace(request.SourceDigest))
 	resources, revision, err := normalizeResources(request.Resources)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (s *Stager) StageResources(ctx context.Context, request kernelskill.Resourc
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := verifyStage(target, request.SourceDigest, revision, resources); err == nil {
-		return &kernelskill.ResourceStage{Root: target, Revision: revision, Adapter: AdapterID}, nil
+		return stageResult(target, request.SourceDigest, revision, len(resources)), nil
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("existing resource stage is invalid: %w", err)
 	}
@@ -134,6 +135,9 @@ func (s *Stager) StageResources(ctx context.Context, request kernelskill.Resourc
 	if err := rejectSymlinks(temporary); err != nil {
 		return nil, err
 	}
+	if err := syncDirectory(temporary); err != nil {
+		return nil, fmt.Errorf("sync temporary resource stage: %w", err)
+	}
 	if err := os.Rename(temporary, target); err != nil {
 		if verifyErr := verifyStage(target, request.SourceDigest, revision, resources); verifyErr != nil {
 			return nil, fmt.Errorf("publish resource stage: %w", err)
@@ -141,8 +145,18 @@ func (s *Stager) StageResources(ctx context.Context, request kernelskill.Resourc
 		_ = os.RemoveAll(temporary)
 	} else {
 		committed = true
+		if err := syncDirectory(s.root); err != nil {
+			return nil, fmt.Errorf("sync published resource stage: %w", err)
+		}
 	}
-	return &kernelskill.ResourceStage{Root: target, Revision: revision, Adapter: AdapterID}, nil
+	return stageResult(target, request.SourceDigest, revision, len(resources)), nil
+}
+
+func stageResult(root, sourceDigest, revision string, resourceCount int) *kernelskill.ResourceStage {
+	return &kernelskill.ResourceStage{
+		Root: root, Revision: revision, Adapter: AdapterID,
+		SourceDigest: sourceDigest, ResourceCount: resourceCount,
+	}
 }
 
 func normalizeResources(input []capability.Resource) ([]capability.Resource, string, error) {
@@ -162,6 +176,11 @@ func normalizeResources(input []capability.Resource) ([]capability.Resource, str
 		}
 		seen[clean] = true
 		resources[index].Path = clean
+		switch resources[index].Kind {
+		case capability.ResourceKindFile, capability.ResourceKindScript, capability.ResourceKindReference, capability.ResourceKindAsset:
+		default:
+			return nil, "", fmt.Errorf("resource %q has unsupported kind %q", clean, resources[index].Kind)
+		}
 		resources[index].Digest = strings.ToLower(strings.TrimSpace(resources[index].Digest))
 		decodedDigest, digestErr := hex.DecodeString(resources[index].Digest)
 		if digestErr != nil || len(decodedDigest) != sha256.Size {
@@ -207,6 +226,17 @@ func verifyStage(root, sourceDigest, revision string, resources []capability.Res
 	if err := rejectSymlinks(root); err != nil {
 		return err
 	}
+	expected := map[string]os.FileMode{".openseal-stage.json": 0o400}
+	for _, resource := range resources {
+		mode := os.FileMode(0o400)
+		if resource.Kind == capability.ResourceKindScript {
+			mode = 0o500
+		}
+		expected[filepath.FromSlash(resource.Path)] = mode
+	}
+	if err := verifyStageShape(root, expected); err != nil {
+		return err
+	}
 	for _, resource := range resources {
 		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(resource.Path)))
 		if err != nil {
@@ -215,6 +245,50 @@ func verifyStage(root, sourceDigest, revision string, resources []capability.Res
 		if err := verifyContent(resource, content); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func verifyStageShape(root string, expected map[string]os.FileMode) error {
+	allowedDirectories := map[string]bool{".": true}
+	for relative := range expected {
+		for directory := filepath.Dir(relative); directory != "."; directory = filepath.Dir(directory) {
+			allowedDirectories[directory] = true
+		}
+	}
+	seen := make(map[string]bool, len(expected))
+	err := filepath.Walk(root, func(current string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return errors.New("resource stage entry escaped its root")
+		}
+		if info.IsDir() {
+			if !allowedDirectories[relative] {
+				return fmt.Errorf("resource stage contains unexpected directory %q", filepath.ToSlash(relative))
+			}
+			if info.Mode().Perm() != 0o700 {
+				return fmt.Errorf("resource stage directory %q has unsafe permissions", filepath.ToSlash(relative))
+			}
+			return nil
+		}
+		mode, ok := expected[relative]
+		if !ok || !info.Mode().IsRegular() {
+			return fmt.Errorf("resource stage contains unexpected entry %q", filepath.ToSlash(relative))
+		}
+		if info.Mode().Perm() != mode {
+			return fmt.Errorf("resource stage entry %q has unsafe permissions", filepath.ToSlash(relative))
+		}
+		seen[relative] = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(seen) != len(expected) {
+		return errors.New("resource stage is missing a declared entry")
 	}
 	return nil
 }
@@ -247,6 +321,19 @@ func writeFile(name string, content []byte, mode os.FileMode) error {
 		return fmt.Errorf("close staged resource: %w", closeErr)
 	}
 	return nil
+}
+
+func syncDirectory(name string) error {
+	directory, err := os.Open(name)
+	if err != nil {
+		return err
+	}
+	err = directory.Sync()
+	closeErr := directory.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 func withinRoot(root, candidate string) bool {

@@ -25,9 +25,11 @@ type ResourceStageRequest struct {
 // ResourceStage is an immutable, non-secret description of materialized skill
 // resources. Root is trusted only after activation validates it for the host OS.
 type ResourceStage struct {
-	Root     string `json:"root"`
-	Revision string `json:"revision"`
-	Adapter  string `json:"adapter"`
+	Root          string `json:"root"`
+	Revision      string `json:"revision"`
+	Adapter       string `json:"adapter"`
+	SourceDigest  string `json:"sourceDigest"`
+	ResourceCount int    `json:"resourceCount"`
 }
 
 // ResourceStager is implemented by local, container, remote-node, or other

@@ -178,8 +178,10 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 				SkillID: definition.ID, SkillVersion: definition.Version,
 				SourceDigest: definitionSourceDigest(definition), Resources: append([]capability.Resource(nil), definition.Resources...),
 			})
+			expectedSourceDigest := definitionSourceDigest(definition)
 			if stageErr != nil || stage == nil || !validResourceRoot(host.OperatingSystem, strings.TrimSpace(stage.Root)) ||
-				strings.TrimSpace(stage.Revision) == "" || strings.TrimSpace(stage.Adapter) == "" {
+				strings.TrimSpace(stage.Revision) == "" || strings.TrimSpace(stage.Adapter) == "" ||
+				!strings.EqualFold(strings.TrimSpace(stage.SourceDigest), expectedSourceDigest) || stage.ResourceCount != len(definition.Resources) {
 				reasons = append(reasons, AvailabilityReason{Code: "resource_staging_failed", Requirement: definition.ID, Message: "declared skill resources could not be materialized by the configured host adapter"})
 			} else {
 				resourceRoot = strings.TrimSpace(stage.Root)

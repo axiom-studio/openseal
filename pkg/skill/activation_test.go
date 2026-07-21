@@ -170,7 +170,10 @@ func TestActivationStagesDeclaredResourcesAndPinsStageIdentity(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stager := &activationResourceStager{stage: &ResourceStage{Root: "/sandbox/staged", Revision: "resource-7", Adapter: "sandbox/v1"}}
+	stager := &activationResourceStager{stage: &ResourceStage{
+		Root: "/sandbox/staged", Revision: "resource-7", Adapter: "sandbox/v1",
+		SourceDigest: compilation.SourceDigest, ResourceCount: len(compilation.Definition.Resources),
+	}}
 	host := HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager, Adapters: map[string]AdapterCapability{
 		AdapterResourceStaging: {State: AdapterStateAvailable, Version: "sandbox/v1"},
 	}}
@@ -200,6 +203,13 @@ func TestActivationStagesDeclaredResourcesAndPinsStageIdentity(t *testing.T) {
 		t.Fatalf("resource revision did not refresh activation identity: %#v, %v", refreshed, err)
 	}
 
+	stager.stage.SourceDigest = strings.Repeat("f", 64)
+	mismatched, err := catalog.Activate(context.Background(), scope, "agent", host)
+	if err != nil || len(mismatched.Skills) != 0 || len(mismatched.Unavailable) != 1 || mismatched.Unavailable[0].Reasons[0].Code != "resource_staging_failed" {
+		t.Fatalf("mismatched staging receipt was accepted: %#v, %v", mismatched, err)
+	}
+	stager.stage.SourceDigest = compilation.SourceDigest
+
 	failed, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{
 		OperatingSystem: "linux", ResourceStager: &activationResourceStager{err: errors.New("provider included sensitive detail")},
 		Adapters: map[string]AdapterCapability{AdapterResourceStaging: {State: AdapterStateAvailable}},
@@ -225,7 +235,10 @@ func TestActivationRequiresTruthfulAdapterStates(t *testing.T) {
 	if err := catalog.Bind(context.Background(), &Binding{ID: "resource", Scope: scope, DeploymentID: "agent", SkillID: "resource", SkillVersion: "1", EnablePrompt: true, MaximumRisk: RiskLevelRead, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
-	stager := &activationResourceStager{stage: &ResourceStage{Root: "/sandbox/resource", Revision: "one", Adapter: "sandbox/v1"}}
+	stager := &activationResourceStager{stage: &ResourceStage{
+		Root: "/sandbox/resource", Revision: "one", Adapter: "sandbox/v1",
+		SourceDigest: strings.Repeat("b", 64), ResourceCount: 1,
+	}}
 	snapshot, err := catalog.Activate(context.Background(), scope, "agent", HostCapabilityState{OperatingSystem: "linux", ResourceStager: stager, Adapters: map[string]AdapterCapability{
 		AdapterResourceStaging: {State: AdapterStateUnavailable, Reason: "artifact transport is not configured"},
 	}})

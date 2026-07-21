@@ -642,13 +642,13 @@ func compileResources(files []File) []capability.Resource {
 			continue
 		}
 		digest := sha256.Sum256(file.Content)
-		kind := "resource"
+		kind := capability.ResourceKindFile
 		if strings.HasPrefix(path, "scripts/") {
-			kind = "script"
+			kind = capability.ResourceKindScript
 		} else if strings.HasPrefix(path, "references/") {
-			kind = "reference"
+			kind = capability.ResourceKindReference
 		} else if strings.HasPrefix(path, "assets/") {
-			kind = "asset"
+			kind = capability.ResourceKindAsset
 		}
 		result = append(result, capability.Resource{Path: path, Kind: kind, MediaType: mime.TypeByExtension(filepath.Ext(path)), Digest: hex.EncodeToString(digest[:]), Size: int64(len(file.Content))})
 	}
