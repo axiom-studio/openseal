@@ -370,7 +370,7 @@ func (m *Model) renderPanelTabs() string {
 		}
 		tabs = append(tabs, label)
 	}
-	if m.clawHubCapability.Available || m.skillActionCapability.Available {
+	if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
 		label := "s Skills"
 		if m.section == sectionSkills {
 			label = selectedStyle.Render(label)
@@ -992,6 +992,17 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 		ownerLabel = "Team"
 	}
 	lines := []string{title, "", mutedStyle.Render(ownerLabel + " authority")}
+	if m.sourcePolicyCapability.Available {
+		lines = append(lines, mutedStyle.Render("Governed source access"))
+		if len(m.sourcePolicies) == 0 {
+			lines = append(lines, mutedStyle.Render("No active or revoked source policies are registered in this scope."))
+		} else {
+			for _, lifecycle := range m.sourcePolicies {
+				lines = append(lines, fmt.Sprintf("• %-7s %s@%s · revision %d", lifecycle.State, lifecycle.PolicyID, lifecycle.ActiveVersion, lifecycle.Revision))
+			}
+		}
+		lines = append(lines, "", mutedStyle.Render(ownerLabel+" Skill authority"))
+	}
 	if !m.skillBindingCapability.Available {
 		lines = append(lines, mutedStyle.Render("Binding management is not advertised for this owner."))
 	} else if len(m.skillBindings) == 0 {
