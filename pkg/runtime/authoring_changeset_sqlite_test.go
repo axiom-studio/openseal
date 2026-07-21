@@ -225,6 +225,7 @@ func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	catalog := skill.NewCatalogWithStore(store)
 	if err := catalog.Register(context.Background(), &skill.Definition{
 		ID: "research", Version: "1.0.0", Name: "Research", Prompt: &skill.PromptModule{Instructions: "Preserve cited evidence."},
+		BindingConfigSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"sourceId"}, "properties": map[string]interface{}{"sourceId": map[string]interface{}{"type": "integer", "minimum": 1}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,8 +233,9 @@ func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	value.Result.Candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "research", PromptRequired: true}}
 	value.Result.Candidate.Agents[0].Authority.AllowedSkillIDs = []string{"research"}
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
-		"research": {ID: "research", Version: "1.0.0", PromptAvailable: true},
+		"research": {ID: "research", Version: "1.0.0", PromptAvailable: true, BindingConfigSchema: map[string]interface{}{"type": "object"}},
 	}}
+	value.Placement.BindingConfigs = map[string]map[string]map[string]interface{}{"agent": {"research": {"sourceId": 17}}}
 	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
 		t.Fatal(err)
 	}
@@ -248,6 +250,10 @@ func TestSQLiteWorkforceApplyMaterializesExecutableSkillBindings(t *testing.T) {
 	prompts, err := catalog.ListModelPrompts(context.Background(), value.Scope, "agent-live")
 	if err != nil || len(prompts) != 1 || prompts[0].SkillID != "research" {
 		t.Fatalf("prompts=%#v error=%v", prompts, err)
+	}
+	bindings, err := store.ListSkillBindings(context.Background(), value.Scope, "agent-live")
+	if err != nil || len(bindings) != 1 || bindings[0].Config["sourceId"] != float64(17) {
+		t.Fatalf("binding config=%#v error=%v", bindings, err)
 	}
 	found := false
 	for _, resource := range result.ApplyReceipt.Resources {

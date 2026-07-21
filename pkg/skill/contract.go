@@ -791,7 +791,11 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 		if err != nil {
 			return fmt.Errorf("compile binding config schema: %w", err)
 		}
-		if err := schema.validate(binding.Config); err != nil {
+		config := binding.Config
+		if config == nil {
+			config = map[string]interface{}{}
+		}
+		if err := schema.validate(config); err != nil {
 			return fmt.Errorf("binding config is invalid: %w", err)
 		}
 	}

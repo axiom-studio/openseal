@@ -225,7 +225,8 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		bindings = append(bindings, &capability.Binding{
 			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
 			SkillID: identity.ID, SkillVersion: identity.Version, SourceIdentity: identity.SourceIdentity, AllowedActions: allowed,
-			Disabled: !activate, EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
+			Disabled: !activate, EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials,
+			Config: cloneMap(value.Placement.BindingConfigs[definition.ID][requirement.SkillID]), Revision: 1,
 		})
 	}
 	return bindings, nil

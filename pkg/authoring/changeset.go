@@ -108,7 +108,11 @@ type ChangeSetPlacement struct {
 	AgentExpectedRevisions     map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
 	InitiativeExpectedRevision int64                                                `json:"initiativeExpectedRevision,omitempty"`
 	CredentialReferences       map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
-	SkillSourceIdentities      map[string]map[string]string                         `json:"skillSourceIdentities,omitempty"`
+	// BindingConfigs selects reviewed non-secret Skill configuration by Agent
+	// definition and catalog Skill id. Models cannot place values here; hosts
+	// materialize and validate this authority before apply.
+	BindingConfigs        map[string]map[string]map[string]interface{} `json:"bindingConfigs,omitempty"`
+	SkillSourceIdentities map[string]map[string]string                 `json:"skillSourceIdentities,omitempty"`
 	// SkillSourceVersions pins the immutable compiled version selected by the
 	// host for each source-qualified Skill. The declared catalog version remains
 	// model-visible; this version is deterministic placement and audit metadata.
@@ -1111,6 +1115,15 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		credentials[canonicalIdentity(scope, id)] = value
 	}
 	placement.CredentialReferences = credentials
+	bindingConfigs := map[string]map[string]map[string]interface{}{}
+	for id, values := range placement.BindingConfigs {
+		qualified := canonicalIdentity(scope, id)
+		bindingConfigs[qualified] = make(map[string]map[string]interface{}, len(values))
+		for skillID, config := range values {
+			bindingConfigs[qualified][strings.TrimSpace(skillID)] = cloneAuthoringMap(config)
+		}
+	}
+	placement.BindingConfigs = bindingConfigs
 	skillSources := map[string]map[string]string{}
 	for id, values := range placement.SkillSourceIdentities {
 		qualified := canonicalIdentity(scope, id)
@@ -1246,6 +1259,19 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		for kind, reference := range inherited {
 			if _, exists := placement.CredentialReferences[definitionID][kind]; !exists {
 				placement.CredentialReferences[definitionID][kind] = reference
+			}
+		}
+	}
+	if placement.BindingConfigs == nil {
+		placement.BindingConfigs = map[string]map[string]map[string]interface{}{}
+	}
+	for definitionID, inherited := range parentPlacement.BindingConfigs {
+		if placement.BindingConfigs[definitionID] == nil {
+			placement.BindingConfigs[definitionID] = map[string]map[string]interface{}{}
+		}
+		for skillID, config := range inherited {
+			if _, exists := placement.BindingConfigs[definitionID][skillID]; !exists {
+				placement.BindingConfigs[definitionID][skillID] = cloneAuthoringMap(config)
 			}
 		}
 	}
@@ -1673,6 +1699,16 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 			copy.CredentialReferences[agentID] = nested
 		}
 	}
+	if value.BindingConfigs != nil {
+		copy.BindingConfigs = make(map[string]map[string]map[string]interface{}, len(value.BindingConfigs))
+		for agentID, configs := range value.BindingConfigs {
+			nested := make(map[string]map[string]interface{}, len(configs))
+			for skillID, config := range configs {
+				nested[skillID] = cloneAuthoringMap(config)
+			}
+			copy.BindingConfigs[agentID] = nested
+		}
+	}
 	if value.SkillSourceIdentities != nil {
 		copy.SkillSourceIdentities = make(map[string]map[string]string, len(value.SkillSourceIdentities))
 		for agentID, identities := range value.SkillSourceIdentities {
@@ -1710,6 +1746,16 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 		}
 	}
 	return copy
+}
+
+func cloneAuthoringMap(value map[string]interface{}) map[string]interface{} {
+	if value == nil {
+		return nil
+	}
+	encoded, _ := json.Marshal(value)
+	var result map[string]interface{}
+	_ = json.Unmarshal(encoded, &result)
+	return result
 }
 
 func cloneCapabilityCatalog(value CapabilityCatalog) CapabilityCatalog {

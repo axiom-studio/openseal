@@ -19,18 +19,19 @@ const (
 )
 
 type SkillCapability struct {
-	ID              string               `json:"id"`
-	Version         string               `json:"version,omitempty"`
-	SourceIdentity  string               `json:"sourceIdentity,omitempty"`
-	Name            string               `json:"name,omitempty"`
-	Description     string               `json:"description,omitempty"`
-	Actions         []string             `json:"actions,omitempty"`
-	CredentialKinds []string             `json:"credentialKinds,omitempty"`
-	Credentials     []SkillCredential    `json:"credentials,omitempty"`
-	PromptAvailable bool                 `json:"promptAvailable,omitempty"`
-	MaximumRisk     capability.RiskLevel `json:"maximumRisk,omitempty"`
-	Readiness       SkillReadiness       `json:"readiness,omitempty"`
-	Compatibility   []SkillCompatibility `json:"compatibility,omitempty"`
+	ID                  string                 `json:"id"`
+	Version             string                 `json:"version,omitempty"`
+	SourceIdentity      string                 `json:"sourceIdentity,omitempty"`
+	Name                string                 `json:"name,omitempty"`
+	Description         string                 `json:"description,omitempty"`
+	Actions             []string               `json:"actions,omitempty"`
+	CredentialKinds     []string               `json:"credentialKinds,omitempty"`
+	Credentials         []SkillCredential      `json:"credentials,omitempty"`
+	BindingConfigSchema map[string]interface{} `json:"bindingConfigSchema,omitempty"`
+	PromptAvailable     bool                   `json:"promptAvailable,omitempty"`
+	MaximumRisk         capability.RiskLevel   `json:"maximumRisk,omitempty"`
+	Readiness           SkillReadiness         `json:"readiness,omitempty"`
+	Compatibility       []SkillCompatibility   `json:"compatibility,omitempty"`
 }
 
 type SkillReadiness string
