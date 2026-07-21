@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -43,6 +45,9 @@ type OutreachPolicy struct {
 type PolicySource struct {
 	Host         string   `json:"host"`
 	PathPrefixes []string `json:"pathPrefixes,omitempty"`
+	// Methods is the exact read-method authority for this source. An omitted
+	// value preserves the original portable contract and means GET only.
+	Methods []string `json:"methods,omitempty"`
 }
 
 type PolicyDecision struct {
@@ -50,6 +55,7 @@ type PolicyDecision struct {
 	PolicyVersion string `json:"policyVersion"`
 	SourceHost    string `json:"sourceHost"`
 	PathPrefix    string `json:"pathPrefix"`
+	Method        string `json:"method"`
 	MaximumItems  int    `json:"maximumItems"`
 }
 
@@ -88,10 +94,24 @@ func (d OutreachPolicyDecision) Authorize(rawURL string, bodyBytes int, approval
 // Authorize constrains host execution and redirects to the exact source scope
 // selected by the control-plane policy decision.
 func (d PolicyDecision) Authorize(rawURL string, requestedItems int) error {
+	return d.AuthorizeRequest(rawURL, http.MethodGet, requestedItems)
+}
+
+// AuthorizeRequest rechecks a dispatch against the exact method and source
+// facts selected by the policy service. Hosts must call it for every redirect.
+func (d PolicyDecision) AuthorizeRequest(rawURL, method string, requestedItems int) error {
+	decisionMethod := strings.ToUpper(strings.TrimSpace(d.Method))
+	if decisionMethod == "" {
+		decisionMethod = http.MethodGet
+	}
 	if strings.TrimSpace(d.PolicyID) == "" || strings.TrimSpace(d.PolicyVersion) == "" ||
 		validatePolicyHost(strings.ToLower(strings.TrimSpace(d.SourceHost))) != nil ||
-		validatePathPrefix(d.PathPrefix) != nil || d.MaximumItems < 1 || d.MaximumItems > MaximumItems {
+		validatePathPrefix(d.PathPrefix) != nil || !validReadMethod(decisionMethod) ||
+		d.MaximumItems < 1 || d.MaximumItems > MaximumItems {
 		return errors.New("source policy decision is invalid")
+	}
+	if strings.ToUpper(strings.TrimSpace(method)) != decisionMethod {
+		return errors.New("source request method is outside the authorized policy decision")
 	}
 	target, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || target.Scheme != "https" || target.User != nil || target.Fragment != "" ||
@@ -121,6 +141,9 @@ func (p Policy) Validate() error {
 	if p.RetentionDays < 0 || p.RetentionDays > 3650 {
 		return errors.New("source policy retentionDays must be between 0 and 3650")
 	}
+	if len(p.ApprovalPolicy) > 256 {
+		return errors.New("source policy approvalPolicy must not exceed 256 characters")
+	}
 	if p.Outreach != nil && p.Outreach.Enabled {
 		if strings.TrimSpace(p.Outreach.ApprovalPolicy) == "" || len(p.Outreach.ApprovalPolicy) > 256 {
 			return errors.New("outreach policy requires an approvalPolicy")
@@ -128,6 +151,8 @@ func (p Policy) Validate() error {
 		if p.Outreach.MaximumBytes < 1 || p.Outreach.MaximumBytes > 20000 {
 			return errors.New("outreach policy maximumBytes must be between 1 and 20000")
 		}
+	} else if p.Outreach != nil && (strings.TrimSpace(p.Outreach.ApprovalPolicy) != "" || p.Outreach.MaximumBytes != 0) {
+		return errors.New("disabled outreach policy cannot retain approval or byte authority")
 	}
 	seen := make(map[string]bool)
 	for _, source := range p.Sources {
@@ -139,10 +164,29 @@ func (p Policy) Validate() error {
 			return fmt.Errorf("source policy host %q is duplicated", host)
 		}
 		seen[host] = true
+		if len(source.PathPrefixes) > 100 {
+			return fmt.Errorf("source policy host %q has more than 100 path prefixes", host)
+		}
+		seenPrefixes := make(map[string]bool, len(source.PathPrefixes))
 		for _, prefix := range source.PathPrefixes {
 			if err := validatePathPrefix(prefix); err != nil {
 				return fmt.Errorf("source policy host %q: %w", host, err)
 			}
+			if seenPrefixes[prefix] {
+				return fmt.Errorf("source policy host %q path prefix %q is duplicated", host, prefix)
+			}
+			seenPrefixes[prefix] = true
+		}
+		seenMethods := make(map[string]bool, len(source.Methods))
+		for _, method := range source.Methods {
+			method = strings.ToUpper(strings.TrimSpace(method))
+			if !validReadMethod(method) {
+				return fmt.Errorf("source policy host %q method must be GET or HEAD", host)
+			}
+			if seenMethods[method] {
+				return fmt.Errorf("source policy host %q method %q is duplicated", host, method)
+			}
+			seenMethods[method] = true
 		}
 	}
 	return nil
@@ -184,6 +228,12 @@ func (p Policy) AuthorizeOutreach(rawURL string, bodyBytes int, approvalPolicy s
 // Authorize returns the exact policy facts a host must carry through dispatch
 // and redirect checks. It never performs network I/O or DNS resolution.
 func (p Policy) Authorize(rawURL string, requestedItems int) (*PolicyDecision, error) {
+	return p.AuthorizeRequest(rawURL, http.MethodGet, requestedItems)
+}
+
+// AuthorizeRequest selects an exact host, path, method, and item bound. Empty
+// source methods retain the v1 default of GET only.
+func (p Policy) AuthorizeRequest(rawURL, method string, requestedItems int) (*PolicyDecision, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
@@ -201,6 +251,10 @@ func (p Policy) Authorize(rawURL string, requestedItems int) (*PolicyDecision, e
 		return nil, fmt.Errorf("source request exceeds policy maximumItems %d", p.MaximumItems)
 	}
 	host := strings.ToLower(target.Hostname())
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if !validReadMethod(method) {
+		return nil, errors.New("source request method must be GET or HEAD")
+	}
 	for _, candidate := range p.Sources {
 		if !policyHostMatches(strings.ToLower(strings.TrimSpace(candidate.Host)), host) {
 			continue
@@ -209,13 +263,16 @@ func (p Policy) Authorize(rawURL string, requestedItems int) (*PolicyDecision, e
 		if !ok {
 			continue
 		}
-		return &PolicyDecision{PolicyID: p.ID, PolicyVersion: p.Version, SourceHost: host, PathPrefix: prefix, MaximumItems: p.MaximumItems}, nil
+		if !methodAllowed(candidate.Methods, method) {
+			continue
+		}
+		return &PolicyDecision{PolicyID: p.ID, PolicyVersion: p.Version, SourceHost: host, PathPrefix: prefix, Method: method, MaximumItems: p.MaximumItems}, nil
 	}
 	return nil, errors.New("source URL is not allowed by policy")
 }
 
 func validatePolicyHost(host string) error {
-	if host == "" || strings.ContainsAny(host, "/:@?#") || strings.HasSuffix(host, ".") {
+	if host == "" || len(host) > 253 || strings.ContainsAny(host, "/:@?#") || strings.HasSuffix(host, ".") {
 		return errors.New("source policy host is invalid")
 	}
 	name := host
@@ -229,10 +286,27 @@ func validatePolicyHost(host string) error {
 }
 
 func validatePathPrefix(prefix string) error {
-	if prefix == "" || !strings.HasPrefix(prefix, "/") || strings.ContainsAny(prefix, "?#") || strings.Contains(prefix, "..") {
+	if prefix == "" || len(prefix) > 1024 || !strings.HasPrefix(prefix, "/") || strings.ContainsAny(prefix, "?#%\\") ||
+		strings.Contains(prefix, "//") || (prefix != "/" && (path.Clean(prefix) != prefix || strings.HasSuffix(prefix, "/"))) {
 		return errors.New("source policy path prefix must be an absolute normalized path")
 	}
 	return nil
+}
+
+func validReadMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead
+}
+
+func methodAllowed(methods []string, requested string) bool {
+	if len(methods) == 0 {
+		return requested == http.MethodGet
+	}
+	for _, method := range methods {
+		if strings.EqualFold(strings.TrimSpace(method), requested) {
+			return true
+		}
+	}
+	return false
 }
 
 func policyHostMatches(pattern, host string) bool {
