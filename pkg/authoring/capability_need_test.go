@@ -174,3 +174,78 @@ func TestCapabilityNeedReplacesMalformedProviderSkillQuestionBeforeValidation(t 
 		t.Fatalf("server-owned replacement = %#v", result.UnresolvedQuestions)
 	}
 }
+
+func TestCompilerSynthesizesSourceScopeAfterSkillAndCredentialPrerequisites(t *testing.T) {
+	catalog := capabilityNeedCatalog(false, "openseal.source", "reddit-post-search")
+	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
+		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
+		Minimum: 1, Maximum: 20, Priority: 950, RequireSourceMonitor: true,
+	}
+	credential := RefinementQuestion{
+		ID: "reddit-credential", Category: RefinementCategoryCredential,
+		Prompt: "Which Reddit credential should be used?", WhyNeeded: "API access requires an authorized credential.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference},
+		Priority: 1000, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}},
+	}
+	payload, err := json.Marshal(GenerationResponse{Candidate: capabilityNeedCandidate(), UnresolvedQuestions: []RefinementQuestion{credential}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor Reddit", Catalog: catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.UnresolvedQuestions) != 3 {
+		t.Fatalf("questions = %#v", result.UnresolvedQuestions)
+	}
+	choice, credential, scope := result.UnresolvedQuestions[0], result.UnresolvedQuestions[1], result.UnresolvedQuestions[2]
+	if next := (ChangeSetRefinement{Questions: result.UnresolvedQuestions}).NextQuestion(); next == nil || next.ID != choice.ID {
+		t.Fatalf("first question = %#v", next)
+	}
+	if len(credential.DependsOn) != 1 || credential.DependsOn[0].QuestionID != choice.ID {
+		t.Fatalf("credential dependencies = %#v", credential.DependsOn)
+	}
+	if scope.ID != CapabilitySourceScopeQuestionID("reddit-access") || scope.Category != RefinementCategoryScope ||
+		scope.Answer.Kind != RefinementAnswerStringList || scope.Answer.Minimum != 1 || scope.Answer.Maximum != 20 ||
+		len(scope.DependsOn) != 2 || scope.DependsOn[0].QuestionID != choice.ID || scope.DependsOn[1].QuestionID != credential.ID {
+		t.Fatalf("deterministic source scope = %#v", scope)
+	}
+}
+
+func TestAnsweredSourceScopeCannotProduceCandidateWithoutMonitor(t *testing.T) {
+	catalog := capabilityNeedCatalog(false, "openseal.source")
+	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
+		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
+		Minimum: 1, Maximum: 20, Priority: 950, RequireSourceMonitor: true,
+	}
+	payload, err := json.Marshal(GenerationResponse{Candidate: capabilityNeedCandidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	request := GenerateRequest{
+		Mode: ModeAmend, Prompt: "Monitor Reddit", Existing: ptrWorkforceCandidate(capabilityNeedCandidate()), Catalog: catalog,
+		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"),
+			Value:      RefinementProviderAnswerValue{Items: []string{"openclaw", "selfhosted"}},
+			Source:     RefinementAnswerSourceUser,
+		}}},
+	}
+	result, err := compiler.Compile(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.UnresolvedQuestions) != 0 {
+		t.Fatalf("answered scope was asked again: %#v", result.UnresolvedQuestions)
+	}
+	found := false
+	for _, issue := range result.Validation {
+		found = found || issue.Code == "source_scope_not_materialized" && issue.Path == "initiative.sourceMonitors"
+	}
+	if !found || result.Valid {
+		t.Fatalf("missing source monitor did not fail closed: valid=%v validation=%#v", result.Valid, result.Validation)
+	}
+}
+
+func ptrWorkforceCandidate(value WorkforceCandidate) *WorkforceCandidate { return &value }
