@@ -991,10 +991,15 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 
 func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
 	definition := &kernelteam.Definition{
 		ID: "gtm-research", Version: "3", DisplayName: "GTM Research", Purpose: "Find evidence, synthesize it, and coordinate approved outreach.",
 		Coordination:       kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "monitor", Title: "Monitor source communities"}, {ID: "report", Title: "Deliver cited report"}},
+		Roles: []kernelteam.RoleSlot{{ID: "research", DisplayName: "Researcher", Purpose: "Find evidence", SkillGrants: []kernelteam.RoleSkillGrant{{
+			SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing", RuntimeIdentity: &identity,
+			AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
+		}}}},
 	}
 	deployment := &kernelteam.Deployment{
 		ID: "gtm-live", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
@@ -1012,7 +1017,7 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 		t.Fatalf("team projection section=%v selected=%q", model.section, model.selectedTeamDeployment)
 	}
 	view := model.View()
-	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "dynamic coordination", "Researcher · research · Agent agent-research", "2 template(s)", "p pause/resume"} {
+	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "dynamic coordination", "Researcher · research · Agent agent-research", "Role authority", "clawhub-listing → summarize@1.0.0", "exact source variant", "2 template(s)", "p pause/resume"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Team view missing %q:\n%s", expected, view)
 		}
