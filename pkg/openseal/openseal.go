@@ -592,9 +592,32 @@ type (
 	ClawHubInstalledState              = clawhub.InstalledState
 )
 
+// Credential lease aliases are kept in their own group so extending the
+// security protocol does not reformat the facade's much larger alias catalog.
+type (
+	ActionCredentialLeaseIssuer            = runtime.ActionCredentialLeaseIssuer
+	ActionCredentialLeaseIssuerFunc        = runtime.ActionCredentialLeaseIssuerFunc
+	ActionCredentialLeaseIssueRequest      = runtime.ActionCredentialLeaseIssueRequest
+	ActionLeaseIdentity                    = runtime.ActionLeaseIdentity
+	ActionCredentialFieldReference         = runtime.ActionCredentialFieldReference
+	ActionCredentialLease                  = runtime.ActionCredentialLease
+	ActionCredentialLeaseSignature         = runtime.ActionCredentialLeaseSignature
+	SignedActionCredentialLease            = runtime.SignedActionCredentialLease
+	CreateActionCredentialLeaseRequest     = runtime.CreateActionCredentialLeaseRequest
+	ActionCredentialLeaseSigner            = runtime.ActionCredentialLeaseSigner
+	ActionCredentialLeaseSignatureVerifier = runtime.ActionCredentialLeaseSignatureVerifier
+	ActionCredentialLeaseAuthority         = runtime.ActionCredentialLeaseAuthority
+	ActionCredentialLeaseAuthorityFunc     = runtime.ActionCredentialLeaseAuthorityFunc
+	ActionCredentialLeaseReplayGuard       = runtime.ActionCredentialLeaseReplayGuard
+	ActionCredentialLeaseValidationRequest = runtime.ActionCredentialLeaseValidationRequest
+	ActionCredentialLeaseValidator         = runtime.ActionCredentialLeaseValidator
+)
+
 const (
 	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
 	ClawHubCompilationPreviewAPIVersion = clawhub.CompilationPreviewAPIVersion
+	ActionCredentialLeaseVersion        = runtime.ActionCredentialLeaseVersion
+	MaximumActionCredentialLeaseTTL     = runtime.MaximumActionCredentialLeaseTTL
 )
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
@@ -889,6 +912,9 @@ var (
 	ErrApprovalNotFound                    = runtime.ErrApprovalNotFound
 	ErrApprovalResolved                    = runtime.ErrApprovalResolved
 	ErrActionIdempotencyConflict           = runtime.ErrIdempotencyConflict
+	ErrActionCredentialLeaseInvalid        = runtime.ErrActionCredentialLeaseInvalid
+	ErrActionCredentialLeaseExpired        = runtime.ErrActionCredentialLeaseExpired
+	ErrActionCredentialLeaseMismatch       = runtime.ErrActionCredentialLeaseMismatch
 	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
 	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
 	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
@@ -925,6 +951,26 @@ var (
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
 	return runtime.NewToolActionDispatcher(invoker)
+}
+
+func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*ActionCredentialLease, error) {
+	return runtime.NewActionCredentialLease(request)
+}
+
+func SignActionCredentialLease(ctx context.Context, lease ActionCredentialLease, signer ActionCredentialLeaseSigner) (*SignedActionCredentialLease, error) {
+	return runtime.SignActionCredentialLease(ctx, lease, signer)
+}
+
+func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, authority ActionCredentialLeaseAuthority, replay ActionCredentialLeaseReplayGuard) (*ActionCredentialLeaseValidator, error) {
+	return runtime.NewActionCredentialLeaseValidator(verifier, authority, replay)
+}
+
+func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, credentialFields map[string][]string) error {
+	return runtime.MatchActionCredentialLease(lease, call, run, credentialFields)
+}
+
+func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease, call *ActionCall, run *AgentRun) error {
+	return runtime.MatchActionCredentialLeaseReferences(envelope, call, run)
 }
 
 func ValidateCredentialFreeContext(value interface{}) error {
@@ -1490,6 +1536,7 @@ type ConversationRunConfig struct {
 type actionWorkerSpec struct {
 	config      runtime.ActionWorkerConfig
 	credentials runtime.CredentialResolver
+	leaseIssuer runtime.ActionCredentialLeaseIssuer
 	dispatcher  runtime.ActionDispatcher
 }
 
@@ -1497,6 +1544,7 @@ type actionWorkerSupervisorSpec struct {
 	config      runtime.DynamicActionWorkerConfig
 	source      runtime.WorkerScopeSource
 	credentials runtime.CredentialResolver
+	leaseIssuer runtime.ActionCredentialLeaseIssuer
 	dispatcher  runtime.ActionDispatcher
 }
 
@@ -2191,6 +2239,18 @@ func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.Cr
 	}
 }
 
+// WithActionCredentialLeaseWorkers dispatches credentialed actions with a
+// signed opaque lease instead of resolving plaintext values inside OpenSeal.
+func WithActionCredentialLeaseWorkers(config runtime.ActionWorkerConfig, issuer runtime.ActionCredentialLeaseIssuer, dispatcher runtime.ActionDispatcher) Option {
+	return func(e *Engine) error {
+		if issuer == nil || dispatcher == nil {
+			return fmt.Errorf("action credential lease issuer and dispatcher are required")
+		}
+		e.actionPoolSpecs = append(e.actionPoolSpecs, actionWorkerSpec{config: config, leaseIssuer: issuer, dispatcher: dispatcher})
+		return nil
+	}
+}
+
 // WithDynamicActionWorkers reconciles one isolated worker pool per active
 // scope supplied by the embedding control plane. The option may be repeated
 // for independent scope sources or transport hosts.
@@ -2204,6 +2264,21 @@ func WithDynamicActionWorkers(config runtime.DynamicActionWorkerConfig, source r
 		}
 		e.actionSupervisorSpecs = append(e.actionSupervisorSpecs, actionWorkerSupervisorSpec{
 			config: config, source: source, credentials: credentials, dispatcher: dispatcher,
+		})
+		return nil
+	}
+}
+
+// WithDynamicActionCredentialLeaseWorkers is the multi-tenant counterpart of
+// WithActionCredentialLeaseWorkers. Each scope keeps independent durable
+// action claims while the issuer derives one signed lease per execution.
+func WithDynamicActionCredentialLeaseWorkers(config runtime.DynamicActionWorkerConfig, source runtime.WorkerScopeSource, issuer runtime.ActionCredentialLeaseIssuer, dispatcher runtime.ActionDispatcher) Option {
+	return func(e *Engine) error {
+		if source == nil || issuer == nil || dispatcher == nil {
+			return fmt.Errorf("action worker scope source, credential lease issuer, and dispatcher are required")
+		}
+		e.actionSupervisorSpecs = append(e.actionSupervisorSpecs, actionWorkerSupervisorSpec{
+			config: config, source: source, leaseIssuer: issuer, dispatcher: dispatcher,
 		})
 		return nil
 	}
@@ -2364,7 +2439,13 @@ func (e *Engine) validateClawHubCompilation(compilation *skillopenclaw.Compilati
 func (e *Engine) rebuildActionWorkerPools() error {
 	e.actionPools = make([]*runtime.ActionWorkerPool, 0, len(e.actionPoolSpecs))
 	for _, spec := range e.actionPoolSpecs {
-		pool, err := runtime.NewActionWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
+		var pool *runtime.ActionWorkerPool
+		var err error
+		if spec.leaseIssuer != nil {
+			pool, err = runtime.NewActionCredentialLeaseWorkerPool(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, e.logger, spec.config)
+		} else {
+			pool, err = runtime.NewActionWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
+		}
 		if err != nil {
 			return err
 		}
@@ -2377,7 +2458,13 @@ func (e *Engine) rebuildActionWorkerPools() error {
 func (e *Engine) rebuildActionWorkerSupervisors() error {
 	e.actionSupervisors = make([]*runtime.ActionWorkerSupervisor, 0, len(e.actionSupervisorSpecs))
 	for _, spec := range e.actionSupervisorSpecs {
-		supervisor, err := runtime.NewActionWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
+		var supervisor *runtime.ActionWorkerSupervisor
+		var err error
+		if spec.leaseIssuer != nil {
+			supervisor, err = runtime.NewActionCredentialLeaseWorkerSupervisor(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, spec.source, e.logger, spec.config)
+		} else {
+			supervisor, err = runtime.NewActionWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
+		}
 		if err != nil {
 			return err
 		}

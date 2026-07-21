@@ -53,6 +53,17 @@ type ActionWorkerPool struct {
 }
 
 func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
+	return newActionWorkerPool(store, catalog, credentials, nil, dispatcher, logger, config)
+}
+
+func NewActionCredentialLeaseWorkerPool(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
+	if issuer == nil {
+		return nil, errors.New("action credential lease issuer is required")
+	}
+	return newActionWorkerPool(store, catalog, nil, issuer, dispatcher, logger, config)
+}
+
+func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
 	if store == nil || catalog == nil || dispatcher == nil {
 		return nil, errors.New("action store, catalog, and dispatcher are required")
 	}
@@ -62,7 +73,11 @@ func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, cred
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &ActionWorkerPool{worker: NewActionWorker(store, catalog, credentials, dispatcher), config: config, logger: logger, wake: make(chan struct{}, 1)}, nil
+	worker := NewActionWorker(store, catalog, credentials, dispatcher)
+	if issuer != nil {
+		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher)
+	}
+	return &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1)}, nil
 }
 
 func (p *ActionWorkerPool) Start(parent context.Context) {
