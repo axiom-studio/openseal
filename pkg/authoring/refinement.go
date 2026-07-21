@@ -15,7 +15,10 @@ import (
 )
 
 func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) ChangeSetRefinement {
-	questions := append([]RefinementQuestion(nil), result.UnresolvedQuestions...)
+	questions := make([]RefinementQuestion, 0, len(result.UnresolvedQuestions)+len(result.Questions))
+	if refinementQuestionsAreActionable(result.UnresolvedQuestions, result.Validation) {
+		questions = append(questions, result.UnresolvedQuestions...)
+	}
 	for _, prompt := range result.Questions {
 		prompt = strings.TrimSpace(prompt)
 		if prompt == "" {
@@ -48,6 +51,22 @@ func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) Cha
 		}
 	}
 	return ChangeSetRefinement{Questions: merged, Answers: append([]RefinementAnswerEvent(nil), current.Answers...)}
+}
+
+func refinementQuestionsAreActionable(questions []RefinementQuestion, validation []ValidationIssue) bool {
+	for _, question := range questions {
+		if strings.TrimSpace(question.ID) == "" || strings.TrimSpace(question.Prompt) == "" || strings.TrimSpace(question.WhyNeeded) == "" ||
+			!validQuestionCategory(question.Category) || !validAnswerKind(question.Answer.Kind) || len(question.Blocking) == 0 ||
+			(question.Category == RefinementCategorySkill && question.Answer.Kind != RefinementAnswerSkillSelection) || validateAnswerSchema(question.Answer) != nil {
+			return false
+		}
+	}
+	for _, issue := range validation {
+		if issue.Path == "unresolvedQuestions" && issue.Code == "invalid_refinement_catalog" {
+			return false
+		}
+	}
+	return true
 }
 
 // RefinementQuestionCategory identifies the authority that can truthfully
