@@ -484,6 +484,12 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 // GeneratePrepared compiles one previously persisted generation intent and
 // commits the immutable candidate with revision CAS.
 func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64) (*ChangeSet, error) {
+	return s.GeneratePreparedWithProgress(ctx, scope, id, expectedRevision, nil)
+}
+
+// GeneratePreparedWithProgress is GeneratePrepared with a credential-free
+// compiler phase observer suitable for durable Run activity and checkpoints.
+func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64, observe CompileProgressObserver) (*ChangeSet, error) {
 	changeSet, err := s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
@@ -492,7 +498,7 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 		return nil, ErrChangeSetRevision
 	}
 	changeSet.Generation.Attempt++
-	result, err := s.compiler.Compile(ctx, changeSet.Generation.Request)
+	result, err := s.compiler.CompileWithProgress(ctx, changeSet.Generation.Request, observe)
 	if err != nil {
 		// Host shutdown is not a candidate failure. The leased Run worker yields
 		// this unchanged evaluating intent so another process can resume it with

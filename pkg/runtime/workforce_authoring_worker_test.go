@@ -77,6 +77,14 @@ func TestWorkforceAuthoringPrepareQueuesDurableRunAndConcurrentWorkersGenerateOn
 		result <- runErr
 	}()
 	<-generator.started
+	inFlight, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || inFlight.Status != AgentRunStatusRunning || inFlight.Checkpoint["phase"] != string(authoring.CompilePhaseProviderRequest) || inFlight.Checkpoint["changeSetId"] != changeSet.ID {
+		t.Fatalf("in-flight Run = %#v, err = %v", inFlight, err)
+	}
+	inFlightEvents, err := store.ListActivity(context.Background(), ActivityFilter{Scope: scope, RunID: run.ID, Limit: 20})
+	if err != nil || !hasWorkforceAuthoringEvent(inFlightEvents, "workforce.generation.phase", string(authoring.CompilePhaseProviderRequest)) {
+		t.Fatalf("in-flight events = %#v, err = %v", inFlightEvents, err)
+	}
 	if worked, err := second.RunOnce(context.Background()); err != nil || worked {
 		t.Fatalf("second worker worked=%t err=%v", worked, err)
 	}
@@ -99,6 +107,18 @@ func TestWorkforceAuthoringPrepareQueuesDurableRunAndConcurrentWorkersGenerateOn
 	if err != nil || len(events) < 3 || events[len(events)-1].EventType != "workforce.generation.completed" {
 		t.Fatalf("events = %#v, err = %v", events, err)
 	}
+	if !hasWorkforceAuthoringEvent(events, "workforce.generation.phase", string(authoring.CompilePhaseCandidateValidate)) {
+		t.Fatalf("validation phase missing from events = %#v", events)
+	}
+}
+
+func hasWorkforceAuthoringEvent(events []*ActivityEvent, eventType, phase string) bool {
+	for _, event := range events {
+		if event != nil && event.EventType == eventType && event.Payload["phase"] == phase {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWorkforceAuthoringWorkerWaitsForDurableRunLinkage(t *testing.T) {

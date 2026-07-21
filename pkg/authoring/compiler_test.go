@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -169,6 +170,30 @@ func TestCompilerPerformsBoundedStrictSchemaRepair(t *testing.T) {
 		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || !strings.Contains(schemaError.Diagnostic, "unknown field alsoUnknown at alsoUnknown") {
 			t.Fatalf("schema failure diagnostic = %#v, err = %v", schemaError, err)
 		}
+	}
+}
+
+func TestCompilerReportsCredentialFreeGenerationAndSchemaRepairPhases(t *testing.T) {
+	valid, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
+	generator := &repairingGenerator{generated: []byte(`{"candidate":{"agents":"invalid"}}`), repaired: valid}
+	compiler, _ := NewCompiler(generator)
+	var progress []CompileProgress
+	_, err := compiler.CompileWithProgress(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a marketing team", Catalog: CapabilityCatalog{
+			Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}},
+		},
+	}, func(value CompileProgress) { progress = append(progress, value) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []CompileProgress{
+		{Phase: CompilePhaseProviderRequest, Attempt: 1, MaximumAttempts: 1},
+		{Phase: CompilePhaseCandidateValidate, Attempt: 1, MaximumAttempts: 1},
+		{Phase: CompilePhaseSchemaRepair, Attempt: 1, MaximumAttempts: maximumSchemaRepairAttempts},
+		{Phase: CompilePhaseCandidateValidate, Attempt: 1, MaximumAttempts: 1},
+	}
+	if !reflect.DeepEqual(progress, want) {
+		t.Fatalf("progress = %#v, want %#v", progress, want)
 	}
 }
 

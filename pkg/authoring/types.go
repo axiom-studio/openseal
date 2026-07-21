@@ -214,6 +214,29 @@ type RepairGenerator interface {
 	Repair(context.Context, GenerateRequest, []byte, error) ([]byte, error)
 }
 
+// CompilePhase identifies the current deterministic boundary of probabilistic
+// workforce authoring. It is deliberately credential- and payload-free so a
+// host can safely persist it as Run progress.
+type CompilePhase string
+
+const (
+	CompilePhaseProviderRequest   CompilePhase = "requesting_provider"
+	CompilePhaseSchemaRepair      CompilePhase = "repairing_schema"
+	CompilePhaseCandidateValidate CompilePhase = "validating_candidate"
+	CompilePhaseContractRepair    CompilePhase = "repairing_contract"
+)
+
+// CompileProgress is emitted immediately before each potentially long-running
+// provider call and deterministic validation pass. Attempt is one-based within
+// the named phase; MaximumAttempts is the bounded phase budget.
+type CompileProgress struct {
+	Phase           CompilePhase `json:"phase"`
+	Attempt         int          `json:"attempt"`
+	MaximumAttempts int          `json:"maximumAttempts"`
+}
+
+type CompileProgressObserver func(CompileProgress)
+
 type GenerationResponse struct {
 	Candidate           WorkforceCandidate   `json:"candidate"`
 	Commitments         PromptCommitments    `json:"commitments"`

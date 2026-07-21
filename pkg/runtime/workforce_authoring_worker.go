@@ -317,7 +317,11 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	})
 	generationCtx, cancel := context.WithTimeout(ctx, w.config.GenerationTimeout)
 	defer cancel()
-	generated, generateErr := w.service.changeSets.GeneratePrepared(generationCtx, scope, changeSet.ID, changeSet.Revision)
+	generated, generateErr := w.service.changeSets.GeneratePreparedWithProgress(generationCtx, scope, changeSet.ID, changeSet.Revision, func(progress authoring.CompileProgress) {
+		if progressErr := w.recordGenerationProgress(generationCtx, run, changeSet, progress); progressErr != nil && generationCtx.Err() == nil {
+			w.logger.Warnw("workforce generation progress persistence failed", "changeSetId", changeSet.ID, "runId", run.ID, "phase", progress.Phase, "error", progressErr)
+		}
+	})
 	if generateErr != nil {
 		if errors.Is(generateErr, context.Canceled) && ctx.Err() != nil {
 			yieldCtx, yieldCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -344,6 +348,44 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 		"changeSetId": generated.ID, "changeSetStatus": generated.Status, "candidateDigest": generated.CandidateDigest,
 	}, "", "workforce.generation.completed")
+}
+
+func (w *WorkforceAuthoringWorker) recordGenerationProgress(ctx context.Context, claimed *AgentRun, changeSet *authoring.ChangeSet, progress authoring.CompileProgress) error {
+	current, err := w.service.store.GetAgentRun(ctx, claimed.Scope, claimed.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Status != AgentRunStatusRunning {
+		return nil
+	}
+	summary := map[authoring.CompilePhase]string{
+		authoring.CompilePhaseProviderRequest:   "Requesting workforce candidate from provider",
+		authoring.CompilePhaseSchemaRepair:      "Repairing workforce candidate schema",
+		authoring.CompilePhaseCandidateValidate: "Validating workforce candidate",
+		authoring.CompilePhaseContractRepair:    "Repairing workforce candidate contract",
+	}[progress.Phase]
+	if summary == "" {
+		summary = "Processing workforce candidate"
+	}
+	payload := map[string]interface{}{
+		"changeSetId":     changeSet.ID,
+		"phase":           string(progress.Phase),
+		"attempt":         progress.Attempt,
+		"maximumAttempts": progress.MaximumAttempts,
+	}
+	_, _, err = w.activity.TransitionRun(ctx, current.Scope, current.ID, RunTransitionRequest{
+		ExpectedRevision: current.Revision,
+		Status:           AgentRunStatusRunning,
+		Checkpoint:       payload,
+		EventType:        "workforce.generation.phase",
+		Summary:          summary,
+		Actor:            ActivityActor{Type: "worker", ID: w.config.WorkerID},
+		Severity:         ActivitySeverityInfo,
+		Visibility:       ActivityVisibilityScope,
+		Payload:          payload,
+		LeaseOwner:       w.config.WorkerID,
+	})
+	return err
 }
 
 // yieldPendingLink closes the narrow creation window in which the canonical
