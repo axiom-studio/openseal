@@ -306,7 +306,6 @@ func TestPostgresAtomicWorkforceApplyHonorsInactiveCommitment(t *testing.T) {
 	})
 	registerInitiativeSourceSkill(t, store)
 	ready := testInitiativeWorkforceChangeSet()
-	ready.Result.Candidate.Activation = authoring.WorkforceActivationInactive
 	ready.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
 	if _, _, err = store.CreateChangeSet(ctx, ready, "create-inactive", "digest-inactive"); err != nil {
 		t.Fatal(err)
