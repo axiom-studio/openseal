@@ -48,6 +48,40 @@ func TestDefinitionAndDeploymentPreserveExtensibleRoles(t *testing.T) {
 	}
 }
 
+func TestRoleSkillGrantExactIdentityRoundTripsAndKeepsNativeCompatibility(t *testing.T) {
+	source := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
+	definition := validDefinition()
+	definition.Roles[0].SkillGrants = []RoleSkillGrant{
+		{SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing-alice", RuntimeIdentity: &source, AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead},
+		{SkillID: "native", SkillVersion: "2.0.0", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
+	}
+	if err := definition.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Definition
+	if err := json.Unmarshal(payload, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.Roles[0].SkillGrants[0].ExactIdentity().Equal(source) ||
+		!restored.Roles[0].SkillGrants[1].ExactIdentity().Equal(capability.NewSkillIdentity("native", "2.0.0", "")) {
+		t.Fatalf("restored grants = %#v", restored.Roles[0].SkillGrants)
+	}
+
+	foreign := source
+	foreign.SourceIdentity = "https://clawhub.ai::@bob/summarize"
+	restored.Roles[0].SkillGrants = append(restored.Roles[0].SkillGrants, RoleSkillGrant{
+		SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing-bob", RuntimeIdentity: &foreign,
+		AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
+	})
+	if err := restored.Validate(); err != nil {
+		t.Fatalf("independent source variant should remain distinct: %v", err)
+	}
+}
+
 func TestDefinitionAndDeploymentFailClosedOnInvalidAuthorityOrRoster(t *testing.T) {
 	definition := validDefinition()
 	definition.Approvals.ApproverRoleIDs = []string{"undeclared-leader"}

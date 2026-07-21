@@ -70,6 +70,7 @@ type ActivatedSkill struct {
 	BindingRevision  int64                  `json:"bindingRevision"`
 	SkillID          string                 `json:"skillId"`
 	SkillVersion     string                 `json:"skillVersion"`
+	SourceIdentity   string                 `json:"sourceIdentity,omitempty"`
 	Name             string                 `json:"name"`
 	Description      string                 `json:"description,omitempty"`
 	SourceDigest     string                 `json:"sourceDigest,omitempty"`
@@ -84,10 +85,11 @@ type ActivatedSkill struct {
 }
 
 type UnavailableSkill struct {
-	BindingID    string               `json:"bindingId"`
-	SkillID      string               `json:"skillId"`
-	SkillVersion string               `json:"skillVersion"`
-	Reasons      []AvailabilityReason `json:"reasons"`
+	BindingID      string               `json:"bindingId"`
+	SkillID        string               `json:"skillId"`
+	SkillVersion   string               `json:"skillVersion"`
+	SourceIdentity string               `json:"sourceIdentity,omitempty"`
+	Reasons        []AvailabilityReason `json:"reasons"`
 }
 
 // ActivationSnapshot is the immutable model-visible skill surface for one
@@ -151,7 +153,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		definition := definitions[definitionKey(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)]
 		if definition == nil {
 			snapshot.Unavailable = append(snapshot.Unavailable, UnavailableSkill{
-				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion,
+				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
 				Reasons: []AvailabilityReason{{Code: "definition_missing", Message: "bound skill definition is unavailable"}},
 			})
 			continue
@@ -198,7 +200,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 		if len(reasons) > 0 {
 			snapshot.Unavailable = append(snapshot.Unavailable, UnavailableSkill{
-				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, Reasons: reasons,
+				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity, Reasons: reasons,
 			})
 			continue
 		}
@@ -228,7 +230,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 		if len(reasons) > 0 {
 			snapshot.Unavailable = append(snapshot.Unavailable, UnavailableSkill{
-				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, Reasons: reasons,
+				BindingID: binding.ID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity, Reasons: reasons,
 			})
 			continue
 		}
@@ -252,7 +254,8 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		}
 		snapshot.Skills = append(snapshot.Skills, ActivatedSkill{
 			BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID, SkillVersion: definition.Version,
-			Name: definition.Name, Description: definition.Description,
+			SourceIdentity: binding.SourceIdentity,
+			Name:           definition.Name, Description: definition.Description,
 			SourceDigest: digest, ConfigurationKey: definition.ConfigurationKey, Configuration: cloneMap(binding.Config),
 			ResourceRoot: resourceRoot, ResourceRevision: resourceRevision, ResourceAdapter: resourceAdapter,
 			PreparedRuntime: preparedRuntime,

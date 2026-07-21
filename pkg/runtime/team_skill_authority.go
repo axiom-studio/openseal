@@ -42,8 +42,8 @@ func AuthorizeTeamSkillActivation(ctx context.Context, catalog TeamSkillAuthorit
 	result.Skills = make([]skill.ActivatedSkill, 0, len(snapshot.Skills))
 	result.Unavailable = make([]skill.UnavailableSkill, 0, len(snapshot.Unavailable))
 	for _, activated := range snapshot.Skills {
-		grant, ok := authority.grants[teamSkillKey(activated.SkillID, activated.SkillVersion)]
-		if !ok || !authority.skillAllowed(activated.SkillID) {
+		grant, ok := authority.grants[teamSkillIdentity(activated.SkillID, activated.SkillVersion, activated.SourceIdentity).Key()]
+		if !ok || !authority.skillAllowed(grant, activated.SkillID) {
 			continue
 		}
 		projected := activated
@@ -62,7 +62,8 @@ func AuthorizeTeamSkillActivation(ctx context.Context, catalog TeamSkillAuthorit
 		}
 	}
 	for _, unavailable := range snapshot.Unavailable {
-		if _, granted := authority.grants[teamSkillKey(unavailable.SkillID, unavailable.SkillVersion)]; granted && authority.skillAllowed(unavailable.SkillID) {
+		grant, granted := authority.grants[teamSkillIdentity(unavailable.SkillID, unavailable.SkillVersion, unavailable.SourceIdentity).Key()]
+		if granted && authority.skillAllowed(grant, unavailable.SkillID) {
 			result.Unavailable = append(result.Unavailable, unavailable)
 		}
 	}
@@ -115,8 +116,8 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 	if binding.DeploymentID != input.Run.Owner.ID {
 		return nil, errors.New("Team Run cannot use a Skill binding owned outside its Agent or Team")
 	}
-	grant, ok := authority.grants[teamSkillKey(binding.SkillID, binding.SkillVersion)]
-	if !ok || !authority.skillAllowed(binding.SkillID) || !teamSkillGrantAllowsAction(grant, input.Bound.Action.Name, input.Bound.Action.Risk) || !authority.allowsRisk(input.Bound.Action.Risk) {
+	grant, ok := authority.grants[teamSkillIdentity(binding.SkillID, binding.SkillVersion, binding.SourceIdentity).Key()]
+	if !ok || !authority.skillAllowed(grant, binding.SkillID) || !teamSkillGrantAllowsAction(grant, input.Bound.Action.Name, input.Bound.Action.Risk) || !authority.allowsRisk(input.Bound.Action.Risk) {
 		return nil, fmt.Errorf("Team role %s is not authorized for %s.%s", authority.assignment.RoleID, binding.SkillID, input.Bound.Action.Name)
 	}
 	return nil, nil
@@ -182,19 +183,20 @@ func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCa
 	}
 	grants := make(map[string]kernelteam.RoleSkillGrant, len(role.SkillGrants))
 	for _, grant := range role.SkillGrants {
-		grants[teamSkillKey(grant.SkillID, grant.SkillVersion)] = grant
+		grants[grant.ExactIdentity().Key()] = grant
 	}
 	return &teamSkillAuthority{deployment: deployment, definition: definition, agent: agentDeployment, agentDefinition: agentDefinition, assignment: *assignment, grants: grants}, nil
 }
 
-func (a *teamSkillAuthority) skillAllowed(skillID string) bool {
+func (a *teamSkillAuthority) skillAllowed(grant kernelteam.RoleSkillGrant, skillID string) bool {
+	identifiers := map[string]bool{strings.TrimSpace(skillID): true, strings.TrimSpace(grant.CatalogID): true}
 	for _, allowlist := range [][]string{a.deployment.Restrictions.AllowedSkillIDs, a.agentDefinition.Authority.AllowedSkillIDs, a.agent.Restrictions.AllowedSkillIDs} {
 		if len(allowlist) == 0 {
 			continue
 		}
 		allowed := false
 		for _, candidate := range allowlist {
-			if candidate == skillID {
+			if identifiers[strings.TrimSpace(candidate)] {
 				allowed = true
 				break
 			}
@@ -232,8 +234,8 @@ func teamSkillGrantAllowsAction(g kernelteam.RoleSkillGrant, action string, risk
 	return false
 }
 
-func teamSkillKey(id, version string) string {
-	return strings.TrimSpace(id) + "\x00" + strings.TrimSpace(version)
+func teamSkillIdentity(id, version, sourceIdentity string) capability.SkillIdentity {
+	return capability.NewSkillIdentity(id, version, sourceIdentity)
 }
 
 func teamSkillRiskRank(risk capability.RiskLevel) int {

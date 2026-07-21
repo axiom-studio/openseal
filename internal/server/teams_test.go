@@ -42,9 +42,16 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	}
 	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
 	for _, version := range []string{"1", "2"} {
+		identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
 		definition := &kernelteam.Definition{
 			ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce findings",
-			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
+			Roles: []kernelteam.RoleSlot{{
+				ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1,
+				SkillGrants: []kernelteam.RoleSkillGrant{{
+					SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing-alice", RuntimeIdentity: &identity,
+					AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
+				}},
+			}},
 			Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, QuietByDefault: true},
 			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
 			Evaluations:  []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
@@ -57,7 +64,9 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 		}
 	}
 	versions := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/team-definitions/research-team", "", "")
-	if versions.Code != http.StatusOK || !strings.Contains(versions.Body.String(), `"version":"2"`) {
+	if versions.Code != http.StatusOK || !strings.Contains(versions.Body.String(), `"version":"2"`) ||
+		!strings.Contains(versions.Body.String(), `"catalogId":"clawhub-listing-alice"`) ||
+		!strings.Contains(versions.Body.String(), `"sourceIdentity":"https://clawhub.ai::@alice/summarize"`) {
 		t.Fatalf("definition versions = %d %s", versions.Code, versions.Body.String())
 	}
 
