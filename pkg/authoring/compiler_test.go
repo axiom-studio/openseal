@@ -249,6 +249,57 @@ func TestCompilerNormalizesOnlyCanonicalRefinementBlockingShorthand(t *testing.T
 	}
 }
 
+func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	payload, err := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		UnresolvedQuestions: []RefinementQuestion{{
+			ID: "email-credential", Category: RefinementCategoryCredential,
+			Prompt: "Which email credential should be configured?", WhyNeeded: "Delivery requires an authorized credential.",
+			Blocking: []RefinementBlockingScope{RefinementBlocksApply},
+			Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference, Options: []RefinementQuestionOption{
+				{ID: "vault-binding-opaque-42", Label: "Production email"},
+			}},
+			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}}, Priority: 100,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team that emails its report."})
+	if err != nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("credential refinement result=%#v err=%v", result, err)
+	}
+	question := result.UnresolvedQuestions[0]
+	if question.Answer.Kind != RefinementAnswerCredentialReference || len(question.Answer.Options) != 0 || len(question.Provenance) != 1 || question.Provenance[0].Kind != RefinementProvenanceCredential {
+		t.Fatalf("normalized credential question=%#v", question)
+	}
+	encoded, _ := json.Marshal(result)
+	if strings.Contains(string(encoded), "vault-binding-opaque-42") {
+		t.Fatalf("provider credential identity persisted: %s", encoded)
+	}
+}
+
+func TestCompilerDoesNotDiscardOptionsForOtherInvalidAnswerKinds(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		UnresolvedQuestions: []RefinementQuestion{{
+			ID: "invalid-text", Category: RefinementCategoryOther, Prompt: "Explain?", WhyNeeded: "Required.",
+			Blocking:   []RefinementBlockingScope{RefinementBlocksCandidate},
+			Answer:     RefinementAnswerSchema{Kind: RefinementAnswerText, Options: []RefinementQuestionOption{{ID: "invented", Label: "Invented"}}},
+			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}}, Priority: 1,
+		}},
+	})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
+	var contractError *ContractGenerationError
+	if result != nil || !errors.As(err, &contractError) || !strings.Contains(contractError.Diagnostic, "only select and Skill-selection answers may declare options") {
+		t.Fatalf("result=%#v contractError=%#v err=%v", result, contractError, err)
+	}
+}
+
 func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
 	invalid := marketingCandidate("1", capability.RiskLevelRead)
 	invalid.Assignments[0].RoleID = "invented-role"
