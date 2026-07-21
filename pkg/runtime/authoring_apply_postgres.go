@@ -20,6 +20,7 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	if err != nil {
 		return nil, err
 	}
+	value.ApplyReceipt.Activation = a.activation
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
@@ -95,8 +96,10 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		if err != nil {
 			return nil, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_definition_activations")+`(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`, activation.ID, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.Revision, activation.CreatedAt, string(ap)); err != nil {
-			return nil, err
+		if a.activation == authoring.WorkforceActivationActive {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_definition_activations")+`(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`, activation.ID, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.Revision, activation.CreatedAt, string(ap)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s.table("skill_bindings"), s.table("skill_definitions"), value, a.skillBindings); err != nil {
@@ -151,8 +154,10 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		if err != nil {
 			return nil, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("team_definition_activations")+`(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`, a.teamActivation.ID, value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, a.teamDeployment.Revision, a.teamActivation.CreatedAt, string(tap)); err != nil {
-			return nil, err
+		if a.activation == authoring.WorkforceActivationActive {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("team_definition_activations")+`(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`, a.teamActivation.ID, value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, a.teamDeployment.Revision, a.teamActivation.CreatedAt, string(tap)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, objective := range a.objectives {

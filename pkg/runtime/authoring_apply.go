@@ -16,6 +16,7 @@ import (
 )
 
 type workforceApplication struct {
+	activation                 authoring.WorkforceActivationIntent
 	agentDefinitions           []*agent.AgentDefinition
 	agentDeployments           []*agent.AgentDeployment
 	agentActivations           []workforce.DefinitionActivation
@@ -57,8 +58,16 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	if value == nil || value.ApplyReceipt == nil {
 		return nil, fmt.Errorf("applied workforce aggregate is incomplete")
 	}
+	activation, err := authoring.EffectiveWorkforceActivationIntent(value.Result.Candidate.Activation)
+	if err != nil {
+		return nil, err
+	}
+	if value.ApplyReceipt.Activation != "" && value.ApplyReceipt.Activation != activation {
+		return nil, fmt.Errorf("apply receipt activation %s does not match reviewed candidate activation %s", value.ApplyReceipt.Activation, activation)
+	}
 	now, scope := value.ApplyReceipt.AppliedAt, value.Scope
-	application := &workforceApplication{}
+	application := &workforceApplication{activation: activation}
+	activate := activation == authoring.WorkforceActivationActive
 	deploymentByDefinition := map[string]string{}
 	for index, source := range value.Result.Candidate.Agents {
 		if source == nil {
@@ -66,7 +75,7 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		}
 		definition := cloneJSON(source)
 		deploymentID := value.Placement.AgentDeploymentIDs[definition.ID]
-		bindings, err := materializeWorkforceSkillBindings(value, definition, deploymentID)
+		bindings, err := materializeWorkforceSkillBindings(value, definition, deploymentID, activate)
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +92,14 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		if expectedRevision > 0 {
 			previous = "__load__"
 		}
-		deployment := &agent.AgentDeployment{ID: deploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, PreviousVersion: previous, RolloutStatus: agent.RolloutActive, Environment: value.Placement.Environment, Credentials: value.Placement.CredentialReferences[definition.ID], Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: definition.Authority.MaxConcurrentRuns}, Revision: revision, CreatedAt: now, UpdatedAt: now}
+		rolloutStatus := agent.RolloutActive
+		if !activate {
+			rolloutStatus = agent.RolloutPending
+			if expectedRevision > 0 {
+				rolloutStatus = agent.RolloutPaused
+			}
+		}
+		deployment := &agent.AgentDeployment{ID: deploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, PreviousVersion: previous, RolloutStatus: rolloutStatus, Environment: value.Placement.Environment, Credentials: value.Placement.CredentialReferences[definition.ID], Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: definition.Authority.MaxConcurrentRuns}, Revision: revision, CreatedAt: now, UpdatedAt: now}
 		if err := deployment.Validate(); err != nil {
 			return nil, err
 		}
@@ -121,7 +137,14 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		roster = append(roster, team.RosterAssignment{ID: assignment.ID, RoleID: assignment.RoleID, AgentDeploymentID: deploymentByDefinition[assignment.AgentDefinitionID], DisplayName: assignment.DisplayName})
 	}
 	revision := value.Placement.TeamExpectedRevision + 1
-	application.teamDeployment = &team.Deployment{ID: value.Placement.TeamDeploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Roster: roster, Status: team.DeploymentActive, Revision: revision, CreatedAt: now, UpdatedAt: now}
+	teamStatus := team.DeploymentActive
+	if !activate {
+		teamStatus = team.DeploymentDraft
+		if value.Placement.TeamExpectedRevision > 0 {
+			teamStatus = team.DeploymentPaused
+		}
+	}
+	application.teamDeployment = &team.Deployment{ID: value.Placement.TeamDeploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Roster: roster, Status: teamStatus, Revision: revision, CreatedAt: now, UpdatedAt: now}
 	if err := application.teamDeployment.Validate(definition); err != nil {
 		return nil, err
 	}
@@ -157,7 +180,7 @@ func finishWorkforceApplication(value *authoring.ChangeSet, application *workfor
 	return nil
 }
 
-func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *agent.AgentDefinition, deploymentID string) ([]*capability.Binding, error) {
+func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *agent.AgentDefinition, deploymentID string, activate bool) ([]*capability.Binding, error) {
 	bindings := make([]*capability.Binding, 0, len(definition.SkillRequirements))
 	for _, requirement := range definition.SkillRequirements {
 		skillCapability, ok := value.Catalog.Skills[requirement.SkillID]
@@ -202,7 +225,7 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		bindings = append(bindings, &capability.Binding{
 			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
 			SkillID: identity.ID, SkillVersion: identity.Version, SourceIdentity: identity.SourceIdentity, AllowedActions: allowed,
-			EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
+			Disabled: !activate, EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
 		})
 	}
 	return bindings, nil
@@ -416,6 +439,10 @@ func synchronizeWorkforceSkillBindingResources(application *workforceApplication
 
 func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate, deploymentByDefinition map[string]string) ([]workforceObjectiveApplication, error) {
 	result := make([]workforceObjectiveApplication, 0, len(templates))
+	status := ObjectiveStatusActive
+	if value.Result.Candidate.Activation == authoring.WorkforceActivationInactive {
+		status = ObjectiveStatusDraft
+	}
 	for _, template := range templates {
 		var cadence *ObjectiveCadence
 		if len(template.Cadence) > 0 {
@@ -445,7 +472,7 @@ func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, 
 		if placement.ExpectedRevision > 0 {
 			revision = placement.ExpectedRevision + 1
 		}
-		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: ObjectiveStatusActive, Priority: template.Priority, Cadence: cadence, EventRules: eventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
+		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: status, Priority: template.Priority, Cadence: cadence, EventRules: eventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
 		if err := objective.Validate(); err != nil {
 			return nil, fmt.Errorf("materialize Objective %s: %w", template.ID, err)
 		}
@@ -518,9 +545,13 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 		return nil, err
 	}
 	now := value.ApplyReceipt.AppliedAt
+	status := InitiativeStatusActive
+	if value.Result.Candidate.Activation == authoring.WorkforceActivationInactive {
+		status = InitiativeStatusDraft
+	}
 	initiative := &Initiative{
 		ID: value.Placement.InitiativeID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Title: blueprint.Title, Purpose: blueprint.Purpose,
-		Status: InitiativeStatusActive, Owner: ObjectiveOwner{Type: OwnerType(blueprint.Owner.Type), ID: ownerID}, ObjectiveRefs: objectiveRefs,
+		Status: status, Owner: ObjectiveOwner{Type: OwnerType(blueprint.Owner.Type), ID: ownerID}, ObjectiveRefs: objectiveRefs,
 		Policy: cloneMap(blueprint.Policy), Revision: value.Placement.InitiativeExpectedRevision + 1, CreatedAt: now, UpdatedAt: now,
 	}
 	for index, definition := range application.agentDefinitions {

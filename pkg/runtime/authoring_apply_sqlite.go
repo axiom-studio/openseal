@@ -36,6 +36,7 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 	if err != nil {
 		return nil, err
 	}
+	value.ApplyReceipt.Activation = application.activation
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -111,8 +112,10 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		if err != nil {
 			return nil, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO agent_definition_activations(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES(?,?,?,?,?,?,?)`, activation.ID, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.Revision, activation.CreatedAt, string(activationPayload)); err != nil {
-			return nil, err
+		if application.activation == authoring.WorkforceActivationActive {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO agent_definition_activations(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES(?,?,?,?,?,?,?)`, activation.ID, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.Revision, activation.CreatedAt, string(activationPayload)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err = applySQLiteWorkforceSkillBindings(ctx, tx, value, application.skillBindings); err != nil {
@@ -167,8 +170,10 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		if err != nil {
 			return nil, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO team_definition_activations(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES(?,?,?,?,?,?,?)`, application.teamActivation.ID, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.Revision, application.teamActivation.CreatedAt, string(teamActivationPayload)); err != nil {
-			return nil, err
+		if application.activation == authoring.WorkforceActivationActive {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO team_definition_activations(id,scope_kind,scope_id,deployment_id,deployment_revision,created_at,payload) VALUES(?,?,?,?,?,?,?)`, application.teamActivation.ID, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.Revision, application.teamActivation.CreatedAt, string(teamActivationPayload)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, objective := range application.objectives {
