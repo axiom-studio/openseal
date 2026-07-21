@@ -65,10 +65,17 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 			return nil, fmt.Errorf("Agent definition is required")
 		}
 		definition := cloneJSON(source)
+		deploymentID := value.Placement.AgentDeploymentIDs[definition.ID]
+		bindings, err := materializeWorkforceSkillBindings(value, definition, deploymentID)
+		if err != nil {
+			return nil, err
+		}
+		if err := resolveAgentDefinitionSkillIdentities(value, definition); err != nil {
+			return nil, err
+		}
 		definition.CreatedAt = now
 		definition.Digest = ""
 		definition.Digest = portableDigest(definition)
-		deploymentID := value.Placement.AgentDeploymentIDs[definition.ID]
 		deploymentByDefinition[definition.ID] = deploymentID
 		expectedRevision := value.Placement.AgentExpectedRevisions[definition.ID]
 		revision := expectedRevision + 1
@@ -85,10 +92,6 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		application.agentDeployments = append(application.agentDeployments, deployment)
 		application.agentActivations = append(application.agentActivations, activation)
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "agent_definition", ID: definition.ID, Version: definition.Version}, authoring.AppliedResourceReference{Kind: "agent_deployment", ID: deployment.ID, Version: definition.Version, Revision: revision})
-		bindings, err := materializeWorkforceSkillBindings(value, definition, deployment.ID)
-		if err != nil {
-			return nil, err
-		}
 		application.skillBindings = append(application.skillBindings, bindings...)
 		for _, binding := range bindings {
 			application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "skill_binding", ID: binding.ID, Version: binding.SkillVersion, Revision: binding.Revision})
@@ -106,6 +109,9 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		return application, nil
 	}
 	definition := cloneJSON(value.Result.Candidate.Team)
+	if err := resolveTeamDefinitionSkillIdentities(value, definition); err != nil {
+		return nil, err
+	}
 	definition.CreatedAt = now
 	definition.Digest = ""
 	definition.Digest = portableDigest(definition)
@@ -192,14 +198,145 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		if workforceRiskRank(definition.Authority.MaximumRisk) < workforceRiskRank(maximumRisk) {
 			maximumRisk = definition.Authority.MaximumRisk
 		}
+		identity := workforceSkillRuntimeIdentity(value, definition.ID, requirement.SkillID, skillCapability.Version)
 		bindings = append(bindings, &capability.Binding{
 			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
-			SkillID: requirement.SkillID, SkillVersion: workforceSkillBindingVersion(value, definition.ID, requirement.SkillID, skillCapability.Version),
-			SourceIdentity: strings.TrimSpace(value.Placement.SkillSourceIdentities[definition.ID][requirement.SkillID]), AllowedActions: allowed,
+			SkillID: identity.ID, SkillVersion: identity.Version, SourceIdentity: identity.SourceIdentity, AllowedActions: allowed,
 			EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials, Revision: 1,
 		})
 	}
 	return bindings, nil
+}
+
+func workforceSkillRuntimeIdentity(value *authoring.ChangeSet, agentID, catalogID, catalogVersion string) capability.SkillIdentity {
+	if value != nil {
+		if identity := value.Placement.SkillRuntimeIdentities[agentID][catalogID].Normalized(); identity.Valid() {
+			return identity
+		}
+		return capability.NewSkillIdentity(catalogID, workforceSkillBindingVersion(value, agentID, catalogID, catalogVersion), strings.TrimSpace(value.Placement.SkillSourceIdentities[agentID][catalogID]))
+	}
+	return capability.NewSkillIdentity(catalogID, catalogVersion, "")
+}
+
+func resolveAgentDefinitionSkillIdentities(value *authoring.ChangeSet, definition *agent.AgentDefinition) error {
+	if value == nil || definition == nil || len(value.Placement.SkillRuntimeIdentities[definition.ID]) == 0 {
+		return nil
+	}
+	aliases := make(map[string]string, len(definition.SkillRequirements))
+	seen := make(map[string]bool, len(definition.SkillRequirements))
+	for index := range definition.SkillRequirements {
+		catalogID := strings.TrimSpace(definition.SkillRequirements[index].SkillID)
+		identity := value.Placement.SkillRuntimeIdentities[definition.ID][catalogID].Normalized()
+		if !identity.Valid() {
+			return fmt.Errorf("Agent %s Skill %s has no exact runtime identity", definition.ID, catalogID)
+		}
+		if seen[identity.ID] {
+			return fmt.Errorf("Agent %s selects multiple catalog Skills with runtime id %s", definition.ID, identity.ID)
+		}
+		seen[identity.ID] = true
+		aliases[catalogID] = identity.ID
+		definition.SkillRequirements[index].SkillID = identity.ID
+	}
+	for index, allowed := range definition.Authority.AllowedSkillIDs {
+		if canonical := aliases[strings.TrimSpace(allowed)]; canonical != "" {
+			definition.Authority.AllowedSkillIDs[index] = canonical
+		}
+	}
+	return definition.Validate()
+}
+
+func resolveTeamDefinitionSkillIdentities(value *authoring.ChangeSet, definition *team.Definition) error {
+	if value == nil || definition == nil {
+		return nil
+	}
+	assignmentsByRole := make(map[string][]string)
+	for _, assignment := range value.Result.Candidate.Assignments {
+		assignmentsByRole[assignment.RoleID] = append(assignmentsByRole[assignment.RoleID], assignment.AgentDefinitionID)
+	}
+	for roleIndex := range definition.Roles {
+		role := &definition.Roles[roleIndex]
+		resolvedRequired := make([]string, 0, len(role.RequiredSkillIDs))
+		for _, catalogID := range role.RequiredSkillIDs {
+			ids := resolvedRoleSkillIDs(value, assignmentsByRole[role.ID], strings.TrimSpace(catalogID), "")
+			if len(ids) == 0 {
+				ids = []string{strings.TrimSpace(catalogID)}
+			}
+			resolvedRequired = append(resolvedRequired, ids...)
+		}
+		role.RequiredSkillIDs = uniqueSortedStrings(resolvedRequired)
+		resolvedGrants := make([]team.RoleSkillGrant, 0, len(role.SkillGrants))
+		for _, grant := range role.SkillGrants {
+			if grant.RuntimeIdentity != nil {
+				resolvedGrants = append(resolvedGrants, grant)
+				continue
+			}
+			catalogID := strings.TrimSpace(grant.CatalogID)
+			if catalogID == "" {
+				catalogID = strings.TrimSpace(grant.SkillID)
+			}
+			identities := resolvedRoleSkillIdentities(value, assignmentsByRole[role.ID], catalogID, grant.SkillID, grant.SkillVersion)
+			if len(identities) == 0 {
+				resolvedGrants = append(resolvedGrants, grant)
+				continue
+			}
+			for _, identity := range identities {
+				copy := grant
+				copy.CatalogID, copy.SkillID = catalogID, identity.ID
+				copy.RuntimeIdentity = &identity
+				resolvedGrants = append(resolvedGrants, copy)
+			}
+		}
+		role.SkillGrants = resolvedGrants
+	}
+	return definition.Validate()
+}
+
+func resolvedRoleSkillIDs(value *authoring.ChangeSet, agentIDs []string, catalogID, declaredVersion string) []string {
+	identities := resolvedRoleSkillIdentities(value, agentIDs, catalogID, "", declaredVersion)
+	ids := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		ids = append(ids, identity.ID)
+	}
+	return uniqueSortedStrings(ids)
+}
+
+func resolvedRoleSkillIdentities(value *authoring.ChangeSet, agentIDs []string, catalogID, declaredID, declaredVersion string) []capability.SkillIdentity {
+	byKey := map[string]capability.SkillIdentity{}
+	for _, agentID := range agentIDs {
+		for selectionID, identity := range value.Placement.SkillRuntimeIdentities[agentID] {
+			identity = identity.Normalized()
+			catalogMatch := strings.TrimSpace(selectionID) == catalogID
+			declaredMatch := declaredID != "" && identity.ID == strings.TrimSpace(declaredID) &&
+				(declaredVersion == "" || strings.TrimSpace(value.Catalog.Skills[selectionID].Version) == strings.TrimSpace(declaredVersion))
+			if identity.Valid() && (catalogMatch || declaredMatch) {
+				byKey[identity.Key()] = identity
+			}
+		}
+	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]capability.SkillIdentity, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, byKey[key])
+	}
+	return result
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func workforceSkillBindingVersion(value *authoring.ChangeSet, agentID, skillID, catalogVersion string) string {

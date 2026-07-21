@@ -541,3 +541,35 @@ func marketingCandidate(version string, risk capability.RiskLevel) WorkforceCand
 		Assignments: []Assignment{{ID: "researcher", RoleID: "researcher", AgentDefinitionID: agentDefinition.ID, DisplayName: agentDefinition.DisplayName}},
 	}
 }
+
+func TestTeamRoleSkillGrantsUseCatalogIdentityAndRejectModelRuntimeIdentity(t *testing.T) {
+	candidate := WorkforceCandidate{Team: &team.Definition{
+		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Summarize evidence",
+		Roles: []team.RoleSlot{{
+			ID: "analyst", DisplayName: "Analyst", Purpose: "Analyze", ChannelParticipation: team.RoleChannelActive,
+			SkillGrants: []team.RoleSkillGrant{{SkillID: "clawhub-listing", SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead}},
+		}},
+		Coordination: team.CoordinationPolicy{Mode: team.CoordinationDynamic}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+	}}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"clawhub-listing": {ID: "clawhub-listing", Version: "1.0.0", Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead},
+	}}
+	if missing := missingRequirements(&candidate, catalog); len(missing) != 0 {
+		t.Fatalf("truthful role grant missing=%#v", missing)
+	}
+	candidate.Team.Roles[0].SkillGrants[0].AllowedActions = []string{"publish"}
+	if missing := missingRequirements(&candidate, catalog); len(missing) != 1 || missing[0].Kind != "action" {
+		t.Fatalf("unsupported role action missing=%#v", missing)
+	}
+	candidate.Team.Roles[0].SkillGrants[0].AllowedActions = []string{"execute"}
+	identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "clawhub::@alice/summarize")
+	candidate.Team.Roles[0].SkillGrants[0].RuntimeIdentity = &identity
+	issues := validateCandidate(&candidate, nil)
+	found := false
+	for _, issue := range issues {
+		found = found || issue.Code == "server_owned"
+	}
+	if !found {
+		t.Fatalf("model-supplied runtime identity was accepted: %#v", issues)
+	}
+}
