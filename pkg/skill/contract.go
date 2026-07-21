@@ -598,28 +598,17 @@ func MaterializeTransportArguments(bound *BoundAction, input map[string]interfac
 		return nil, errors.New("bound skill action is required")
 	}
 	result := make(map[string]interface{})
-	if bound.Binding != nil {
-		for name, value := range bound.Binding.Config {
-			result[name] = cloneValue(value)
-		}
-	}
 	transport := bound.Definition.Transport
 	if bound.Action.Transport != nil {
 		transport = *bound.Action.Transport
 	}
 	if len(transport.Arguments) == 0 {
 		for name, value := range input {
-			if _, exists := result[name]; exists {
-				return nil, fmt.Errorf("binding config collides with transport argument %s", name)
-			}
 			result[name] = cloneValue(value)
 		}
 		return result, nil
 	}
 	for name, mapping := range transport.Arguments {
-		if _, exists := result[name]; exists {
-			return nil, fmt.Errorf("binding config collides with transport argument %s", name)
-		}
 		if mapping.SourceArgument != "" {
 			value, ok := input[mapping.SourceArgument]
 			if !ok {
@@ -663,6 +652,11 @@ func validateDefinition(definition *Definition) error {
 	if definition.Source != nil {
 		if err := validateSourceIdentity(definition.Source.Identity); err != nil {
 			return fmt.Errorf("skill source identity is invalid: %w", err)
+		}
+	}
+	if definition.BindingConfigSchema != nil {
+		if _, err := compileSchema(definition.ID+"-"+definition.Version+"-binding-config.json", definition.BindingConfigSchema); err != nil {
+			return fmt.Errorf("skill binding config schema is invalid: %w", err)
 		}
 	}
 	if definition.Prompt != nil {
@@ -788,6 +782,19 @@ func validateSourceIdentity(value string) error {
 }
 
 func validateBindingAgainstDefinition(binding *Binding, definition *Definition) error {
+	if definition.BindingConfigSchema == nil {
+		if len(binding.Config) != 0 {
+			return errors.New("binding config is not declared by the skill")
+		}
+	} else {
+		schema, err := compileSchema(definition.ID+"-"+definition.Version+"-binding-config.json", definition.BindingConfigSchema)
+		if err != nil {
+			return fmt.Errorf("compile binding config schema: %w", err)
+		}
+		if err := schema.validate(binding.Config); err != nil {
+			return fmt.Errorf("binding config is invalid: %w", err)
+		}
+	}
 	if binding.EnablePrompt && definition.Prompt == nil {
 		return errors.New("binding enables a prompt that the skill does not define")
 	}

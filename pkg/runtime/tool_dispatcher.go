@@ -29,10 +29,13 @@ type ToolInvocation struct {
 	ActionCallID          string
 	RunID                 string
 	Arguments             map[string]interface{}
-	Credentials           map[string]string
-	CredentialLease       *SignedActionCredentialLease
-	CredentialReferences  map[string]skill.CredentialReference
-	PreparedRuntime       *skill.PreparedRuntime
+	// BindingConfig is trusted, non-secret configuration selected by the host
+	// when the Skill was bound. It is never writable by the model.
+	BindingConfig        map[string]interface{}
+	Credentials          map[string]string
+	CredentialLease      *SignedActionCredentialLease
+	CredentialReferences map[string]skill.CredentialReference
+	PreparedRuntime      *skill.PreparedRuntime
 }
 
 // ToolInvoker is the product-neutral boundary for a registered typed tool.
@@ -102,7 +105,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		Name: transportEndpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
-		Action: input.Bound.Action.Name, Arguments: arguments, Credentials: input.Credentials,
+		Action: input.Bound.Action.Name, Arguments: arguments, BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
 		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
 	}
 	if input.Call != nil {
