@@ -31,12 +31,44 @@ type OpenAICompatibleGenerator struct {
 	apiKey     string
 	model      string
 	httpClient *http.Client
+	options    OpenAICompatibleGeneratorOptions
+}
+
+// OpenAICompatibleThinkingMode controls provider-native reasoning when the
+// selected model explicitly supports the OpenAI-compatible `thinking` field.
+// The zero value deliberately omits the field so generic providers retain
+// their native default behavior.
+type OpenAICompatibleThinkingMode string
+
+const (
+	OpenAICompatibleThinkingDefault  OpenAICompatibleThinkingMode = ""
+	OpenAICompatibleThinkingEnabled  OpenAICompatibleThinkingMode = "enabled"
+	OpenAICompatibleThinkingDisabled OpenAICompatibleThinkingMode = "disabled"
+)
+
+// OpenAICompatibleGeneratorOptions contains optional, provider-negotiated
+// transport behavior. Callers must only select a non-default mode after
+// identifying a model family that documents support for it.
+type OpenAICompatibleGeneratorOptions struct {
+	ThinkingMode OpenAICompatibleThinkingMode
 }
 
 func NewOpenAICompatibleGenerator(endpoint, apiKey, model string, httpClient *http.Client) (*OpenAICompatibleGenerator, error) {
+	return NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, httpClient, OpenAICompatibleGeneratorOptions{})
+}
+
+// NewOpenAICompatibleGeneratorWithOptions creates a generator with explicit
+// provider capabilities. Deterministic compilation and validation remain
+// authoritative regardless of transport options.
+func NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model string, httpClient *http.Client, options OpenAICompatibleGeneratorOptions) (*OpenAICompatibleGenerator, error) {
 	endpoint, model = strings.TrimSpace(endpoint), strings.TrimSpace(model)
 	if endpoint == "" || strings.TrimSpace(apiKey) == "" || model == "" {
 		return nil, errors.New("authoring endpoint, API key, and model are required")
+	}
+	switch options.ThinkingMode {
+	case OpenAICompatibleThinkingDefault, OpenAICompatibleThinkingEnabled, OpenAICompatibleThinkingDisabled:
+	default:
+		return nil, fmt.Errorf("unsupported OpenAI-compatible thinking mode %q", options.ThinkingMode)
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 90 * time.Second}
@@ -45,7 +77,7 @@ func NewOpenAICompatibleGenerator(endpoint, apiKey, model string, httpClient *ht
 	if !strings.HasSuffix(endpoint, "/chat/completions") {
 		endpoint += "/chat/completions"
 	}
-	return &OpenAICompatibleGenerator{endpoint: endpoint, apiKey: apiKey, model: model, httpClient: httpClient}, nil
+	return &OpenAICompatibleGenerator{endpoint: endpoint, apiKey: apiKey, model: model, httpClient: httpClient, options: options}, nil
 }
 
 func (g *OpenAICompatibleGenerator) Generate(ctx context.Context, request GenerateRequest) ([]byte, error) {
@@ -120,12 +152,16 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 }
 
 func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey string, messages []map[string]string) ([]byte, error) {
-	body, err := json.Marshal(map[string]interface{}{
+	payload := map[string]interface{}{
 		"model":           g.model,
 		"messages":        messages,
 		"response_format": map[string]string{"type": "json_object"},
 		"temperature":     0,
-	})
+	}
+	if g.options.ThinkingMode != OpenAICompatibleThinkingDefault {
+		payload["thinking"] = map[string]string{"type": string(g.options.ThinkingMode)}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}

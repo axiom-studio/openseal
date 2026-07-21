@@ -2124,6 +2124,25 @@ func NewOpenAICompatibleWorkforceGenerator(endpoint, apiKey, model string, clien
 	return authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, client)
 }
 
+// OpenAICompatibleWorkforceGeneratorOptions contains explicit capabilities
+// negotiated by an embedding host for its selected provider model.
+type OpenAICompatibleWorkforceGeneratorOptions = authoring.OpenAICompatibleGeneratorOptions
+
+type OpenAICompatibleWorkforceThinkingMode = authoring.OpenAICompatibleThinkingMode
+
+const (
+	OpenAICompatibleWorkforceThinkingDefault  = authoring.OpenAICompatibleThinkingDefault
+	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
+	OpenAICompatibleWorkforceThinkingDisabled = authoring.OpenAICompatibleThinkingDisabled
+)
+
+// NewOpenAICompatibleWorkforceGeneratorWithOptions creates the portable
+// adapter with explicit provider capabilities. The default constructor remains
+// capability-neutral and emits no vendor-specific transport fields.
+func NewOpenAICompatibleWorkforceGeneratorWithOptions(endpoint, apiKey, model string, client *http.Client, options OpenAICompatibleWorkforceGeneratorOptions) (authoring.Generator, error) {
+	return authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, client, options)
+}
+
 func NewWorkforceAuthoringRunService(generator authoring.Generator, store runtime.WorkforceAuthoringRunStore) (*runtime.WorkforceAuthoringRunService, error) {
 	compiler, err := authoring.NewCompiler(generator)
 	if err != nil {
