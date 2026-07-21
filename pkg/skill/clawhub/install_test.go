@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 type installRegistry struct {
@@ -297,6 +299,58 @@ Use the external service.
 	}
 	if !found {
 		t.Fatalf("actionable incompatibility diagnostic missing: %#v", preview.Diagnostics)
+	}
+}
+
+func TestPreviewCompilesDeclarativeRedditHelperIntoGovernedReadAction(t *testing.T) {
+	registry := &installRegistry{
+		version: "1.0.0", verification: Verification{Schema: "clawhub.skill.verify.v1", OK: true, Decision: "pass"},
+		archive: createTestZip(t, map[string]string{
+			"SKILL.md": `---
+name: Reddit Keyword Search API
+description: Search Reddit through JustOneAPI.
+metadata:
+  openclaw:
+    primaryEnv: JUST_ONE_API_TOKEN
+    requires:
+      bins: [node]
+      env: [JUST_ONE_API_TOKEN]
+---
+Supported operation IDs in this skill: searchRedditV1.
+
+node {baseDir}/bin/run.mjs --operation "searchRedditV1" --token "$JUST_ONE_API_TOKEN" --params-json '{"keyword":"<keyword>"}'
+`,
+			"bin/run.mjs": `const manifest = {
+  "baseUrl":"https://api.justoneapi.com",
+  "slug":"justoneapi-reddit-search",
+  "operations":[{
+    "method":"GET","operationId":"searchRedditV1","path":"/api/reddit/search/v1","requestBody":null,
+    "description":"Search Reddit by keyword.",
+    "parameters":[
+      {"name":"token","location":"query","required":true,"schemaType":"string"},
+      {"name":"keyword","location":"query","required":true,"schemaType":"string"}
+    ]
+  }]
+};`,
+		}),
+	}
+	manager, err := NewInstallManager("https://registry.test", registry, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := manager.Preview(context.Background(), PreviewRequest{Reference: SkillReference{Owner: "justoneapi", Slug: "justoneapi-reddit-search"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, ok := preview.Actions["searchRedditV1"]
+	if !preview.Compatible || !ok || action.SideEffect != capability.SideEffectRead || action.Risk != capability.RiskLevelRead ||
+		len(preview.CredentialRequirements) != 1 || preview.CredentialRequirements[0].Name != "JUST_ONE_API_TOKEN" {
+		t.Fatalf("Reddit helper preview = %#v", preview)
+	}
+	for _, diagnostic := range preview.Diagnostics {
+		if diagnostic.Code == "needs_action_adapter" {
+			t.Fatalf("semantics-preserving helper remained unavailable: %#v", preview.Diagnostics)
+		}
 	}
 }
 

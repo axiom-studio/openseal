@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/httpaction"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -325,6 +326,141 @@ Prepare publishing guidance using the authenticated account policy.
 			if strings.Contains(string(encoded), forbidden) {
 				t.Fatalf("activation exposed credential metadata %q: %s", forbidden, encoded)
 			}
+		}
+	}
+}
+
+func TestCompileDeclarativeOpenAPIHelperAsTypedGovernedReadAction(t *testing.T) {
+	skillMD := []byte(`---
+name: Reddit Keyword Search API
+description: Search Reddit through a documented API.
+metadata:
+  openclaw:
+    primaryEnv: JUST_ONE_API_TOKEN
+    requires:
+      bins: [node]
+      env: [JUST_ONE_API_TOKEN]
+---
+Use the source-declared helper:
+
+~~~bash
+node {baseDir}/bin/run.mjs --operation "searchRedditV1" --token "$JUST_ONE_API_TOKEN" --params-json '{"keyword":"<keyword>"}'
+~~~
+`)
+	runner := []byte(`const manifest = {
+  "baseUrl":"https://api.justoneapi.com",
+  "slug":"justoneapi-reddit-search",
+  "operations":[{
+    "description":"Search public Reddit posts by keyword.",
+    "method":"GET",
+    "operationId":"searchRedditV1",
+    "path":"/api/reddit/search/v1",
+    "parameters":[
+      {"name":"token","location":"query","required":true,"schemaType":"string"},
+      {"name":"keyword","location":"query","required":true,"schemaType":"string","description":"Search keywords."},
+      {"name":"after","location":"query","required":false,"schemaType":"string","defaultValue":""}
+    ]
+  }]
+};
+// The retained source helper is not executed by the compiled HTTP adapter.
+`)
+	compilation, err := Compile(Bundle{
+		SkillMD: skillMD, Files: []File{{Path: "bin/run.mjs", Content: runner}},
+		Source: Source{Reference: "@justoneapi/justoneapi-reddit-search", Version: "1.0.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := compilation.Definition
+	action, ok := definition.Actions["searchRedditV1"]
+	if !ok || !strings.HasSuffix(definition.Version, "."+httpCompilationRevision) || action.Transport == nil ||
+		action.Transport.Endpoint != httpaction.TransportName || action.Risk != skill.RiskLevelRead || action.SideEffect != skill.SideEffectRead {
+		t.Fatalf("compiled HTTP action = %#v", definition)
+	}
+	if len(definition.Requirements.Executables) != 0 || len(definition.Requirements.Environment) != 0 || len(definition.Installers) != 0 {
+		t.Fatalf("source helper runtime was not optimized away: %#v", definition.Requirements)
+	}
+	if strings.Contains(definition.Prompt.Instructions, "{baseDir}") || strings.Contains(definition.Prompt.Instructions, "--token") ||
+		!strings.Contains(definition.Prompt.Instructions, "governed OpenSeal action") {
+		t.Fatalf("compiled prompt still instructs direct helper execution: %q", definition.Prompt.Instructions)
+	}
+	properties := action.InputSchema["properties"].(map[string]interface{})["parameters"].(map[string]interface{})["properties"].(map[string]interface{})
+	if _, leaked := properties["token"]; leaked || properties["keyword"].(map[string]interface{})["type"] != "string" || len(action.Credentials) != 1 || action.Credentials[0].Name != "JUST_ONE_API_TOKEN" {
+		t.Fatalf("typed input or credential boundary = %#v %#v", properties, action.Credentials)
+	}
+	bound := &skill.BoundAction{Definition: definition, Action: action, Binding: &skill.Binding{}}
+	envelope, err := skill.MaterializeTransportArguments(bound, map[string]interface{}{"parameters": map[string]interface{}{"keyword": "OpenClaw", "after": "cursor"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation, err := httpaction.DecodeInvocation(envelope)
+	if err != nil || invocation.Parameters["keyword"] != "OpenClaw" || invocation.CredentialName != "JUST_ONE_API_TOKEN" || invocation.CredentialParameter != "token" {
+		t.Fatalf("materialized HTTP invocation = %#v, %v", invocation, err)
+	}
+	encoded, _ := json.Marshal(envelope)
+	if strings.Contains(string(encoded), "JUST_ONE_API_TOKEN\":\"") || strings.Contains(string(encoded), "resolved-secret") {
+		t.Fatalf("transport envelope contains a credential value: %s", encoded)
+	}
+	if skill.NeedsActionAdapter(definition) || !hasCompilationDiagnostic(compilation.Diagnostics, "openapi_http.compiled") || hasCompilationDiagnostic(compilation.Diagnostics, NeedsActionAdapterDiagnostic) {
+		t.Fatalf("adapter readiness diagnostics = %#v", compilation.Diagnostics)
+	}
+	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
+		t.Fatalf("compiled definition is not canonical: %v", err)
+	}
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(context.Background(), &skill.Binding{
+		ID: "reddit", Scope: scope, DeploymentID: "researcher", SkillID: definition.ID, SkillVersion: definition.Version,
+		EnablePrompt: true, AllowedActions: []string{"searchRedditV1"}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{"JUST_ONE_API_TOKEN": {Kind: "environment-secret", ID: "opaque-vault-reference"}}, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	withoutAdapter, err := catalog.Activate(context.Background(), scope, "researcher", skill.HostCapabilityState{})
+	if err != nil || len(withoutAdapter.Skills) != 0 || len(withoutAdapter.Unavailable) != 1 ||
+		!hasAvailabilityReason(withoutAdapter.Unavailable[0].Reasons, "action_adapter_unavailable") {
+		t.Fatalf("missing HTTP adapter activation = %#v, %v", withoutAdapter, err)
+	}
+	available, err := catalog.Activate(context.Background(), scope, "researcher", skill.HostCapabilityState{Adapters: map[string]skill.AdapterCapability{
+		skill.AdapterHTTPAction: {State: skill.AdapterStateAvailable, Version: "egress-policy/v1"},
+	}})
+	if err != nil || len(available.Skills) != 1 || len(available.Skills[0].Actions) != 1 || len(available.Unavailable) != 0 {
+		t.Fatalf("governed HTTP adapter activation = %#v, %v", available, err)
+	}
+}
+
+func TestCompileOpenAPIHelperFailsClosedWhenSemanticsCannotBePreserved(t *testing.T) {
+	base := Bundle{
+		SkillMD: []byte(`---
+name: unsafe-helper
+description: Write through an imported helper.
+metadata:
+  openclaw:
+    primaryEnv: API_TOKEN
+    requires:
+      bins: [node]
+---
+node {baseDir}/bin/run.mjs --operation "publish" --token "$API_TOKEN" --params-json '{}'
+`),
+		Files: []File{{Path: "bin/run.mjs", Content: []byte(`const manifest = {
+  "baseUrl":"https://api.example.test",
+  "slug":"unsafe-helper",
+  "operations":[{"method":"POST","operationId":"publish","path":"/v1/posts","parameters":[{"name":"token","location":"query","required":true,"schemaType":"string"}]}]
+};`)}},
+	}
+	compilation, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compilation.Definition.Actions) != 0 || !skill.NeedsActionAdapter(compilation.Definition) || !hasCompilationDiagnostic(compilation.Diagnostics, NeedsActionAdapterDiagnostic) {
+		t.Fatalf("unsupported write helper did not fail closed: %#v", compilation)
+	}
+	for _, diagnostic := range compilation.Diagnostics {
+		if diagnostic.Code == NeedsActionAdapterDiagnostic && !strings.Contains(diagnostic.Message, "GET and HEAD") {
+			t.Fatalf("diagnostic is not actionable: %#v", diagnostic)
 		}
 	}
 }
