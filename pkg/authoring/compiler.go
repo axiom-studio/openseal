@@ -72,6 +72,13 @@ func NewCompiler(generator Generator) (*Compiler, error) {
 }
 
 func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*CompileResult, error) {
+	return c.CompileWithProgress(ctx, request, nil)
+}
+
+// CompileWithProgress compiles a candidate while reporting bounded,
+// credential-free phase changes. Observers must return quickly; compilation
+// correctness never depends on observation succeeding.
+func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequest, observe CompileProgressObserver) (*CompileResult, error) {
 	request.Prompt = strings.TrimSpace(request.Prompt)
 	if request.Mode != ModeCreate && request.Mode != ModeAmend {
 		return nil, errors.New("authoring mode must be create or amend")
@@ -85,6 +92,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
 		return nil, fmt.Errorf("authoring capability catalog: %w", err)
 	}
+	reportCompileProgress(observe, CompilePhaseProviderRequest, 1, 1)
 	payload, err := c.generator.Generate(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("generate workforce candidate: %w", err)
@@ -92,6 +100,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	if len(payload) == 0 || len(payload) > maximumGenerationBytes {
 		return nil, errors.New("generated workforce candidate must be between 1 byte and 1 MiB")
 	}
+	reportCompileProgress(observe, CompilePhaseCandidateValidate, 1, 1)
 	generated, decodeErr := decodeGenerationResponse(payload)
 	for attempt := 1; decodeErr != nil; attempt++ {
 		repairer, ok := c.generator.(RepairGenerator)
@@ -105,6 +114,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		if repairRequest.InvocationKey != "" {
 			repairRequest.InvocationKey = fmt.Sprintf("%s:schema:%d", repairRequest.InvocationKey, attempt)
 		}
+		reportCompileProgress(observe, CompilePhaseSchemaRepair, attempt, maximumSchemaRepairAttempts)
 		payload, err = repairer.Repair(ctx, repairRequest, payload, decodeErr)
 		if err != nil {
 			return nil, fmt.Errorf("repair workforce candidate schema attempt %d: %w", attempt, err)
@@ -112,6 +122,7 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 		if len(payload) == 0 || len(payload) > maximumGenerationBytes {
 			return nil, errors.New("repaired workforce candidate must be between 1 byte and 1 MiB")
 		}
+		reportCompileProgress(observe, CompilePhaseCandidateValidate, 1, 1)
 		generated, decodeErr = decodeGenerationResponse(payload)
 	}
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
@@ -157,11 +168,13 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 			if repairRequest.InvocationKey != "" {
 				repairRequest.InvocationKey = fmt.Sprintf("%s:contract:%d", repairRequest.InvocationKey, attempt)
 			}
+			reportCompileProgress(observe, CompilePhaseContractRepair, attempt, maximumContractRepairAttempts)
 			repaired, repairErr := repairer.Repair(ctx, repairRequest, payload, repairReason)
 			if repairErr != nil || len(repaired) == 0 || len(repaired) > maximumGenerationBytes {
 				break
 			}
 			payload = repaired
+			reportCompileProgress(observe, CompilePhaseCandidateValidate, 1, 1)
 			candidate, candidateErr := decodeGenerationResponse(repaired)
 			if candidateErr != nil {
 				repairReason = candidateErr
@@ -213,6 +226,13 @@ func (c *Compiler) Compile(ctx context.Context, request GenerateRequest) (*Compi
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+func reportCompileProgress(observe CompileProgressObserver, phase CompilePhase, attempt, maximumAttempts int) {
+	if observe == nil {
+		return
+	}
+	observe(CompileProgress{Phase: phase, Attempt: attempt, MaximumAttempts: maximumAttempts})
 }
 
 // applyAuthorityConstraint narrows only the approval threshold that can be
