@@ -336,6 +336,73 @@ func TestCompilerNormalizesOnlyCanonicalRefinementProvenanceShorthand(t *testing
 	}
 }
 
+func TestCompilerNormalizesOnlyUnambiguousRefinementProvenanceTypeAlias(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Which scope is permitted?","whyNeeded":"Execution needs an explicit scope.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[{"type":"catalog","reference":"openseal.reddit@1.0.0","evidence":"compatible"}],"priority":100}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
+	if err != nil || result == nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("normalized provenance alias result = %#v, err = %v", result, err)
+	}
+	got := result.UnresolvedQuestions[0].Provenance
+	if len(got) != 1 || got[0].Kind != RefinementProvenanceCatalog || got[0].Reference != "openseal.reddit@1.0.0" || got[0].Evidence != "compatible" {
+		t.Fatalf("provenance alias = %#v", got)
+	}
+
+	invalid := []string{
+		`{"type":"invented"}`,
+		`{"type":"catalog","extra":"value"}`,
+		`{"kind":"catalog","type":"catalog"}`,
+		`{"type":" catalog"}`,
+	}
+	for _, provenance := range invalid {
+		strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[` + provenance + `],"priority":1}]}`)
+		strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
+		if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
+			t.Fatalf("ambiguous provenance alias %s must fail closed", provenance)
+		}
+	}
+}
+
+func TestCompilerNormalizesOnlyExactRefinementProvenanceSourceAlias(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, err := json.Marshal(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduces live ChangeSet ce762d1d: every provenance entry used source
+	// where the canonical contract requires kind.
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Which scope is permitted?","whyNeeded":"Execution needs an explicit scope.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[{"source":"prompt"},{"source":"catalog"}],"priority":100}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
+	if err != nil || result == nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("normalized source alias result = %#v, err = %v", result, err)
+	}
+	got := result.UnresolvedQuestions[0].Provenance
+	if len(got) != 2 || got[0].Kind != RefinementProvenancePrompt || got[1].Kind != RefinementProvenanceCatalog {
+		t.Fatalf("source provenance aliases = %#v", got)
+	}
+
+	invalid := []string{
+		`{"source":"invented"}`,
+		`{"source":"prompt","evidence":"ambiguous"}`,
+		`{"kind":"prompt","source":"prompt"}`,
+		`{"source":" prompt"}`,
+		`{"source":7}`,
+	}
+	for _, provenance := range invalid {
+		strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[` + provenance + `],"priority":1}]}`)
+		strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
+		if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || !strings.Contains(err.Error(), "provenance[0].source") {
+			t.Fatalf("ambiguous source alias %s must fail closed, got %v", provenance, err)
+		}
+	}
+}
+
 func TestCompilerNormalizesOnlyCanonicalRefinementBlockingShorthand(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidateJSON, err := json.Marshal(candidate)
