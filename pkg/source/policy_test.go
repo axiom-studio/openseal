@@ -1,6 +1,9 @@
 package source
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestSourcePolicyAuthorizesExactBoundedSource(t *testing.T) {
 	policy := Policy{ID: "public-reddit-research", Version: "2026-07-13", Enabled: true, MaximumItems: 10, RetentionDays: 30, Sources: []PolicySource{{Host: "www.reddit.com", PathPrefixes: []string{"/r/kubernetes"}}}}
@@ -16,6 +19,31 @@ func TestSourcePolicyAuthorizesExactBoundedSource(t *testing.T) {
 	}
 	if err := decision.Authorize("https://old.reddit.com/r/kubernetes/comments/thread", 5); err == nil {
 		t.Fatal("redirect escaped the exact authorized host")
+	}
+}
+
+func TestPolicyBindsExactReadMethodAndRejectsAmbiguousBounds(t *testing.T) {
+	policy := Policy{ID: "forums", Version: "2", Enabled: true, MaximumItems: 3, RetentionDays: 7,
+		Sources: []PolicySource{{Host: "api.example.com", PathPrefixes: []string{"/v1/forum"}, Methods: []string{http.MethodHead}}}}
+	decision, err := policy.AuthorizeRequest("https://api.example.com/v1/forum/threads", http.MethodHead, 3)
+	if err != nil || decision.Method != http.MethodHead {
+		t.Fatalf("HEAD decision = %#v, %v", decision, err)
+	}
+	if err := decision.AuthorizeRequest("https://api.example.com/v1/forum/threads", http.MethodGet, 3); err == nil {
+		t.Fatal("decision widened HEAD authority to GET")
+	}
+	if _, err := policy.Authorize("https://api.example.com/v1/forum/threads", 1); err == nil {
+		t.Fatal("legacy GET helper widened explicit HEAD-only policy")
+	}
+
+	invalid := policy
+	invalid.Sources = []PolicySource{{Host: "api.example.com", PathPrefixes: []string{"/v1//forum"}, Methods: []string{http.MethodPost}}}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("ambiguous path and write method were accepted")
+	}
+	invalid.Sources = []PolicySource{{Host: "api.example.com", PathPrefixes: []string{"/v1/forum", "/v1/forum"}}}
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("duplicate path authority was accepted")
 	}
 }
 
