@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -126,7 +127,7 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
 	}
-	credentialFieldsDigest, err := digestActionCredentialFields(request.Lease.Credentials)
+	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
 	if err != nil {
 		return err
 	}
@@ -162,6 +163,30 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 
 func digestActionCredentialFields(fields []ActionCredentialFieldReference) (string, error) {
 	payload, err := json.Marshal(cloneActionCredentialFieldReferences(fields))
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func digestActionCredentialFieldSelection(fields map[string][]string) (string, error) {
+	type fieldSelection struct {
+		Name   string   `json:"name"`
+		Fields []string `json:"fields"`
+	}
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	selections := make([]fieldSelection, 0, len(names))
+	for _, name := range names {
+		selected := append([]string(nil), fields[name]...)
+		sort.Strings(selected)
+		selections = append(selections, fieldSelection{Name: name, Fields: selected})
+	}
+	payload, err := json.Marshal(selections)
 	if err != nil {
 		return "", err
 	}

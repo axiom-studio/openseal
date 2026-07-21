@@ -65,7 +65,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		WHERE issuer=$1 AND audience=$2`, request.Lease.Issuer, request.Lease.Audience).Scan(&nonceDigest, &transport, &fieldsDigest); err != nil {
 		t.Fatal(err)
 	}
-	expectedFieldsDigest, err := digestActionCredentialFields(request.CredentialFields)
+	expectedFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
 	if err != nil {
 		t.Fatal(err)
 	}
