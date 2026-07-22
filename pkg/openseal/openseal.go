@@ -1023,6 +1023,7 @@ var (
 	ErrTeamDeploymentNotFound               = kernelteam.ErrDeploymentNotFound
 	ErrTeamDeploymentRevisionConflict       = kernelteam.ErrRevisionConflict
 	ErrTeamAmendmentNotFound                = kernelteam.ErrAmendmentNotFound
+	ErrTeamIdempotencyConflict              = kernelteam.ErrIdempotencyConflict
 	ErrTeamParticipationRecoveryNotRequired = kernelteam.ErrParticipationRecoveryNotRequired
 )
 
