@@ -731,10 +731,11 @@ type ReportEventSourceHealthRequest struct {
 }
 
 type AdvanceEventSourceCheckpointRequest struct {
-	ExpectedRevision int64     `json:"expectedRevision"`
-	Cursor           string    `json:"cursor,omitempty"`
-	EventIDs         []string  `json:"eventIds,omitempty"`
-	Watermark        time.Time `json:"watermark,omitempty"`
+	ExpectedRevision             int64     `json:"expectedRevision"`
+	ObservedSubscriptionRevision int64     `json:"observedSubscriptionRevision"`
+	Cursor                       string    `json:"cursor,omitempty"`
+	EventIDs                     []string  `json:"eventIds,omitempty"`
+	Watermark                    time.Time `json:"watermark,omitempty"`
 }
 
 type CreateInitiativeRequest struct {
