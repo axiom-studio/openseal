@@ -81,6 +81,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/action-approvals", s.handleListActionApprovals)
 	s.mux.HandleFunc("GET /api/v1/action-approvals/{id}", s.handleGetActionApproval)
 	s.mux.HandleFunc("POST /api/v1/action-approvals/{id}/decisions", s.handleResolveActionApproval)
+	s.mux.HandleFunc("GET /api/v1/action-calls", s.handleListActionCalls)
+	s.mux.HandleFunc("GET /api/v1/action-calls/{id}", s.handleGetActionCall)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments", s.handleListAgentDeployments)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}", s.handleGetAgentDeployment)
 	s.mux.HandleFunc("PUT /api/v1/agent-deployments/{id}", s.handleUpdateAgentDeployment)
@@ -151,7 +153,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.agentRunCreation != nil {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
 	}
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActivityCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability()}
 	if s.sourcePolicies != nil {
 		capabilities = append(capabilities, kernelapi.SourcePoliciesCapability())
 	}

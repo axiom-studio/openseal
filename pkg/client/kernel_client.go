@@ -68,6 +68,8 @@ type KernelClient interface {
 	GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error)
 	RespondAgentRequest(context.Context, runtime.Scope, string, kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error)
 	CompleteAgentRequest(context.Context, runtime.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
+	ListActionCalls(context.Context, runtime.ActionFilter) ([]*runtime.ActionCall, error)
+	GetActionCall(context.Context, runtime.Scope, string) (*runtime.ActionCall, error)
 	ListActionApprovals(context.Context, runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error)
 	GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
 	ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error)
@@ -1105,6 +1107,34 @@ func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope runti
 		return nil, err
 	}
 	return &result, nil
+}
+
+func (c *KernelHTTPClient) ListActionCalls(ctx context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+	query := scopeQuery(filter.Scope)
+	setIfPresent(query, "runId", filter.RunID)
+	for _, status := range filter.Status {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var calls []*runtime.ActionCall
+	if err := c.do(ctx, http.MethodGet, "/api/v1/action-calls?"+query.Encode(), nil, "", &calls); err != nil {
+		return nil, err
+	}
+	return calls, nil
+}
+
+func (c *KernelHTTPClient) GetActionCall(ctx context.Context, scope runtime.Scope, actionID string) (*runtime.ActionCall, error) {
+	var call runtime.ActionCall
+	path := "/api/v1/action-calls/" + url.PathEscape(strings.TrimSpace(actionID)) + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &call); err != nil {
+		return nil, err
+	}
+	return &call, nil
 }
 
 func (c *KernelHTTPClient) ListActionApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {

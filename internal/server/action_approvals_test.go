@@ -33,6 +33,25 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 	if !ok || !slices.Equal(capability.Operations, expectedReadOnly.Operations) || capability.Supports(kernelapi.OperationResolve) {
 		t.Fatalf("read-only approval capability = %#v", capability)
 	}
+	actionCapability, ok := document.Find(kernelapi.ActionCallsCapabilityID, kernelapi.ActionCallsCapabilityVersion)
+	if !ok || !actionCapability.Supports(kernelapi.OperationGet) || !actionCapability.Supports(kernelapi.OperationList) {
+		t.Fatalf("action call capability = %#v", actionCapability)
+	}
+	calls, err := kernel.ListActionCalls(t.Context(), runtime.ActionFilter{
+		Scope: proposal.Call.Scope, RunID: proposal.Call.RunID, Status: []runtime.ActionCallStatus{runtime.ActionCallStatusWaitingApproval}, Limit: 25,
+	})
+	if err != nil || len(calls) != 1 || calls[0].ID != proposal.Call.ID || calls[0].InvocationDigest == "" {
+		t.Fatalf("listed action calls = %#v, %v", calls, err)
+	}
+	call, err := kernel.GetActionCall(t.Context(), proposal.Call.Scope, proposal.Call.ID)
+	if err != nil || call.ID != proposal.Call.ID || call.Revision != proposal.Call.Revision {
+		t.Fatalf("restored action call = %#v, %v", call, err)
+	}
+	_, err = kernel.GetActionCall(t.Context(), runtime.Scope{Kind: "local", ID: "other"}, proposal.Call.ID)
+	var apiError *client.APIError
+	if !errors.As(err, &apiError) || apiError.StatusCode != 404 {
+		t.Fatalf("cross-scope action call error = %#v", err)
+	}
 	listed, err := kernel.ListActionApprovals(t.Context(), runtime.ApprovalFilter{
 		Scope: proposal.Approval.Scope, Owner: &proposal.Run.Owner, Status: []runtime.ApprovalStatus{runtime.ApprovalStatusPending}, Limit: 25,
 	})
@@ -46,7 +65,6 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 	_, err = kernel.ResolveActionApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, kernelapi.ResolveActionApprovalRequest{
 		ExpectedRevision: proposal.Approval.Revision, Approve: true, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"},
 	}, "decision-1")
-	var apiError *client.APIError
 	if !errors.As(err, &apiError) || apiError.StatusCode != 501 {
 		t.Fatalf("unconfigured resolution error = %#v", err)
 	}

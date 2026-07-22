@@ -459,6 +459,14 @@ func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ runtime.Sco
 	return &runtime.AgentRequestResult{Request: request}, nil
 }
 
+func (f *fakeKernelClient) ListActionCalls(context.Context, runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+	return nil, nil
+}
+
+func (f *fakeKernelClient) GetActionCall(context.Context, runtime.Scope, string) (*runtime.ActionCall, error) {
+	return nil, runtime.ErrActionNotFound
+}
+
 func (f *fakeKernelClient) ListActionApprovals(_ context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
 	f.approvalFilters = append(f.approvalFilters, filter)
 	return f.actionApprovals, nil

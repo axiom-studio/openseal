@@ -116,6 +116,18 @@ func TestActivityCapabilityIsReadOnlyAndSelectorBounded(t *testing.T) {
 	}
 }
 
+func TestActionCallsExposeOnlyDurableReadOperations(t *testing.T) {
+	capability, ok := Capabilities().Find(ActionCallsCapabilityID, ActionCallsCapabilityVersion)
+	if !ok || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {
+		t.Fatalf("action call capability = %#v", capability)
+	}
+	for _, operation := range []string{OperationCreate, OperationUpdate, OperationResolve, OperationRetry} {
+		if capability.Supports(operation) {
+			t.Fatalf("action call capability advertised mutation %q: %#v", operation, capability.Operations)
+		}
+	}
+}
+
 func TestAgentRequestsAdvertisePortableCollaborationLifecycle(t *testing.T) {
 	capability := AgentRequestsCapability()
 	if capability.ID != AgentRequestsCapabilityID || capability.Version != AgentRequestsCapabilityVersion {
