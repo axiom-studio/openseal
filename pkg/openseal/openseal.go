@@ -151,6 +151,7 @@ type (
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
 	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
 	WorkforceCapabilitySourceScopeRequirement = authoring.CapabilitySourceScopeRequirement
+	WorkforceCapabilitySourcePolicyProposal   = authoring.CapabilitySourcePolicyProposal
 	WorkforceAuthorityConstraint              = authoring.AuthorityConstraint
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
@@ -166,6 +167,7 @@ type (
 	WorkforceAuthoringResult                  = authoring.CompileResult
 	WorkforceAuthoringValidationIssue         = authoring.ValidationIssue
 	WorkforceAuthoringMissingRequirement      = authoring.MissingRequirement
+	WorkforceAuthoringSourcePolicyProposal    = authoring.SourcePolicyProposal
 	WorkforceAuthoringRiskChange              = authoring.RiskChange
 	WorkforceAuthoringFieldDiff               = authoring.FieldDiff
 	WorkforceChangeSet                        = authoring.ChangeSet

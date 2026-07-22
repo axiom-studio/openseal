@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/source"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -604,6 +605,61 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: catalog})
 	if err != nil || result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_scope" {
 		t.Fatalf("out-of-policy monitor source = %#v, err = %v", result, err)
+	}
+}
+
+func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAuthority(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	candidate.Initiative.SourceMonitors[0].SourcePolicyRef = "approved-communities@2026-07-22"
+	candidate.Team.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["policy"].(map[string]interface{})["sourcePolicyRef"] = "approved-communities@2026-07-22"
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	generator := &repairingGenerator{generated: payload, repaired: payload}
+	compiler, _ := NewCompiler(generator)
+	policy := source.Policy{
+		ID: "approved-communities", Version: "2026-07-22", Enabled: true,
+		Sources:      []source.PolicySource{{Host: "community.example", PathPrefixes: []string{"/feed"}, Methods: []string{"GET"}}},
+		MaximumItems: 5, RetentionDays: 30, ApprovalPolicy: "source-policy-admin",
+	}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a continuing market research initiative that runs every hour",
+		Catalog: CapabilityCatalog{
+			Skills: map[string]SkillCapability{"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}}},
+			CapabilityNeeds: []CapabilityNeed{{
+				ID: "community-research", Prompt: "Which research capability?", WhyNeeded: "A verified capability is required.",
+				SkillIDs: []string{"community-source"}, Priority: 100,
+				SourcePolicyProposal: &CapabilitySourcePolicyProposal{Policy: policy, Reason: "Permit bounded read-only collection from the reviewed community feed."},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "source_policy" {
+		t.Fatalf("missing authority = %#v", result.MissingRequirements)
+	}
+	if len(result.SourcePolicyProposals) != 1 {
+		t.Fatalf("proposals = %#v", result.SourcePolicyProposals)
+	}
+	if generator.repairs != 0 {
+		t.Fatalf("reviewable policy proposal unexpectedly triggered %d provider repairs", generator.repairs)
+	}
+	proposal := result.SourcePolicyProposals[0]
+	if proposal.Reference != "approved-communities@2026-07-22" || proposal.Policy.ID != policy.ID ||
+		!proposal.RequiresApproval || len(proposal.RequiredBy) != 1 {
+		t.Fatalf("proposal = %#v", proposal)
+	}
+
+	// Once an authorized host activates the exact immutable version, a fresh
+	// catalog projection resolves the requirement and no longer emits a draft.
+	active := CapabilityCatalog{
+		Skills: map[string]SkillCapability{"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}}},
+		SourcePolicies: map[string]SourcePolicyCapability{
+			"approved-communities@2026-07-22": {Reference: "approved-communities@2026-07-22", Sources: []SourcePolicySourceCapability{{Host: "community.example", PathPrefixes: []string{"/feed"}}}, MaximumItems: 5},
+		},
+	}
+	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: active})
+	if err != nil || !result.Valid || len(result.SourcePolicyProposals) != 0 {
+		t.Fatalf("active authority result = %#v, err = %v", result, err)
 	}
 }
 

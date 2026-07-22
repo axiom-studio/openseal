@@ -155,14 +155,15 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		return commitments, validation, missingRequirements(&generated.Candidate, request.Catalog)
 	}
 	commitments, validation, missing := validateGenerated()
+	repairableMissing := sourcePolicyProposalRepairableMissing(missing, request.Catalog)
 	// Structural schema repair and deterministic contract repair have separate,
 	// bounded budgets. Every semantic repair is revalidated before it can replace
 	// the canonical result; a second bounded attempt receives the new diagnostic
 	// instead of persisting a still-invalid typed refinement.
 	contractRepairAttempts := 0
 	if repairer, ok := c.generator.(RepairGenerator); ok {
-		repairReason := deterministicContractError(validation, missing)
-		for attempt := 1; attempt <= maximumContractRepairAttempts && (len(validation) > 0 || len(missing) > 0); attempt++ {
+		repairReason := deterministicContractError(validation, repairableMissing)
+		for attempt := 1; attempt <= maximumContractRepairAttempts && (len(validation) > 0 || len(repairableMissing) > 0); attempt++ {
 			contractRepairAttempts = attempt
 			repairRequest := request
 			if repairRequest.InvocationKey != "" {
@@ -188,7 +189,8 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 				materializationIssues = deferScheduleBlockedMaterializationIssues(materializationIssues)
 			}
 			commitments, validation, missing = validateGenerated()
-			repairReason = deterministicContractError(validation, missing)
+			repairableMissing = sourcePolicyProposalRepairableMissing(missing, request.Catalog)
+			repairReason = deterministicContractError(validation, repairableMissing)
 		}
 	}
 	assumptions := normalized(generated.Assumptions)
@@ -222,6 +224,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		}
 	}
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
+	result.SourcePolicyProposals = sourcePolicyProposals(result.MissingRequirements, request.Catalog)
 	result.RiskChanges = riskChanges(request.Existing, &result.Candidate)
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0

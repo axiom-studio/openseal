@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/source"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -116,6 +117,16 @@ type CapabilityNeed struct {
 	ChoiceRequired bool                              `json:"choiceRequired,omitempty"`
 	Priority       int                               `json:"priority"`
 	SourceScope    *CapabilitySourceScopeRequirement `json:"sourceScope,omitempty"`
+	// SourcePolicyProposal is an exact, credential-free policy draft supplied by
+	// the trusted capability catalog. It is never active authority: compilation
+	// may surface it for review, while registration and activation remain
+	// separate governed lifecycle operations.
+	SourcePolicyProposal *CapabilitySourcePolicyProposal `json:"sourcePolicyProposal,omitempty"`
+}
+
+type CapabilitySourcePolicyProposal struct {
+	Policy source.Policy `json:"policy"`
+	Reason string        `json:"reason"`
 }
 
 // CapabilitySourceScopeRequirement declares that a source-oriented capability
@@ -309,14 +320,28 @@ type FieldDiff struct {
 }
 
 type CompileResult struct {
-	Candidate           WorkforceCandidate   `json:"candidate"`
-	Valid               bool                 `json:"valid"`
-	Commitments         PromptCommitments    `json:"commitments"`
-	Assumptions         []string             `json:"assumptions,omitempty"`
-	Questions           []string             `json:"questions,omitempty"`
-	UnresolvedQuestions []RefinementQuestion `json:"unresolvedQuestions,omitempty"`
-	Validation          []ValidationIssue    `json:"validation,omitempty"`
-	MissingRequirements []MissingRequirement `json:"missingRequirements,omitempty"`
-	RiskChanges         []RiskChange         `json:"riskChanges,omitempty"`
-	Diff                []FieldDiff          `json:"diff,omitempty"`
+	Candidate             WorkforceCandidate     `json:"candidate"`
+	Valid                 bool                   `json:"valid"`
+	Commitments           PromptCommitments      `json:"commitments"`
+	Assumptions           []string               `json:"assumptions,omitempty"`
+	Questions             []string               `json:"questions,omitempty"`
+	UnresolvedQuestions   []RefinementQuestion   `json:"unresolvedQuestions,omitempty"`
+	Validation            []ValidationIssue      `json:"validation,omitempty"`
+	MissingRequirements   []MissingRequirement   `json:"missingRequirements,omitempty"`
+	SourcePolicyProposals []SourcePolicyProposal `json:"sourcePolicyProposals,omitempty"`
+	RiskChanges           []RiskChange           `json:"riskChanges,omitempty"`
+	Diff                  []FieldDiff            `json:"diff,omitempty"`
+}
+
+// SourcePolicyProposal is a deterministic review artifact, not authority. A
+// host must independently authorize registration and activation, after which
+// authoring regenerates against the active catalog entry.
+type SourcePolicyProposal struct {
+	APIVersion       string        `json:"apiVersion"`
+	CapabilityNeedID string        `json:"capabilityNeedId"`
+	Reference        string        `json:"reference"`
+	Policy           source.Policy `json:"policy"`
+	Reason           string        `json:"reason"`
+	RequiredBy       []string      `json:"requiredBy"`
+	RequiresApproval bool          `json:"requiresApproval"`
 }
