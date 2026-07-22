@@ -1859,6 +1859,14 @@ func (m *Model) renderChannelsContent(width int) string {
 				}
 				lines = append(lines, mutedStyle.Render(compact(meta, max(width-8, 28))))
 				lines = append(lines, "  "+compact(message.Content, max(width-10, 24)))
+				for _, reference := range message.References {
+					if reference.Kind != runtime.ConversationReferenceApproval {
+						continue
+					}
+					if approval := m.actionApprovalByID(reference.ID); approval != nil {
+						lines = append(lines, renderConversationActionApproval(approval, width)...)
+					}
+				}
 			}
 		}
 
@@ -1886,6 +1894,108 @@ func (m *Model) renderChannelsContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render(strings.Join(actions, " · ")))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) actionApprovalByID(id string) *runtime.ApprovalCheckpoint {
+	for _, approval := range m.actionApprovals {
+		if approval != nil && approval.ID == id {
+			return approval
+		}
+	}
+	return nil
+}
+
+// renderConversationActionApproval projects only typed, user-visible action
+// facts. It deliberately does not dump arbitrary arguments, which may contain
+// configuration or credential-shaped values owned by a host adapter.
+func renderConversationActionApproval(approval *runtime.ApprovalCheckpoint, width int) []string {
+	if approval == nil {
+		return nil
+	}
+	preview := approval.ProposedAction
+	resourceType, _ := preview["resourceType"].(string)
+	operation, _ := preview["operation"].(string)
+	if operation == "" {
+		operation, _ = preview["action"].(string)
+	}
+	resourceLabel := conversationResourceLabel(resourceType)
+	if resourceLabel == "" {
+		resourceLabel = "Governed action"
+	}
+	heading := fmt.Sprintf("  %s · %s · %s", resourceLabel, valueOrDash(operation), approval.Status)
+	lines := []string{lipgloss.NewStyle().Foreground(accentSoft).Render(compact(heading, max(width-8, 24)))}
+	if approval.Summary != "" {
+		lines = append(lines, "    "+compact(approval.Summary, max(width-12, 20)))
+	}
+	if owner, ok := preview["owner"].(map[string]interface{}); ok {
+		ownerType, _ := owner["type"].(string)
+		ownerID, _ := owner["id"].(string)
+		if ownerType != "" && ownerID != "" {
+			lines = append(lines, mutedStyle.Render(compact("    Owner · "+ownerType+":"+ownerID, max(width-12, 20))))
+		}
+	}
+	changes, _ := preview["changes"].(map[string]interface{})
+	switch resourceType {
+	case "objective":
+		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
+		lines = appendTypedConversationChange(lines, "Goal", changes["goal"], width)
+	case "initiative":
+		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
+		lines = appendTypedConversationChange(lines, "Purpose", changes["purpose"], width)
+		if refs := conversationStringSlice(changes["objectiveRefs"]); len(refs) > 0 {
+			lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("    Objectives · %d · %s", len(refs), strings.Join(refs, ", ")), max(width-12, 20))))
+		}
+		if milestones, ok := changes["milestones"].([]interface{}); ok && len(milestones) > 0 {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("    Milestones · %d", len(milestones))))
+		}
+		if deliverables, ok := changes["deliverables"].([]interface{}); ok && len(deliverables) > 0 {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("    Deliverables · %d", len(deliverables))))
+		}
+	}
+	if approval.Status == runtime.ApprovalStatusPending {
+		lines = append(lines, mutedStyle.Render("    A approvals · review this exact proposal"))
+	} else if approval.DecisionBy != nil {
+		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("    Decision · %s:%s", approval.DecisionBy.Type, approval.DecisionBy.ID), max(width-12, 20))))
+	}
+	return lines
+}
+
+func appendTypedConversationChange(lines []string, label string, value interface{}, width int) []string {
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return lines
+	}
+	return append(lines, mutedStyle.Render(compact("    "+label+" · "+text, max(width-12, 20))))
+}
+
+func conversationStringSlice(value interface{}) []string {
+	switch values := value.(type) {
+	case []string:
+		return values
+	case []interface{}:
+		result := make([]string, 0, len(values))
+		for _, item := range values {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func conversationResourceLabel(resourceType string) string {
+	switch resourceType {
+	case "objective":
+		return "Objective"
+	case "initiative":
+		return "Initiative"
+	case "skill_binding":
+		return "Skill access"
+	default:
+		return ""
+	}
 }
 
 func activePresenceSummary(presence []*runtime.ConversationPresence, width int) string {

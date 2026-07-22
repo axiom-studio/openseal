@@ -142,6 +142,42 @@ func (f *fakeKernelClient) RouteEvent(_ context.Context, event runtime.EventEnve
 	return &runtime.EventRouteResult{}, nil
 }
 
+func (f *fakeKernelClient) ReconcileObjectiveSchedules(context.Context, kernelapi.ReconcileObjectiveSchedulesRequest) (*kernelapi.ObjectiveScheduleReconciliation, error) {
+	return nil, errors.New("objective schedule reconciliation is not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) CreateEventSourceSubscription(context.Context, kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) ListEventSourceSubscriptions(context.Context, runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error) {
+	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) GetEventSourceSubscription(context.Context, runtime.Scope, string) (*runtime.EventSourceSubscriptionDetail, error) {
+	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) UpdateEventSourceSubscription(context.Context, runtime.Scope, string, kernelapi.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) RetireEventSourceSubscription(context.Context, runtime.Scope, string, kernelapi.RetireEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) ReportEventSourceHealth(context.Context, runtime.Scope, string, kernelapi.ReportEventSourceHealthRequest) (*runtime.EventSourceHealth, error) {
+	return nil, errors.New("event source health is not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) GetEventSourceCheckpoint(context.Context, runtime.Scope, string) (*runtime.EventSourceCheckpoint, error) {
+	return nil, errors.New("event source checkpoints are not configured in this TUI test")
+}
+
+func (f *fakeKernelClient) AdvanceEventSourceCheckpoint(context.Context, runtime.Scope, string, kernelapi.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error) {
+	return nil, errors.New("event source checkpoints are not configured in this TUI test")
+}
+
 type fakeChannelKernelClient struct {
 	*fakeKernelClient
 	conversations              []*runtime.Conversation
@@ -2791,6 +2827,56 @@ func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testin
 		if !strings.Contains(view, expected) {
 			t.Fatalf("channel audit missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestTeamChannelProjectsGovernedInitiativeProposalInline(t *testing.T) {
+	conversation := testConversation("research", "customer-research", 1, 2)
+	approval := &runtime.ApprovalCheckpoint{
+		ID: "approval-initiative", Scope: conversation.Scope, RunID: "run-initiative", ActionCallID: "call-initiative",
+		Status: runtime.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create customer research Initiative",
+		ProposedAction: map[string]interface{}{
+			"resourceType": "initiative", "operation": "create",
+			"owner": map[string]interface{}{"type": "team", "id": "research-team"},
+			"changes": map[string]interface{}{
+				"title": "Customer research", "purpose": "Research pain points and follow up with qualified leads",
+				"objectiveRefs": []interface{}{"monitor-feedback", "follow-up-leads"},
+				"milestones":    []interface{}{map[string]interface{}{"id": "weekly-brief"}},
+			},
+		},
+	}
+	message := &runtime.ChannelMessage{
+		ID: "proposal", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
+		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "research-lead"},
+		Intent: runtime.MessageIntentProposal, Content: "I prepared the Initiative for review.",
+		Audience:   runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel},
+		References: []runtime.ConversationReference{{Kind: runtime.ConversationReferenceApproval, ID: approval.ID, Version: 1}}, CreatedAt: time.Now(),
+	}
+	fake := &fakeChannelKernelClient{
+		fakeKernelClient: &fakeKernelClient{
+			document: kernelapi.NewCapabilityDocument(
+				kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}),
+				kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{}),
+			),
+			actionApprovals: []*runtime.ApprovalCheckpoint{approval},
+		},
+		conversations: []*runtime.Conversation{conversation}, messages: []*runtime.ChannelMessage{message},
+	}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section = sectionChannels
+	model.width = 180
+	view := model.View()
+	for _, expected := range []string{
+		"Initiative · create · pending", "Create customer research Initiative", "Owner · team:research-team",
+		"Purpose · Research pain points", "Objectives · 2 · monitor-feedback, follow-up-leads", "Milestones · 1", "A approvals",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("channel Initiative projection missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "apiKey") || strings.Contains(view, "credential") {
+		t.Fatalf("channel Initiative projection exposed untyped configuration:\n%s", view)
 	}
 }
 
