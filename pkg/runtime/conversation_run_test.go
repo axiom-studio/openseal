@@ -713,6 +713,28 @@ func TestGovernedConversationProposalFailureProjectsLifecycleError(t *testing.T)
 	}
 }
 
+func TestGovernedConversationActionFailureProjectsStaleRevision(t *testing.T) {
+	run := &AgentRun{
+		ID: "run-stale-initiative", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
+		Checkpoint: map[string]interface{}{"lastAction": map[string]interface{}{
+			"actionCallId": "call-stale-initiative", "status": ActionCallStatusFailed,
+			"skillId": InitiativeManagementSkillID, "action": ObjectiveActionPause,
+			"arguments": map[string]interface{}{
+				"initiativeId": "initiative-research", "expectedRevision": float64(1),
+			},
+			"approvalId": "approval-stale-initiative", "error": "initiative revision conflict",
+		}},
+	}
+	outcome, ok := governedConversationActionOutcome(run)
+	if !ok || outcome.Content != "Initiative pause was not applied because the Initiative changed while approval was pending. Review the latest state and try again." ||
+		outcome.ResourceType != "initiative" || outcome.ResourceID != "initiative-research" || len(outcome.References) != 3 ||
+		outcome.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) ||
+		outcome.References[1] != (ConversationReference{Kind: ConversationReferenceApproval, ID: "approval-stale-initiative"}) ||
+		outcome.References[2] != (ConversationReference{Kind: ConversationReferenceInitiative, ID: "initiative-research"}) {
+		t.Fatalf("stale Initiative outcome = %#v, ok=%v", outcome, ok)
+	}
+}
+
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
 	store := NewMemoryStore(20)
 	ctx := context.Background()

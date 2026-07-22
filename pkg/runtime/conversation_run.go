@@ -1000,9 +1000,10 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 }
 
 // governedConversationActionOutcome turns terminal governed mutations into a
-// kernel-authored channel fact. In particular, approval rejection/expiry and
-// policy denial must resolve the user's request once; they must never send the
-// same write back to the model where it can be proposed repeatedly.
+// kernel-authored channel fact. In particular, approval rejection/expiry,
+// policy denial, and terminal execution failures must resolve the user's
+// request once; they must never send the same write back to the model where it
+// can be proposed repeatedly.
 func governedConversationActionOutcome(run *AgentRun) (*governedConversationCompletion, bool) {
 	if completion, ok := governedConversationActionCompletion(run); ok {
 		return completion, true
@@ -1015,7 +1016,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		return nil, false
 	}
 	terminalStatus := fmt.Sprint(last["status"])
-	if terminalStatus != string(ActionCallStatusDenied) && terminalStatus != governedActionProposalFailedStatus {
+	if terminalStatus != string(ActionCallStatusDenied) && terminalStatus != string(ActionCallStatusFailed) && terminalStatus != governedActionProposalFailedStatus {
 		return nil, false
 	}
 	resourceType, label, kind, idField := "", "", ConversationReferenceKind(""), ""
@@ -1037,6 +1038,11 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		content = label + " " + operation + " could not be proposed."
 		if transition := strings.TrimPrefix(strings.TrimSpace(fmt.Sprint(last["error"])), "invalid objective transition: "); transition != strings.TrimSpace(fmt.Sprint(last["error"])) && transition != "" {
 			content = label + " " + operation + " could not be proposed because the requested lifecycle change is invalid (" + strings.ReplaceAll(transition, " -> ", " → ") + ")."
+		}
+	} else if terminalStatus == string(ActionCallStatusFailed) {
+		content = label + " " + operation + " could not be applied because execution failed. Review the Run details and try again."
+		if strings.Contains(strings.ToLower(strings.TrimSpace(fmt.Sprint(last["error"]))), "revision conflict") {
+			content = label + " " + operation + " was not applied because the " + label + " changed while approval was pending. Review the latest state and try again."
 		}
 	} else if disposition != "" {
 		content = label + " " + operation + " was not applied because approval was " + strings.ReplaceAll(disposition, "_", " ") + "."

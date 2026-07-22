@@ -80,6 +80,9 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		"action": call.Action, "status": call.Status,
 		"arguments": deepCloneCheckpointMap(call.Arguments),
 	}
+	if call.ApprovalID != "" {
+		lastAction["approvalId"] = call.ApprovalID
+	}
 	if call.Status == ActionCallStatusSucceeded {
 		lastAction["result"] = boundedActionResult(call.Output)
 	} else if call.Error != "" {
