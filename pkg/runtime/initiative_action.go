@@ -79,22 +79,109 @@ func initiativeSkillAction(name, description string, properties map[string]inter
 }
 
 func initiativeMutableSchema() map[string]interface{} {
-	array := func() map[string]interface{} { return map[string]interface{}{"type": "array"} }
+	stringArray := func() map[string]interface{} {
+		return map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true}
+	}
+	resourceRefs := map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true}
 	return map[string]interface{}{
 		"initiativeId":     map[string]interface{}{"type": "string", "minLength": 1},
 		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
 		"title":            map[string]interface{}{"type": "string", "minLength": 1},
 		"purpose":          map[string]interface{}{"type": "string", "minLength": 1},
-		"agentRefs":        array(),
-		"teamRefs":         array(),
-		"objectiveRefs":    array(),
-		"runRefs":          array(),
-		"milestones":       array(),
-		"hypotheses":       array(),
-		"sourceMonitors":   array(),
-		"deliverables":     array(),
-		"budget":           map[string]interface{}{"type": "object"},
+		"agentRefs":        cloneMap(resourceRefs),
+		"teamRefs":         cloneMap(resourceRefs),
+		"objectiveRefs":    stringArray(),
+		"runRefs":          stringArray(),
+		"milestones":       map[string]interface{}{"type": "array", "items": initiativeMilestoneSchema()},
+		"hypotheses":       map[string]interface{}{"type": "array", "items": initiativeHypothesisSchema()},
+		"sourceMonitors":   map[string]interface{}{"type": "array", "items": initiativeSourceMonitorSchema()},
+		"deliverables":     map[string]interface{}{"type": "array", "items": initiativeDeliverableSchema()},
+		"budget":           initiativeBudgetSchema(),
 		"policy":           map[string]interface{}{"type": "object"},
+	}
+}
+
+func initiativeResourceReferenceSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"kind": map[string]interface{}{"type": "string", "enum": []interface{}{
+				string(ResourceKindAgentDefinition), string(ResourceKindAgentDeployment), string(ResourceKindTeamDefinition),
+				string(ResourceKindTeamDeployment), string(ResourceKindArtifact), string(ResourceKindEvidence),
+			}},
+			"id":       map[string]interface{}{"type": "string", "minLength": 1},
+			"version":  map[string]interface{}{"type": "string", "minLength": 1},
+			"revision": map[string]interface{}{"type": "integer", "minimum": 1},
+		},
+		"required": []interface{}{"kind", "id"},
+	}
+}
+
+func initiativeMilestoneSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "minLength": 1}, "title": map[string]interface{}{"type": "string", "minLength": 1},
+			"status":        map[string]interface{}{"type": "string", "enum": []interface{}{string(MilestonePending), string(MilestoneInProgress), string(MilestoneCompleted), string(MilestoneBlocked), string(MilestoneCanceled)}},
+			"objectiveRefs": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
+			"dueAt":         map[string]interface{}{"type": "string", "format": "date-time"},
+			"completedAt":   map[string]interface{}{"type": "string", "format": "date-time"},
+		},
+		"required": []interface{}{"id", "title", "status"},
+	}
+}
+
+func initiativeHypothesisSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "minLength": 1}, "statement": map[string]interface{}{"type": "string", "minLength": 1},
+			"confidence":   map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1},
+			"evidenceRefs": map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true},
+			"status":       map[string]interface{}{"type": "string", "enum": []interface{}{string(HypothesisOpen), string(HypothesisSupported), string(HypothesisContradicted), string(HypothesisInconclusive)}},
+			"updatedAt":    map[string]interface{}{"type": "string", "format": "date-time"},
+		},
+		"required": []interface{}{"id", "statement", "confidence", "status", "updatedAt"},
+	}
+}
+
+func initiativeSourceMonitorSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "minLength": 1}, "objectiveId": map[string]interface{}{"type": "string", "minLength": 1},
+			"assignedAgentId": map[string]interface{}{"type": "string", "minLength": 1}, "skillId": map[string]interface{}{"type": "string", "minLength": 1},
+			"skillVersion": map[string]interface{}{"type": "string", "minLength": 1}, "action": map[string]interface{}{"type": "string", "minLength": 1},
+			"sourcePolicyRef": map[string]interface{}{"type": "string", "minLength": 1},
+			"deduplication":   map[string]interface{}{"type": "string", "enum": []interface{}{string(SourceMonitorDeduplicateStableSource), string(SourceMonitorDeduplicateContentDigest), string(SourceMonitorDeduplicateStableSourceAndContent)}},
+		},
+		"required": []interface{}{"id", "objectiveId", "assignedAgentId", "skillId", "skillVersion", "action", "sourcePolicyRef", "deduplication"},
+	}
+}
+
+func initiativeDeliverableSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{"type": "string", "minLength": 1}, "title": map[string]interface{}{"type": "string", "minLength": 1},
+			"status":        map[string]interface{}{"type": "string", "enum": []interface{}{string(DeliverablePlanned), string(DeliverableInProgress), string(DeliverableReview), string(DeliverableDelivered), string(DeliverableCanceled)}},
+			"artifactRefs":  map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true},
+			"objectiveRefs": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
+			"dueAt":         map[string]interface{}{"type": "string", "format": "date-time"},
+		},
+		"required": []interface{}{"id", "title", "status"},
+	}
+}
+
+func initiativeBudgetSchema() map[string]interface{} {
+	positive := func() map[string]interface{} { return map[string]interface{}{"type": "integer", "minimum": 1} }
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"maxAttempts": positive(), "maxTurns": positive(), "maxInputTokens": positive(), "maxOutputTokens": positive(),
+			"maxTotalTokens": positive(), "maxCostMicros": positive(), "maxDurationMs": positive(), "maxActions": positive(),
+			"warningPermille": map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 1000},
+		},
 	}
 }
 
