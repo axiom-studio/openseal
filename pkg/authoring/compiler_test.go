@@ -678,6 +678,44 @@ func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.
 	}
 }
 
+func TestCompilerMaterializesCatalogOwnedSourceMonitorWithoutGrantingAuthority(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	candidate.Initiative.SourceMonitors = nil
+	runTemplate := candidate.Team.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})
+	delete(runTemplate["context"].(map[string]interface{}), "sourceMonitorId")
+	delete(runTemplate, "policy")
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	policy := source.Policy{
+		ID: "approved-communities", Version: "proposal-v1", Enabled: true,
+		Sources:      []source.PolicySource{{Host: "community.example", PathPrefixes: []string{"/feed"}, Methods: []string{"GET"}}},
+		MaximumItems: 5, RetentionDays: 30, ApprovalPolicy: "source-policy-admin",
+	}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Monitor community.example every hour", Catalog: CapabilityCatalog{
+			Skills: map[string]SkillCapability{"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}}},
+			CapabilityNeeds: []CapabilityNeed{{
+				ID: "community-research", Prompt: "Which source?", WhyNeeded: "Source access must be explicit.", SkillIDs: []string{"community-source"},
+				SourceScope:          &CapabilitySourceScopeRequirement{Prompt: "Which community?", WhyNeeded: "Scope must be bounded.", Minimum: 1, Maximum: 1, Priority: 90, MaterializationInputKeys: []string{"url"}},
+				SourcePolicyProposal: &CapabilitySourcePolicyProposal{Policy: policy, Reason: "Permit reviewed collection.", SkillIDs: []string{"community-source"}}, Priority: 100,
+			}},
+		}, Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{
+			{QuestionID: CapabilityNeedQuestionID("community-research"), Value: RefinementProviderAnswerValue{SkillIDs: []string{"community-source"}}, Source: RefinementAnswerSourceUser},
+			{QuestionID: CapabilitySourceScopeQuestionID("community-research"), Value: RefinementProviderAnswerValue{Items: []string{"community.example"}}, Source: RefinementAnswerSourceUser},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidate.Initiative.SourceMonitors) != 1 || result.Candidate.Initiative.SourceMonitors[0].SourcePolicyRef != "approved-communities@proposal-v1" ||
+		len(result.SourcePolicyProposals) != 1 || result.SourcePolicyProposals[0].Reference != "approved-communities@proposal-v1" || result.Valid {
+		t.Fatalf("deterministic inert source monitor = %#v", result)
+	}
+	if hasValidationCode(result.Validation, "source_action_requires_monitor") {
+		t.Fatalf("materialized monitor was not recognized: %#v", result.Validation)
+	}
+}
+
 func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
