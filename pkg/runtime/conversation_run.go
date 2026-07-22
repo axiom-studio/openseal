@@ -505,6 +505,32 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		}
 		return r.retryOutcome(input.Run, err)
 	}
+	if len(result.Messages) == 0 {
+		trigger, triggerErr := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
+		if triggerErr != nil {
+			return nil, triggerErr
+		}
+		if trigger.RequiresResponse {
+			current, currentErr := r.conversations.GetConversation(ctx, input.Run.Scope, conversation.ID)
+			if currentErr != nil {
+				return nil, currentErr
+			}
+			fallback, fallbackErr := r.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+				Scope: input.Run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
+				Sender:   ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
+				Intent:   MessageIntentSystem,
+				Content:  "No Team member offered a role-relevant response or authorized action for this request. Review the Team’s roles and Skills, or rephrase the request.",
+				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
+				References: []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}}, ResolvesMessageID: trigger.ID,
+				IdempotencyKey: "team-participation-unanswered:" + result.Round.ID,
+			})
+			if fallbackErr != nil {
+				return nil, fallbackErr
+			}
+			result.Conversation = fallback.Conversation
+			result.Messages = append(result.Messages, fallback.Message)
+		}
+	}
 	messageIDs := make([]interface{}, 0, len(result.Messages))
 	for _, message := range result.Messages {
 		messageIDs = append(messageIDs, message.ID)
