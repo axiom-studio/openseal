@@ -1,6 +1,7 @@
 package authoring
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -33,7 +34,7 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 		}
 		need = selectedCapabilityNeed(need, answered)
 		targets := nonEmptyUnique(answer.Items)
-		if len(targets) == 0 || capabilitySourceScopeMaterialized(candidate, need, targets, requirement.MaterializationInputKeys) {
+		if len(targets) == 0 {
 			continue
 		}
 		matches := matchingSourceScopeInvocations(candidate, need, request.Catalog)
@@ -58,9 +59,74 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 			))
 			continue
 		}
-		materializeSourceTargets(matches[0].invocation, targets, requirement.MaterializationInputKeys)
+		if !capabilitySourceScopeMaterialized(candidate, need, targets, requirement.MaterializationInputKeys) {
+			materializeSourceTargets(matches[0].invocation, targets, requirement.MaterializationInputKeys)
+		}
+		issues = append(issues, materializeCatalogSourceMonitor(candidate, need, matches[0])...)
 	}
 	return issues
+}
+
+// materializeCatalogSourceMonitor turns an audited source-Skill choice into
+// the Initiative envelope required by runtime authorization. The compiler may
+// wire an exact catalog-owned draft into the plan, but it never activates that
+// policy; registration and activation remain explicit host-governed actions.
+func materializeCatalogSourceMonitor(candidate *WorkforceCandidate, need CapabilityNeed, match sourceScopeInvocation) []ValidationIssue {
+	if candidate == nil || candidate.Initiative == nil || need.SourcePolicyProposal == nil || !strings.HasSuffix(match.path, ".cadence") {
+		return nil
+	}
+	skillID, _ := match.invocation["skillId"].(string)
+	skillVersion, _ := match.invocation["skillVersion"].(string)
+	action, _ := match.invocation["action"].(string)
+	if !stringSet(need.SourcePolicyProposal.SkillIDs)[skillID] {
+		return nil
+	}
+	objectiveRef := strings.TrimSuffix(match.path, ".cadence")
+	objective := candidateObjectiveTemplates(candidate)[objectiveRef]
+	if objective == nil || !stringSet(candidate.Initiative.ObjectiveRefs)[objectiveRef] {
+		return nil
+	}
+	assignedAgentID, _ := objective.Cadence["assignedAgentId"].(string)
+	policy := need.SourcePolicyProposal.Policy
+	reference := strings.TrimSpace(policy.ID) + "@" + strings.TrimSpace(policy.Version)
+	monitorID := catalogSourceMonitorID(need.ID)
+	for _, existing := range candidate.Initiative.SourceMonitors {
+		if existing.ID == monitorID || existing.ObjectiveRef == objectiveRef {
+			return nil
+		}
+	}
+	runTemplate, _ := objective.Cadence["runTemplate"].(map[string]interface{})
+	if runTemplate == nil {
+		return nil
+	}
+	contextValues, _ := runTemplate["context"].(map[string]interface{})
+	if contextValues == nil {
+		contextValues = map[string]interface{}{}
+		runTemplate["context"] = contextValues
+	}
+	policyValues, _ := runTemplate["policy"].(map[string]interface{})
+	if policyValues == nil {
+		policyValues = map[string]interface{}{}
+		runTemplate["policy"] = policyValues
+	}
+	contextValues["initiativeId"] = candidate.Initiative.ID
+	contextValues["sourceMonitorId"] = monitorID
+	policyValues["sourcePolicyRef"] = reference
+	candidate.Initiative.SourceMonitors = append(candidate.Initiative.SourceMonitors, InitiativeSourceMonitorBlueprint{
+		ID: monitorID, ObjectiveRef: objectiveRef, AssignedAgentDefinitionID: assignedAgentID,
+		SkillID: skillID, SkillVersion: skillVersion, Action: action,
+		SourcePolicyRef: reference, Deduplication: InitiativeDeduplicateStableSourceAndContent,
+	})
+	return nil
+}
+
+func catalogSourceMonitorID(needID string) string {
+	candidate := "source-" + strings.TrimSpace(needID)
+	if validBlueprintID(candidate) {
+		return candidate
+	}
+	digest := sha256.Sum256([]byte(strings.TrimSpace(needID)))
+	return fmt.Sprintf("source-%x", digest[:8])
 }
 
 func selectedCapabilityNeed(need CapabilityNeed, answered map[string]RefinementProviderAnswerValue) CapabilityNeed {
