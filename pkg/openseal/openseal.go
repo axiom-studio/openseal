@@ -1368,6 +1368,7 @@ const (
 	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
 
 	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
+	ConversationReferenceInitiative     = runtime.ConversationReferenceInitiative
 	ConversationReferenceRun            = runtime.ConversationReferenceRun
 	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
 	ConversationReferenceApproval       = runtime.ConversationReferenceApproval

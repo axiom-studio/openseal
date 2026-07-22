@@ -21,9 +21,13 @@ func TestConversationFactsValidateStructuredChannelState(t *testing.T) {
 		ID: "message-1", Scope: scope, ConversationID: conversation.ID, Sequence: 1,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "developer"},
 		Intent: MessageIntentQuestion, Content: "@reviewer, is the launch evidence sufficient?",
-		Audience:         ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "reviewer"}}},
-		Mentions:         []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "reviewer"}},
-		References:       []ConversationReference{{Kind: ConversationReferenceRun, ID: "run-42"}, {Kind: ConversationReferenceArtifact, ID: "launch-evidence", Version: 3}},
+		Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "reviewer"}}},
+		Mentions: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "reviewer"}},
+		References: []ConversationReference{
+			{Kind: ConversationReferenceRun, ID: "run-42"},
+			{Kind: ConversationReferenceInitiative, ID: "initiative-launch", Version: 2},
+			{Kind: ConversationReferenceArtifact, ID: "launch-evidence", Version: 3},
+		},
 		RequiresResponse: true, IdempotencyKey: "release-question-v1", CreatedAt: now,
 	}
 	if err := message.Validate(); err != nil {
