@@ -342,6 +342,66 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	}
 }
 
+func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t *testing.T) {
+	store := NewMemoryStore(20)
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "proposal-failure"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "Pause the draft objective", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workerID = "conversation-worker"
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: workerID, Now: time.Now(),
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claimed Run = %#v, %v", claimed, err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := &AgentTurn{ID: "turn-pause", ContinuationCheckpoint: map[string]interface{}{
+		"actionInputs": map[string]interface{}{"call": map[string]interface{}{"objectiveId": "objective-draft", "expectedRevision": float64(2)}},
+	}, RequestedActions: []TurnAction{{
+		Type: "skill_action", Capability: "openseal.objectives.pause", InputRef: "/actionInputs/call",
+		BindingID: "bundled:objectives", BindingRevision: 1,
+	}}}
+	pool.failMaterialization(ctx, workerID, claimed, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
+
+	requeued, err := store.GetAgentRun(ctx, scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, _ := requeued.Checkpoint["lastAction"].(map[string]interface{})
+	if requeued.Status != AgentRunStatusQueued || requeued.Error != "" || requeued.LeaseOwner != "" ||
+		fmt.Sprint(last["status"]) != governedActionProposalFailedStatus || fmt.Sprint(last["action"]) != ObjectiveActionPause {
+		t.Fatalf("requeued proposal failure = %#v", requeued)
+	}
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.EventType == "action.materialization_failed" {
+			found = true
+			if reason := fmt.Sprint(event.Payload["reason"]); strings.Contains(reason, "<nil>") || reason == "" {
+				t.Fatalf("unsafe materialization failure reason = %q", reason)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("materialization failure activity missing: %#v", events)
+	}
+}
+
 func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
 	store := NewMemoryStore(20)
 	scope := Scope{Kind: "tenant", ID: "fork-worker"}

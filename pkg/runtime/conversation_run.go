@@ -19,7 +19,10 @@ const (
 	conversationRunSchedulerParticipant  = "conversation-run-scheduler"
 )
 
-const teamActionAssignedAgentCheckpointKey = "_opensealTeamActionAssignedAgentId"
+const (
+	teamActionAssignedAgentCheckpointKey = "_opensealTeamActionAssignedAgentId"
+	governedActionProposalFailedStatus   = "proposal_failed"
+)
 
 type ConversationRunSchedulerConfig struct {
 	ConversationPageSize int
@@ -876,7 +879,11 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		return nil, false
 	}
 	last, ok := run.Checkpoint["lastAction"].(map[string]interface{})
-	if !ok || fmt.Sprint(last["status"]) != string(ActionCallStatusDenied) {
+	if !ok {
+		return nil, false
+	}
+	terminalStatus := fmt.Sprint(last["status"])
+	if terminalStatus != string(ActionCallStatusDenied) && terminalStatus != governedActionProposalFailedStatus {
 		return nil, false
 	}
 	resourceType, label, kind, idField := "", "", ConversationReferenceKind(""), ""
@@ -894,12 +901,19 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	}
 	disposition := strings.TrimSpace(fmt.Sprint(last["approvalStatus"]))
 	content := label + " " + operation + " was not applied because policy denied the action."
-	if disposition != "" {
+	if terminalStatus == governedActionProposalFailedStatus {
+		content = label + " " + operation + " could not be proposed."
+		if transition := strings.TrimPrefix(strings.TrimSpace(fmt.Sprint(last["error"])), "invalid objective transition: "); transition != strings.TrimSpace(fmt.Sprint(last["error"])) && transition != "" {
+			content = label + " " + operation + " could not be proposed because the requested lifecycle change is invalid (" + strings.ReplaceAll(transition, " -> ", " → ") + ")."
+		}
+	} else if disposition != "" {
 		content = label + " " + operation + " was not applied because approval was " + strings.ReplaceAll(disposition, "_", " ") + "."
 	}
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-	if approvalID := strings.TrimSpace(fmt.Sprint(last["approvalId"])); validOpaqueIdentifier(approvalID, 256) {
-		references = append(references, ConversationReference{Kind: ConversationReferenceApproval, ID: approvalID})
+	if rawApprovalID, present := last["approvalId"]; present && rawApprovalID != nil {
+		if approvalID := strings.TrimSpace(fmt.Sprint(rawApprovalID)); validOpaqueIdentifier(approvalID, 256) {
+			references = append(references, ConversationReference{Kind: ConversationReferenceApproval, ID: approvalID})
+		}
 	}
 	resourceID := ""
 	if arguments, argumentsOK := last["arguments"].(map[string]interface{}); argumentsOK {
@@ -911,6 +925,46 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		}
 	}
 	return &governedConversationCompletion{Content: content, ResourceType: resourceType, ResourceID: resourceID, References: references}, true
+}
+
+// checkpointGovernedConversationProposalFailure preserves a safe, typed
+// failure from the deterministic mutation validator. Conversation Runs are
+// requeued once so their normal projection can resolve the user's message;
+// other Runs retain the existing fail-closed terminal behavior.
+func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTurn, cause error) (map[string]interface{}, bool) {
+	if run == nil || run.Kind != RunKindConversation || turn == nil || cause == nil || len(turn.RequestedActions) != 1 {
+		return nil, false
+	}
+	requested := turn.RequestedActions[0]
+	parts := strings.Split(strings.TrimSpace(requested.Capability), ".")
+	if len(parts) < 3 {
+		return nil, false
+	}
+	action := parts[len(parts)-1]
+	skillID := strings.Join(parts[:len(parts)-1], ".")
+	version := ""
+	switch skillID {
+	case ObjectiveManagementSkillID:
+		version = ObjectiveManagementSkillVersion
+	case InitiativeManagementSkillID:
+		version = InitiativeManagementSkillVersion
+	default:
+		return nil, false
+	}
+	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause {
+		return nil, false
+	}
+	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, requested.InputRef)
+	if err != nil {
+		return nil, false
+	}
+	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
+	checkpoint["lastAction"] = map[string]interface{}{
+		"status": governedActionProposalFailedStatus, "skillId": skillID, "skillVersion": version, "action": action,
+		"bindingId": requested.BindingID, "bindingRevision": requested.BindingRevision,
+		"arguments": deepCloneCheckpointMap(arguments), "error": sanitizeActionError(cause, nil),
+	}
+	return checkpoint, true
 }
 
 func conversationResultMap(value interface{}) map[string]interface{} {
