@@ -87,6 +87,14 @@ type KernelClient interface {
 	ApplyWorkforceChangeSet(context.Context, authoring.ApplyChangeSetRequest, string) (*authoring.ChangeSet, error)
 }
 
+// AgentDefinitionCapabilityClient discovers the operations authorized for one
+// exact Agent deployment. Hosts may expose read-only Agent definition
+// capabilities globally and add governed mutations only after applying the
+// deployment's scope, revision, and caller policy.
+type AgentDefinitionCapabilityClient interface {
+	AgentDefinitionCapabilities(context.Context, capability.ScopeReference, string) (kernelapi.CapabilityDocument, error)
+}
+
 type ClawHubClient interface {
 	InspectClawHubSkill(context.Context, clawhub.SkillReference) (*clawhub.SkillDetail, error)
 	ListClawHubSkillVersions(context.Context, clawhub.SkillReference, int, string) (*clawhub.VersionPage, error)
@@ -261,6 +269,14 @@ func NewKernelHTTPClient(baseURL string, httpClient *http.Client, options ...Ker
 func (c *KernelHTTPClient) Capabilities(ctx context.Context) (kernelapi.CapabilityDocument, error) {
 	var document kernelapi.CapabilityDocument
 	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities", nil, "", &document)
+	return document, err
+}
+
+func (c *KernelHTTPClient) AgentDefinitionCapabilities(ctx context.Context, scope capability.ScopeReference, deploymentID string) (kernelapi.CapabilityDocument, error) {
+	query := capabilityScopeQuery(scope)
+	query.Set("deploymentId", strings.TrimSpace(deploymentID))
+	var document kernelapi.CapabilityDocument
+	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities?"+query.Encode(), nil, "", &document)
 	return document, err
 }
 
@@ -1430,3 +1446,4 @@ func setIfPresent(query url.Values, key, value string) {
 }
 
 var _ KernelClient = (*KernelHTTPClient)(nil)
+var _ AgentDefinitionCapabilityClient = (*KernelHTTPClient)(nil)

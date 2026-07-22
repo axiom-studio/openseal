@@ -33,6 +33,11 @@ import (
 
 type fakeKernelClient struct {
 	document             kernelapi.CapabilityDocument
+	agentDocument        *kernelapi.CapabilityDocument
+	agentCapabilityCalls []struct {
+		scope        capability.ScopeReference
+		deploymentID string
+	}
 	agentDeployments     []kernelapi.AgentDeploymentCatalogEntry
 	agentUpdates         []kernelapi.UpdateAgentDeploymentRequest
 	agentAmendments      []*kernelagent.DefinitionAmendment
@@ -113,11 +118,12 @@ type fakeKernelClient struct {
 }
 
 var (
-	_ client.KernelClient                   = (*fakeKernelClient)(nil)
-	_ client.AgentDefinitionLifecycleClient = (*fakeKernelClient)(nil)
-	_ client.KernelClient                   = (*fakeChannelKernelClient)(nil)
-	_ client.KernelClient                   = (*fakeClawHubKernelClient)(nil)
-	_ client.SkillBindingClient             = (*fakeKernelClient)(nil)
+	_ client.KernelClient                    = (*fakeKernelClient)(nil)
+	_ client.AgentDefinitionCapabilityClient = (*fakeKernelClient)(nil)
+	_ client.AgentDefinitionLifecycleClient  = (*fakeKernelClient)(nil)
+	_ client.KernelClient                    = (*fakeChannelKernelClient)(nil)
+	_ client.KernelClient                    = (*fakeClawHubKernelClient)(nil)
+	_ client.SkillBindingClient              = (*fakeKernelClient)(nil)
 )
 
 func (f *fakeKernelClient) ListSkillBindings(context.Context, capability.ScopeReference, client.SkillBindingOwner) (*kernelapi.SkillBindingList, error) {
@@ -357,6 +363,17 @@ func (f *fakeChannelKernelClient) ListConversationPresence(context.Context, runt
 }
 
 func (f *fakeKernelClient) Capabilities(context.Context) (kernelapi.CapabilityDocument, error) {
+	return f.document, nil
+}
+
+func (f *fakeKernelClient) AgentDefinitionCapabilities(_ context.Context, scope capability.ScopeReference, deploymentID string) (kernelapi.CapabilityDocument, error) {
+	f.agentCapabilityCalls = append(f.agentCapabilityCalls, struct {
+		scope        capability.ScopeReference
+		deploymentID string
+	}{scope: scope, deploymentID: deploymentID})
+	if f.agentDocument != nil {
+		return *f.agentDocument, nil
+	}
 	return f.document, nil
 }
 
@@ -1174,12 +1191,21 @@ func TestAgentAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *
 		Candidate: candidate, Changes: []workforce.DefinitionFieldChange{{Field: "systemPrompt"}}, ProposerType: "agent", ProposerID: "operator", Rationale: "Require attributable evidence",
 		Status: kernelagent.AmendmentEvaluating, Revision: 4, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
+	globalDocument := kernelapi.NewCapabilityDocument(kernelapi.Capability{
+		ID: kernelapi.AgentDefinitionsCapabilityID, Version: kernelapi.AgentDefinitionsCapabilityVersion,
+		Available: true, Operations: []string{kernelapi.OperationGet, kernelapi.OperationList, kernelapi.OperationListCompilations},
+	})
+	contextualDocument := kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true}))
 	fake := &fakeKernelClient{
-		document:         kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true})),
+		document:         globalDocument,
+		agentDocument:    &contextualDocument,
 		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}}, agentAmendments: []*kernelagent.DefinitionAmendment{amendment},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
+	if len(fake.agentCapabilityCalls) != 1 || fake.agentCapabilityCalls[0].scope != scope || fake.agentCapabilityCalls[0].deploymentID != deployment.ID {
+		t.Fatalf("contextual Agent capability calls = %#v", fake.agentCapabilityCalls)
+	}
 	view := model.View()
 	for _, expected := range []string{"Agent runtime & placement", "Governance history · 1 amendment(s)", "evaluating · 1 → 2 · r4", "Proposed by agent:operator", "Changed · systemPrompt", "evaluate"} {
 		if !strings.Contains(view, expected) {

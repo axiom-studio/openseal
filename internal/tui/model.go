@@ -141,6 +141,7 @@ const (
 type Model struct {
 	ctx                         context.Context
 	client                      client.KernelClient
+	agentCapabilityClient       client.AgentDefinitionCapabilityClient
 	agentLifecycleClient        client.AgentDefinitionLifecycleClient
 	conversationClient          client.ConversationClient
 	clawHubClient               client.ClawHubClient
@@ -571,11 +572,12 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
 		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
-		agentLifecycleClient: agentLifecycleClient(kernelClient),
-		conversationClient:   conversationClient(kernelClient),
-		clawHubClient:        clawHubClient(kernelClient),
-		skillBindingClient:   skillBindingClient(kernelClient),
-		sourcePolicyClient:   sourcePolicyClient(kernelClient),
+		agentLifecycleClient:  agentLifecycleClient(kernelClient),
+		agentCapabilityClient: agentCapabilityClient(kernelClient),
+		conversationClient:    conversationClient(kernelClient),
+		clawHubClient:         clawHubClient(kernelClient),
+		skillBindingClient:    skillBindingClient(kernelClient),
+		sourcePolicyClient:    sourcePolicyClient(kernelClient),
 	}, nil
 }
 
@@ -1920,6 +1922,8 @@ func (m *Model) loadCapabilities() tea.Cmd {
 		var err error
 		if m.authoringChangeSet != nil {
 			document, err = m.client.WorkforceChangeSetCapabilities(m.ctx, m.authoringChangeSet.Scope, m.authoringChangeSet.ID)
+		} else if m.config.Owner.Type == runtime.OwnerTypeAgent && m.agentCapabilityClient != nil {
+			document, err = m.agentCapabilityClient.AgentDefinitionCapabilities(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.config.Owner.ID)
 		} else {
 			document, err = m.client.Capabilities(m.ctx)
 		}
@@ -5346,6 +5350,11 @@ func conversationClient(kernelClient client.KernelClient) client.ConversationCli
 
 func agentLifecycleClient(kernelClient client.KernelClient) client.AgentDefinitionLifecycleClient {
 	value, _ := kernelClient.(client.AgentDefinitionLifecycleClient)
+	return value
+}
+
+func agentCapabilityClient(kernelClient client.KernelClient) client.AgentDefinitionCapabilityClient {
+	value, _ := kernelClient.(client.AgentDefinitionCapabilityClient)
 	return value
 }
 
