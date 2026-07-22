@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 func TestCompileManifestBuildsPortableDefinitionWithSafeDefaults(t *testing.T) {
@@ -61,5 +63,33 @@ func TestCompileManifestRejectsSecretsAndInvalidIdentity(t *testing.T) {
 	invalid.Metadata.ID = "Not Portable"
 	if _, err := CompileManifest(invalid, "", DefinitionProvenance{}); err == nil {
 		t.Fatal("expected invalid manifest identity rejection")
+	}
+}
+
+func TestDecodeManifestYAMLPreservesNestedCamelCaseContract(t *testing.T) {
+	manifest, err := DecodeManifestYAML([]byte(`apiVersion: openseal.dev/agent/v1alpha1
+kind: Agent
+metadata:
+  id: researcher
+  version: 1.0.0
+  displayName: Researcher
+spec:
+  skillRequirements:
+    - skillId: reddit
+      versionConstraint: ">=1.0.0 <2.0.0"
+      requiredActions: [search]
+  authority:
+    maximumRisk: read
+    maxConcurrentRuns: 2
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Spec.SkillRequirements) != 1 || manifest.Spec.SkillRequirements[0].SkillID != "reddit" ||
+		manifest.Spec.Authority.MaximumRisk != capability.RiskLevelRead || manifest.Spec.Authority.MaxConcurrentRuns != 2 {
+		t.Fatalf("manifest=%#v", manifest)
+	}
+	if _, err = DecodeManifestYAML([]byte("apiVersion: openseal.dev/agent/v1alpha1\nkind: Agent\nunknown: true\n")); err == nil {
+		t.Fatal("unknown portable Agent field was accepted")
 	}
 }

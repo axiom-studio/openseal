@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -52,6 +54,27 @@ type ManifestSpec struct {
 	Evaluations         []EvaluationCriterion  `json:"evaluations,omitempty" yaml:"evaluations,omitempty"`
 	Runbook             *runbook.Definition    `json:"runbook,omitempty" yaml:"runbook,omitempty"`
 	Amendments          AmendmentPolicy        `json:"amendments,omitempty" yaml:"amendments,omitempty"`
+}
+
+// DecodeManifestYAML decodes the public YAML artifact through its JSON
+// contract. Nested portable types intentionally remain JSON-native, so this
+// bridge provides one strict camelCase representation across every host.
+func DecodeManifestYAML(data []byte) (*Manifest, error) {
+	var document map[string]interface{}
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("decode agent manifest YAML: %w", err)
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("normalize agent manifest YAML: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	var manifest Manifest
+	if err = decoder.Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("decode agent manifest contract: %w", err)
+	}
+	return &manifest, nil
 }
 
 // CompileManifest converts a portable artifact into one immutable definition.

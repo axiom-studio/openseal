@@ -639,6 +639,10 @@ func CompileAgentManifest(manifest *AgentManifest, definitionID string, provenan
 	return kernelagent.CompileManifest(manifest, definitionID, provenance)
 }
 
+func DecodeAgentManifestYAML(data []byte) (*AgentManifest, error) {
+	return kernelagent.DecodeManifestYAML(data)
+}
+
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
 type (
