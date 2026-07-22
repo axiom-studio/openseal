@@ -790,6 +790,57 @@ func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
 	}
 }
 
+func TestCompilerOmitsExplicitZeroOptionalRunBudgetLimits(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{
+		{
+			ID: "monitor", Title: "Monitor", Goal: "Observe a bounded source", Priority: 1,
+			Cadence: map[string]interface{}{
+				"type": "interval", "intervalSeconds": float64(3600),
+				"runBudget": map[string]interface{}{
+					"maxAttempts": float64(3), "maxTurns": float64(3), "maxActions": float64(1),
+					"maxCostMicros": float64(0), "warningPermille": float64(0),
+				},
+				"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
+					"skillId": "reddit-research", "skillVersion": "1.0.0", "action": "read",
+				}},
+			},
+		},
+		{
+			ID: "react", Title: "React", Goal: "React to retained evidence", Priority: 2,
+			EventRules: map[string]interface{}{"version": "1", "rules": []interface{}{map[string]interface{}{
+				"id": "observed", "eventType": "source.observed",
+				"runBudget": map[string]interface{}{
+					"maxAttempts": float64(3), "maxTurns": float64(3), "maxActions": float64(1),
+					"maxDurationMs": float64(0),
+				},
+				"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
+					"skillId": "reddit-research", "skillVersion": "1.0.0", "action": "read",
+				}},
+			}}},
+		},
+	}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a monitor every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+		}},
+	})
+	if err != nil || !result.Valid {
+		t.Fatalf("zero-valued optional budget normalization = %#v, err = %v", result, err)
+	}
+	cadenceBudget := result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence["runBudget"].(map[string]interface{})
+	if _, exists := cadenceBudget["maxCostMicros"]; exists || cadenceBudget["maxAttempts"] != float64(3) || cadenceBudget["warningPermille"] != float64(0) {
+		t.Fatalf("cadence budget was not normalized exactly: %#v", cadenceBudget)
+	}
+	eventRule := result.Candidate.Agents[0].ObjectiveTemplates[1].EventRules["rules"].([]interface{})[0].(map[string]interface{})
+	eventBudget := eventRule["runBudget"].(map[string]interface{})
+	if _, exists := eventBudget["maxDurationMs"]; exists || eventBudget["maxActions"] != float64(1) {
+		t.Fatalf("event budget was not normalized exactly: %#v", eventBudget)
+	}
+}
+
 func TestCompilerRejectsEvidenceProjectionBudgetWithoutReviewAndRepairCapacity(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{

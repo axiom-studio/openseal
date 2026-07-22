@@ -370,6 +370,7 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		}
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
+	normalizeCandidateObjectiveRunBudgets(&generated.Candidate)
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
 }
