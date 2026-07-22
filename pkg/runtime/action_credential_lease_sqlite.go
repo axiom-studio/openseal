@@ -104,15 +104,23 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 		return err
 	}
 
-	var unixMicros int64
-	if err := conn.QueryRowContext(ctx, `SELECT CAST((julianday('now') - 2440587.5) * 86400000000 AS INTEGER)`).Scan(&unixMicros); err != nil {
+	// SQLite's built-in clock has millisecond resolution. Compare every lease
+	// boundary at that same resolution: comparing its rounded-down value with a
+	// nanosecond Go timestamp can otherwise make a lease issued in the current
+	// millisecond appear to come from the future. unixepoch('subsec') also avoids
+	// the precision loss from converting a large Julian-day float to microseconds.
+	var unixMillis int64
+	if err := conn.QueryRowContext(ctx, `SELECT CAST(unixepoch('subsec') * 1000 AS INTEGER)`).Scan(&unixMillis); err != nil {
 		return err
 	}
-	now := canonicalLeaseTime(time.UnixMicro(unixMicros))
-	if now.Before(request.Lease.IssuedAt) || !now.Before(request.Lease.ExpiresAt) || !now.Before(request.Lease.ActionLease.ExpiresAt) {
+	now := canonicalSQLiteLeaseTime(time.UnixMilli(unixMillis))
+	issuedAt := canonicalSQLiteLeaseTime(request.Lease.IssuedAt)
+	expiresAt := canonicalSQLiteLeaseTime(request.Lease.ExpiresAt)
+	actionLeaseExpiresAt := canonicalSQLiteLeaseTime(request.Lease.ActionLease.ExpiresAt)
+	if now.Before(issuedAt) || !now.Before(expiresAt) || !now.Before(actionLeaseExpiresAt) {
 		return ErrActionCredentialLeaseExpired
 	}
-	if call.LeaseExpiresAt == nil || !now.Before(canonicalLeaseTime(*call.LeaseExpiresAt)) {
+	if call.LeaseExpiresAt == nil || !now.Before(canonicalSQLiteLeaseTime(*call.LeaseExpiresAt)) {
 		return ErrActionCredentialLeaseExpired
 	}
 	if err := MatchActionCredentialLease(request.Lease, call, run, request.Transport, request.CredentialFields); err != nil {
@@ -153,4 +161,8 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	}
 	committed = true
 	return nil
+}
+
+func canonicalSQLiteLeaseTime(value time.Time) time.Time {
+	return canonicalLeaseTime(value).Truncate(time.Millisecond)
 }
