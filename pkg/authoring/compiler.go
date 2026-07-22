@@ -938,6 +938,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		issues = append(issues, validateObjectiveTemplateCadences(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 		issues = append(issues, validateObjectiveTemplateEventRules(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
+	issues = append(issues, validateSourceActionProjection(candidate)...)
 	if candidate.Team == nil {
 		if len(candidate.Agents) == 0 {
 			issues = append(issues, issue("workforce", "required", "At least one Agent or Team definition is required"))
