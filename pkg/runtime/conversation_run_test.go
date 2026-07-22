@@ -280,6 +280,10 @@ func TestConversationRunTurnRunnerArbitratesOneGovernedTeamActionAndCompletesTru
 	resumed.Checkpoint["lastAction"] = map[string]interface{}{
 		"status": "succeeded", "skillId": "openseal.objectives", "action": "create",
 		"bindingId": "bundled:objectives", "bindingRevision": float64(1),
+		"result": map[string]interface{}{
+			"resourceType": "objective", "operation": "create", "created": true,
+			"objective": map[string]interface{}{"id": "objective-release", "title": "Release", "status": "draft", "revision": float64(1)},
+		},
 	}
 	second, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
 	if err != nil || second.NextRunStatus != AgentRunStatusCompleted || len(second.ProposedActions) != 0 {
@@ -288,7 +292,10 @@ func TestConversationRunTurnRunnerArbitratesOneGovernedTeamActionAndCompletesTru
 	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 3 || messages[1].Sender.ID != "agent-1" ||
 		len(messages[1].References) != 1 || messages[1].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) ||
-		messages[2].Content != "Governed action openseal.objectives.create completed after all required approval gates were satisfied." ||
+		messages[2].Content != "Objective “Release” was created successfully and is now draft." ||
+		len(messages[2].References) != 2 ||
+		messages[2].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) ||
+		messages[2].References[1] != (ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-release", Version: 1}) ||
 		messages[2].ResolvesMessageID != trigger.ID {
 		t.Fatalf("Team action channel messages = %#v, %v", messages, err)
 	}
@@ -405,6 +412,96 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation, Owner: &conversation.Owner})
 	if err != nil || len(runs) != 1 || runs[0].ID != scheduled.Run.ID {
 		t.Fatalf("Agent reply scheduled a response loop: %#v, %v", runs, err)
+	}
+}
+
+func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarration(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "agent-result"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Title: "Release assistant", IdempotencyKey: "agent-result-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Create the release objective after approval.", "agent-result-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelCalls := 0
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1",
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				modelCalls++
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "It is still awaiting approval."}}, nil
+			}),
+		}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed := cloneAgentRun(scheduled.Run)
+	resumed.Checkpoint = map[string]interface{}{
+		"lastAction": map[string]interface{}{
+			"status": ActionCallStatusSucceeded,
+			"result": map[string]interface{}{
+				"resourceType": "objective", "operation": "create", "created": true,
+				"objective": &Objective{ID: "objective-release", Title: "Release readiness", Status: ObjectiveStatusDraft, Revision: 1},
+			},
+		},
+	}
+	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || modelCalls != 0 ||
+		outcome.RunOutput["resourceType"] != "objective" || outcome.RunOutput["resourceId"] != "objective-release" {
+		t.Fatalf("governed Agent completion = %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 || messages[1].Content != "Objective “Release readiness” was created successfully and is now draft." ||
+		strings.Contains(messages[1].Content, "awaiting approval") || len(messages[1].References) != 2 ||
+		messages[1].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) ||
+		messages[1].References[1] != (ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-release", Version: 1}) {
+		t.Fatalf("governed Agent message = %#v, %v", messages, err)
+	}
+	replayed, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || replayed.RunOutput["replayed"] != true || modelCalls != 0 {
+		t.Fatalf("governed Agent replay = %#v, modelCalls=%d, err=%v", replayed, modelCalls, err)
+	}
+	messages, _ = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if len(messages) != 2 {
+		t.Fatalf("governed Agent replay duplicated messages: %#v", messages)
+	}
+}
+
+func TestGovernedConversationActionCompletionProjectsInitiativeIdentity(t *testing.T) {
+	run := &AgentRun{
+		ID: "run-initiative", Checkpoint: map[string]interface{}{
+			"lastAction": map[string]interface{}{
+				"status": "succeeded",
+				"result": map[string]interface{}{
+					"resourceType": "initiative", "operation": "update", "created": false,
+					"initiative": map[string]interface{}{
+						"id": "initiative-research", "title": "Customer research", "status": "active", "revision": float64(4),
+					},
+				},
+			},
+		},
+	}
+	completion, ok := governedConversationActionCompletion(run)
+	if !ok || completion.Content != "Initiative “Customer research” was updated successfully and is now active." ||
+		completion.ResourceType != "initiative" || completion.ResourceID != "initiative-research" ||
+		len(completion.References) != 2 ||
+		completion.References[1] != (ConversationReference{Kind: ConversationReferenceInitiative, ID: "initiative-research", Version: 4}) {
+		t.Fatalf("initiative completion = %#v, ok=%v", completion, ok)
 	}
 }
 

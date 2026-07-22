@@ -587,6 +587,11 @@ func (r *ConversationRunTurnRunner) postTeamActionCompletion(
 ) (*ChannelMessage, bool, error) {
 	key := "team-action-completion:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+triggerID)
 	content := "Governed action " + strings.TrimSpace(action.Capability) + " completed after all required approval gates were satisfied."
+	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
+	if completion, ok := governedConversationActionCompletion(run); ok {
+		content = completion.Content
+		references = completion.References
+	}
 	for range 3 {
 		current, err := r.conversations.GetConversation(ctx, run.Scope, conversation.ID)
 		if err != nil {
@@ -597,7 +602,7 @@ func (r *ConversationRunTurnRunner) postTeamActionCompletion(
 			Sender: participant, Intent: MessageIntentAnswer, Content: content,
 			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
-			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			References:     references,
 			IdempotencyKey: key,
 		})
 		if err == nil {
@@ -639,6 +644,21 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		Type: ConversationParticipantAgent, ID: conversation.Owner.ID,
 	}, latestConversationSequence(recent)); err != nil {
 		return nil, err
+	}
+	if completion, ok := governedConversationActionCompletion(input.Run); ok {
+		message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References)
+		if err != nil {
+			return nil, err
+		}
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusCompleted,
+			OutputSummary: "Governed Agent action completed",
+			RunOutput: map[string]interface{}{
+				"conversationId": conversation.ID, "triggerMessageId": trigger.ID,
+				"messageId": message.ID, "replayed": replayed,
+				"resourceType": completion.ResourceType, "resourceId": completion.ResourceID,
+			},
+		}, nil
 	}
 	goal, err := agentConversationGoal(conversation, trigger, recent)
 	if err != nil {
@@ -738,6 +758,17 @@ func (r *ConversationRunTurnRunner) postAgentResponse(
 	trigger *ChannelMessage,
 	content string,
 ) (*ChannelMessage, bool, error) {
+	return r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}})
+}
+
+func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
+	ctx context.Context,
+	run *AgentRun,
+	conversation *Conversation,
+	trigger *ChannelMessage,
+	content string,
+	references []ConversationReference,
+) (*ChannelMessage, bool, error) {
 	key := "agent-channel-response:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+trigger.ID)
 	for range 3 {
 		current, err := r.conversations.GetConversation(ctx, run.Scope, conversation.ID)
@@ -749,7 +780,7 @@ func (r *ConversationRunTurnRunner) postAgentResponse(
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: current.Owner.ID},
 			Intent: MessageIntentAnswer, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
-			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			References:     append([]ConversationReference(nil), references...),
 			IdempotencyKey: key,
 		})
 		if err == nil {
@@ -760,6 +791,100 @@ func (r *ConversationRunTurnRunner) postAgentResponse(
 		}
 	}
 	return nil, false, ErrRevisionConflict
+}
+
+type governedConversationCompletion struct {
+	Content      string
+	ResourceType string
+	ResourceID   string
+	References   []ConversationReference
+}
+
+// governedConversationActionCompletion projects the kernel-owned action result
+// instead of asking a model to narrate a mutation that has already happened.
+// This prevents stale claims such as "awaiting approval" after the approval
+// and action workers have durably completed the write.
+func governedConversationActionCompletion(run *AgentRun) (*governedConversationCompletion, bool) {
+	if run == nil {
+		return nil, false
+	}
+	last, ok := run.Checkpoint["lastAction"].(map[string]interface{})
+	if !ok || fmt.Sprint(last["status"]) != string(ActionCallStatusSucceeded) {
+		return nil, false
+	}
+	result, ok := last["result"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	if fmt.Sprint(result["truncated"]) == "true" {
+		if value, valueOK := result["value"].(map[string]interface{}); valueOK {
+			result = value
+		}
+	}
+	resourceType := strings.TrimSpace(fmt.Sprint(result["resourceType"]))
+	if resourceType != "objective" && resourceType != "initiative" {
+		return nil, false
+	}
+	resource := conversationResultMap(result[resourceType])
+	id := strings.TrimSpace(fmt.Sprint(resource["id"]))
+	if !validOpaqueIdentifier(id, 256) {
+		return nil, false
+	}
+	title := strings.TrimSpace(fmt.Sprint(resource["title"]))
+	status := strings.TrimSpace(fmt.Sprint(resource["status"]))
+	operation := strings.TrimSpace(fmt.Sprint(result["operation"]))
+	label := "Objective"
+	kind := ConversationReferenceObjective
+	if resourceType == "initiative" {
+		label = "Initiative"
+		kind = ConversationReferenceInitiative
+	}
+	verb := "updated"
+	if operation == "create" {
+		verb = "created"
+	} else if operation == "pause" {
+		verb = "paused"
+	}
+	content := label + " " + id + " was " + verb + " successfully."
+	if title != "" {
+		content = label + " “" + title + "” was " + verb + " successfully."
+	}
+	if status != "" {
+		content = strings.TrimSuffix(content, ".") + " and is now " + strings.ReplaceAll(status, "_", " ") + "."
+	}
+	version := int64(0)
+	switch value := resource["revision"].(type) {
+	case int64:
+		version = value
+	case int:
+		version = int64(value)
+	case float64:
+		if value > 0 && value == math.Trunc(value) {
+			version = int64(value)
+		}
+	}
+	return &governedConversationCompletion{
+		Content: content, ResourceType: resourceType, ResourceID: id,
+		References: []ConversationReference{
+			{Kind: ConversationReferenceRun, ID: run.ID},
+			{Kind: kind, ID: id, Version: version},
+		},
+	}, true
+}
+
+func conversationResultMap(value interface{}) map[string]interface{} {
+	if result, ok := value.(map[string]interface{}); ok {
+		return result
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return nil
+	}
+	return result
 }
 
 func (r *ConversationRunTurnRunner) retryOutcome(run *AgentRun, cause error) (*TurnOutcome, error) {
