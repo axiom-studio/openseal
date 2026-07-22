@@ -209,7 +209,7 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 		ID: uuid.NewString(), Scope: scope, RunID: run.ID, DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusRunning,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,
-		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "atlas-worker", LeaseExpiresAt: &expires,
+		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "runtime-worker", LeaseExpiresAt: &expires,
 		Revision: 2, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := call.Validate(); err != nil {
@@ -228,7 +228,7 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 	fields := map[string][]string{"reddit": {"oauth.access_token"}}
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
 		TenantID: scope.ID, Call: call, Run: run, CredentialFields: fields, Transport: definition.Transport.Endpoint,
-		Issuer: "sentinel", Audience: "atlas", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: nonce,
+		Issuer: "credential-authority", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: nonce,
 	})
 	if err != nil {
 		t.Fatal(err)

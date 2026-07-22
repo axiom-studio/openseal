@@ -30,7 +30,7 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 	for index := 0; index < 130; index++ {
 		if _, err := primary.db.ExecContext(ctx, `INSERT INTO action_credential_lease_redemptions
 			(issuer,audience,nonce_digest,scope_kind,scope_id,run_id,action_call_id,action_lease_id,deployment_id,binding_id,binding_revision,transport,credential_fields_digest,expires_at,consumed_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, "expired", "atlas", fmt.Sprintf("%064x", index), "tenant", "expired", "run", "call", "lease", "agent", "binding", 1, "tool", fmt.Sprintf("%064x", index), cutoff, cutoff); err != nil {
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, "expired", "execution-host", fmt.Sprintf("%064x", index), "tenant", "expired", "run", "call", "lease", "agent", "binding", 1, "tool", fmt.Sprintf("%064x", index), cutoff, cutoff); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -231,7 +231,7 @@ func createSQLiteActionCredentialLeaseFixture(t *testing.T, ctx context.Context,
 		ID: uuid.NewString(), Scope: scope, RunID: run.ID, DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusRunning,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,
-		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "atlas-worker", LeaseExpiresAt: &expires,
+		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "runtime-worker", LeaseExpiresAt: &expires,
 		Revision: 2, CreatedAt: now, UpdatedAt: now,
 	}
 	payload, err := json.Marshal(call)
@@ -247,7 +247,7 @@ func createSQLiteActionCredentialLeaseFixture(t *testing.T, ctx context.Context,
 	fields := map[string][]string{"reddit": {"oauth.access_token"}}
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
 		TenantID: scope.ID, Call: call, Run: run, CredentialFields: fields, Transport: definition.Transport.Endpoint,
-		Issuer: "sentinel", Audience: "atlas", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: nonce,
+		Issuer: "credential-authority", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: nonce,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -1,13 +1,16 @@
-.PHONY: build test vet docker-up docker-down docker-logs
+.PHONY: build test vet neutrality docker-up docker-down docker-logs
 
 build:
 	go build -o openseal ./cmd/openseal
 
-test:
+test: neutrality
 	go test ./...
 
-vet:
+vet: neutrality
 	go vet ./...
+
+neutrality:
+	./scripts/check-product-neutral.sh
 
 # Docker Compose targets
 docker-up:
