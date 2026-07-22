@@ -724,6 +724,7 @@ const (
 	KernelOperationList                     = kernelapi.OperationList
 	KernelOperationGet                      = kernelapi.OperationGet
 	KernelOperationUpdate                   = kernelapi.OperationUpdate
+	KernelOperationRegister                 = kernelapi.OperationRegister
 	KernelOperationPause                    = kernelapi.OperationPause
 	KernelOperationResume                   = kernelapi.OperationResume
 	KernelOperationRetire                   = kernelapi.OperationRetire
