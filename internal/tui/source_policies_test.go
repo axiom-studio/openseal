@@ -12,12 +12,16 @@ import (
 
 type sourcePolicyKernelClient struct {
 	*fakeKernelClient
-	policies  []*source.Lifecycle
-	listCalls int
+	policies   []*source.Lifecycle
+	listCalls  int
+	registered *source.RegisterVersionRequest
+	activated  *source.ActivateRequest
+	revoked    *source.RevokeRequest
 }
 
-func (f *sourcePolicyKernelClient) RegisterSourcePolicyVersion(context.Context, source.RegisterVersionRequest) (*source.PolicyVersion, error) {
-	return nil, nil
+func (f *sourcePolicyKernelClient) RegisterSourcePolicyVersion(_ context.Context, request source.RegisterVersionRequest) (*source.PolicyVersion, error) {
+	f.registered = &request
+	return &source.PolicyVersion{APIVersion: source.LifecycleAPIVersion, Scope: request.Scope, Policy: &request.Policy}, nil
 }
 func (f *sourcePolicyKernelClient) GetSourcePolicy(context.Context, capability.ScopeReference, string) (*source.LifecycleDetail, error) {
 	return nil, nil
@@ -32,11 +36,40 @@ func (f *sourcePolicyKernelClient) GetSourcePolicyVersion(context.Context, capab
 func (f *sourcePolicyKernelClient) ListSourcePolicyVersions(context.Context, capability.ScopeReference, string) (*source.PolicyVersionList, error) {
 	return nil, nil
 }
-func (f *sourcePolicyKernelClient) ActivateSourcePolicy(context.Context, string, source.ActivateRequest) (*source.LifecycleResult, error) {
-	return nil, nil
+func (f *sourcePolicyKernelClient) ActivateSourcePolicy(_ context.Context, _ string, request source.ActivateRequest) (*source.LifecycleResult, error) {
+	f.activated = &request
+	return &source.LifecycleResult{APIVersion: source.LifecycleAPIVersion, Lifecycle: &source.Lifecycle{PolicyID: request.PolicyID, ActiveVersion: request.Version, State: source.LifecycleActive, Revision: request.ExpectedRevision + 1}}, nil
 }
-func (f *sourcePolicyKernelClient) RevokeSourcePolicy(context.Context, string, source.RevokeRequest) (*source.LifecycleResult, error) {
-	return nil, nil
+func (f *sourcePolicyKernelClient) RevokeSourcePolicy(_ context.Context, _ string, request source.RevokeRequest) (*source.LifecycleResult, error) {
+	f.revoked = &request
+	return &source.LifecycleResult{APIVersion: source.LifecycleAPIVersion, Lifecycle: &source.Lifecycle{PolicyID: request.PolicyID, ActiveVersion: "1", State: source.LifecycleRevoked, Revision: request.ExpectedRevision + 1}}, nil
+}
+
+func TestTUISourcePolicyMutationsUseAdvertisedPortableLifecycle(t *testing.T) {
+	fake := &sourcePolicyKernelClient{fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.SourcePoliciesCapability())}}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+
+	model.editor.SetValue("id: approved-forums\nversion: 2\nsources: forums.example|/feeds|GET,HEAD\nmax-items: 10\nretention-days: 30\napproval: operator-review\nreason: reviewed public feeds")
+	applyCommand(t, model, model.submitSourcePolicyRegister())
+	if fake.registered == nil || fake.registered.Policy.ID != "approved-forums" || len(fake.registered.Policy.Sources) != 1 || fake.registered.ActorID != model.config.Actor.ID {
+		t.Fatalf("registered request = %#v", fake.registered)
+	}
+	if len(model.sourcePolicies) != 0 {
+		t.Fatal("registration must not invent active authority")
+	}
+
+	model.editor.SetValue("policy: approved-forums\nversion: 2\nrevision: 0\nreason: approved after review")
+	applyCommand(t, model, model.submitSourcePolicyActivate())
+	if fake.activated == nil || fake.activated.ExpectedRevision != 0 || fake.activated.Version != "2" {
+		t.Fatalf("activation request = %#v", fake.activated)
+	}
+
+	model.editor.SetValue("policy: approved-forums\nrevision: 1\nreason: access no longer required")
+	applyCommand(t, model, model.submitSourcePolicyRevoke())
+	if fake.revoked == nil || fake.revoked.ExpectedRevision != 1 {
+		t.Fatalf("revocation request = %#v", fake.revoked)
+	}
 }
 func (f *sourcePolicyKernelClient) ListSourcePolicyActivations(context.Context, capability.ScopeReference, string) (*source.LifecycleEventList, error) {
 	return nil, nil
