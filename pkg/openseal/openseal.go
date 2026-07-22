@@ -677,6 +677,21 @@ type (
 	ActionApprovalCapabilityFeatures      = kernelapi.ActionApprovalCapabilityFeatures
 )
 
+type (
+	EventSourceSubscription              = runtime.EventSourceSubscription
+	EventSourceSubscriptionStatus        = runtime.EventSourceSubscriptionStatus
+	EventSourceConnector                 = runtime.EventSourceConnector
+	EventSourceConnectorKind             = runtime.EventSourceConnectorKind
+	EventSourceHealth                    = runtime.EventSourceHealth
+	EventSourceHealthState               = runtime.EventSourceHealthState
+	EventSourceSubscriptionDetail        = runtime.EventSourceSubscriptionDetail
+	EventSourceSubscriptionFilter        = runtime.EventSourceSubscriptionFilter
+	EventSourceSubscriptionStore         = runtime.EventSourceSubscriptionStore
+	CreateEventSourceSubscriptionRequest = runtime.CreateEventSourceSubscriptionRequest
+	UpdateEventSourceSubscriptionRequest = runtime.UpdateEventSourceSubscriptionRequest
+	ReportEventSourceHealthRequest       = runtime.ReportEventSourceHealthRequest
+)
+
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
@@ -777,6 +792,23 @@ const (
 	RunbookPredicateNot                     = runbook.PredicateNot
 )
 
+const (
+	EventSourceSubscriptionsCapabilityID      = kernelapi.EventSourceSubscriptionsCapabilityID
+	EventSourceSubscriptionsCapabilityVersion = kernelapi.EventSourceSubscriptionsCapabilityVersion
+	KernelOperationReportHealth               = kernelapi.OperationReportHealth
+	KernelOperationGetCheckpoint              = kernelapi.OperationGetCheckpoint
+	KernelOperationAdvanceCheckpoint          = kernelapi.OperationAdvanceCheckpoint
+	EventSourceSubscriptionActive             = runtime.EventSourceSubscriptionActive
+	EventSourceSubscriptionPaused             = runtime.EventSourceSubscriptionPaused
+	EventSourceSubscriptionRetired            = runtime.EventSourceSubscriptionRetired
+	EventSourceConnectorHost                  = runtime.EventSourceConnectorHost
+	EventSourceConnectorSkill                 = runtime.EventSourceConnectorSkill
+	EventSourceHealthUnknown                  = runtime.EventSourceHealthUnknown
+	EventSourceHealthHealthy                  = runtime.EventSourceHealthHealthy
+	EventSourceHealthDegraded                 = runtime.EventSourceHealthDegraded
+	EventSourceHealthUnhealthy                = runtime.EventSourceHealthUnhealthy
+)
+
 // ChannelCapability returns the canonical versioned descriptor for the
 // channel services an embedding host has actually wired.
 func ChannelCapability(features ChannelCapabilityFeatures) KernelCapability {
@@ -793,6 +825,10 @@ func ObjectivesCapability() KernelCapability {
 
 func ObjectiveSchedulesCapability() KernelCapability {
 	return kernelapi.ObjectiveSchedulesCapability()
+}
+
+func EventSourceSubscriptionsCapability() KernelCapability {
+	return kernelapi.EventSourceSubscriptionsCapability()
 }
 
 func EventRoutingCapability() KernelCapability {
@@ -980,6 +1016,13 @@ var (
 	ErrTeamDeploymentNotFound              = kernelteam.ErrDeploymentNotFound
 	ErrTeamDeploymentRevisionConflict      = kernelteam.ErrRevisionConflict
 	ErrTeamAmendmentNotFound               = kernelteam.ErrAmendmentNotFound
+)
+
+var (
+	ErrEventSourceSubscriptionNotFound = runtime.ErrEventSourceSubscriptionNotFound
+	ErrEventSourceSubscriptionConflict = runtime.ErrEventSourceSubscriptionConflict
+	ErrInvalidEventSourceSubscription  = runtime.ErrInvalidEventSourceSubscription
+	ErrInvalidEventSourceHealth        = runtime.ErrInvalidEventSourceHealth
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -1505,6 +1548,7 @@ type Engine struct {
 	initiatives                   *runtime.InitiativeService
 	sourceMonitors                *runtime.SourceMonitorService
 	eventSources                  *runtime.EventSourceCheckpointService
+	eventSourceSubscriptions      *runtime.EventSourceSubscriptionService
 	outreach                      *runtime.OutreachService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
@@ -1614,31 +1658,32 @@ func New(opts ...Option) (*Engine, error) {
 
 	agentRegistry := kernelagent.NewRegistry()
 	e := &Engine{
-		registry:            reg,
-		store:               store,
-		pool:                pool,
-		scheduler:           runtime.NewScheduler(pool, store),
-		portfolio:           runtime.NewPortfolioService(store),
-		initiatives:         runtime.NewInitiativeService(store, store),
-		sourceMonitors:      runtime.NewSourceMonitorService(store, store, store, store),
-		eventSources:        runtime.NewEventSourceCheckpointService(store),
-		outreach:            runtime.NewOutreachService(store, store, store, store),
-		activity:            runtime.NewRunActivityService(store, store),
-		dependencies:        runtime.NewDependencyCoordinator(store),
-		conversations:       runtime.NewConversationService(store),
-		conversationChanges: conversationChanges,
-		collaboration:       runtime.NewCollaborationService(store),
-		turns:               runtime.NewAgentTurnService(store, store),
-		turnsRun:            runtime.NewTurnCoordinator(store, store, store),
-		runQueue:            runtime.NewAgentRunScheduler(store),
-		wake:                runtime.NewAgentRunWakeService(store, store),
-		artifacts:           runtime.NewArtifactCatalog(store),
-		skills:              skill.NewCatalog(),
-		agents:              agentRegistry,
-		teams:               kernelteam.NewRegistry(agentRegistry),
-		actionPolicy:        runtime.NewDefaultActionPolicy(),
-		approvalAuth:        runtime.EligibleApprovalAuthorizer{},
-		logger:              sugar,
+		registry:                 reg,
+		store:                    store,
+		pool:                     pool,
+		scheduler:                runtime.NewScheduler(pool, store),
+		portfolio:                runtime.NewPortfolioService(store),
+		initiatives:              runtime.NewInitiativeService(store, store),
+		sourceMonitors:           runtime.NewSourceMonitorService(store, store, store, store),
+		eventSources:             runtime.NewEventSourceCheckpointService(store),
+		eventSourceSubscriptions: runtime.NewEventSourceSubscriptionService(store, store),
+		outreach:                 runtime.NewOutreachService(store, store, store, store),
+		activity:                 runtime.NewRunActivityService(store, store),
+		dependencies:             runtime.NewDependencyCoordinator(store),
+		conversations:            runtime.NewConversationService(store),
+		conversationChanges:      conversationChanges,
+		collaboration:            runtime.NewCollaborationService(store),
+		turns:                    runtime.NewAgentTurnService(store, store),
+		turnsRun:                 runtime.NewTurnCoordinator(store, store, store),
+		runQueue:                 runtime.NewAgentRunScheduler(store),
+		wake:                     runtime.NewAgentRunWakeService(store, store),
+		artifacts:                runtime.NewArtifactCatalog(store),
+		skills:                   skill.NewCatalog(),
+		agents:                   agentRegistry,
+		teams:                    kernelteam.NewRegistry(agentRegistry),
+		actionPolicy:             runtime.NewDefaultActionPolicy(),
+		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
+		logger:                   sugar,
 	}
 	e.progression = progression.NewService(e.agents, e.teams)
 
@@ -1830,6 +1875,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.eventSources = runtime.NewEventSourceCheckpointService(store)
+		e.eventSourceSubscriptions = runtime.NewEventSourceSubscriptionService(store, store)
 		if initiativeStore, ok := store.(runtime.InitiativeStore); ok {
 			e.initiatives = runtime.NewInitiativeService(initiativeStore, store)
 			if sourceMonitorStore, supported := store.(runtime.SourceMonitorStore); supported {
@@ -2704,6 +2750,69 @@ func (e *Engine) AdvanceEventSourceCheckpoint(ctx context.Context, req runtime.A
 		return nil, errors.New("event source checkpoint capability is unavailable")
 	}
 	return e.eventSources.Advance(ctx, req)
+}
+
+func (e *Engine) CreateEventSourceSubscription(ctx context.Context, req runtime.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	if e.eventSourceSubscriptions == nil {
+		return nil, errors.New("event source subscription capability is unavailable")
+	}
+	if err := e.validateEventSourceConnector(ctx, req.Scope, req.Owner, req.Connector); err != nil {
+		return nil, err
+	}
+	return e.eventSourceSubscriptions.Create(ctx, req)
+}
+
+func (e *Engine) GetEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string) (*runtime.EventSourceSubscriptionDetail, error) {
+	if e.eventSourceSubscriptions == nil {
+		return nil, errors.New("event source subscription capability is unavailable")
+	}
+	return e.eventSourceSubscriptions.Get(ctx, scope, id)
+}
+
+func (e *Engine) ListEventSourceSubscriptions(ctx context.Context, filter runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error) {
+	if e.eventSourceSubscriptions == nil {
+		return nil, errors.New("event source subscription capability is unavailable")
+	}
+	return e.eventSourceSubscriptions.List(ctx, filter)
+}
+
+func (e *Engine) UpdateEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string, req runtime.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	if e.eventSourceSubscriptions == nil {
+		return nil, errors.New("event source subscription capability is unavailable")
+	}
+	current, err := e.eventSourceSubscriptions.Get(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	connector := current.Subscription.Connector
+	if req.Connector != nil {
+		connector = *req.Connector
+	}
+	if err := e.validateEventSourceConnector(ctx, scope, current.Subscription.Owner, connector); err != nil {
+		return nil, err
+	}
+	return e.eventSourceSubscriptions.Update(ctx, scope, id, req)
+}
+
+func (e *Engine) ReportEventSourceHealth(ctx context.Context, req runtime.ReportEventSourceHealthRequest) (*runtime.EventSourceHealth, error) {
+	if e.eventSourceSubscriptions == nil {
+		return nil, errors.New("event source subscription capability is unavailable")
+	}
+	return e.eventSourceSubscriptions.ReportHealth(ctx, req)
+}
+
+func (e *Engine) validateEventSourceConnector(ctx context.Context, scope runtime.Scope, owner runtime.ObjectiveOwner, connector runtime.EventSourceConnector) error {
+	if connector.Kind != runtime.EventSourceConnectorSkill {
+		return nil
+	}
+	if e.skills == nil {
+		return errors.New("event source Skill connector catalog is unavailable")
+	}
+	_, err := e.skills.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, connector.ID, connector.Version, connector.Action, skill.BindingReference{ID: connector.BindingID, Revision: connector.BindingRevision})
+	if err != nil {
+		return fmt.Errorf("event source Skill connector is unavailable: %w", err)
+	}
+	return nil
 }
 
 func (e *Engine) CreateOutreachThread(ctx context.Context, req runtime.CreateOutreachThreadRequest) (*runtime.OutreachThread, *runtime.ActivityEvent, error) {

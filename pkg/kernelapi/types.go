@@ -57,6 +57,11 @@ const (
 )
 
 const (
+	EventSourceSubscriptionsCapabilityID      = "event-source-subscriptions"
+	EventSourceSubscriptionsCapabilityVersion = "1"
+)
+
+const (
 	OperationCreate            = "create"
 	OperationGet               = "get"
 	OperationList              = "list"
@@ -104,6 +109,8 @@ const (
 	OperationActivateAmendment = "activate-amendment"
 	OperationRoute             = "route"
 	OperationReconcile         = "reconcile"
+	OperationReportHealth      = "report-health"
+	OperationAdvanceCheckpoint = "advance-checkpoint"
 	OperationUpsert            = "upsert"
 	OperationDisable           = "disable"
 	OperationRefine            = "refine"
@@ -393,6 +400,13 @@ func ObjectiveSchedulesCapability() Capability {
 	}
 }
 
+func EventSourceSubscriptionsCapability() Capability {
+	return Capability{
+		ID: EventSourceSubscriptionsCapabilityID, Version: EventSourceSubscriptionsCapabilityVersion, Available: true,
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationUpdate, OperationRetire, OperationReportHealth, OperationGetCheckpoint, OperationAdvanceCheckpoint},
+	}
+}
+
 func EventRoutingCapability() Capability {
 	return Capability{
 		ID: EventRoutingCapabilityID, Version: EventRoutingCapabilityVersion, Available: true,
@@ -431,7 +445,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), ObjectiveSchedulesCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -675,6 +689,52 @@ type ObjectiveScheduleReconciliation struct {
 	Scope        runtime.Scope                    `json:"scope"`
 	ReconciledAt time.Time                        `json:"reconciledAt"`
 	Result       *runtime.ObjectiveScheduleResult `json:"result"`
+}
+
+type CreateEventSourceSubscriptionRequest struct {
+	ID                  string                                `json:"id,omitempty"`
+	Scope               runtime.Scope                         `json:"scope"`
+	Owner               runtime.ObjectiveOwner                `json:"owner"`
+	DisplayName         string                                `json:"displayName"`
+	Description         string                                `json:"description,omitempty"`
+	Source              string                                `json:"source"`
+	Connector           runtime.EventSourceConnector          `json:"connector"`
+	Status              runtime.EventSourceSubscriptionStatus `json:"status,omitempty"`
+	EventTypes          []string                              `json:"eventTypes"`
+	Parameters          map[string]interface{}                `json:"parameters,omitempty"`
+	PollIntervalSeconds int64                                 `json:"pollIntervalSeconds,omitempty"`
+}
+
+type UpdateEventSourceSubscriptionRequest struct {
+	ExpectedRevision    int64                                  `json:"expectedRevision"`
+	DisplayName         *string                                `json:"displayName,omitempty"`
+	Description         *string                                `json:"description,omitempty"`
+	Connector           *runtime.EventSourceConnector          `json:"connector,omitempty"`
+	Status              *runtime.EventSourceSubscriptionStatus `json:"status,omitempty"`
+	EventTypes          *[]string                              `json:"eventTypes,omitempty"`
+	Parameters          map[string]interface{}                 `json:"parameters,omitempty"`
+	ReplaceParameters   bool                                   `json:"replaceParameters,omitempty"`
+	PollIntervalSeconds *int64                                 `json:"pollIntervalSeconds,omitempty"`
+}
+
+type RetireEventSourceSubscriptionRequest struct {
+	ExpectedRevision int64 `json:"expectedRevision"`
+}
+
+type ReportEventSourceHealthRequest struct {
+	ExpectedHealthRevision       int64                          `json:"expectedHealthRevision"`
+	ObservedSubscriptionRevision int64                          `json:"observedSubscriptionRevision"`
+	State                        runtime.EventSourceHealthState `json:"state"`
+	LastEventAt                  time.Time                      `json:"lastEventAt,omitempty"`
+	ErrorCode                    string                         `json:"errorCode,omitempty"`
+	Summary                      string                         `json:"summary,omitempty"`
+}
+
+type AdvanceEventSourceCheckpointRequest struct {
+	ExpectedRevision int64     `json:"expectedRevision"`
+	Cursor           string    `json:"cursor,omitempty"`
+	EventIDs         []string  `json:"eventIds,omitempty"`
+	Watermark        time.Time `json:"watermark,omitempty"`
 }
 
 type CreateInitiativeRequest struct {

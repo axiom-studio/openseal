@@ -35,6 +35,14 @@ func TestPublicFacadeExposesObjectiveScheduleReconciliation(t *testing.T) {
 	}
 }
 
+func TestPublicFacadeExposesEventSourceSubscriptions(t *testing.T) {
+	capability := EventSourceSubscriptionsCapability()
+	if capability.ID != EventSourceSubscriptionsCapabilityID || capability.Version != EventSourceSubscriptionsCapabilityVersion ||
+		!capability.Supports(KernelOperationReportHealth) || !capability.Supports(KernelOperationGetCheckpoint) || !capability.Supports(KernelOperationAdvanceCheckpoint) {
+		t.Fatalf("event source subscription capability = %#v", capability)
+	}
+}
+
 func TestPublicFacadeDecodesObjectiveEventRulesForHostConnectors(t *testing.T) {
 	rules, err := DecodeObjectiveEventRules(map[string]interface{}{
 		"version": "1",

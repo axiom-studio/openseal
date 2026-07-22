@@ -125,7 +125,7 @@ func TestEventSourceSubscriptionRejectsCredentialLeakageAndInvalidSkillConnector
 	base := CreateEventSourceSubscriptionRequest{
 		Scope: Scope{Kind: "tenant", ID: "research"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
 		DisplayName: "Forum monitor", Source: "forum:example", EventTypes: []string{"forum.post"},
-		Connector: EventSourceConnector{Kind: EventSourceConnectorSkill, ID: "forum.reader", Version: "1", BindingID: "forum-binding", Action: "watch"},
+		Connector: EventSourceConnector{Kind: EventSourceConnectorSkill, ID: "forum.reader", Version: "1", BindingID: "forum-binding", BindingRevision: 1, Action: "watch"},
 	}
 	unsafe := base
 	unsafe.Parameters = map[string]interface{}{"apiToken": "must-not-persist"}
