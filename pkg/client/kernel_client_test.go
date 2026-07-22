@@ -126,6 +126,12 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil || len(activity.Items) == 0 || activity.Items[0].InitiativeID != "initiative-client" || activity.Items[0].Payload["sourceHost"] != "www.reddit.com" {
 		t.Fatalf("activity = %#v, %v", activity, err)
 	}
+	initiativeActivity, err := client.ListActivity(ctx, runtime.ActivityFeedRequest{
+		Scope: scope, InitiativeID: "initiative-client", Limit: 5, IncludeDetails: true,
+	})
+	if err != nil || len(initiativeActivity.Items) != 1 || initiativeActivity.Items[0].ID != "source-policy-client" {
+		t.Fatalf("initiative activity = %#v, %v", initiativeActivity, err)
+	}
 
 	replayed, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
 		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,

@@ -217,6 +217,8 @@ type Model struct {
 	outreachActions             []capability.ModelAction
 	outreachActionSelected      int
 	sourceMonitorStatuses       map[string]sourceMonitorStatus
+	initiativeActivity          map[string][]runtime.ActivityProjection
+	initiativeActivityErrors    map[string]error
 	clawHubSkills               []clawhub.InstalledState
 	skillActions                []capability.ModelAction
 	skillBindings               []*capability.Binding
@@ -404,7 +406,9 @@ type sourceMonitorStatus struct {
 }
 
 type sourceMonitorsLoaded struct {
-	statuses map[string]sourceMonitorStatus
+	statuses       map[string]sourceMonitorStatus
+	activity       map[string][]runtime.ActivityProjection
+	activityErrors map[string]error
 }
 type initiativeCreated struct {
 	initiative *runtime.Initiative
@@ -878,6 +882,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.loadSourceMonitors(), m.loadOutreach())
 	case sourceMonitorsLoaded:
 		m.sourceMonitorStatuses = msg.statuses
+		m.initiativeActivity = msg.activity
+		m.initiativeActivityErrors = msg.activityErrors
 		return m, nil
 	case clawHubSkillsLoaded:
 		m.loading = false
@@ -2436,14 +2442,31 @@ func (m *Model) loadInitiatives() tea.Cmd {
 }
 
 func (m *Model) loadSourceMonitors() tea.Cmd {
-	if !m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) || !m.supportsSourceMonitor(kernelapi.OperationListObservations) {
+	monitorAvailable := m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) && m.supportsSourceMonitor(kernelapi.OperationListObservations)
+	activityAvailable := m.activityCapability.Supports(kernelapi.OperationList)
+	if !monitorAvailable && !activityAvailable {
 		return nil
 	}
 	initiatives := append([]*runtime.Initiative(nil), m.initiatives...)
 	return func() tea.Msg {
 		statuses := make(map[string]sourceMonitorStatus)
+		activity := make(map[string][]runtime.ActivityProjection)
+		activityErrors := make(map[string]error)
 		for _, initiative := range initiatives {
 			if initiative == nil {
+				continue
+			}
+			if activityAvailable {
+				page, activityErr := m.client.ListActivity(m.ctx, runtime.ActivityFeedRequest{
+					Scope: initiative.Scope, InitiativeID: initiative.ID, Limit: 5,
+				})
+				if activityErr != nil {
+					activityErrors[initiative.ID] = activityErr
+				} else if page != nil {
+					activity[initiative.ID] = page.Items
+				}
+			}
+			if !monitorAvailable {
 				continue
 			}
 			for _, monitor := range initiative.SourceMonitors {
@@ -2472,7 +2495,7 @@ func (m *Model) loadSourceMonitors() tea.Cmd {
 				statuses[key] = status
 			}
 		}
-		return sourceMonitorsLoaded{statuses: statuses}
+		return sourceMonitorsLoaded{statuses: statuses, activity: activity, activityErrors: activityErrors}
 	}
 }
 

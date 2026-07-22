@@ -2,10 +2,11 @@ package runtime
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestPostgresInitiativeRestartAndAtomicActivity(t *testing.T) {
@@ -22,6 +23,9 @@ func TestPostgresInitiativeRestartAndAtomicActivity(t *testing.T) {
 	var migrationName string
 	if err = store.db.QueryRowContext(ctx, `SELECT name FROM `+store.table("schema_migrations")+` WHERE version=14`).Scan(&migrationName); err != nil || migrationName != "durable initiatives" {
 		t.Fatalf("initiative migration=%q err=%v", migrationName, err)
+	}
+	if err = store.db.QueryRowContext(ctx, `SELECT name FROM `+store.table("schema_migrations")+` WHERE version=23`).Scan(&migrationName); err != nil || migrationName != "indexed initiative activity projections" {
+		t.Fatalf("initiative activity migration=%q err=%v", migrationName, err)
 	}
 	scope := Scope{Kind: "tenant", ID: "restart"}
 	seedInitiativeObjectives(t, store, scope)
@@ -45,7 +49,7 @@ func TestPostgresInitiativeRestartAndAtomicActivity(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ID != created.ID {
 		t.Fatalf("filtered list=%#v err=%v", listed, err)
 	}
-	feed, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, Descending: true, Limit: 10})
+	feed, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, InitiativeID: created.ID, Descending: true, Limit: 10})
 	if err != nil || len(feed) != 1 || feed[0].InitiativeID != created.ID {
 		t.Fatalf("restart activity=%#v err=%v", feed, err)
 	}

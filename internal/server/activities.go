@@ -35,7 +35,7 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	request := runtime.ActivityFeedRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.URL.Query().Get("runId")), AgentID: strings.TrimSpace(r.URL.Query().Get("agentId")),
-		ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), TeamID: strings.TrimSpace(r.URL.Query().Get("teamId")),
+		ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), InitiativeID: strings.TrimSpace(r.URL.Query().Get("initiativeId")), TeamID: strings.TrimSpace(r.URL.Query().Get("teamId")),
 		EventTypes: cleanQueryValues(r.URL.Query()["eventType"]), Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")),
 		Limit: limit, IncludeDetails: includeDetails,
 	}
