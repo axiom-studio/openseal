@@ -30,6 +30,25 @@ func GetCodeExecutorImage() string {
 	return "python:3.11-slim"
 }
 
+// GetBrewProcessRunnerImage returns the host image used for explicitly
+// governed process-backed Skill actions. An empty value keeps the adapter
+// unavailable instead of inventing a runtime.
+func GetBrewProcessRunnerImage() string {
+	return strings.TrimSpace(os.Getenv("OPENSEAL_BREW_RUNNER_IMAGE"))
+}
+
+// ProcessExecutorEnabled lets embedding hosts remove the procedural adapter
+// entirely. It defaults on only for compatibility with an explicitly
+// configured runner image; invalid values fail closed.
+func ProcessExecutorEnabled() bool {
+	raw := strings.TrimSpace(os.Getenv("OPENSEAL_PROCESS_EXECUTOR_ENABLED"))
+	if raw == "" {
+		return GetBrewProcessRunnerImage() != ""
+	}
+	enabled, err := strconv.ParseBool(raw)
+	return err == nil && enabled && GetBrewProcessRunnerImage() != ""
+}
+
 func NewRegistryConfigFromEnv() (*RegistryConfig, error) {
 	return &RegistryConfig{
 		Namespace:   GetCodeExecutorNamespace(),
