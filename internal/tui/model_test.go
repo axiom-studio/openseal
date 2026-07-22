@@ -35,6 +35,11 @@ type fakeKernelClient struct {
 	document             kernelapi.CapabilityDocument
 	agentDeployments     []kernelapi.AgentDeploymentCatalogEntry
 	agentUpdates         []kernelapi.UpdateAgentDeploymentRequest
+	agentAmendments      []*kernelagent.DefinitionAmendment
+	agentProposals       []kernelagent.ProposeAmendmentRequest
+	agentEvaluations     []kernelagent.SubmitAmendmentEvaluationRequest
+	agentDecisions       []kernelagent.ResolveAmendmentRequest
+	agentActivations     []kernelapi.ActivateAgentDefinitionAmendmentRequest
 	teamDeployments      []kernelapi.TeamDeploymentCatalogEntry
 	teamUpdates          []kernelapi.UpdateTeamDeploymentRequest
 	teamAmendments       []*kernelteam.DefinitionAmendment
@@ -108,10 +113,11 @@ type fakeKernelClient struct {
 }
 
 var (
-	_ client.KernelClient       = (*fakeKernelClient)(nil)
-	_ client.KernelClient       = (*fakeChannelKernelClient)(nil)
-	_ client.KernelClient       = (*fakeClawHubKernelClient)(nil)
-	_ client.SkillBindingClient = (*fakeKernelClient)(nil)
+	_ client.KernelClient                   = (*fakeKernelClient)(nil)
+	_ client.AgentDefinitionLifecycleClient = (*fakeKernelClient)(nil)
+	_ client.KernelClient                   = (*fakeChannelKernelClient)(nil)
+	_ client.KernelClient                   = (*fakeClawHubKernelClient)(nil)
+	_ client.SkillBindingClient             = (*fakeKernelClient)(nil)
 )
 
 func (f *fakeKernelClient) ListSkillBindings(context.Context, capability.ScopeReference, client.SkillBindingOwner) (*kernelapi.SkillBindingList, error) {
@@ -818,6 +824,77 @@ func (f *fakeKernelClient) UpdateAgentDeployment(_ context.Context, id string, r
 	return nil, kernelagent.ErrDeploymentNotFound
 }
 
+func (f *fakeKernelClient) ActivateAgentDefinition(context.Context, string, kernelapi.ActivateAgentDefinitionRequest) (*kernelapi.AgentDefinitionActivationResult, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) RollbackAgentDefinition(context.Context, string, kernelapi.RollbackAgentDefinitionRequest) (*kernelapi.AgentDefinitionActivationResult, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeKernelClient) ListAgentDefinitionActivations(context.Context, capability.ScopeReference, string) ([]workforce.DefinitionActivation, error) {
+	return nil, nil
+}
+
+func (f *fakeKernelClient) ProposeAgentDefinitionAmendment(_ context.Context, request kernelagent.ProposeAmendmentRequest) (*kernelagent.DefinitionAmendment, error) {
+	f.agentProposals = append(f.agentProposals, request)
+	amendment := &kernelagent.DefinitionAmendment{ID: "agent-amendment-new", Scope: request.Scope, DeploymentID: request.DeploymentID, DefinitionID: request.Candidate.ID, BaseVersion: "1", BaseDigest: "sha256:base", Candidate: *request.Candidate, Changes: []workforce.DefinitionFieldChange{{Field: "systemPrompt"}}, ProposerType: request.ProposerType, ProposerID: request.ProposerID, Rationale: request.Rationale, Status: kernelagent.AmendmentReady, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.agentAmendments = append([]*kernelagent.DefinitionAmendment{amendment}, f.agentAmendments...)
+	return amendment, nil
+}
+
+func (f *fakeKernelClient) GetAgentDefinitionAmendment(_ context.Context, scope capability.ScopeReference, deploymentID, amendmentID string) (*kernelagent.DefinitionAmendment, error) {
+	for _, amendment := range f.agentAmendments {
+		if amendment.Scope == scope && amendment.DeploymentID == deploymentID && amendment.ID == amendmentID {
+			return amendment, nil
+		}
+	}
+	return nil, kernelagent.ErrAmendmentNotFound
+}
+
+func (f *fakeKernelClient) ListAgentDefinitionAmendments(_ context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.AgentDefinitionAmendmentList, error) {
+	result := &kernelapi.AgentDefinitionAmendmentList{}
+	for _, amendment := range f.agentAmendments {
+		if amendment.Scope == scope && amendment.DeploymentID == deploymentID {
+			result.Items = append(result.Items, amendment)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeKernelClient) SubmitAgentDefinitionAmendmentEvaluation(_ context.Context, _ string, request kernelagent.SubmitAmendmentEvaluationRequest) (*kernelagent.DefinitionAmendment, error) {
+	f.agentEvaluations = append(f.agentEvaluations, request)
+	amendment, err := f.GetAgentDefinitionAmendment(context.Background(), request.Scope, f.agentAmendments[0].DeploymentID, request.AmendmentID)
+	if err != nil {
+		return nil, err
+	}
+	amendment.Evaluations, amendment.Status, amendment.Revision = request.Evaluations, kernelagent.AmendmentAwaitingApproval, request.ExpectedRevision+1
+	return amendment, nil
+}
+
+func (f *fakeKernelClient) ResolveAgentDefinitionAmendment(_ context.Context, _ string, request kernelagent.ResolveAmendmentRequest) (*kernelagent.DefinitionAmendment, error) {
+	f.agentDecisions = append(f.agentDecisions, request)
+	amendment := f.agentAmendments[0]
+	amendment.Decision = &kernelagent.AmendmentDecision{Approved: request.Approved, ActorType: request.ActorType, ActorID: request.ActorID, Reason: request.Reason}
+	amendment.Revision = request.ExpectedRevision + 1
+	if request.Approved {
+		amendment.Status = kernelagent.AmendmentApproved
+	} else {
+		amendment.Status = kernelagent.AmendmentRejected
+	}
+	return amendment, nil
+}
+
+func (f *fakeKernelClient) ActivateAgentDefinitionAmendment(_ context.Context, _ string, _ string, request kernelapi.ActivateAgentDefinitionAmendmentRequest) (*kernelapi.AgentDefinitionAmendmentActivationResult, error) {
+	f.agentActivations = append(f.agentActivations, request)
+	amendment := f.agentAmendments[0]
+	amendment.Status, amendment.Revision, amendment.ActivationID = kernelagent.AmendmentActivated, request.ExpectedRevision+1, "agent-activation-amendment"
+	deployment := *f.agentDeployments[0].Deployment
+	deployment.ActiveVersion, deployment.Revision = amendment.Candidate.Version, deployment.Revision+1
+	f.agentDeployments[0].Deployment, f.agentDeployments[0].Definition = &deployment, &amendment.Candidate
+	return &kernelapi.AgentDefinitionAmendmentActivationResult{Amendment: amendment, Deployment: &deployment, Activation: &workforce.DefinitionActivation{ID: amendment.ActivationID}}, nil
+}
+
 func (f *fakeKernelClient) GetAgentRun(_ context.Context, _ runtime.Scope, id string) (*runtime.AgentRun, error) {
 	for _, run := range f.runs {
 		if run != nil && run.ID == id {
@@ -1077,6 +1154,94 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	}
 	if selected := model.selectedTeamDeploymentRecord(); selected == nil || selected.Deployment == nil || selected.Deployment.Revision != 8 || selected.Deployment.Status != kernelteam.DeploymentPaused {
 		t.Fatalf("updated Team was not reloaded: %#v", selected)
+	}
+}
+
+func TestAgentAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	definition := &kernelagent.AgentDefinition{
+		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely", SystemPrompt: "Verify evidence before acting.", Personality: "Calm and precise.",
+		Authority:   kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		Evaluations: []workforce.EvaluationCriterion{{ID: "safety", Description: "Behavior remains bounded", Required: true}},
+		Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"systemPrompt", "personality"}, RequiresApproval: true, ApproverPrincipals: []string{"user:local"}},
+		Digest:      "sha256:base",
+	}
+	candidate := *definition
+	candidate.Version, candidate.SystemPrompt = "2", "Verify attributable evidence and state uncertainty before acting."
+	deployment := &kernelagent.AgentDeployment{ID: "operator", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive, Revision: 9}
+	amendment := &kernelagent.DefinitionAmendment{
+		ID: "agent-amend-1", Scope: scope, DeploymentID: deployment.ID, DefinitionID: definition.ID, BaseVersion: definition.Version, BaseDigest: definition.Digest,
+		Candidate: candidate, Changes: []workforce.DefinitionFieldChange{{Field: "systemPrompt"}}, ProposerType: "agent", ProposerID: "operator", Rationale: "Require attributable evidence",
+		Status: kernelagent.AmendmentEvaluating, Revision: 4, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	fake := &fakeKernelClient{
+		document:         kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true})),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}}, agentAmendments: []*kernelagent.DefinitionAmendment{amendment},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	for _, expected := range []string{"Agent runtime & placement", "Governance history · 1 amendment(s)", "evaluating · 1 → 2 · r4", "Proposed by agent:operator", "Changed · systemPrompt", "evaluate"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Agent governance view missing %q:\n%s", expected, view)
+		}
+	}
+
+	model.section, model.focus = sectionReadiness, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model.editor.SetValue("safety=pass: Prompt remains bounded to attributable evidence")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.agentEvaluations) != 1 || fake.agentEvaluations[0].ExpectedRevision != 4 || len(fake.agentEvaluations[0].Evaluations) != 1 || !fake.agentEvaluations[0].Evaluations[0].Passed {
+		t.Fatalf("unsafe Agent evaluation request: %#v", fake.agentEvaluations)
+	}
+
+	model.section, model.focus = sectionReadiness, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	model.editor.SetValue("Required safety evidence passed")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.agentDecisions) != 1 || fake.agentDecisions[0].ExpectedRevision != 5 || !fake.agentDecisions[0].Approved || fake.agentDecisions[0].ActorType != "user" || fake.agentDecisions[0].ActorID != "local" {
+		t.Fatalf("unsafe Agent decision request: %#v", fake.agentDecisions)
+	}
+
+	model.section, model.focus = sectionReadiness, focusPanel
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	model.editor.SetValue("Reviewed safety evidence supports activation")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+	if len(fake.agentActivations) != 1 || fake.agentActivations[0].ExpectedRevision != 6 || fake.agentActivations[0].ActorType != "user" || fake.agentActivations[0].ActorID != "local" || fake.agentDeployments[0].Deployment.ActiveVersion != "2" {
+		t.Fatalf("unsafe Agent activation request: requests=%#v deployment=%#v", fake.agentActivations, fake.agentDeployments[0].Deployment)
+	}
+	if !strings.Contains(model.View(), "activated · 1 → 2 · r7") || !strings.Contains(model.View(), "Activation · agent-activation-amendment") {
+		t.Fatalf("authoritative Agent activation was not rendered:\n%s", model.View())
+	}
+
+	proposalFake := &fakeKernelClient{
+		document:         kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true})),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}},
+	}
+	proposal := newTestModel(t, proposalFake)
+	applyCommand(t, proposal, proposal.loadCapabilities())
+	proposal.section, proposal.focus = sectionReadiness, focusPanel
+	_, _ = proposal.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	proposal.editor.SetValue("personality\nMake collaboration more concise\nConcise, calm, and direct.")
+	_, command = proposal.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, proposal, command)
+	if len(proposalFake.agentProposals) != 1 || proposalFake.agentProposals[0].ExpectedDeploymentRevision != 9 || proposalFake.agentProposals[0].Candidate.Personality != "Concise, calm, and direct." || proposalFake.agentProposals[0].Candidate.SystemPrompt != definition.SystemPrompt {
+		t.Fatalf("Agent proposal did not preserve immutable behavior: %#v", proposalFake.agentProposals)
+	}
+
+	readOnlyFake := &fakeKernelClient{
+		document:         kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true})),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{Deployment: deployment, Definition: definition}}, agentAmendments: []*kernelagent.DefinitionAmendment{amendment},
+	}
+	readOnly := newTestModel(t, readOnlyFake)
+	applyCommand(t, readOnly, readOnly.loadCapabilities())
+	for _, forbidden := range []string{"Governance history", "m propose behavior", "Enter evaluate", "y approve", "v activate"} {
+		if strings.Contains(readOnly.View(), forbidden) {
+			t.Fatalf("unadvertised Agent governance control %q rendered:\n%s", forbidden, readOnly.View())
+		}
 	}
 }
 
