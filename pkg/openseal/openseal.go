@@ -914,6 +914,9 @@ var (
 	ObjectiveManagementSkill           = runtime.ObjectiveManagementSkill
 	NewObjectiveActionValidator        = runtime.NewObjectiveActionValidator
 	NewObjectiveActionDispatcher       = runtime.NewObjectiveActionDispatcher
+	InitiativeManagementSkill          = runtime.InitiativeManagementSkill
+	NewInitiativeActionValidator       = runtime.NewInitiativeActionValidator
+	NewInitiativeActionDispatcher      = runtime.NewInitiativeActionDispatcher
 	TeamManagementSkill                = runtime.TeamManagementSkill
 	NewTeamRoleActionValidator         = runtime.NewTeamRoleActionValidator
 	NewTeamRoleActionDispatcher        = runtime.NewTeamRoleActionDispatcher
@@ -1172,6 +1175,11 @@ const (
 	ObjectiveActionCreate            = runtime.ObjectiveActionCreate
 	ObjectiveActionUpdate            = runtime.ObjectiveActionUpdate
 	ObjectiveActionPause             = runtime.ObjectiveActionPause
+	InitiativeManagementSkillID      = runtime.InitiativeManagementSkillID
+	InitiativeManagementSkillVersion = runtime.InitiativeManagementSkillVersion
+	InitiativeActionCreate           = runtime.InitiativeActionCreate
+	InitiativeActionUpdate           = runtime.InitiativeActionUpdate
+	InitiativeActionPause            = runtime.InitiativeActionPause
 	TeamManagementSkillID            = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion       = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole             = runtime.TeamActionUpdateRole
