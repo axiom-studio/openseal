@@ -807,6 +807,23 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				seenInputKeys[key] = true
 			}
 		}
+		if proposal := need.SourcePolicyProposal; proposal != nil {
+			proposal.Reason = strings.TrimSpace(proposal.Reason)
+			if proposal.Reason == "" || len(proposal.Reason) > 1024 || strings.ContainsAny(proposal.Reason, "\r\n\t") {
+				return fmt.Errorf("capability catalog need %d source policy proposal reason is invalid", index)
+			}
+			if err := proposal.Policy.Validate(); err != nil {
+				return fmt.Errorf("capability catalog need %d source policy proposal is invalid: %w", index, err)
+			}
+			if !proposal.Policy.Enabled {
+				return fmt.Errorf("capability catalog need %d source policy proposal must describe an enabled immutable version", index)
+			}
+			for _, policySource := range proposal.Policy.Sources {
+				if len(policySource.PathPrefixes) == 0 || len(policySource.Methods) == 0 {
+					return fmt.Errorf("capability catalog need %d source policy proposal requires explicit paths and methods", index)
+				}
+			}
+		}
 		if needIDs[need.ID] {
 			return fmt.Errorf("capability catalog need %d duplicates id %s", index, need.ID)
 		}
