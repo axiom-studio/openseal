@@ -184,6 +184,52 @@ func TestConversationArbiterSuppressesSemanticClaimPileOn(t *testing.T) {
 	}
 }
 
+func TestConversationArbiterKeepsGovernedActionDistinctFromTriggerAndDeduplicatesExactActionPileOn(t *testing.T) {
+	t.Parallel()
+	roundID := "round-governed-action"
+	channel := ConversationAudience{Kind: ConversationAudienceChannel}
+	recent := []*ChannelMessage{{
+		ID: "request-1", Scope: Scope{Kind: "tenant", ID: "one"}, ConversationID: "conversation-1", Sequence: 1,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
+		Content: "Update the Coordinator role purpose to publish concise progress updates.", Audience: channel, CreatedAt: time.Now(),
+	}}
+	action := &TurnAction{
+		Type: "skill_action", Capability: "openseal.teams.update_role",
+		Summary: "Update the Coordinator role purpose", IdempotencyKey: "coordinator-role-revision-3", InputRef: "/actionInputs/call",
+	}
+	proposals := []ParticipationProposal{
+		{
+			ID: "coordinator", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "coordinator"},
+			WantsToSpeak: true, Intent: MessageIntentProposal,
+			Content: "Proposing to update the Coordinator role purpose to publish concise progress updates.", Audience: channel,
+			Signals:        ParticipationSignals{DirectlyMentioned: true, AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true},
+			ProposedAction: action, ActionInputs: map[string]interface{}{"actionInputs": map[string]interface{}{"call": map[string]interface{}{"roleId": "coordinator"}}},
+		},
+		{
+			ID: "reviewer", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "reviewer"},
+			WantsToSpeak: true, Intent: MessageIntentProposal,
+			Content: "I also propose updating the Coordinator purpose to publish concise progress updates.", Audience: channel,
+			Signals:        ParticipationSignals{HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true},
+			ProposedAction: action, ActionInputs: map[string]interface{}{"actionInputs": map[string]interface{}{"call": map[string]interface{}{"roleId": "coordinator"}}},
+		},
+	}
+	result, err := ArbitrateParticipation(roundID, proposals, recent, DefaultConversationArbitrationPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Speakers, []string{"coordinator"}) {
+		t.Fatalf("governed action speakers = %#v", result.Speakers)
+	}
+	decisions := decisionsByProposal(result.Decisions)
+	if decisions["coordinator"].Disposition != ParticipationSpeak || decisions["coordinator"].DuplicateOfID != "" {
+		t.Fatalf("action was suppressed as trigger narration: %#v", decisions["coordinator"])
+	}
+	if decisions["reviewer"].Disposition != ParticipationSilent || decisions["reviewer"].DuplicateOfID != "coordinator" ||
+		!containsParticipationReason(decisions["reviewer"].Reasons, ParticipationReasonDuplicate) {
+		t.Fatalf("exact action pile-on was not suppressed: %#v", decisions["reviewer"])
+	}
+}
+
 func TestConversationArbitrationIsInputOrderIndependent(t *testing.T) {
 	t.Parallel()
 	roundID := "round-deterministic"
