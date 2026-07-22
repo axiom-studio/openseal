@@ -69,6 +69,18 @@ func (m *Model) renderHeader(width int) string {
 }
 
 func (m *Model) renderComposer(width int) string {
+	if m.mode == modeAgentAmendmentPropose && !m.supportsAgentDefinition(kernelapi.OperationProposeAmendment) {
+		return m.renderUnavailableComposer(width, "Propose Agent amendment", "This server does not advertise governed Agent amendments.")
+	}
+	if m.mode == modeAgentAmendmentEvaluate && !m.supportsAgentDefinition(kernelapi.OperationEvaluateAmendment) {
+		return m.renderUnavailableComposer(width, "Evaluate Agent amendment", "This server does not advertise Agent amendment evaluations.")
+	}
+	if (m.mode == modeAgentAmendmentApprove || m.mode == modeAgentAmendmentReject) && !m.supportsAgentDefinition(kernelapi.OperationResolveAmendment) {
+		return m.renderUnavailableComposer(width, "Review Agent amendment", "This server does not advertise Agent amendment decisions.")
+	}
+	if m.mode == modeAgentAmendmentActivate && !m.supportsAgentDefinition(kernelapi.OperationActivateAmendment) {
+		return m.renderUnavailableComposer(width, "Activate Agent amendment", "This server does not advertise Agent amendment activation.")
+	}
 	if m.mode == modeTeamAmendmentPropose && !m.supportsTeamDefinition(kernelapi.OperationProposeAmendment) {
 		return m.renderUnavailableComposer(width, "Propose Team amendment", "This server does not advertise governed Team amendments.")
 	}
@@ -126,7 +138,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -136,6 +148,26 @@ func (m *Model) renderComposer(width int) string {
 	description := "Describe an outcome. OpenSeal will keep the work safe across restarts."
 	owner := humanOwner(m.config.Owner)
 	switch m.mode {
+	case modeAgentAmendmentPropose:
+		title = "Propose Agent behavior amendment"
+		description = "Choose an allowed behavior field, record rationale, and provide its new immutable value."
+		owner = "No behavior changes until activation"
+	case modeAgentAmendmentEvaluate:
+		title = "Evaluate Agent amendment"
+		description = "Record pass/fail evidence for every declared criterion at this exact revision."
+		owner = "Revision-bound evaluation audit"
+	case modeAgentAmendmentApprove:
+		title = "Approve Agent amendment"
+		description = "Record why this reviewed candidate may proceed. The decision is permanent."
+		owner = "Eligible principal · revision-bound decision"
+	case modeAgentAmendmentReject:
+		title = "Reject Agent amendment"
+		description = "Record why this candidate must not proceed. The decision is permanent."
+		owner = "Eligible principal · revision-bound decision"
+	case modeAgentAmendmentActivate:
+		title = "Activate Agent amendment"
+		description = "Atomically activate this exact reviewed definition and reload authoritative Agent state."
+		owner = "Optimistic revision · immutable activation audit"
 	case modeTeamAmendmentPropose:
 		title = "Propose Team purpose amendment"
 		description = "Record a concise rationale and a new immutable Team purpose for governed review."
@@ -510,9 +542,60 @@ func (m *Model) renderReadinessContent(width int) string {
 		}
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Candidate %s · source %s %s · %d immutable record(s)", compact(latest.CandidateVersion, 20), latest.Source.Kind, latest.Source.Version, len(m.compilations))))
 	}
+	if m.supportsAgentDefinition(kernelapi.OperationListAmendments) && m.agentLifecycleClient != nil {
+		lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Governance history · %d amendment(s)", len(m.agentAmendments))))
+		for index, amendment := range m.agentAmendments[:min(3, len(m.agentAmendments))] {
+			if amendment == nil {
+				continue
+			}
+			prefix := "  "
+			if index == m.agentAmendmentSelected {
+				prefix = "› "
+			}
+			lines = append(lines, compact(fmt.Sprintf("%s%s · %s → %s · r%d", prefix, amendment.Status, amendment.BaseVersion, amendment.Candidate.Version, amendment.Revision), max(width-6, 24)))
+		}
+		if amendment := m.selectedAgentAmendmentRecord(); amendment != nil {
+			lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Proposed by %s:%s · %s", amendment.ProposerType, amendment.ProposerID, amendment.Rationale), max(width-6, 24))))
+			for _, change := range amendment.Changes {
+				lines = append(lines, mutedStyle.Render("  Changed · "+change.Field))
+			}
+			for _, evaluation := range amendment.Evaluations {
+				outcome := "failed"
+				if evaluation.Passed {
+					outcome = "passed"
+				}
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  Evaluation %s · %s · %s", evaluation.CriterionID, outcome, evaluation.Summary), max(width-8, 24))))
+			}
+			if amendment.Decision != nil {
+				decision := "rejected"
+				if amendment.Decision.Approved {
+					decision = "approved"
+				}
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  Decision %s by %s:%s · %s", decision, amendment.Decision.ActorType, amendment.Decision.ActorID, amendment.Decision.Reason), max(width-8, 24))))
+			}
+			if amendment.Status == kernelagent.AmendmentActivated {
+				lines = append(lines, mutedStyle.Render("  Activation · "+amendment.ActivationID))
+			}
+		}
+	}
 	actions := []string{"r refresh"}
 	if m.supportsAgentDefinition(kernelapi.OperationUpdate) && (deployment.RolloutStatus == kernelagent.RolloutActive || deployment.RolloutStatus == kernelagent.RolloutPaused) {
 		actions = append(actions, "p pause/resume")
+	}
+	if m.canProposeAgentBehaviorAmendment() {
+		actions = append(actions, "m propose behavior")
+	}
+	if len(m.agentAmendments) > 1 {
+		actions = append(actions, "[ ] amendment")
+	}
+	if m.canEvaluateSelectedAgentAmendment() {
+		actions = append(actions, "Enter evaluate")
+	}
+	if m.canResolveSelectedAgentAmendment() {
+		actions = append(actions, "y approve", "x reject")
+	}
+	if m.canActivateSelectedAgentAmendment() {
+		actions = append(actions, "v activate")
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, " · ")))
 	return strings.Join(lines, "\n")

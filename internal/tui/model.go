@@ -126,6 +126,11 @@ const (
 	modeRequestComplete
 	modeApprovalApprove
 	modeApprovalReject
+	modeAgentAmendmentPropose
+	modeAgentAmendmentEvaluate
+	modeAgentAmendmentApprove
+	modeAgentAmendmentReject
+	modeAgentAmendmentActivate
 	modeTeamAmendmentPropose
 	modeTeamAmendmentEvaluate
 	modeTeamAmendmentApprove
@@ -136,6 +141,7 @@ const (
 type Model struct {
 	ctx                         context.Context
 	client                      client.KernelClient
+	agentLifecycleClient        client.AgentDefinitionLifecycleClient
 	conversationClient          client.ConversationClient
 	clawHubClient               client.ClawHubClient
 	skillBindingClient          client.SkillBindingClient
@@ -197,6 +203,9 @@ type Model struct {
 	activityHasMore             bool
 	compilations                []*kernelagent.DefinitionCompilation
 	agentDeployment             *kernelapi.AgentDeploymentCatalogEntry
+	agentAmendments             []*kernelagent.DefinitionAmendment
+	agentAmendmentSelected      int
+	selectedAgentAmendment      string
 	teamDeployments             []kernelapi.TeamDeploymentCatalogEntry
 	teamDeploymentSelected      int
 	selectedTeamDeployment      string
@@ -368,12 +377,20 @@ type activityDetailLoaded struct {
 type compilationsLoaded struct {
 	compilations []*kernelagent.DefinitionCompilation
 	deployment   *kernelapi.AgentDeploymentCatalogEntry
+	amendments   []*kernelagent.DefinitionAmendment
 	err          error
 }
 
 type agentDeploymentUpdated struct {
 	result *kernelapi.AgentDeploymentUpdateResult
 	err    error
+}
+
+type agentAmendmentChanged struct {
+	amendment  *kernelagent.DefinitionAmendment
+	deployment *kernelagent.AgentDeployment
+	action     string
+	err        error
 }
 
 type objectivesLoaded struct {
@@ -554,10 +571,11 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
 		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
-		conversationClient: conversationClient(kernelClient),
-		clawHubClient:      clawHubClient(kernelClient),
-		skillBindingClient: skillBindingClient(kernelClient),
-		sourcePolicyClient: sourcePolicyClient(kernelClient),
+		agentLifecycleClient: agentLifecycleClient(kernelClient),
+		conversationClient:   conversationClient(kernelClient),
+		clawHubClient:        clawHubClient(kernelClient),
+		skillBindingClient:   skillBindingClient(kernelClient),
+		sourcePolicyClient:   sourcePolicyClient(kernelClient),
 	}, nil
 }
 
@@ -1124,6 +1142,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.compilations = msg.compilations
 		m.agentDeployment = msg.deployment
+		m.agentAmendments = msg.amendments
+		m.restoreAgentAmendmentSelection()
 		return m, nil
 	case agentDeploymentUpdated:
 		m.busy = false
@@ -1141,6 +1161,25 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.status = "Agent deployment operating state updated with an immutable audit record."
 		return m, nil
+	case agentAmendmentChanged:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. Refreshing authoritative Agent governance state."
+			return m, m.loadCompilations()
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.amendment != nil {
+			m.selectedAgentAmendment = msg.amendment.ID
+			m.status = fmt.Sprintf("%s recorded · %s · revision %d.", msg.action, msg.amendment.Status, msg.amendment.Revision)
+		}
+		if msg.deployment != nil && m.agentDeployment != nil {
+			m.agentDeployment.Deployment = msg.deployment
+		}
+		return m, m.loadCompilations()
 	case artifactsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -1482,6 +1521,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitActionApproval(true)
 			case modeApprovalReject:
 				return m, m.submitActionApproval(false)
+			case modeAgentAmendmentPropose:
+				return m, m.submitAgentAmendmentProposal()
+			case modeAgentAmendmentEvaluate:
+				return m, m.submitAgentAmendmentEvaluation()
+			case modeAgentAmendmentApprove:
+				return m, m.submitAgentAmendmentDecision(true)
+			case modeAgentAmendmentReject:
+				return m, m.submitAgentAmendmentDecision(false)
+			case modeAgentAmendmentActivate:
+				return m, m.submitAgentAmendmentActivation()
 			case modeTeamAmendmentPropose:
 				return m, m.submitTeamAmendmentProposal()
 			case modeTeamAmendmentEvaluate:
@@ -1636,6 +1685,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceBindingConfigurationChoice(-1)
 			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(-1)
+			} else if m.section == sectionReadiness {
+				m.moveAgentAmendmentSelection(-1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(-1)
 			} else if m.section == sectionOutreach {
@@ -1651,6 +1702,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceBindingConfigurationChoice(1)
 			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialChoice(1)
+			} else if m.section == sectionReadiness {
+				m.moveAgentAmendmentSelection(1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(1)
 			} else if m.section == sectionOutreach {
@@ -1684,6 +1737,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "m":
 			if m.section == sectionActivity && m.activityHasMore {
 				return m, m.loadActivity(true)
+			} else if m.section == sectionReadiness && m.canProposeAgentBehaviorAmendment() {
+				m.prepareAgentAmendmentComposer(modeAgentAmendmentPropose, "systemPrompt|personality\nConcise rationale\nNew immutable value")
 			} else if m.section == sectionTeams && m.canProposeTeamPurposeAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentPropose, "First line: concise rationale\nRemaining lines: the Team's new purpose")
 			} else if m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost) {
@@ -1717,6 +1772,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareRequestComposer(modeApprovalReject, "Explain why this action must not proceed…")
 			} else if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
+			} else if m.section == sectionReadiness && m.canResolveSelectedAgentAmendment() {
+				m.prepareAgentAmendmentComposer(modeAgentAmendmentReject, "Record why this exact Agent amendment must not proceed…")
 			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentReject, "Record why this exact Team amendment must not proceed…")
 			} else if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && !m.selectedSkillBindingRecord().Disabled && m.supportsSkillBinding(kernelapi.OperationDisable) {
@@ -1741,6 +1798,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareRequestComposer(modeRequestAccept, placeholder)
 			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
 				m.prepareRequestComposer(modeApprovalApprove, "Record why this exact action is safe to approve…")
+			} else if m.section == sectionReadiness && m.canResolveSelectedAgentAmendment() {
+				m.prepareAgentAmendmentComposer(modeAgentAmendmentApprove, "Record why this exact Agent amendment is approved…")
 			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentApprove, "Record why this exact Team amendment is approved…")
 			}
@@ -1764,6 +1823,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "e", "enter":
 			if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && m.supportsSkillBinding(kernelapi.OperationUpsert) {
 				m.prepareSkillBindingComposer(m.selectedSkillBindingRecord())
+			} else if m.section == sectionReadiness && m.canEvaluateSelectedAgentAmendment() {
+				m.prepareAgentAmendmentComposer(modeAgentAmendmentEvaluate, agentEvaluationPlaceholder(m.agentDeployment))
 			} else if m.section == sectionTeams && m.canEvaluateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentEvaluate, teamEvaluationPlaceholder(m.selectedTeamDeploymentRecord()))
 			} else if m.section == sectionAuthoring && m.canApplyWorkforce() {
@@ -1812,7 +1873,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.updateAllClawHub()
 			}
 		case "v":
-			if m.section == sectionTeams && m.canActivateSelectedTeamAmendment() {
+			if m.section == sectionReadiness && m.canActivateSelectedAgentAmendment() {
+				m.prepareAgentAmendmentComposer(modeAgentAmendmentActivate, "Record why this reviewed Agent definition should become active…")
+			} else if m.section == sectionTeams && m.canActivateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
 			} else if m.section == sectionSkills {
 				return m, m.verifySelectedClawHub()
@@ -2373,7 +2436,15 @@ func (m *Model) loadCompilations() tea.Cmd {
 		if m.supportsAgentDefinition(kernelapi.OperationListCompilations) {
 			values, err = m.client.ListAgentDefinitionCompilations(m.ctx, scope, m.config.Owner.ID)
 		}
-		return compilationsLoaded{compilations: values, deployment: deployment, err: err}
+		var amendments []*kernelagent.DefinitionAmendment
+		if err == nil && m.supportsAgentDefinition(kernelapi.OperationListAmendments) && m.agentLifecycleClient != nil {
+			var result *kernelapi.AgentDefinitionAmendmentList
+			result, err = m.agentLifecycleClient.ListAgentDefinitionAmendments(m.ctx, scope, m.config.Owner.ID)
+			if result != nil {
+				amendments = result.Items
+			}
+		}
+		return compilationsLoaded{compilations: values, deployment: deployment, amendments: amendments, err: err}
 	}
 }
 
@@ -4390,6 +4461,79 @@ func (m *Model) selectedTeamDeploymentRecord() *kernelapi.TeamDeploymentCatalogE
 	return &m.teamDeployments[m.teamDeploymentSelected]
 }
 
+func (m *Model) selectedAgentAmendmentRecord() *kernelagent.DefinitionAmendment {
+	if m.agentAmendmentSelected < 0 || m.agentAmendmentSelected >= len(m.agentAmendments) {
+		return nil
+	}
+	return m.agentAmendments[m.agentAmendmentSelected]
+}
+
+func (m *Model) restoreAgentAmendmentSelection() {
+	if len(m.agentAmendments) == 0 {
+		m.agentAmendmentSelected = 0
+		m.selectedAgentAmendment = ""
+		return
+	}
+	for index, amendment := range m.agentAmendments {
+		if amendment != nil && amendment.ID == m.selectedAgentAmendment {
+			m.agentAmendmentSelected = index
+			return
+		}
+	}
+	m.agentAmendmentSelected = min(m.agentAmendmentSelected, len(m.agentAmendments)-1)
+	if amendment := m.agentAmendments[m.agentAmendmentSelected]; amendment != nil {
+		m.selectedAgentAmendment = amendment.ID
+	}
+}
+
+func (m *Model) moveAgentAmendmentSelection(delta int) {
+	if len(m.agentAmendments) == 0 {
+		return
+	}
+	m.agentAmendmentSelected = max(0, min(len(m.agentAmendments)-1, m.agentAmendmentSelected+delta))
+	if amendment := m.agentAmendments[m.agentAmendmentSelected]; amendment != nil {
+		m.selectedAgentAmendment = amendment.ID
+	}
+}
+
+func (m *Model) canProposeAgentBehaviorAmendment() bool {
+	entry := m.agentDeployment
+	if entry == nil || entry.Definition == nil || m.agentLifecycleClient == nil || !m.supportsAgentDefinition(kernelapi.OperationProposeAmendment) {
+		return false
+	}
+	for _, field := range entry.Definition.Amendments.AllowedFields {
+		if field == "systemPrompt" || field == "personality" {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) canResolveSelectedAgentAmendment() bool {
+	amendment := m.selectedAgentAmendmentRecord()
+	entry := m.agentDeployment
+	if amendment == nil || amendment.Status != kernelagent.AmendmentAwaitingApproval || entry == nil || entry.Definition == nil || m.agentLifecycleClient == nil || !m.supportsAgentDefinition(kernelapi.OperationResolveAmendment) {
+		return false
+	}
+	principal := strings.TrimSpace(m.config.Actor.Type) + ":" + strings.TrimSpace(m.config.Actor.ID)
+	for _, eligible := range entry.Definition.Amendments.ApproverPrincipals {
+		if eligible == principal {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) canEvaluateSelectedAgentAmendment() bool {
+	amendment := m.selectedAgentAmendmentRecord()
+	return amendment != nil && amendment.Status == kernelagent.AmendmentEvaluating && m.agentLifecycleClient != nil && m.supportsAgentDefinition(kernelapi.OperationEvaluateAmendment)
+}
+
+func (m *Model) canActivateSelectedAgentAmendment() bool {
+	amendment := m.selectedAgentAmendmentRecord()
+	return amendment != nil && (amendment.Status == kernelagent.AmendmentReady || amendment.Status == kernelagent.AmendmentApproved) && m.agentLifecycleClient != nil && m.supportsAgentDefinition(kernelapi.OperationActivateAmendment)
+}
+
 func (m *Model) restoreTeamDeploymentSelection() {
 	if len(m.teamDeployments) == 0 {
 		m.teamDeploymentSelected = 0
@@ -4530,6 +4674,136 @@ func (m *Model) pauseOrResumeTeamDeployment() tea.Cmd {
 	}
 }
 
+func (m *Model) submitAgentAmendmentProposal() tea.Cmd {
+	entry := m.agentDeployment
+	input := strings.TrimSpace(m.editor.Value())
+	if !m.canProposeAgentBehaviorAmendment() || entry == nil || entry.Deployment == nil || entry.Definition == nil || m.busy {
+		return nil
+	}
+	parts := strings.SplitN(input, "\n", 3)
+	if len(parts) != 3 {
+		m.status = "Use three sections: systemPrompt|personality, concise rationale, then the new value."
+		return nil
+	}
+	field, rationale, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+	allowed := false
+	for _, candidate := range entry.Definition.Amendments.AllowedFields {
+		if candidate == field && (field == "systemPrompt" || field == "personality") {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		m.status = "Choose an amendment field allowed by this Agent: systemPrompt or personality."
+		return nil
+	}
+	if rationale == "" || value == "" {
+		m.status = "Agent amendment rationale and new value are required."
+		return nil
+	}
+	candidate := *entry.Definition
+	current := candidate.SystemPrompt
+	if field == "personality" {
+		current = candidate.Personality
+	}
+	if value == strings.TrimSpace(current) {
+		m.status = "The proposed value must change Agent behavior."
+		return nil
+	}
+	digest := sha256.Sum256([]byte(entry.Definition.Digest + "\x00" + field + "\x00" + value))
+	candidate.Version = fmt.Sprintf("amend-%x", digest[:8])
+	if field == "systemPrompt" {
+		candidate.SystemPrompt = value
+	} else {
+		candidate.Personality = value
+	}
+	candidate.Digest, candidate.CreatedAt = "", time.Time{}
+	request := kernelagent.ProposeAmendmentRequest{
+		Scope: entry.Deployment.Scope, DeploymentID: entry.Deployment.ID, Candidate: &candidate,
+		ProposerType: m.config.Actor.Type, ProposerID: m.config.Actor.ID, Rationale: rationale,
+		ExpectedDeploymentRevision: entry.Deployment.Revision,
+	}
+	m.busy, m.err = true, nil
+	m.status = "Recording immutable Agent amendment candidate…"
+	return func() tea.Msg {
+		amendment, err := m.agentLifecycleClient.ProposeAgentDefinitionAmendment(m.ctx, request)
+		return agentAmendmentChanged{amendment: amendment, action: "Agent amendment proposal", err: err}
+	}
+}
+
+func (m *Model) submitAgentAmendmentEvaluation() tea.Cmd {
+	amendment := m.selectedAgentAmendmentRecord()
+	entry := m.agentDeployment
+	if !m.canEvaluateSelectedAgentAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || entry.Definition == nil || m.busy {
+		return nil
+	}
+	evaluations, err := parseAmendmentEvaluations(m.editor.Value(), entry.Definition.Evaluations)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	request := kernelagent.SubmitAmendmentEvaluationRequest{Scope: amendment.Scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Evaluations: evaluations}
+	m.busy, m.err = true, nil
+	m.status = "Recording revision-bound Agent evaluation…"
+	return func() tea.Msg {
+		updated, err := m.agentLifecycleClient.SubmitAgentDefinitionAmendmentEvaluation(m.ctx, entry.Deployment.ID, request)
+		return agentAmendmentChanged{amendment: updated, action: "Agent evaluation", err: err}
+	}
+}
+
+func (m *Model) submitAgentAmendmentDecision(approved bool) tea.Cmd {
+	amendment := m.selectedAgentAmendmentRecord()
+	entry := m.agentDeployment
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canResolveSelectedAgentAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || m.busy {
+		return nil
+	}
+	if reason == "" {
+		m.status = "Record a reason for the permanent Agent amendment decision."
+		return nil
+	}
+	request := kernelagent.ResolveAmendmentRequest{
+		Scope: amendment.Scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: approved,
+		ActorType: m.config.Actor.Type, ActorID: m.config.Actor.ID, Reason: reason,
+	}
+	action := "Agent amendment approval"
+	if !approved {
+		action = "Agent amendment rejection"
+	}
+	m.busy, m.err = true, nil
+	m.status = "Recording revision-bound Agent decision…"
+	return func() tea.Msg {
+		updated, err := m.agentLifecycleClient.ResolveAgentDefinitionAmendment(m.ctx, entry.Deployment.ID, request)
+		return agentAmendmentChanged{amendment: updated, action: action, err: err}
+	}
+}
+
+func (m *Model) submitAgentAmendmentActivation() tea.Cmd {
+	amendment := m.selectedAgentAmendmentRecord()
+	entry := m.agentDeployment
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canActivateSelectedAgentAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || m.busy {
+		return nil
+	}
+	if reason == "" {
+		m.status = "Record why this exact Agent definition should become active."
+		return nil
+	}
+	request := kernelapi.ActivateAgentDefinitionAmendmentRequest{
+		Scope: amendment.Scope, ExpectedRevision: amendment.Revision,
+		ActorType: m.config.Actor.Type, ActorID: m.config.Actor.ID, Reason: reason,
+	}
+	m.busy, m.err = true, nil
+	m.status = "Atomically activating reviewed Agent definition…"
+	return func() tea.Msg {
+		result, err := m.agentLifecycleClient.ActivateAgentDefinitionAmendment(m.ctx, entry.Deployment.ID, amendment.ID, request)
+		if result == nil {
+			return agentAmendmentChanged{action: "Agent amendment activation", err: err}
+		}
+		return agentAmendmentChanged{amendment: result.Amendment, deployment: result.Deployment, action: "Agent amendment activation", err: err}
+	}
+}
+
 func (m *Model) submitTeamAmendmentProposal() tea.Cmd {
 	entry := m.selectedTeamDeploymentRecord()
 	prompt := strings.TrimSpace(m.editor.Value())
@@ -4568,7 +4842,7 @@ func (m *Model) submitTeamAmendmentEvaluation() tea.Cmd {
 	if !m.canEvaluateSelectedTeamAmendment() || amendment == nil || entry == nil || entry.Deployment == nil || entry.Definition == nil || m.busy {
 		return nil
 	}
-	evaluations, err := parseTeamAmendmentEvaluations(m.editor.Value(), entry.Definition.Evaluations)
+	evaluations, err := parseAmendmentEvaluations(m.editor.Value(), entry.Definition.Evaluations)
 	if err != nil {
 		m.status = err.Error()
 		return nil
@@ -4637,8 +4911,8 @@ func (m *Model) submitTeamAmendmentActivation() tea.Cmd {
 	}
 }
 
-func parseTeamAmendmentEvaluations(input string, criteria []workforce.EvaluationCriterion) ([]kernelteam.AmendmentEvaluation, error) {
-	byID := make(map[string]kernelteam.AmendmentEvaluation, len(criteria))
+func parseAmendmentEvaluations(input string, criteria []workforce.EvaluationCriterion) ([]workforce.AmendmentEvaluation, error) {
+	byID := make(map[string]workforce.AmendmentEvaluation, len(criteria))
 	for _, raw := range strings.Split(strings.TrimSpace(input), "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
@@ -4653,9 +4927,9 @@ func parseTeamAmendmentEvaluations(input string, criteria []workforce.Evaluation
 		if _, duplicate := byID[criterionID]; duplicate {
 			return nil, fmt.Errorf("evaluation criterion %q was entered more than once", criterionID)
 		}
-		byID[criterionID] = kernelteam.AmendmentEvaluation{CriterionID: criterionID, Passed: outcome == "pass", Summary: summary}
+		byID[criterionID] = workforce.AmendmentEvaluation{CriterionID: criterionID, Passed: outcome == "pass", Summary: summary}
 	}
-	result := make([]kernelteam.AmendmentEvaluation, 0, len(criteria))
+	result := make([]workforce.AmendmentEvaluation, 0, len(criteria))
 	for _, criterion := range criteria {
 		evaluation, ok := byID[criterion.ID]
 		if !ok {
@@ -4665,9 +4939,21 @@ func parseTeamAmendmentEvaluations(input string, criteria []workforce.Evaluation
 		delete(byID, criterion.ID)
 	}
 	if len(byID) > 0 {
-		return nil, errors.New("evaluation contains a criterion not declared by this Team definition")
+		return nil, errors.New("evaluation contains a criterion not declared by this definition")
 	}
 	return result, nil
+}
+
+func agentEvaluationPlaceholder(entry *kernelapi.AgentDeploymentCatalogEntry) string {
+	if entry == nil || entry.Definition == nil || len(entry.Definition.Evaluations) == 0 {
+		return "criterion-id=pass|fail: concise evidence summary"
+	}
+	lines := make([]string, 0, len(entry.Definition.Evaluations)+1)
+	lines = append(lines, "One line per required criterion:")
+	for _, criterion := range entry.Definition.Evaluations {
+		lines = append(lines, criterion.ID+"=pass|fail: concise evidence summary")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func teamEvaluationPlaceholder(entry *kernelapi.TeamDeploymentCatalogEntry) string {
@@ -4854,6 +5140,13 @@ func (m *Model) prepareRequestComposer(mode editorMode, placeholder string) {
 	m.focusComposerEditor()
 }
 
+func (m *Model) prepareAgentAmendmentComposer(mode editorMode, placeholder string) {
+	m.mode = mode
+	m.editor.Reset()
+	m.editor.Placeholder = placeholder
+	m.focusComposerEditor()
+}
+
 func (m *Model) prepareTeamAmendmentComposer(mode editorMode, placeholder string) {
 	m.mode = mode
 	m.editor.Reset()
@@ -4873,6 +5166,8 @@ func (m *Model) prepareComposerForSection() {
 	switch {
 	case m.section == sectionAuthoring && m.readyRefinement() != nil:
 		m.activateReadyRefinement()
+	case m.section == sectionReadiness && m.canProposeAgentBehaviorAmendment():
+		m.prepareAgentAmendmentComposer(modeAgentAmendmentPropose, "systemPrompt|personality\nConcise rationale\nNew immutable value")
 	case m.section == sectionTeams && m.canProposeTeamPurposeAmendment():
 		m.prepareTeamAmendmentComposer(modeTeamAmendmentPropose, "First line: concise rationale\nRemaining lines: the Team's new purpose")
 	case m.section == sectionAuthoring && m.supportsWorkforceAuthoring():
@@ -4929,6 +5224,11 @@ func (m *Model) prepareComposerForSection() {
 }
 
 func (m *Model) resetComposerMode() {
+	if m.section == sectionReadiness {
+		m.mode = modeCreate
+		m.editor.Placeholder = "Select an Agent amendment to inspect its governed lifecycle."
+		return
+	}
 	if m.section == sectionTeams {
 		m.mode = modeCreate
 		m.editor.Placeholder = "Select a Team amendment to inspect its governed lifecycle."
@@ -5042,6 +5342,11 @@ func (m *Model) operatorParticipant() runtime.ConversationParticipant {
 func conversationClient(kernelClient client.KernelClient) client.ConversationClient {
 	conversationClient, _ := kernelClient.(client.ConversationClient)
 	return conversationClient
+}
+
+func agentLifecycleClient(kernelClient client.KernelClient) client.AgentDefinitionLifecycleClient {
+	value, _ := kernelClient.(client.AgentDefinitionLifecycleClient)
+	return value
 }
 
 func clawHubClient(kernelClient client.KernelClient) client.ClawHubClient {
