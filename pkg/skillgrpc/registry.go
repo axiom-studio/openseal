@@ -4,6 +4,7 @@ package skillgrpc
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -12,74 +13,97 @@ import (
 
 // Registry manages connections to external skill services
 type Registry struct {
-	mu      sync.RWMutex
-	clients map[string]*Client // skillID -> client
-	byType  map[string]string // nodeType -> skillID
+	mu           sync.RWMutex
+	clients      map[string]*Client             // authority-scoped registration key -> client
+	typesBySkill map[string]map[string]struct{} // registration key -> node types
+	skillsByType map[string]map[string]struct{} // node type -> registration keys
 }
 
 // NewRegistry creates a new skill registry
 func NewRegistry() *Registry {
 	return &Registry{
-		clients: make(map[string]*Client),
-		byType:  make(map[string]string),
+		clients:      make(map[string]*Client),
+		typesBySkill: make(map[string]map[string]struct{}),
+		skillsByType: make(map[string]map[string]struct{}),
 	}
 }
 
 // Register adds a skill to the registry
 func (r *Registry) Register(ctx context.Context, address string) (*Client, error) {
+	return r.register(ctx, "", address)
+}
+
+// RegisterAs adds a Skill endpoint under an authority-scoped registration key.
+// A trusted discovery boundary supplies the key independently of the identity
+// reported by the remote Skill. Callers can therefore isolate equal Skill IDs
+// by tenant, version, environment, or another host authority dimension.
+func (r *Registry) RegisterAs(ctx context.Context, key, address string) (*Client, error) {
+	if key == "" {
+		return nil, fmt.Errorf("skill registration key is required")
+	}
+	return r.register(ctx, key, address)
+}
+
+func (r *Registry) register(ctx context.Context, key, address string) (*Client, error) {
 	client := NewClient(address)
 	if err := client.Connect(ctx); err != nil {
 		return nil, err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Get node types
 	types, err := client.GetNodeTypes(ctx)
 	if err != nil {
 		client.Close()
 		return nil, fmt.Errorf("failed to get node types: %w", err)
 	}
 
-	// Register
-	skillID := client.SkillID()
-	r.clients[skillID] = client
-
-	// Map node types to skill
+	if key == "" {
+		key = client.SkillID()
+	}
+	r.mu.Lock()
+	previous := r.clients[key]
+	r.removeMappingsLocked(key)
+	r.clients[key] = client
+	r.typesBySkill[key] = make(map[string]struct{}, len(types))
 	for _, t := range types {
-		r.byType[t] = skillID
+		if t == "" {
+			continue
+		}
+		r.typesBySkill[key][t] = struct{}{}
+		owners := r.skillsByType[t]
+		if owners == nil {
+			owners = make(map[string]struct{})
+			r.skillsByType[t] = owners
+		}
+		owners[key] = struct{}{}
+	}
+	r.mu.Unlock()
+	if previous != nil && previous != client {
+		_ = previous.Close()
 	}
 
 	return client, nil
 }
 
 // Unregister removes a skill from the registry
-func (r *Registry) Unregister(skillID string) error {
+func (r *Registry) Unregister(key string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	client, ok := r.clients[skillID]
+	client, ok := r.clients[key]
 	if !ok {
 		return nil
 	}
 
-	// Remove type mappings
-	for t, sid := range r.byType {
-		if sid == skillID {
-			delete(r.byType, t)
-		}
-	}
-
-	delete(r.clients, skillID)
+	r.removeMappingsLocked(key)
+	delete(r.clients, key)
 	return client.Close()
 }
 
 // GetClient returns the client for a skill ID
-func (r *Registry) GetClient(skillID string) *Client {
+func (r *Registry) GetClient(key string) *Client {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.clients[skillID]
+	return r.clients[key]
 }
 
 // GetClientForType returns the client that handles a node type
@@ -87,31 +111,44 @@ func (r *Registry) GetClientForType(nodeType string) *Client {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	skillID, ok := r.byType[nodeType]
-	if !ok {
+	owners := r.skillsByType[nodeType]
+	if len(owners) != 1 {
 		return nil
 	}
-	return r.clients[skillID]
+	for key := range owners {
+		return r.clients[key]
+	}
+	return nil
+}
+
+// GetClientForSkillType resolves a node type within one exact authority-scoped
+// registration. This is the safe lookup when multiple Skills expose the same
+// node type; ambiguous global type lookup deliberately fails closed.
+func (r *Registry) GetClientForSkillType(key, nodeType string) *Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.typesBySkill[key][nodeType]; !ok {
+		return nil
+	}
+	return r.clients[key]
 }
 
 // HasType checks if a node type is registered
 func (r *Registry) HasType(nodeType string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.byType[nodeType]
-	return ok
+	return len(r.skillsByType[nodeType]) > 0
 }
 
-func (r *Registry) GetSkillTypes(skillID string) []string {
+func (r *Registry) GetSkillTypes(key string) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var types []string
-	for t, sid := range r.byType {
-		if sid == skillID {
-			types = append(types, t)
-		}
+	types := make([]string, 0, len(r.typesBySkill[key]))
+	for nodeType := range r.typesBySkill[key] {
+		types = append(types, nodeType)
 	}
+	sort.Strings(types)
 	return types
 }
 
@@ -124,6 +161,7 @@ func (r *Registry) ListSkills() []string {
 	for id := range r.clients {
 		skills = append(skills, id)
 	}
+	sort.Strings(skills)
 	return skills
 }
 
@@ -132,10 +170,11 @@ func (r *Registry) ListTypes() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	types := make([]string, 0, len(r.byType))
-	for t := range r.byType {
+	types := make([]string, 0, len(r.skillsByType))
+	for t := range r.skillsByType {
 		types = append(types, t)
 	}
+	sort.Strings(types)
 	return types
 }
 
@@ -152,12 +191,24 @@ func (r *Registry) Close() error {
 	}
 
 	r.clients = make(map[string]*Client)
-	r.byType = make(map[string]string)
+	r.typesBySkill = make(map[string]map[string]struct{})
+	r.skillsByType = make(map[string]map[string]struct{})
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing connections: %v", errs)
 	}
 	return nil
+}
+
+func (r *Registry) removeMappingsLocked(key string) {
+	for nodeType := range r.typesBySkill[key] {
+		owners := r.skillsByType[nodeType]
+		delete(owners, key)
+		if len(owners) == 0 {
+			delete(r.skillsByType, nodeType)
+		}
+	}
+	delete(r.typesBySkill, key)
 }
 
 // GRPCExecutor wraps a gRPC client as an executor

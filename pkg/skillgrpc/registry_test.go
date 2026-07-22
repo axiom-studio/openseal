@@ -52,3 +52,45 @@ func TestRegistry_ListTypesEmpty(t *testing.T) {
 	types := r.ListTypes()
 	assert.Empty(t, types)
 }
+
+func TestRegistryRequiresSkillIdentityForSharedNodeType(t *testing.T) {
+	r := NewRegistry()
+	first := &Client{skillID: "first"}
+	second := &Client{skillID: "second"}
+	r.clients[first.skillID] = first
+	r.clients[second.skillID] = second
+	r.typesBySkill[first.skillID] = map[string]struct{}{"openclaw": {}}
+	r.typesBySkill[second.skillID] = map[string]struct{}{"openclaw": {}, "unique": {}}
+	r.skillsByType["openclaw"] = map[string]struct{}{first.skillID: {}, second.skillID: {}}
+	r.skillsByType["unique"] = map[string]struct{}{second.skillID: {}}
+
+	assert.Nil(t, r.GetClientForType("openclaw"), "ambiguous endpoint must fail closed")
+	assert.Same(t, first, r.GetClientForSkillType("first", "openclaw"))
+	assert.Same(t, second, r.GetClientForSkillType("second", "openclaw"))
+	assert.Same(t, second, r.GetClientForType("unique"))
+	assert.Equal(t, []string{"openclaw", "unique"}, r.GetSkillTypes("second"))
+
+	require.NoError(t, r.Unregister("first"))
+	assert.Same(t, second, r.GetClientForType("openclaw"))
+}
+
+func TestRegistryKeepsSameReportedSkillUnderIndependentAuthorityKeys(t *testing.T) {
+	r := NewRegistry()
+	firstKey := "tenant:1\x00skill:ideogram"
+	secondKey := "tenant:3\x00skill:ideogram"
+	first := &Client{skillID: "ideogram"}
+	second := &Client{skillID: "ideogram"}
+	r.clients[firstKey] = first
+	r.clients[secondKey] = second
+	r.typesBySkill[firstKey] = map[string]struct{}{"generate": {}}
+	r.typesBySkill[secondKey] = map[string]struct{}{"generate": {}}
+	r.skillsByType["generate"] = map[string]struct{}{firstKey: {}, secondKey: {}}
+
+	assert.Same(t, first, r.GetClientForSkillType(firstKey, "generate"))
+	assert.Same(t, second, r.GetClientForSkillType(secondKey, "generate"))
+	assert.Nil(t, r.GetClientForSkillType("ideogram", "generate"), "reported Skill ID must not bypass scoped authority")
+	assert.Nil(t, r.GetClientForType("generate"), "cross-authority ambiguity must fail closed")
+
+	require.NoError(t, r.Unregister(firstKey))
+	assert.Same(t, second, r.GetClientForSkillType(secondKey, "generate"))
+}
