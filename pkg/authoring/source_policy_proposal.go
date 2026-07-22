@@ -10,7 +10,7 @@ import (
 // sourcePolicyProposals projects only exact catalog-owned drafts that match an
 // unresolved source-policy reference. Provider output can request a reference,
 // but cannot author or widen this policy object.
-func sourcePolicyProposals(missing []MissingRequirement, catalog CapabilityCatalog) []SourcePolicyProposal {
+func sourcePolicyProposals(candidate *WorkforceCandidate, missing []MissingRequirement, catalog CapabilityCatalog) []SourcePolicyProposal {
 	requiredBy := make(map[string][]string)
 	for _, requirement := range missing {
 		if requirement.Kind != "source_policy" {
@@ -28,7 +28,7 @@ func sourcePolicyProposals(missing []MissingRequirement, catalog CapabilityCatal
 		}
 		reference := draft.Policy.ID + "@" + draft.Policy.Version
 		consumers := requiredBy[reference]
-		if len(consumers) == 0 || seen[reference] {
+		if len(consumers) == 0 || seen[reference] || !candidateUsesProposedSourcePolicy(candidate, reference, draft.SkillIDs) {
 			continue
 		}
 		seen[reference] = true
@@ -44,15 +44,29 @@ func sourcePolicyProposals(missing []MissingRequirement, catalog CapabilityCatal
 	return proposals
 }
 
+func candidateUsesProposedSourcePolicy(candidate *WorkforceCandidate, reference string, skillIDs []string) bool {
+	if candidate == nil || candidate.Initiative == nil {
+		return false
+	}
+	allowed := stringSet(skillIDs)
+	for _, monitor := range candidate.Initiative.SourceMonitors {
+		if monitor.SourcePolicyRef == reference && allowed[monitor.SkillID] {
+			return true
+		}
+	}
+	return false
+}
+
 // sourcePolicyProposalRepairableMissing excludes only source-policy gaps for
 // which the trusted catalog supplies the exact requested draft. Asking the
 // provider to "repair" such a gap could make it silently remove the requested
 // monitor; the correct next step is governed human review and activation.
-func sourcePolicyProposalRepairableMissing(missing []MissingRequirement, catalog CapabilityCatalog) []MissingRequirement {
+func sourcePolicyProposalRepairableMissing(candidate *WorkforceCandidate, missing []MissingRequirement, catalog CapabilityCatalog) []MissingRequirement {
 	proposed := make(map[string]bool)
 	for _, need := range catalog.CapabilityNeeds {
 		if draft := need.SourcePolicyProposal; draft != nil {
-			proposed[draft.Policy.ID+"@"+draft.Policy.Version] = true
+			reference := draft.Policy.ID + "@" + draft.Policy.Version
+			proposed[reference] = candidateUsesProposedSourcePolicy(candidate, reference, draft.SkillIDs)
 		}
 	}
 	result := make([]MissingRequirement, 0, len(missing))
