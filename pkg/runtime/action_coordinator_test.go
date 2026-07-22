@@ -154,6 +154,49 @@ func TestActionCoordinatorPersistsPolicyDenialAndRequeues(t *testing.T) {
 
 func (d ActionDisposition) String() string { return string(d) }
 
+func TestActionCoordinatorPersistsTrustedTeamConversationAgentAttribution(t *testing.T) {
+	catalog, scope := governedActionCatalog(t)
+	if err := catalog.Bind(context.Background(), &skill.Binding{
+		ID: "team-release-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "release-team",
+		SkillID: "release", SkillVersion: "1.0.0", AllowedActions: []string{"deploy"}, MaximumRisk: skill.RiskLevelProduction,
+		Credentials: map[string]skill.CredentialReference{"token": {Kind: "vault", ID: "release-secret"}}, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryStore(20)
+	now := time.Now().UTC()
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, Goal: "coordinate release", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	}))
+	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	result, err := coordinator.Propose(context.Background(), ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-team", AssignedAgentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "staging"}, IdempotencyKey: "team-release",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Run.AssignedAgentID != "release-agent" {
+		t.Fatalf("proposal Run attribution = %#v", result.Run)
+	}
+	persisted, err := store.GetAgentRun(context.Background(), scope, run.ID)
+	if err != nil || persisted.AssignedAgentID != "release-agent" {
+		t.Fatalf("persisted Run attribution = %#v, %v", persisted, err)
+	}
+}
+
 func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	t.Helper()
 	ctx := context.Background()
