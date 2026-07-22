@@ -133,6 +133,16 @@ Credential choices displayed by the TUI are opaque server-authored references.
 Secret values are never entered into the authoring prompt or stored in TUI
 state.
 
+## Run execution history
+
+The Runs inspector loads canonical `ActionCall` records only for the selected
+Run when the server advertises `action-calls` v1. It shows the immutable Skill,
+action, binding revision, lifecycle status, attempts, risk, side effect, and
+stable call identity. Invocation arguments, prepared runtime state, and
+credential references are intentionally not rendered. Selection changes,
+manual refresh, and background Run reconciliation reload the same durable
+records; the TUI does not infer execution from chat text or Run checkpoints.
+
 ## Artifact downloads
 
 Downloads stream from the kernel into a temporary file, verify catalog size and

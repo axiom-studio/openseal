@@ -62,6 +62,8 @@ type fakeKernelClient struct {
 	agentCompletionKeys  []string
 	actionApprovals      []*runtime.ApprovalCheckpoint
 	approvalFilters      []runtime.ApprovalFilter
+	actionCalls          []*runtime.ActionCall
+	actionCallFilters    []runtime.ActionFilter
 	actionDecisions      []kernelapi.ResolveActionApprovalRequest
 	actionDecisionKeys   []string
 	compilations         []*kernelagent.DefinitionCompilation
@@ -459,8 +461,15 @@ func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ runtime.Sco
 	return &runtime.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) ListActionCalls(context.Context, runtime.ActionFilter) ([]*runtime.ActionCall, error) {
-	return nil, nil
+func (f *fakeKernelClient) ListActionCalls(_ context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+	f.actionCallFilters = append(f.actionCallFilters, filter)
+	calls := make([]*runtime.ActionCall, 0, len(f.actionCalls))
+	for _, call := range f.actionCalls {
+		if call != nil && (filter.RunID == "" || call.RunID == filter.RunID) {
+			calls = append(calls, call)
+		}
+	}
+	return calls, nil
 }
 
 func (f *fakeKernelClient) GetActionCall(context.Context, runtime.Scope, string) (*runtime.ActionCall, error) {
@@ -2556,6 +2565,58 @@ func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("delivery receipt missing %q:\n%s", expected, view)
 		}
+	}
+}
+
+func TestRunViewLoadsAndProjectsCanonicalActionCalls(t *testing.T) {
+	run := testRun("run-actions", runtime.AgentRunStatusCompleted, 4)
+	fake := &fakeKernelClient{
+		document: kernelapi.Capabilities(),
+		runs:     []*runtime.AgentRun{run},
+		actionCalls: []*runtime.ActionCall{{
+			ID: "call-1", RunID: run.ID, SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
+			BindingID: "source-prod", BindingRevision: 9, Status: runtime.ActionCallStatusSucceeded,
+			Attempt: 1, MaxAttempts: 3, Risk: "read", SideEffect: "none",
+			Arguments:      map[string]interface{}{"token": "must-not-render"},
+			CredentialRefs: map[string]skill.CredentialReference{"token": {Kind: "opaque", ID: "must-not-render"}},
+		}},
+	}
+	model := newTestModel(t, fake)
+	model.ready = true
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.actionCallCapability = kernelapi.ActionCallsCapability()
+	model.runs = fake.runs
+	model.selectedID = run.ID
+
+	applyCommand(t, model, model.loadSelectedActionCalls())
+
+	if len(fake.actionCallFilters) != 1 || fake.actionCallFilters[0].RunID != run.ID || fake.actionCallFilters[0].Limit != 100 {
+		t.Fatalf("action call filters = %#v", fake.actionCallFilters)
+	}
+	view := model.renderRunsContent(140)
+	for _, expected := range []string{"Skill executions", "succeeded", "openseal.source@1.0.2/observe_feed", "source-prod@9", "attempt 1/3", "read/none", "call call-1"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("ActionCall projection missing %q:\n%s", expected, view)
+		}
+	}
+	if strings.Contains(view, "must-not-render") || strings.Contains(strings.ToLower(view), "credential") {
+		t.Fatalf("ActionCall projection exposed private invocation state:\n%s", view)
+	}
+}
+
+func TestRunViewDoesNotLoadActionCallsWithoutCapability(t *testing.T) {
+	fake := &fakeKernelClient{runs: []*runtime.AgentRun{testRun("run-no-actions", runtime.AgentRunStatusRunning, 1)}}
+	model := newTestModel(t, fake)
+	model.ready = true
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.runs = fake.runs
+
+	if command := model.loadSelectedActionCalls(); command != nil {
+		t.Fatal("TUI loaded ActionCalls without an advertised capability")
+	}
+	if len(fake.actionCallFilters) != 0 || strings.Contains(model.renderRunsContent(100), "Skill executions") {
+		t.Fatalf("unsupported ActionCall surface was not hidden: filters=%#v\n%s", fake.actionCallFilters, model.renderRunsContent(100))
 	}
 }
 

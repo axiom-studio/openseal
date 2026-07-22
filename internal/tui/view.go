@@ -1449,6 +1449,7 @@ func (m *Model) renderRunsContent(width int) string {
 			lines = append(lines, mutedStyle.Render("Autonomy budget · "+string(state)))
 			lines = append(lines, renderBudgetLines(run.Budget, &run.BudgetUsage, max(width-8, 24))...)
 		}
+		lines = append(lines, m.renderSelectedActionCalls(width)...)
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		if receipt, ok := runDeliveryReceipt(run); ok {
@@ -1472,6 +1473,40 @@ func (m *Model) renderRunsContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("↑/↓ select · n new · r refresh · Tab compose"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderSelectedActionCalls(width int) []string {
+	run := m.selectedRun()
+	if run == nil || !m.actionCallCapability.Supports(kernelapi.OperationList) {
+		return nil
+	}
+	lines := []string{"", lipgloss.NewStyle().Foreground(text).Bold(true).Render("Skill executions")}
+	if m.loadingActionCalls {
+		return append(lines, mutedStyle.Render("Refreshing execution history…"))
+	}
+	if m.actionCallsRunID != run.ID {
+		return append(lines, mutedStyle.Render("Execution history has not loaded yet."))
+	}
+	if m.actionCallsErr != nil {
+		return append(lines, lipgloss.NewStyle().Foreground(danger).Render("Execution history unavailable · "+compact(m.actionCallsErr.Error(), max(width-38, 24))))
+	}
+	if len(m.actionCalls) == 0 {
+		return append(lines, mutedStyle.Render("No Skill executions recorded for this work."))
+	}
+	for _, call := range m.actionCalls {
+		if call == nil || call.RunID != run.ID {
+			continue
+		}
+		identity := fmt.Sprintf("%s@%s/%s", call.SkillID, call.SkillVersion, call.Action)
+		status := strings.ReplaceAll(string(call.Status), "_", " ")
+		lines = append(lines, compact(fmt.Sprintf("• %-20s %s", status, identity), max(width-4, 28)))
+		detail := fmt.Sprintf("  binding %s@%d · attempt %d/%d · %s/%s · call %s", compact(call.BindingID, 18), call.BindingRevision, call.Attempt, call.MaxAttempts, call.Risk, call.SideEffect, compact(call.ID, 14))
+		lines = append(lines, mutedStyle.Render(compact(detail, max(width-4, 28))))
+		if call.Error != "" {
+			lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("  "+call.Error, max(width-4, 28))))
+		}
+	}
+	return lines
 }
 
 func renderBudgetLines(policy *runtime.BudgetPolicy, usage *runtime.BudgetUsage, width int) []string {
