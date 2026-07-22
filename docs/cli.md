@@ -8,7 +8,6 @@ openseal tui       # default; open the terminal workspace
 openseal daemon    # start the durable daemon
 openseal run       # execute one HCL workflow directly
 openseal validate  # validate an HCL workflow
-openseal skill     # legacy Git repository skill commands
 openseal workflow  # create an HCL workflow skeleton
 openseal version
 openseal help
@@ -87,18 +86,3 @@ openseal workflow create --name <name> [options]
 
 The generated skeleton contains a webhook node followed by an HTTP node. Edit
 and validate it before use.
-
-## `openseal skill`
-
-The current CLI contains two legacy repository-oriented helpers:
-
-```bash
-openseal skill install <git-url> [--dir ./skills] [--branch main]
-openseal skill list [--dir ./skills]
-```
-
-`OPENSEAL_SKILLS_DIR` changes the default directory. These commands clone Git
-repositories under `<dir>/repos`; they are not the canonical ClawHub lifecycle
-and do not create a deployment Skill binding. Use the TUI or REST ClawHub
-lifecycle to verify, preview, install, update, pin, or remove OpenClaw-format
-Skills, then bind exact authority to an Agent or Team deployment.
