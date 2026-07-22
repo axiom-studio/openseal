@@ -48,6 +48,7 @@ type ConversationRunReconcileResult struct {
 	Scheduled     int `json:"scheduled"`
 	Replayed      int `json:"replayed"`
 	Skipped       int `json:"skipped"`
+	Results       int `json:"results"`
 }
 
 // ConversationRunScheduler projects durable channel messages into canonical
@@ -179,8 +180,113 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 			}
 		}
 		if len(conversations) < s.config.ConversationPageSize {
-			return result, nil
+			break
 		}
+	}
+	if err := s.reconcileCanceledConversationRuns(ctx, scope, result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// reconcileCanceledConversationRuns closes the crash gap between atomically
+// canceling a Run/Approval/ActionCall and projecting that terminal fact back
+// into its command channel. The message key is Run-stable, so any replica can
+// recover it after a restart without duplicating user-visible results.
+func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
+	const pageSize = 100
+	for offset := 0; ; offset += pageSize {
+		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: scope, Kind: RunKindConversation, Statuses: []AgentRunStatus{AgentRunStatusCanceled}, Limit: pageSize, Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, run := range runs {
+			if run == nil {
+				continue
+			}
+			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+			if !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) {
+				continue
+			}
+			conversation, err := s.conversations.GetConversation(ctx, scope, conversationID)
+			if err != nil {
+				return err
+			}
+			if conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner {
+				continue
+			}
+			trigger, err := s.conversations.GetChannelMessage(ctx, scope, conversationID, triggerID)
+			if err != nil {
+				return err
+			}
+			if !trigger.RequiresResponse {
+				continue
+			}
+			resolved, err := s.conversationTriggerResolved(ctx, scope, conversationID, triggerID)
+			if err != nil {
+				return err
+			}
+			if resolved {
+				continue
+			}
+			content := "This request was canceled before completion."
+			references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
+			approvals, err := s.runs.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: run.ID, Status: []ApprovalStatus{ApprovalStatusCanceled}, Limit: 1})
+			if err != nil {
+				return err
+			}
+			if len(approvals) == 1 {
+				content = "The proposed action was canceled before execution. No changes were applied."
+				references = append(references, ConversationReference{Kind: ConversationReferenceApproval, ID: approvals[0].ID})
+			}
+			current, err := s.conversations.GetConversation(ctx, scope, conversationID)
+			if err != nil {
+				return err
+			}
+			posted, err := s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+				Scope: scope, ConversationID: conversationID, ExpectedRevision: current.Revision,
+				Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
+				Intent: MessageIntentSystem, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				ReplyToMessageID: triggerID, References: references, ResolvesMessageID: triggerID,
+				IdempotencyKey: "conversation-run-canceled-result:" + run.ID,
+			})
+			if errors.Is(err, ErrRevisionConflict) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if !posted.Replayed {
+				result.Results++
+			}
+		}
+		if len(runs) < pageSize {
+			return nil
+		}
+	}
+}
+
+func (s *ConversationRunScheduler) conversationTriggerResolved(ctx context.Context, scope Scope, conversationID, triggerID string) (bool, error) {
+	const pageSize = 100
+	for after := int64(0); ; {
+		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+			Scope: scope, ConversationID: conversationID, AfterSequence: after, Limit: pageSize,
+		})
+		if err != nil {
+			return false, err
+		}
+		for _, message := range messages {
+			if message.ResolvesMessageID == triggerID {
+				return true, nil
+			}
+		}
+		if len(messages) < pageSize {
+			return false, nil
+		}
+		after = messages[len(messages)-1].Sequence
 	}
 }
 
