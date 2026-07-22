@@ -48,11 +48,6 @@ update-all, pin, unpin, installed verification, and uninstall. See the
 exposes cursor-paginated search and explore clients, verified preview, source
 artifact import/export, and the lifecycle methods used by the server.
 
-The `openseal skill install <git-url>` command is an older Git-repository sync
-helper. It neither runs the ClawHub verifier/compiler lifecycle nor grants a
-deployment binding; do not use it as evidence that an OpenClaw Skill is ready
-to execute.
-
 ## Compatibility guarantees
 
 | Upstream semantic | OpenSeal representation | Guarantee |
