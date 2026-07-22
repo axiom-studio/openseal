@@ -65,7 +65,8 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil || !initial.HasChanges || initial.HasMore || !initial.RunsChanged || !initial.ActivityChanged || !initial.PresenceChanged ||
 				len(initial.Messages) != 1 || len(initial.Rounds) != 0 ||
 				len(initial.Runs) != 1 || initial.Runs[0].ID != scheduled.Run.ID || initial.Runs[0].Status != AgentRunStatusQueued ||
-				len(initial.Activity) != 1 || initial.Activity[0].EventType != "run.created" ||
+				len(initial.Activity) != 1 || initial.Activity[0].EventType != "run.created" || initial.Activity[0].Category != "run" ||
+				initial.Activity[0].Payload != nil || !initial.Activity[0].DetailAvailable ||
 				len(initial.Presence) != 0 || initial.Cursor == "" {
 				t.Fatalf("initial changes = %#v, %v", initial, err)
 			}
