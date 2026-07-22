@@ -375,6 +375,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	}
 	mode := ModeCreate
 	var existing *WorkforceCandidate
+	inheritedRefinement := ChangeSetRefinement{}
 	if request.ParentID != "" {
 		parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ParentID)
 		if err != nil {
@@ -384,8 +385,12 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		candidate := parent.Result.Candidate
 		existing = &candidate
 		inheritParentPlacement(&request.Placement, parent)
+		inheritedRefinement = refinementForUnchangedParentPrompt(parent, request.Prompt)
 	}
 	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
+	if len(inheritedRefinement.Answers) > 0 {
+		compileRequest.Refinement = providerRefinementContext(inheritedRefinement)
+	}
 	requestDigest, err := digestChangeSetRequest(request, mode, existing)
 	if err != nil {
 		return nil, false, err
@@ -431,7 +436,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement), RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog), Status: status, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	changeSet.Refinement = reconcileRefinement(ChangeSetRefinement{}, result)
+	changeSet.Refinement = reconcileRefinement(inheritedRefinement, result)
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: "candidate_compiled", Actor: request.Actor, At: now}}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
 }
@@ -451,6 +456,7 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	}
 	mode := ModeCreate
 	var existing *WorkforceCandidate
+	inheritedRefinement := ChangeSetRefinement{}
 	if request.ParentID != "" {
 		parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ParentID)
 		if err != nil {
@@ -460,8 +466,12 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		candidate := parent.Result.Candidate
 		existing = &candidate
 		inheritParentPlacement(&request.Placement, parent)
+		inheritedRefinement = refinementForUnchangedParentPrompt(parent, request.Prompt)
 	}
 	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
+	if len(inheritedRefinement.Answers) > 0 {
+		compileRequest.Refinement = providerRefinementContext(inheritedRefinement)
+	}
 	requestDigest, err := digestChangeSetRequest(request, mode, existing)
 	if err != nil {
 		return nil, false, err
@@ -476,9 +486,21 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		Status: ChangeSetEvaluating, Actor: request.Actor, Generation: &ChangeSetGeneration{Request: compileRequest},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	changeSet.Refinement = inheritedRefinement
 	changeSet.Generation.Request.InvocationKey = generationInvocationKey(changeSet.ID, 0)
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: ChangeSetEvaluating, Reason: "candidate_generation_queued", Actor: request.Actor, At: now}}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
+}
+
+// refinementForUnchangedParentPrompt preserves already-audited answers when a
+// child ChangeSet refreshes host-owned catalog facts (for example after policy
+// activation). A changed prompt starts a fresh decision sequence so stale
+// answers cannot silently constrain new intent.
+func refinementForUnchangedParentPrompt(parent *ChangeSet, prompt string) ChangeSetRefinement {
+	if parent == nil || strings.TrimSpace(parent.Prompt) != strings.TrimSpace(prompt) {
+		return ChangeSetRefinement{}
+	}
+	return cloneRefinement(parent.Refinement)
 }
 
 // GeneratePrepared compiles one previously persisted generation intent and

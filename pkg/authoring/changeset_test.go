@@ -429,6 +429,49 @@ func TestAtomicMemoryApplyCreatesResourcesForRecoveredUnappliedAmendment(t *test
 	}
 }
 
+func TestPreparedCatalogRefreshInheritsAuditedAnswersOnlyForUnchangedPrompt(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	prompt := "Monitor the reviewed community"
+	question := RefinementQuestion{
+		ID: CapabilitySourceScopeQuestionID("community"), Category: RefinementCategoryScope,
+		Prompt: "Which community?", WhyNeeded: "Scope must remain explicit.", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer: RefinementAnswerSchema{Kind: RefinementAnswerStringList, Minimum: 1, Maximum: 1}, Priority: 10,
+		Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	answer := RefinementAnswerEvent{
+		ID: "answer-1", QuestionID: question.ID, QuestionRevision: 3, Value: RefinementAnswerValue{Items: []string{"LocalLLaMA"}},
+		Source: RefinementAnswerSourceUser, Actor: ChangeSetActor{Type: "user", ID: "7"}, AnsweredAt: time.Now().UTC(),
+	}
+	parent := &ChangeSet{
+		ID: "parent", Scope: scope, Prompt: prompt, PromptDigest: digestString(prompt), Status: ChangeSetBlocked, Revision: 3,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, Result: CompileResult{Candidate: capabilityNeedCandidate()},
+		Refinement: ChangeSetRefinement{Questions: []RefinementQuestion{question}, Answers: []RefinementAnswerEvent{answer}},
+	}
+	store := NewMemoryChangeSetStore()
+	if _, _, err := store.CreateChangeSet(context.Background(), parent, "parent-key", "parent-digest"); err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: capabilityNeedPayload(t)})
+	service, _ := NewChangeSetService(compiler, store)
+	catalog := capabilityNeedCatalog(false, "openseal.source")
+
+	refreshed, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: scope, ParentID: parent.ID, Prompt: prompt, Catalog: catalog,
+		Actor: parent.Actor, IdempotencyKey: "refresh-same-prompt",
+	})
+	if err != nil || refreshed.Generation.Request.Refinement == nil || len(refreshed.Generation.Request.Refinement.Answers) != 1 ||
+		len(refreshed.Refinement.Answers) != 1 || refreshed.Refinement.Answers[0].Value.Items[0] != "LocalLLaMA" {
+		t.Fatalf("same-prompt refresh = %#v, err = %v", refreshed, err)
+	}
+	changed, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: scope, ParentID: parent.ID, Prompt: "Monitor a different community", Catalog: catalog,
+		Actor: parent.Actor, IdempotencyKey: "refresh-changed-prompt",
+	})
+	if err != nil || changed.Generation.Request.Refinement != nil || len(changed.Refinement.Answers) != 0 {
+		t.Fatalf("changed-prompt refresh inherited stale answers: %#v, err = %v", changed, err)
+	}
+}
+
 func TestAmendmentPlacementRevisionsComeOnlyFromAppliedReceipt(t *testing.T) {
 	const (
 		agentDefinitionID = "tenant/one/researcher"
