@@ -20,6 +20,8 @@ const (
 	AgentRunsCapabilityVersion          = "1"
 	ObjectivesCapabilityID              = "objectives"
 	ObjectivesCapabilityVersion         = "1"
+	ObjectiveSchedulesCapabilityID      = "objective-schedules"
+	ObjectiveSchedulesCapabilityVersion = "1"
 	InitiativesCapabilityID             = "initiatives"
 	InitiativesCapabilityVersion        = "1"
 	SourceMonitorsCapabilityID          = "source-monitors"
@@ -101,6 +103,7 @@ const (
 	OperationResolveAmendment  = "resolve-amendment"
 	OperationActivateAmendment = "activate-amendment"
 	OperationRoute             = "route"
+	OperationReconcile         = "reconcile"
 	OperationUpsert            = "upsert"
 	OperationDisable           = "disable"
 	OperationRefine            = "refine"
@@ -383,6 +386,13 @@ func ObjectivesCapability() Capability {
 	}
 }
 
+func ObjectiveSchedulesCapability() Capability {
+	return Capability{
+		ID: ObjectiveSchedulesCapabilityID, Version: ObjectiveSchedulesCapabilityVersion, Available: true,
+		Operations: []string{OperationReconcile},
+	}
+}
+
 func EventRoutingCapability() Capability {
 	return Capability{
 		ID: EventRoutingCapabilityID, Version: EventRoutingCapabilityVersion, Available: true,
@@ -654,6 +664,17 @@ type UpdateObjectiveRequest struct {
 type ObjectiveDetail struct {
 	Objective *runtime.Objective  `json:"objective"`
 	Runs      []*runtime.AgentRun `json:"runs"`
+}
+
+type ReconcileObjectiveSchedulesRequest struct {
+	Scope runtime.Scope `json:"scope"`
+	Limit int           `json:"limit,omitempty"`
+}
+
+type ObjectiveScheduleReconciliation struct {
+	Scope        runtime.Scope                    `json:"scope"`
+	ReconciledAt time.Time                        `json:"reconciledAt"`
+	Result       *runtime.ObjectiveScheduleResult `json:"result"`
 }
 
 type CreateInitiativeRequest struct {

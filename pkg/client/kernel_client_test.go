@@ -60,6 +60,10 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !eventCapability.Supports(kernelapi.OperationRoute) {
 		t.Fatalf("event routing capabilities: %#v", document)
 	}
+	scheduleCapability, ok := document.Find(kernelapi.ObjectiveSchedulesCapabilityID, kernelapi.ObjectiveSchedulesCapabilityVersion)
+	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) {
+		t.Fatalf("objective schedule capabilities: %#v", document)
+	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	objective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
@@ -71,6 +75,23 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 	if objective.Budget == nil || objective.Budget.MaxTurns != 40 {
 		t.Fatalf("objective = %#v", objective)
+	}
+	due := time.Now().UTC().Add(-time.Minute)
+	scheduledObjective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Recurring research", Goal: "Monitor feedback periodically", Status: runtime.ObjectiveStatusActive,
+		Cadence:          &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: owner.ID},
+		NextEvaluationAt: &due,
+	}, "recurring-research-objective")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciliation, err := client.ReconcileObjectiveSchedules(ctx, kernelapi.ReconcileObjectiveSchedulesRequest{Scope: scope, Limit: 10})
+	if err != nil || reconciliation.Result == nil || reconciliation.Result.Scheduled != 1 {
+		t.Fatalf("schedule reconciliation = %#v, %v", reconciliation, err)
+	}
+	scheduledRuns, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, ObjectiveID: scheduledObjective.ID})
+	if err != nil || len(scheduledRuns) != 1 || scheduledRuns[0].Source != runtime.RunSourceSchedule {
+		t.Fatalf("scheduled runs = %#v, %v", scheduledRuns, err)
 	}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
 		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
@@ -180,7 +201,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	for _, run := range runs {
 		runIDs[run.ID] = run.Kind == runtime.RunKindAgentWork
 	}
-	if len(runs) != 2 || !runIDs[created.Run.ID] || !runIDs[routed.Routes[0].Run.ID] {
+	if len(runs) != 3 || !runIDs[created.Run.ID] || !runIDs[routed.Routes[0].Run.ID] || !runIDs[scheduledRuns[0].ID] {
 		t.Fatalf("runs = %#v", runs)
 	}
 
