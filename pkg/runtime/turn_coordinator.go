@@ -481,11 +481,11 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		}
 		leaseOwner = workerID
 	}
+	turnUsageDelta := budgetUsageForTurn(turn.Usage)
 	var budgetDelta *BudgetUsage
 	if run.Budget != nil {
 		if _, reserved := run.BudgetReservations[turn.ID]; reserved {
-			delta := budgetUsageForTurn(turn.Usage)
-			budgetDelta = &delta
+			budgetDelta = &turnUsageDelta
 		}
 	}
 	activityPayload := map[string]interface{}{
@@ -516,6 +516,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,
 		BudgetUsageDelta:          budgetDelta,
+		ActivityUsageDelta:        &turnUsageDelta,
 		SettleBudgetReservationID: budgetReservationID(run, turn),
 	})
 	if err != nil {

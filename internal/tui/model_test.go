@@ -1324,6 +1324,10 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 	detail.ParentRunID = "root-run"
 	detail.CorrelationID = "incident-42"
 	detail.ConversationRefs = []string{"conversation:sre"}
+	detail.UsageDelta = &runtime.BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}
+	if got := activityUsageLine(detail.UsageDelta); got != "Usage · 1 turn · 150 tokens (120 in, 30 out) · $0.125 · 500ms" {
+		t.Fatalf("usage line = %q", got)
+	}
 	detail.Payload = map[string]interface{}{"approvalId": "approval-7", "decisionReason": "Exact workload and namespace reviewed"}
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
@@ -1344,7 +1348,7 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 		t.Fatalf("expanded=%t selected=%q", model.activityExpanded, model.selectedActivity)
 	}
 	view := model.View()
-	for _, expected := range []string{"t Activity", "Production restart approved", "Evidence · redacted canonical projection", "approval-7", "incident-42", "conversation:sre", "Parent Run root-run"} {
+	for _, expected := range []string{"t Activity", "Production restart approved", "Usage · 1 turn · 150 tokens", "Evidence · redacted canonical projection", "approval-7", "incident-42", "conversation:sre", "Parent Run root-run"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Activity view missing %q:\n%s", expected, view)
 		}

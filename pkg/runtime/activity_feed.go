@@ -50,6 +50,7 @@ type ActivityProjection struct {
 	TeamID           string                 `json:"teamId,omitempty"`
 	Actor            ActivityActor          `json:"actor"`
 	Summary          string                 `json:"summary"`
+	UsageDelta       *BudgetUsage           `json:"usageDelta,omitempty"`
 	CreatedAt        time.Time              `json:"createdAt"`
 	DetailAvailable  bool                   `json:"detailAvailable"`
 	Payload          map[string]interface{} `json:"payload,omitempty"`
@@ -132,7 +133,7 @@ func projectActivityEvent(event *ActivityEvent, includeDetails bool) ActivityPro
 		ID: event.ID, Sequence: event.Sequence, EventType: event.EventType, Category: activityCategory(event.EventType),
 		Severity: event.Severity, Visibility: event.Visibility, AgentID: event.AgentID, ObjectiveID: event.ObjectiveID, InitiativeID: event.InitiativeID,
 		RunID: event.RunID, TurnID: event.TurnID, ParentRunID: event.ParentRunID, TeamID: event.TeamID,
-		Actor: event.Actor, Summary: event.Summary, CreatedAt: event.CreatedAt,
+		Actor: event.Actor, Summary: event.Summary, UsageDelta: cloneBudgetUsage(event.UsageDelta), CreatedAt: event.CreatedAt,
 		DetailAvailable: len(event.Payload) > 0 || len(event.ConversationRefs) > 0 || event.CorrelationID != "" || event.CausationID != "",
 	}
 	if includeDetails {

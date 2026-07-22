@@ -315,6 +315,9 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		Summary: summary, Visibility: ActivityVisibilityScope, CausationID: call.ID, CreatedAt: now,
 		Payload: map[string]interface{}{"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
 	}
+	if updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed {
+		event.UsageDelta = &BudgetUsage{Actions: 1}
+	}
 	return w.store.PersistActionExecution(ctx, ActionExecutionRecord{
 		Call: updatedCall, ExpectedCallRevision: call.Revision, Run: updatedRun, ExpectedRunRevision: expectedRunRevision,
 		WorkerID: workerID, Now: now, Event: event,

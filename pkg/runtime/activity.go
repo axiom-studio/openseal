@@ -60,6 +60,7 @@ type ActivityEvent struct {
 	ConversationRefs []string               `json:"conversationRefs,omitempty"`
 	Actor            ActivityActor          `json:"actor"`
 	Summary          string                 `json:"summary"`
+	UsageDelta       *BudgetUsage           `json:"usageDelta,omitempty"`
 	Payload          map[string]interface{} `json:"payload,omitempty"`
 	Visibility       ActivityVisibility     `json:"visibility"`
 	CorrelationID    string                 `json:"correlationId,omitempty"`
@@ -76,6 +77,11 @@ func (e *ActivityEvent) Validate() error {
 	}
 	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "" && strings.TrimSpace(e.InitiativeID) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
 		return errors.New("activity subject, type, and summary are required")
+	}
+	if e.UsageDelta != nil {
+		if err := e.UsageDelta.Validate(); err != nil {
+			return fmt.Errorf("activity usage delta: %w", err)
+		}
 	}
 	return nil
 }
@@ -103,6 +109,7 @@ type RunTransitionRequest struct {
 	OccurredAt                *time.Time
 	Intervention              *AgentRunIntervention
 	BudgetUsageDelta          *BudgetUsage
+	ActivityUsageDelta        *BudgetUsage
 	BudgetReservation         *BudgetReservation
 	SettleBudgetReservationID string
 }
@@ -325,7 +332,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		ParentRunID: run.ParentRunID, Actor: req.Actor, Summary: req.Summary,
 		Payload: req.Payload, Visibility: visibility, CorrelationID: req.CorrelationID,
 		CausationID: req.CausationID, CreatedAt: now,
-		TurnID: req.TurnID,
+		TurnID: req.TurnID, UsageDelta: cloneBudgetUsage(req.ActivityUsageDelta),
 	}
 	if strings.TrimSpace(event.Summary) == "" {
 		event.Summary = fmt.Sprintf("Run moved from %s to %s", previousStatus, req.Status)
@@ -338,6 +345,14 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		return nil, nil, err
 	}
 	return run, persisted, nil
+}
+
+func cloneBudgetUsage(usage *BudgetUsage) *BudgetUsage {
+	if usage == nil {
+		return nil
+	}
+	cloned := *usage
+	return &cloned
 }
 
 func (s *RunActivityService) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
