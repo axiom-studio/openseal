@@ -16,6 +16,14 @@ func TestPublicFacadeExposesCanonicalActivityCapability(t *testing.T) {
 	}
 }
 
+func TestPublicFacadeExposesSourcePolicyLifecycleCapability(t *testing.T) {
+	capability := SourcePoliciesCapability()
+	if capability.ID != SourcePoliciesCapabilityID || capability.Version != SourcePoliciesCapabilityVersion ||
+		!capability.Supports(KernelOperationListVersions) || !capability.Supports(KernelOperationActivate) || !capability.Supports(KernelOperationRevoke) {
+		t.Fatalf("source policy capability = %#v", capability)
+	}
+}
+
 func TestPublicFacadeExposesObjectiveScheduleConditions(t *testing.T) {
 	condition := ObjectiveScheduleCondition{State: ObjectiveScheduleBudgetExhausted, Reason: "Objective budget cannot allocate another Run", Since: time.Now(), UpdatedAt: time.Now()}
 	objective := Objective{ScheduleCondition: &condition}
