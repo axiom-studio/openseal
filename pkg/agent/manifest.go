@@ -118,6 +118,7 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance Definit
 		Evaluations:        manifest.Spec.Evaluations,
 		Runbook:            manifest.Spec.Runbook, Amendments: manifest.Spec.Amendments, Provenance: provenance,
 	}
+	canonicalizeDefinition(definition)
 	if err := definition.Validate(); err != nil {
 		return nil, err
 	}
