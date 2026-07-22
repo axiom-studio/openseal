@@ -627,7 +627,7 @@ func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAut
 			CapabilityNeeds: []CapabilityNeed{{
 				ID: "community-research", Prompt: "Which research capability?", WhyNeeded: "A verified capability is required.",
 				SkillIDs: []string{"community-source"}, Priority: 100,
-				SourcePolicyProposal: &CapabilitySourcePolicyProposal{Policy: policy, Reason: "Permit bounded read-only collection from the reviewed community feed."},
+				SourcePolicyProposal: &CapabilitySourcePolicyProposal{Policy: policy, Reason: "Permit bounded read-only collection from the reviewed community feed.", SkillIDs: []string{"community-source"}},
 			}},
 		},
 	})

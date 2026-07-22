@@ -125,8 +125,9 @@ type CapabilityNeed struct {
 }
 
 type CapabilitySourcePolicyProposal struct {
-	Policy source.Policy `json:"policy"`
-	Reason string        `json:"reason"`
+	Policy   source.Policy `json:"policy"`
+	Reason   string        `json:"reason"`
+	SkillIDs []string      `json:"skillIds"`
 }
 
 // CapabilitySourceScopeRequirement declares that a source-oriented capability

@@ -823,6 +823,17 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 					return fmt.Errorf("capability catalog need %d source policy proposal requires explicit paths and methods", index)
 				}
 			}
+			allowedSkills := stringSet(need.SkillIDs)
+			seenProposalSkills := make(map[string]bool, len(proposal.SkillIDs))
+			if len(proposal.SkillIDs) == 0 {
+				return fmt.Errorf("capability catalog need %d source policy proposal requires at least one applicable Skill", index)
+			}
+			for _, skillID := range proposal.SkillIDs {
+				if skillID != strings.TrimSpace(skillID) || !allowedSkills[skillID] || seenProposalSkills[skillID] {
+					return fmt.Errorf("capability catalog need %d source policy proposal has an invalid applicable Skill", index)
+				}
+				seenProposalSkills[skillID] = true
+			}
 		}
 		if needIDs[need.ID] {
 			return fmt.Errorf("capability catalog need %d duplicates id %s", index, need.ID)
