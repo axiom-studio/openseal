@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,8 +38,13 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 	scope := Scope{Kind: "tenant", ID: "postgres-monitor"}
 	initiative, runs := seedExecutableMonitorInitiative(t, primary, scope)
 	request := sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "PostgreSQL finding")
+	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	expires := base.Add(time.Hour)
+	request.RetentionExpiresAt = &expires
 	firstService := NewSourceMonitorService(primary, primary, primary, primary)
 	secondService := NewSourceMonitorService(replica, replica, replica, replica)
+	firstService.now = func() time.Time { return base }
+	secondService.now = func() time.Time { return base }
 	type outcome struct {
 		result *SourceObservationIngestResult
 		err    error
@@ -100,5 +106,11 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 	observations, listErr := primary.ListSourceObservations(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-a"})
 	if err != nil || listErr != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 1 || checkpoint.LastActionCallID != "no-change-postgres" || len(observations) != 1 {
 		t.Fatalf("checkpoint=%#v observations=%#v err=%v listErr=%v", checkpoint, observations, err, listErr)
+	}
+	retainedService := NewSourceMonitorService(primary, primary, primary, primary)
+	retainedService.now = func() time.Time { return expires }
+	retained, retainedErr := retainedService.List(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-a"})
+	if retainedErr != nil || len(retained) != 0 {
+		t.Fatalf("expired PostgreSQL evidence remained product-visible: values=%#v err=%v", retained, retainedErr)
 	}
 }

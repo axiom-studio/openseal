@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -61,6 +62,72 @@ func TestSourceMonitorObservationIngestDeduplicatesAndSurvivesRestart(t *testing
 			values, listErr := service.List(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, Limit: 10})
 			if err != nil || listErr != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 1 || len(values) != 2 {
 				t.Fatalf("checkpoint=%#v values=%#v err=%v listErr=%v", checkpoint, values, err, listErr)
+			}
+		})
+	}
+}
+
+func TestSourceMonitorReadsExcludeExpiredEvidenceWithoutDeletingAuditRecords(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func() KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func() KernelStore, func()) {
+			store := NewMemoryStore(50)
+			return store, func() KernelStore { return store }, func() {}
+		}},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func() KernelStore, func()) {
+			path := filepath.Join(t.TempDir(), "retention.db")
+			store, err := NewSQLiteStore(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() KernelStore {
+				_ = store.Close()
+				reopened, openErr := NewSQLiteStore(path)
+				if openErr != nil {
+					t.Fatal(openErr)
+				}
+				store = reopened
+				return store
+			}, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			store, restart, closeStore := fixture.open(t)
+			defer closeStore()
+			ctx := context.Background()
+			scope := Scope{Kind: "tenant", ID: "retention"}
+			initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
+			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
+			base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+			service.now = func() time.Time { return base }
+
+			expires := base.Add(time.Hour)
+			expiredRequest := sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-expired", "thread-expired", "Expired finding")
+			expiredRequest.RetentionExpiresAt = &expires
+			expired, err := service.Ingest(ctx, expiredRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activeRequest := sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 1, "cursor-active", "thread-active", "Retained finding")
+			active, err := service.Ingest(ctx, activeRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			store = restart()
+			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
+			service.now = func() time.Time { return expires }
+			values, err := service.List(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, Limit: 1})
+			if err != nil || len(values) != 1 || values[0].ID != active.Observation.ID {
+				t.Fatalf("retained values=%#v err=%v", values, err)
+			}
+			if _, err = service.Get(ctx, scope, expired.Observation.ID); !errors.Is(err, ErrSourceObservationNotFound) {
+				t.Fatalf("expired product read err=%v", err)
+			}
+			if _, err = store.(SourceMonitorStore).GetSourceObservation(ctx, scope, expired.Observation.ID); err != nil {
+				t.Fatalf("immutable audit record was deleted: %v", err)
 			}
 		})
 	}

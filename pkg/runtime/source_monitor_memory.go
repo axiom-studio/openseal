@@ -121,6 +121,9 @@ func (s *MemoryStore) ListSourceObservations(_ context.Context, filter SourceObs
 		if value.Scope != filter.Scope || filter.InitiativeID != "" && value.InitiativeID != filter.InitiativeID || filter.MonitorID != "" && value.MonitorID != filter.MonitorID || filter.RunID != "" && value.RunID != filter.RunID || filter.ActionCallID != "" && value.ActionCallID != filter.ActionCallID {
 			continue
 		}
+		if !filter.RetainedAt.IsZero() && sourceObservationExpiredAt(value, filter.RetainedAt) {
+			continue
+		}
 		values = append(values, cloneSourceObservation(value))
 	}
 	sort.Slice(values, func(i, j int) bool { return values[i].IngestedAt.After(values[j].IngestedAt) })

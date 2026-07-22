@@ -69,6 +69,10 @@ type SourceObservationFilter struct {
 	ActionCallID string
 	Limit        int
 	Offset       int
+	// RetainedAt excludes observations whose configured retention window has
+	// elapsed. SourceMonitorService sets it for product reads; a zero value is
+	// reserved for immutable store-level audit access.
+	RetainedAt time.Time
 }
 
 type SourceMonitorStore interface {
@@ -290,8 +294,30 @@ func (s *SourceMonitorService) GetCheckpoint(ctx context.Context, scope Scope, i
 	return s.store.GetSourceMonitorCheckpoint(ctx, scope, initiativeID, monitorID)
 }
 
+func (s *SourceMonitorService) Get(ctx context.Context, scope Scope, id string) (*SourceObservation, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("source monitor service is not configured")
+	}
+	value, err := s.store.GetSourceObservation(ctx, scope, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	if sourceObservationExpiredAt(value, s.now().UTC()) {
+		return nil, ErrSourceObservationNotFound
+	}
+	return value, nil
+}
+
 func (s *SourceMonitorService) List(ctx context.Context, filter SourceObservationFilter) ([]*SourceObservation, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("source monitor service is not configured")
+	}
+	filter.RetainedAt = s.now().UTC()
 	return s.store.ListSourceObservations(ctx, filter)
+}
+
+func sourceObservationExpiredAt(value *SourceObservation, at time.Time) bool {
+	return value != nil && value.RetentionExpiresAt != nil && !value.RetentionExpiresAt.After(at)
 }
 
 func (o *SourceObservation) Validate() error {

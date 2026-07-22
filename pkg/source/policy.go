@@ -57,6 +57,7 @@ type PolicyDecision struct {
 	PathPrefix    string `json:"pathPrefix"`
 	Method        string `json:"method"`
 	MaximumItems  int    `json:"maximumItems"`
+	RetentionDays int    `json:"retentionDays,omitempty"`
 }
 
 type OutreachPolicyDecision struct {
@@ -107,7 +108,7 @@ func (d PolicyDecision) AuthorizeRequest(rawURL, method string, requestedItems i
 	if strings.TrimSpace(d.PolicyID) == "" || strings.TrimSpace(d.PolicyVersion) == "" ||
 		validatePolicyHost(strings.ToLower(strings.TrimSpace(d.SourceHost))) != nil ||
 		validatePathPrefix(d.PathPrefix) != nil || !validReadMethod(decisionMethod) ||
-		d.MaximumItems < 1 || d.MaximumItems > MaximumItems {
+		d.MaximumItems < 1 || d.MaximumItems > MaximumItems || d.RetentionDays < 0 || d.RetentionDays > 3650 {
 		return errors.New("source policy decision is invalid")
 	}
 	if strings.ToUpper(strings.TrimSpace(method)) != decisionMethod {
@@ -266,7 +267,7 @@ func (p Policy) AuthorizeRequest(rawURL, method string, requestedItems int) (*Po
 		if !methodAllowed(candidate.Methods, method) {
 			continue
 		}
-		return &PolicyDecision{PolicyID: p.ID, PolicyVersion: p.Version, SourceHost: host, PathPrefix: prefix, Method: method, MaximumItems: p.MaximumItems}, nil
+		return &PolicyDecision{PolicyID: p.ID, PolicyVersion: p.Version, SourceHost: host, PathPrefix: prefix, Method: method, MaximumItems: p.MaximumItems, RetentionDays: p.RetentionDays}, nil
 	}
 	return nil, errors.New("source URL is not allowed by policy")
 }

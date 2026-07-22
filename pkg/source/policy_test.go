@@ -11,7 +11,7 @@ func TestSourcePolicyAuthorizesExactBoundedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.PolicyID != policy.ID || decision.PolicyVersion != policy.Version || decision.SourceHost != "www.reddit.com" || decision.PathPrefix != "/r/kubernetes" || decision.MaximumItems != 10 {
+	if decision.PolicyID != policy.ID || decision.PolicyVersion != policy.Version || decision.SourceHost != "www.reddit.com" || decision.PathPrefix != "/r/kubernetes" || decision.MaximumItems != 10 || decision.RetentionDays != 30 {
 		t.Fatalf("policy decision mismatch: %#v", decision)
 	}
 	if err := decision.Authorize("https://www.reddit.com/r/kubernetes/comments/thread", 5); err != nil {
