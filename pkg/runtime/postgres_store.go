@@ -307,6 +307,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateEventSourceCheckpoints(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateEventSourceSubscriptions(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.migrateOutreach(ctx, tx); err != nil {
 		return err
 	}

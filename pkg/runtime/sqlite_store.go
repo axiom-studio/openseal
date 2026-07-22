@@ -77,6 +77,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateEventSourceCheckpoints(db); err != nil {
 		return err
 	}
+	if err := migrateEventSourceSubscriptions(db); err != nil {
+		return err
+	}
 	if err := migrateOutreach(db); err != nil {
 		return err
 	}
