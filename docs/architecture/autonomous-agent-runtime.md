@@ -193,6 +193,11 @@ Source monitoring stores normalized observations and monotonic checkpoints.
 Governed outreach requires source evidence, a truthful public identity, an
 external Skill action, policy, and an approval-aware delivery Run.
 
+Short-lived files passed into an execution sandbox are not Artifacts. The
+portable execution transport bounds their size and lifetime, exposes only
+opaque identifiers, and is intentionally lost across process restart. A host
+must promote any durable result into the Artifact catalog and content store.
+
 ## Storage implementations
 
 - **Memory** is the default for programmatic construction and tests. It is not

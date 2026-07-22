@@ -79,6 +79,17 @@ commands and dispatch proposals.
 Back up the SQLite database and artifact content together. Do not copy a live
 database file without using a SQLite-safe snapshot procedure.
 
+### Temporary execution transport
+
+`pkg/store` is a separate, deliberately non-durable transport for bounded
+execution inputs such as a context file handed to a sandbox. It uses opaque
+cryptographic identifiers, private filesystem permissions, maximum-size and
+expiry enforcement, run association, and synchronous cleanup. It never treats
+an identifier as a filesystem path and does not restore its index after a
+process restart. Hosts choose the root, size, and TTL and call `Cleanup` from
+their own lifecycle. Anything a user must inspect, retain, cite, or download
+after recovery belongs in the Artifact content store instead.
+
 ## Embedded PostgreSQL
 
 The public facade includes a PostgreSQL store for shared deployments:
