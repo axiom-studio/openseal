@@ -718,6 +718,8 @@ const (
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	ObjectiveSchedulesCapabilityID          = kernelapi.ObjectiveSchedulesCapabilityID
 	ObjectiveSchedulesCapabilityVersion     = kernelapi.ObjectiveSchedulesCapabilityVersion
+	SourcePoliciesCapabilityID              = kernelapi.SourcePoliciesCapabilityID
+	SourcePoliciesCapabilityVersion         = kernelapi.SourcePoliciesCapabilityVersion
 	KernelOperationCreate                   = kernelapi.OperationCreate
 	KernelOperationList                     = kernelapi.OperationList
 	KernelOperationGet                      = kernelapi.OperationGet
@@ -740,6 +742,8 @@ const (
 	KernelOperationReconcile                = kernelapi.OperationReconcile
 	KernelOperationUpsert                   = kernelapi.OperationUpsert
 	KernelOperationDisable                  = kernelapi.OperationDisable
+	KernelOperationRevoke                   = kernelapi.OperationRevoke
+	KernelOperationListVersions             = kernelapi.OperationListVersions
 	ChannelOperationCreate                  = kernelapi.OperationCreate
 	ChannelOperationGet                     = kernelapi.OperationGet
 	ChannelOperationList                    = kernelapi.OperationList
@@ -861,6 +865,12 @@ func SkillBindingsCapability(management bool) KernelCapability {
 
 func ActivityCapability() KernelCapability {
 	return kernelapi.ActivityCapability()
+}
+
+// SourcePoliciesCapability returns the portable credential-free governance
+// contract implemented by an embedding host's selected lifecycle store.
+func SourcePoliciesCapability() KernelCapability {
+	return kernelapi.SourcePoliciesCapability()
 }
 
 func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) KernelCapability {
