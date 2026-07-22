@@ -39,6 +39,7 @@ type DeploymentHealth struct {
 
 type AgentDeployment struct {
 	ID              string                                    `json:"id"`
+	DisplayName     string                                    `json:"displayName,omitempty"`
 	Scope           capability.ScopeReference                 `json:"scope"`
 	DefinitionID    string                                    `json:"definitionId"`
 	ActiveVersion   string                                    `json:"activeVersion"`
@@ -64,6 +65,9 @@ func (d *AgentDeployment) Validate() error {
 	}
 	if d.Capacity.MaxConcurrentRuns < 1 || d.Capacity.MaxQueuedRuns < 0 || d.Revision < 1 {
 		return errors.New("deployment capacity and revision are invalid")
+	}
+	if len(strings.TrimSpace(d.DisplayName)) > 200 {
+		return errors.New("deployment display name must not exceed 200 characters")
 	}
 	if d.RolloutStatus != RolloutPending && d.RolloutStatus != RolloutActive && d.RolloutStatus != RolloutDegraded && d.RolloutStatus != RolloutPaused && d.RolloutStatus != RolloutRetired {
 		return errors.New("deployment rollout status is invalid")

@@ -106,6 +106,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeploy
 		return nil, nil, errors.New("agent registry is not configured")
 	}
 	candidate := cloneDeployment(deployment)
+	candidate.DisplayName = strings.TrimSpace(candidate.DisplayName)
 	if candidate.CreatedAt.IsZero() {
 		candidate.CreatedAt = r.now().UTC()
 	}
@@ -175,6 +176,7 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployme
 		return nil, nil, err
 	}
 	updated := cloneDeployment(proposed)
+	updated.DisplayName = strings.TrimSpace(updated.DisplayName)
 	updated.SkillBindingIDs = normalizedStrings(updated.SkillBindingIDs)
 	updated.Revision = current.Revision + 1
 	updated.UpdatedAt = r.now().UTC()
