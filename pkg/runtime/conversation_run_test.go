@@ -287,6 +287,7 @@ func TestConversationRunTurnRunnerArbitratesOneGovernedTeamActionAndCompletesTru
 	}
 	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 3 || messages[1].Sender.ID != "agent-1" ||
+		len(messages[1].References) != 1 || messages[1].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) ||
 		messages[2].Content != "Governed action openseal.objectives.create completed after all required approval gates were satisfied." ||
 		messages[2].ResolvesMessageID != trigger.ID {
 		t.Fatalf("Team action channel messages = %#v, %v", messages, err)
