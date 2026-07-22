@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 )
 
 func migrateSourceMonitors(db *sql.DB) error {
@@ -248,6 +249,10 @@ func (s *SQLiteStore) ListSourceObservations(ctx context.Context, filter SourceO
 	if filter.ActionCallID != "" {
 		query += " AND json_extract(payload,'$.actionCallId')=?"
 		args = append(args, filter.ActionCallID)
+	}
+	if !filter.RetainedAt.IsZero() {
+		query += " AND (json_extract(payload,'$.retentionExpiresAt') IS NULL OR json_extract(payload,'$.retentionExpiresAt')>?)"
+		args = append(args, filter.RetainedAt.UTC().Format(time.RFC3339Nano))
 	}
 	query += ` ORDER BY ingested_at DESC,id DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, filter.Offset)

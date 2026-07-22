@@ -2755,11 +2755,10 @@ func (e *Engine) ListSourceObservations(ctx context.Context, filter runtime.Sour
 }
 
 func (e *Engine) GetSourceObservation(ctx context.Context, scope runtime.Scope, id string) (*runtime.SourceObservation, error) {
-	store, ok := e.store.(runtime.SourceMonitorStore)
-	if !ok {
+	if e.sourceMonitors == nil {
 		return nil, errors.New("source observation capability is unavailable")
 	}
-	return store.GetSourceObservation(ctx, scope, id)
+	return e.sourceMonitors.Get(ctx, scope, id)
 }
 
 // GetEventSourceCheckpoint returns durable host-connector progress without
