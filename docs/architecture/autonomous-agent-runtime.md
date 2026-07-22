@@ -219,6 +219,29 @@ The TUI loads that document before rendering its workspace. It does not
 manufacture permissions, statuses, approval eligibility, or durable state. An
 embedding graphical client must follow the same rule.
 
+### Governed source authority
+
+```mermaid
+flowchart LR
+    Prompt[Prompt and source scope] --> Draft[Exact credential-free policy draft]
+    Draft --> Review[Authorized review]
+    Review --> Register[Register immutable version]
+    Register --> Activate[CAS activate lifecycle]
+    Activate --> Resolve[Resolve exact active version per action]
+    Resolve --> Decision[Host + path + method + item decision]
+    Decision --> Dispatch[Governed transport]
+    Activate --> Revoke[CAS revoke]
+    Revoke -. immediately fails closed .-> Resolve
+```
+
+An authoring draft is not an active catalog entry. The compiler may surface an
+exact server-supplied proposal when a requested monitor lacks authority, but it
+keeps the ChangeSet blocked. Registration and activation are separate audited
+operations. A fresh authoring pass can consume the version only after the
+lifecycle reports it active. Source policies contain no credentials: a host may
+resolve an opaque credential reference after authorization, outside this
+portable policy contract.
+
 ## Extension boundary
 
 The public facade exposes types and configuration options for persistent

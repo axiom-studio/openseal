@@ -118,15 +118,22 @@ responses when they can contain sensitive content.
 
 ## Source access and outreach
 
-`sourcePolicies` in daemon YAML are credential-free, scope-bound network
-authority used by configured source and outreach workers. A policy must specify
+Source policies are credential-free, scope-bound network authority used by
+configured source and outreach workers. Daemon YAML can seed standalone
+configuration; the source-policy lifecycle API and persistent store are the
+canonical runtime control surface. A policy version must specify
 an ID, version, enabled state, one or more HTTPS hosts, a bounded maximum item
-count, and optional path/method restrictions. Outreach additionally requires an
+count, and explicit normalized path/method restrictions before lifecycle
+registration. Outreach additionally requires an
 explicit approval policy and maximum body size.
 
 Policy validation does not perform network I/O. Dispatch adapters must enforce
 the exact decision on every request and redirect. Source policy configuration
 does not itself provide API credentials or an HTTP provider implementation.
+Registration is immutable and grants no authority. Activation and revocation
+use compare-and-swap lifecycle revisions and append durable actor/reason audit
+events. Runtime resolution always checks the currently active exact version;
+revocation and version drift fail closed without a process restart.
 
 ## Deterministic quality gates
 
