@@ -151,9 +151,12 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	}
 	validator, _ := NewObjectiveActionValidator(store)
 	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID, "expectedRevision": objective.Revision}, IdempotencyKey: "pause-on-request"})
+	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if revision, ok := numericRevision(proposal.Call.Arguments["expectedRevision"]); !ok || revision != objective.Revision {
+		t.Fatalf("kernel did not resolve Objective revision: %#v", proposal.Call.Arguments)
 	}
 	if proposal.Approval.ProposedAction["changes"].(map[string]interface{})["status"] != string(ObjectiveStatusPaused) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)
@@ -185,6 +188,19 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 type objectiveActionStoreCase struct {
 	name string
 	open func(*testing.T) (KernelStore, func())
+}
+
+func numericRevision(value interface{}) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), typed == float64(int64(typed))
+	default:
+		return 0, false
+	}
 }
 
 func objectiveActionStores() []objectiveActionStoreCase {

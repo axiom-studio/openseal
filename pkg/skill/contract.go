@@ -54,6 +54,12 @@ const (
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
 	BindingLifecycleEnabled  = capability.BindingLifecycleEnabled
 	BindingLifecycleDisabled = capability.BindingLifecycleDisabled
+
+	// SchemaExtensionKernelResolved marks an action argument that is required
+	// by the executable contract but supplied by the trusted kernel rather than
+	// requested from the model or user. Model action projections remove these
+	// fields while the canonical Skill schema remains strict.
+	SchemaExtensionKernelResolved = "x-openseal-kernel-resolved"
 )
 
 type Catalog struct {
@@ -271,7 +277,7 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 				Name: definition.ID + "." + name, Description: action.Description,
 				BindingID: binding.ID, BindingRevision: binding.Revision, DeploymentID: binding.DeploymentID,
 				SkillID: definition.ID, Version: definition.Version, Action: name,
-				InputSchema: cloneMap(action.InputSchema), SemanticArguments: cloneStringMap(action.SemanticArguments),
+				InputSchema: modelVisibleInputSchema(action.InputSchema), SemanticArguments: cloneStringMap(action.SemanticArguments),
 				Risk: action.Risk, SideEffect: action.SideEffect,
 			})
 		}

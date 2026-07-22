@@ -54,7 +54,7 @@ func InitiativeManagementSkill() *skill.Definition {
 			InitiativeActionUpdate: initiativeSkillAction(InitiativeActionUpdate, "Propose changes to an existing Initiative owned by this Agent or Team using its current revision.", mutable, []interface{}{"initiativeId", "expectedRevision"}),
 			InitiativeActionPause: initiativeSkillAction(InitiativeActionPause, "Propose pausing an existing Initiative owned by this Agent or Team using its current revision.", map[string]interface{}{
 				"initiativeId":     map[string]interface{}{"type": "string", "minLength": 1},
-				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
+				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 			}, []interface{}{"initiativeId", "expectedRevision"}),
 		},
 	}
@@ -85,7 +85,7 @@ func initiativeMutableSchema() map[string]interface{} {
 	resourceRefs := map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true}
 	return map[string]interface{}{
 		"initiativeId":     map[string]interface{}{"type": "string", "minLength": 1},
-		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
+		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 		"title":            map[string]interface{}{"type": "string", "minLength": 1},
 		"purpose":          map[string]interface{}{"type": "string", "minLength": 1},
 		"agentRefs":        cloneMap(resourceRefs),
@@ -194,6 +194,30 @@ func NewInitiativeActionValidator(store InitiativePortfolioStore) (*InitiativeAc
 		return nil, errors.New("initiative portfolio store is required")
 	}
 	return &InitiativeActionValidator{store: store}, nil
+}
+
+func (v *InitiativeActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+	if !isInitiativeAction(input.Bound) || input.Bound.Action.Name == InitiativeActionCreate {
+		return nil, false, nil
+	}
+	arguments := cloneMap(input.Arguments)
+	if _, supplied := arguments["expectedRevision"]; supplied {
+		return arguments, true, nil
+	}
+	if v == nil || v.store == nil || input.Run == nil {
+		return nil, true, errors.New("initiative action validator is not configured")
+	}
+	target, _ := arguments["initiativeId"].(string)
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return arguments, true, nil
+	}
+	current, err := NewInitiativeService(v.store, v.store).Get(ctx, input.Run.Scope, target)
+	if err != nil {
+		return nil, true, err
+	}
+	arguments["expectedRevision"] = current.Revision
+	return arguments, true, nil
 }
 
 func (v *InitiativeActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
