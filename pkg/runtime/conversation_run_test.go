@@ -482,6 +482,62 @@ func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarra
 	}
 }
 
+func TestConversationRunTurnRunnerProjectsGovernedAgentRejectionWithoutReproposal(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "agent-rejection"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Title: "Release assistant", IdempotencyKey: "agent-rejection-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Update the objective after approval.", "agent-rejection-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelCalls := 0
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			modelCalls++
+			return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedActions: []TurnAction{{Type: "skill_action", Capability: "openseal.objectives.update", Summary: "Propose it again"}}}, nil
+		})}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed := cloneAgentRun(scheduled.Run)
+	resumed.Checkpoint = map[string]interface{}{"lastAction": map[string]interface{}{
+		"status": ActionCallStatusDenied, "skillId": ObjectiveManagementSkillID, "action": ObjectiveActionUpdate,
+		"arguments":  map[string]interface{}{"objectiveId": "objective-release", "expectedRevision": float64(1)},
+		"approvalId": "approval-release", "approvalStatus": ApprovalStatusRejected,
+		"error": "rejected: change is not authorized",
+	}}
+	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || modelCalls != 0 ||
+		outcome.RunOutput["resourceType"] != "objective" || outcome.RunOutput["resourceId"] != "objective-release" {
+		t.Fatalf("governed Agent rejection = %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 || messages[1].Content != "Objective update was not applied because approval was rejected." ||
+		len(messages[1].References) != 3 || messages[1].References[1] != (ConversationReference{Kind: ConversationReferenceApproval, ID: "approval-release"}) ||
+		messages[1].References[2] != (ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-release"}) || messages[1].ResolvesMessageID != trigger.ID {
+		t.Fatalf("governed Agent rejection message = %#v, %v", messages, err)
+	}
+	replayed, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || replayed.RunOutput["replayed"] != true || modelCalls != 0 {
+		t.Fatalf("governed Agent rejection replay = %#v, modelCalls=%d, err=%v", replayed, modelCalls, err)
+	}
+}
+
 func TestGovernedConversationActionCompletionProjectsInitiativeIdentity(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-initiative", Checkpoint: map[string]interface{}{

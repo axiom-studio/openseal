@@ -67,6 +67,31 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 	return result
 }
 
+// checkpointTerminalAction records the authoritative terminal ActionCall both
+// in the bounded history and as the most recent result consumed by the next
+// Turn. Callers may add non-secret decision metadata such as approval identity
+// and disposition. Keeping this projection shared prevents approval and policy
+// denials from disappearing between Turns and being proposed again.
+func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCall, metadata map[string]interface{}) map[string]interface{} {
+	result := appendActionHistory(checkpoint, call)
+	lastAction := map[string]interface{}{
+		"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision,
+		"skillId": call.SkillID, "skillVersion": call.SkillVersion,
+		"action": call.Action, "status": call.Status,
+		"arguments": deepCloneCheckpointMap(call.Arguments),
+	}
+	if call.Status == ActionCallStatusSucceeded {
+		lastAction["result"] = boundedActionResult(call.Output)
+	} else if call.Error != "" {
+		lastAction["error"] = call.Error
+	}
+	for key, value := range metadata {
+		lastAction[key] = deepCloneCheckpointValue(value)
+	}
+	result["lastAction"] = lastAction
+	return result
+}
+
 func actionHistoryEntries(checkpoint map[string]interface{}) []map[string]interface{} {
 	if checkpoint == nil {
 		return nil

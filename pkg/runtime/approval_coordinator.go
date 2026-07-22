@@ -118,6 +118,7 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 		if req.Reason != "" {
 			updatedCall.Error += ": " + req.Reason
 		}
+		updatedCall.CompletedAt = &now
 	}
 	updatedRun := cloneAgentRun(run)
 	if callStatus == ActionCallStatusDenied && updatedRun.Budget != nil {
@@ -133,6 +134,9 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 		updatedRun.WakeCondition = nil
 		updatedRun.AvailableAt = now
 		updatedRun.QueueEnteredAt = now
+		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, map[string]interface{}{
+			"approvalId": approval.ID, "approvalStatus": status,
+		})
 	}
 	updatedRun.LeaseOwner = ""
 	updatedRun.LeaseExpiresAt = nil

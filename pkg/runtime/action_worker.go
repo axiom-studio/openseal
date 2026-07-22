@@ -307,22 +307,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 			}
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
-		checkpoint := appendActionHistory(updatedRun.Checkpoint, updatedCall)
-		if checkpoint == nil {
-			checkpoint = make(map[string]interface{})
-		}
-		lastAction := map[string]interface{}{
-			"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision,
-			"skillId": call.SkillID, "skillVersion": call.SkillVersion,
-			"action": call.Action, "status": updatedCall.Status,
-		}
-		if updatedCall.Status == ActionCallStatusSucceeded {
-			lastAction["result"] = boundedActionResult(updatedCall.Output)
-		} else if updatedCall.Error != "" {
-			lastAction["error"] = updatedCall.Error
-		}
-		checkpoint["lastAction"] = lastAction
-		updatedRun.Checkpoint = checkpoint
+		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
 	}
 	event := &ActivityEvent{
 		ID: w.newID(), Scope: call.Scope, EventType: eventType, Severity: ActivitySeverityInfo,

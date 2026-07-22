@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -107,6 +108,46 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	if expired.Approval.Status != ApprovalStatusExpired || expired.Call.Status != ActionCallStatusDenied || expired.Run.Status != AgentRunStatusQueued ||
 		expired.Run.BudgetUsage.Actions != 0 || len(expired.Run.BudgetReservations) != 0 || expired.Run.BudgetState != BudgetStateActive {
 		t.Fatalf("expiry resolution mismatch: %#v", expired)
+	}
+}
+
+func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval-rejection.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, cleanup := testCase.open(t)
+			defer cleanup()
+			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+			proposal := createApprovalForStore(t, store, now)
+			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+			coordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+			result, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+				DecisionID: "reject-release", Approve: false, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change is not authorized",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Approval.Status != ApprovalStatusRejected || result.Call.Status != ActionCallStatusDenied || result.Call.CompletedAt == nil || result.Run.Status != AgentRunStatusQueued {
+				t.Fatalf("rejection result = %#v", result)
+			}
+			last, _ := result.Run.Checkpoint["lastAction"].(map[string]interface{})
+			if fmt.Sprint(last["status"]) != string(ActionCallStatusDenied) || fmt.Sprint(last["approvalId"]) != proposal.Approval.ID || fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusRejected) ||
+				fmt.Sprint(last["error"]) != "rejected: change is not authorized" || len(actionHistoryEntries(result.Run.Checkpoint)) != 1 {
+				t.Fatalf("rejection checkpoint = %#v", result.Run.Checkpoint)
+			}
+		})
 	}
 }
 
