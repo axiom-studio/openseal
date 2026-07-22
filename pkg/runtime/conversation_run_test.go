@@ -140,6 +140,64 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	}
 }
 
+func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T) {
+	store := NewMemoryStore(50)
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "canceled-conversation"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+		Title: "Operations", IdempotencyKey: "canceled-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
+		Intent: MessageIntentQuestion, Content: "Pause the initiative.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		RequiresResponse: true, IdempotencyKey: "canceled-trigger",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := mustConversationRunScheduler(t, store)
+	scheduled, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, posted.Message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: scheduled.Run.ID, ExpectedRevision: scheduled.Run.Revision, Kind: AgentRunCommandCancel,
+		Actor: ActivityActor{Type: "user", ID: "user-1"}, Summary: "Cancel the proposal",
+	})
+	if err != nil || canceled.Run.Status != AgentRunStatusCanceled {
+		t.Fatalf("canceled conversation Run = %#v, %v", canceled, err)
+	}
+	result, err := scheduler.ReconcileScope(ctx, scope)
+	if err != nil || result.Results != 1 {
+		t.Fatalf("canceled result reconciliation = %#v, %v", result, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("canceled channel messages = %#v, %v", messages, err)
+	}
+	message := messages[1]
+	if message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"}) ||
+		message.Intent != MessageIntentSystem || message.Content != "This request was canceled before completion." ||
+		message.ReplyToMessageID != posted.Message.ID || message.ResolvesMessageID != posted.Message.ID ||
+		len(message.References) != 1 || message.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) {
+		t.Fatalf("canceled channel result = %#v", message)
+	}
+	replay, err := scheduler.ReconcileScope(ctx, scope)
+	if err != nil || replay.Results != 0 {
+		t.Fatalf("canceled result replay = %#v, %v", replay, err)
+	}
+	messages, _ = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if len(messages) != 2 {
+		t.Fatalf("canceled result duplicated: %#v", messages)
+	}
+}
+
 func TestConversationRunTurnRunnerCompletesAndReplaysCommittedRound(t *testing.T) {
 	store := NewMemoryStore(50)
 	ctx := context.Background()
