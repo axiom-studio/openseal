@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 type ObjectiveCadenceType string
@@ -13,6 +15,7 @@ const (
 	ObjectiveCadenceInterval ObjectiveCadenceType = "interval"
 	ObjectiveCadenceDaily    ObjectiveCadenceType = "daily"
 	ObjectiveCadenceWeekly   ObjectiveCadenceType = "weekly"
+	ObjectiveCadenceCron     ObjectiveCadenceType = "cron"
 )
 
 // ObjectiveCadence is the portable schedule contract for recurring objective
@@ -23,6 +26,7 @@ type ObjectiveCadence struct {
 	IntervalSeconds   int64                 `json:"intervalSeconds,omitempty"`
 	TimeOfDay         string                `json:"timeOfDay,omitempty"`
 	DayOfWeek         string                `json:"dayOfWeek,omitempty"`
+	CronExpression    string                `json:"cronExpression,omitempty"`
 	Timezone          string                `json:"timezone,omitempty"`
 	AssignedAgentID   string                `json:"assignedAgentId,omitempty"`
 	RunBudget         *BudgetPolicy         `json:"runBudget,omitempty"`
@@ -155,6 +159,10 @@ func (c *ObjectiveCadence) Validate() error {
 		if _, err := objectiveWeekday(c.DayOfWeek); err != nil {
 			return err
 		}
+	case ObjectiveCadenceCron:
+		if _, err := parseObjectiveCron(c.CronExpression); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unsupported objective cadence type %q", c.Type)
 	}
@@ -211,9 +219,31 @@ func (c *ObjectiveCadence) Next(from time.Time) (time.Time, error) {
 			next = next.AddDate(0, 0, 7)
 		}
 		return next.UTC(), nil
+	case ObjectiveCadenceCron:
+		schedule, _ := parseObjectiveCron(c.CronExpression)
+		return schedule.Next(from.In(loc)).UTC(), nil
 	default:
 		return time.Time{}, fmt.Errorf("unsupported objective cadence type %q", c.Type)
 	}
+}
+
+func parseObjectiveCron(value string) (cron.Schedule, error) {
+	expression := strings.TrimSpace(value)
+	if expression == "" {
+		return nil, errors.New("cron objective cadence requires cronExpression")
+	}
+	if len(expression) > 128 {
+		return nil, errors.New("objective cadence cronExpression cannot exceed 128 characters")
+	}
+	// OpenSeal uses one explicit portable dialect: second, minute, hour,
+	// day-of-month, month, day-of-week. Timezone is a typed cadence field,
+	// never an implementation-specific CRON_TZ prefix.
+	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	schedule, err := parser.Parse(expression)
+	if err != nil {
+		return nil, fmt.Errorf("objective cadence cronExpression must contain six valid fields: %w", err)
+	}
+	return schedule, nil
 }
 
 func parseObjectiveClock(value string) (int, int, error) {
