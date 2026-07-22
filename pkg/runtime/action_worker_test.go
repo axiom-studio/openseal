@@ -199,7 +199,8 @@ func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executed.Call.ID != proposal.Call.ID || executed.Run.BudgetUsage.Actions != 1 || len(executed.Run.BudgetReservations) != 0 {
+	if executed.Call.ID != proposal.Call.ID || executed.Run.BudgetUsage.Actions != 1 || len(executed.Run.BudgetReservations) != 0 ||
+		executed.Event == nil || executed.Event.UsageDelta == nil || executed.Event.UsageDelta.Actions != 1 {
 		t.Fatalf("settled action budget = %#v", executed)
 	}
 	claimed, err = store.ClaimNextAgentRun(context.Background(), AgentRunClaim{

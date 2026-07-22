@@ -247,6 +247,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
+		UsageDelta: &BudgetUsage{Attempts: 1},
 	})
 	if runAttemptBudgetExceeded(run) {
 		result, err := p.coordinator.Advance(ctx, AdvanceAgentRunRequest{

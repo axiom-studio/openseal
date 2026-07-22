@@ -54,7 +54,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 			service := NewRunActivityService(fixture.store, fixture.store)
 			for _, event := range []*ActivityEvent{
 				{ID: "event-a", Scope: scope, RunID: "run-one", AgentID: "agent-one", InitiativeID: "initiative-one", EventType: "run.claimed", Summary: "Claimed", Actor: ActivityActor{Type: "worker", ID: "one"}, Visibility: ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"evidence": "artifact://one"}},
-				{ID: "event-b", Scope: scope, RunID: "run-two", AgentID: "agent-one", EventType: "action.succeeded", Summary: "Published", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityTeam, CreatedAt: now, CorrelationID: "correlation"},
+				{ID: "event-b", Scope: scope, RunID: "run-two", AgentID: "agent-one", EventType: "action.succeeded", Summary: "Published", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityTeam, CreatedAt: now, CorrelationID: "correlation", UsageDelta: &BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}},
 				{ID: "event-c", Scope: scope, RunID: "run-other", AgentID: "agent-two", EventType: "run.completed", Summary: "Other", Actor: ActivityActor{Type: "agent", ID: "agent-two"}, Visibility: ActivityVisibilityScope, CreatedAt: now.Add(time.Second)},
 				{ID: "event-private", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "turn.reasoned", Summary: "Private", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityPrivate, CreatedAt: now.Add(2 * time.Second)},
 			} {
@@ -71,7 +71,9 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(page.Items) != 1 || page.Items[0].ID != "event-b" || page.Items[0].Category != "action" ||
-				page.Items[0].CorrelationID != "" || page.Items[0].Payload != nil || !page.Items[0].DetailAvailable || !page.HasMore || page.NextCursor == "" {
+				page.Items[0].CorrelationID != "" || page.Items[0].Payload != nil || !page.Items[0].DetailAvailable || !page.HasMore || page.NextCursor == "" ||
+				page.Items[0].UsageDelta == nil || page.Items[0].UsageDelta.InputTokens != 120 || page.Items[0].UsageDelta.OutputTokens != 30 ||
+				page.Items[0].UsageDelta.CostMicros != 125_000 || page.Items[0].UsageDelta.DurationMS != 500 {
 				t.Fatalf("summary page = %#v", page)
 			}
 			next, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
@@ -95,6 +97,16 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 				t.Fatalf("initiative page = %#v", initiativePage)
 			}
 		})
+	}
+}
+
+func TestActivityEventRejectsInvalidUsageDelta(t *testing.T) {
+	event := &ActivityEvent{
+		Scope: Scope{Kind: "tenant", ID: "one"}, RunID: "run", EventType: "turn.completed", Summary: "Completed",
+		UsageDelta: &BudgetUsage{InputTokens: -1},
+	}
+	if err := event.Validate(); err == nil {
+		t.Fatal("negative activity usage delta was accepted")
 	}
 }
 

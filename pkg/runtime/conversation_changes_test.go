@@ -82,6 +82,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, scheduled.Run.ID, RunTransitionRequest{
 				ExpectedRevision: scheduled.Run.Revision, Status: AgentRunStatusRunning,
 				Actor: ActivityActor{Type: "worker", ID: "conversation-worker"}, Summary: "Review started",
+				ActivityUsageDelta: &BudgetUsage{Turns: 1, InputTokens: 80, OutputTokens: 20, CostMicros: 50_000},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -100,6 +101,8 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil || !working.HasChanges || !working.RunsChanged || !working.ActivityChanged || !working.PresenceChanged ||
 				len(working.Runs) != 1 || working.Runs[0].Status != AgentRunStatusRunning ||
 				len(working.Activity) != 2 || working.Activity[0].Summary != "Review started" ||
+				working.Activity[0].UsageDelta == nil || working.Activity[0].UsageDelta.InputTokens != 80 ||
+				working.Activity[0].UsageDelta.OutputTokens != 20 || working.Activity[0].UsageDelta.CostMicros != 50_000 ||
 				len(working.Presence) != 1 || working.Presence[0].LeaseID != presence.LeaseID {
 				t.Fatalf("working projection = %#v, %v", working, err)
 			}

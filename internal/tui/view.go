@@ -1719,6 +1719,9 @@ func (m *Model) renderActivityContent(width int) string {
 		}
 		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("%s · %s · %s · actor %s", item.EventType, item.Severity, item.Visibility, actor), max(width-8, 24))))
 		if m.activityExpanded {
+			if usage := activityUsageLine(item.UsageDelta); usage != "" {
+				lines = append(lines, "", mutedStyle.Render(compact(usage, max(width-8, 24))))
+			}
 			lines = append(lines, "", mutedStyle.Render("Subject and lineage"))
 			for _, subject := range activitySubjectLines(item) {
 				lines = append(lines, mutedStyle.Render(compact(subject, max(width-8, 24))))
@@ -1759,6 +1762,36 @@ func (m *Model) renderActivityContent(width int) string {
 		lines = append(lines, mutedStyle.Render("↑/↓ select · r refresh · Tab compose"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func activityUsageLine(usage *runtime.BudgetUsage) string {
+	if usage == nil {
+		return ""
+	}
+	parts := make([]string, 0, 6)
+	if usage.Attempts > 0 {
+		parts = append(parts, fmt.Sprintf("%d attempt%s", usage.Attempts, pluralSuffix(int(usage.Attempts))))
+	}
+	if usage.Turns > 0 {
+		parts = append(parts, fmt.Sprintf("%d turn%s", usage.Turns, pluralSuffix(int(usage.Turns))))
+	}
+	if tokens := usage.InputTokens + usage.OutputTokens; tokens > 0 {
+		parts = append(parts, fmt.Sprintf("%d tokens (%d in, %d out)", tokens, usage.InputTokens, usage.OutputTokens))
+	}
+	if usage.CostMicros > 0 {
+		cost := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", float64(usage.CostMicros)/1_000_000), "0"), ".")
+		parts = append(parts, "$"+cost)
+	}
+	if usage.DurationMS > 0 {
+		parts = append(parts, (time.Duration(usage.DurationMS) * time.Millisecond).String())
+	}
+	if usage.Actions > 0 {
+		parts = append(parts, fmt.Sprintf("%d action%s", usage.Actions, pluralSuffix(int(usage.Actions))))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Usage · " + strings.Join(parts, " · ")
 }
 
 func activitySubjectLines(item *runtime.ActivityProjection) []string {

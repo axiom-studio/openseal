@@ -677,10 +677,14 @@ func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundYield := false
+	claimUsageEvents := 0
 	for _, event := range events {
 		foundYield = foundYield || event.EventType == "run.yielded"
+		if event.EventType == "run.claimed" && event.UsageDelta != nil && event.UsageDelta.Attempts == 1 {
+			claimUsageEvents++
+		}
 	}
-	if !foundYield {
+	if !foundYield || claimUsageEvents != 2 {
 		t.Fatalf("yield activity was not recorded: %#v", events)
 	}
 }
