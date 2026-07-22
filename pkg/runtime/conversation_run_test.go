@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -558,6 +559,35 @@ func TestGovernedConversationActionCompletionProjectsInitiativeIdentity(t *testi
 		len(completion.References) != 2 ||
 		completion.References[1] != (ConversationReference{Kind: ConversationReferenceInitiative, ID: "initiative-research", Version: 4}) {
 		t.Fatalf("initiative completion = %#v, ok=%v", completion, ok)
+	}
+}
+
+func TestGovernedConversationProposalFailureProjectsLifecycleError(t *testing.T) {
+	run := &AgentRun{
+		ID: "run-pause", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
+		Checkpoint: map[string]interface{}{"phase": "before-pause"},
+	}
+	turn := &AgentTurn{ContinuationCheckpoint: map[string]interface{}{
+		"actionInputs": map[string]interface{}{"call": map[string]interface{}{"objectiveId": "objective-draft", "expectedRevision": float64(2)}},
+	}, RequestedActions: []TurnAction{{
+		Type: "skill_action", Capability: "openseal.objectives.pause", InputRef: "/actionInputs/call",
+		BindingID: "bundled:objectives", BindingRevision: 1,
+	}}}
+	checkpoint, ok := checkpointGovernedConversationProposalFailure(run, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
+	if !ok || checkpoint["phase"] != nil {
+		t.Fatalf("proposal failure checkpoint = %#v, ok=%v", checkpoint, ok)
+	}
+	run.Checkpoint = checkpoint
+	outcome, ok := governedConversationActionOutcome(run)
+	if !ok || outcome.Content != "Objective pause could not be proposed because the requested lifecycle change is invalid (draft → paused)." ||
+		outcome.ResourceType != "objective" || outcome.ResourceID != "objective-draft" || len(outcome.References) != 2 ||
+		outcome.References[1] != (ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-draft"}) {
+		t.Fatalf("proposal failure outcome = %#v, ok=%v", outcome, ok)
+	}
+	ordinary := cloneAgentRun(run)
+	ordinary.Kind = RunKindAgentWork
+	if _, accepted := checkpointGovernedConversationProposalFailure(ordinary, turn, errors.New("invalid")); accepted {
+		t.Fatal("ordinary Agent work materialization failure was converted into a conversational outcome")
 	}
 }
 

@@ -585,16 +585,27 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	if run == nil {
 		return
 	}
+	status := AgentRunStatusFailed
+	runError := "governed action materialization failed"
+	checkpoint := map[string]interface{}(nil)
+	safeCause := sanitizeActionError(cause, nil)
+	if conversationalCheckpoint, ok := checkpointGovernedConversationProposalFailure(run, turn, cause); ok {
+		status = AgentRunStatusQueued
+		runError = ""
+		checkpoint = conversationalCheckpoint
+	}
 	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: workerID,
-		Error: "governed action materialization failed", Summary: "Agent action proposal could not be governed",
+		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
+		Error: runError, Summary: "Agent action proposal could not be governed",
 		EventType: "action.materialization_failed", Actor: ActivityActor{Type: "worker", ID: workerID},
-		TurnID: turn.ID, CausationID: turn.ID, Payload: map[string]interface{}{"reason": cause.Error()},
+		TurnID: turn.ID, CausationID: turn.ID, Payload: map[string]interface{}{"reason": safeCause},
 	})
 	if err != nil {
 		p.logger.Errorw("failed to persist action materialization failure", "runId", run.ID, "error", err)
-	} else {
+	} else if isTerminalAgentRunStatus(failed.Status) {
 		p.resolveCollaborationChild(ctx, failed)
+	} else {
+		p.Wake()
 	}
 }
 
