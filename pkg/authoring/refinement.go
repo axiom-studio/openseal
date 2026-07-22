@@ -244,10 +244,18 @@ func validateAnsweredCapabilityNeeds(candidate *WorkforceCandidate, request Gene
 		if len(answer.SkillIDs) > 0 {
 			selected.SkillIDs = append([]string(nil), answer.SkillIDs...)
 		}
-		if candidateSatisfiesCapabilityNeed(candidate, selected, request.Catalog) {
+		if !candidateSatisfiesCapabilityNeed(candidate, selected, request.Catalog) {
+			issues = append(issues, issue("agents.skillRequirements", "capability_need_not_materialized", fmt.Sprintf("Answered capability need %s must be bound as an exact Agent Skill requirement", need.ID)))
 			continue
 		}
-		issues = append(issues, issue("agents.skillRequirements", "capability_need_not_materialized", fmt.Sprintf("Answered capability need %s must be bound as an exact Agent Skill requirement", need.ID)))
+		// Source capability choices are operational, not descriptive. Merely
+		// listing the selected Skill on an Agent while scheduling a different
+		// network capability would ignore the operator's audited choice and can
+		// bypass the Initiative monitor envelope. Require one exact executable
+		// invocation before source-scope materialization proceeds.
+		if selected.SourceScope != nil && len(matchingSourceScopeInvocations(candidate, selected, request.Catalog)) == 0 {
+			issues = append(issues, issue("objectives.cadence.runTemplate.capability", "capability_need_action_not_materialized", fmt.Sprintf("Answered source capability need %s must be used by an exact durable Objective action", need.ID)))
+		}
 	}
 	return issues
 }

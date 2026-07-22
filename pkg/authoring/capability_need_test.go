@@ -216,6 +216,27 @@ func TestAnsweredCapabilityNeedRequiresTheSelectedSkill(t *testing.T) {
 	}
 }
 
+func TestAnsweredSourceCapabilityNeedRequiresAnExactObjectiveAction(t *testing.T) {
+	catalog := capabilityNeedCatalog(false, "openseal.source")
+	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
+		Prompt: "Which communities?", WhyNeeded: "Source access must remain bounded.",
+		Minimum: 1, Maximum: 20, MaterializationInputKeys: []string{"url"},
+	}
+	candidate := capabilityNeedCandidate()
+	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "openseal.source", VersionConstraint: "1.0.0"}}
+	request := GenerateRequest{
+		Mode: ModeCreate, Prompt: "Monitor Reddit", Catalog: catalog,
+		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: CapabilityNeedQuestionID("reddit-access"), Value: RefinementProviderAnswerValue{SkillIDs: []string{"openseal.source"}}, Source: RefinementAnswerSourceUser,
+		}}},
+	}
+
+	issues := validateAnsweredCapabilityNeeds(&candidate, request)
+	if !hasValidationCode(issues, "capability_need_action_not_materialized") {
+		t.Fatalf("selected source Skill without an Objective action was accepted: %#v", issues)
+	}
+}
+
 func TestCapabilityNeedReplacesMalformedProviderSkillQuestionBeforeValidation(t *testing.T) {
 	malformed := RefinementQuestion{
 		ID: "provider-sentiment-install", Category: RefinementCategorySkill,
