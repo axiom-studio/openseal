@@ -39,7 +39,7 @@ func ObjectiveManagementSkill() *skill.Definition {
 			ObjectiveActionUpdate: objectiveSkillAction(ObjectiveActionUpdate, "Propose changes to an existing objective owned by this Agent or Team using its current revision.", updateFields, []interface{}{"objectiveId", "expectedRevision"}),
 			ObjectiveActionPause: objectiveSkillAction(ObjectiveActionPause, "Propose pausing an existing objective owned by this Agent or Team using its current revision.", map[string]interface{}{
 				"objectiveId":      map[string]interface{}{"type": "string", "minLength": 1},
-				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
+				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 			}, []interface{}{"objectiveId", "expectedRevision"}),
 		},
 	}
@@ -66,7 +66,7 @@ func objectiveSkillAction(name, description string, properties map[string]interf
 func objectiveMutableSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"objectiveId":      map[string]interface{}{"type": "string", "minLength": 1},
-		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
+		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 		"title":            map[string]interface{}{"type": "string", "minLength": 1},
 		"goal":             map[string]interface{}{"type": "string", "minLength": 1},
 		"priority":         map[string]interface{}{"type": "integer", "minimum": 0},
@@ -87,6 +87,33 @@ func NewObjectiveActionValidator(store PortfolioStore) (*ObjectiveActionValidato
 		return nil, errors.New("portfolio store is required")
 	}
 	return &ObjectiveActionValidator{store: store}, nil
+}
+
+func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+	if !isObjectiveAction(input.Bound) || input.Bound.Action.Name == ObjectiveActionCreate {
+		return nil, false, nil
+	}
+	arguments := cloneMap(input.Arguments)
+	if _, supplied := arguments["expectedRevision"]; supplied {
+		return arguments, true, nil
+	}
+	if v == nil || v.store == nil || input.Run == nil {
+		return nil, true, errors.New("objective action validator is not configured")
+	}
+	target, _ := arguments["objectiveId"].(string)
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return arguments, true, nil
+	}
+	objective, err := v.store.GetObjective(ctx, input.Run.Scope, target)
+	if err != nil {
+		return nil, true, err
+	}
+	if objective == nil {
+		return nil, true, ErrObjectiveNotFound
+	}
+	arguments["expectedRevision"] = objective.Revision
+	return arguments, true, nil
 }
 
 func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {

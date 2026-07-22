@@ -127,6 +127,62 @@ func cloneValue(value interface{}) interface{} {
 	return result
 }
 
+func modelVisibleInputSchema(schema map[string]interface{}) map[string]interface{} {
+	projected, _ := projectModelSchemaValue(cloneMap(schema)).(map[string]interface{})
+	return projected
+}
+
+func projectModelSchemaValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		hidden := make(map[string]bool)
+		if properties, ok := typed["properties"].(map[string]interface{}); ok {
+			for name, property := range properties {
+				if definition, ok := property.(map[string]interface{}); ok {
+					hidden[name], _ = definition[SchemaExtensionKernelResolved].(bool)
+				}
+			}
+		}
+		result := make(map[string]interface{}, len(typed))
+		for key, child := range typed {
+			if key == SchemaExtensionKernelResolved {
+				continue
+			}
+			switch key {
+			case "properties":
+				properties, _ := child.(map[string]interface{})
+				visible := make(map[string]interface{}, len(properties))
+				for name, property := range properties {
+					if !hidden[name] {
+						visible[name] = projectModelSchemaValue(property)
+					}
+				}
+				result[key] = visible
+			case "required":
+				required, _ := child.([]interface{})
+				visible := make([]interface{}, 0, len(required))
+				for _, name := range required {
+					if text, ok := name.(string); !ok || !hidden[text] {
+						visible = append(visible, name)
+					}
+				}
+				result[key] = visible
+			default:
+				result[key] = projectModelSchemaValue(child)
+			}
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, child := range typed {
+			result[index] = projectModelSchemaValue(child)
+		}
+		return result
+	default:
+		return typed
+	}
+}
+
 func cloneDefinition(value *Definition) *Definition {
 	if value == nil {
 		return nil

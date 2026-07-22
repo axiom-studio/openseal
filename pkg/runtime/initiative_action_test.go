@@ -176,10 +176,13 @@ func TestInitiativePauseIsCASAndReplaySafe(t *testing.T) {
 	validator, _ := NewInitiativeActionValidator(store)
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: InitiativeManagementSkillID, SkillVersion: InitiativeManagementSkillVersion,
-		Action: InitiativeActionPause, Arguments: map[string]interface{}{"initiativeId": initiative.ID, "expectedRevision": initiative.Revision}, IdempotencyKey: "pause-on-request",
+		Action: InitiativeActionPause, Arguments: map[string]interface{}{"initiativeId": initiative.ID}, IdempotencyKey: "pause-on-request",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if revision, ok := numericRevision(proposal.Call.Arguments["expectedRevision"]); !ok || revision != initiative.Revision {
+		t.Fatalf("kernel did not resolve Initiative revision: %#v", proposal.Call.Arguments)
 	}
 	if proposal.Approval.ProposedAction["changes"].(map[string]interface{})["status"] != string(InitiativeStatusPaused) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)

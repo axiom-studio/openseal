@@ -336,6 +336,50 @@ func TestDefinitionAllowsDistinctPerActionTransports(t *testing.T) {
 	}
 }
 
+func TestModelActionsHideKernelResolvedArgumentsWhileExecutionSchemaStaysStrict(t *testing.T) {
+	ctx := context.Background()
+	catalog := NewCatalog()
+	definition := &Definition{
+		ID: "portfolio", Version: "1", Name: "Portfolio", Transport: TransportReference{Kind: "kernel", Endpoint: "kernel://portfolio"},
+		Actions: map[string]Action{"pause": {
+			Name: "pause", Description: "Pause a resource", Risk: RiskLevelWrite, SideEffect: SideEffectWrite, Idempotency: IdempotencyRequired,
+			InputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{
+					"resourceId":       map[string]interface{}{"type": "string"},
+					"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, SchemaExtensionKernelResolved: true},
+				},
+				"required": []interface{}{"resourceId", "expectedRevision"},
+			},
+		}},
+	}
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	if err := catalog.Bind(ctx, &Binding{ID: "portfolio", Revision: 1, Scope: scope, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"pause"}, MaximumRisk: RiskLevelWrite}); err != nil {
+		t.Fatal(err)
+	}
+	actions, err := catalog.ListModelActions(ctx, scope, "agent")
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("model actions = %#v, %v", actions, err)
+	}
+	properties, _ := actions[0].InputSchema["properties"].(map[string]interface{})
+	if _, visible := properties["expectedRevision"]; visible {
+		t.Fatalf("kernel concurrency token leaked into model schema: %#v", actions[0].InputSchema)
+	}
+	if required, _ := actions[0].InputSchema["required"].([]interface{}); len(required) != 1 || required[0] != "resourceId" {
+		t.Fatalf("model required fields = %#v", required)
+	}
+	bound, err := catalog.Resolve(ctx, scope, "agent", definition.ID, definition.Version, "pause")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"resourceId": "resource-1"}); err == nil {
+		t.Fatal("canonical execution schema accepted unresolved concurrency token")
+	}
+}
+
 func testSkillDefinition() *Definition {
 	return &Definition{
 		ID: "release", Version: "1.0.0", Name: "Release", Description: "Release software",

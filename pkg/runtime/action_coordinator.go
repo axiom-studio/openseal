@@ -58,6 +58,16 @@ type ActionProposalValidator interface {
 	ValidateActionProposal(context.Context, ActionProposalValidationInput) (map[string]interface{}, error)
 }
 
+// ActionProposalArgumentResolver lets a deterministic kernel validator add
+// arguments that belong to the runtime rather than the model. Resolvers run
+// before JSON Schema validation; the resolved arguments are then used for
+// validation, policy, approval previews, persistence, and execution. This is
+// intentionally separate from model input so concurrency tokens and similar
+// implementation details never need to become user-facing prompt fields.
+type ActionProposalArgumentResolver interface {
+	ResolveActionProposalArguments(context.Context, ActionProposalValidationInput) (map[string]interface{}, bool, error)
+}
+
 type ActionProposalValidationInput struct {
 	Run       *AgentRun
 	Bound     *skill.BoundAction
@@ -144,7 +154,23 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if err != nil {
 		return nil, err
 	}
-	if err := c.catalog.ValidateInput(ctx, bound, req.Arguments); err != nil {
+	arguments := cloneMap(req.Arguments)
+	for _, validator := range c.validators {
+		resolver, ok := validator.(ActionProposalArgumentResolver)
+		if !ok || resolver == nil {
+			continue
+		}
+		resolved, handled, resolveErr := resolver.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+			Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments),
+		})
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if handled {
+			arguments = cloneMap(resolved)
+		}
+	}
+	if err := c.catalog.ValidateInput(ctx, bound, arguments); err != nil {
 		return nil, err
 	}
 	var proposedAction map[string]interface{}
@@ -152,7 +178,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		if validator == nil {
 			continue
 		}
-		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(req.Arguments)})
+		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments)})
 		if validateErr != nil {
 			return nil, validateErr
 		}
@@ -163,7 +189,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if bound.Action.Idempotency == skill.IdempotencyRequired && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, errors.New("skill action requires an idempotency key")
 	}
-	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(req.Arguments), Actor: req.Actor, Summary: req.Summary})
+	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), Actor: req.Actor, Summary: req.Summary})
 	if err != nil {
 		return nil, fmt.Errorf("evaluate action policy: %w", err)
 	}
@@ -179,7 +205,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
-		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(req.Arguments, bound.Action.InputSchema),
+		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(arguments, bound.Action.InputSchema),
 		PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
 		CredentialRefs:  boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		MaxAttempts: max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -260,7 +286,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		eventType = "action.approval_requested"
 	}
 	if approval != nil && approval.ProposedAction == nil {
-		approval.ProposedAction = approvalPreview(bound, req.Arguments)
+		approval.ProposedAction = approvalPreview(bound, arguments)
 	}
 	actor := req.Actor
 	if actor.Type == "" {
