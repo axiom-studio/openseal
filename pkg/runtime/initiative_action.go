@@ -13,7 +13,7 @@ import (
 
 const (
 	InitiativeManagementSkillID      = "openseal.initiatives"
-	InitiativeManagementSkillVersion = "1.0.0"
+	InitiativeManagementSkillVersion = "1.0.1"
 	InitiativeActionCreate           = "create"
 	InitiativeActionUpdate           = "update"
 	InitiativeActionPause            = "pause"
