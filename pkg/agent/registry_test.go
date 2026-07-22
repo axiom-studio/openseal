@@ -37,6 +37,7 @@ func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
 	concurrency := 2
 	deployment, initial, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
 		ID: "operator-prod", Scope: scope, DefinitionID: "operator", ActiveVersion: "1.0.0",
+		DisplayName: "  Production Operator  ",
 		Environment: "production", SkillBindingIDs: []string{"git", "kubernetes"},
 		Credentials:  map[string]capability.CredentialReference{"git": {Kind: "git-token", ID: "opaque-vault-reference"}},
 		Restrictions: DeploymentRestrictions{MaximumRisk: &maximumRisk, AllowedSkillIDs: []string{"git"}, MaxConcurrentRuns: &concurrency, BudgetCeilings: map[string]float64{"usd": 25}},
@@ -44,6 +45,9 @@ func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
 	}, "user", "admin", "initial activation")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if deployment.DisplayName != "Production Operator" {
+		t.Fatalf("deployment display name was not canonicalized: %q", deployment.DisplayName)
 	}
 	if initial.FromVersion != "" || initial.ToVersion != "1.0.0" || deployment.Revision != 1 {
 		t.Fatalf("initial activation = %#v %#v", deployment, initial)
@@ -152,6 +156,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposed := cloneDeployment(deployment)
+	proposed.DisplayName = "  Incident Operator  "
 	proposed.RolloutStatus = RolloutPaused
 	proposed.Placement = map[string]string{"modelProvider": "deepseek"}
 	proposed.Credentials = map[string]capability.CredentialReference{
@@ -164,7 +169,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Revision != deployment.Revision+1 || updated.RolloutStatus != RolloutPaused || updated.Capacity.MaxQueuedRuns != 25 ||
+	if updated.Revision != deployment.Revision+1 || updated.DisplayName != "Incident Operator" || updated.RolloutStatus != RolloutPaused || updated.Capacity.MaxQueuedRuns != 25 ||
 		len(updated.SkillBindingIDs) != 2 || updated.SkillBindingIDs[0] != "alpha" ||
 		updated.Credentials["MODEL_PROVIDER"].ID != "vault://tenant-one/model-provider" {
 		t.Fatalf("updated deployment = %#v", updated)
