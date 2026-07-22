@@ -38,6 +38,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
 	s.mux.HandleFunc("PUT /api/v1/objectives/{id}", s.handleUpdateObjective)
 	s.mux.HandleFunc("POST /api/v1/objective-schedules/reconciliations", s.handleReconcileObjectiveSchedules)
+	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions", s.handleCreateEventSourceSubscription)
+	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions", s.handleListEventSourceSubscriptions)
+	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions/{id}", s.handleGetEventSourceSubscription)
+	s.mux.HandleFunc("PATCH /api/v1/event-source-subscriptions/{id}", s.handleUpdateEventSourceSubscription)
+	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/retirements", s.handleRetireEventSourceSubscription)
+	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/health-reports", s.handleReportEventSourceHealth)
+	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions/{id}/checkpoint", s.handleGetEventSourceCheckpoint)
+	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/checkpoint-advancements", s.handleAdvanceEventSourceCheckpoint)
 	s.mux.HandleFunc("POST /api/v1/events", s.handleRouteEvent)
 	s.mux.HandleFunc("POST /api/v1/initiatives", s.handleCreateInitiative)
 	s.mux.HandleFunc("GET /api/v1/initiatives", s.handleListInitiatives)
@@ -143,7 +151,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.agentRunCreation != nil {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
 	}
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActivityCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActivityCapability()}
 	if s.sourcePolicies != nil {
 		capabilities = append(capabilities, kernelapi.SourcePoliciesCapability())
 	}

@@ -45,6 +45,37 @@ func TestEngineExposesGovernedSkillCatalog(t *testing.T) {
 	}
 }
 
+func TestEngineRequiresExactGovernedBindingForEventSourceSkillConnector(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	definition := &SkillDefinition{ID: "forum.reader", Version: "1", Name: "Forum Reader", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{
+		"watch": {Name: "watch", Description: "Watch a forum", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}},
+	}}
+	if err := engine.RegisterSkill(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "research"}
+	if err := engine.BindSkill(ctx, &SkillBinding{ID: "forum-binding", Scope: scope, DeploymentID: "researcher", SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"watch"}, MaximumRisk: SkillRiskRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	request := CreateEventSourceSubscriptionRequest{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, DisplayName: "Forum watch", Source: "forum:product",
+		Connector: EventSourceConnector{Kind: EventSourceConnectorSkill, ID: definition.ID, Version: definition.Version, BindingID: "forum-binding", BindingRevision: 1, Action: "watch"}, EventTypes: []string{"forum.post"},
+	}
+	created, err := engine.CreateEventSourceSubscription(ctx, request)
+	if err != nil || created.Connector.BindingRevision != 1 {
+		t.Fatalf("created = %#v, %v", created, err)
+	}
+	request.ID = "stale-binding"
+	request.Connector.BindingRevision = 2
+	if _, err := engine.CreateEventSourceSubscription(ctx, request); err == nil {
+		t.Fatal("stale binding revision was accepted")
+	}
+}
+
 func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 	engine, err := New()
 	if err != nil {

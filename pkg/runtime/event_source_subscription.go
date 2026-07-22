@@ -43,11 +43,12 @@ const (
 // deployment's governed Skill binding; subscription state never contains
 // credential values or references.
 type EventSourceConnector struct {
-	Kind      EventSourceConnectorKind `json:"kind"`
-	ID        string                   `json:"id"`
-	Version   string                   `json:"version,omitempty"`
-	BindingID string                   `json:"bindingId,omitempty"`
-	Action    string                   `json:"action,omitempty"`
+	Kind            EventSourceConnectorKind `json:"kind"`
+	ID              string                   `json:"id"`
+	Version         string                   `json:"version,omitempty"`
+	BindingID       string                   `json:"bindingId,omitempty"`
+	BindingRevision int64                    `json:"bindingRevision,omitempty"`
+	Action          string                   `json:"action,omitempty"`
 }
 
 // EventSourceSubscription is desired state for a long-running host connector.
@@ -377,11 +378,11 @@ func (c EventSourceConnector) Validate() error {
 	}
 	switch c.Kind {
 	case EventSourceConnectorHost:
-		if c.BindingID != "" || c.Action != "" {
+		if c.BindingID != "" || c.BindingRevision != 0 || c.Action != "" {
 			return ErrInvalidEventSourceSubscription
 		}
 	case EventSourceConnectorSkill:
-		if !validOpaqueIdentifier(c.BindingID, 512) || !validOpaqueIdentifier(c.Action, 128) || strings.TrimSpace(c.Version) == "" {
+		if !validOpaqueIdentifier(c.BindingID, 512) || c.BindingRevision < 1 || !validOpaqueIdentifier(c.Action, 128) || strings.TrimSpace(c.Version) == "" {
 			return ErrInvalidEventSourceSubscription
 		}
 	default:
