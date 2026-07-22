@@ -332,6 +332,7 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 		recentComparable = append(recentComparable, comparableMessage{id: message.ID, content: message.Content, key: message.ContributionKey})
 	}
 	speakers := make([]string, 0, normalizedPolicy.MaximumSpeakers)
+	selectedActions := make(map[string]string)
 	for index := range decisions {
 		decision := &decisions[index]
 		proposal := proposalByID[decision.ProposalID]
@@ -343,7 +344,21 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonLowRelevance)
 			continue
 		}
-		if duplicateID := findDuplicateConversationMessage(proposal.Content, proposal.ContributionKey, recentComparable, normalizedPolicy.DuplicateThreshold); duplicateID != "" {
+		actionKey := ""
+		if proposal.ProposedAction != nil {
+			// A governed action proposal creates executable state and is not a
+			// duplicate of the user's request merely because its explanation
+			// restates that request. The Action coordinator owns durable replay
+			// and idempotency. Within this round, still collapse the exact same
+			// capability and idempotency key to prevent an Agent pile-on.
+			actionKey = strings.TrimSpace(proposal.ProposedAction.Capability) + "\x00" + strings.TrimSpace(proposal.ProposedAction.IdempotencyKey)
+			if duplicateID := selectedActions[actionKey]; duplicateID != "" {
+				decision.Disposition = ParticipationSilent
+				decision.DuplicateOfID = duplicateID
+				decision.Reasons = appendReason(decision.Reasons, ParticipationReasonDuplicate)
+				continue
+			}
+		} else if duplicateID := findDuplicateConversationMessage(proposal.Content, proposal.ContributionKey, recentComparable, normalizedPolicy.DuplicateThreshold); duplicateID != "" {
 			decision.Disposition = ParticipationSilent
 			decision.DuplicateOfID = duplicateID
 			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonDuplicate)
@@ -358,6 +373,9 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 		decision.Rank = len(speakers) + 1
 		decision.Fingerprint = ConversationMessageFingerprint(proposal.Content)
 		speakers = append(speakers, proposal.ID)
+		if actionKey != "" {
+			selectedActions[actionKey] = proposal.ID
+		}
 		recentComparable = append(recentComparable, comparableMessage{id: proposal.ID, content: proposal.Content, key: proposal.ContributionKey})
 	}
 	sort.Slice(decisions, func(i, j int) bool { return decisions[i].ProposalID < decisions[j].ProposalID })
