@@ -50,6 +50,15 @@ func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
 	if result.Run.BudgetUsage != (BudgetUsage{}) || len(result.Run.BudgetReservations) != 0 {
 		t.Fatalf("rejected preflight consumed budget: %#v", result.Run)
 	}
+	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: scope, RunID: run.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.UsageDelta != nil {
+			t.Fatalf("rejected preflight reported usage: %#v", event)
+		}
+	}
 }
 
 func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *testing.T) {
