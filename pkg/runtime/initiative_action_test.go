@@ -81,6 +81,41 @@ func TestGovernedInitiativeCreateUsesApprovalActionAndIdempotencyLifecycle(t *te
 	}
 }
 
+func TestInitiativeActionCatalogPublishesExecutableCompositeSchemas(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	catalog := initiativeActionCatalog(t, NewMemoryStore(20), scope, "research-team")
+	bound, err := catalog.Resolve(context.Background(), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "research-team", InitiativeManagementSkillID, InitiativeManagementSkillVersion, InitiativeActionCreate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := map[string]interface{}{"title": "Research", "purpose": "Coordinate evidence", "objectiveRefs": []interface{}{"monitor-feedback"}}
+	for name, invalid := range map[string]interface{}{
+		"team reference": []interface{}{"research-team"},
+		"milestone":      []interface{}{"weekly-brief"},
+		"deliverable":    []interface{}{"research-report"},
+	} {
+		input := cloneMap(base)
+		switch name {
+		case "team reference":
+			input["teamRefs"] = invalid
+		case "milestone":
+			input["milestones"] = invalid
+		case "deliverable":
+			input["deliverables"] = invalid
+		}
+		if err := catalog.ValidateInput(context.Background(), bound, input); err == nil {
+			t.Fatalf("catalog accepted untyped %s", name)
+		}
+	}
+	typed := cloneMap(base)
+	typed["teamRefs"] = []interface{}{map[string]interface{}{"kind": "team_deployment", "id": "research-team"}}
+	typed["milestones"] = []interface{}{map[string]interface{}{"id": "weekly-brief", "title": "Weekly brief", "status": "pending"}}
+	typed["deliverables"] = []interface{}{map[string]interface{}{"id": "research-report", "title": "Research report", "status": "planned"}}
+	if err := catalog.ValidateInput(context.Background(), bound, typed); err != nil {
+		t.Fatalf("catalog rejected typed Initiative composites: %v", err)
+	}
+}
+
 func TestInitiativeActionsRejectInjectedOwnerForeignObjectivesTargetsAndStaleRevision(t *testing.T) {
 	store := NewMemoryStore(20)
 	ctx := context.Background()
