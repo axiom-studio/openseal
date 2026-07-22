@@ -468,6 +468,27 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if conversation.Owner.Type == OwnerTypeAgent {
 		return r.runAgentTurn(ctx, input, conversation, triggerID, nil)
 	}
+	if outcome, ok := governedConversationActionOutcome(input.Run); ok {
+		trigger, getErr := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		participantID := strings.TrimSpace(fmt.Sprint(input.Run.Checkpoint[teamActionAssignedAgentCheckpointKey]))
+		if !validOpaqueIdentifier(participantID, 256) {
+			return nil, errors.New("governed Team action outcome is missing its trusted roster Agent attribution")
+		}
+		message, replayed, postErr := r.postTeamActionOutcome(ctx, input.Run, conversation, trigger.ID, ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}, outcome)
+		if postErr != nil {
+			return nil, postErr
+		}
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Governed Team action resolved",
+			RunOutput: map[string]interface{}{
+				"conversationId": conversation.ID, "triggerMessageId": trigger.ID, "messageId": message.ID, "replayed": replayed,
+				"resourceType": outcome.ResourceType, "resourceId": outcome.ResourceID,
+			},
+		}, nil
+	}
 	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 	result, err := r.coordinator.Coordinate(ctx, ConversationCoordinationRequest{
 		Scope: input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
@@ -487,18 +508,6 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	}
 	proposal := selectedParticipationAction(result.Round)
 	if proposal != nil {
-		if teamActionSucceeded(input.Run.Checkpoint, proposal.ProposedAction) {
-			message, replayed, postErr := r.postTeamActionCompletion(ctx, input.Run, conversation, triggerID, proposal.Participant, proposal.ProposedAction)
-			if postErr != nil {
-				return nil, postErr
-			}
-			messageIDs = append(messageIDs, message.ID)
-			return &TurnOutcome{
-				NextRunStatus: AgentRunStatusCompleted,
-				OutputSummary: "Governed Team action completed",
-				RunOutput:     participationRoundRunOutput(result, conversationID, triggerID, messageIDs, replayed),
-			}, nil
-		}
 		action := *proposal.ProposedAction
 		action.EvidenceRefs = append([]string(nil), proposal.ProposedAction.EvidenceRefs...)
 		if strings.TrimSpace(action.IdempotencyKey) == "" {
@@ -563,35 +572,18 @@ func selectedParticipationAction(round *ParticipationRound) *ParticipationPropos
 	return nil
 }
 
-func teamActionSucceeded(checkpoint map[string]interface{}, action *TurnAction) bool {
-	if action == nil {
-		return false
-	}
-	last, _ := checkpoint["lastAction"].(map[string]interface{})
-	if fmt.Sprint(last["status"]) != "succeeded" || fmt.Sprint(last["skillId"])+"."+fmt.Sprint(last["action"]) != action.Capability {
-		return false
-	}
-	if action.BindingID != "" && (fmt.Sprint(last["bindingId"]) != action.BindingID || fmt.Sprint(last["bindingRevision"]) != fmt.Sprint(action.BindingRevision)) {
-		return false
-	}
-	return true
-}
-
-func (r *ConversationRunTurnRunner) postTeamActionCompletion(
+func (r *ConversationRunTurnRunner) postTeamActionOutcome(
 	ctx context.Context,
 	run *AgentRun,
 	conversation *Conversation,
 	triggerID string,
 	participant ConversationParticipant,
-	action *TurnAction,
+	outcome *governedConversationCompletion,
 ) (*ChannelMessage, bool, error) {
-	key := "team-action-completion:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+triggerID)
-	content := "Governed action " + strings.TrimSpace(action.Capability) + " completed after all required approval gates were satisfied."
-	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-	if completion, ok := governedConversationActionCompletion(run); ok {
-		content = completion.Content
-		references = completion.References
+	if outcome == nil {
+		return nil, false, errors.New("governed Team action outcome is required")
 	}
+	key := "team-action-outcome:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+triggerID)
 	for range 3 {
 		current, err := r.conversations.GetConversation(ctx, run.Scope, conversation.ID)
 		if err != nil {
@@ -599,10 +591,10 @@ func (r *ConversationRunTurnRunner) postTeamActionCompletion(
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-			Sender: participant, Intent: MessageIntentAnswer, Content: content,
+			Sender: participant, Intent: MessageIntentAnswer, Content: outcome.Content,
 			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
-			References:     references,
+			References:     outcome.References,
 			IdempotencyKey: key,
 		})
 		if err == nil {
@@ -645,7 +637,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	}, latestConversationSequence(recent)); err != nil {
 		return nil, err
 	}
-	if completion, ok := governedConversationActionCompletion(input.Run); ok {
+	if completion, ok := governedConversationActionOutcome(input.Run); ok {
 		message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References)
 		if err != nil {
 			return nil, err
@@ -870,6 +862,55 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 			{Kind: kind, ID: id, Version: version},
 		},
 	}, true
+}
+
+// governedConversationActionOutcome turns terminal governed mutations into a
+// kernel-authored channel fact. In particular, approval rejection/expiry and
+// policy denial must resolve the user's request once; they must never send the
+// same write back to the model where it can be proposed repeatedly.
+func governedConversationActionOutcome(run *AgentRun) (*governedConversationCompletion, bool) {
+	if completion, ok := governedConversationActionCompletion(run); ok {
+		return completion, true
+	}
+	if run == nil {
+		return nil, false
+	}
+	last, ok := run.Checkpoint["lastAction"].(map[string]interface{})
+	if !ok || fmt.Sprint(last["status"]) != string(ActionCallStatusDenied) {
+		return nil, false
+	}
+	resourceType, label, kind, idField := "", "", ConversationReferenceKind(""), ""
+	switch strings.TrimSpace(fmt.Sprint(last["skillId"])) {
+	case ObjectiveManagementSkillID:
+		resourceType, label, kind, idField = "objective", "Objective", ConversationReferenceObjective, "objectiveId"
+	case InitiativeManagementSkillID:
+		resourceType, label, kind, idField = "initiative", "Initiative", ConversationReferenceInitiative, "initiativeId"
+	default:
+		return nil, false
+	}
+	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
+	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause {
+		return nil, false
+	}
+	disposition := strings.TrimSpace(fmt.Sprint(last["approvalStatus"]))
+	content := label + " " + operation + " was not applied because policy denied the action."
+	if disposition != "" {
+		content = label + " " + operation + " was not applied because approval was " + strings.ReplaceAll(disposition, "_", " ") + "."
+	}
+	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
+	if approvalID := strings.TrimSpace(fmt.Sprint(last["approvalId"])); validOpaqueIdentifier(approvalID, 256) {
+		references = append(references, ConversationReference{Kind: ConversationReferenceApproval, ID: approvalID})
+	}
+	resourceID := ""
+	if arguments, argumentsOK := last["arguments"].(map[string]interface{}); argumentsOK {
+		resourceID = strings.TrimSpace(fmt.Sprint(arguments[idField]))
+		if validOpaqueIdentifier(resourceID, 256) {
+			references = append(references, ConversationReference{Kind: kind, ID: resourceID})
+		} else {
+			resourceID = ""
+		}
+	}
+	return &governedConversationCompletion{Content: content, ResourceType: resourceType, ResourceID: resourceID, References: references}, true
 }
 
 func conversationResultMap(value interface{}) map[string]interface{} {

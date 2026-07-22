@@ -220,12 +220,15 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	case ActionDispositionDeny:
 		call.Status = ActionCallStatusDenied
 		call.Error = decision.Reason
+		call.CompletedAt = &now
 		updatedRun.Status = AgentRunStatusQueued
 		if budgetDenied {
 			updatedRun.Status = AgentRunStatusPaused
 		}
 		updatedRun.WakeCondition = nil
-		updatedRun.Checkpoint = preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
+		updatedRun.Checkpoint = checkpointTerminalAction(preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint), call, map[string]interface{}{
+			"denialSource": "policy",
+		})
 		updatedRun.AvailableAt = now
 		updatedRun.QueueEnteredAt = now
 		updatedRun.LeaseOwner = ""
