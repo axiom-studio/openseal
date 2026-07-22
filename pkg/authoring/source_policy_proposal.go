@@ -57,6 +57,38 @@ func candidateUsesProposedSourcePolicy(candidate *WorkforceCandidate, reference 
 	return false
 }
 
+// validateSourceActionProjection prevents an authoring candidate from placing
+// the built-in governed source action outside the Initiative monitor envelope
+// required by runtime policy authorization and evidence checkpoints.
+func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	for _, invocation := range candidateObjectiveCapabilityInvocations(candidate) {
+		skillID, _ := invocation.invocation["skillId"].(string)
+		action, _ := invocation.invocation["action"].(string)
+		if strings.TrimSpace(skillID) != source.SkillID || strings.TrimSpace(action) != source.ObserveFeed {
+			continue
+		}
+		objectiveRef := strings.TrimSuffix(invocation.path, ".cadence")
+		projected := false
+		if candidate != nil && candidate.Initiative != nil && objectiveRef != invocation.path {
+			for _, monitor := range candidate.Initiative.SourceMonitors {
+				if monitor.ObjectiveRef == objectiveRef && monitor.SkillID == source.SkillID && monitor.Action == source.ObserveFeed {
+					projected = true
+					break
+				}
+			}
+		}
+		if !projected {
+			issues = append(issues, issue(
+				"objectives."+invocation.path+".runTemplate.capability",
+				"source_action_requires_monitor",
+				"The governed source observer must be projected by an exact Initiative source monitor so policy decisions, checkpoints, and evidence remain enforceable",
+			))
+		}
+	}
+	return issues
+}
+
 // sourcePolicyProposalRepairableMissing excludes only source-policy gaps for
 // which the trusted catalog supplies the exact requested draft. Asking the
 // provider to "repair" such a gap could make it silently remove the requested

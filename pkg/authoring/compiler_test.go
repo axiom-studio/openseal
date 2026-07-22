@@ -663,6 +663,21 @@ func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAut
 	}
 }
 
+func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	candidate.Initiative = nil
+	invocation := candidate.Team.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["capability"].(map[string]interface{})
+	invocation["skillId"], invocation["skillVersion"], invocation["action"] = source.SkillID, source.SkillVersion, source.ObserveFeed
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor a public feed every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+		source.SkillID: {ID: source.SkillID, Version: source.SkillVersion, Actions: []string{source.ObserveFeed}},
+	}}})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "source_action_requires_monitor") {
+		t.Fatalf("unprojected source action result = %#v, err = %v", result, err)
+	}
+}
+
 func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
