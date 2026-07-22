@@ -156,6 +156,10 @@ func (s *Server) handleAdvanceEventSourceCheckpoint(w http.ResponseWriter, r *ht
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if detail.Subscription.Status != runtime.EventSourceSubscriptionActive || payload.ObservedSubscriptionRevision <= 0 || detail.Subscription.Revision != payload.ObservedSubscriptionRevision {
+		s.respondEventSourceSubscriptionError(w, runtime.ErrEventSourceSubscriptionConflict)
+		return
+	}
 	checkpoint, err := runtime.NewEventSourceCheckpointService(s.store).Advance(r.Context(), runtime.AdvanceEventSourceCheckpointRequest{
 		Scope: scope, Source: detail.Subscription.Source, SubscriptionID: id, ExpectedRevision: payload.ExpectedRevision,
 		Cursor: payload.Cursor, EventIDs: payload.EventIDs, Watermark: payload.Watermark,

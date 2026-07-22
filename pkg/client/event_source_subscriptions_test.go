@@ -31,7 +31,7 @@ func TestKernelHTTPClientOperatesEventSourceSubscriptions(t *testing.T) {
 	if err != nil || reported.Revision != 1 {
 		t.Fatalf("health = %#v, %v", reported, err)
 	}
-	checkpoint, err := client.AdvanceEventSourceCheckpoint(ctx, scope, created.ID, kernelapi.AdvanceEventSourceCheckpointRequest{Cursor: "cursor-1", EventIDs: []string{"event-1"}})
+	checkpoint, err := client.AdvanceEventSourceCheckpoint(ctx, scope, created.ID, kernelapi.AdvanceEventSourceCheckpointRequest{ObservedSubscriptionRevision: created.Revision, Cursor: "cursor-1", EventIDs: []string{"event-1"}})
 	if err != nil || checkpoint.Revision != 1 {
 		t.Fatalf("checkpoint = %#v, %v", checkpoint, err)
 	}
@@ -42,6 +42,9 @@ func TestKernelHTTPClientOperatesEventSourceSubscriptions(t *testing.T) {
 	detail, err := client.GetEventSourceSubscription(ctx, scope, created.ID)
 	if err != nil || detail.Health == nil || detail.Checkpoint == nil {
 		t.Fatalf("detail = %#v, %v", detail, err)
+	}
+	if _, err := client.AdvanceEventSourceCheckpoint(ctx, scope, created.ID, kernelapi.AdvanceEventSourceCheckpointRequest{ObservedSubscriptionRevision: created.Revision + 1, ExpectedRevision: checkpoint.Revision, EventIDs: []string{"event-2"}}); err == nil {
+		t.Fatal("stale connector advanced the checkpoint")
 	}
 	items, err := client.ListEventSourceSubscriptions(ctx, runtime.EventSourceSubscriptionFilter{Scope: scope, Statuses: []runtime.EventSourceSubscriptionStatus{runtime.EventSourceSubscriptionActive}})
 	if err != nil || len(items) != 1 {

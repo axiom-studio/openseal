@@ -36,7 +36,7 @@ func TestEventSourceSubscriptionAPIExposesDurableLifecycleHealthAndCheckpoint(t 
 	if health.Code != http.StatusOK || !strings.Contains(health.Body.String(), `"state":"healthy"`) {
 		t.Fatalf("health = %d %s", health.Code, health.Body.String())
 	}
-	checkpoint := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/event-source-subscriptions/production-warnings/checkpoint-advancements?scopeKind=tenant&scopeId=operations", `{"expectedRevision":0,"cursor":"rv-10","eventIds":["event-1"]}`, "")
+	checkpoint := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/event-source-subscriptions/production-warnings/checkpoint-advancements?scopeKind=tenant&scopeId=operations", `{"expectedRevision":0,"observedSubscriptionRevision":1,"cursor":"rv-10","eventIds":["event-1"]}`, "")
 	if checkpoint.Code != http.StatusOK || !strings.Contains(checkpoint.Body.String(), `"cursor":"rv-10"`) {
 		t.Fatalf("checkpoint = %d %s", checkpoint.Code, checkpoint.Body.String())
 	}
