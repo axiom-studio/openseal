@@ -1046,12 +1046,6 @@ func (pe *PipelineExecutor) buildLoopIterationInputFromContext(execCtx *executio
 		"elapsed_ms": elapsedMs,
 	}
 
-	if execCtx.bindings != nil {
-		if vaultData, ok := execCtx.bindings["vault"]; ok {
-			input["vault"] = vaultData
-		}
-	}
-
 	if len(node.incoming) > 0 {
 		parentOutputs := make(map[string]interface{})
 		var singleParentName string
@@ -1166,12 +1160,6 @@ func (pe *PipelineExecutor) buildLoopIterationInput(
 		"elapsed_ms": elapsedMs,
 	}
 
-	if execCtx.bindings != nil {
-		if vaultData, ok := execCtx.bindings["vault"]; ok {
-			input["vault"] = vaultData
-		}
-	}
-
 	input["prev"] = item
 
 	return input
@@ -1281,13 +1269,6 @@ func (pe *PipelineExecutor) buildNodeInput(node *graphNode, execCtx *executionCo
 		"run":        runMetadata,
 		"self":       selfContext,
 		"elapsed_ms": elapsedMs,
-	}
-
-	// Add vault credentials from bindings if present
-	if execCtx.bindings != nil {
-		if vaultData, ok := execCtx.bindings["vault"]; ok {
-			input["vault"] = vaultData
-		}
 	}
 
 	if len(node.incoming) > 0 {

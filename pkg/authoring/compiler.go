@@ -556,7 +556,7 @@ func normalizeGeneratedDefinitionVersions(payload []byte) []byte {
 // normalizeGeneratedCredentialReferenceOptions removes provider-authored
 // credential choices at the strict decode boundary. A model can identify the
 // credential kind that work requires, but only the authorized host may resolve
-// that requirement to an opaque Vault binding. Retaining option IDs here would
+// that requirement to an opaque credential reference. Retaining option IDs here would
 // let untrusted output invent or disclose credential identities.
 func normalizeGeneratedCredentialReferenceOptions(generated *GenerationResponse) {
 	if generated == nil {

@@ -228,6 +228,6 @@ ClawHub registries, source artifact storage, conversation coordination, Team
 management, and Skill management.
 
 OpenSeal validates portable semantics and fails closed when a necessary adapter
-is absent. It does not pretend to provide tenant identity, a secret vault,
+is absent. It does not pretend to provide tenant identity, a host secret service,
 remote sandbox provisioning, external network credentials, or organization
 policy in standalone defaults.

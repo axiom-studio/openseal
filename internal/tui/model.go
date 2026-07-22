@@ -2973,7 +2973,7 @@ func (m *Model) submitClawHubRemoval() tea.Cmd {
 func (m *Model) prepareSkillBindingComposer(binding *capability.Binding) {
 	m.mode = modeSkillBindingUpsert
 	m.editor.Reset()
-	m.editor.Placeholder = "binding: reddit\nskill: reddit@1.0.0\nactions: search,post\nprompt: true\nrisk: external\ncredentials: reddit=vault:credential-id\nreason: why this access is needed"
+	m.editor.Placeholder = "binding: reddit\nskill: reddit@1.0.0\nactions: search,post\nprompt: true\nrisk: external\ncredentials: reddit=reddit-oauth:credential-id\nreason: why this access is needed"
 	if binding != nil {
 		credentials := make([]string, 0, len(binding.Credentials))
 		for name, reference := range binding.Credentials {
