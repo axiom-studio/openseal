@@ -69,6 +69,38 @@ func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
 	}
 }
 
+func TestPendingAgentDeploymentActivatesItsReviewedCurrentVersion(t *testing.T) {
+	registry := NewRegistry()
+	definition := testDefinition("1.0.0", capability.RiskLevelRead, 1)
+	if _, err := registry.RegisterDefinition(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployed, _, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
+		ID: "reviewed-inactive", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: RolloutPending, Environment: "development", Capacity: DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "apply reviewed resources without activation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, event, err := registry.ActivateDefinition(
+		context.Background(), scope, deployed.ID, definition.Version, deployed.Revision,
+		"user", "admin", "source authority approved",
+	)
+	if err != nil || activated.RolloutStatus != RolloutActive || activated.Revision != deployed.Revision+1 ||
+		activated.PreviousVersion != "" || event.FromVersion != definition.Version || event.ToVersion != definition.Version ||
+		event.Reason != "source authority approved" {
+		t.Fatalf("pending current-version activation = %#v, %#v, %v", activated, event, err)
+	}
+	if _, _, err := registry.ActivateDefinition(context.Background(), scope, deployed.ID, definition.Version, activated.Revision, "user", "admin", "duplicate"); err == nil {
+		t.Fatal("already-active current version should not create another activation")
+	}
+	history, err := registry.ListActivations(context.Background(), scope, deployed.ID)
+	if err != nil || len(history) != 2 || history[1].DeploymentRevision != activated.Revision {
+		t.Fatalf("activation history = %#v, %v", history, err)
+	}
+}
+
 func TestAgentDefinitionRequiresValidRunbookSkillDeclarations(t *testing.T) {
 	definition := testDefinition("1.0.0", capability.RiskLevelExternal, 1)
 	definition.Runbook = &runbook.Definition{
