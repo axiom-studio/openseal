@@ -78,6 +78,93 @@ type authoredObjectiveEventRule struct {
 	RunTemplate     *authoredObjectiveRunTemplate `json:"runTemplate,omitempty"`
 }
 
+var optionalRunBudgetLimitFields = [...]string{
+	"maxAttempts", "maxTurns", "maxInputTokens", "maxOutputTokens",
+	"maxTotalTokens", "maxCostMicros", "maxDurationMs", "maxActions",
+}
+
+// normalizeCandidateObjectiveRunBudgets reconciles provider-authored map
+// values with the portable runtime JSON contract. An omitted limit is
+// unbounded, while an explicitly supplied zero is deliberately invalid at the
+// runtime boundary because execution hosts cannot safely infer the author's
+// intent. The authoring compiler has enough context to make the sole lossless
+// repair: remove only exact numeric zero limits while preserving the budget,
+// its warning threshold, every positive bound, and every invalid value for
+// deterministic validation.
+func normalizeCandidateObjectiveRunBudgets(candidate *WorkforceCandidate) {
+	if candidate == nil {
+		return
+	}
+	for _, definition := range candidate.Agents {
+		if definition != nil {
+			normalizeObjectiveTemplateRunBudgets(definition.ObjectiveTemplates)
+		}
+	}
+	if candidate.Team != nil {
+		normalizeObjectiveTemplateRunBudgets(candidate.Team.ObjectiveTemplates)
+	}
+}
+
+func normalizeObjectiveTemplateRunBudgets(templates []workforce.ObjectiveTemplate) {
+	for index := range templates {
+		normalizeRunBudgetContainer(templates[index].Cadence)
+		rules, ok := templates[index].EventRules["rules"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, value := range rules {
+			if rule, ok := value.(map[string]interface{}); ok {
+				normalizeRunBudgetContainer(rule)
+			}
+		}
+	}
+}
+
+func normalizeRunBudgetContainer(container map[string]interface{}) {
+	budget, ok := container["runBudget"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, field := range optionalRunBudgetLimitFields {
+		if value, present := budget[field]; present && exactNumericZero(value) {
+			delete(budget, field)
+		}
+	}
+}
+
+func exactNumericZero(value interface{}) bool {
+	switch number := value.(type) {
+	case float64:
+		return number == 0
+	case float32:
+		return number == 0
+	case int:
+		return number == 0
+	case int8:
+		return number == 0
+	case int16:
+		return number == 0
+	case int32:
+		return number == 0
+	case int64:
+		return number == 0
+	case uint:
+		return number == 0
+	case uint8:
+		return number == 0
+	case uint16:
+		return number == 0
+	case uint32:
+		return number == 0
+	case uint64:
+		return number == 0
+	case json.Number:
+		return number.String() == "0" || number.String() == "0.0"
+	default:
+		return false
+	}
+}
+
 func validateObjectiveTemplateCadences(path string, templates []workforce.ObjectiveTemplate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	for index, template := range templates {
