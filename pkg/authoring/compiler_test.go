@@ -734,6 +734,41 @@ func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
 	}
 }
 
+func TestCompilerMaterializesExactRequiredSkillAuthorityDefault(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{
+		{SkillID: "reddit-research", VersionConstraint: "1.0.0", RequiredActions: []string{"read"}},
+		{SkillID: "optional-export", VersionConstraint: "1.0.0", Optional: true},
+	}
+	candidate.Agents[0].Authority.AllowedSkillIDs = nil
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+			"optional-export": {ID: "optional-export", Version: "1.0.0"},
+		}},
+	})
+	if err != nil || !result.Valid || len(result.Candidate.Agents[0].Authority.AllowedSkillIDs) != 1 ||
+		result.Candidate.Agents[0].Authority.AllowedSkillIDs[0] != "reddit-research" {
+		t.Fatalf("required Skill authority default = %#v, err = %v", result, err)
+	}
+
+	candidate.Agents[0].Authority.AllowedSkillIDs = []string{}
+	payload, _ = json.Marshal(GenerationResponse{Candidate: candidate})
+	payload = bytes.Replace(payload, []byte(`"authority":{`), []byte(`"authority":{"allowedSkillIds":[],`), 1)
+	compiler, _ = NewCompiler(staticGenerator{payload: payload})
+	result, err = compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a research team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
+			"optional-export": {ID: "optional-export", Version: "1.0.0"},
+		}},
+	})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "required_skill_not_authorized") {
+		t.Fatalf("explicitly restricted required Skill = %#v, err = %v", result, err)
+	}
+}
+
 func TestCompilerRejectsHostedCadenceBudgetBelowPortableFloor(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{

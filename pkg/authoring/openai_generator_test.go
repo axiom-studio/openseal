@@ -141,6 +141,7 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"authority.maximumRisk and authority.requireApprovalAt are each one risk string",
 		"never an array or object; omit requireApprovalAt when no approval threshold is required",
 		"cadence, eventRules, successCriteria, and constraints are JSON objects",
+		"authority.allowedSkillIds must contain every non-optional skillRequirement",
 		"never strings or arrays",
 		"omit any of them when no structured value is needed",
 		"omit candidate.team and candidate.assignments entirely",

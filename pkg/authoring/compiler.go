@@ -133,6 +133,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
+		materializeDefaultAgentSkillAuthority(&generated.Candidate)
 		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
@@ -229,6 +230,47 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+// materializeDefaultAgentSkillAuthority gives an omitted allowlist the only
+// safe useful meaning available from the typed definition: authorize the
+// Agent's exact non-optional Skill requirements. An explicitly supplied empty
+// or narrower list remains an intentional restriction and is validated below
+// instead of being silently widened.
+func materializeDefaultAgentSkillAuthority(candidate *WorkforceCandidate) {
+	if candidate == nil {
+		return
+	}
+	for _, definition := range candidate.Agents {
+		if definition == nil || definition.Authority.AllowedSkillIDs != nil {
+			continue
+		}
+		for _, requirement := range definition.SkillRequirements {
+			if !requirement.Optional {
+				definition.Authority.AllowedSkillIDs = append(definition.Authority.AllowedSkillIDs, requirement.SkillID)
+			}
+		}
+		definition.Authority.AllowedSkillIDs = normalized(definition.Authority.AllowedSkillIDs)
+	}
+}
+
+func validateAgentSkillAuthority(path string, definition *agent.AgentDefinition) []ValidationIssue {
+	if definition == nil {
+		return nil
+	}
+	allowed := stringSet(definition.Authority.AllowedSkillIDs)
+	issues := make([]ValidationIssue, 0)
+	for index, requirement := range definition.SkillRequirements {
+		if requirement.Optional || allowed[requirement.SkillID] {
+			continue
+		}
+		issues = append(issues, issue(
+			fmt.Sprintf("%s.skillRequirements[%d].skillId", path, index),
+			"required_skill_not_authorized",
+			fmt.Sprintf("Required Skill %s must be present in authority.allowedSkillIds", requirement.SkillID),
+		))
+	}
+	return issues
 }
 
 func reportCompileProgress(observe CompileProgressObserver, phase CompilePhase, attempt, maximumAttempts int) {
@@ -936,6 +978,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		if err := definition.Validate(); err != nil {
 			issues = append(issues, issue(path, "invalid_agent", err.Error()))
 		}
+		issues = append(issues, validateAgentSkillAuthority(path, definition)...)
 		issues = append(issues, validateObjectiveTemplateCadences(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 		issues = append(issues, validateObjectiveTemplateEventRules(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
