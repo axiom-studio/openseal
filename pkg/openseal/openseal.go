@@ -716,6 +716,7 @@ const (
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	ObjectiveSchedulesCapabilityID          = kernelapi.ObjectiveSchedulesCapabilityID
 	ObjectiveSchedulesCapabilityVersion     = kernelapi.ObjectiveSchedulesCapabilityVersion
+	KernelOperationCreate                   = kernelapi.OperationCreate
 	KernelOperationList                     = kernelapi.OperationList
 	KernelOperationGet                      = kernelapi.OperationGet
 	KernelOperationUpdate                   = kernelapi.OperationUpdate
