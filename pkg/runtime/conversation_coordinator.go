@@ -94,10 +94,15 @@ func (f ParticipationProposalProviderFunc) ProposeParticipation(ctx context.Cont
 }
 
 type ConversationCoordinationRequest struct {
-	Scope              Scope
-	ConversationID     string
-	ExpectedRevision   int64
-	TriggerMessageID   string
+	Scope            Scope
+	ConversationID   string
+	ExpectedRevision int64
+	TriggerMessageID string
+	// MessageReferences are host-owned durable links attached to every message
+	// emitted by this coordination round. Providers cannot remove them. A Run
+	// host uses this to make each visible contribution traceable to the durable
+	// work that produced it.
+	MessageReferences  []ConversationReference
 	Policy             ConversationArbitrationPolicy
 	MaximumConcurrency int
 	IdempotencyKey     string
@@ -173,6 +178,11 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	}
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
+	}
+	for _, reference := range req.MessageReferences {
+		if err := reference.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	policy, err := req.Policy.normalize()
 	if err != nil {
@@ -356,6 +366,11 @@ queue:
 			return nil, proposalErr
 		}
 	}
+	for index := range proposals {
+		if proposals[index].WantsToSpeak {
+			proposals[index].References = mergeConversationReferences(proposals[index].References, req.MessageReferences)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -367,6 +382,21 @@ queue:
 		Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: req.ExpectedRevision,
 		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Policy: policy, Proposals: proposals, IdempotencyKey: key,
 	})
+}
+
+func mergeConversationReferences(left, right []ConversationReference) []ConversationReference {
+	merged := make([]ConversationReference, 0, len(left)+len(right))
+	seen := make(map[ConversationReference]struct{}, len(left)+len(right))
+	for _, references := range [][]ConversationReference{left, right} {
+		for _, reference := range references {
+			if _, exists := seen[reference]; exists {
+				continue
+			}
+			seen[reference] = struct{}{}
+			merged = append(merged, reference)
+		}
+	}
+	return merged
 }
 
 func unavailableParticipationProposal(binding ConversationParticipantBinding, failureCode string) ParticipationProposal {

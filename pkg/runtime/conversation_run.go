@@ -472,7 +472,8 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	result, err := r.coordinator.Coordinate(ctx, ConversationCoordinationRequest{
 		Scope: input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		TriggerMessageID: triggerID, Policy: r.config.Policy, MaximumConcurrency: r.config.MaximumConcurrency,
-		IdempotencyKey: key,
+		MessageReferences: []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}},
+		IdempotencyKey:    key,
 	})
 	if err != nil {
 		if ctx.Err() != nil || permanentConversationRunError(err) {
