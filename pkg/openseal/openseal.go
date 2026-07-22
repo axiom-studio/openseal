@@ -712,6 +712,8 @@ const (
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion
 	ActivityCapabilityID                    = kernelapi.ActivityCapabilityID
 	ActivityCapabilityVersion               = kernelapi.ActivityCapabilityVersion
+	ActionCallsCapabilityID                 = kernelapi.ActionCallsCapabilityID
+	ActionCallsCapabilityVersion            = kernelapi.ActionCallsCapabilityVersion
 	SkillActionsCapabilityID                = kernelapi.SkillActionsCapabilityID
 	SkillActionsCapabilityVersion           = kernelapi.SkillActionsCapabilityVersion
 	SkillBindingsCapabilityID               = kernelapi.SkillBindingsCapabilityID
@@ -868,6 +870,10 @@ func SkillBindingsCapability(management bool) KernelCapability {
 
 func ActivityCapability() KernelCapability {
 	return kernelapi.ActivityCapability()
+}
+
+func ActionCallsCapability() KernelCapability {
+	return kernelapi.ActionCallsCapability()
 }
 
 // SourcePoliciesCapability returns the portable credential-free governance
