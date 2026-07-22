@@ -19,6 +19,8 @@ const (
 	conversationRunSchedulerParticipant  = "conversation-run-scheduler"
 )
 
+const teamActionAssignedAgentCheckpointKey = "_opensealTeamActionAssignedAgentId"
+
 type ConversationRunSchedulerConfig struct {
 	ConversationPageSize int
 	MessagePageSize      int
@@ -501,11 +503,17 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		if strings.TrimSpace(action.IdempotencyKey) == "" {
 			action.IdempotencyKey = "team-participation-action:" + result.Round.ID + ":" + proposal.ID
 		}
+		checkpoint := cloneMap(proposal.ActionInputs)
+		// The participant identity comes from the persisted, arbitrated proposal,
+		// not model action arguments. Carry it through the Turn checkpoint so the
+		// ActionCoordinator can durably attribute Team authority to the roster
+		// Agent that actually proposed the action.
+		checkpoint[teamActionAssignedAgentCheckpointKey] = proposal.Participant.ID
 		return &TurnOutcome{
 			NextRunStatus:          AgentRunStatusRunning,
 			OutputSummary:          "Team participant proposed a governed action",
 			ProposedActions:        []TurnAction{action},
-			ContinuationCheckpoint: cloneMap(proposal.ActionInputs),
+			ContinuationCheckpoint: checkpoint,
 			RunOutput:              participationRoundRunOutput(result, conversationID, triggerID, messageIDs, result.Replayed),
 		}, nil
 	}

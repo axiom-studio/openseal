@@ -272,6 +272,9 @@ func TestConversationRunTurnRunnerArbitratesOneGovernedTeamActionAndCompletesTru
 	if err != nil || arguments["title"] != "Release" {
 		t.Fatalf("Team action arguments = %#v, %v", arguments, err)
 	}
+	if first.ContinuationCheckpoint[teamActionAssignedAgentCheckpointKey] != "agent-1" {
+		t.Fatalf("Team action roster attribution = %#v", first.ContinuationCheckpoint)
+	}
 	resumed := cloneAgentRun(scheduled.Run)
 	resumed.Checkpoint = cloneMap(first.ContinuationCheckpoint)
 	resumed.Checkpoint["lastAction"] = map[string]interface{}{

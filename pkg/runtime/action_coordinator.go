@@ -70,6 +70,7 @@ type ProposeActionRequest struct {
 	TurnID                 string
 	WorkerID               string
 	DeploymentID           string
+	AssignedAgentID        string
 	BindingID              string
 	BindingRevision        int64
 	SkillID                string
@@ -119,6 +120,13 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	if run.Status != AgentRunStatusRunning {
 		return nil, fmt.Errorf("action can only be proposed by a running run, got %s", run.Status)
+	}
+	if assignedAgentID := strings.TrimSpace(req.AssignedAgentID); assignedAgentID != "" {
+		if run.Kind != RunKindConversation || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.AssignedAgentID) != "" {
+			return nil, errors.New("action Agent attribution is only valid for an unassigned Team conversation Run")
+		}
+		run = cloneAgentRun(run)
+		run.AssignedAgentID = assignedAgentID
 	}
 	var lease *AgentRunLeaseGuard
 	now := c.now().UTC()
