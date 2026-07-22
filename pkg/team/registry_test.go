@@ -229,3 +229,102 @@ func TestRegistryGovernsEvaluatesApprovesAndAtomicallyActivatesTeamAmendment(t *
 		t.Fatalf("stored candidate = %#v, err = %v", stored, err)
 	}
 }
+
+func TestRegistryRecoversLegacyListeningOnlyTeamThroughAuditedImmutableAmendment(t *testing.T) {
+	ctx := context.Background()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	agents := kernelagent.NewRegistry()
+	agentDefinition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "reviewer", Version: "1", DisplayName: "Reviewer", Purpose: "Review evidence", SystemPrompt: "Review evidence.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentDeployment, _, err := agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "reviewer-one", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "test", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "legacy Team roster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(agents)
+	definition := validDefinition()
+	definition.Roles[0] = RoleSlot{
+		ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review evidence",
+		MinimumMembers: 1, MaximumMembers: 1, ChannelParticipation: RoleChannelObserveOnly,
+	}
+	definition.Approvals.ApproverRoleIDs = []string{"reviewer"}
+	// This intentionally represents a legacy definition with no amendment
+	// policy. Normal self-amendment must remain unavailable while an authorized
+	// operator can still recover the primary channel.
+	definition.Amendments = workforce.AmendmentPolicy{}
+	registered, err := registry.RegisterDefinition(ctx, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, _, err := registry.CreateDeployment(ctx, &Deployment{
+		ID: "legacy-review-team", Scope: scope, DefinitionID: registered.ID, ActiveVersion: registered.Version,
+		Roster: []RosterAssignment{{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: agentDeployment.ID}},
+		Status: DeploymentActive,
+	}, "user", "admin", "legacy Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RecoverParticipationRequest{
+		Scope: scope, DeploymentID: deployment.ID, BaseVersion: deployment.ActiveVersion,
+		ExpectedDeploymentRevision: deployment.Revision, RoleID: "reviewer",
+		ActorType: "user", ActorID: "admin", Reason: "Restore one reviewed speaking role", IdempotencyKey: "recover-reviewer-v1",
+	}
+	agentRequest := request
+	agentRequest.ActorType, agentRequest.ActorID = "agent", agentDeployment.ID
+	if _, err := registry.RecoverParticipation(ctx, agentRequest); err == nil {
+		t.Fatal("Agent must not use the operator recovery path")
+	}
+	foreign := request
+	foreign.Scope.ID = "other"
+	if _, err := registry.RecoverParticipation(ctx, foreign); !errors.Is(err, ErrDeploymentNotFound) {
+		t.Fatalf("cross-scope recovery err = %v", err)
+	}
+	undeclared := request
+	undeclared.RoleID, undeclared.IdempotencyKey = "missing", "recover-missing-role"
+	if _, err := registry.RecoverParticipation(ctx, undeclared); err == nil {
+		t.Fatal("undeclared recovery role must fail closed")
+	}
+	recovered, err := registry.RecoverParticipation(ctx, request)
+	if err != nil || recovered.Replayed || recovered.Deployment.Revision != 2 ||
+		recovered.Deployment.ActiveVersion == registered.Version || recovered.Activation.FromVersion != registered.Version ||
+		recovered.Amendment.Status != AmendmentActivated || !recovered.Amendment.RiskWidening ||
+		recovered.Amendment.Decision == nil || !recovered.Amendment.Decision.Approved ||
+		len(recovered.Amendment.Changes) != 1 || recovered.Amendment.Changes[0].Field != "roles" {
+		t.Fatalf("recovery = %#v, err = %v", recovered, err)
+	}
+	stored, err := registry.GetDefinition(ctx, registered.ID, recovered.Deployment.ActiveVersion)
+	if err != nil || stored.Roles[0].ChannelParticipation != RoleChannelActive ||
+		stored.Provenance.Source != "openseal-team-participation-recovery" || stored.Provenance.DerivedFrom != registered.Digest ||
+		stored.Amendments.AgentMayPropose || stored.Amendments.RequiresApproval || len(stored.Amendments.AllowedFields) != 0 ||
+		len(stored.Amendments.ApproverPrincipals) != 0 {
+		t.Fatalf("recovered definition = %#v, err = %v", stored, err)
+	}
+	replay, err := registry.RecoverParticipation(ctx, request)
+	if err != nil || !replay.Replayed || replay.Activation.ID != recovered.Activation.ID || replay.Deployment.Revision != 2 {
+		t.Fatalf("recovery replay = %#v, err = %v", replay, err)
+	}
+	conflict := request
+	conflict.Reason = "A different reviewed command"
+	if _, err := registry.RecoverParticipation(ctx, conflict); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("idempotency conflict err = %v", err)
+	}
+	stale := request
+	stale.IdempotencyKey = "new-stale-command"
+	if _, err := registry.RecoverParticipation(ctx, stale); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale recovery err = %v", err)
+	}
+	alreadyActive := request
+	alreadyActive.BaseVersion = recovered.Deployment.ActiveVersion
+	alreadyActive.ExpectedDeploymentRevision = recovered.Deployment.Revision
+	alreadyActive.IdempotencyKey = "already-active"
+	if _, err := registry.RecoverParticipation(ctx, alreadyActive); !errors.Is(err, ErrParticipationRecoveryNotRequired) {
+		t.Fatalf("already-active recovery err = %v", err)
+	}
+}
