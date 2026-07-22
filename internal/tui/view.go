@@ -111,13 +111,22 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeSkillBindingDisable && !m.supportsSkillBinding(kernelapi.OperationDisable) {
 		return m.renderUnavailableComposer(width, "Disable Skill authority", "This kernel does not advertise Skill binding disablement.")
 	}
+	if m.mode == modeSourcePolicyRegister && !m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
+		return m.renderUnavailableComposer(width, "Register source policy", "This kernel does not advertise source policy registration.")
+	}
+	if m.mode == modeSourcePolicyActivate && !m.sourcePolicyCapability.Supports(kernelapi.OperationActivate) {
+		return m.renderUnavailableComposer(width, "Activate source policy", "This kernel does not advertise source policy activation.")
+	}
+	if m.mode == modeSourcePolicyRevoke && !m.sourcePolicyCapability.Supports(kernelapi.OperationRevoke) {
+		return m.renderUnavailableComposer(width, "Revoke source policy", "This kernel does not advertise source policy revocation.")
+	}
 	if m.mode == modeChannelCreate && !m.supportsChannel(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Create a Team channel", "This server does not advertise channel creation.")
 	}
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -237,6 +246,18 @@ func (m *Model) renderComposer(width int) string {
 		title = "Disable selected Skill authority"
 		description = "Record a durable reason. The binding remains visible and can be reviewed or re-enabled later."
 		owner = "CAS protected · audit preserved"
+	case modeSourcePolicyRegister:
+		title = "Register source policy version"
+		description = "Review exact hosts, normalized path prefixes, read methods, item limits, retention, and the durable reason. Registration does not activate authority."
+		owner = "Immutable version · credential-free"
+	case modeSourcePolicyActivate:
+		title = "Activate source policy"
+		description = "Activate one reviewed immutable version using the current lifecycle revision."
+		owner = "Explicit approval · CAS protected"
+	case modeSourcePolicyRevoke:
+		title = "Revoke source policy"
+		description = "Immediately remove network authority while preserving versions and audit history."
+		owner = "Fail closed · CAS protected"
 	case modeRequestAccept:
 		title = "Accept collaboration request"
 		description = "Accept this exact revision and create traceable child work for the recipient."
@@ -1146,6 +1167,19 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 			}
 		}
 		lines = append(lines, "", mutedStyle.Render(ownerLabel+" Skill authority"))
+		actions := []string{}
+		if m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
+			actions = append(actions, "P register policy")
+		}
+		if m.sourcePolicyCapability.Supports(kernelapi.OperationActivate) {
+			actions = append(actions, "Y activate")
+		}
+		if m.sourcePolicyCapability.Supports(kernelapi.OperationRevoke) {
+			actions = append(actions, "X revoke")
+		}
+		if len(actions) > 0 {
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")), "")
+		}
 	}
 	if !m.skillBindingCapability.Available {
 		lines = append(lines, mutedStyle.Render("Binding management is not advertised for this owner."))

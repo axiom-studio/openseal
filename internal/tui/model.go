@@ -111,6 +111,9 @@ const (
 	modeSkillRemove
 	modeSkillBindingUpsert
 	modeSkillBindingDisable
+	modeSourcePolicyRegister
+	modeSourcePolicyActivate
+	modeSourcePolicyRevoke
 	modeWorkforceApprove
 	modeWorkforceReject
 	modeWorkforceApply
@@ -452,6 +455,12 @@ type skillBindingsLoaded struct {
 type sourcePoliciesLoaded struct {
 	policies []*source.Lifecycle
 	err      error
+}
+type sourcePolicyChanged struct {
+	action  string
+	version *source.PolicyVersion
+	result  *source.LifecycleResult
+	err     error
 }
 type skillBindingChanged struct {
 	binding *capability.Binding
@@ -906,6 +915,23 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err, m.sourcePolicies = nil, msg.policies
 		return m, nil
+	case sourcePolicyChanged:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Source policy change failed. The reviewed draft is preserved for retry."
+			return m, m.loadSourcePolicies()
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.result != nil && msg.result.Lifecycle != nil {
+			m.status = fmt.Sprintf("Source policy %s · %s@%s · revision %d.", msg.action, msg.result.Lifecycle.PolicyID, msg.result.Lifecycle.ActiveVersion, msg.result.Lifecycle.Revision)
+		} else if msg.version != nil && msg.version.Policy != nil {
+			m.status = fmt.Sprintf("Source policy version registered · %s@%s. Activate it separately after review.", msg.version.Policy.ID, msg.version.Policy.Version)
+		}
+		return m, m.loadSourcePolicies()
 	case skillBindingChanged:
 		m.busy = false
 		if msg.err != nil {
@@ -1416,6 +1442,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitSkillBindingUpsert()
 			case modeSkillBindingDisable:
 				return m, m.submitSkillBindingDisable()
+			case modeSourcePolicyRegister:
+				return m, m.submitSourcePolicyRegister()
+			case modeSourcePolicyActivate:
+				return m, m.submitSourcePolicyActivate()
+			case modeSourcePolicyRevoke:
+				return m, m.submitSourcePolicyRevoke()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
 			case modeWorkforceRefinement:
@@ -1541,7 +1573,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadOutreach()
 			}
 		case "s":
-			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
+			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
 				m.section = sectionSkills
 				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies())
 			}
@@ -1790,6 +1822,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.groundingExpanded = !m.groundingExpanded
 					m.groundingPageSelected = 0
 				}
+			}
+		case "P":
+			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
+				m.prepareSourcePolicyComposer(modeSourcePolicyRegister, "id: public-forums\nversion: 2026-07-22\nsources: forums.example|/feeds|GET\nmax-items: 20\nretention-days: 30\napproval: source-policy-review\nreason: bounded read access")
+			}
+		case "Y":
+			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationActivate) {
+				m.prepareSourcePolicyComposer(modeSourcePolicyActivate, "policy: public-forums\nversion: 2026-07-22\nrevision: 0\nreason: reviewed and approved")
+			}
+		case "X":
+			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRevoke) {
+				m.prepareSourcePolicyComposer(modeSourcePolicyRevoke, "policy: public-forums\nrevision: 1\nreason: authority no longer required")
 			}
 		}
 		return m, nil
@@ -3045,6 +3089,123 @@ func splitNonEmpty(value string) []string {
 		}
 	}
 	return result
+}
+
+func parseSourcePolicyFields(value string) map[string]string {
+	fields := make(map[string]string)
+	for _, line := range strings.Split(value, "\n") {
+		key, raw, ok := strings.Cut(line, ":")
+		if ok && strings.TrimSpace(raw) != "" {
+			fields[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(raw)
+		}
+	}
+	return fields
+}
+
+func parseSourcePolicyRegistration(value string, scope capability.ScopeReference) (source.RegisterVersionRequest, error) {
+	fields := parseSourcePolicyFields(value)
+	maximumItems, err := strconv.Atoi(fields["max-items"])
+	if err != nil {
+		return source.RegisterVersionRequest{}, errors.New("max-items must be a positive integer")
+	}
+	retentionDays, err := strconv.Atoi(fields["retention-days"])
+	if err != nil {
+		return source.RegisterVersionRequest{}, errors.New("retention-days must be an integer")
+	}
+	policy := source.Policy{ID: fields["id"], Version: fields["version"], Enabled: true, MaximumItems: maximumItems, RetentionDays: retentionDays, ApprovalPolicy: fields["approval"]}
+	for _, rawSource := range strings.Split(fields["sources"], ";") {
+		parts := strings.Split(rawSource, "|")
+		if len(parts) != 3 {
+			return source.RegisterVersionRequest{}, errors.New("sources must use host|paths|methods; separate sources with semicolons")
+		}
+		policy.Sources = append(policy.Sources, source.PolicySource{Host: strings.TrimSpace(parts[0]), PathPrefixes: splitNonEmpty(parts[1]), Methods: splitNonEmpty(parts[2])})
+	}
+	reason := fields["reason"]
+	request := source.RegisterVersionRequest{Scope: scope, Policy: policy, ActorType: "operator", ActorID: "tui", Reason: reason}
+	if reason == "" {
+		return source.RegisterVersionRequest{}, errors.New("reason is required")
+	}
+	return request, nil
+}
+
+func parseSourcePolicyActivation(value string, scope capability.ScopeReference) (source.ActivateRequest, error) {
+	fields := parseSourcePolicyFields(value)
+	revision, err := strconv.ParseInt(fields["revision"], 10, 64)
+	if err != nil {
+		return source.ActivateRequest{}, errors.New("revision must be zero for first activation or the current lifecycle revision")
+	}
+	request := source.ActivateRequest{Scope: scope, PolicyID: fields["policy"], Version: fields["version"], ExpectedRevision: revision, ActorType: "operator", ActorID: "tui", Reason: fields["reason"]}
+	if request.PolicyID == "" || request.Version == "" || request.Reason == "" {
+		return source.ActivateRequest{}, errors.New("policy, version, revision, and reason are required")
+	}
+	return request, nil
+}
+
+func parseSourcePolicyRevocation(value string, scope capability.ScopeReference) (source.RevokeRequest, error) {
+	fields := parseSourcePolicyFields(value)
+	revision, err := strconv.ParseInt(fields["revision"], 10, 64)
+	if err != nil {
+		return source.RevokeRequest{}, errors.New("revision must be the current positive lifecycle revision")
+	}
+	request := source.RevokeRequest{Scope: scope, PolicyID: fields["policy"], ExpectedRevision: revision, ActorType: "operator", ActorID: "tui", Reason: fields["reason"]}
+	if request.PolicyID == "" || request.Reason == "" {
+		return source.RevokeRequest{}, errors.New("policy, revision, and reason are required")
+	}
+	return request, nil
+}
+
+func (m *Model) submitSourcePolicyRegister() tea.Cmd {
+	if m.busy || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
+		return nil
+	}
+	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+	request, err := parseSourcePolicyRegistration(m.editor.Value(), scope)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	request.ActorType, request.ActorID = m.config.Actor.Type, m.config.Actor.ID
+	m.busy, m.err, m.status = true, nil, "Registering immutable source policy version…"
+	return func() tea.Msg {
+		version, registerErr := m.sourcePolicyClient.RegisterSourcePolicyVersion(m.ctx, request)
+		return sourcePolicyChanged{action: "registered", version: version, err: registerErr}
+	}
+}
+
+func (m *Model) submitSourcePolicyActivate() tea.Cmd {
+	if m.busy || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationActivate) {
+		return nil
+	}
+	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+	request, err := parseSourcePolicyActivation(m.editor.Value(), scope)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	request.ActorType, request.ActorID = m.config.Actor.Type, m.config.Actor.ID
+	m.busy, m.err, m.status = true, nil, "Activating reviewed source authority…"
+	return func() tea.Msg {
+		result, activateErr := m.sourcePolicyClient.ActivateSourcePolicy(m.ctx, request.PolicyID, request)
+		return sourcePolicyChanged{action: "active", result: result, err: activateErr}
+	}
+}
+
+func (m *Model) submitSourcePolicyRevoke() tea.Cmd {
+	if m.busy || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationRevoke) {
+		return nil
+	}
+	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+	request, err := parseSourcePolicyRevocation(m.editor.Value(), scope)
+	if err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	request.ActorType, request.ActorID = m.config.Actor.Type, m.config.Actor.ID
+	m.busy, m.err, m.status = true, nil, "Revoking source authority…"
+	return func() tea.Msg {
+		result, revokeErr := m.sourcePolicyClient.RevokeSourcePolicy(m.ctx, request.PolicyID, request)
+		return sourcePolicyChanged{action: "revoked", result: result, err: revokeErr}
+	}
 }
 
 func mapsClone[K comparable, V any](input map[K]V) map[K]V {
@@ -4677,6 +4838,14 @@ func (m *Model) prepareTeamAmendmentComposer(mode editorMode, placeholder string
 	m.focusComposerEditor()
 }
 
+func (m *Model) prepareSourcePolicyComposer(mode editorMode, template string) {
+	m.mode = mode
+	m.editor.Reset()
+	m.editor.SetValue(template)
+	m.editor.Placeholder = template
+	m.focusComposerEditor()
+}
+
 func (m *Model) prepareComposerForSection() {
 	switch {
 	case m.section == sectionAuthoring && m.readyRefinement() != nil:
@@ -4703,6 +4872,8 @@ func (m *Model) prepareComposerForSection() {
 		m.focusComposerEditor()
 	case m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert):
 		m.prepareSkillBindingComposer(nil)
+	case m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRegister):
+		m.prepareSourcePolicyComposer(modeSourcePolicyRegister, "id: public-forums\nversion: 2026-07-22\nsources: forums.example|/feeds|GET\nmax-items: 20\nretention-days: 30\napproval: source-policy-review\nreason: bounded read access")
 	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -4768,9 +4939,12 @@ func (m *Model) resetComposerMode() {
 		if m.supportsSkillBinding(kernelapi.OperationUpsert) {
 			m.mode = modeSkillBindingUpsert
 			m.editor.Placeholder = "Describe the exact Skill authority…"
-		} else {
+		} else if m.supportsClawHub(clawhub.LifecycleInstall) {
 			m.mode = modeSkillInstall
 			m.editor.Placeholder = "Enter @owner/skill to install…"
+		} else if m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
+			m.mode = modeSourcePolicyRegister
+			m.editor.Placeholder = "Press P to review a source policy version template."
 		}
 		return
 	}
