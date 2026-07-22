@@ -1117,6 +1117,7 @@ const (
 	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
 	ObjectiveCadenceDaily            = runtime.ObjectiveCadenceDaily
 	ObjectiveCadenceWeekly           = runtime.ObjectiveCadenceWeekly
+	ObjectiveCadenceCron             = runtime.ObjectiveCadenceCron
 	ObjectiveScheduleBackpressured   = runtime.ObjectiveScheduleBackpressured
 	ObjectiveScheduleSuspended       = runtime.ObjectiveScheduleSuspended
 	ObjectiveScheduleBudgetExhausted = runtime.ObjectiveScheduleBudgetExhausted
