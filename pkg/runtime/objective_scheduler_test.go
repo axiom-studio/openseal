@@ -22,6 +22,26 @@ func TestObjectiveCadenceUsesExplicitTimezoneAndValidates(t *testing.T) {
 	if err := (&ObjectiveCadence{Type: ObjectiveCadenceWeekly, DayOfWeek: "noday"}).Validate(); err == nil {
 		t.Fatal("expected invalid weekday to fail")
 	}
+	if err := (&ObjectiveCadence{Type: ObjectiveCadenceCron, CronExpression: "*/5 * * * * *"}).Validate(); err != nil {
+		t.Fatalf("validate six-field cron cadence: %v", err)
+	}
+	if err := (&ObjectiveCadence{Type: ObjectiveCadenceCron, CronExpression: "*/5 * * * *"}).Validate(); err == nil {
+		t.Fatal("expected five-field cron cadence to fail closed")
+	}
+}
+
+func TestObjectiveCadenceCronNextUsesConfiguredTimezone(t *testing.T) {
+	cadence := &ObjectiveCadence{
+		Type: ObjectiveCadenceCron, CronExpression: "0 30 9 * * *", Timezone: "America/New_York",
+	}
+	next, err := cadence.Next(time.Date(2026, time.January, 2, 14, 30, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("next cron cadence: %v", err)
+	}
+	want := time.Date(2026, time.January, 3, 14, 30, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Fatalf("next = %s, want %s", next, want)
+	}
 }
 
 func TestObjectiveCadenceCapabilityRequiresBudgetForBothDurablePhases(t *testing.T) {
