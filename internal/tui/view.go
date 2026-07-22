@@ -1079,6 +1079,16 @@ func (m *Model) renderInitiativesContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("Selected"), compact(initiative.Purpose, max(width-8, 24)))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(initiative.ObjectiveRefs), len(initiative.Milestones), len(initiative.SourceMonitors), len(initiative.Deliverables))))
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", initiative.Revision, relativeTime(initiative.UpdatedAt))))
+		if activityErr := m.initiativeActivityErrors[initiative.ID]; activityErr != nil {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact("Activity unavailable · "+activityErr.Error(), max(width-6, 24))))
+		} else if activity := m.initiativeActivity[initiative.ID]; len(activity) > 0 {
+			lines = append(lines, "", mutedStyle.Render("Recent activity"))
+			for _, item := range activity[:min(3, len(activity))] {
+				lines = append(lines, compact(fmt.Sprintf("%s · %s · %s", strings.ReplaceAll(item.EventType, "_", " "), item.Summary, relativeTime(item.CreatedAt)), max(width-6, 24)))
+			}
+		} else if m.activityCapability.Supports(kernelapi.OperationList) {
+			lines = append(lines, "", mutedStyle.Render("No durable activity recorded for this Initiative."))
+		}
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		if len(initiative.SourceMonitors) > 0 {

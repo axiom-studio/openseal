@@ -24,6 +24,7 @@ type ActivityFeedRequest struct {
 	RunID          string
 	AgentID        string
 	ObjectiveID    string
+	InitiativeID   string
 	TeamID         string
 	EventTypes     []string
 	Severities     []ActivitySeverity
@@ -78,8 +79,9 @@ func (s *RunActivityService) ListActivityFeed(ctx context.Context, request Activ
 		return nil, err
 	}
 	if strings.TrimSpace(request.RunID) == "" && strings.TrimSpace(request.AgentID) == "" &&
-		strings.TrimSpace(request.ObjectiveID) == "" && strings.TrimSpace(request.TeamID) == "" {
-		return nil, errors.New("an activity run, agent, objective, or team selector is required")
+		strings.TrimSpace(request.ObjectiveID) == "" && strings.TrimSpace(request.InitiativeID) == "" &&
+		strings.TrimSpace(request.TeamID) == "" {
+		return nil, errors.New("an activity run, agent, objective, initiative, or team selector is required")
 	}
 	limit := request.Limit
 	if limit <= 0 {
@@ -99,7 +101,7 @@ func (s *RunActivityService) ListActivityFeed(ctx context.Context, request Activ
 		beforeID = cursor.ID
 	}
 	events, err := s.activity.ListActivity(ctx, ActivityFilter{
-		Scope: request.Scope, RunID: request.RunID, AgentID: request.AgentID, ObjectiveID: request.ObjectiveID,
+		Scope: request.Scope, RunID: request.RunID, AgentID: request.AgentID, ObjectiveID: request.ObjectiveID, InitiativeID: request.InitiativeID,
 		TeamID: request.TeamID, EventTypes: request.EventTypes, Severities: request.Severities,
 		Visibilities: request.Visibilities, BeforeCreatedAt: before, BeforeID: beforeID,
 		Descending: true, Limit: limit + 1,
@@ -176,6 +178,7 @@ func matchesActivityFilter(event *ActivityEvent, filter ActivityFilter) bool {
 	if event == nil || event.Scope != filter.Scope || filter.RunID != "" && event.RunID != filter.RunID ||
 		len(filter.RunIDs) > 0 && !activityStringAllowed(event.RunID, filter.RunIDs) ||
 		filter.AgentID != "" && event.AgentID != filter.AgentID || filter.ObjectiveID != "" && event.ObjectiveID != filter.ObjectiveID ||
+		filter.InitiativeID != "" && event.InitiativeID != filter.InitiativeID ||
 		filter.TeamID != "" && event.TeamID != filter.TeamID || !activityStringAllowed(event.EventType, filter.EventTypes) ||
 		!activitySeverityAllowed(event.Severity, filter.Severities) || !activityVisibilityAllowed(event.Visibility, filter.Visibilities) {
 		return false

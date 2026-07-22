@@ -705,6 +705,8 @@ func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
 		selector = "team:" + request.TeamID
 	} else if request.ObjectiveID != "" {
 		selector = "objective:" + request.ObjectiveID
+	} else if request.InitiativeID != "" {
+		selector = "initiative:" + request.InitiativeID
 	} else if request.RunID != "" {
 		selector = "run:" + request.RunID
 	}
@@ -1994,7 +1996,9 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 			Summary: "Operators want simpler upgrades", SourceURI: "https://www.reddit.com/r/kubernetes/comments/example",
 			ArtifactRef: &runtime.ResourceReference{Kind: runtime.ResourceKindArtifact, ID: "captured-thread", Revision: 2},
 		}}},
-		activityPages: map[string]*runtime.ActivityFeedPage{"run-live-123": {Items: []runtime.ActivityProjection{{
+		activityPages: map[string]*runtime.ActivityFeedPage{"initiative:" + initiative.ID: {Items: []runtime.ActivityProjection{{
+			ID: "initiative-progress-1", EventType: "artifact.created", InitiativeID: initiative.ID, Summary: "Weekly research brief produced", CreatedAt: time.Now().Add(-30 * time.Second),
+		}}}, "run-live-123": {Items: []runtime.ActivityProjection{{
 			ID: "source-policy-call-1", EventType: "source_policy.authorized", InitiativeID: initiative.ID, RunID: "run-live-123", CreatedAt: time.Now().Add(-2 * time.Minute),
 			Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "policyId": "public-reddit-research", "policyVersion": "2026-07-13", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": float64(5)},
 		}}}},
@@ -2003,21 +2007,26 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 	applyCommand(t, model, model.loadCapabilities())
 	model.section = sectionInitiatives
 	view := model.View()
-	for _, expected := range []string{"reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "Next evaluation", "Schedule backpressured", "Maximum concurrent Runs are", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
+	for _, expected := range []string{"Recent activity", "Weekly research brief produced", "reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "Next evaluation", "Schedule backpressured", "Maximum concurrent Runs are", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
 		}
 	}
-	var policyRequest *runtime.ActivityFeedRequest
+	var policyRequest, initiativeRequest *runtime.ActivityFeedRequest
 	for index := range fake.activityRequests {
 		request := &fake.activityRequests[index]
 		if request.RunID == "run-live-123" {
 			policyRequest = request
-			break
+		}
+		if request.InitiativeID == initiative.ID {
+			initiativeRequest = request
 		}
 	}
 	if policyRequest == nil || !policyRequest.IncludeDetails || len(policyRequest.EventTypes) != 1 || policyRequest.EventTypes[0] != "source_policy.authorized" {
 		t.Fatalf("activity requests=%#v", fake.activityRequests)
+	}
+	if initiativeRequest == nil || initiativeRequest.Limit != 5 || initiativeRequest.IncludeDetails {
+		t.Fatalf("initiative activity request=%#v", initiativeRequest)
 	}
 }
 

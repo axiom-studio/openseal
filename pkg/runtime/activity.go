@@ -118,6 +118,7 @@ type ActivityFilter struct {
 	RunIDs          []string
 	AgentID         string
 	ObjectiveID     string
+	InitiativeID    string
 	TeamID          string
 	EventTypes      []string
 	Severities      []ActivitySeverity

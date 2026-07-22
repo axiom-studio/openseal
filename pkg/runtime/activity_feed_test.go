@@ -84,6 +84,16 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 			if len(next.Items) != 1 || next.Items[0].ID != "event-a" || next.Items[0].InitiativeID != "initiative-one" || next.Items[0].Payload["evidence"] != "artifact://one" || next.HasMore {
 				t.Fatalf("detail page = %#v", next)
 			}
+
+			initiativePage, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
+				Scope: scope, InitiativeID: "initiative-one", Limit: 10, IncludeDetails: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(initiativePage.Items) != 1 || initiativePage.Items[0].ID != "event-a" || initiativePage.Items[0].Payload["evidence"] != "artifact://one" {
+				t.Fatalf("initiative page = %#v", initiativePage)
+			}
 		})
 	}
 }

@@ -842,7 +842,7 @@ func (c *KernelHTTPClient) DeliverOutreachMessage(ctx context.Context, initiativ
 func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	query := scopeQuery(request.Scope)
 	for _, item := range []struct{ key, value string }{
-		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
+		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"initiativeId", request.InitiativeID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
 	} {
 		if value := strings.TrimSpace(item.value); value != "" {
 			query.Set(item.key, value)
