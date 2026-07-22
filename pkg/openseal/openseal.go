@@ -666,6 +666,8 @@ type (
 	KernelSkillActionList                 = kernelapi.SkillActionList
 	KernelSkillBindingList                = kernelapi.SkillBindingList
 	KernelSkillBindingMutationResult      = kernelapi.SkillBindingMutationResult
+	ReconcileObjectiveSchedulesRequest    = kernelapi.ReconcileObjectiveSchedulesRequest
+	ObjectiveScheduleReconciliation       = kernelapi.ObjectiveScheduleReconciliation
 	KernelTeamDeploymentList              = kernelapi.TeamDeploymentList
 	KernelTeamDeploymentCatalogEntry      = kernelapi.TeamDeploymentCatalogEntry
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
@@ -697,6 +699,8 @@ const (
 	SkillBindingsCapabilityVersion          = kernelapi.SkillBindingsCapabilityVersion
 	EventRoutingCapabilityID                = kernelapi.EventRoutingCapabilityID
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
+	ObjectiveSchedulesCapabilityID          = kernelapi.ObjectiveSchedulesCapabilityID
+	ObjectiveSchedulesCapabilityVersion     = kernelapi.ObjectiveSchedulesCapabilityVersion
 	KernelOperationList                     = kernelapi.OperationList
 	KernelOperationGet                      = kernelapi.OperationGet
 	KernelOperationUpdate                   = kernelapi.OperationUpdate
@@ -714,6 +718,7 @@ const (
 	KernelOperationResolveAmendment         = kernelapi.OperationResolveAmendment
 	KernelOperationActivateAmendment        = kernelapi.OperationActivateAmendment
 	KernelOperationRoute                    = kernelapi.OperationRoute
+	KernelOperationReconcile                = kernelapi.OperationReconcile
 	KernelOperationUpsert                   = kernelapi.OperationUpsert
 	KernelOperationDisable                  = kernelapi.OperationDisable
 	ChannelOperationCreate                  = kernelapi.OperationCreate
@@ -784,6 +789,10 @@ func AgentRunsCapability() KernelCapability {
 
 func ObjectivesCapability() KernelCapability {
 	return kernelapi.ObjectivesCapability()
+}
+
+func ObjectiveSchedulesCapability() KernelCapability {
+	return kernelapi.ObjectiveSchedulesCapability()
 }
 
 func EventRoutingCapability() KernelCapability {

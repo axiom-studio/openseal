@@ -24,6 +24,17 @@ func TestPublicFacadeExposesObjectiveScheduleConditions(t *testing.T) {
 	}
 }
 
+func TestPublicFacadeExposesObjectiveScheduleReconciliation(t *testing.T) {
+	capability := ObjectiveSchedulesCapability()
+	if capability.ID != ObjectiveSchedulesCapabilityID || capability.Version != ObjectiveSchedulesCapabilityVersion || !capability.Supports(KernelOperationReconcile) {
+		t.Fatalf("objective schedule capability = %#v", capability)
+	}
+	request := ReconcileObjectiveSchedulesRequest{Scope: Scope{Kind: "tenant", ID: "operations"}, Limit: 50}
+	if request.Scope.ID != "operations" || request.Limit != 50 {
+		t.Fatalf("objective schedule request = %#v", request)
+	}
+}
+
 func TestPublicFacadeDecodesObjectiveEventRulesForHostConnectors(t *testing.T) {
 	rules, err := DecodeObjectiveEventRules(map[string]interface{}{
 		"version": "1",
