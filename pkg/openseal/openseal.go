@@ -64,6 +64,9 @@ type (
 	RunbookTurnRunner        = runtime.RunbookTurnRunner
 
 	AgentDefinition                           = kernelagent.AgentDefinition
+	AgentManifest                             = kernelagent.Manifest
+	AgentManifestMetadata                     = kernelagent.ManifestMetadata
+	AgentManifestSpec                         = kernelagent.ManifestSpec
 	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
 	AgentCompilationSource                    = kernelagent.CompilationSource
 	AgentCompilationDiagnostic                = kernelagent.CompilationDiagnostic
@@ -624,11 +627,17 @@ type (
 )
 
 const (
+	AgentManifestAPIVersion             = kernelagent.ManifestAPIVersion
+	AgentManifestKind                   = kernelagent.ManifestKind
 	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
 	ClawHubCompilationPreviewAPIVersion = clawhub.CompilationPreviewAPIVersion
 	ActionCredentialLeaseVersion        = runtime.ActionCredentialLeaseVersion
 	MaximumActionCredentialLeaseTTL     = runtime.MaximumActionCredentialLeaseTTL
 )
+
+func CompileAgentManifest(manifest *AgentManifest, definitionID string, provenance AgentDefinitionProvenance) (*AgentDefinition, error) {
+	return kernelagent.CompileManifest(manifest, definitionID, provenance)
+}
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
