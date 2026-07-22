@@ -482,7 +482,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		leaseOwner = workerID
 	}
 	turnUsageDelta := budgetUsageForTurn(turn.Usage)
-	if turn.Status == AgentTurnStatusCanceled {
+	if turn.Status == AgentTurnStatusCanceled && turn.Usage == (TurnUsage{}) {
 		turnUsageDelta.Turns = 0
 	}
 	var activityUsageDelta *BudgetUsage

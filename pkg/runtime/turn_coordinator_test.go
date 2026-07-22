@@ -358,6 +358,9 @@ func TestTurnCoordinatorCancelsAtDurableDurationCeiling(t *testing.T) {
 		result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.DurationMS < 15 || result.Event == nil || result.Event.EventType != "budget.exhausted" {
 		t.Fatalf("duration result = %#v", result)
 	}
+	if result.Event.UsageDelta == nil || result.Event.UsageDelta.Turns != 1 || result.Event.UsageDelta.DurationMS < 15 {
+		t.Fatalf("duration activity usage = %#v", result.Event.UsageDelta)
+	}
 	if result.Run.Error != "" || result.Turn.Status != AgentTurnStatusCanceled {
 		t.Fatalf("duration ceiling masqueraded as failure: run=%#v turn=%#v", result.Run, result.Turn)
 	}
