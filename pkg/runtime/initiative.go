@@ -564,6 +564,9 @@ func (s *InitiativeService) validateObjectives(ctx context.Context, i *Initiativ
 			}
 			return fmt.Errorf("initiative objective %s: %w", id, err)
 		}
+		if objective.Owner != i.Owner {
+			return fmt.Errorf("initiative objective %s owner must match Initiative owner", id)
+		}
 	}
 	return nil
 }
