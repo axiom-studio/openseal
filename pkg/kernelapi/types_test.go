@@ -197,7 +197,7 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	if capability.Supports("delete") {
 		t.Fatalf("unsupported Team definition operation advertised: %#v", capability.Operations)
 	}
-	if capability.Version != "2" || capability.Supports(OperationProposeAmendment) {
+	if capability.Version != "3" || capability.Supports(OperationProposeAmendment) || capability.Supports(OperationRecoverParticipation) {
 		t.Fatalf("portable Team definition capability = %#v", capability)
 	}
 	amendments := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{Amendments: true})
@@ -205,6 +205,10 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 		if !amendments.Supports(operation) {
 			t.Fatalf("configured Team amendment operation %q not advertised: %#v", operation, amendments.Operations)
 		}
+	}
+	recovery := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{ParticipationRecovery: true})
+	if !recovery.Supports(OperationRecoverParticipation) {
+		t.Fatalf("configured Team recovery operation not advertised: %#v", recovery.Operations)
 	}
 }
 

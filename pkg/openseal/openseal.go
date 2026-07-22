@@ -124,6 +124,8 @@ type (
 	ProposeTeamAmendmentRequest               = kernelteam.ProposeAmendmentRequest
 	SubmitTeamAmendmentEvaluationRequest      = kernelteam.SubmitAmendmentEvaluationRequest
 	ResolveTeamAmendmentRequest               = kernelteam.ResolveAmendmentRequest
+	RecoverTeamParticipationRequest           = kernelteam.RecoverParticipationRequest
+	TeamParticipationRecoveryResult           = kernelteam.ParticipationRecoveryResult
 	TeamRegistryStore                         = kernelteam.Store
 	AuthorityProgressionOwnerKind             = progression.OwnerKind
 	AuthorityProgressionDirection             = progression.Direction
@@ -733,6 +735,7 @@ const (
 	KernelOperationEvaluateAmendment        = kernelapi.OperationEvaluateAmendment
 	KernelOperationResolveAmendment         = kernelapi.OperationResolveAmendment
 	KernelOperationActivateAmendment        = kernelapi.OperationActivateAmendment
+	KernelOperationRecoverParticipation     = kernelapi.OperationRecoverParticipation
 	KernelOperationRoute                    = kernelapi.OperationRoute
 	KernelOperationReconcile                = kernelapi.OperationReconcile
 	KernelOperationUpsert                   = kernelapi.OperationUpsert
@@ -956,70 +959,71 @@ type PersistentKernelStore interface {
 var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
 
 var (
-	ErrRunNotFound                         = runtime.ErrRunNotFound
-	ErrRevisionConflict                    = runtime.ErrRevisionConflict
-	ErrInvalidRunTransition                = runtime.ErrInvalidRunTransition
-	ErrRunIdempotency                      = runtime.ErrRunIdempotency
-	ErrInvalidAgentRun                     = runtime.ErrInvalidAgentRun
-	ErrInvalidRunCommand                   = runtime.ErrInvalidRunCommand
-	ErrInvalidScope                        = runtime.ErrInvalidScope
-	ErrSourceObservationNotFound           = runtime.ErrSourceObservationNotFound
-	ErrSourceObservationConflict           = runtime.ErrSourceObservationConflict
-	ErrSourceMonitorCheckpoint             = runtime.ErrSourceMonitorCheckpoint
-	ErrInvalidSourceObservation            = runtime.ErrInvalidSourceObservation
-	ErrEventSourceCheckpointConflict       = runtime.ErrEventSourceCheckpointConflict
-	ErrInvalidEventSourceCheckpoint        = runtime.ErrInvalidEventSourceCheckpoint
-	ErrInvalidOwner                        = runtime.ErrInvalidOwner
-	ErrInitiativeNotFound                  = runtime.ErrInitiativeNotFound
-	ErrInitiativeConflict                  = runtime.ErrInitiativeConflict
-	ErrInitiativeIdempotency               = runtime.ErrInitiativeIdempotency
-	ErrInitiativeNoChanges                 = runtime.ErrInitiativeNoChanges
-	ErrInvalidInitiative                   = runtime.ErrInvalidInitiative
-	ErrObjectiveNotFound                   = runtime.ErrObjectiveNotFound
-	ErrObjectiveIdempotency                = runtime.ErrObjectiveIdempotency
-	ErrInvalidObjectiveTransition          = runtime.ErrInvalidObjectiveTransition
-	ErrBudgetExhausted                     = runtime.ErrBudgetExhausted
-	ErrTurnNotFound                        = runtime.ErrTurnNotFound
-	ErrActionNotFound                      = runtime.ErrActionNotFound
-	ErrApprovalNotFound                    = runtime.ErrApprovalNotFound
-	ErrApprovalResolved                    = runtime.ErrApprovalResolved
-	ErrActionIdempotencyConflict           = runtime.ErrIdempotencyConflict
-	ErrActionCredentialLeaseInvalid        = runtime.ErrActionCredentialLeaseInvalid
-	ErrActionCredentialLeaseExpired        = runtime.ErrActionCredentialLeaseExpired
-	ErrActionCredentialLeaseMismatch       = runtime.ErrActionCredentialLeaseMismatch
-	ErrActionCredentialLeaseReplay         = runtime.ErrActionCredentialLeaseReplay
-	ErrAgentRequestNotFound                = runtime.ErrAgentRequestNotFound
-	ErrInvalidAgentRequestState            = runtime.ErrInvalidAgentRequestState
-	ErrAgentRequestUnauthorized            = runtime.ErrAgentRequestUnauthorized
-	ErrAgentRequestAssignment              = runtime.ErrAgentRequestAssignment
-	ErrAgentRequestIdempotency             = runtime.ErrAgentRequestIdempotency
-	ErrUnsafeSharedContext                 = runtime.ErrUnsafeSharedContext
-	ErrInvalidArtifact                     = runtime.ErrInvalidArtifact
-	ErrArtifactNotFound                    = runtime.ErrArtifactNotFound
-	ErrArtifactImmutable                   = runtime.ErrArtifactImmutable
-	ErrArtifactVersionConflict             = runtime.ErrArtifactVersionConflict
-	ErrInvalidArtifactRecord               = runtime.ErrInvalidArtifactRecord
-	ErrRunDependencyNotFound               = runtime.ErrRunDependencyNotFound
-	ErrDependencyGroupNotFound             = runtime.ErrDependencyGroupNotFound
-	ErrInvalidRunDependency                = runtime.ErrInvalidRunDependency
-	ErrDependencyConflict                  = runtime.ErrDependencyConflict
-	ErrConversationNotFound                = runtime.ErrConversationNotFound
-	ErrChannelMessageNotFound              = runtime.ErrChannelMessageNotFound
-	ErrParticipationRoundNotFound          = runtime.ErrParticipationRoundNotFound
-	ErrInvalidConversation                 = runtime.ErrInvalidConversation
-	ErrMessageConflict                     = runtime.ErrMessageConflict
-	ErrConversationCursorConflict          = runtime.ErrConversationCursorConflict
-	ErrConversationPresenceConflict        = runtime.ErrConversationPresenceConflict
-	ErrConversationCoordinationUnavailable = runtime.ErrConversationCoordinationUnavailable
-	ErrNoConversationParticipants          = runtime.ErrNoConversationParticipants
-	ErrAgentDefinitionNotFound             = kernelagent.ErrDefinitionNotFound
-	ErrAgentDeploymentNotFound             = kernelagent.ErrDeploymentNotFound
-	ErrAgentAmendmentNotFound              = kernelagent.ErrAmendmentNotFound
-	ErrAgentDeploymentRevisionConflict     = kernelagent.ErrRevisionConflict
-	ErrTeamDefinitionNotFound              = kernelteam.ErrDefinitionNotFound
-	ErrTeamDeploymentNotFound              = kernelteam.ErrDeploymentNotFound
-	ErrTeamDeploymentRevisionConflict      = kernelteam.ErrRevisionConflict
-	ErrTeamAmendmentNotFound               = kernelteam.ErrAmendmentNotFound
+	ErrRunNotFound                          = runtime.ErrRunNotFound
+	ErrRevisionConflict                     = runtime.ErrRevisionConflict
+	ErrInvalidRunTransition                 = runtime.ErrInvalidRunTransition
+	ErrRunIdempotency                       = runtime.ErrRunIdempotency
+	ErrInvalidAgentRun                      = runtime.ErrInvalidAgentRun
+	ErrInvalidRunCommand                    = runtime.ErrInvalidRunCommand
+	ErrInvalidScope                         = runtime.ErrInvalidScope
+	ErrSourceObservationNotFound            = runtime.ErrSourceObservationNotFound
+	ErrSourceObservationConflict            = runtime.ErrSourceObservationConflict
+	ErrSourceMonitorCheckpoint              = runtime.ErrSourceMonitorCheckpoint
+	ErrInvalidSourceObservation             = runtime.ErrInvalidSourceObservation
+	ErrEventSourceCheckpointConflict        = runtime.ErrEventSourceCheckpointConflict
+	ErrInvalidEventSourceCheckpoint         = runtime.ErrInvalidEventSourceCheckpoint
+	ErrInvalidOwner                         = runtime.ErrInvalidOwner
+	ErrInitiativeNotFound                   = runtime.ErrInitiativeNotFound
+	ErrInitiativeConflict                   = runtime.ErrInitiativeConflict
+	ErrInitiativeIdempotency                = runtime.ErrInitiativeIdempotency
+	ErrInitiativeNoChanges                  = runtime.ErrInitiativeNoChanges
+	ErrInvalidInitiative                    = runtime.ErrInvalidInitiative
+	ErrObjectiveNotFound                    = runtime.ErrObjectiveNotFound
+	ErrObjectiveIdempotency                 = runtime.ErrObjectiveIdempotency
+	ErrInvalidObjectiveTransition           = runtime.ErrInvalidObjectiveTransition
+	ErrBudgetExhausted                      = runtime.ErrBudgetExhausted
+	ErrTurnNotFound                         = runtime.ErrTurnNotFound
+	ErrActionNotFound                       = runtime.ErrActionNotFound
+	ErrApprovalNotFound                     = runtime.ErrApprovalNotFound
+	ErrApprovalResolved                     = runtime.ErrApprovalResolved
+	ErrActionIdempotencyConflict            = runtime.ErrIdempotencyConflict
+	ErrActionCredentialLeaseInvalid         = runtime.ErrActionCredentialLeaseInvalid
+	ErrActionCredentialLeaseExpired         = runtime.ErrActionCredentialLeaseExpired
+	ErrActionCredentialLeaseMismatch        = runtime.ErrActionCredentialLeaseMismatch
+	ErrActionCredentialLeaseReplay          = runtime.ErrActionCredentialLeaseReplay
+	ErrAgentRequestNotFound                 = runtime.ErrAgentRequestNotFound
+	ErrInvalidAgentRequestState             = runtime.ErrInvalidAgentRequestState
+	ErrAgentRequestUnauthorized             = runtime.ErrAgentRequestUnauthorized
+	ErrAgentRequestAssignment               = runtime.ErrAgentRequestAssignment
+	ErrAgentRequestIdempotency              = runtime.ErrAgentRequestIdempotency
+	ErrUnsafeSharedContext                  = runtime.ErrUnsafeSharedContext
+	ErrInvalidArtifact                      = runtime.ErrInvalidArtifact
+	ErrArtifactNotFound                     = runtime.ErrArtifactNotFound
+	ErrArtifactImmutable                    = runtime.ErrArtifactImmutable
+	ErrArtifactVersionConflict              = runtime.ErrArtifactVersionConflict
+	ErrInvalidArtifactRecord                = runtime.ErrInvalidArtifactRecord
+	ErrRunDependencyNotFound                = runtime.ErrRunDependencyNotFound
+	ErrDependencyGroupNotFound              = runtime.ErrDependencyGroupNotFound
+	ErrInvalidRunDependency                 = runtime.ErrInvalidRunDependency
+	ErrDependencyConflict                   = runtime.ErrDependencyConflict
+	ErrConversationNotFound                 = runtime.ErrConversationNotFound
+	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
+	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
+	ErrInvalidConversation                  = runtime.ErrInvalidConversation
+	ErrMessageConflict                      = runtime.ErrMessageConflict
+	ErrConversationCursorConflict           = runtime.ErrConversationCursorConflict
+	ErrConversationPresenceConflict         = runtime.ErrConversationPresenceConflict
+	ErrConversationCoordinationUnavailable  = runtime.ErrConversationCoordinationUnavailable
+	ErrNoConversationParticipants           = runtime.ErrNoConversationParticipants
+	ErrAgentDefinitionNotFound              = kernelagent.ErrDefinitionNotFound
+	ErrAgentDeploymentNotFound              = kernelagent.ErrDeploymentNotFound
+	ErrAgentAmendmentNotFound               = kernelagent.ErrAmendmentNotFound
+	ErrAgentDeploymentRevisionConflict      = kernelagent.ErrRevisionConflict
+	ErrTeamDefinitionNotFound               = kernelteam.ErrDefinitionNotFound
+	ErrTeamDeploymentNotFound               = kernelteam.ErrDeploymentNotFound
+	ErrTeamDeploymentRevisionConflict       = kernelteam.ErrRevisionConflict
+	ErrTeamAmendmentNotFound                = kernelteam.ErrAmendmentNotFound
+	ErrTeamParticipationRecoveryNotRequired = kernelteam.ErrParticipationRecoveryNotRequired
 )
 
 var (
@@ -3705,6 +3709,10 @@ func (e *Engine) ResolveTeamDefinitionAmendment(ctx context.Context, request ker
 
 func (e *Engine) ActivateTeamDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelteam.DefinitionAmendment, *kernelteam.Deployment, *workforce.DefinitionActivation, error) {
 	return e.teams.ActivateAmendment(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason)
+}
+
+func (e *Engine) RecoverTeamParticipation(ctx context.Context, request kernelteam.RecoverParticipationRequest) (*kernelteam.ParticipationRecoveryResult, error) {
+	return e.teams.RecoverParticipation(ctx, request)
 }
 
 // RecommendTeamAuthority is the Team peer of RecommendAgentAuthority and uses
