@@ -30,14 +30,17 @@ type ConversationChangeRequest struct {
 
 // ConversationChangeSet is a portable, transport-neutral projection for
 // reconnect-safe channel observation. Messages and rounds are durable deltas;
-// Runs and leased presence are authoritative current projections when their
-// digest changes. Consumers merge by stable identity and revision.
+// Runs, summary-first Activity projections, and leased presence are
+// authoritative current projections when their digest changes. Consumers
+// merge by stable identity and revision. Raw Activity payloads never travel on
+// the reconnecting channel stream; detail remains available from the bounded
+// canonical Activity feed.
 type ConversationChangeSet struct {
 	Conversation    *Conversation               `json:"conversation"`
 	Messages        []*ChannelMessage           `json:"messages"`
 	Rounds          []*ParticipationRoundResult `json:"rounds"`
 	Runs            []*AgentRun                 `json:"runs"`
-	Activity        []*ActivityEvent            `json:"activity"`
+	Activity        []ActivityProjection        `json:"activity"`
 	Presence        []*ConversationPresence     `json:"presence"`
 	RunsChanged     bool                        `json:"runsChanged"`
 	ActivityChanged bool                        `json:"activityChanged"`
@@ -155,7 +158,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	activityChanged := initial || activityDigest != cursor.ActivityDigest
 	projectedActivity := activity
 	if !activityChanged {
-		projectedActivity = []*ActivityEvent{}
+		projectedActivity = []ActivityProjection{}
 	}
 
 	activeAt := req.ActiveAt
@@ -303,16 +306,16 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	return result, nil
 }
 
-func (s *ConversationChangeService) listConversationActivity(ctx context.Context, runs []*AgentRun) ([]*ActivityEvent, error) {
+func (s *ConversationChangeService) listConversationActivity(ctx context.Context, runs []*AgentRun) ([]ActivityProjection, error) {
 	if s.activity == nil {
-		return []*ActivityEvent{}, nil
+		return []ActivityProjection{}, nil
 	}
 	runIDs := make([]string, 0, len(runs))
 	for _, run := range runs {
 		runIDs = append(runIDs, run.ID)
 	}
 	if len(runIDs) == 0 {
-		return []*ActivityEvent{}, nil
+		return []ActivityProjection{}, nil
 	}
 	byID := make(map[string]*ActivityEvent)
 	for start := 0; start < len(runIDs); start += conversationActivityRunBatchSize {
@@ -343,10 +346,14 @@ func (s *ConversationChangeService) listConversationActivity(ctx context.Context
 	if len(result) > conversationRunProjectionLimit {
 		result = result[:conversationRunProjectionLimit]
 	}
-	return result, nil
+	projected := make([]ActivityProjection, 0, len(result))
+	for _, event := range result {
+		projected = append(projected, projectActivityEvent(event, false))
+	}
+	return projected, nil
 }
 
-func conversationActivityProjectionDigest(events []*ActivityEvent) (string, error) {
+func conversationActivityProjectionDigest(events []ActivityProjection) (string, error) {
 	values := make([]struct {
 		ID       string `json:"id"`
 		Sequence int64  `json:"sequence"`
@@ -364,11 +371,9 @@ func conversationActivityProjectionDigest(events []*ActivityEvent) (string, erro
 	return hashBytes(encoded), nil
 }
 
-func cloneConversationActivity(events []*ActivityEvent) []*ActivityEvent {
-	result := make([]*ActivityEvent, 0, len(events))
-	for _, event := range events {
-		result = append(result, cloneActivityEvent(event))
-	}
+func cloneConversationActivity(events []ActivityProjection) []ActivityProjection {
+	result := make([]ActivityProjection, len(events))
+	copy(result, events)
 	return result
 }
 
