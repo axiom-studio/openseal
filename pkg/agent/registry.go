@@ -254,7 +254,8 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	if current.Revision != expectedRevision {
 		return nil, nil, ErrRevisionConflict
 	}
-	if current.ActiveVersion == version {
+	sameVersion := current.ActiveVersion == version
+	if sameVersion && current.RolloutStatus == RolloutActive {
 		return nil, nil, errors.New("agent deployment already uses the requested definition version")
 	}
 	definition, err := r.store.GetDefinition(ctx, current.DefinitionID, version)
@@ -262,8 +263,13 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 		return nil, nil, err
 	}
 	updated := cloneDeployment(current)
-	updated.PreviousVersion = current.ActiveVersion
+	if !sameVersion {
+		updated.PreviousVersion = current.ActiveVersion
+	}
 	updated.ActiveVersion = version
+	if err := validateRolloutTransition(current.RolloutStatus, RolloutActive); err != nil {
+		return nil, nil, err
+	}
 	updated.RolloutStatus = RolloutActive
 	updated.Revision++
 	updated.UpdatedAt = r.now().UTC()
