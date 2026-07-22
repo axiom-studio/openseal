@@ -31,8 +31,8 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			request := ImportConversationArchiveRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 				Title:          "Imported launch history",
-				Source:         ConversationArchiveSource{System: "cortex", ResourceType: "team-chat", ResourceID: "conversation-42"},
-				IdempotencyKey: "cortex-team-chat-conversation-42",
+				Source:         ConversationArchiveSource{System: "legacy-system", ResourceType: "team-chat", ResourceID: "conversation-42"},
+				IdempotencyKey: "legacy-system-team-chat-conversation-42",
 				Messages: []ConversationArchiveMessage{
 					{
 						RecordID: "message-1", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
@@ -53,7 +53,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			first, err := service.ImportArchive(ctx, partial)
 			if err != nil || first.ImportedMessages != 1 || first.ReplayedMessages != 0 || first.Replayed ||
 				!first.Conversation.CreatedAt.Equal(start) || first.Conversation.Origin == nil ||
-				first.Conversation.Origin.ID != "cortex:team-chat:conversation-42" {
+				first.Conversation.Origin.ID != "legacy-system:team-chat:conversation-42" {
 				t.Fatalf("partial import = %#v, %v", first, err)
 			}
 			resumed, err := service.ImportArchive(ctx, request)
@@ -66,7 +66,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 				answer.ReplyToMessageID != resumed.Messages[0].ID ||
 				answer.ThreadRootID != resumed.Messages[0].ID || len(answer.References) != 1 ||
 				answer.References[0].Kind != ConversationReferenceExternalSource ||
-				answer.References[0].ID != "cortex:team-chat:conversation-42:message-2" {
+				answer.References[0].ID != "legacy-system:team-chat:conversation-42:message-2" {
 				t.Fatalf("imported answer = %#v", answer)
 			}
 

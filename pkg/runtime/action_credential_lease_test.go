@@ -214,7 +214,7 @@ func TestActionCredentialLeaseAuthorityAcceptsHeartbeatButRejectsReclaim(t *test
 
 	reclaimed := cloneActionCall(renewed)
 	reclaimed.Attempt++
-	reclaimed.LeaseOwner = "worker-atlas-2"
+	reclaimed.LeaseOwner = "runtime-worker-2"
 	if err := MatchActionCredentialLease(*lease, reclaimed, run, testActionCredentialLeaseTransport, fields); err == nil {
 		t.Fatal("reclaimed ActionCall accepted an earlier credential lease")
 	}
@@ -278,7 +278,7 @@ func actionCredentialLeaseFixture() (time.Time, *ActionCall, *AgentRun, map[stri
 		ID: "action-1", Scope: scope, RunID: "run-1", DeploymentID: "team-marketing", BindingID: "reddit-binding", BindingRevision: 3,
 		SkillID: "reddit-research", SkillVersion: "1.2.0", Action: "search", Status: ActionCallStatusRunning,
 		CredentialRefs: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant-7/reddit"}},
-		Attempt:        1, MaxAttempts: 3, LeaseOwner: "worker-atlas-1", LeaseExpiresAt: &expires, Revision: 4,
+		Attempt:        1, MaxAttempts: 3, LeaseOwner: "runtime-worker-1", LeaseExpiresAt: &expires, Revision: 4,
 	}
 	run := &AgentRun{ID: "run-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-marketing"}, AssignedAgentID: "agent-researcher"}
 	return now, call, run, map[string][]string{"reddit": {"api.token"}}
