@@ -482,6 +482,13 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		leaseOwner = workerID
 	}
 	turnUsageDelta := budgetUsageForTurn(turn.Usage)
+	if turn.Status == AgentTurnStatusCanceled {
+		turnUsageDelta.Turns = 0
+	}
+	var activityUsageDelta *BudgetUsage
+	if turnUsageDelta != (BudgetUsage{}) {
+		activityUsageDelta = &turnUsageDelta
+	}
 	var budgetDelta *BudgetUsage
 	if run.Budget != nil {
 		if _, reserved := run.BudgetReservations[turn.ID]; reserved {
@@ -516,7 +523,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,
 		BudgetUsageDelta:          budgetDelta,
-		ActivityUsageDelta:        &turnUsageDelta,
+		ActivityUsageDelta:        activityUsageDelta,
 		SettleBudgetReservationID: budgetReservationID(run, turn),
 	})
 	if err != nil {
