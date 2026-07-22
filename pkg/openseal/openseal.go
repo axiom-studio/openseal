@@ -3431,6 +3431,28 @@ func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference,
 	return e.skills.Activate(ctx, scope, deploymentID, host)
 }
 
+// ActivateTeamSkillsForAgent returns the exact model-visible Skill surface an
+// Agent may use while participating as one roster member of a Team. Team-owned
+// bindings are first evaluated against the current host and then narrowed by
+// the immutable roster assignment, semantic-role grants, Agent authority, and
+// Team deployment restrictions. Embedding hosts should use this projection for
+// every participant-specific Team turn instead of exposing the Team catalog
+// directly.
+func (e *Engine) ActivateTeamSkillsForAgent(ctx context.Context, scope skill.ScopeReference, teamDeploymentID, agentDeploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
+	if e == nil || e.skills == nil || e.agents == nil || e.teams == nil {
+		return nil, errors.New("Team Skill activation is unavailable")
+	}
+	activation, err := e.skills.Activate(ctx, scope, teamDeploymentID, host)
+	if err != nil {
+		return nil, err
+	}
+	return runtime.AuthorizeTeamSkillActivation(ctx, e, &runtime.AgentRun{
+		Scope:           runtime.Scope{Kind: scope.Kind, ID: scope.ID},
+		Owner:           runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: teamDeploymentID},
+		AssignedAgentID: agentDeploymentID,
+	}, activation)
+}
+
 // PreviewSkillBindingActivation evaluates one exact proposed binding against
 // the execution host without persisting or invoking host lifecycle adapters.
 func (e *Engine) PreviewSkillBindingActivation(ctx context.Context, binding *skill.Binding, host skill.HostCapabilityState) (*skill.BindingActivationPreview, error) {
