@@ -618,6 +618,31 @@ func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
 	}
 }
 
+func TestKernelHTTPClientDiscoversAgentDeploymentCapabilitiesThroughHostedRoot(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "seven"}
+	var requestURI string
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURI = r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true})))
+	}))
+	defer httpServer.Close()
+
+	client := NewKernelHTTPClient(httpServer.URL+"/host/kernel/v1", httpServer.Client())
+	document, err := client.AgentDefinitionCapabilities(t.Context(), scope, "operator/primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, ok := document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
+	if !ok || !capability.Supports(kernelapi.OperationProposeAmendment) {
+		t.Fatalf("contextual capability = %#v", document)
+	}
+	want := "/host/kernel/v1/capabilities?deploymentId=operator%2Fprimary&scopeId=seven&scopeKind=tenant"
+	if requestURI != want {
+		t.Fatalf("request URI = %q, want %q", requestURI, want)
+	}
+}
+
 func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
 	if err != nil {
