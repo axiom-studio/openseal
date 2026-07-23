@@ -159,6 +159,15 @@ type WorkforceAuthoringWorkerConfig struct {
 	PollInterval      time.Duration
 	RecoveryLimit     int
 	GenerationTimeout time.Duration
+	CatalogResolver   WorkforceAuthoringCatalogResolver
+}
+
+// WorkforceAuthoringCatalogResolver refreshes host-owned capability facts
+// inside the leased durable Run, before any provider request. Implementations
+// may perform bounded registry or policy I/O, but must never resolve secrets
+// into the returned model-visible catalog.
+type WorkforceAuthoringCatalogResolver interface {
+	ResolveWorkforceAuthoringCatalog(context.Context, *authoring.ChangeSet) (authoring.CapabilityCatalog, error)
 }
 
 type WorkforceAuthoringWorker struct {
@@ -322,6 +331,36 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	})
 	generationCtx, cancel := context.WithTimeout(ctx, w.config.GenerationTimeout)
 	defer cancel()
+	if w.config.CatalogResolver != nil {
+		if progressErr := w.recordGenerationProgress(generationCtx, run, changeSet, authoring.CompileProgress{
+			Phase: authoring.CompilePhaseCapabilityResolve, Attempt: 1, MaximumAttempts: 1,
+		}); progressErr != nil && generationCtx.Err() == nil {
+			w.logger.Warnw("workforce capability resolution progress persistence failed", "changeSetId", changeSet.ID, "runId", run.ID, "error", progressErr)
+		}
+		catalog, resolveErr := w.config.CatalogResolver.ResolveWorkforceAuthoringCatalog(generationCtx, cloneRuntimeChangeSetForAuthoring(changeSet))
+		if resolveErr != nil {
+			if ctx.Err() != nil {
+				settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				defer settleCancel()
+				settleErr := w.settleInterruptedRun(settleCtx, run, scope, changeSet.ID)
+				return errors.Join(context.Cause(ctx), settleErr)
+			}
+			w.logger.Warnw("workforce capability catalog resolution failed", "changeSetId", changeSet.ID, "runId", run.ID, "error", resolveErr)
+			if _, failErr := w.service.changeSets.FailPreparedGeneration(ctx, scope, changeSet.ID, changeSet.Revision, "capability_discovery_failed", "Workforce capability discovery failed"); failErr != nil {
+				resolveErr = errors.Join(resolveErr, failErr)
+			}
+			finishErr := w.finishRun(ctx, run, AgentRunStatusFailed, nil, "Workforce capability discovery failed", "workforce.generation.failed")
+			return errors.Join(resolveErr, finishErr)
+		}
+		changeSet, err = w.service.changeSets.RefreshPreparedCatalog(generationCtx, scope, changeSet.ID, changeSet.Revision, catalog)
+		if err != nil {
+			if _, failErr := w.service.changeSets.FailPreparedGeneration(ctx, scope, changeSet.ID, changeSet.Revision, "capability_discovery_failed", "Workforce capability discovery failed"); failErr != nil && !errors.Is(err, authoring.ErrChangeSetRevision) {
+				err = errors.Join(err, failErr)
+			}
+			finishErr := w.finishRun(ctx, run, AgentRunStatusFailed, nil, "Workforce capability discovery failed", "workforce.generation.failed")
+			return errors.Join(err, finishErr)
+		}
+	}
 	generated, generateErr := w.service.changeSets.GeneratePreparedWithProgress(generationCtx, scope, changeSet.ID, changeSet.Revision, func(progress authoring.CompileProgress) {
 		if progressErr := w.recordGenerationProgress(generationCtx, run, changeSet, progress); progressErr != nil && generationCtx.Err() == nil {
 			w.logger.Warnw("workforce generation progress persistence failed", "changeSetId", changeSet.ID, "runId", run.ID, "phase", progress.Phase, "error", progressErr)
@@ -386,6 +425,7 @@ func (w *WorkforceAuthoringWorker) recordGenerationProgress(ctx context.Context,
 		return nil
 	}
 	summary := map[authoring.CompilePhase]string{
+		authoring.CompilePhaseCapabilityResolve: "Resolving authorized workforce capabilities",
 		authoring.CompilePhaseProviderRequest:   "Requesting workforce candidate from provider",
 		authoring.CompilePhaseSchemaRepair:      "Repairing workforce candidate schema",
 		authoring.CompilePhaseCandidateValidate: "Validating workforce candidate",

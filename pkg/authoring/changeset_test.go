@@ -78,6 +78,51 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	}
 }
 
+func TestPreparedCatalogRefreshIsCASBoundAndAuditable(t *testing.T) {
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "catalog-refresh",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := CapabilityCatalog{AvailableCredentials: map[string]bool{"vault": true}}
+	refreshed, err := service.RefreshPreparedCatalog(context.Background(), prepared.Scope, prepared.ID, prepared.Revision, catalog)
+	if err != nil || refreshed.Revision != prepared.Revision+1 || !refreshed.Catalog.AvailableCredentials["vault"] ||
+		!refreshed.Generation.Request.Catalog.AvailableCredentials["vault"] ||
+		refreshed.Lifecycle[len(refreshed.Lifecycle)-1].Reason != "capability_catalog_resolved" {
+		t.Fatalf("refreshed=%#v err=%v", refreshed, err)
+	}
+	unchanged, err := service.RefreshPreparedCatalog(context.Background(), prepared.Scope, prepared.ID, refreshed.Revision, catalog)
+	if err != nil || unchanged.Revision != refreshed.Revision {
+		t.Fatalf("unchanged=%#v err=%v", unchanged, err)
+	}
+	if _, err := service.RefreshPreparedCatalog(context.Background(), prepared.Scope, prepared.ID, prepared.Revision, catalog); !errors.Is(err, ErrChangeSetRevision) {
+		t.Fatalf("stale refresh error=%v", err)
+	}
+}
+
+func TestPreparedCatalogFailureTerminatesGenerationIntent(t *testing.T) {
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "catalog-failure",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := service.FailPreparedGeneration(context.Background(), prepared.Scope, prepared.ID, prepared.Revision, "capability_discovery_failed", "Capability discovery failed")
+	if err != nil || failed.Status != ChangeSetFailed || failed.Generation.FailureCode != "capability_discovery_failed" ||
+		failed.Generation.LastError != "Capability discovery failed" {
+		t.Fatalf("failed=%#v err=%v", failed, err)
+	}
+}
+
 func TestPreparedGenerationFailureIsDurable(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()
