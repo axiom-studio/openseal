@@ -597,6 +597,9 @@ func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
 	if _, err := client.ResolveWorkforceChangeSetApproval(ctx, authoring.ResolveChangeSetApprovalRequest{Scope: scope, ChangeSetID: "change/one"}, "approve-1"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := client.PrepareWorkforceChangeSetActivation(ctx, authoring.PrepareChangeSetActivationRequest{Scope: scope, ChangeSetID: "change/one"}, "activation-1"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := client.ApplyWorkforceChangeSet(ctx, authoring.ApplyChangeSetRequest{Scope: scope, ChangeSetID: "change/one"}, "apply-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -606,6 +609,7 @@ func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/refinements key=refine-1",
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/evaluations key=evaluate-1",
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/approvals key=approve-1",
+		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/activation key=activation-1",
 		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/apply key=apply-1",
 	}
 	if len(requests) != len(want) {

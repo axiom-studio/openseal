@@ -22,6 +22,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/refinements", s.handleAnswerWorkforceChangeSetRefinement)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/evaluations", s.handleEvaluateWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/approvals", s.handleApproveWorkforceChangeSet)
+	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/activation", s.handlePrepareWorkforceChangeSetActivation)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/apply", s.handleApplyWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/objectives", s.handleCreateObjective)
 	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)

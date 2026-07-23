@@ -88,6 +88,7 @@ type KernelClient interface {
 	RetryWorkforceChangeSetGeneration(context.Context, authoring.RetryChangeSetGenerationRequest, string) (*authoring.ChangeSet, error)
 	EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error)
 	ResolveWorkforceChangeSetApproval(context.Context, authoring.ResolveChangeSetApprovalRequest, string) (*authoring.ChangeSet, error)
+	PrepareWorkforceChangeSetActivation(context.Context, authoring.PrepareChangeSetActivationRequest, string) (*authoring.ChangeSet, error)
 	ApplyWorkforceChangeSet(context.Context, authoring.ApplyChangeSetRequest, string) (*authoring.ChangeSet, error)
 }
 
@@ -591,6 +592,10 @@ func (c *KernelHTTPClient) RetryWorkforceChangeSetGeneration(ctx context.Context
 
 func (c *KernelHTTPClient) ResolveWorkforceChangeSetApproval(ctx context.Context, request authoring.ResolveChangeSetApprovalRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
 	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "approvals", request, idempotencyKey)
+}
+
+func (c *KernelHTTPClient) PrepareWorkforceChangeSetActivation(ctx context.Context, request authoring.PrepareChangeSetActivationRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
+	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "activation", request, idempotencyKey)
 }
 
 func (c *KernelHTTPClient) ApplyWorkforceChangeSet(ctx context.Context, request authoring.ApplyChangeSetRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
