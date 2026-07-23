@@ -114,6 +114,37 @@ type HostedTurnResponse struct {
 	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
 }
 
+// ValidateHostedSkillSelections verifies that a host returned exactly one
+// operator-visible disposition for every authorized prompt Skill and no other
+// Skill. Hosts can call this before returning a response so mechanically
+// repairable model output is corrected inside the bounded invocation rather
+// than failing later in the durable Run lifecycle.
+func ValidateHostedSkillSelections(prompts []HostedSkillPrompt, selections []HostedSkillSelection) error {
+	allowed := make(map[string]struct{}, len(prompts))
+	for _, prompt := range prompts {
+		allowed[prompt.Reference] = struct{}{}
+	}
+	if len(selections) != len(allowed) {
+		return errors.New("turn host must disposition every offered Skill")
+	}
+	selected := make(map[string]struct{}, len(selections))
+	for _, selection := range selections {
+		reference := strings.TrimSpace(selection.SkillRef)
+		if _, ok := allowed[reference]; !ok {
+			return fmt.Errorf("turn host dispositioned unauthorized Skill reference %q", reference)
+		}
+		if _, duplicate := selected[reference]; duplicate {
+			return errors.New("turn host dispositioned a Skill more than once")
+		}
+		if strings.TrimSpace(selection.Summary) == "" ||
+			(selection.Disposition != HostedSkillApplied && selection.Disposition != HostedSkillNotApplied) {
+			return errors.New("turn host returned an invalid Skill disposition")
+		}
+		selected[reference] = struct{}{}
+	}
+	return nil
+}
+
 type TurnHost interface {
 	ExecuteHostedTurn(context.Context, HostedTurnRequest) (*HostedTurnResponse, error)
 }
@@ -265,28 +296,17 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if proposalCount == 1 && response.NextRunStatus != AgentRunStatusRunning {
 		return nil, errors.New("a hosted Turn proposal must remain running until the kernel materializes it")
 	}
+	if err := ValidateHostedSkillSelections(request.SkillPrompts, response.SkillSelections); err != nil {
+		return nil, err
+	}
 	allowedSkillRefs := make(map[string]struct{}, len(request.SkillPrompts))
 	for _, prompt := range request.SkillPrompts {
 		allowedSkillRefs[prompt.Reference] = struct{}{}
 	}
-	if len(response.SkillSelections) != len(allowedSkillRefs) {
-		return nil, errors.New("turn host must disposition every offered Skill")
-	}
 	selectionDecisions := make([]TurnDecision, 0, len(response.SkillSelections))
-	selected := make(map[string]struct{}, len(response.SkillSelections))
 	for _, selection := range response.SkillSelections {
 		selection.SkillRef = strings.TrimSpace(selection.SkillRef)
 		selection.Summary = strings.TrimSpace(selection.Summary)
-		if _, ok := allowedSkillRefs[selection.SkillRef]; !ok {
-			return nil, fmt.Errorf("turn host dispositioned unauthorized Skill reference %q", selection.SkillRef)
-		}
-		if _, duplicate := selected[selection.SkillRef]; duplicate {
-			return nil, errors.New("turn host dispositioned a Skill more than once")
-		}
-		if selection.Summary == "" || (selection.Disposition != HostedSkillApplied && selection.Disposition != HostedSkillNotApplied) {
-			return nil, errors.New("turn host returned an invalid Skill disposition")
-		}
-		selected[selection.SkillRef] = struct{}{}
 		decision := TurnDecision{Summary: selection.Summary}
 		if selection.Disposition == HostedSkillApplied {
 			decision.EvidenceRefs = []string{selection.SkillRef}

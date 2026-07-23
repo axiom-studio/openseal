@@ -956,6 +956,7 @@ var (
 	MarshalHostedTurnModelInput        = runtime.MarshalHostedTurnModelInput
 	MarshalEvidenceGroundingModelInput = runtime.MarshalEvidenceGroundingModelInput
 	EstimateHostedTurnInputTokens      = runtime.EstimateHostedTurnInputTokens
+	ValidateHostedSkillSelections      = runtime.ValidateHostedSkillSelections
 	NewCapabilityInvocationTurnRunner  = runtime.NewCapabilityInvocationTurnRunner
 	NewOutreachTurnRunner              = runtime.NewOutreachTurnRunner
 	NewOutreachActionProposalObserver  = runtime.NewOutreachActionProposalObserver
