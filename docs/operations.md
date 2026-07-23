@@ -162,6 +162,22 @@ exercises independent objective portfolios, a Team, child Runs, deterministic
 actions, restart recovery, collaboration, a winner message, and a verified game
 log artifact without external network calls.
 
+The default suite also includes a three-Agent market-research Initiative. It
+joins recurring source monitoring, deduplicated provenance-linked evidence,
+restart recovery, cited PDF generation, approval-gated email delivery, and a
+durable provider receipt into one portable end-to-end journey. Source and
+delivery transports are deterministic governed fixtures in this test; host
+credentials are resolved ephemerally and the resolved value is verified absent
+from persisted kernel state.
+
+Run either acceptance scenario directly while developing:
+
+```bash
+go test ./pkg/openseal \
+  -run 'Test(ThreeAgentSnakesAndLadders|MarketResearchInitiative)' \
+  -count=1
+```
+
 Run race-sensitive kernel packages explicitly when changing concurrency:
 
 ```bash

@@ -1274,6 +1274,12 @@ const (
 	InitiativeStatusFailed                            = runtime.InitiativeStatusFailed
 	InitiativeStatusCanceled                          = runtime.InitiativeStatusCanceled
 	InitiativeStatusArchived                          = runtime.InitiativeStatusArchived
+	InitiativeResourceAgentDefinition                 = runtime.ResourceKindAgentDefinition
+	InitiativeResourceAgentDeployment                 = runtime.ResourceKindAgentDeployment
+	InitiativeResourceTeamDefinition                  = runtime.ResourceKindTeamDefinition
+	InitiativeResourceTeamDeployment                  = runtime.ResourceKindTeamDeployment
+	InitiativeResourceArtifact                        = runtime.ResourceKindArtifact
+	InitiativeResourceEvidence                        = runtime.ResourceKindEvidence
 	InitiativeMilestonePending                        = runtime.MilestonePending
 	InitiativeMilestoneInProgress                     = runtime.MilestoneInProgress
 	InitiativeMilestoneCompleted                      = runtime.MilestoneCompleted
