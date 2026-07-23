@@ -422,6 +422,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	for index := range request.SkillPrompts {
 		request.SkillPrompts[index].Reference = hostedSkillPromptReference(request.SkillPrompts[index])
 	}
+	if err := applyHostedMinimumChildBudget(&request); err != nil {
+		return HostedTurnRequest{}, err
+	}
 	return request, nil
 }
 
@@ -552,6 +555,30 @@ func hostedMinimumChildBudget(policy BudgetPolicy) BudgetPolicy {
 		minimum.MaxActions = 0
 	}
 	return minimum
+}
+
+func applyHostedMinimumChildBudget(request *HostedTurnRequest) error {
+	if request == nil || request.Budget == nil {
+		return nil
+	}
+	minimum := hostedMinimumChildBudget(request.Budget.Policy)
+	request.Budget.MinimumChild = minimum
+	estimatedInput, err := EstimateHostedTurnInputTokens(*request)
+	if err != nil {
+		return fmt.Errorf("estimate minimum hosted child budget: %w", err)
+	}
+	envelopeInput := estimatedInput + HostedTurnBudgetEnvelopeReserveTokens
+	if minimum.MaxInputTokens > 0 && envelopeInput > minimum.MaxInputTokens {
+		minimum.MaxInputTokens = envelopeInput
+	}
+	if minimum.MaxTotalTokens > 0 {
+		minimumTotal := envelopeInput + HostedTurnMinimumChildOutputTokens
+		if minimumTotal > minimum.MaxTotalTokens {
+			minimum.MaxTotalTokens = minimumTotal
+		}
+	}
+	request.Budget.MinimumChild = minimum
+	return nil
 }
 
 func validateHostedChildBudgetFloor(allocation *BudgetPolicy, budget *HostedRunBudget) error {

@@ -164,11 +164,14 @@ then starts as a separate child Run with its own Skills, credentials, budget,
 policy, and audit trail.
 
 Budgeted hosted turns expose a typed `minimumChild` floor beside their remaining
-capacity. Agents use those two values when proposing delegation or forks;
-people describe the outcome and boundaries rather than calculating internal
-token or duration allocations. The kernel rejects any positive bounded
-dimension below the portable floor and rejects aggregate child allocations
-that exceed the source Run's remaining capacity before it persists child work.
+capacity. The input floor grows with the current authorized hosted envelope,
+including active Skill instructions, so it does not assume every Agent has the
+same context size. Agents use the floor and remaining capacity when proposing
+delegation or forks; people describe the outcome and boundaries rather than
+calculating internal token or duration allocations. The kernel rejects any
+positive bounded dimension below the portable floor and rejects aggregate
+child allocations that exceed the source Run's remaining capacity before it
+persists child work.
 
 ## Activity, artifacts, and evidence
 

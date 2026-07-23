@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -110,6 +111,50 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	}
 	if result.Run.Status != AgentRunStatusCompleted || result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.InputTokens != 100 || result.Run.BudgetUsage.OutputTokens != 20 || len(result.Run.BudgetReservations) != 0 {
 		t.Fatalf("settled run=%#v", result.Run)
+	}
+}
+
+func TestHostedTurnMinimumChildBudgetCoversAuthorizedEnvelope(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-large-context",
+		NextRunStatus: AgentRunStatusCompleted, ModelProvider: "test", Model: "test-model",
+		SkillSelections: []HostedSkillSelection{{
+			SkillRef: "skill:large-context@1", Disposition: HostedSkillApplied, Summary: "Applied authorized context",
+		}},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+		SkillPrompts: []HostedSkillPrompt{{
+			SkillID: "large-context", Version: "1", Name: "Large context",
+			Instructions: strings.Repeat("bounded authorized instructions ", 900),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{
+		ID: "run-large-context", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Complete bounded work",
+		Budget: &BudgetPolicy{
+			MaxAttempts: 5, MaxTurns: 5, MaxInputTokens: 100000, MaxOutputTokens: 20000,
+			MaxTotalTokens: 120000, MaxDurationMS: 600000, MaxActions: 2,
+		},
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: run, Turn: &AgentTurn{ID: "turn-large-context"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.request.Budget.MinimumChild.MaxInputTokens <= HostedTurnMinimumChildInputTokens {
+		t.Fatalf("large authorized envelope kept static child floor: %#v", host.request.Budget.MinimumChild)
+	}
+	estimated, err := EstimateHostedTurnInputTokens(host.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.request.Budget.MinimumChild.MaxInputTokens < estimated ||
+		host.request.Budget.MinimumChild.MaxTotalTokens < host.request.Budget.MinimumChild.MaxInputTokens+HostedTurnMinimumChildOutputTokens {
+		t.Fatalf("minimum child budget %#v does not cover hosted estimate %d", host.request.Budget.MinimumChild, estimated)
 	}
 }
 
