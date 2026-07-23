@@ -44,13 +44,6 @@ func ProcessExecutorEnabled() bool {
 	return err == nil && enabled && GetBrewProcessRunnerImage() != ""
 }
 
-func NewRegistryConfigFromEnv() (*RegistryConfig, error) {
-	return &RegistryConfig{
-		Namespace:   GetAgentsNamespace(),
-		PythonImage: GetCodeExecutorImage(),
-	}, nil
-}
-
 // GetK8sClient returns a k8s client, using local kubeconfig if RUNTIME_CONFIG_LOCAL_DEV=true
 func GetK8sClient() (kubernetes.Interface, error) {
 	localDevMode := strings.ToLower(os.Getenv("RUNTIME_CONFIG_LOCAL_DEV")) == "true"

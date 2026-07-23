@@ -1,18 +1,6 @@
 package module
 
-// RegistryConfig is deprecated - use executor.Registry for code execution
-type RegistryConfig struct {
-	Namespace   string
-	PythonImage string
-}
-
 func NewDefaultRegistry() (*Registry, error) {
-	return NewDefaultRegistryWithConfig(nil)
-}
-
-// NewDefaultRegistryWithConfig creates a registry with default step executors
-// Note: Code execution is now handled by executor.Registry, not module.Registry
-func NewDefaultRegistryWithConfig(config *RegistryConfig) (*Registry, error) {
 	r := NewRegistry()
 
 	executors := []StepExecutor{
