@@ -103,6 +103,9 @@ Options:
 	engineOptions := []opensealkernel.Option{
 		opensealkernel.WithPersistentStore(store),
 		opensealkernel.WithWorkerConcurrencyLimit(8),
+		opensealkernel.WithSkillManagementActions(),
+		opensealkernel.WithAgentManagementActions(),
+		opensealkernel.WithTeamManagementActions(),
 		opensealkernel.WithClawHubRegistrySkillsDirectory(clawhub.RegistryURL, clawhub.NewClawHubClient(""), skillsDir, skillsDir),
 		opensealkernel.WithClawHubSourceArtifactScope(skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}),
 	}

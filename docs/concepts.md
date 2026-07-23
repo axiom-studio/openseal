@@ -136,6 +136,14 @@ Workforce ChangeSets and Agent/Team amendments use their own governed lifecycle
 records. They bind decisions to an exact revision and candidate digest so stale
 reviews cannot activate changed content.
 
+Agent-owned conversations can use the bundled `openseal.agents/amend_behavior`
+action to propose a change to their own purpose, system prompt, personality, or
+operating principles. The model never selects a deployment or revision.
+OpenSeal derives the active Agent from the durable Run, checks the definition's
+`AgentMayPropose` and `AllowedFields` policy, presents the exact current and
+proposed values for approval, and activates one immutable amendment. A Team
+conversation cannot use this action to rewrite a roster member.
+
 ## Conversations and collaboration
 
 A **conversation** is a durable channel and command/observation surface. Its

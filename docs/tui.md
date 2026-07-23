@@ -44,7 +44,8 @@ Depending on the connected server, the workspace can expose:
 - **Workforce** — describe Agents and Teams, answer sequential refinements,
   place approved credential references and binding configuration, inspect
   evaluation, resolve eligible requirements, and apply a reviewed ChangeSet
-- **Readiness** — Agent deployment state and compilation history
+- **Readiness** — Agent deployment state, compilation history, and governed
+  definition amendments, including self-proposed conversation changes
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
 - **Objectives / Initiatives** — multi-objective portfolios, schedule supervision,
   and project context
