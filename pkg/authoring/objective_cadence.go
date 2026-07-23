@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/robfig/cron/v3"
 )
 
 // authoredObjectiveCadence mirrors the portable runtime schedule wire
@@ -20,6 +21,7 @@ type authoredObjectiveCadence struct {
 	IntervalSeconds   int64                         `json:"intervalSeconds,omitempty"`
 	TimeOfDay         string                        `json:"timeOfDay,omitempty"`
 	DayOfWeek         string                        `json:"dayOfWeek,omitempty"`
+	CronExpression    string                        `json:"cronExpression,omitempty"`
 	Timezone          string                        `json:"timezone,omitempty"`
 	AssignedAgentID   string                        `json:"assignedAgentId,omitempty"`
 	RunBudget         *authoredObjectiveRunBudget   `json:"runBudget,omitempty"`
@@ -269,6 +271,10 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 		default:
 			return errors.New("weekly objective cadence requires a valid dayOfWeek")
 		}
+	case "cron":
+		if err := validateAuthoredCron(cadence.CronExpression); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unsupported objective cadence type %q", cadence.Type)
 	}
@@ -301,6 +307,21 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 	grounded := hosted && cadence.RunTemplate != nil && cadence.RunTemplate.EvidenceProjection != nil && !cadence.RunTemplate.EvidenceProjection.Disabled
 	if err := validateAuthoredObjectiveRunBudget(cadence.RunBudget, hosted, grounded); err != nil {
 		return fmt.Errorf("objective cadence: %w", err)
+	}
+	return nil
+}
+
+func validateAuthoredCron(value string) error {
+	expression := strings.TrimSpace(value)
+	if expression == "" {
+		return errors.New("cron objective cadence requires cronExpression")
+	}
+	if len(expression) > 128 {
+		return errors.New("objective cadence cronExpression cannot exceed 128 characters")
+	}
+	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	if _, err := parser.Parse(expression); err != nil {
+		return fmt.Errorf("objective cadence cronExpression must contain six valid fields: %w", err)
 	}
 	return nil
 }
