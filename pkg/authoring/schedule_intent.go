@@ -28,6 +28,7 @@ type scheduleIntent struct {
 	intervalSeconds int64
 	timeOfDay       string
 	dayOfWeek       string
+	cronExpression  string
 	timezone        string
 }
 
@@ -105,6 +106,24 @@ func parseScheduleIntent(value string) scheduleIntent {
 	}
 	if containsWord(lower, "hourly") || containsSchedulePhrase(lower, "every hour") {
 		return scheduleIntent{kind: scheduleIntentExact, cadenceType: "interval", intervalSeconds: 3600}
+	}
+
+	if containsWord(lower, "weekday") || containsWord(lower, "weekdays") {
+		clock := scheduleClockPattern.FindStringSubmatch(value)
+		zone := scheduleTimezonePattern.FindString(value)
+		if len(clock) == 3 && zone != "" {
+			if _, err := time.LoadLocation(zone); err == nil {
+				hour, _ := strconv.Atoi(clock[1])
+				minute, _ := strconv.Atoi(clock[2])
+				return scheduleIntent{
+					kind:           scheduleIntentExact,
+					cadenceType:    "cron",
+					cronExpression: fmt.Sprintf("0 %d %d * * 1-5", minute, hour),
+					timezone:       zone,
+				}
+			}
+		}
+		return scheduleIntent{kind: scheduleIntentAmbiguous}
 	}
 
 	frequency := ""
@@ -304,10 +323,18 @@ func cadenceMatchesScheduleIntent(cadence map[string]interface{}, intent schedul
 		value, ok := numericInt64(cadence["intervalSeconds"])
 		return ok && value == intent.intervalSeconds
 	}
+	if intent.cadenceType == "cron" {
+		return normalizeWhitespace(fmt.Sprint(cadence["cronExpression"])) == intent.cronExpression &&
+			strings.TrimSpace(fmt.Sprint(cadence["timezone"])) == intent.timezone
+	}
 	if strings.TrimSpace(fmt.Sprint(cadence["timeOfDay"])) != intent.timeOfDay || strings.TrimSpace(fmt.Sprint(cadence["timezone"])) != intent.timezone {
 		return false
 	}
 	return intent.cadenceType != "weekly" || strings.EqualFold(strings.TrimSpace(fmt.Sprint(cadence["dayOfWeek"])), intent.dayOfWeek)
+}
+
+func normalizeWhitespace(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func numericInt64(value interface{}) (int64, bool) {

@@ -3,13 +3,24 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
+
+func mustAtoi(value string) int {
+	result, err := strconv.Atoi(value)
+	if err != nil {
+		panic(err)
+	}
+	return result
+}
 
 func scheduledAuthoringCandidate(cadence map[string]interface{}) WorkforceCandidate {
 	return WorkforceCandidate{Agents: []*agent.AgentDefinition{{
@@ -23,6 +34,14 @@ func scheduledAuthoringCandidate(cadence map[string]interface{}) WorkforceCandid
 
 func dailyCadence(timeOfDay, timezone string) map[string]interface{} {
 	return map[string]interface{}{"type": "daily", "timeOfDay": timeOfDay, "timezone": timezone, "assignedAgentId": "operator"}
+}
+
+func weekdayCadence(timeOfDay, timezone string) map[string]interface{} {
+	parts := strings.Split(timeOfDay, ":")
+	return map[string]interface{}{
+		"type": "cron", "cronExpression": fmt.Sprintf("0 %d %d * * 1-5", mustAtoi(parts[1]), mustAtoi(parts[0])),
+		"timezone": timezone, "assignedAgentId": "operator",
+	}
 }
 
 func compileScheduledCandidate(t *testing.T, prompt string, candidate WorkforceCandidate, refinement *RefinementContext, existing *WorkforceCandidate) *CompileResult {
@@ -61,6 +80,26 @@ func TestScheduleIntentExactDailyTimezoneIsPreserved(t *testing.T) {
 	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(cadence), nil, nil)
 	if !result.Valid || !reflect.DeepEqual(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence, cadence) {
 		t.Fatalf("exact daily candidate = %#v", result)
+	}
+}
+
+func TestScheduleIntentExactWeekdaysUsesPortableCronCadence(t *testing.T) {
+	cadence := weekdayCadence("09:00", "UTC")
+	result := compileScheduledCandidate(t, "Create one Agent that runs every weekday at 09:00 UTC", scheduledAuthoringCandidate(cadence), nil, nil)
+	if !result.Valid || len(result.UnresolvedQuestions) != 0 ||
+		!reflect.DeepEqual(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence, cadence) {
+		t.Fatalf("exact weekday candidate = %#v", result)
+	}
+}
+
+func TestAuthoredCronCadenceRequiresPortableSixFieldDialect(t *testing.T) {
+	if err := validateAuthoredObjectiveCadence(map[string]interface{}{
+		"type": "cron", "cronExpression": "0 9 * * 1-5", "timezone": "UTC",
+	}); err == nil || !strings.Contains(err.Error(), "six valid fields") {
+		t.Fatalf("five-field cron error = %v", err)
+	}
+	if err := validateAuthoredObjectiveCadence(weekdayCadence("09:00", "UTC")); err != nil {
+		t.Fatalf("six-field cron rejected: %v", err)
 	}
 }
 
@@ -118,6 +157,24 @@ func TestScheduleIntentAuditedAnswerAuthorizesExactCadence(t *testing.T) {
 	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), refinement, nil)
 	if !result.Valid || len(result.UnresolvedQuestions) != 0 || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) == 0 {
 		t.Fatalf("answered recurring candidate = %#v", result)
+	}
+}
+
+func TestScheduleIntentAuditedWeekdayAnswerDoesNotReopenQuestion(t *testing.T) {
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
+		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
+		Value: RefinementProviderAnswerValue{Text: "Every weekday at 09:00 UTC"},
+	}}}
+	result := compileScheduledCandidate(t, "Create one Agent with a recurring objective", scheduledAuthoringCandidate(weekdayCadence("09:00", "UTC")), refinement, nil)
+	if !result.Valid || len(result.UnresolvedQuestions) != 0 || hasScheduleIntentQuestion(result.UnresolvedQuestions) {
+		t.Fatalf("answered weekday candidate = %#v", result)
+	}
+}
+
+func TestScheduleIntentMismatchedWeekdayCadenceFailsClosed(t *testing.T) {
+	result := compileScheduledCandidate(t, "Create one Agent that runs every weekday at 09:00 UTC", scheduledAuthoringCandidate(weekdayCadence("10:00", "UTC")), nil, nil)
+	if result.Valid || !hasValidationCode(result.Validation, "schedule_intent_mismatch") || !hasValidationCode(result.Validation, "requested_schedule_missing") {
+		t.Fatalf("mismatched weekday candidate = %#v", result)
 	}
 }
 
