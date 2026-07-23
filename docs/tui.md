@@ -46,7 +46,10 @@ Depending on the connected server, the workspace can expose:
   evaluation, resolve eligible requirements, and apply a reviewed ChangeSet
 - **Readiness** — Agent deployment state and compilation history
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
-- **Objectives / Initiatives** — multi-objective portfolios and project context
+- **Objectives / Initiatives** — multi-objective portfolios, schedule supervision,
+  and project context
+- **Sources** — durable event-source subscriptions, connector health, checkpoints,
+  and CAS-protected pause, resume, and retirement
 - **Work** — Runs, lifecycle commands, guidance, evidence, and grounding
 - **Requests / Approvals** — delegation, handoffs, clarification, completion,
   and exact action decisions
@@ -72,6 +75,7 @@ Section shortcuts work while the list panel is focused:
 | `h` | Agent readiness |
 | `T` | Teams |
 | `o` | Objectives |
+| `S` | Event sources |
 | `i` | Initiatives |
 | `O` | Outreach |
 | `s` | Skills |
@@ -91,8 +95,8 @@ Common controls:
 | `↑` / `↓` or `k` / `j` | Select an item or current requirement |
 | `n` | Begin a supported creation or install operation in the section |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
-| `p` | Pause/resume selected Run, Agent, Team, or Initiative; pin/unpin a Skill |
-| `g` | Guide a selected active Run |
+| `p` | Pause/resume selected Run, Agent, Team, Initiative, or event source; pin/unpin a Skill |
+| `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `m` | Post to a selected channel, propose a Team purpose amendment, or load more activity |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
 | `?` / `M` | Request or provide clarification for an Agent request |
@@ -132,6 +136,17 @@ authenticated identity, but credential values never belong in these forms.
 Credential choices displayed by the TUI are opaque server-authored references.
 Secret values are never entered into the authoring prompt or stored in TUI
 state.
+
+Event-source creation also separates configuration from activation. `n` in
+Sources opens a reviewable `key: value` form. A new subscription is always
+created paused; `p` activates or pauses it at its exact revision, and `x`
+opens an explicit `RETIRE` confirmation without deleting its health or
+checkpoint history. `connector` is
+either `host:<id>[@version]` or
+`skill:<id>@<exact-version>#<action>`; Skill connectors additionally require
+`binding: <id>@<revision>`. `parameters` is a JSON object and must never contain
+credential values. Health reports and checkpoint advancement remain
+connector-owned operations: the TUI observes them but cannot fabricate them.
 
 ## Run execution history
 

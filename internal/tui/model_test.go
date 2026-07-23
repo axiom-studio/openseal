@@ -75,6 +75,14 @@ type fakeKernelClient struct {
 	objectiveKeys        []string
 	objectiveCreates     []kernelapi.CreateObjectiveRequest
 	objectiveUpdates     []kernelapi.UpdateObjectiveRequest
+	scheduleRequests     []kernelapi.ReconcileObjectiveSchedulesRequest
+	scheduleResult       *kernelapi.ObjectiveScheduleReconciliation
+	eventSources         []*runtime.EventSourceSubscription
+	eventSourceDetails   map[string]*runtime.EventSourceSubscriptionDetail
+	eventSourceCreates   []kernelapi.CreateEventSourceSubscriptionRequest
+	eventSourceError     error
+	eventSourceUpdates   []kernelapi.UpdateEventSourceSubscriptionRequest
+	eventSourceRetires   []kernelapi.RetireEventSourceSubscriptionRequest
 	initiatives          []*runtime.Initiative
 	monitorCheckpoints   map[string]*runtime.SourceMonitorCheckpoint
 	monitorObservations  map[string][]*runtime.SourceObservation
@@ -156,28 +164,67 @@ func (f *fakeKernelClient) RouteEvent(_ context.Context, event runtime.EventEnve
 	return &runtime.EventRouteResult{}, nil
 }
 
-func (f *fakeKernelClient) ReconcileObjectiveSchedules(context.Context, kernelapi.ReconcileObjectiveSchedulesRequest) (*kernelapi.ObjectiveScheduleReconciliation, error) {
-	return nil, errors.New("objective schedule reconciliation is not configured in this TUI test")
+func (f *fakeKernelClient) ReconcileObjectiveSchedules(_ context.Context, request kernelapi.ReconcileObjectiveSchedulesRequest) (*kernelapi.ObjectiveScheduleReconciliation, error) {
+	f.scheduleRequests = append(f.scheduleRequests, request)
+	if f.scheduleResult != nil {
+		return f.scheduleResult, nil
+	}
+	return &kernelapi.ObjectiveScheduleReconciliation{Scope: request.Scope, Result: &runtime.ObjectiveScheduleResult{}}, nil
 }
 
-func (f *fakeKernelClient) CreateEventSourceSubscription(context.Context, kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+func (f *fakeKernelClient) CreateEventSourceSubscription(_ context.Context, request kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	f.eventSourceCreates = append(f.eventSourceCreates, request)
+	if f.eventSourceError != nil {
+		return nil, f.eventSourceError
+	}
+	item := &runtime.EventSourceSubscription{ID: request.ID, Scope: request.Scope, Owner: request.Owner, DisplayName: request.DisplayName, Description: request.Description, Source: request.Source, Connector: request.Connector, Status: request.Status, EventTypes: request.EventTypes, Parameters: request.Parameters, PollIntervalSeconds: request.PollIntervalSeconds, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if item.ID == "" {
+		item.ID = "event-source:test"
+	}
+	f.eventSources = append(f.eventSources, item)
+	return item, nil
 }
 
 func (f *fakeKernelClient) ListEventSourceSubscriptions(context.Context, runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error) {
-	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+	return f.eventSources, nil
 }
 
-func (f *fakeKernelClient) GetEventSourceSubscription(context.Context, runtime.Scope, string) (*runtime.EventSourceSubscriptionDetail, error) {
-	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+func (f *fakeKernelClient) GetEventSourceSubscription(_ context.Context, _ runtime.Scope, id string) (*runtime.EventSourceSubscriptionDetail, error) {
+	if detail := f.eventSourceDetails[id]; detail != nil {
+		return detail, nil
+	}
+	for _, item := range f.eventSources {
+		if item.ID == id {
+			return &runtime.EventSourceSubscriptionDetail{Subscription: item}, nil
+		}
+	}
+	return nil, runtime.ErrEventSourceSubscriptionNotFound
 }
 
-func (f *fakeKernelClient) UpdateEventSourceSubscription(context.Context, runtime.Scope, string, kernelapi.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+func (f *fakeKernelClient) UpdateEventSourceSubscription(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	f.eventSourceUpdates = append(f.eventSourceUpdates, request)
+	for _, item := range f.eventSources {
+		if item.ID == id {
+			if request.Status != nil {
+				item.Status = *request.Status
+			}
+			item.Revision++
+			return item, nil
+		}
+	}
+	return nil, runtime.ErrEventSourceSubscriptionNotFound
 }
 
-func (f *fakeKernelClient) RetireEventSourceSubscription(context.Context, runtime.Scope, string, kernelapi.RetireEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	return nil, errors.New("event source subscriptions are not configured in this TUI test")
+func (f *fakeKernelClient) RetireEventSourceSubscription(_ context.Context, _ runtime.Scope, id string, request kernelapi.RetireEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
+	f.eventSourceRetires = append(f.eventSourceRetires, request)
+	for _, item := range f.eventSources {
+		if item.ID == id {
+			item.Status = runtime.EventSourceSubscriptionRetired
+			item.Revision++
+			return item, nil
+		}
+	}
+	return nil, runtime.ErrEventSourceSubscriptionNotFound
 }
 
 func (f *fakeKernelClient) ReportEventSourceHealth(context.Context, runtime.Scope, string, kernelapi.ReportEventSourceHealthRequest) (*runtime.EventSourceHealth, error) {
@@ -1137,6 +1184,134 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 		if strings.Contains(view, action) {
 			t.Fatalf("unadvertised action %q was rendered:\n%s", action, view)
 		}
+	}
+}
+
+func TestTUIObjectiveScheduleReconciliationIsCapabilityGated(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	fake := &fakeKernelClient{
+		document:       kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability()),
+		scheduleResult: &kernelapi.ObjectiveScheduleReconciliation{Scope: scope, Result: &runtime.ObjectiveScheduleResult{Examined: 3, Scheduled: 2}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	applyCommand(t, model, model.reconcileObjectiveSchedules())
+	if len(fake.scheduleRequests) != 1 || fake.scheduleRequests[0].Scope != scope || fake.scheduleRequests[0].Limit != 100 {
+		t.Fatalf("schedule requests = %#v", fake.scheduleRequests)
+	}
+	if !strings.Contains(model.status, "3 examined · 2 Runs scheduled") || !strings.Contains(model.View(), "g reconcile schedules") {
+		t.Fatalf("schedule projection missing: status=%q view=%s", model.status, model.View())
+	}
+
+	drifted := kernelapi.ObjectiveSchedulesCapability()
+	drifted.Version = "future"
+	closedFake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), drifted)}
+	closed := newTestModel(t, closedFake)
+	applyCommand(t, closed, closed.loadCapabilities())
+	if closed.objectiveScheduleCapability.Available || closed.reconcileObjectiveSchedules() != nil || len(closedFake.scheduleRequests) != 0 || strings.Contains(closed.View(), "reconcile schedules") {
+		t.Fatalf("mismatched schedule capability did not fail closed: %#v", closed.objectiveScheduleCapability)
+	}
+}
+
+func TestTUIEventSourcesExposeLifecycleAndOperationalTruth(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	updated := time.Now().UTC().Add(-time.Minute)
+	item := &runtime.EventSourceSubscription{
+		ID: "event-source:kubernetes", Scope: scope, Owner: owner, DisplayName: "Production events", Source: "kubernetes:cluster:production",
+		Connector: runtime.EventSourceConnector{Kind: runtime.EventSourceConnectorHost, ID: "kubernetes-events"}, Status: runtime.EventSourceSubscriptionPaused,
+		EventTypes: []string{"Warning", "DeploymentChanged"}, PollIntervalSeconds: 5, Revision: 4, CreatedAt: updated, UpdatedAt: updated,
+	}
+	fake := &fakeKernelClient{
+		document:     kernelapi.NewCapabilityDocument(kernelapi.EventSourceSubscriptionsCapability()),
+		eventSources: []*runtime.EventSourceSubscription{item},
+		eventSourceDetails: map[string]*runtime.EventSourceSubscriptionDetail{item.ID: {
+			Subscription: item,
+			Health:       &runtime.EventSourceHealth{Scope: scope, SubscriptionID: item.ID, SubscriptionRevision: item.Revision, State: runtime.EventSourceHealthDegraded, LastHeartbeatAt: updated, ConsecutiveFailures: 2, Summary: "Watch reconnecting", Revision: 2, UpdatedAt: updated},
+			Checkpoint:   &runtime.EventSourceCheckpoint{Scope: scope, Source: item.Source, SubscriptionID: item.ID, Revision: 7, UpdatedAt: updated},
+		}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionSources || !model.eventSourceCapability.Available {
+		t.Fatalf("event source capability was not selected: section=%v capability=%#v", model.section, model.eventSourceCapability)
+	}
+	view := model.View()
+	for _, expected := range []string{"S Sources", "Production events", "Watch reconnecting", "Checkpoint · revision 7", "p pause/resume", "x retire"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("event source view missing %q: %s", expected, view)
+		}
+	}
+	applyCommand(t, model, model.pauseOrResumeEventSource())
+	if len(fake.eventSourceUpdates) != 1 || fake.eventSourceUpdates[0].ExpectedRevision != 4 || fake.eventSourceUpdates[0].Status == nil || *fake.eventSourceUpdates[0].Status != runtime.EventSourceSubscriptionActive {
+		t.Fatalf("event source activation = %#v", fake.eventSourceUpdates)
+	}
+	model.editor.SetValue("RETIRE")
+	applyCommand(t, model, model.retireEventSource())
+	if len(fake.eventSourceRetires) != 1 || fake.eventSourceRetires[0].ExpectedRevision != 5 {
+		t.Fatalf("event source retirement = %#v", fake.eventSourceRetires)
+	}
+}
+
+func TestTUIEventSourceCreationParsesHostAndSkillConnectors(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	host, err := parseEventSourceComposer(eventSourceComposerTemplate(), scope, owner)
+	if err != nil || host.Status != runtime.EventSourceSubscriptionPaused || host.Connector.Kind != runtime.EventSourceConnectorHost || host.Connector.ID != "kubernetes-events" || host.PollIntervalSeconds != 5 || len(host.EventTypes) != 2 {
+		t.Fatalf("host event source = %#v, %v", host, err)
+	}
+	skill, err := parseEventSourceComposer("name: Forum monitor\nsource: reddit:subreddit:openseal\nconnector: skill:reddit-search@1.2.3#search\nbinding: reddit@9\nevents: NewPost\nparameters: {\"subreddit\":\"openseal\"}", scope, owner)
+	if err != nil || skill.Connector.Kind != runtime.EventSourceConnectorSkill || skill.Connector.ID != "reddit-search" || skill.Connector.Version != "1.2.3" || skill.Connector.Action != "search" || skill.Connector.BindingID != "reddit" || skill.Connector.BindingRevision != 9 {
+		t.Fatalf("Skill event source = %#v, %v", skill, err)
+	}
+	if _, err := parseEventSourceComposer("name: Unsafe\nsource: source\nconnector: skill:reddit#search\nevents: NewPost", scope, owner); err == nil {
+		t.Fatal("non-versioned Skill connector was accepted")
+	}
+	if _, err := parseEventSourceComposer("name: Too frequent\nsource: source\nconnector: host:poller\nevents: NewPost\npoll-seconds: 1", scope, owner); err == nil {
+		t.Fatal("server-invalid polling interval was accepted")
+	}
+}
+
+func TestTUIEventSourceCreationPreservesRetryIdentityUntilSuccess(t *testing.T) {
+	fake := &fakeKernelClient{eventSourceError: errors.New("connector temporarily unavailable")}
+	model := newTestModel(t, fake)
+	model.ready = true
+	model.eventSourceCapability = kernelapi.EventSourceSubscriptionsCapability()
+	model.mode = modeEventSourceCreate
+	model.editor.SetValue(eventSourceComposerTemplate())
+
+	first := model.submitEventSource()
+	if first == nil {
+		t.Fatal("first event source submission did not dispatch")
+	}
+	applyCommand(t, model, first)
+	if len(fake.eventSourceCreates) != 1 || fake.eventSourceCreates[0].ID == "" || model.pendingEventSourceID == "" {
+		t.Fatalf("failed submission did not preserve its identity: requests=%#v pending=%q", fake.eventSourceCreates, model.pendingEventSourceID)
+	}
+	firstID := fake.eventSourceCreates[0].ID
+
+	fake.eventSourceError = nil
+	retry := model.submitEventSource()
+	if retry == nil {
+		t.Fatal("event source retry did not dispatch")
+	}
+	applyCommand(t, model, retry)
+	if len(fake.eventSourceCreates) != 2 || fake.eventSourceCreates[1].ID != firstID {
+		t.Fatalf("retry identity changed: first=%q retry=%q", firstID, fake.eventSourceCreates[1].ID)
+	}
+	if model.pendingEventSourceID != "" || model.pendingEventSourcePrompt != "" {
+		t.Fatalf("successful creation retained retry state: id=%q prompt=%q", model.pendingEventSourceID, model.pendingEventSourcePrompt)
+	}
+}
+
+func TestTUIEventSourcesFailClosedOnCapabilityVersionDrift(t *testing.T) {
+	drifted := kernelapi.EventSourceSubscriptionsCapability()
+	drifted.Version = "future"
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), drifted)}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.eventSourceCapability.Available || len(fake.eventSources) != 0 || strings.Contains(model.View(), "S Sources") {
+		t.Fatalf("mismatched event source capability did not fail closed: %#v", model.eventSourceCapability)
 	}
 }
 

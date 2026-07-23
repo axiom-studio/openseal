@@ -105,6 +105,12 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeObjectiveEdit && !m.supportsObjective(kernelapi.OperationUpdate) {
 		return m.renderUnavailableComposer(width, "Amend objective", "This server does not advertise objective updates.")
 	}
+	if m.mode == modeEventSourceCreate && !m.supportsEventSource(kernelapi.OperationCreate) {
+		return m.renderUnavailableComposer(width, "Add event source", "This server does not advertise event-source creation.")
+	}
+	if m.mode == modeEventSourceRetire && !m.supportsEventSource(kernelapi.OperationRetire) {
+		return m.renderUnavailableComposer(width, "Retire event source", "This server does not advertise event-source retirement.")
+	}
 	if m.mode == modeInitiativeCreate && !m.supportsInitiative(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Create an Initiative", "This server does not advertise Initiative creation.")
 	}
@@ -138,7 +144,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -243,6 +249,14 @@ func (m *Model) renderComposer(width int) string {
 	case modeObjectiveEdit:
 		title = "Amend selected objective"
 		description = "Record a new goal revision without losing its runs, budget, or audit history."
+	case modeEventSourceCreate:
+		title = "Add event source"
+		description = "Configure a deterministic host or governed Skill connector. New sources start paused for review."
+		owner = "No credentials in parameters · activate separately"
+	case modeEventSourceRetire:
+		title = "Retire selected event source"
+		description = "Type RETIRE exactly. The connector stops permanently while health, checkpoints, and audit remain durable."
+		owner = "Revision-bound permanent lifecycle change"
 	case modeInitiativeCreate:
 		title = "Create an Initiative"
 		description = "Compose durable objectives into a coordinated outcome that survives restarts."
@@ -350,6 +364,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderTeamsContent(width)
 	} else if m.section == sectionObjectives {
 		content = m.renderObjectivesContent(width)
+	} else if m.section == sectionSources {
+		content = m.renderEventSourcesContent(width)
 	} else if m.section == sectionInitiatives {
 		content = m.renderInitiativesContent(width)
 	} else if m.section == sectionOutreach {
@@ -373,7 +389,7 @@ func (m *Model) renderPanel(width int) string {
 }
 
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 13)
+	tabs := make([]string, 0, 14)
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
@@ -404,6 +420,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.objectiveCapability.Available {
 		label := "o Objectives"
 		if m.section == sectionObjectives {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.eventSourceCapability.Available {
+		label := "S Sources"
+		if m.section == sectionSources {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -1131,9 +1156,95 @@ func (m *Model) renderObjectivesContent(width int) string {
 		}
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
+		actions := []string{}
 		if m.supportsObjective(kernelapi.OperationUpdate) {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter amend  ·  n add objective"))
+			actions = append(actions, "Enter amend")
 		}
+		if m.supportsObjective(kernelapi.OperationCreate) {
+			actions = append(actions, "n add objective")
+		}
+		if m.supportsObjectiveSchedule(kernelapi.OperationReconcile) {
+			actions = append(actions, "g reconcile schedules")
+		}
+		if len(actions) > 0 {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
+		}
+	} else if m.supportsObjectiveSchedule(kernelapi.OperationReconcile) {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("g reconcile schedules"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderEventSourcesContent(width int) string {
+	title := headerStyle.Render("Event sources")
+	if m.loading {
+		title += mutedStyle.Render("  refreshing…")
+	}
+	lines := []string{title, "", mutedStyle.Render("Durable connectors normalize external events; Objective rules decide which work wakes.")}
+	if len(m.eventSources) == 0 {
+		lines = append(lines, "", mutedStyle.Render("No event sources configured for this Agent or Team."))
+	} else {
+		visible := max(3, min(len(m.eventSources), max(m.height-19, 5)))
+		start := max(0, min(m.eventSourceSelected-visible/2, len(m.eventSources)-visible))
+		for index := start; index < min(len(m.eventSources), start+visible); index++ {
+			item := m.eventSources[index]
+			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+			if index == m.eventSourceSelected {
+				prefix, style = "› ", selectedStyle
+			}
+			lines = append(lines, style.Render(fmt.Sprintf("%s%-9s %s", prefix, item.Status, compact(item.DisplayName, max(width-17, 20)))))
+		}
+	}
+	if item := m.selectedEventSourceRecord(); item != nil {
+		lines = append(lines, "", mutedStyle.Render("Selected"), compact(item.Source, max(width-8, 24)))
+		connector := string(item.Connector.Kind) + ":" + item.Connector.ID
+		if item.Connector.Version != "" {
+			connector += "@" + item.Connector.Version
+		}
+		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("%s · revision %d · connector %s", item.Status, item.Revision, connector), max(width-8, 24))))
+		if len(item.EventTypes) > 0 {
+			lines = append(lines, mutedStyle.Render(compact("Events · "+strings.Join(item.EventTypes, ", "), max(width-8, 24))))
+		}
+		if item.PollIntervalSeconds > 0 {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Poll every %ds", item.PollIntervalSeconds)))
+		}
+		if detail := m.eventSourceDetail; detail != nil && detail.Subscription != nil && detail.Subscription.ID == item.ID {
+			if detail.Health == nil {
+				lines = append(lines, mutedStyle.Render("Health · awaiting first connector report"))
+			} else {
+				health := detail.Health
+				value := fmt.Sprintf("Health · %s · heartbeat %s", health.State, relativeTime(health.LastHeartbeatAt))
+				style := mutedStyle
+				if health.State == runtime.EventSourceHealthDegraded || health.State == runtime.EventSourceHealthUnhealthy {
+					style = lipgloss.NewStyle().Foreground(danger)
+				}
+				lines = append(lines, style.Render(compact(value, max(width-8, 24))))
+				if health.Summary != "" {
+					lines = append(lines, style.Render(compact(health.Summary, max(width-10, 24))))
+				}
+			}
+			if detail.Checkpoint == nil {
+				lines = append(lines, mutedStyle.Render("Checkpoint · awaiting first event"))
+			} else {
+				checkpoint := detail.Checkpoint
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Checkpoint · revision %d · %s", checkpoint.Revision, relativeTime(checkpoint.UpdatedAt)), max(width-8, 24))))
+			}
+		}
+		actions := []string{}
+		if m.supportsEventSource(kernelapi.OperationUpdate) && item.Status != runtime.EventSourceSubscriptionRetired {
+			actions = append(actions, "p pause/resume")
+		}
+		if m.supportsEventSource(kernelapi.OperationRetire) && item.Status != runtime.EventSourceSubscriptionRetired {
+			actions = append(actions, "x retire")
+		}
+		if m.supportsEventSource(kernelapi.OperationCreate) {
+			actions = append(actions, "n add source")
+		}
+		if len(actions) > 0 {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
+		}
+	} else if m.supportsEventSource(kernelapi.OperationCreate) {
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("n add source"))
 	}
 	return strings.Join(lines, "\n")
 }
