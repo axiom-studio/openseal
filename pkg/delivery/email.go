@@ -42,7 +42,8 @@ func SkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Governed delivery",
 		Description: "Deliver reviewed messages and durable artifacts through authorized channels.",
-		Transport:   skill.TransportReference{Kind: "tool", Endpoint: SkillID},
+		Icon:        "mail", Category: "communication", Tags: []string{"email", "smtp", "delivery", "artifact"},
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		Actions: map[string]skill.Action{SendEmail: {
 			Name: SendEmail, Description: "Send a reviewed email through the bound delivery identity.",
 			SemanticArguments: map[string]string{

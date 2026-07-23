@@ -165,12 +165,14 @@ type SourceProvenance struct {
 }
 
 type Definition struct {
-	ID               string `json:"id"`
-	Version          string `json:"version"`
-	Name             string `json:"name"`
-	Description      string `json:"description,omitempty"`
-	Icon             string `json:"icon,omitempty"`
-	ConfigurationKey string `json:"configurationKey,omitempty"`
+	ID               string   `json:"id"`
+	Version          string   `json:"version"`
+	Name             string   `json:"name"`
+	Description      string   `json:"description,omitempty"`
+	Icon             string   `json:"icon,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	ConfigurationKey string   `json:"configurationKey,omitempty"`
 	// BindingConfigSchema defines non-secret, host-owned configuration that is
 	// fixed when a Skill is bound. It is never part of model-visible action
 	// input and is delivered to tool hosts separately from action arguments.

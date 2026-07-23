@@ -45,7 +45,8 @@ func SkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Source observer",
 		Description: "Observe permitted RSS or Atom sources and emit provenance-linked evidence.",
-		Transport:   skill.TransportReference{Kind: "tool", Endpoint: SkillID},
+		Icon:        "rss", Category: "research", Tags: []string{"rss", "atom", "monitoring", "evidence"},
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		Actions: map[string]skill.Action{ObserveFeed: {
 			Name: ObserveFeed, Description: "Read a permitted RSS or Atom feed and normalize its newest entries.",
 			InputSchema: map[string]interface{}{
