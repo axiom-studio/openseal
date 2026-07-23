@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
-	"github.com/axiom-studio/openseal/pkg/executor"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/source"
@@ -19,7 +18,6 @@ import (
 // Server exposes the versioned OpenSeal kernel API. Interactive clients
 // discover its exact capabilities rather than depending on hidden routes.
 type Server struct {
-	registry           *executor.Registry
 	store              runtime.KernelStore
 	artifactContent    runtime.ArtifactContentStore
 	artifactResolver   runtime.ArtifactContentResolver
@@ -49,12 +47,11 @@ func (s *Server) SetClawHubLifecycle(engine *opensealkernel.Engine, allowMutatio
 }
 
 // NewServer creates a new API server.
-func NewServer(registry *executor.Registry, store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
+func NewServer(store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
 	s := &Server{
-		registry: registry,
-		store:    store,
-		logger:   logger,
-		mux:      http.NewServeMux(),
+		store:  store,
+		logger: logger,
+		mux:    http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s

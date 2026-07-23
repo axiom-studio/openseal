@@ -16,7 +16,6 @@ import (
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/internal/server"
 	"github.com/axiom-studio/openseal/pkg/authoring"
-	"github.com/axiom-studio/openseal/pkg/executor"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -73,7 +72,6 @@ Options:
 		"apiAddr", cfg.API.ListenAddr,
 	)
 
-	reg := executor.NewRegistry(nil)
 	scope, err := parseDaemonScope(*authoringScope)
 	if err != nil {
 		sugar.Fatal(err)
@@ -159,7 +157,7 @@ Options:
 	kernel.Start(ctx)
 
 	// Versioned kernel API for the TUI and embedding integrations.
-	apiServer := server.NewServer(reg, store, sugar)
+	apiServer := server.NewServer(store, sugar)
 	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
 	if *standaloneOperator {
 		apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})

@@ -38,7 +38,7 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 	}, "user", "one", "test"); err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(nil, store, zap.NewNop().Sugar())
+	server := NewServer(store, zap.NewNop().Sugar())
 	capabilities := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"id":"agent-definitions","version":"6"`) ||
 		!strings.Contains(capabilities.Body.String(), `"update"`) || !strings.Contains(capabilities.Body.String(), `"rollback"`) ||
@@ -126,7 +126,7 @@ func TestAgentDefinitionLifecycleIsCASGuardedScopedAndAudited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(nil, store, zap.NewNop().Sugar())
+	server := NewServer(store, zap.NewNop().Sugar())
 
 	activatePayload, _ := json.Marshal(kernelapi.ActivateAgentDefinitionRequest{
 		Scope: scope, Version: "2.0.0", ExpectedRevision: deployed.Revision, ActorType: "user", ActorID: "admin", Reason: "validated rollout",
