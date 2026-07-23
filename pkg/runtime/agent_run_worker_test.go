@@ -579,9 +579,28 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var collaborationResultObserved atomic.Bool
 	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		if run.AssignedAgentID == "manager" {
-			return &TurnRunnerBinding{DefinitionID: "manager", DefinitionVersion: "1", Runner: parentRunner}, nil
+			return &TurnRunnerBinding{DefinitionID: "manager", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				if results, _ := input.Run.Output["collaborationResults"].(map[string]interface{}); len(results) > 0 {
+					for _, raw := range results {
+						result, _ := raw.(map[string]interface{})
+						output, _ := result["output"].(map[string]interface{})
+						if output["answer"] != "ship" {
+							return nil, fmt.Errorf("delegated output mismatch: %#v", results)
+						}
+						if output["collaborationResults"] != nil {
+							return nil, fmt.Errorf("delegated output contains recipient lifecycle metadata: %#v", output)
+						}
+						collaborationResultObserved.Store(true)
+					}
+					if groups, _ := input.Run.Output["dependencyGroups"].(map[string]interface{}); len(groups) != 0 {
+						return nil, fmt.Errorf("single delegation created parallel dependency groups: %#v", groups)
+					}
+				}
+				return parentRunner.RunTurn(ctx, input)
+			})}, nil
 		}
 		if run.AssignedAgentID != "specialist" || run.Context["release"] != "2026.07" || run.Context[DelegationModeContextKey] != string(runbook.DelegateReason) || run.Goal != "Analyze the release" {
 			return nil, fmt.Errorf("delegated child mismatch: %#v", run)
@@ -616,8 +635,11 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	if completed == nil || completed.Status != AgentRunStatusCompleted || completed.Output["answer"] != "ship" {
 		t.Fatalf("parent=%#v", completed)
 	}
+	if !collaborationResultObserved.Load() {
+		t.Fatal("parent did not observe the durable AgentRequest child output")
+	}
 	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 10})
-	if err != nil || len(children) != 1 || children[0].AssignedAgentID != "specialist" || children[0].Source != RunSourceFork || children[0].Status != AgentRunStatusCompleted {
+	if err != nil || len(children) != 1 || children[0].AssignedAgentID != "specialist" || children[0].Source != RunSourceRequest || children[0].Status != AgentRunStatusCompleted {
 		t.Fatalf("children=%#v error=%v", children, err)
 	}
 	if children[0].Budget == nil || children[0].Budget.MaxTurns != 2 || children[0].Budget.MaxDurationMS != 60000 || len(completed.BudgetAllocations) != 1 {
@@ -626,6 +648,71 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: parent.ID})
 	if err != nil || len(turns) != 2 || turns[0].RequestedDelegation == nil || turns[0].RequestedDelegation.AssignedAgentID != "specialist" {
 		t.Fatalf("turns=%#v error=%v", turns, err)
+	}
+	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: parent.ID, Limit: 10})
+	if err != nil || len(requests) != 1 || requests[0].Status != AgentRequestStatusCompleted ||
+		requests[0].Requester != (CollaborationParty{Type: OwnerTypeAgent, ID: "manager"}) ||
+		requests[0].Recipient != (CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"}) {
+		t.Fatalf("requests=%#v error=%v", requests, err)
+	}
+}
+
+func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "delegation-recovery"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
+		Goal: "delegate safely", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &TurnDelegationProposal{
+		StepID: "analyze", AssignedAgentID: "specialist", Goal: "Analyze evidence",
+		Context:    map[string]interface{}{"evidence": "artifact:one"},
+		Checkpoint: map[string]interface{}{"phase": "analysis"},
+		Budget:     &BudgetPolicy{MaxTurns: 2},
+		Mode:       "reason",
+	}
+	key := strings.Join([]string{"delegation", source.ID, proposal.StepID}, ":")
+	service := NewCollaborationService(store)
+	pending, err := service.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+		ID: stableCollaborationID(scope, key, "request"), Scope: scope, Kind: AgentRequestKindRequest,
+		Requester:   CollaborationParty{Type: OwnerTypeAgent, ID: "manager"},
+		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"},
+		SourceRunID: source.ID, Goal: proposal.Goal,
+		SharedContext:   map[string]interface{}{"evidence": "artifact:one", DelegationModeContextKey: "reason"},
+		ChildCheckpoint: proposal.Checkpoint, BudgetAllocation: proposal.Budget, IdempotencyKey: key,
+	})
+	if err != nil || pending.Request.Status != AgentRequestStatusPending {
+		t.Fatalf("pending request = %#v, %v", pending, err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := &AgentTurn{ID: "turn", RequestedDelegation: proposal}
+	waiting, err := pool.materializeTurnDelegation(t.Context(), "worker", source, turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := pool.materializeTurnDelegation(t.Context(), "worker", waiting, turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.ID != source.ID || replayed.Status != AgentRunStatusWaitingForDependency {
+		t.Fatalf("replayed source = %#v", replayed)
+	}
+	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: source.ID, Limit: 10})
+	if err != nil || len(requests) != 1 || requests[0].Status != AgentRequestStatusAccepted {
+		t.Fatalf("requests = %#v, %v", requests, err)
+	}
+	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(children) != 1 || children[0].Checkpoint["phase"] != "analysis" ||
+		children[0].Context[DelegationModeContextKey] != "reason" {
+		t.Fatalf("children = %#v, %v", children, err)
 	}
 }
 

@@ -44,7 +44,11 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	}
 	outcome, err := runner.RunTurn(context.Background(), TurnExecutionContext{
 		Run: &AgentRun{ID: "run-2", Scope: Scope{Kind: "tenant", ID: "1"}, AssignedAgentID: "agent-3", Goal: "Analyze launch feedback", Context: map[string]interface{}{"source": "https://example.test/evidence"}, Checkpoint: map[string]interface{}{"cursor": "next"},
-			Output: map[string]interface{}{"summary": "delegated", "dependencyGroups": map[string]interface{}{"group-1": map[string]interface{}{"status": "satisfied", "dependencies": map[string]interface{}{"analysis": map[string]interface{}{"result": map[string]interface{}{"output": map[string]interface{}{"finding": "visual debugging matters"}}}}}}},
+			Output: map[string]interface{}{
+				"summary":              "delegated",
+				"dependencyGroups":     map[string]interface{}{"group-1": map[string]interface{}{"status": "satisfied", "dependencies": map[string]interface{}{"analysis": map[string]interface{}{"result": map[string]interface{}{"output": map[string]interface{}{"finding": "visual debugging matters"}}}}}},
+				"collaborationResults": map[string]interface{}{"request-1": map[string]interface{}{"requestId": "request-1", "output": map[string]interface{}{"brief": "Launch accessibility"}}},
+			},
 			Budget: &BudgetPolicy{MaxTurns: 10, MaxDurationMS: 120000, MaxActions: 4}, BudgetUsage: BudgetUsage{Turns: 2, DurationMS: 15000},
 			BudgetReservations: map[string]BudgetReservation{"pending": {ID: "pending", Usage: BudgetUsage{Turns: 1, DurationMS: 5000}, CreatedAt: time.Now()}},
 			BudgetAllocations:  map[string]BudgetPolicy{"child": {MaxTurns: 2, MaxDurationMS: 30000, MaxActions: 1}}},
@@ -65,6 +69,9 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 	if host.request.DependencyResults["group-1"].(map[string]interface{})["status"] != "satisfied" {
 		t.Fatalf("dependency results = %#v", host.request.DependencyResults)
 	}
+	if host.request.CollaborationResults["request-1"].(map[string]interface{})["output"].(map[string]interface{})["brief"] != "Launch accessibility" {
+		t.Fatalf("collaboration results = %#v", host.request.CollaborationResults)
+	}
 	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "vault" || host.request.ModelCredential.ID != "credential-17" {
 		t.Fatalf("model credential reference = %#v", host.request.ModelCredential)
 	}
@@ -76,6 +83,31 @@ func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *tes
 		if strings.Contains(strings.ToLower(string(encoded)), strings.ToLower(forbidden)) {
 			t.Fatalf("host envelope exposes forbidden credential surface %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestHostedTurnRunnerRejectsUnsafeCollaborationResultsBeforeHostDispatch(t *testing.T) {
+	host := &recordingTurnHost{}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{
+			ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Synthesize delegated work",
+			Output: map[string]interface{}{"collaborationResults": map[string]interface{}{
+				"request": map[string]interface{}{"output": map[string]interface{}{"apiKey": "must-not-reach-host"}},
+			}},
+		},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if !errors.Is(err, ErrUnsafeSharedContext) {
+		t.Fatalf("unsafe collaboration projection error = %v", err)
+	}
+	if host.request.InvocationID != "" {
+		t.Fatalf("unsafe collaboration result reached host: %#v", host.request)
 	}
 }
 

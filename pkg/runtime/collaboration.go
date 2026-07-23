@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -114,6 +115,7 @@ type AgentRequest struct {
 	AcceptanceCriteria   map[string]interface{} `json:"acceptanceCriteria,omitempty"`
 	ArtifactRequirements []ArtifactRequirement  `json:"artifactRequirements,omitempty"`
 	SharedContext        map[string]interface{} `json:"sharedContext,omitempty"`
+	ChildCheckpoint      map[string]interface{} `json:"childCheckpoint,omitempty"`
 	ConversationRefs     []string               `json:"conversationRefs,omitempty"`
 	BudgetAllocation     *BudgetPolicy          `json:"budgetAllocation,omitempty"`
 	Clarification        string                 `json:"clarification,omitempty"`
@@ -161,6 +163,9 @@ func (r *AgentRequest) Validate() error {
 		return errors.New("agent request dependency identifiers must be portable opaque identifiers")
 	}
 	if err := validateCredentialFreeContext(r.SharedContext); err != nil {
+		return err
+	}
+	if err := validateCredentialFreeContext(r.ChildCheckpoint); err != nil {
 		return err
 	}
 	if r.BudgetAllocation != nil {
@@ -211,6 +216,7 @@ type CreateAgentRequestRequest struct {
 	AcceptanceCriteria   map[string]interface{}
 	ArtifactRequirements []ArtifactRequirement
 	SharedContext        map[string]interface{}
+	ChildCheckpoint      map[string]interface{}
 	ConversationRefs     []string
 	BudgetAllocation     *BudgetPolicy
 	IdempotencyKey       string
@@ -229,6 +235,7 @@ type AgentRequestGroupSpec struct {
 	AcceptanceCriteria   map[string]interface{}
 	ArtifactRequirements []ArtifactRequirement
 	SharedContext        map[string]interface{}
+	ChildCheckpoint      map[string]interface{}
 	ConversationRefs     []string
 	BudgetAllocation     *BudgetPolicy
 	Required             *bool
@@ -389,6 +396,9 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := validateCredentialFreeContext(req.SharedContext); err != nil {
 		return nil, err
 	}
+	if err := validateCredentialFreeContext(req.ChildCheckpoint); err != nil {
+		return nil, err
+	}
 	if err := validateArtifactRequirements(req.ArtifactRequirements); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
@@ -433,7 +443,8 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		DependencyGroupID: strings.TrimSpace(req.DependencyGroupID), DependencyID: strings.TrimSpace(req.DependencyID),
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
 		AcceptanceCriteria: cloneMap(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
-		SharedContext: cloneMap(req.SharedContext), ConversationRefs: append([]string(nil), req.ConversationRefs...),
+		SharedContext: cloneMap(req.SharedContext), ChildCheckpoint: cloneMap(req.ChildCheckpoint),
+		ConversationRefs: append([]string(nil), req.ConversationRefs...),
 		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
 		IdempotencyKey:   strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -551,7 +562,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			ID: requestID, Scope: req.Scope, Kind: spec.Kind, Requester: req.Requester, Recipient: spec.Recipient,
 			SourceRunID: req.SourceRunID, Goal: spec.Goal, Instructions: spec.Instructions, SemanticRole: spec.SemanticRole,
 			AcceptanceCriteria: spec.AcceptanceCriteria, ArtifactRequirements: spec.ArtifactRequirements,
-			SharedContext: spec.SharedContext, ConversationRefs: spec.ConversationRefs,
+			SharedContext: spec.SharedContext, ChildCheckpoint: spec.ChildCheckpoint, ConversationRefs: spec.ConversationRefs,
 			BudgetAllocation: spec.BudgetAllocation,
 			IdempotencyKey:   key + ":request:" + dependencyID, DependencyGroupID: groupID, DependencyID: dependencyID,
 		})
@@ -804,6 +815,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	updatedRequest.CompletedAt = &now
 	updatedRequest.ResolvedAt = &now
 
+	sharedChildOutput := cloneMap(child.Output)
 	updatedChild := completedCollaborationChildRun(child, updatedRequest, now)
 	var updatedSource *AgentRun
 	var dependencyResolution *RunDependencyResolutionRecord
@@ -818,12 +830,13 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 			Result: map[string]interface{}{
 				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
 				"summary": updatedRequest.CompletionSummary, "acceptanceEvidence": cloneMap(updatedRequest.AcceptanceEvidence),
+				"output": sharedChildOutput,
 			},
 			Artifacts: updatedRequest.Artifacts, Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID},
 			Visibility: ActivityVisibilityTeam, OccurredAt: now,
 		}
 	} else {
-		updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, now)
+		updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, sharedChildOutput, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1085,7 +1098,8 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: source.ConcurrencyKey,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
-		Budget: cloneBudgetPolicy(request.BudgetAllocation), Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Checkpoint: cloneMap(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),
+		Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if child.Budget != nil {
 		child.BudgetState = BudgetStateActive
@@ -1178,6 +1192,7 @@ func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (
 
 func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now time.Time) *AgentRun {
 	updated := cloneAgentRun(child)
+	sharedOutput := cloneMap(updated.Output)
 	updated.Status = AgentRunStatusCompleted
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -1185,11 +1200,11 @@ func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now 
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
 	updated.WakeCondition = nil
-	updated.Output = collaborationCompletionOutput(updated.Output, request)
+	updated.Output = collaborationCompletionOutput(updated.Output, request, sharedOutput)
 	return updated
 }
 
-func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
+func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, childOutput map[string]interface{}, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
 	if request.Kind == AgentRequestKindRequest {
 		if updated.Status != AgentRunStatusWaitingForDependency || updated.WakeCondition == nil ||
@@ -1208,7 +1223,7 @@ func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, no
 	updated.UpdatedAt = now
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
-	updated.Output = collaborationCompletionOutput(updated.Output, request)
+	updated.Output = collaborationCompletionOutput(updated.Output, request, childOutput)
 	return updated, nil
 }
 
@@ -1235,7 +1250,7 @@ func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now t
 	return updated, nil
 }
 
-func collaborationCompletionOutput(existing map[string]interface{}, request *AgentRequest) map[string]interface{} {
+func collaborationCompletionOutput(existing map[string]interface{}, request *AgentRequest, childOutput map[string]interface{}) map[string]interface{} {
 	result := cloneMap(existing)
 	if result == nil {
 		result = make(map[string]interface{})
@@ -1249,7 +1264,7 @@ func collaborationCompletionOutput(existing map[string]interface{}, request *Age
 	results[request.ID] = map[string]interface{}{
 		"requestId": request.ID, "kind": request.Kind, "childRunId": request.ChildRunID,
 		"summary": request.CompletionSummary, "acceptanceEvidence": cloneMap(request.AcceptanceEvidence),
-		"artifacts": cloneArtifactReferences(request.Artifacts),
+		"artifacts": cloneArtifactReferences(request.Artifacts), "output": cloneMap(childOutput),
 	}
 	result["collaborationResults"] = results
 	return result
@@ -1599,8 +1614,31 @@ func validateLocalSchemaReferences(value interface{}) error {
 func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestRequest) bool {
 	return existing.Kind == req.Kind && existing.Requester == req.Requester && existing.Recipient == req.Recipient &&
 		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal) &&
+		existing.Instructions == strings.TrimSpace(req.Instructions) && existing.SemanticRole == strings.TrimSpace(req.SemanticRole) &&
 		existing.DependencyGroupID == strings.TrimSpace(req.DependencyGroupID) && existing.DependencyID == strings.TrimSpace(req.DependencyID) &&
+		sameJSONValue(existing.AcceptanceCriteria, req.AcceptanceCriteria) &&
+		sameJSONValue(existing.ArtifactRequirements, req.ArtifactRequirements) &&
+		sameJSONValue(existing.SharedContext, req.SharedContext) &&
+		sameJSONValue(existing.ChildCheckpoint, req.ChildCheckpoint) &&
+		sameJSONValue(existing.ConversationRefs, req.ConversationRefs) &&
 		sameBudgetPolicy(existing.BudgetAllocation, req.BudgetAllocation)
+}
+
+func sameJSONValue(left, right interface{}) bool {
+	if emptyJSONCollection(left) && emptyJSONCollection(right) {
+		return true
+	}
+	leftJSON, _ := json.Marshal(left)
+	rightJSON, _ := json.Marshal(right)
+	return bytes.Equal(leftJSON, rightJSON)
+}
+
+func emptyJSONCollection(value interface{}) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	return (reflected.Kind() == reflect.Map || reflected.Kind() == reflect.Slice) && reflected.Len() == 0
 }
 
 func sameBudgetPolicy(left, right *BudgetPolicy) bool {
@@ -1648,6 +1686,7 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 	out.AcceptanceEvidence = cloneMap(in.AcceptanceEvidence)
 	out.Artifacts = cloneArtifactReferences(in.Artifacts)
 	out.SharedContext = cloneMap(in.SharedContext)
+	out.ChildCheckpoint = cloneMap(in.ChildCheckpoint)
 	out.ConversationRefs = append([]string(nil), in.ConversationRefs...)
 	if in.ResolvedAt != nil {
 		resolved := *in.ResolvedAt

@@ -635,6 +635,7 @@ type CreateAgentRequestRequest struct {
 	AcceptanceCriteria   map[string]interface{}        `json:"acceptanceCriteria,omitempty"`
 	ArtifactRequirements []runtime.ArtifactRequirement `json:"artifactRequirements,omitempty"`
 	SharedContext        map[string]interface{}        `json:"sharedContext,omitempty"`
+	ChildCheckpoint      map[string]interface{}        `json:"childCheckpoint,omitempty"`
 	ConversationRefs     []string                      `json:"conversationRefs,omitempty"`
 	BudgetAllocation     *runtime.BudgetPolicy         `json:"budgetAllocation,omitempty"`
 	IdempotencyKey       string                        `json:"idempotencyKey,omitempty"`
