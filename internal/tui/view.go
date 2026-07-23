@@ -1560,6 +1560,7 @@ func (m *Model) renderRunsContent(width int) string {
 			lines = append(lines, mutedStyle.Render("Autonomy budget · "+string(state)))
 			lines = append(lines, renderBudgetLines(run.Budget, &run.BudgetUsage, max(width-8, 24))...)
 		}
+		lines = append(lines, m.renderSelectedAgentTurns(width)...)
 		lines = append(lines, m.renderSelectedActionCalls(width)...)
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
@@ -1584,6 +1585,64 @@ func (m *Model) renderRunsContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("↑/↓ select · n new · r refresh · Tab compose"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderSelectedAgentTurns(width int) []string {
+	run := m.selectedRun()
+	if run == nil || !m.agentTurnCapability.Supports(kernelapi.OperationList) {
+		return nil
+	}
+	lines := []string{"", lipgloss.NewStyle().Foreground(text).Bold(true).Render("Agent turns")}
+	if m.loadingAgentTurns {
+		return append(lines, mutedStyle.Render("Refreshing turn history…"))
+	}
+	if m.agentTurnsRunID != run.ID {
+		return append(lines, mutedStyle.Render("Turn history has not loaded yet."))
+	}
+	if m.agentTurnsErr != nil {
+		return append(lines, lipgloss.NewStyle().Foreground(danger).Render("Turn history unavailable · "+compact(m.agentTurnsErr.Error(), max(width-32, 24))))
+	}
+	if len(m.agentTurns) == 0 {
+		return append(lines, mutedStyle.Render("No Agent turns recorded for this work."))
+	}
+	for _, turn := range m.agentTurns {
+		if turn == nil || turn.RunID != run.ID {
+			continue
+		}
+		status := strings.ReplaceAll(string(turn.Status), "_", " ")
+		identity := strings.Trim(strings.Join([]string{turn.ModelProvider, turn.Model}, "/"), "/")
+		line := fmt.Sprintf("• turn %-3d %-12s", turn.Sequence, status)
+		if identity != "" {
+			line += " " + identity
+		}
+		lines = append(lines, compact(line, max(width-4, 28)))
+		if turn.OutputSummary != "" {
+			lines = append(lines, mutedStyle.Render(compact("  "+turn.OutputSummary, max(width-4, 28))))
+		}
+		for _, decision := range turn.Decisions {
+			if decision.Summary != "" {
+				lines = append(lines, mutedStyle.Render(compact("  · "+decision.Summary, max(width-4, 28))))
+			}
+		}
+		for _, action := range turn.RequestedActions {
+			detail := action.Summary
+			if detail == "" {
+				detail = action.Capability
+			}
+			if action.BindingID != "" {
+				detail += fmt.Sprintf(" · binding %s@%d", action.BindingID, action.BindingRevision)
+			}
+			lines = append(lines, mutedStyle.Render(compact("  → "+detail, max(width-4, 28))))
+		}
+		if turn.Usage.InputTokens > 0 || turn.Usage.OutputTokens > 0 || turn.Usage.DurationMS > 0 {
+			usage := fmt.Sprintf("  %d input · %d output tokens", turn.Usage.InputTokens, turn.Usage.OutputTokens)
+			if turn.Usage.DurationMS > 0 {
+				usage += fmt.Sprintf(" · %s", (time.Duration(turn.Usage.DurationMS) * time.Millisecond).Round(time.Millisecond))
+			}
+			lines = append(lines, mutedStyle.Render(compact(usage, max(width-4, 28))))
+		}
+	}
+	return lines
 }
 
 func (m *Model) renderSelectedActionCalls(width int) []string {

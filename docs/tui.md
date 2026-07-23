@@ -150,13 +150,19 @@ connector-owned operations: the TUI observes them but cannot fabricate them.
 
 ## Run execution history
 
-The Runs inspector loads canonical `ActionCall` records only for the selected
-Run when the server advertises `action-calls` v1. It shows the immutable Skill,
-action, binding revision, lifecycle status, attempts, risk, side effect, and
-stable call identity. Invocation arguments, prepared runtime state, and
-credential references are intentionally not rendered. Selection changes,
-manual refresh, and background Run reconciliation reload the same durable
-records; the TUI does not infer execution from chat text or Run checkpoints.
+The Runs inspector loads canonical `AgentTurn` and `ActionCall` records only
+for the selected Run when the server advertises `agent-turns` v1 and
+`action-calls` v1. Turns show their durable sequence, lifecycle status,
+provider/model identity, concise output, and governed action summaries.
+Continuation checkpoints, model inputs, private provider payloads, leases, and
+hidden reasoning are never available to the TUI.
+
+Skill executions show the immutable Skill, action, binding revision, lifecycle
+status, attempts, risk, side effect, and stable call identity. Invocation
+arguments, prepared runtime state, and credential references are intentionally
+not rendered. Selection changes, manual refresh, and background Run
+reconciliation reload both timelines from durable kernel state; the TUI does
+not infer execution from chat text or Run checkpoints.
 
 ## Artifact downloads
 
