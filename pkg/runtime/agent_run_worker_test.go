@@ -254,7 +254,7 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	if err := catalog.Bind(t.Context(), &skill.Binding{
 		ID: "team-release-binding", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "release-team",
 		SkillID: "release", SkillVersion: "1.0.0", AllowedActions: []string{"deploy"}, MaximumRisk: skill.RiskLevelProduction,
-		Credentials: map[string]skill.CredentialReference{"token": {Kind: "vault", ID: "release-secret"}}, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api-token", ID: "release-secret"}}, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}

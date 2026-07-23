@@ -70,13 +70,13 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 	}
 	proposed := *entry.Deployment
 	proposed.RolloutStatus = kernelagent.RolloutPaused
-	proposed.Credentials = map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://tenant-one/provider"}}
+	proposed.Credentials = map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "credential://tenant-one/provider"}}
 	payload, _ := json.Marshal(kernelapi.UpdateAgentDeploymentRequest{
 		Deployment: &proposed, ExpectedRevision: proposed.Revision, ActorType: "system", ActorID: "reconciler", Reason: "place provider",
 	})
 	updated := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/agent-deployments/operator-live", string(payload), "")
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"rolloutStatus":"paused"`) ||
-		!strings.Contains(updated.Body.String(), `"changeKind":"configuration-updated"`) || !strings.Contains(updated.Body.String(), `"vault://tenant-one/provider"`) {
+		!strings.Contains(updated.Body.String(), `"changeKind":"configuration-updated"`) || !strings.Contains(updated.Body.String(), `"credential://tenant-one/provider"`) {
 		t.Fatalf("update = %d %s", updated.Code, updated.Body.String())
 	}
 	stale := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/agent-deployments/operator-live", string(payload), "")

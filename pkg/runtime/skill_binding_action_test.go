@@ -34,7 +34,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		"bindingId": "reddit", "expectedRevision": 0,
 		"skillId": "reddit.reader", "skillVersion": "1.0.0",
 		"allowedActions": []interface{}{"read"}, "enablePrompt": true, "maximumRisk": "read",
-		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "vault://tenant-a/reddit"}},
+		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://tenant-a/reddit"}},
 		"config":           map[string]interface{}{"subreddits": []interface{}{"kubernetes", "devops"}},
 	}
 	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
@@ -49,7 +49,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("proposal lifecycle = %#v", proposal)
 	}
 	encodedPreview, _ := json.Marshal(proposal.Approval.ProposedAction)
-	if !strings.Contains(string(encodedPreview), "vault://tenant-a/reddit") || strings.Contains(string(encodedPreview), "client_secret") {
+	if !strings.Contains(string(encodedPreview), "credential://tenant-a/reddit") || strings.Contains(string(encodedPreview), "client_secret") {
 		t.Fatalf("approval preview is not opaque and secret-safe: %s", encodedPreview)
 	}
 	if proposal.Approval.ProposedAction["deploymentId"] != deploymentID || proposal.Approval.ProposedAction["resourceType"] != "skill_binding" {
@@ -69,7 +69,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("upsert execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
 	}
 	binding, err := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
-	if err != nil || binding == nil || binding.Revision != 1 || binding.Disabled || binding.Credentials["reddit"].ID != "vault://tenant-a/reddit" {
+	if err != nil || binding == nil || binding.Revision != 1 || binding.Disabled || binding.Credentials["reddit"].ID != "credential://tenant-a/reddit" {
 		t.Fatalf("materialized binding = %#v, %v", binding, err)
 	}
 	if len(binding.Lifecycle) != 1 || binding.Lifecycle[0].Actor.Type != "user" || binding.Lifecycle[0].Actor.ID != "operator" {
@@ -181,7 +181,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 		t.Fatalf("discovery authority was not derived from the Run: %#v", received)
 	}
 	encoded, _ := json.Marshal(executed.Call.Output)
-	if strings.Contains(string(encoded), "vault://") || strings.Contains(string(encoded), "credentialId") || strings.Contains(string(encoded), "secret") {
+	if strings.Contains(string(encoded), "credential://") || strings.Contains(string(encoded), "credentialId") || strings.Contains(string(encoded), "secret") {
 		t.Fatalf("discovery exposed credential identity or material: %s", encoded)
 	}
 	if !strings.Contains(string(encoded), `"bindingConfigSchema":{"properties":{"community"`) {
@@ -227,7 +227,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	base := map[string]interface{}{
 		"bindingId": "reader", "expectedRevision": 0, "skillId": "reddit.reader", "skillVersion": "1.0.0",
 		"allowedActions": []interface{}{"read"}, "enablePrompt": false, "maximumRisk": "read",
-		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "vault://reddit"}},
+		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://reddit"}},
 	}
 
 	foreignRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-b"}, AssignedAgentID: "agent-b"}
@@ -277,7 +277,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 		Binding: &skill.Binding{
 			ID: "reader", Scope: skillScope, DeploymentID: "agent-a", SkillID: "reddit.reader", SkillVersion: "1.0.0",
 			AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead,
-			Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "vault://reddit"}},
+			Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://reddit"}},
 		},
 		ExpectedRevision: 0, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "initial",
 	}); err != nil {

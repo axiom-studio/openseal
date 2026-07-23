@@ -548,14 +548,14 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	placement := *activated
 	placement.RolloutStatus = kernelagent.RolloutPaused
 	placement.Credentials = map[string]capability.CredentialReference{
-		"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://postgres-e2e/model-provider"},
+		"MODEL_PROVIDER": {Kind: "model-provider", ID: "credential://postgres-e2e/model-provider"},
 	}
 	updatedPlacement, placementAudit, err := agentRegistry.UpdateDeployment(ctx, &placement, activated.Revision, "system", "reconciler", "place model provider")
 	if err != nil || updatedPlacement.RolloutStatus != kernelagent.RolloutPaused || placementAudit.ChangeKind != "configuration-updated" {
 		t.Fatalf("deployment placement = %#v %#v, %v", updatedPlacement, placementAudit, err)
 	}
 	restoredPlacement, err := replicaRegistry.GetDeployment(ctx, agentScope, deployment.ID)
-	if err != nil || restoredPlacement.Revision != updatedPlacement.Revision || restoredPlacement.Credentials["MODEL_PROVIDER"].ID != "vault://postgres-e2e/model-provider" {
+	if err != nil || restoredPlacement.Revision != updatedPlacement.Revision || restoredPlacement.Credentials["MODEL_PROVIDER"].ID != "credential://postgres-e2e/model-provider" {
 		t.Fatalf("restored placement = %#v, %v", restoredPlacement, err)
 	}
 	placementHistory, err := replicaRegistry.ListActivations(ctx, agentScope, deployment.ID)

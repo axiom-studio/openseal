@@ -156,7 +156,7 @@ func sqliteApprovalProposal(run *AgentRun, callID, idempotencyKey, eventID strin
 	call := &ActionCall{
 		ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0",
 		Action: "deploy", Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
-		Arguments: map[string]interface{}{"environment": "production"}, CredentialRefs: map[string]skill.CredentialReference{"token": {Kind: "vault", ID: "release-token"}},
+		Arguments: map[string]interface{}{"environment": "production"}, CredentialRefs: map[string]skill.CredentialReference{"token": {Kind: "api-token", ID: "release-token"}},
 		IdempotencyKey: idempotencyKey, ApprovalID: approval.ID, MaxAttempts: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}

@@ -415,7 +415,7 @@ node {baseDir}/bin/run.mjs --operation "searchRedditV1" --token "$JUST_ONE_API_T
 	if err := catalog.Bind(context.Background(), &skill.Binding{
 		ID: "reddit", Scope: scope, DeploymentID: "researcher", SkillID: definition.ID, SkillVersion: definition.Version,
 		EnablePrompt: true, AllowedActions: []string{"searchRedditV1"}, MaximumRisk: skill.RiskLevelRead,
-		Credentials: map[string]skill.CredentialReference{"JUST_ONE_API_TOKEN": {Kind: "environment-secret", ID: "opaque-vault-reference"}}, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{"JUST_ONE_API_TOKEN": {Kind: "environment-secret", ID: "opaque-credential-reference"}}, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}

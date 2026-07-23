@@ -121,7 +121,7 @@ func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(
 	scope := Scope{Kind: "tenant", ID: "7"}
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "lead", Goal: "Coordinate research", Source: RunSourceManual,
-		Context: map[string]interface{}{"initiativeId": "initiative-1", "vaultBindingRef": "source-only", "privateBrief": "lead-only"},
+		Context: map[string]interface{}{"initiativeId": "initiative-1", "privateCredentialRef": "source-only", "privateBrief": "lead-only"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(
 		t.Fatal(err)
 	}
 	for _, child := range created.Children {
-		if child.Context["initiativeId"] != "initiative-1" || child.Context["product"] == nil || child.Context["vaultBindingRef"] != nil || child.Context["privateBrief"] != nil {
+		if child.Context["initiativeId"] != "initiative-1" || child.Context["product"] == nil || child.Context["privateCredentialRef"] != nil || child.Context["privateBrief"] != nil {
 			t.Fatalf("child context = %#v", child.Context)
 		}
 	}

@@ -18,7 +18,7 @@ func TestCanonicalBindingManagementIsScopedCASAuditedAndCredentialExplicit(t *te
 	proposed := &Binding{
 		ID: "production-git", Scope: scope, DeploymentID: "release-agent", SkillID: definition.ID, SkillVersion: definition.Version,
 		AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
-		Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "vault://tenant/one/git/production"}},
+		Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "credential://tenant/one/git/production"}},
 		Revision:    99, Lifecycle: []BindingLifecycleEntry{{Revision: 99, Action: BindingLifecycleDisabled, Actor: BindingActor{Type: "user", ID: "spoofed"}, Reason: "spoofed"}},
 	}
 	created, err := catalog.UpsertBinding(ctx, UpsertBindingRequest{
@@ -32,7 +32,7 @@ func TestCanonicalBindingManagementIsScopedCASAuditedAndCredentialExplicit(t *te
 		created.Lifecycle[0].Reason != "connect production Git credential" {
 		t.Fatalf("created binding = %#v", created)
 	}
-	if reference := created.Credentials["git"]; reference.Kind != "git-token" || reference.ID != "vault://tenant/one/git/production" {
+	if reference := created.Credentials["git"]; reference.Kind != "git-token" || reference.ID != "credential://tenant/one/git/production" {
 		t.Fatalf("opaque credential reference = %#v", reference)
 	}
 	proposed.Revision = 1
@@ -82,7 +82,7 @@ func TestCanonicalBindingManagementPersistsLifecycleAcrossCatalogRestart(t *test
 	created, err := first.UpsertBinding(ctx, UpsertBindingRequest{
 		Binding: &Binding{ID: "git", Scope: scope, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version,
 			AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
-			Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "vault://git"}}},
+			Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "credential://git"}}},
 		Actor: BindingActor{Type: "user", ID: "admin"}, Reason: "initial assignment",
 	})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestCanonicalBindingManagementSerializesConcurrentCAS(t *testing.T) {
 	}
 	binding, err := catalog.UpsertBinding(ctx, UpsertBindingRequest{
 		Binding: &Binding{ID: "git", Scope: ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version,
-			AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction, Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "vault://git"}}},
+			AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction, Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "credential://git"}}},
 		Actor: BindingActor{Type: "user", ID: "admin"}, Reason: "create",
 	})
 	if err != nil {

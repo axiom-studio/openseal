@@ -2942,7 +2942,7 @@ func TestEvidenceSnapshotExpansionPagesCredentialFreeObservationProjection(t *te
 			t.Fatalf("expanded evidence missing %q:\n%s", expected, view)
 		}
 	}
-	for _, forbidden := range []string{"observation-second", "vaultBindingRef", "rawContent", "credential"} {
+	for _, forbidden := range []string{"observation-second", "privateCredentialRef", "rawContent", "credential"} {
 		if strings.Contains(view, forbidden) {
 			t.Fatalf("expanded evidence exposed %q:\n%s", forbidden, view)
 		}
@@ -3191,7 +3191,7 @@ func evidenceSnapshotRun(id, snapshotID string, createdAt time.Time) *runtime.Ag
 		},
 		// This unrelated context proves the renderer consumes only the canonical
 		// credential-free projection rather than dumping Run context.
-		"vaultBindingRef": "opaque-secret-reference",
+		"privateCredentialRef": "opaque-secret-reference",
 		"rawContent":      "unbounded source body",
 	}
 	return run
@@ -3732,7 +3732,7 @@ func TestRuntimePlacementPauseUsesAdvertisedGovernedUpdate(t *testing.T) {
 		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{
 			Deployment: &kernelagent.AgentDeployment{
 				ID: "operator", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, DefinitionID: "operator", ActiveVersion: "1",
-				RolloutStatus: kernelagent.RolloutActive, Environment: "local", Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://hidden/provider"}},
+				RolloutStatus: kernelagent.RolloutActive, Environment: "local", Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "credential://hidden/provider"}},
 				Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 3,
 			},
 			Definition: &kernelagent.AgentDefinition{ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely"},
@@ -3743,7 +3743,7 @@ func TestRuntimePlacementPauseUsesAdvertisedGovernedUpdate(t *testing.T) {
 	model.section = sectionReadiness
 	model.focus = focusPanel
 	view := model.View()
-	if !strings.Contains(view, "Credentials · 1 opaque reference(s) · model-provider") || strings.Contains(view, "vault://hidden/provider") {
+	if !strings.Contains(view, "Credentials · 1 opaque reference(s) · model-provider") || strings.Contains(view, "credential://hidden/provider") {
 		t.Fatalf("credential placement was not secret-safe:\n%s", view)
 	}
 	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
@@ -3777,7 +3777,7 @@ func newModelWithClient(t *testing.T, kernelClient client.KernelClient) *Model {
 }
 
 func TestSkillBindingPromptPreservesExactAuthorityAndOpaqueReferences(t *testing.T) {
-	binding, reason, err := parseSkillBindingPrompt("binding: reddit-research\nskill: reddit@2.1.0\nactions: search, post\nprompt: false\nrisk: external\ncredentials: reddit=vault:reddit-prod\nreason: approved market research", nil)
+	binding, reason, err := parseSkillBindingPrompt("binding: reddit-research\nskill: reddit@2.1.0\nactions: search, post\nprompt: false\nrisk: external\ncredentials: reddit=credential:reddit-prod\nreason: approved market research", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3798,7 +3798,7 @@ func TestSkillBindingTUIUsesCASForAgentAndRecoversFromConflict(t *testing.T) {
 	model.skillBindings = fake.skillBindings
 	model.restoreSkillBindingSelection()
 	model.prepareSkillBindingComposer(existing)
-	model.editor.SetValue("binding: reddit\nskill: reddit@1\nactions: search,post\nprompt: true\nrisk: external\ncredentials: token=vault:reddit-prod\nreason: expand approved authority")
+	model.editor.SetValue("binding: reddit\nskill: reddit@1\nactions: search,post\nprompt: true\nrisk: external\ncredentials: token=credential:reddit-prod\nreason: expand approved authority")
 	applyCommand(t, model, model.submitSkillBindingUpsert())
 	if len(fake.skillBindingUpserts) != 1 || fake.skillBindingUpserts[0].ExpectedRevision != 7 || fake.skillBindingUpserts[0].Binding.DeploymentID != "operator" || !fake.skillBindingUpserts[0].Binding.EnablePrompt {
 		t.Fatalf("upsert = %#v", fake.skillBindingUpserts)

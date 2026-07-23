@@ -33,7 +33,7 @@ func TestEmailSkillIsGovernedCredentialedAndArtifactSafe(t *testing.T) {
 	if err := catalog.Bind(ctx, &skill.Binding{
 		ID: "delivery", Scope: scope, DeploymentID: "agent", SkillID: SkillID, SkillVersion: SkillVersion,
 		AllowedActions: []string{SendEmail}, MaximumRisk: skill.RiskLevelExternal,
-		Credentials: map[string]skill.CredentialReference{EmailCredentialName: {Kind: EmailCredentialKind, ID: "opaque-vault-reference"}}, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{EmailCredentialName: {Kind: EmailCredentialKind, ID: "opaque-credential-reference"}}, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}

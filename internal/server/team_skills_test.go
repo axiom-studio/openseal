@@ -76,7 +76,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		t.Fatalf("create Agent binding = %d %s", agentCreated.Code, agentCreated.Body.String())
 	}
 	request := skill.UpsertBindingRequest{
-		Binding: &skill.Binding{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead, Credentials: map[string]capability.CredentialReference{"FORUM_TOKEN": {Kind: "vault", ID: "credential-17"}}},
+		Binding: &skill.Binding{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead, Credentials: map[string]capability.CredentialReference{"FORUM_TOKEN": {Kind: "api-token", ID: "credential-17"}}},
 		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Team uses shared research account",
 	}
 	payload, _ := json.Marshal(request)

@@ -259,12 +259,12 @@ func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T)
 
 	proposed := *deployment
 	proposed.RolloutStatus = kernelagent.RolloutPaused
-	proposed.Credentials = map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://tenant-one/provider"}}
+	proposed.Credentials = map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "credential://tenant-one/provider"}}
 	result, err := client.UpdateAgentDeployment(t.Context(), deployment.ID, kernelapi.UpdateAgentDeploymentRequest{
 		Deployment: &proposed, ExpectedRevision: deployment.Revision, ActorType: "system", ActorID: "reconciler", Reason: "place provider",
 	})
 	if err != nil || result.Deployment == nil || result.Audit == nil || result.Deployment.RolloutStatus != kernelagent.RolloutPaused ||
-		result.Deployment.Credentials["MODEL_PROVIDER"].ID != "vault://tenant-one/provider" || result.Audit.ChangeKind != workforce.DeploymentChangeConfigurationUpdated {
+		result.Deployment.Credentials["MODEL_PROVIDER"].ID != "credential://tenant-one/provider" || result.Audit.ChangeKind != workforce.DeploymentChangeConfigurationUpdated {
 		t.Fatalf("update result = %#v, %v", result, err)
 	}
 }
