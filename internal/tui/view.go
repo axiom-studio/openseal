@@ -798,7 +798,7 @@ func (m *Model) renderAuthoringContent(width int) string {
 		return title + "\n\n" + mutedStyle.Render("Describe the workforce on the left. OpenSeal will verify every generated definition, Skill gap, authority change, and role assignment.")
 	}
 	state := lipgloss.NewStyle().Foreground(success).Render("READY FOR REVIEW")
-	issues := len(result.Questions) + len(result.Validation) + len(result.MissingRequirements)
+	issues := len(result.UnresolvedQuestions) + len(result.Validation) + len(result.MissingRequirements)
 	if !result.Valid {
 		state = lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("%d ITEM(S) NEED ATTENTION", issues))
 	}
@@ -947,8 +947,8 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, fmt.Sprintf("• %s  %s · %d concurrent", compact(agent.DisplayName, max(width-28, 18)), agent.Authority.MaximumRisk, agent.Authority.MaxConcurrentRuns))
 	}
 	if m.authoringChangeSet == nil {
-		for _, question := range result.Questions {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question, max(width-8, 24))))
+		for _, question := range result.UnresolvedQuestions {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question.Prompt, max(width-8, 24))))
 		}
 	}
 	for _, missing := range result.MissingRequirements {

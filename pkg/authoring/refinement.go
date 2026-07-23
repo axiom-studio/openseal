@@ -1,8 +1,6 @@
 package authoring
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,22 +19,9 @@ var (
 )
 
 func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) ChangeSetRefinement {
-	questions := make([]RefinementQuestion, 0, len(result.UnresolvedQuestions)+len(result.Questions))
+	questions := make([]RefinementQuestion, 0, len(result.UnresolvedQuestions))
 	if refinementQuestionsAreActionable(result.UnresolvedQuestions, result.Validation) {
 		questions = append(questions, result.UnresolvedQuestions...)
-	}
-	for _, prompt := range result.Questions {
-		prompt = strings.TrimSpace(prompt)
-		if prompt == "" {
-			continue
-		}
-		sum := sha256.Sum256([]byte(prompt))
-		questions = append(questions, RefinementQuestion{
-			ID: "legacy-" + hex.EncodeToString(sum[:8]), Category: RefinementCategoryOther,
-			Prompt: prompt, WhyNeeded: "Additional information is required to complete the workforce candidate.",
-			Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerText}, Priority: 1,
-			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}},
-		})
 	}
 	byID := make(map[string]bool, len(questions))
 	merged := make([]RefinementQuestion, 0, len(questions)+len(current.Questions))

@@ -51,11 +51,26 @@ func (g staticGenerator) Generate(context.Context, GenerateRequest) ([]byte, err
 	return g.payload, g.err
 }
 
+func testRefinementQuestion(id, prompt string) RefinementQuestion {
+	return RefinementQuestion{
+		ID:         id,
+		Category:   RefinementCategoryOther,
+		Prompt:     prompt,
+		WhyNeeded:  "The workforce candidate requires an explicit answer.",
+		Blocking:   []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer:     RefinementAnswerSchema{Kind: RefinementAnswerText},
+		Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}},
+		Priority:   1,
+	}
+}
+
 func TestCompilerVerifiesPromptGeneratedWorkforceAndCapabilityGaps(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelExternal)
 	payload, _ := json.Marshal(GenerationResponse{
 		Candidate: candidate, Assumptions: []string{"Public replies use the configured brand identity", "Public replies use the configured brand identity"},
-		Questions: []string{"Which communities are approved for outreach?"},
+		UnresolvedQuestions: []RefinementQuestion{
+			testRefinementQuestion("approved-communities", "Which communities are approved for outreach?"),
+		},
 	})
 	compiler, err := NewCompiler(staticGenerator{payload: payload})
 	if err != nil {
@@ -70,7 +85,7 @@ func TestCompilerVerifiesPromptGeneratedWorkforceAndCapabilityGaps(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Valid || len(result.Validation) != 0 || len(result.Assumptions) != 1 || len(result.Questions) != 1 ||
+	if result.Valid || len(result.Validation) != 0 || len(result.Assumptions) != 1 || len(result.UnresolvedQuestions) != 1 ||
 		len(result.MissingRequirements) != 1 || result.MissingRequirements[0].Kind != "credential" || result.MissingRequirements[0].ID != "reddit-oauth" {
 		t.Fatalf("compile result = %#v", result)
 	}
@@ -542,7 +557,10 @@ func TestCompilerDoesNotDiscardOptionsForOtherInvalidAnswerKinds(t *testing.T) {
 func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
 	invalid := marketingCandidate("1", capability.RiskLevelRead)
 	invalid.Assignments[0].RoleID = "invented-role"
-	generated, _ := json.Marshal(GenerationResponse{Candidate: invalid, Questions: []string{"Would you prefer another role?"}})
+	generated, _ := json.Marshal(GenerationResponse{
+		Candidate:           invalid,
+		UnresolvedQuestions: []RefinementQuestion{testRefinementQuestion("alternate-role", "Would you prefer another role?")},
+	})
 	repaired, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead), Assumptions: []string{"Used the declared researcher role."}})
 	generator := &repairingGenerator{generated: generated, repaired: repaired}
 	compiler, _ := NewCompiler(generator)
@@ -551,7 +569,7 @@ func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
 			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
 		}},
 	})
-	if err != nil || !result.Valid || generator.repairs != 1 || len(result.Validation) != 0 || len(result.Questions) != 0 || len(result.Assumptions) != 1 {
+	if err != nil || !result.Valid || generator.repairs != 1 || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 0 || len(result.Assumptions) != 1 {
 		t.Fatalf("contract-repaired result = %#v, repairs = %d, err = %v", result, generator.repairs, err)
 	}
 }

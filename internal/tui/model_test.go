@@ -1855,8 +1855,12 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 				Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 			},
 		},
-		Questions: []string{"Which sources are authorized?"},
-		Diff:      []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "candidate"}},
+		UnresolvedQuestions: []authoring.RefinementQuestion{{
+			ID: "authorized-sources", Category: authoring.RefinementCategoryOther, Prompt: "Which sources are authorized?",
+			WhyNeeded: "The workforce needs an explicit source scope.", Blocking: []authoring.RefinementBlockingScope{authoring.RefinementBlocksCandidate},
+			Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerText}, Provenance: []authoring.RefinementQuestionProvenance{{Kind: authoring.RefinementProvenancePrompt}}, Priority: 1,
+		}},
+		Diff: []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "candidate"}},
 	}
 	fake := &fakeKernelClient{
 		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{}), kernelapi.ObjectivesCapability()),

@@ -24,7 +24,7 @@ import (
 type authoringFixtureGenerator struct{}
 
 func (authoringFixtureGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
-	return []byte(`{"candidate":{"agents":[],"assignments":[]},"questions":["Which responsibilities should this Team own?"]}`), nil
+	return []byte(`{"candidate":{"agents":[],"assignments":[]},"unresolvedQuestions":[{"id":"team-responsibilities","category":"other","prompt":"Which responsibilities should this Team own?","whyNeeded":"The Team needs an explicit purpose.","blocking":["candidate"],"answer":{"kind":"text"},"provenance":[{"kind":"prompt"}],"priority":1}]}`), nil
 }
 
 type failingAuthoringGenerator struct{}
@@ -336,7 +336,7 @@ func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
 	if err := json.NewDecoder(compiled.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Valid || len(result.Questions) != 1 || len(result.Validation) == 0 {
+	if result.Valid || len(result.UnresolvedQuestions) != 1 || len(result.Validation) == 0 {
 		t.Fatalf("compile result = %#v", result)
 	}
 }

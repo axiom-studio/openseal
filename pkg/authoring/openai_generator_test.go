@@ -155,7 +155,6 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"A cadence containing only an interval is invalid",
 		"When a Team owns the Initiative, put the monitor Objective template on the Team",
 		"Questions are blocking requests for information, not suggestions or confirmations",
-		"The legacy questions string array is accepted only for compatibility; emit unresolvedQuestions",
 		"Each RefinementQuestion is",
 		"Set autoResolvable only when an authorized host can derive the answer",
 		"In refinement mode, use refinement.answers as authoritative",

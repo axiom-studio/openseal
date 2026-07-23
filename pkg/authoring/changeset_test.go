@@ -649,7 +649,10 @@ func TestAtomicMemoryApplySupportsAgentWithoutTeam(t *testing.T) {
 }
 
 func TestChangeSetServicePersistsIdempotentImmutableCreateAndRefineLineage(t *testing.T) {
-	create := GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead), Questions: []string{"Which sources are authorized?"}}
+	create := GenerationResponse{
+		Candidate:           marketingCandidate("1", capability.RiskLevelRead),
+		UnresolvedQuestions: []RefinementQuestion{testRefinementQuestion("authorized-sources", "Which sources are authorized?")},
+	}
 	amend := GenerationResponse{Candidate: marketingCandidate("2", capability.RiskLevelExternal)}
 	createPayload, _ := jsonMarshal(create)
 	amendPayload, _ := jsonMarshal(amend)
