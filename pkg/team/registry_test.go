@@ -4,11 +4,44 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
+
+func TestPrepareDefinitionIsTheCanonicalImportBoundary(t *testing.T) {
+	createdAt := time.Date(2026, time.July, 23, 8, 30, 0, 0, time.UTC)
+	source := validDefinition()
+	source.ID = "tenant-7-team-research"
+	source.Digest = "sha256:retired"
+	source.CreatedAt = createdAt.Add(-time.Hour)
+	source.OperatingPrinciples = []string{"  cite evidence  ", "cite evidence"}
+
+	legacy, err := PrepareDefinition(source, createdAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalSource := cloneDefinition(source)
+	canonicalSource.ID = "tenant/7/research"
+	canonical, err := PrepareDefinition(canonicalSource, createdAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.CreatedAt != createdAt || canonical.CreatedAt != createdAt {
+		t.Fatalf("creation times = %v, %v; want %v", legacy.CreatedAt, canonical.CreatedAt, createdAt)
+	}
+	if legacy.Digest == "" || canonical.Digest == "" || legacy.Digest == canonical.Digest {
+		t.Fatalf("identity-sensitive digests = %q, %q", legacy.Digest, canonical.Digest)
+	}
+	if got := canonical.OperatingPrinciples; len(got) != 1 || got[0] != "cite evidence" {
+		t.Fatalf("normalized operating principles = %#v", got)
+	}
+	if source.Digest != "sha256:retired" || source.ID != "tenant-7-team-research" {
+		t.Fatalf("source was mutated: %#v", source)
+	}
+}
 
 func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *testing.T) {
 	ctx := context.Background()
