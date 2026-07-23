@@ -951,12 +951,17 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 	resourceType := strings.TrimSpace(fmt.Sprint(result["resourceType"]))
 	if resourceType == agentBehaviorResourceType {
 		deployment := conversationResultMap(result["deployment"])
-		id := strings.TrimSpace(fmt.Sprint(deployment["id"]))
+		id := conversationResultString(deployment, "id")
 		if !validOpaqueIdentifier(id, 256) {
 			return nil, false
 		}
-		displayName := strings.TrimSpace(fmt.Sprint(deployment["displayName"]))
-		activeVersion := strings.TrimSpace(fmt.Sprint(deployment["activeVersion"]))
+		displayName := conversationResultString(deployment, "displayName")
+		if displayName == "" {
+			amendment := conversationResultMap(result["amendment"])
+			candidate := conversationResultMap(amendment["candidate"])
+			displayName = conversationResultString(candidate, "displayName")
+		}
+		activeVersion := conversationResultString(deployment, "activeVersion")
 		content := "Agent behavior was updated successfully."
 		if displayName != "" {
 			content = "Agent “" + displayName + "” behavior was updated successfully."
@@ -1150,6 +1155,17 @@ func conversationResultMap(value interface{}) map[string]interface{} {
 		return nil
 	}
 	return result
+}
+
+func conversationResultString(value map[string]interface{}, key string) string {
+	if value == nil {
+		return ""
+	}
+	result, ok := value[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(result)
 }
 
 func (r *ConversationRunTurnRunner) retryOutcome(run *AgentRun, cause error) (*TurnOutcome, error) {
