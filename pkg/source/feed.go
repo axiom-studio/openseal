@@ -21,7 +21,7 @@ import (
 
 const (
 	SkillID      = "openseal.source"
-	SkillVersion = "1.0.2"
+	SkillVersion = "1.0.3"
 	SkillImage   = "axiomstudio/skill-openseal-source:1.0.2"
 	ObserveFeed  = "observe_feed"
 	MaximumItems = 100

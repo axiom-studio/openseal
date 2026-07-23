@@ -12,7 +12,7 @@ import (
 
 const (
 	SkillID             = "openseal.delivery"
-	SkillVersion        = "1.1.0"
+	SkillVersion        = "1.2.0"
 	SkillImage          = "axiomstudio/skill-openseal-delivery:1.1.0"
 	SendEmail           = "send_email"
 	EmailCredentialName = "email-delivery"

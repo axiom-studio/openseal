@@ -72,7 +72,7 @@ func TestSkillValidateCommandChecksCanonicalManifest(t *testing.T) {
 	if err := runSkillCommand(&output, []string{"validate", path}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if output.String() != "valid openseal.source@1.0.2\n" {
+	if output.String() != "valid openseal.source@1.0.3\n" {
 		t.Fatalf("output = %q", output.String())
 	}
 	if err := os.WriteFile(path, []byte("apiVersion: legacy"), 0o600); err != nil {
