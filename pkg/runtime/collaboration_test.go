@@ -85,7 +85,11 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if created.Request.Status != AgentRequestStatusPending || len(created.Events) != 1 || created.Events[0].TeamID != "product" || created.Events[0].Visibility != ActivityVisibilityTeam {
+			if created.Request.Status != AgentRequestStatusPending || created.Source == nil ||
+				created.Source.Status != AgentRunStatusWaitingForAgent || created.Source.WakeCondition == nil ||
+				created.Source.WakeCondition.Type != "agent_request_decision" ||
+				created.Source.WakeCondition.Reference != created.Request.ID ||
+				len(created.Events) != 1 || created.Events[0].TeamID != "product" || created.Events[0].Visibility != ActivityVisibilityTeam {
 				t.Fatalf("created request = %#v, events = %#v", created.Request, created.Events)
 			}
 			duplicate, err := service.CreateAgentRequest(ctx, create)
@@ -315,6 +319,10 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: active.ID,
 		Requester: CollaborationParty(owner), Recipient: recipient, Goal: "Prepare the release brief",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err = portfolio.GetAgentRun(ctx, scope, active.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -313,8 +313,10 @@ type AgentRequestResult struct {
 }
 
 type AgentRequestCreateRecord struct {
-	Request *AgentRequest
-	Event   *ActivityEvent
+	Request                *AgentRequest
+	SourceRun              *AgentRun
+	ExpectedSourceRevision int64
+	Event                  *ActivityEvent
 }
 
 type AgentRequestResponseRecord struct {
@@ -489,11 +491,22 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		summary = fmt.Sprintf("Proposed handoff to %s %s", request.Recipient.Type, request.Recipient.ID)
 	}
 	event := collaborationEvent(source, request, eventType, summary, req.Requester, now)
-	persisted, err := s.store.CreateAgentRequest(ctx, AgentRequestCreateRecord{Request: request, Event: event})
+	record := AgentRequestCreateRecord{Request: request, Event: event}
+	if request.DependencyGroupID == "" {
+		record.SourceRun, err = sourceAwaitingAgentRequestDecision(source, request, now)
+		if err != nil {
+			return nil, err
+		}
+		record.ExpectedSourceRevision = source.Revision
+	}
+	persisted, err := s.store.CreateAgentRequest(ctx, record)
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRequestResult{Request: cloneAgentRequest(request), Events: []*ActivityEvent{persisted}}, nil
+	return &AgentRequestResult{
+		Request: cloneAgentRequest(request), Source: cloneAgentRun(record.SourceRun),
+		Events: []*ActivityEvent{persisted},
+	}, nil
 }
 
 // CreateAgentRequestGroup durably seals a complete fan-out before exposing its
@@ -678,6 +691,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		updated.Status = AgentRequestStatusPending
 		eventType = "collaboration.clarification_provided"
 		summary = fmt.Sprintf("%s %s provided clarification", actor.Type, actor.ID)
+		if groupedDependency == nil {
+			record.SourceRun, err = sourceAwaitingAgentRequestDecision(source, updated, now)
+			if err != nil {
+				return nil, err
+			}
+			record.ExpectedSourceRevision = source.Revision
+		}
 	case AgentRequestDecisionRequestClarification:
 		if request.Status != AgentRequestStatusPending {
 			return nil, ErrInvalidAgentRequestState
@@ -689,6 +709,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		updated.Clarification = strings.TrimSpace(req.Message)
 		eventType = "collaboration.clarification_requested"
 		summary = fmt.Sprintf("%s %s requested clarification", actor.Type, actor.ID)
+		if groupedDependency == nil {
+			record.SourceRun, err = sourceResumingAfterAgentRequestDecision(source, updated, now)
+			if err != nil {
+				return nil, err
+			}
+			record.ExpectedSourceRevision = source.Revision
+		}
 	case AgentRequestDecisionReject:
 		updated.Status = AgentRequestStatusRejected
 		updated.ResolvedAt = &now
@@ -704,11 +731,19 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 				ExpectedDependencyRevision: groupedDependency.Revision, State: RunDependencyStateFailed, Error: reason,
 				Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
 			}
+		} else {
+			record.SourceRun, err = sourceResumingAfterAgentRequestDecision(source, updated, now)
+			if err != nil {
+				return nil, err
+			}
+			record.ExpectedSourceRevision = source.Revision
 		}
 	case AgentRequestDecisionAccept:
 		if groupedDependency == nil {
-			if err := validateAgentRequestSource(source); err != nil {
-				return nil, err
+			if !sourceWaitsForAgentRequestDecision(source, request.ID) {
+				if err := validateAgentRequestSource(source); err != nil {
+					return nil, err
+				}
 			}
 		}
 		assignedAgentID, assignmentErr := s.resolveRequestAssignment(ctx, request, req.AssignedAgentID)
@@ -754,6 +789,8 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		if err != nil {
 			return nil, err
 		}
+	} else if record.SourceRun != nil {
+		source = record.SourceRun
 	}
 	return &AgentRequestResult{Request: cloneAgentRequest(updated), Source: cloneAgentRun(source), Child: cloneAgentRun(record.ChildRun), Events: events}, nil
 }
@@ -1242,6 +1279,64 @@ func cloneWakeCondition(condition *WakeCondition) *WakeCondition {
 	return &cloned
 }
 
+func sourceWaitsForAgentRequestDecision(source *AgentRun, requestID string) bool {
+	return source != nil && source.Status == AgentRunStatusWaitingForAgent && source.WakeCondition != nil &&
+		source.WakeCondition.Type == "agent_request_decision" &&
+		source.WakeCondition.Reference == strings.TrimSpace(requestID)
+}
+
+func sourceAwaitingAgentRequestDecision(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
+	if source == nil || request == nil {
+		return nil, ErrRunNotFound
+	}
+	if sourceWaitsForAgentRequestDecision(source, request.ID) {
+		return cloneAgentRun(source), nil
+	}
+	if !CanStartAgentRequestFromRun(source) {
+		return nil, fmt.Errorf("%w: source run cannot await request decision from %s", ErrInvalidAgentRequestState, source.Status)
+	}
+	updated := cloneAgentRun(source)
+	updated.Status = AgentRunStatusWaitingForAgent
+	updated.WakeCondition = &WakeCondition{Type: "agent_request_decision", Reference: request.ID}
+	updated.Revision++
+	updated.UpdatedAt = now
+	updated.LeaseOwner = ""
+	updated.LeaseExpiresAt = nil
+	return updated, updated.Validate()
+}
+
+func sourceResumingAfterAgentRequestDecision(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
+	if source == nil || request == nil {
+		return nil, ErrRunNotFound
+	}
+	if !sourceWaitsForAgentRequestDecision(source, request.ID) {
+		return nil, fmt.Errorf("%w: source run is not awaiting request %s", ErrInvalidAgentRequestState, request.ID)
+	}
+	updated := cloneAgentRun(source)
+	updated.Status = AgentRunStatusQueued
+	updated.WakeCondition = nil
+	updated.Revision++
+	updated.UpdatedAt = now
+	updated.AvailableAt = now
+	updated.QueueEnteredAt = now
+	updated.LeaseOwner = ""
+	updated.LeaseExpiresAt = nil
+	if updated.Output == nil {
+		updated.Output = make(map[string]interface{})
+	}
+	results, _ := updated.Output["collaborationResults"].(map[string]interface{})
+	results = cloneMap(results)
+	if results == nil {
+		results = make(map[string]interface{})
+	}
+	results[request.ID] = map[string]interface{}{
+		"requestId": request.ID, "status": request.Status, "message": request.Response,
+		"clarification": request.Clarification, "recipient": request.Recipient,
+	}
+	updated.Output["collaborationResults"] = results
+	return updated, updated.Validate()
+}
+
 func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
 	if err := addRunBudgetAllocation(updated, request.ID, request.BudgetAllocation); err != nil {
@@ -1336,6 +1431,7 @@ func collaborationCompletionOutput(existing map[string]interface{}, request *Age
 	}
 	results[request.ID] = map[string]interface{}{
 		"requestId": request.ID, "kind": request.Kind, "childRunId": request.ChildRunID,
+		"status":  request.Status,
 		"summary": request.CompletionSummary, "acceptanceEvidence": cloneMap(request.AcceptanceEvidence),
 		"artifacts": cloneArtifactReferences(request.Artifacts), "output": cloneMap(childOutput),
 	}

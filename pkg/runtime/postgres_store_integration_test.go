@@ -765,6 +765,12 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitingSource, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, source.ID)
+	if err != nil || waitingSource.Status != AgentRunStatusWaitingForAgent || waitingSource.WakeCondition == nil ||
+		waitingSource.WakeCondition.Type != "agent_request_decision" ||
+		waitingSource.WakeCondition.Reference != created.Request.ID {
+		t.Fatalf("atomically waiting source = %#v, %v", waitingSource, err)
+	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
 		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},

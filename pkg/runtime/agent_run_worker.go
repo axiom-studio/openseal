@@ -396,12 +396,44 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		sharedContext[DelegationModeContextKey] = proposal.Mode
 	}
 	key := strings.Join([]string{"delegation", run.ID, proposal.StepID}, ":")
+	requestID := stableCollaborationID(run.Scope, key, "request")
+	existing, err := p.collaboration.GetAgentRequest(ctx, run.Scope, requestID)
+	if err != nil && !errors.Is(err, ErrAgentRequestNotFound) {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Status == AgentRequestStatusClarificationRequested {
+			if strings.TrimSpace(proposal.Clarification) == "" {
+				return nil, errors.New("delegation recipient requested clarification, but the follow-up proposal supplied no answer")
+			}
+			clarified, clarifyErr := p.collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+				Scope: run.Scope, RequestID: existing.ID, ExpectedRevision: existing.Revision,
+				Decision: AgentRequestDecisionProvideClarification, Principal: existing.Requester,
+				Message: strings.TrimSpace(proposal.Clarification),
+			})
+			if clarifyErr != nil {
+				return nil, clarifyErr
+			}
+			if clarified == nil || clarified.Source == nil {
+				return nil, errors.New("delegation clarification did not return the durable waiting source Run")
+			}
+			return clarified.Source, nil
+		}
+		source, getErr := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+		if getErr != nil || source == nil {
+			if getErr == nil {
+				getErr = ErrRunNotFound
+			}
+			return nil, getErr
+		}
+		return source, nil
+	}
 	created, err := p.collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		ID: stableCollaborationID(run.Scope, key, "request"), Scope: run.Scope, Kind: AgentRequestKindRequest,
+		ID: requestID, Scope: run.Scope, Kind: AgentRequestKindRequest,
 		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: proposal.AssignedAgentID},
 		SourceRunID: run.ID, Goal: proposal.Goal, SharedContext: sharedContext, ChildCheckpoint: proposal.Checkpoint,
-		AcceptancePolicy: AgentRequestAcceptancePreauthorized,
+		AcceptancePolicy: AgentRequestAcceptanceRecipientReview,
 		BudgetAllocation: proposal.Budget, IdempotencyKey: key,
 	})
 	if err != nil {
@@ -411,20 +443,21 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		return nil, errors.New("delegation materialization returned no durable Agent request")
 	}
 	if created.Request.Status == AgentRequestStatusPending {
-		accepted, acceptErr := p.collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
-			Scope: run.Scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-			Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
-			AssignedAgentID: proposal.AssignedAgentID,
-		})
-		if acceptErr != nil {
-			return nil, acceptErr
+		if created.Source != nil {
+			return created.Source, nil
 		}
-		if accepted == nil || accepted.Source == nil || accepted.Child == nil {
-			return nil, errors.New("delegation acceptance returned no durable source and child Runs")
+		source, getErr := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+		if getErr != nil || source == nil {
+			if getErr == nil {
+				getErr = ErrRunNotFound
+			}
+			return nil, getErr
 		}
-		return accepted.Source, nil
+		return source, nil
 	}
-	if created.Request.Status != AgentRequestStatusAccepted && created.Request.Status != AgentRequestStatusCompleted {
+	if created.Request.Status != AgentRequestStatusAccepted && created.Request.Status != AgentRequestStatusCompleted &&
+		created.Request.Status != AgentRequestStatusRejected && created.Request.Status != AgentRequestStatusCanceled &&
+		created.Request.Status != AgentRequestStatusFailed {
 		return nil, fmt.Errorf("delegation request %s is %s", created.Request.ID, created.Request.Status)
 	}
 	source, err := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
@@ -709,7 +742,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 }
 
 func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) {
-	if p.requestInbox == nil || p.config.Kind != RunKindAgentWork {
+	if p.requestInbox == nil || p.config.Kind != "" && p.config.Kind != RunKindAgentWork {
 		return
 	}
 	result, err := p.requestInbox.Reconcile(ctx, p.config.Scope, p.config.AssignedAgentID)

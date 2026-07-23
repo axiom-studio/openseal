@@ -40,13 +40,7 @@ func migrateCollaboration(db *sql.DB) error {
 }
 
 func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentRequestCreateRecord) (*ActivityEvent, error) {
-	if record.Request == nil || record.Event == nil {
-		return nil, ErrAgentRequestNotFound
-	}
-	if err := record.Request.Validate(); err != nil {
-		return nil, err
-	}
-	if err := record.Event.Validate(); err != nil {
+	if err := validateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(record.Request)
@@ -59,13 +53,19 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
-	var exists int
-	if err := conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-		record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrRunNotFound
+	if record.SourceRun != nil {
+		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
+			return nil, err
 		}
-		return nil, err
+	} else {
+		var exists int
+		if err := conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+			record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, ErrRunNotFound
+			}
+			return nil, err
+		}
 	}
 	_, err = conn.ExecContext(ctx, `INSERT INTO agent_requests
 		(scope_kind, scope_id, id, kind, status, requester_type, requester_id, recipient_type, recipient_id,

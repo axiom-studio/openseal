@@ -467,7 +467,7 @@ func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interf
 		if len(result) == 0 {
 			return false, nil, nil
 		}
-		if resultStatus, _ := result["status"].(string); resultStatus != "" {
+		if resultStatus, _ := result["status"].(string); resultStatus != "" && resultStatus != string(AgentRequestStatusCompleted) {
 			message := "delegated Agent step " + stepID + " " + resultStatus
 			return false, r.failed(checkpoint, *state, nil, message), nil
 		}

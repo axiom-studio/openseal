@@ -581,6 +581,23 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	}
 	var collaborationResultObserved atomic.Bool
 	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		if run.Source == RunSourceRequestDecision {
+			if run.AssignedAgentID != "specialist" || run.Context[AgentRequestInboxContextKey] == nil {
+				return nil, fmt.Errorf("request decision run mismatch: %#v", run)
+			}
+			return &TurnRunnerBinding{DefinitionID: "specialist", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{
+					NextRunStatus: AgentRunStatusCompleted,
+					OutputSummary: "Request accepted",
+					RunOutput: map[string]interface{}{
+						AgentRequestDecisionOutputKey: map[string]interface{}{
+							"decision": string(AgentRequestDecisionAccept),
+							"message":  "The request is clear and relevant.",
+						},
+					},
+				}, nil
+			})}, nil
+		}
 		if run.AssignedAgentID == "manager" {
 			return &TurnRunnerBinding{DefinitionID: "manager", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 				if results, _ := input.Run.Output["collaborationResults"].(map[string]interface{}); len(results) > 0 {
@@ -633,16 +650,43 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if completed == nil || completed.Status != AgentRunStatusCompleted || completed.Output["answer"] != "ship" {
-		t.Fatalf("parent=%#v", completed)
+		events, _ := store.ListActivity(t.Context(), ActivityFilter{Scope: scope, RunID: parent.ID, Limit: 50})
+		runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 50})
+		requests, _ := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: parent.ID, Limit: 50})
+		var latest *ActivityEvent
+		if len(events) > 0 {
+			latest = events[len(events)-1]
+		}
+		var child, request interface{}
+		if len(runs) > 0 {
+			child = *runs[0]
+		}
+		if len(requests) > 0 {
+			request = *requests[0]
+		}
+		t.Fatalf("parent=%#v latest=%#v child=%#v request=%#v", completed, latest, child, request)
 	}
 	if !collaborationResultObserved.Load() {
 		t.Fatal("parent did not observe the durable AgentRequest child output")
 	}
 	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: parent.ID, Limit: 10})
-	if err != nil || len(children) != 1 || children[0].AssignedAgentID != "specialist" || children[0].Source != RunSourceRequest || children[0].Status != AgentRunStatusCompleted {
+	if err != nil || len(children) != 2 {
 		t.Fatalf("children=%#v error=%v", children, err)
 	}
-	if children[0].Budget == nil || children[0].Budget.MaxTurns != 2 || children[0].Budget.MaxDurationMS != 60000 || len(completed.BudgetAllocations) != 1 {
+	var decision, delegated *AgentRun
+	for _, child := range children {
+		switch child.Source {
+		case RunSourceRequestDecision:
+			decision = child
+		case RunSourceRequest:
+			delegated = child
+		}
+	}
+	if decision == nil || decision.AssignedAgentID != "specialist" || decision.Status != AgentRunStatusCompleted ||
+		delegated == nil || delegated.AssignedAgentID != "specialist" || delegated.Status != AgentRunStatusCompleted {
+		t.Fatalf("children=%#v", children)
+	}
+	if delegated.Budget == nil || delegated.Budget.MaxTurns != 2 || delegated.Budget.MaxDurationMS != 60000 || len(completed.BudgetAllocations) != 1 {
 		t.Fatalf("budgeted parent=%#v children=%#v", completed, children)
 	}
 	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: scope, RunID: parent.ID})
@@ -651,6 +695,7 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	}
 	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: parent.ID, Limit: 10})
 	if err != nil || len(requests) != 1 || requests[0].Status != AgentRequestStatusCompleted ||
+		requests[0].AcceptancePolicy != AgentRequestAcceptanceRecipientReview ||
 		requests[0].Requester != (CollaborationParty{Type: OwnerTypeAgent, ID: "manager"}) ||
 		requests[0].Recipient != (CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"}) {
 		t.Fatalf("requests=%#v error=%v", requests, err)
@@ -703,8 +748,16 @@ func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replayed.ID != source.ID || replayed.Status != AgentRunStatusWaitingForDependency {
+	if replayed.ID != source.ID || replayed.Status != AgentRunStatusWaitingForAgent {
 		t.Fatalf("replayed source = %#v", replayed)
+	}
+	reconciled, err := pool.requestInbox.Reconcile(t.Context(), scope, "specialist")
+	if err != nil || reconciled.RequestsAccepted != 1 {
+		t.Fatalf("reconciled inbox = %#v, %v", reconciled, err)
+	}
+	replayed, err = store.GetAgentRun(t.Context(), scope, source.ID)
+	if err != nil || replayed.Status != AgentRunStatusWaitingForDependency {
+		t.Fatalf("accepted source = %#v, %v", replayed, err)
 	}
 	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: source.ID, Limit: 10})
 	if err != nil || len(requests) != 1 || requests[0].Status != AgentRequestStatusAccepted {
@@ -714,6 +767,138 @@ func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *t
 	if err != nil || len(children) != 1 || children[0].Checkpoint["phase"] != "analysis" ||
 		children[0].Context[DelegationModeContextKey] != "reason" {
 		t.Fatalf("children = %#v, %v", children, err)
+	}
+}
+
+func TestAgentRunWorkerCompletesDelegationClarificationRoundTrip(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "delegation-clarification"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
+		Goal: "delegate with enough context", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &TurnDelegationProposal{
+		StepID: "research", AssignedAgentID: "specialist", Goal: "Research customer feedback",
+		Context: map[string]interface{}{"release": "2026.07"}, Mode: "reason",
+	}
+	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		switch run.Source {
+		case RunSourceRequestDecision:
+			inbox, _ := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+			revision, revisionErr := positiveInt64(inbox["requestRevision"])
+			if revisionErr != nil {
+				return nil, revisionErr
+			}
+			decision := AgentRequestDecisionRequestClarification
+			message := "Which customer segment should I prioritize?"
+			if revision > 1 {
+				if inbox["clarificationQuestion"] != message || inbox["clarificationResponse"] != "Prioritize enterprise platform teams." {
+					return nil, fmt.Errorf("clarification context mismatch: %#v", inbox)
+				}
+				decision = AgentRequestDecisionAccept
+				message = "The clarified request is relevant and specific."
+			}
+			return &TurnRunnerBinding{DefinitionID: "specialist", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{
+					NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Request reviewed",
+					RunOutput: map[string]interface{}{AgentRequestDecisionOutputKey: map[string]interface{}{
+						"decision": string(decision), "message": message,
+					}},
+				}, nil
+			})}, nil
+		case RunSourceRequest:
+			return &TurnRunnerBinding{DefinitionID: "specialist", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{
+					NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Research complete",
+					RunOutput: map[string]interface{}{"summary": "Enterprise platform teams need clearer rollout evidence."},
+				}, nil
+			})}, nil
+		default:
+			return nil, fmt.Errorf("unexpected claimed run source %s", run.Source)
+		}
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, Kind: RunKindAgentWork, AssignedAgentID: "specialist",
+		Concurrency: 1, MaxTurnsPerClaim: 1, PollInterval: 5 * time.Millisecond,
+		LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := pool.materializeTurnDelegation(t.Context(), "worker", source, &AgentTurn{ID: "turn-1", RequestedDelegation: proposal})
+	if err != nil || waiting.Status != AgentRunStatusWaitingForAgent {
+		t.Fatalf("initial delegation = %#v, %v", waiting, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	pool.Start(ctx)
+	defer func() {
+		cancel()
+		pool.Stop()
+	}()
+	service := NewCollaborationService(store)
+	requestID := stableCollaborationID(scope, "delegation:"+source.ID+":"+proposal.StepID, "request")
+	deadline := time.Now().Add(3 * time.Second)
+	var request *AgentRequest
+	for time.Now().Before(deadline) {
+		request, err = service.GetAgentRequest(t.Context(), scope, requestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if request.Status == AgentRequestStatusClarificationRequested {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if request == nil || request.Status != AgentRequestStatusClarificationRequested {
+		t.Fatalf("clarification request = %#v", request)
+	}
+	resumed, err := store.GetAgentRun(t.Context(), scope, source.ID)
+	if err != nil || resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil {
+		t.Fatalf("source awaiting clarification response = %#v, %v", resumed, err)
+	}
+	followUp := *proposal
+	followUp.Clarification = "Prioritize enterprise platform teams."
+	waiting, err = pool.materializeTurnDelegation(t.Context(), "worker", resumed, &AgentTurn{ID: "turn-2", RequestedDelegation: &followUp})
+	if err != nil || waiting.Status != AgentRunStatusWaitingForAgent {
+		t.Fatalf("clarification response = %#v, %v", waiting, err)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		request, err = service.GetAgentRequest(t.Context(), scope, requestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if request.Status == AgentRequestStatusCompleted {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if request == nil || request.Status != AgentRequestStatusCompleted {
+		t.Fatalf("completed clarified request = %#v", request)
+	}
+	resumed, err = store.GetAgentRun(t.Context(), scope, source.ID)
+	if err != nil || resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil {
+		t.Fatalf("completed source = %#v, %v", resumed, err)
+	}
+	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(children) != 3 {
+		t.Fatalf("clarification children = %#v, %v", children, err)
+	}
+	decisionRuns := 0
+	workRuns := 0
+	for _, child := range children {
+		switch child.Source {
+		case RunSourceRequestDecision:
+			decisionRuns++
+		case RunSourceRequest:
+			workRuns++
+		}
+	}
+	if decisionRuns != 2 || workRuns != 1 {
+		t.Fatalf("clarification children = %#v", children)
 	}
 }
 
