@@ -123,9 +123,13 @@ func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope
 			}
 			continue
 		}
-		decisionRun, created, createErr := r.ensureDecisionRun(ctx, request, assigned)
+		decisionRun, created, resolved, createErr := r.ensureDecisionRun(ctx, request, assigned)
 		if createErr != nil {
 			failures = append(failures, fmt.Errorf("review request %s: %w", request.ID, createErr))
+			continue
+		}
+		if resolved {
+			result.DecisionsApplied++
 			continue
 		}
 		if created {
@@ -210,13 +214,20 @@ func (r *AgentRequestInboxReconciler) recipientAssignment(ctx context.Context, r
 	return eligible[0].AgentDeploymentID, definition.Delegation.RequireAcceptance, nil
 }
 
-func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, request *AgentRequest, assignedAgentID string) (*AgentRun, bool, error) {
+func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, request *AgentRequest, assignedAgentID string) (*AgentRun, bool, bool, error) {
 	source, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.SourceRunID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	if source == nil {
-		return nil, false, ErrRunNotFound
+		return nil, false, false, ErrRunNotFound
+	}
+	existing, err := r.findDecisionRun(ctx, request, source, assignedAgentID)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if existing != nil {
+		return existing, false, false, nil
 	}
 	inbox := map[string]interface{}{
 		"requestId": request.ID, "requestRevision": request.Revision, "kind": request.Kind,
@@ -246,9 +257,65 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		Visibility: ActivityVisibilityTeam,
 	})
 	if err != nil {
-		return nil, false, err
+		if errors.Is(err, ErrRunIdempotency) {
+			existing, findErr := r.findDecisionRun(ctx, request, source, assignedAgentID)
+			if findErr != nil {
+				return nil, false, false, findErr
+			}
+			if existing != nil {
+				return existing, false, false, nil
+			}
+			resolved, resolveErr := r.failDecisionReview(ctx, request, source, nil, AgentRequestStatusFailed,
+				"AgentRequest review could not recover its durable decision Run.")
+			if resolveErr != nil {
+				return nil, false, false, errors.Join(err, resolveErr)
+			}
+			return nil, false, resolved, nil
+		}
+		return nil, false, false, err
 	}
-	return created.Run, created.Event != nil, nil
+	return created.Run, created.Event != nil, false, nil
+}
+
+func (r *AgentRequestInboxReconciler) findDecisionRun(ctx context.Context, request *AgentRequest, source *AgentRun, assignedAgentID string) (*AgentRun, error) {
+	const pageSize = 100
+	var matched *AgentRun
+	for offset := 0; ; offset += pageSize {
+		runs, err := r.collaboration.runs.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: request.Scope, ParentRunID: source.ID, AssignedAgentID: assignedAgentID, Limit: pageSize, Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range runs {
+			if !decisionRunMatchesRequest(candidate, request, assignedAgentID) {
+				continue
+			}
+			if matched != nil && matched.ID != candidate.ID {
+				return nil, errors.New("AgentRequest has multiple durable decision Runs")
+			}
+			matched = candidate
+		}
+		if len(runs) < pageSize {
+			return matched, nil
+		}
+	}
+}
+
+func decisionRunMatchesRequest(run *AgentRun, request *AgentRequest, assignedAgentID string) bool {
+	if run == nil || request == nil || run.Source != RunSourceRequestDecision ||
+		run.Scope != request.Scope || run.ParentRunID != request.SourceRunID ||
+		run.Owner != (ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) ||
+		run.AssignedAgentID != assignedAgentID || run.ConcurrencyKey != "agent-request:"+request.ID {
+		return false
+	}
+	inbox, ok := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	requestID, _ := inbox["requestId"].(string)
+	requestRevision, err := positiveInt64(inbox["requestRevision"])
+	return strings.TrimSpace(requestID) == request.ID && err == nil && requestRevision == request.Revision
 }
 
 func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, run *AgentRun) (bool, error) {
@@ -272,8 +339,20 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 	if request.Status != AgentRequestStatusPending || request.Revision != requestRevision {
 		return false, nil
 	}
-	if run.Status != AgentRunStatusCompleted {
-		return false, nil
+	if run.Status == AgentRunStatusFailed || run.Status == AgentRunStatusCanceled {
+		status := AgentRequestStatusFailed
+		if run.Status == AgentRunStatusCanceled {
+			status = AgentRequestStatusCanceled
+		}
+		source, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.SourceRunID)
+		if err != nil {
+			return false, err
+		}
+		reason := strings.TrimSpace(run.Error)
+		if reason == "" {
+			reason = "AgentRequest review Run " + string(run.Status) + "."
+		}
+		return r.failDecisionReview(ctx, request, source, run, status, reason)
 	}
 	decision, message, err := parseAgentRequestDecisionOutput(run.Output)
 	if err != nil {
@@ -293,6 +372,80 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func (r *AgentRequestInboxReconciler) failDecisionReview(
+	ctx context.Context,
+	request *AgentRequest,
+	source *AgentRun,
+	decisionRun *AgentRun,
+	status AgentRequestStatus,
+	reason string,
+) (bool, error) {
+	if request == nil || source == nil || request.Status != AgentRequestStatusPending ||
+		(status != AgentRequestStatusFailed && status != AgentRequestStatusCanceled) {
+		return false, ErrInvalidAgentRequestState
+	}
+	now := r.collaboration.now()
+	updated := cloneAgentRequest(request)
+	updated.Status = status
+	updated.ResolutionReason = strings.TrimSpace(reason)
+	if updated.ResolutionReason == "" {
+		updated.ResolutionReason = "AgentRequest review did not complete."
+	}
+	updated.Revision++
+	updated.UpdatedAt = now
+	updated.ResolvedAt = &now
+	record := AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
+	actor := CollaborationParty{Type: OwnerTypeAgent, ID: request.Recipient.ID}
+	if decisionRun != nil && strings.TrimSpace(decisionRun.AssignedAgentID) != "" {
+		actor.ID = decisionRun.AssignedAgentID
+	}
+	if request.DependencyGroupID != "" {
+		dependency, err := r.collaboration.groupedRequestDependency(ctx, request, source, true)
+		if err != nil {
+			return false, err
+		}
+		state := RunDependencyStateFailed
+		if status == AgentRequestStatusCanceled {
+			state = RunDependencyStateCanceled
+		}
+		record.DependencyResolution = &RunDependencyResolutionRecord{
+			Scope: request.Scope, GroupID: request.DependencyGroupID, DependencyID: request.DependencyID,
+			ExpectedDependencyRevision: dependency.Revision, State: state, Error: updated.ResolutionReason,
+			Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+		}
+	} else {
+		resumed, err := sourceResumingAfterAgentRequestDecision(source, updated, now)
+		if err != nil {
+			return false, err
+		}
+		resumed.Output = collaborationResolutionOutput(resumed.Output, updated)
+		record.SourceRun = resumed
+		record.ExpectedSourceRevision = source.Revision
+	}
+	eventType := "collaboration.review_failed"
+	if status == AgentRequestStatusCanceled {
+		eventType = "collaboration.review_canceled"
+	}
+	if request.Kind == AgentRequestKindHandoff {
+		eventType = "handoff.review_failed"
+		if status == AgentRequestStatusCanceled {
+			eventType = "handoff.review_canceled"
+		}
+	}
+	summary := fmt.Sprintf("%s %s could not complete request review: %s", actor.Type, actor.ID, updated.ResolutionReason)
+	record.SourceEvent = collaborationEvent(source, updated, eventType, summary, actor, now)
+	if decisionRun != nil {
+		linkAgentRequestDecisionRun(record.SourceEvent, decisionRun.ID)
+	}
+	if _, err := r.collaboration.store.RespondAgentRequest(ctx, record); err != nil {
+		if errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidAgentRequestState) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func parseAgentRequestDecisionOutput(output map[string]interface{}) (AgentRequestDecision, string, error) {
