@@ -191,6 +191,16 @@ decision Run whose input contains the question and response. Accepted work is a
 separate child Run, preserving a clear boundary between deciding to take work
 and doing it.
 
+Hosted turns receive both the source Run's remaining budget and a
+`minimumChild` budget. The latter is a provider-neutral protocol floor for a
+viable delegated or forked child, not a value users must put in prompts. Every
+positive bounded child dimension must meet that floor, and the aggregate of a
+fork must fit the source Run's remaining capacity. The kernel rejects an
+under-sized or over-allocated proposal before creating requests or child Runs.
+An unbounded parent dimension remains unbounded. If remaining capacity cannot
+fit the advertised floor, the Agent must continue locally, finish with a
+bounded result, or surface that constraint rather than creating doomed work.
+
 Conversations persist messages, reply and mention structure, participant
 cursors, leased presence, incremental change sequences, and participation
 rounds. Arbitration records who was eligible, who was suppressed, and why. A

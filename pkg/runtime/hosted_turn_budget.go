@@ -21,6 +21,17 @@ const (
 	// self-referential field so kernel and host calculate one stable estimate.
 	HostedTurnBudgetEnvelopeReserveTokens int64 = 256
 	HostedTurnMinimumOutputTokens         int64 = 64
+	// Hosted child work must be large enough to carry at least one complete
+	// provider-neutral hosted protocol exchange with room for bounded recovery.
+	// These are protocol floors, not domain-specific recommendations; a model
+	// may allocate more when the parent has capacity and the work requires it.
+	HostedTurnMinimumChildAttempts     int64 = 3
+	HostedTurnMinimumChildTurns        int64 = 2
+	HostedTurnMinimumChildInputTokens  int64 = 16384
+	HostedTurnMinimumChildOutputTokens int64 = 4096
+	HostedTurnMinimumChildTotalTokens  int64 = HostedTurnMinimumChildInputTokens + HostedTurnMinimumChildOutputTokens
+	HostedTurnMinimumChildDurationMS   int64 = 180000
+	HostedTurnMinimumChildActions      int64 = 1
 )
 
 // HostedTurnModelInput is the credential-free data envelope presented to the
