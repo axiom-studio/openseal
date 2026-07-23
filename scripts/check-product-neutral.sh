@@ -17,6 +17,8 @@ for term in 'at''las' 'sen''tinel' 'cor''tex'; do
 done
 
 for identifier in \
+  'AgentLibrary' \
+  'agentLibraryId' \
   'AXIOM_OPENCLAW_SKILLS_DIR' \
   '/var/lib/axiom' \
   'Axiom-Agent-Runtime' \
@@ -34,6 +36,11 @@ for identifier in \
     status=1
   fi
 done
+
+if compgen -G 'pkg/llm/*.go' >/dev/null; then
+  echo "pkg/llm is the retired visual-workflow assistant; use the canonical provider, authoring, and hosted-turn contracts." >&2
+  status=1
+fi
 
 if (( status != 0 )); then
   echo "OpenSeal source must remain product-neutral." >&2
