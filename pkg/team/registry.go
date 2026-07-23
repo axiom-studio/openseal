@@ -245,7 +245,7 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	candidate.Digest = teamDefinitionDigest(candidate)
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	evidenceRefs := normalizedStrings(req.EvidenceRefs)
-	requestDigest := amendmentRequestDigest(deployment.ID, base.Digest, candidate.Digest, req.ProposerType, req.ProposerID, req.Rationale, evidenceRefs)
+	requestDigest := AmendmentRequestDigest(deployment.ID, base.Digest, candidate.Digest, req.ProposerType, req.ProposerID, req.Rationale, evidenceRefs)
 	amendmentID := r.newID()
 	if idempotencyKey != "" {
 		amendmentID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+deployment.ID+"\x00"+idempotencyKey)).String()
@@ -307,11 +307,15 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	return cloneAmendment(amendment), nil
 }
 
-func amendmentRequestDigest(deploymentID, baseDigest, candidateDigest, proposerType, proposerID, rationale string, evidenceRefs []string) string {
+// AmendmentRequestDigest returns the stable fingerprint used to make Team
+// amendment proposals idempotent. Importers that rewrite definition identity
+// or digest metadata must recompute this value rather than preserving a stale
+// fingerprint.
+func AmendmentRequestDigest(deploymentID, baseDigest, candidateDigest, proposerType, proposerID, rationale string, evidenceRefs []string) string {
 	payload, _ := json.Marshal(struct {
 		DeploymentID, BaseDigest, CandidateDigest, ProposerType, ProposerID, Rationale string
 		EvidenceRefs                                                                   []string
-	}{strings.TrimSpace(deploymentID), strings.TrimSpace(baseDigest), strings.TrimSpace(candidateDigest), strings.TrimSpace(proposerType), strings.TrimSpace(proposerID), strings.TrimSpace(rationale), evidenceRefs})
+	}{strings.TrimSpace(deploymentID), strings.TrimSpace(baseDigest), strings.TrimSpace(candidateDigest), strings.TrimSpace(proposerType), strings.TrimSpace(proposerID), strings.TrimSpace(rationale), normalizedStrings(evidenceRefs)})
 	digest := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(digest[:])
 }

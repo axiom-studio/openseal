@@ -68,7 +68,7 @@ func (r *Registry) RecoverParticipation(ctx context.Context, req RecoverParticip
 	if err != nil {
 		return nil, err
 	}
-	requestDigest := amendmentRequestDigest(req.DeploymentID, base.Digest, candidate.Digest, req.ActorType, req.ActorID, req.Reason, nil)
+	requestDigest := AmendmentRequestDigest(req.DeploymentID, base.Digest, candidate.Digest, req.ActorType, req.ActorID, req.Reason, nil)
 	amendmentID := participationRecoveryAmendmentID(req)
 	if existing, lookupErr := r.store.GetTeamAmendment(ctx, req.Scope, amendmentID); lookupErr == nil {
 		if existing.IdempotencyKey != req.IdempotencyKey || existing.RequestDigest != requestDigest {
