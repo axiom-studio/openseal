@@ -561,6 +561,8 @@ type (
 	ToolInvokerFunc                    = runtime.ToolInvokerFunc
 	ToolInvocation                     = runtime.ToolInvocation
 	ToolActionDispatcher               = runtime.ToolActionDispatcher
+	AgentBehaviorActionValidator       = runtime.AgentBehaviorActionValidator
+	AgentBehaviorActionDispatcher      = runtime.AgentBehaviorActionDispatcher
 	TeamRoleActionValidator            = runtime.TeamRoleActionValidator
 	TeamRoleActionDispatcher           = runtime.TeamRoleActionDispatcher
 	TeamSkillActionValidator           = runtime.TeamSkillActionValidator
@@ -974,6 +976,9 @@ var (
 	InitiativeManagementSkill          = runtime.InitiativeManagementSkill
 	NewInitiativeActionValidator       = runtime.NewInitiativeActionValidator
 	NewInitiativeActionDispatcher      = runtime.NewInitiativeActionDispatcher
+	AgentManagementSkill               = runtime.AgentManagementSkill
+	NewAgentBehaviorActionValidator    = runtime.NewAgentBehaviorActionValidator
+	NewAgentBehaviorActionDispatcher   = runtime.NewAgentBehaviorActionDispatcher
 	TeamManagementSkill                = runtime.TeamManagementSkill
 	NewTeamRoleActionValidator         = runtime.NewTeamRoleActionValidator
 	NewTeamRoleActionDispatcher        = runtime.NewTeamRoleActionDispatcher
@@ -1239,6 +1244,9 @@ const (
 	InitiativeActionCreate           = runtime.InitiativeActionCreate
 	InitiativeActionUpdate           = runtime.InitiativeActionUpdate
 	InitiativeActionPause            = runtime.InitiativeActionPause
+	AgentManagementSkillID           = runtime.AgentManagementSkillID
+	AgentManagementSkillVersion      = runtime.AgentManagementSkillVersion
+	AgentActionAmendBehavior         = runtime.AgentActionAmendBehavior
 	TeamManagementSkillID            = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion       = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole             = runtime.TeamActionUpdateRole
@@ -1642,6 +1650,7 @@ type Engine struct {
 	artifacts                     *runtime.ArtifactCatalog
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	actionValidators              []runtime.ActionProposalValidator
+	agentManagementActions        bool
 	teamManagementActions         bool
 	skillManagementActions        bool
 	skillDiscovery                skill.DiscoveryProvider
@@ -1784,6 +1793,9 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if err := e.configureSkillManagementActions(); err != nil {
 		return nil, fmt.Errorf("Skill management action configuration: %w", err)
+	}
+	if err := e.configureAgentManagementActions(); err != nil {
+		return nil, fmt.Errorf("Agent management action configuration: %w", err)
 	}
 	if err := e.configureTeamManagementActions(); err != nil {
 		return nil, fmt.Errorf("Team management action configuration: %w", err)
@@ -2232,6 +2244,15 @@ func WithActionProposalValidators(validators ...runtime.ActionProposalValidator)
 	}
 }
 
+// WithAgentManagementActions enables the portable, governed self-amendment
+// layer for Agent-owned conversation Runs.
+func WithAgentManagementActions() Option {
+	return func(e *Engine) error {
+		e.agentManagementActions = true
+		return nil
+	}
+}
+
 // WithTeamManagementActions enables the portable, governed Team action layer.
 // The Engine owns its Team registry, so embedding hosts never need to import
 // internal registry implementations or duplicate dispatcher composition.
@@ -2295,6 +2316,35 @@ func optionalSkillDiscovery(provider skill.DiscoveryProvider) []skill.DiscoveryP
 		return nil
 	}
 	return []skill.DiscoveryProvider{provider}
+}
+
+func (e *Engine) configureAgentManagementActions() error {
+	if !e.agentManagementActions {
+		return nil
+	}
+	if err := e.skills.Register(context.Background(), runtime.AgentManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+		return err
+	}
+	validator, err := runtime.NewAgentBehaviorActionValidator(e.agents)
+	if err != nil {
+		return err
+	}
+	e.actionValidators = append(e.actionValidators, validator)
+	for index := range e.actionPoolSpecs {
+		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionPoolSpecs[index].dispatcher = dispatcher
+	}
+	for index := range e.actionSupervisorSpecs {
+		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionSupervisorSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionSupervisorSpecs[index].dispatcher = dispatcher
+	}
+	return nil
 }
 
 func (e *Engine) configureTeamManagementActions() error {
