@@ -121,6 +121,7 @@ const (
 	modeWorkforceApprove
 	modeWorkforceReject
 	modeWorkforceApply
+	modeWorkforceActivate
 	modeWorkforceRetry
 	modeRequestCreate
 	modeRequestAccept
@@ -1666,6 +1667,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitWorkforceApproval(false)
 			case modeWorkforceApply:
 				return m, m.submitWorkforceApply()
+			case modeWorkforceActivate:
+				return m, m.submitWorkforceActivation()
 			case modeWorkforceRetry:
 				return m, m.submitWorkforceRetry()
 			case modeRequestCreate:
@@ -2023,6 +2026,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentEvaluate, teamEvaluationPlaceholder(m.selectedTeamDeploymentRecord()))
 			} else if m.section == sectionAuthoring && m.canApplyWorkforce() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
+			} else if m.section == sectionAuthoring && m.canPrepareWorkforceActivation() {
+				m.prepareWorkforceGovernanceComposer(modeWorkforceActivate, "Why should these reviewed resources start working now?…")
 			} else if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
 				m.mode = modeObjectiveEdit
 				m.editor.Reset()
@@ -2290,6 +2295,32 @@ func (m *Model) submitWorkforceApply() tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.client.ApplyWorkforceChangeSet(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: "Workforce Apply", err: err}
+	}
+}
+
+func (m *Model) submitWorkforceActivation() tea.Cmd {
+	reason := strings.TrimSpace(m.editor.Value())
+	if !m.canPrepareWorkforceActivation() || m.busy || reason == "" {
+		if reason == "" {
+			m.status = "Record why these reviewed resources should start working."
+		}
+		return nil
+	}
+	changeSet := m.authoringChangeSet
+	intent := fmt.Sprintf("activate\x00%s\x00%d\x00%s\x00%s", changeSet.ID, changeSet.Revision, changeSet.CandidateDigest, reason)
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.PrepareChangeSetActivationRequest{
+		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
+		CandidateDigest: changeSet.CandidateDigest, Catalog: changeSet.Catalog, Reason: reason,
+		Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err, m.status = true, nil, "Preparing the governed activation review…"
+	return func() tea.Msg {
+		result, err := m.client.PrepareWorkforceChangeSetActivation(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Workforce Activation", err: err}
 	}
 }
 
@@ -4291,6 +4322,15 @@ func (m *Model) canApplyWorkforce() bool {
 	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetReady &&
 		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
 		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApply)
+}
+
+func (m *Model) canPrepareWorkforceActivation() bool {
+	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetApplied &&
+		m.authoringChangeSet.ApplyReceipt != nil &&
+		m.authoringChangeSet.ApplyReceipt.Activation == authoring.WorkforceActivationInactive &&
+		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
+		m.supportsAuthoring(kernelapi.OperationActivate)
 }
 
 func (m *Model) canRetryWorkforce() bool {

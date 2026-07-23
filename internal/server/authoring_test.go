@@ -100,6 +100,22 @@ func (governedAuthoringGenerator) Generate(context.Context, authoring.GenerateRe
 		Assignments: []authoring.Assignment{{ID: "researcher", RoleID: "researcher", AgentDefinitionID: agent.ID, DisplayName: agent.DisplayName}}}})
 }
 
+type inactiveGovernedAuthoringGenerator struct{}
+
+func (inactiveGovernedAuthoringGenerator) Generate(ctx context.Context, request authoring.GenerateRequest) ([]byte, error) {
+	payload, err := (governedAuthoringGenerator{}).Generate(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	var response authoring.GenerationResponse
+	if err := json.Unmarshal(payload, &response); err != nil {
+		return nil, err
+	}
+	response.Candidate.Activation = authoring.WorkforceActivationInactive
+	response.Commitments.Activation = authoring.ActivationCommitmentInactive
+	return json.Marshal(response)
+}
+
 type governedFixtureAuthority struct {
 	role          string
 	actor         string
@@ -118,6 +134,8 @@ func (a governedFixtureAuthority) AuthorizeWorkforceLifecycle(_ context.Context,
 		}
 		return result, nil
 	case kernelapi.OperationApply:
+		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
+	case kernelapi.OperationActivate:
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}}, nil
 	case kernelapi.OperationPatch:
 		return WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: a.actor}, BindingConfigurationFields: a.bindingFields}, nil
@@ -338,6 +356,68 @@ func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
 	}
 	if result.Valid || len(result.UnresolvedQuestions) != 1 || len(result.Validation) == 0 {
 		t.Fatalf("compile result = %#v", result)
+	}
+}
+
+func TestGovernedInactiveWorkforceAdvertisesAndPreparesActivation(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "activation.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	api := NewServer(store, zap.NewNop().Sugar())
+	compiler, _ := authoring.NewCompiler(inactiveGovernedAuthoringGenerator{})
+	api.SetWorkforceAuthoringCompiler(compiler)
+	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{actor: "configured-operator"})
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	catalog := authoring.CapabilityCatalog{AgentCredentialRequirements: []authoring.AgentCredentialRequirement{{
+		BindingKey: "MODEL_PROVIDER", DisplayName: "Model provider",
+		Prompt: "Choose the model provider this Agent may use.", RequiredForActivation: true,
+	}}}
+	created, _, err := api.authoringChanges.Create(context.Background(), authoring.CreateChangeSetRequest{
+		Scope: scope, Prompt: "Create inactive resources", Catalog: catalog,
+		Placement: authoring.ChangeSetPlacement{
+			TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"},
+			Environment: "production",
+		},
+		Actor: authoring.ChangeSetActor{Type: "user", ID: "requester"}, IdempotencyKey: "create-inactive",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, _, err := api.authoringChanges.SubmitEvaluation(context.Background(), authoring.SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest,
+		Allowed: true, Actor: authoring.ChangeSetActor{Type: "policy_evaluator", ID: "configured-policy"}, IdempotencyKey: "allow-inactive",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _, err := api.authoringChanges.Apply(context.Background(), authoring.ApplyChangeSetRequest{
+		Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest,
+		Reason: "Create for review", Actor: authoring.ChangeSetActor{Type: "user", ID: "configured-operator"}, IdempotencyKey: "apply-inactive",
+	})
+	if err != nil || applied.ApplyReceipt == nil || applied.ApplyReceipt.Activation != authoring.WorkforceActivationInactive {
+		t.Fatalf("inactive apply=%#v err=%v", applied, err)
+	}
+	capabilityPath := "/api/v1/capabilities?scopeKind=tenant&scopeId=one&changeSetId=" + applied.ID
+	if response := performAgentRunRequest(t, api.Handler(), http.MethodGet, capabilityPath, "", ""); !strings.Contains(response.Body.String(), `"activate"`) {
+		t.Fatalf("activation capability=%s", response.Body.String())
+	}
+	request := authoring.PrepareChangeSetActivationRequest{
+		Scope: scope, ChangeSetID: applied.ID, ExpectedRevision: applied.Revision, CandidateDigest: applied.CandidateDigest,
+		Catalog: catalog, Reason: "Start the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "forged", ID: "browser"},
+	}
+	path := "/api/v1/authoring/workforce/change-sets/" + applied.ID + "/activation"
+	response := performAgentRunRequest(t, api.Handler(), http.MethodPost, path, mustJSON(t, request), "activate-stable")
+	var activation authoring.ChangeSet
+	if response.Code != http.StatusCreated || json.NewDecoder(response.Body).Decode(&activation) != nil ||
+		activation.ParentID != applied.ID || activation.Result.Candidate.Activation != authoring.WorkforceActivationActive ||
+		activation.Actor.ID != "configured-operator" || activation.RequiredCredentials["tenant/one/researcher"][0] != "MODEL_PROVIDER" {
+		t.Fatalf("activation=%d %s", response.Code, response.Body.String())
+	}
+	replay := performAgentRunRequest(t, api.Handler(), http.MethodPost, path, mustJSON(t, request), "activate-stable")
+	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), activation.ID) {
+		t.Fatalf("activation replay=%d %s", replay.Code, replay.Body.String())
 	}
 }
 

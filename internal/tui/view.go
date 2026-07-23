@@ -144,7 +144,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -227,6 +227,10 @@ func (m *Model) renderComposer(width int) string {
 			description = "Create this exact candidate atomically in a non-executing state. Activate each reviewed resource later through governed commands."
 			owner = "Inactive Apply · permanent audit receipt"
 		}
+	case modeWorkforceActivate:
+		title = "Start reviewed workforce"
+		description = "Create an activation review over the exact inactive resources and their current revisions."
+		owner = "Governed activation · no regeneration"
 	case modeWorkforceRetry:
 		title = "Retry proposal generation"
 		description = "Record why the failed generation should be resumed as a new durable attempt."
@@ -873,6 +877,8 @@ func (m *Model) renderAuthoringContent(width int) string {
 			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("y approve · x reject selected requirement"))
 		} else if m.canApplyWorkforce() {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter create this exact reviewed workforce"))
+		} else if m.canPrepareWorkforceActivation() {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter review and start these exact inactive resources"))
 		} else if m.supportsAuthoring(kernelapi.OperationEvaluate) {
 			lines = append(lines, "", mutedStyle.Render("Waiting for the configured policy evaluator to submit its decision."))
 		}
@@ -958,7 +964,11 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
 	}
 	if m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetApplied && m.authoringChangeSet.ApplyReceipt != nil && m.authoringChangeSet.ApplyReceipt.Activation == authoring.WorkforceActivationInactive {
-		lines = append(lines, "", mutedStyle.Render("Resources are created but remain inactive until separate governed activation commands succeed."))
+		if m.canPrepareWorkforceActivation() {
+			lines = append(lines, "", mutedStyle.Render("Resources are created but inactive. Continue here to configure and review activation."))
+		} else {
+			lines = append(lines, "", mutedStyle.Render("Resources are created but inactive; activation is not authorized for this principal."))
+		}
 	} else if m.authoringChangeSet == nil || m.authoringChangeSet.Status != authoring.ChangeSetApplied {
 		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	}

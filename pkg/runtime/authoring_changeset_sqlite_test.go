@@ -632,6 +632,9 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	value := testInitiativeWorkforceChangeSet()
 	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
 	value.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
+	value.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
+		"agent": {"MODEL_PROVIDER": {Kind: "credential", ID: "model-one"}},
+	}
 	if _, _, err = store.CreateChangeSet(ctx, value, "create-inactive", "digest-inactive"); err != nil {
 		t.Fatal(err)
 	}
@@ -683,6 +686,75 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: initiative.Scope})
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("inactive Runs=%#v err=%v", runs, err)
+	}
+
+	compiler, err := authoring.NewCompiler(testAuthoringGenerator(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSets, err := authoring.NewChangeSetService(compiler, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := result.Catalog
+	catalog.SourcePolicies = map[string]authoring.SourcePolicyCapability{
+		"approved-communities": {
+			Reference: "approved-communities",
+			Sources:   []authoring.SourcePolicySourceCapability{{Host: "community.example"}},
+		},
+	}
+	catalog.AgentCredentialRequirements = []authoring.AgentCredentialRequirement{{
+		BindingKey: "MODEL_PROVIDER", DisplayName: "Model provider",
+		Prompt: "Choose the model provider this Agent may use.", RequiredForActivation: true,
+	}}
+	activation, _, err := changeSets.PrepareActivation(ctx, authoring.PrepareChangeSetActivationRequest{
+		Scope: result.Scope, ChangeSetID: result.ID, ExpectedRevision: result.Revision, CandidateDigest: result.CandidateDigest,
+		Catalog: catalog, Reason: "Start the reviewed workforce", Actor: result.Actor, IdempotencyKey: "prepare-activation",
+	})
+	if err != nil || activation.Status != authoring.ChangeSetReview ||
+		activation.Placement.AgentExpectedRevisions["agent"] != agentDeployment.Revision ||
+		activation.Placement.TeamExpectedRevision != teamDeployment.Revision {
+		t.Fatalf("activation ChangeSet=%#v err=%v", activation, err)
+	}
+	reviewed, _, err := changeSets.SubmitEvaluation(ctx, authoring.SubmitChangeSetEvaluationRequest{
+		Scope: activation.Scope, ChangeSetID: activation.ID, ExpectedRevision: activation.Revision, CandidateDigest: activation.CandidateDigest,
+		Allowed: true, Actor: authoring.ChangeSetActor{Type: "policy_evaluator", ID: "test"}, IdempotencyKey: "evaluate-activation",
+	})
+	if err != nil || reviewed.Status != authoring.ChangeSetReady {
+		t.Fatalf("reviewed activation=%#v err=%v", reviewed, err)
+	}
+	activated, _, err := changeSets.Apply(ctx, authoring.ApplyChangeSetRequest{
+		Scope: reviewed.Scope, ChangeSetID: reviewed.ID, ExpectedRevision: reviewed.Revision, CandidateDigest: reviewed.CandidateDigest,
+		Reason: "Activate reviewed workforce", Actor: reviewed.Actor, IdempotencyKey: "apply-activation",
+	})
+	if err != nil || activated.ApplyReceipt == nil || activated.ApplyReceipt.Activation != authoring.WorkforceActivationActive {
+		t.Fatalf("activated ChangeSet=%#v err=%v", activated, err)
+	}
+	agentDeployment, err = agents.GetDeployment(ctx, value.Scope, "agent-live")
+	if err != nil || agentDeployment.RolloutStatus != agent.RolloutActive || agentDeployment.Revision != 2 ||
+		agentDeployment.Credentials["MODEL_PROVIDER"].ID != "model-one" {
+		t.Fatalf("activated Agent=%#v err=%v", agentDeployment, err)
+	}
+	teamDeployment, err = teams.GetDeployment(ctx, value.Scope, "team-live")
+	if err != nil || teamDeployment.Status != team.DeploymentActive || teamDeployment.Revision != 2 {
+		t.Fatalf("activated Team=%#v err=%v", teamDeployment, err)
+	}
+	bindings, err = store.ListSkillBindings(ctx, value.Scope, agentDeployment.ID)
+	if err != nil || len(bindings) != 1 || bindings[0].Disabled {
+		t.Fatalf("activated Skill bindings=%#v err=%v", bindings, err)
+	}
+	objectives, err = store.ListObjectives(ctx, ObjectiveFilter{Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}})
+	if err != nil || len(objectives) != 2 {
+		t.Fatalf("activated Objectives=%#v err=%v", objectives, err)
+	}
+	for _, objective := range objectives {
+		if objective.Status != ObjectiveStatusActive || objective.Revision != 2 {
+			t.Fatalf("activated Objective %s=%#v", objective.ID, objective)
+		}
+	}
+	initiative, err = store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
+	if err != nil || initiative.Status != InitiativeStatusActive || initiative.Revision != 2 {
+		t.Fatalf("activated Initiative=%#v err=%v", initiative, err)
 	}
 }
 

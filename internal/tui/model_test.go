@@ -113,6 +113,8 @@ type fakeKernelClient struct {
 	approvalKeys         []string
 	applyRequests        []authoring.ApplyChangeSetRequest
 	applyKeys            []string
+	activationRequests   []authoring.PrepareChangeSetActivationRequest
+	activationKeys       []string
 	placementRequests    []authoring.UpdateChangeSetPlacementRequest
 	placementKeys        []string
 	refinementRequests   []authoring.AnswerChangeSetRefinementRequest
@@ -635,6 +637,12 @@ func (f *fakeKernelClient) ResolveWorkforceChangeSetApproval(_ context.Context, 
 func (f *fakeKernelClient) ApplyWorkforceChangeSet(_ context.Context, request authoring.ApplyChangeSetRequest, key string) (*authoring.ChangeSet, error) {
 	f.applyRequests = append(f.applyRequests, request)
 	f.applyKeys = append(f.applyKeys, key)
+	return f.nextGovernanceResult()
+}
+
+func (f *fakeKernelClient) PrepareWorkforceChangeSetActivation(_ context.Context, request authoring.PrepareChangeSetActivationRequest, key string) (*authoring.ChangeSet, error) {
+	f.activationRequests = append(f.activationRequests, request)
+	f.activationKeys = append(f.activationKeys, key)
 	return f.nextGovernanceResult()
 }
 
@@ -2124,6 +2132,9 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 	applied := ready
 	applied.Status, applied.Revision = authoring.ChangeSetApplied, 4
 	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-1", CandidateDigest: ready.CandidateDigest, Activation: authoring.WorkforceActivationInactive, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "user", ID: "server-operator"}, AppliedAt: time.Now(), Resources: []authoring.AppliedResourceReference{{Kind: "agent_definition", ID: "researcher", Version: "1"}, {Kind: "team_deployment", ID: "research-live", Revision: 1}}}
+	activation := applied
+	activation.ID, activation.ParentID, activation.Status, activation.Revision, activation.ApplyReceipt = "activation-1", applied.ID, authoring.ChangeSetReview, 1, nil
+	activation.Result.Candidate.Activation = authoring.WorkforceActivationActive
 	approvalCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
 	approvalCapability.Operations = append(approvalCapability.Operations, kernelapi.OperationApprove)
 	approvalCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: awaiting.ID, Revision: awaiting.Revision, EligibleApprovalRequirements: []kernelapi.ApprovalRequirementReference{
@@ -2133,7 +2144,7 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 	fake := &fakeKernelClient{
 		document:          kernelapi.NewCapabilityDocument(approvalCapability),
 		governanceErrors:  []error{errors.New("temporary disconnect"), nil, nil},
-		governanceResults: []*authoring.ChangeSet{&ready, &applied},
+		governanceResults: []*authoring.ChangeSet{&ready, &applied, &activation},
 	}
 	model := newTestModel(t, fake)
 	model.authoringChangeSet, model.authoringResult = awaiting, &awaiting.Result
@@ -2173,8 +2184,25 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 	if len(fake.applyRequests) != 1 || fake.applyRequests[0].ExpectedRevision != ready.Revision || fake.applyRequests[0].CandidateDigest != ready.CandidateDigest || fake.applyRequests[0].Reason != "Create the reviewed workforce" || fake.applyKeys[0] == "" {
 		t.Fatalf("Apply requests=%#v keys=%#v", fake.applyRequests, fake.applyKeys)
 	}
-	if !strings.Contains(model.View(), "Created atomically · inactive") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") || !strings.Contains(model.View(), "remain inactive") {
+	if !strings.Contains(model.View(), "Created atomically · inactive") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") || !strings.Contains(model.View(), "inactive") {
 		t.Fatalf("Apply receipt was not rendered:\n%s", model.View())
+	}
+	activationCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	activationCapability.Operations = append(activationCapability.Operations, kernelapi.OperationActivate)
+	activationCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: applied.ID, Revision: applied.Revision}
+	fake.document = kernelapi.NewCapabilityDocument(activationCapability)
+	applyCommand(t, model, model.loadCapabilities())
+	if !model.canPrepareWorkforceActivation() || !strings.Contains(model.View(), "Enter review and start these exact inactive resources") {
+		t.Fatalf("inactive activation was not capability gated:\n%s", model.View())
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model.editor.SetValue("Start the reviewed workforce")
+	applyCommand(t, model, model.submitWorkforceActivation())
+	if len(fake.activationRequests) != 1 || fake.activationRequests[0].ExpectedRevision != applied.Revision ||
+		fake.activationRequests[0].CandidateDigest != applied.CandidateDigest ||
+		fake.activationRequests[0].Reason != "Start the reviewed workforce" || fake.activationKeys[0] == "" ||
+		model.authoringChangeSet.ID != activation.ID || model.authoringChangeSet.ParentID != applied.ID {
+		t.Fatalf("activation requests=%#v keys=%#v changeSet=%#v", fake.activationRequests, fake.activationKeys, model.authoringChangeSet)
 	}
 }
 

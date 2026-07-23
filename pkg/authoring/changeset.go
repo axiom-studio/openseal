@@ -283,6 +283,22 @@ type ApplyChangeSetRequest struct {
 	IdempotencyKey   string                    `json:"idempotencyKey"`
 }
 
+// PrepareChangeSetActivationRequest creates a deterministic child ChangeSet
+// over one applied inactive aggregate. The child preserves the reviewed
+// candidate and authoritative resource identities, but changes the explicit
+// operating intent to active so current placement, policy, approval, and
+// atomic apply controls govern activation.
+type PrepareChangeSetActivationRequest struct {
+	Scope            capability.ScopeReference `json:"scope"`
+	ChangeSetID      string                    `json:"changeSetId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	CandidateDigest  string                    `json:"candidateDigest"`
+	Catalog          CapabilityCatalog         `json:"catalog"`
+	Reason           string                    `json:"reason"`
+	Actor            ChangeSetActor            `json:"actor"`
+	IdempotencyKey   string                    `json:"idempotencyKey"`
+}
+
 type UpdateChangeSetPlacementRequest struct {
 	Scope            capability.ScopeReference `json:"scope"`
 	ChangeSetID      string                    `json:"changeSetId"`
@@ -798,6 +814,94 @@ func classifyGenerationFailure(err error) (string, string) {
 func (s *ChangeSetService) ApplyAvailable() bool {
 	_, ok := s.store.(AtomicChangeSetStore)
 	return ok
+}
+
+// PrepareActivation derives a reviewable activation ChangeSet without another
+// probabilistic model call. It is valid only for an applied inactive parent;
+// the parent's receipt is the sole authority for resource revisions.
+func (s *ChangeSetService) PrepareActivation(ctx context.Context, request PrepareChangeSetActivationRequest) (*ChangeSet, bool, error) {
+	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
+	request.CandidateDigest = strings.TrimSpace(request.CandidateDigest)
+	request.Reason = strings.TrimSpace(request.Reason)
+	request.Actor.Type, request.Actor.ID = strings.TrimSpace(request.Actor.Type), strings.TrimSpace(request.Actor.ID)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || request.ChangeSetID == "" ||
+		request.ExpectedRevision < 1 || request.CandidateDigest == "" || request.Reason == "" ||
+		request.Actor.Type == "" || request.Actor.ID == "" || request.IdempotencyKey == "" {
+		return nil, false, errors.New("activation scope, change set, revision, candidate digest, reason, actor, and idempotency key are required")
+	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, false, fmt.Errorf("activation capability catalog: %w", err)
+	}
+	parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
+	if err != nil {
+		return nil, false, err
+	}
+	requestDigest, err := digestJSON(struct {
+		ParentID         string
+		ExpectedRevision int64
+		CandidateDigest  string
+		Catalog          CapabilityCatalog
+		Reason           string
+		Actor            ChangeSetActor
+	}{parent.ID, request.ExpectedRevision, request.CandidateDigest, request.Catalog, request.Reason, request.Actor})
+	if err != nil {
+		return nil, false, err
+	}
+	if replay, found, err := s.store.GetChangeSetByIdempotency(ctx, request.Scope, request.IdempotencyKey, requestDigest); err != nil || found {
+		return replay, found, err
+	}
+	if parent.Revision != request.ExpectedRevision || parent.CandidateDigest != request.CandidateDigest {
+		return nil, false, ErrChangeSetRevision
+	}
+	if parent.Status != ChangeSetApplied || parent.ApplyReceipt == nil {
+		return nil, false, fmt.Errorf("%w: cannot activate status %s", ErrChangeSetTransition, parent.Status)
+	}
+	if parent.ApplyReceipt.Activation != WorkforceActivationInactive {
+		return nil, false, fmt.Errorf("%w: workforce is already active", ErrChangeSetTransition)
+	}
+
+	snapshot := cloneChangeSet(parent)
+	result := snapshot.Result
+	existing := snapshot.Result.Candidate
+	result.Candidate.Activation = WorkforceActivationActive
+	// An explicit activation command supersedes the parent's preserved
+	// do-not-activate commitment in this child only; the parent remains an
+	// immutable audit record of the earlier decision.
+	result.Commitments.Activation = ""
+	// Activation does not amend immutable Agent or Team definitions, so it
+	// must not require synthetic version bumps. Validate the preserved
+	// candidate as a complete standalone definition while still computing its
+	// activation-only diff against the inactive parent.
+	result.Validation = validateCandidate(&result.Candidate, nil)
+	// The applied parent already proved its semantic requirements. Activation
+	// refreshes runtime placement requirements separately and must not reinterpret
+	// an immutable candidate against newer planning-only catalog hints.
+	result.MissingRequirements = append([]MissingRequirement(nil), parent.Result.MissingRequirements...)
+	result.RiskChanges = riskChanges(&existing, &result.Candidate)
+	result.Diff = workforceDiff(&existing, &result.Candidate)
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
+
+	placement := clonePlacement(parent.Placement)
+	inheritParentPlacement(&placement, parent)
+	candidateDigest, err := digestJSON(result.Candidate)
+	if err != nil {
+		return nil, false, fmt.Errorf("digest activation candidate: %w", err)
+	}
+	now := s.now().UTC()
+	status := ChangeSetReview
+	if !result.Valid {
+		status = ChangeSetBlocked
+	}
+	child := &ChangeSet{
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: parent.ID, Mode: ModeAmend,
+		Prompt: parent.Prompt, PromptDigest: parent.PromptDigest, CandidateDigest: candidateDigest,
+		Result: result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: placement,
+		RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog),
+		Status:              status, Actor: request.Actor, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	child.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: request.Reason, Actor: request.Actor, At: now}}
+	return s.store.CreateChangeSet(ctx, child, request.IdempotencyKey, requestDigest)
 }
 
 // UpdatePlacement deterministically updates host-owned resource, credential,

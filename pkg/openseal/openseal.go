@@ -196,6 +196,7 @@ type (
 	ResolveWorkforceChangeSetApprovalRequest  = authoring.ResolveChangeSetApprovalRequest
 	UpdateWorkforceChangeSetPlacementRequest  = authoring.UpdateChangeSetPlacementRequest
 	ApplyWorkforceChangeSetRequest            = authoring.ApplyChangeSetRequest
+	PrepareWorkforceActivationRequest         = authoring.PrepareChangeSetActivationRequest
 	RetryWorkforceChangeSetGenerationRequest  = authoring.RetryChangeSetGenerationRequest
 	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
 	WorkforceAppliedResourceReference         = authoring.AppliedResourceReference
@@ -3697,6 +3698,15 @@ func (e *Engine) UpdateWorkforceChangeSetPlacement(ctx context.Context, request 
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
 	return e.authoringChanges.UpdatePlacement(ctx, request)
+}
+
+// PrepareWorkforceChangeSetActivation creates a deterministic, reviewable
+// activation child over one applied inactive workforce aggregate.
+func (e *Engine) PrepareWorkforceChangeSetActivation(ctx context.Context, request authoring.PrepareChangeSetActivationRequest) (*authoring.ChangeSet, bool, error) {
+	if e == nil || e.authoringChanges == nil {
+		return nil, false, errors.New("workforce change sets are not configured")
+	}
+	return e.authoringChanges.PrepareActivation(ctx, request)
 }
 
 func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.ApplyChangeSetRequest) (*authoring.ChangeSet, bool, error) {

@@ -221,6 +221,12 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 			result.Operations = append(result.Operations, kernelapi.OperationApply)
 		}
 	}
+	if changeSet.Status == authoring.ChangeSetApplied && changeSet.ApplyReceipt != nil &&
+		changeSet.ApplyReceipt.Activation == authoring.WorkforceActivationInactive {
+		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationActivate, changeSet); err == nil {
+			result.Operations = append(result.Operations, kernelapi.OperationActivate)
+		}
+	}
 }
 
 func bindingConfigurationFieldsMatchChangeSet(changeSet *authoring.ChangeSet, fields []capability.BindingConfigurationFieldChoice) bool {
@@ -317,6 +323,20 @@ func (s *Server) handleApplyWorkforceChangeSet(w http.ResponseWriter, r *http.Re
 	s.respondWorkforceMutation(w, result, replayed, err)
 }
 
+func (s *Server) handlePrepareWorkforceChangeSetActivation(w http.ResponseWriter, r *http.Request) {
+	var request authoring.PrepareChangeSetActivationRequest
+	if !s.decodeGovernedWorkforceRequest(w, r, &request) {
+		return
+	}
+	_, authorization, ok := s.authorizeWorkforceLifecycle(w, r, kernelapi.OperationActivate, request.Scope, request.ChangeSetID)
+	if !ok {
+		return
+	}
+	request.Actor = authorization.Actor
+	result, replayed, err := s.authoringChanges.PrepareActivation(r.Context(), request)
+	s.respondWorkforceMutation(w, result, replayed, err)
+}
+
 func (s *Server) decodeGovernedWorkforceRequest(w http.ResponseWriter, r *http.Request, value interface{}) bool {
 	if s.authoringChanges == nil {
 		s.respondError(w, http.StatusNotImplemented, "workforce change sets are not configured")
@@ -337,6 +357,8 @@ func (s *Server) decodeGovernedWorkforceRequest(w http.ResponseWriter, r *http.R
 	case *authoring.ResolveChangeSetApprovalRequest:
 		request.IdempotencyKey = key
 	case *authoring.ApplyChangeSetRequest:
+		request.IdempotencyKey = key
+	case *authoring.PrepareChangeSetActivationRequest:
 		request.IdempotencyKey = key
 	case *authoring.RetryChangeSetGenerationRequest:
 		request.IdempotencyKey = key

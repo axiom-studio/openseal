@@ -306,6 +306,110 @@ func TestAtomicMemoryApplyCarriesInactiveCommitmentIntoReceipt(t *testing.T) {
 	}
 }
 
+func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate:   marketingCandidate("1", capability.RiskLevelRead),
+		Commitments: PromptCommitments{Activation: ActivationCommitmentInactive},
+	})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	catalog := CapabilityCatalog{
+		Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}},
+		AgentCredentialRequirements: []AgentCredentialRequirement{{
+			BindingKey: "MODEL_PROVIDER", DisplayName: "Model provider",
+			Prompt: "Choose the model provider this Agent may use.", RequiredForActivation: true,
+		}},
+	}
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: scope, Prompt: "Create this workforce and keep it inactive.", Catalog: catalog,
+		Placement: ChangeSetPlacement{
+			TeamDeploymentID: "marketing-live", AgentDeploymentIDs: map[string]string{"community-researcher": "researcher-live"},
+			Environment: "production",
+		},
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-inactive-for-activation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest,
+		Allowed: true, Actor: ChangeSetActor{Type: "policy_evaluator", ID: "policy"}, IdempotencyKey: "allow-inactive-for-activation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{
+		Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest,
+		Reason: "Create reviewed resources", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply-inactive-for-activation",
+	})
+	if err != nil || applied.ApplyReceipt.Activation != WorkforceActivationInactive {
+		t.Fatalf("inactive apply=%#v err=%v", applied, err)
+	}
+
+	activation, replayed, err := service.PrepareActivation(context.Background(), PrepareChangeSetActivationRequest{
+		Scope: scope, ChangeSetID: applied.ID, ExpectedRevision: applied.Revision, CandidateDigest: applied.CandidateDigest,
+		Catalog: catalog, Reason: "Start the reviewed workforce", Actor: ChangeSetActor{Type: "user", ID: "7"},
+		IdempotencyKey: "prepare-activation",
+	})
+	if err != nil || replayed || activation.ParentID != applied.ID || activation.Result.Candidate.Activation != WorkforceActivationActive ||
+		activation.Status != ChangeSetReview || activation.RequiredCredentials["tenant/one/community-researcher"][0] != "MODEL_PROVIDER" ||
+		activation.Placement.AgentExpectedRevisions["tenant/one/community-researcher"] < 1 || activation.Placement.TeamExpectedRevision < 1 {
+		t.Fatalf("activation=%#v replayed=%v err=%v", activation, replayed, err)
+	}
+	if replay, wasReplayed, replayErr := service.PrepareActivation(context.Background(), PrepareChangeSetActivationRequest{
+		Scope: scope, ChangeSetID: applied.ID, ExpectedRevision: applied.Revision, CandidateDigest: applied.CandidateDigest,
+		Catalog: catalog, Reason: "Start the reviewed workforce", Actor: ChangeSetActor{Type: "user", ID: "7"},
+		IdempotencyKey: "prepare-activation",
+	}); replayErr != nil || !wasReplayed || replay.ID != activation.ID {
+		t.Fatalf("activation replay=%#v replayed=%v err=%v", replay, wasReplayed, replayErr)
+	}
+
+	evaluated, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: activation.ID, ExpectedRevision: activation.Revision, CandidateDigest: activation.CandidateDigest,
+		Allowed: true, Actor: ChangeSetActor{Type: "policy_evaluator", ID: "policy"}, IdempotencyKey: "allow-activation",
+	})
+	if err != nil || evaluated.Status != ChangeSetReady {
+		t.Fatalf("activation evaluation=%#v err=%v", evaluated, err)
+	}
+	if _, _, err = service.Apply(context.Background(), ApplyChangeSetRequest{
+		Scope: scope, ChangeSetID: evaluated.ID, ExpectedRevision: evaluated.Revision, CandidateDigest: evaluated.CandidateDigest,
+		Reason: "Activate reviewed resources", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply-without-provider",
+	}); err == nil || !strings.Contains(err.Error(), "MODEL_PROVIDER") {
+		t.Fatalf("missing provider apply err=%v", err)
+	}
+
+	placed := clonePlacement(evaluated.Placement)
+	if placed.CredentialReferences == nil {
+		placed.CredentialReferences = map[string]map[string]capability.CredentialReference{}
+	}
+	placed.CredentialReferences["tenant/one/community-researcher"] = map[string]capability.CredentialReference{
+		"MODEL_PROVIDER": {Kind: "vault", ID: "29"},
+	}
+	updated, _, err := service.UpdatePlacement(context.Background(), UpdateChangeSetPlacementRequest{
+		Scope: scope, ChangeSetID: evaluated.ID, ExpectedRevision: evaluated.Revision, Placement: placed,
+		Reason: "Select authorized model provider", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "place-provider",
+	})
+	if err != nil || updated.Status != ChangeSetReview {
+		t.Fatalf("placement=%#v err=%v", updated, err)
+	}
+	reviewed, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: scope, ChangeSetID: updated.ID, ExpectedRevision: updated.Revision, CandidateDigest: updated.CandidateDigest,
+		Allowed: true, Actor: ChangeSetActor{Type: "policy_evaluator", ID: "policy"}, IdempotencyKey: "allow-placed-activation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activated, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{
+		Scope: scope, ChangeSetID: reviewed.ID, ExpectedRevision: reviewed.Revision, CandidateDigest: reviewed.CandidateDigest,
+		Reason: "Activate reviewed resources", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply-activation",
+	})
+	if err != nil || activated.ApplyReceipt.Activation != WorkforceActivationActive {
+		t.Fatalf("activated=%#v err=%v", activated, err)
+	}
+}
+
 func TestEffectiveChangeSetActivationIntentMigratesTypedCommitmentWithoutPromptParsing(t *testing.T) {
 	legacy := &ChangeSet{Result: CompileResult{Commitments: PromptCommitments{Activation: ActivationCommitmentInactive}}}
 	if intent, err := EffectiveChangeSetActivationIntent(legacy); err != nil || intent != WorkforceActivationInactive {
