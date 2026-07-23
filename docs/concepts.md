@@ -150,15 +150,18 @@ channels useful without forcing one permanent spokesperson or allowing every
 Agent to answer every message.
 
 An **Agent request** is durable delegated work, not a chat instruction. Incoming
-requests are reconciled through recipient policy. Preauthorized delegation from
-an already bounded Agent Turn is accepted idempotently; other requests create a
-small, decision-only Run for the recipient Agent. A Team request deterministically
-selects one eligible roster Agent under the active Team role and delegation
-policy. That Agent can accept, reject, or ask one concrete clarification
-question. The decision Run cannot execute Skills, fork, delegate, or perform the
-requested work, and its durable identity is bound to the request revision before
-the lifecycle decision is applied. Accepted work then starts as a separate child
-Run with its own Skills, credentials, budget, policy, and audit trail.
+requests are reconciled through recipient policy. Ordinary Turn delegation
+places the requesting Run in `waiting_for_agent` and creates a small,
+decision-only Run for the recipient Agent; only explicitly preauthorized policy
+skips that review. A Team request deterministically selects one eligible roster
+Agent under the active Team role and delegation policy. That Agent can accept,
+reject, or ask one concrete clarification question. Rejection resumes the
+requester with the durable reason. A clarification question also resumes it;
+the requester can answer through the same request, wait again, and receive a
+new decision Run bound to the new request revision. The decision Run cannot
+execute Skills, fork, delegate, or perform the requested work. Accepted work
+then starts as a separate child Run with its own Skills, credentials, budget,
+policy, and audit trail.
 
 ## Activity, artifacts, and evidence
 

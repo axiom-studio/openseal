@@ -250,15 +250,16 @@ func TestAgentRequestInboxAppliesAutonomousRecipientDecisions(t *testing.T) {
 		message    string
 		wantStatus AgentRequestStatus
 		wantEvent  string
+		wantSource AgentRunStatus
 	}{
-		{name: "accept", decision: AgentRequestDecisionAccept, message: "This is relevant and clear.", wantStatus: AgentRequestStatusCompleted, wantEvent: "collaboration.accepted"},
-		{name: "reject", decision: AgentRequestDecisionReject, message: "This is outside my role.", wantStatus: AgentRequestStatusRejected, wantEvent: "collaboration.rejected"},
-		{name: "clarify", decision: AgentRequestDecisionRequestClarification, message: "Which customer segment should I prioritize?", wantStatus: AgentRequestStatusClarificationRequested, wantEvent: "collaboration.clarification_requested"},
+		{name: "accept", decision: AgentRequestDecisionAccept, message: "This is relevant and clear.", wantStatus: AgentRequestStatusCompleted, wantEvent: "collaboration.accepted", wantSource: AgentRunStatusQueued},
+		{name: "reject", decision: AgentRequestDecisionReject, message: "This is outside my role.", wantStatus: AgentRequestStatusRejected, wantEvent: "collaboration.rejected", wantSource: AgentRunStatusQueued},
+		{name: "clarify", decision: AgentRequestDecisionRequestClarification, message: "Which customer segment should I prioritize?", wantStatus: AgentRequestStatusClarificationRequested, wantEvent: "collaboration.clarification_requested", wantSource: AgentRunStatusQueued},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
-			_, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
+			source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 			resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 				switch run.Source {
 				case RunSourceRequestDecision:
@@ -309,6 +310,15 @@ func TestAgentRequestInboxAppliesAutonomousRecipientDecisions(t *testing.T) {
 			}
 			if current == nil || current.Status != tc.wantStatus {
 				t.Fatalf("request = %#v", current)
+			}
+			resumed, getErr := store.GetAgentRun(t.Context(), request.Scope, source.ID)
+			if getErr != nil || resumed.Status != tc.wantSource || resumed.WakeCondition != nil {
+				t.Fatalf("source after %s = %#v, %v", tc.decision, resumed, getErr)
+			}
+			results, _ := resumed.Output["collaborationResults"].(map[string]interface{})
+			result, _ := results[request.ID].(map[string]interface{})
+			if fmt.Sprint(result["status"]) != string(tc.wantStatus) {
+				t.Fatalf("source collaboration result = %#v", result)
 			}
 			events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: request.Scope, RunID: current.SourceRunID, Limit: 30})
 			if err != nil {

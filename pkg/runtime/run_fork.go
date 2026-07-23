@@ -43,6 +43,7 @@ type TurnDelegationProposal struct {
 	StepID          string                 `json:"stepId"`
 	AssignedAgentID string                 `json:"assignedAgentId"`
 	Goal            string                 `json:"goal"`
+	Clarification   string                 `json:"clarification,omitempty"`
 	Context         map[string]interface{} `json:"context,omitempty"`
 	Checkpoint      map[string]interface{} `json:"checkpoint"`
 	Budget          *BudgetPolicy          `json:"budget,omitempty"`
@@ -53,6 +54,9 @@ type TurnDelegationProposal struct {
 func (p *TurnDelegationProposal) Validate() error {
 	if p == nil || !validOpaqueIdentifier(p.StepID, 128) || !validOpaqueIdentifier(p.AssignedAgentID, 128) || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
 		return errors.New("delegation proposal requires step, assigned Agent, goal, and non-negative timeout")
+	}
+	if len(p.Clarification) > 8192 {
+		return errors.New("delegation clarification exceeds 8192 bytes")
 	}
 	if err := ValidateCredentialFreeContext(p.Context); err != nil {
 		return err

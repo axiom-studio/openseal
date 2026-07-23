@@ -12,23 +12,19 @@ func requestStoreKey(scope Scope, id string) string { return scope.key() + ":" +
 func requestIdempotencyStoreKey(scope Scope, key string) string { return scope.key() + ":" + key }
 
 func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestCreateRecord) (*ActivityEvent, error) {
-	if record.Request == nil || record.Event == nil {
-		return nil, ErrAgentRequestNotFound
-	}
-	if err := record.Request.Validate(); err != nil {
+	if err := validateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
-	}
-	if err := record.Event.Validate(); err != nil {
-		return nil, err
-	}
-	if record.Request.Scope != record.Event.Scope || record.Request.SourceRunID != record.Event.RunID {
-		return nil, ErrInvalidScope
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runKey := portfolioKey(record.Request.Scope, record.Request.SourceRunID)
-	if s.agentRuns[runKey] == nil {
+	currentSource := s.agentRuns[runKey]
+	if currentSource == nil {
 		return nil, ErrRunNotFound
+	}
+	if record.SourceRun != nil &&
+		(currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1) {
+		return nil, ErrRevisionConflict
 	}
 	requestKey := requestStoreKey(record.Request.Scope, record.Request.ID)
 	if s.requests[requestKey] != nil {
@@ -40,6 +36,9 @@ func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestC
 			return nil, ErrAgentRequestIdempotency
 		}
 		s.requestKeys[key] = record.Request.ID
+	}
+	if record.SourceRun != nil {
+		s.agentRuns[runKey] = cloneAgentRun(record.SourceRun)
 	}
 	s.requests[requestKey] = cloneAgentRequest(record.Request)
 	persisted := appendMemoryActivityLocked(s, record.Event)
@@ -281,6 +280,34 @@ func pageAgentRequests(values []*AgentRequest, offset, limit int) []*AgentReques
 		values = values[:limit]
 	}
 	return values
+}
+
+func validateAgentRequestCreateRecord(record AgentRequestCreateRecord) error {
+	if record.Request == nil || record.Event == nil {
+		return errors.New("agent request and source event are required")
+	}
+	if err := record.Request.Validate(); err != nil {
+		return err
+	}
+	if err := record.Event.Validate(); err != nil {
+		return err
+	}
+	if record.Request.Scope != record.Event.Scope || record.Request.SourceRunID != record.Event.RunID {
+		return ErrInvalidScope
+	}
+	if record.SourceRun != nil {
+		if err := record.SourceRun.Validate(); err != nil {
+			return err
+		}
+		if record.SourceRun.Scope != record.Request.Scope || record.SourceRun.ID != record.Request.SourceRunID ||
+			record.SourceRun.Revision != record.ExpectedSourceRevision+1 {
+			return ErrInvalidScope
+		}
+	}
+	if (record.Request.DependencyGroupID == "") != (record.SourceRun != nil) {
+		return errors.New("singular AgentRequest creation requires exactly one source Run wait transition")
+	}
+	return nil
 }
 
 func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error {

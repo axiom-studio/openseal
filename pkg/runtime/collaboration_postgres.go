@@ -50,13 +50,7 @@ func (s *PostgresStore) migrateCollaboration(ctx context.Context, tx *sql.Tx) er
 }
 
 func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequestCreateRecord) (*ActivityEvent, error) {
-	if record.Request == nil || record.Event == nil {
-		return nil, ErrAgentRequestNotFound
-	}
-	if err := record.Request.Validate(); err != nil {
-		return nil, err
-	}
-	if err := record.Event.Validate(); err != nil {
+	if err := validateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(record.Request)
@@ -68,14 +62,20 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequ
 		return nil, err
 	}
 	defer tx.Rollback()
-	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`,
-		record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRunNotFound
-	}
-	if err != nil {
-		return nil, err
+	if record.SourceRun != nil {
+		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
+			return nil, err
+		}
+	} else {
+		var exists int
+		err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`,
+			record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRunNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_requests")+`
 		(scope_kind, scope_id, id, kind, status, requester_type, requester_id, recipient_type, recipient_id,

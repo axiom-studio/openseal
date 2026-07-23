@@ -222,6 +222,7 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		"requestId": request.ID, "requestRevision": request.Revision, "kind": request.Kind,
 		"requester": request.Requester, "recipient": request.Recipient, "goal": request.Goal,
 		"instructions": request.Instructions, "semanticRole": request.SemanticRole,
+		"clarificationQuestion": request.Clarification, "clarificationResponse": request.Response,
 		"acceptanceCriteria":   cloneMap(request.AcceptanceCriteria),
 		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
 		"sharedContext":        cloneMap(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
