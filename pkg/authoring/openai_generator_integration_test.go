@@ -45,7 +45,7 @@ func TestLiveGeneratorCompilesRepresentativeMarketingTeam(t *testing.T) {
 	if len(result.Validation) != 0 {
 		t.Fatalf("candidate validation = %#v", result.Validation)
 	}
-	if len(result.Questions) == 0 {
+	if len(result.UnresolvedQuestions) == 0 {
 		t.Fatal("ambiguous outreach authority should produce a question")
 	}
 	encoded, _ := json.Marshal(result)

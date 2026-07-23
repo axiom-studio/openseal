@@ -420,7 +420,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	if err := validateRefinementCatalog(result.UnresolvedQuestions, request.Catalog); err != nil {
 		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
 	}
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, false, fmt.Errorf("digest workforce candidate: %w", err)
@@ -565,7 +565,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	if err := validateRefinementCatalog(result.UnresolvedQuestions, changeSet.Catalog); err != nil {
 		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
 	}
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, fmt.Errorf("digest workforce candidate: %w", err)
@@ -859,7 +859,7 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	// projection when placement changes; the next governed ready transition
 	// recomputes it against the newly selected immutable resources.
 	next.Result.Validation = replaceReadinessValidation(next.Result.Validation, nil)
-	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.Questions) == 0 && len(next.Result.UnresolvedQuestions) == 0
+	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.UnresolvedQuestions) == 0
 	next.Status = ChangeSetReview
 	if !next.Result.Valid {
 		next.Status = ChangeSetBlocked
@@ -1493,7 +1493,7 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 	}
 	next := cloneChangeSet(current)
 	next.Result.Validation = replaceReadinessValidation(next.Result.Validation, readinessIssues)
-	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.Questions) == 0 && len(next.Result.UnresolvedQuestions) == 0
+	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.UnresolvedQuestions) == 0
 	next.Evaluations = append(next.Evaluations, ChangeSetEvaluation{ID: uuid.NewString(), IdempotencyKey: request.IdempotencyKey,
 		CandidateDigest: request.CandidateDigest, Allowed: request.Allowed, Findings: append([]ChangeSetPolicyFinding(nil), request.Findings...),
 		ApprovalRequirements: append([]ChangeSetApprovalRequirement(nil), request.ApprovalRequirements...), Actor: request.Actor, SubmittedAt: now})
@@ -1651,7 +1651,7 @@ func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveC
 			return nil, false, err
 		}
 		next.Result.Validation = replaceReadinessValidation(next.Result.Validation, readinessIssues)
-		next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.Questions) == 0 && len(next.Result.UnresolvedQuestions) == 0
+		next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.UnresolvedQuestions) == 0
 		if len(readinessIssues) > 0 {
 			nextStatus, lifecycleReason = ChangeSetBlocked, "binding_validation_failed"
 		} else {

@@ -11,19 +11,19 @@ import (
 type workforceFixtureGenerator struct{}
 
 func (workforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
-	return []byte(`{"candidate":{"agents":[],"assignments":[]},"questions":["What should this Team own?"]}`), nil
+	return []byte(`{"candidate":{"agents":[],"assignments":[]},"unresolvedQuestions":[{"id":"team-purpose","category":"other","prompt":"What should this Team own?","whyNeeded":"The Team needs an explicit purpose.","blocking":["candidate"],"answer":{"kind":"text"},"provenance":[{"kind":"prompt"}],"priority":1}]}`), nil
 }
 
 type evaluableWorkforceFixtureGenerator struct{}
 
 func (evaluableWorkforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
-	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[]},"questions":[]}`), nil
+	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[]}}`), nil
 }
 
 type sourceQualifiedWorkforceFixtureGenerator struct{}
 
 func (sourceQualifiedWorkforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
-	return []byte(`{"candidate":{"agents":[{"id":"researcher","version":"1","displayName":"Researcher","purpose":"Research safely","systemPrompt":"Research with evidence.","skillRequirements":[{"skillId":"research","versionConstraint":"1.0.0","promptRequired":true}],"authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"assignments":[]},"questions":[]}`), nil
+	return []byte(`{"candidate":{"agents":[{"id":"researcher","version":"1","displayName":"Researcher","purpose":"Research safely","systemPrompt":"Research with evidence.","skillRequirements":[{"skillId":"research","versionConstraint":"1.0.0","promptRequired":true}],"authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"assignments":[]}}`), nil
 }
 
 func TestPublicWorkforceObjectivePlacementContract(t *testing.T) {

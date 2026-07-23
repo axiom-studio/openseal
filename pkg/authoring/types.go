@@ -253,7 +253,6 @@ type GenerationResponse struct {
 	Candidate           WorkforceCandidate   `json:"candidate"`
 	Commitments         PromptCommitments    `json:"commitments"`
 	Assumptions         []string             `json:"assumptions,omitempty"`
-	Questions           []string             `json:"questions,omitempty"`
 	UnresolvedQuestions []RefinementQuestion `json:"unresolvedQuestions,omitempty"`
 }
 
@@ -325,7 +324,6 @@ type CompileResult struct {
 	Valid                 bool                   `json:"valid"`
 	Commitments           PromptCommitments      `json:"commitments"`
 	Assumptions           []string               `json:"assumptions,omitempty"`
-	Questions             []string               `json:"questions,omitempty"`
 	UnresolvedQuestions   []RefinementQuestion   `json:"unresolvedQuestions,omitempty"`
 	Validation            []ValidationIssue      `json:"validation,omitempty"`
 	MissingRequirements   []MissingRequirement   `json:"missingRequirements,omitempty"`

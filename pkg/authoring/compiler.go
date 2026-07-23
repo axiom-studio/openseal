@@ -199,7 +199,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		assumptions = normalized(append(assumptions, "Atomic apply remains inactive by creating non-executing resources; activation requires a separate governed command."))
 	}
 	result := &CompileResult{
-		Candidate: generated.Candidate, Commitments: commitments, Assumptions: assumptions, Questions: normalized(generated.Questions),
+		Candidate: generated.Candidate, Commitments: commitments, Assumptions: assumptions,
 		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
@@ -228,7 +228,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	result.SourcePolicyProposals = sourcePolicyProposals(&result.Candidate, result.MissingRequirements, request.Catalog)
 	result.RiskChanges = riskChanges(request.Existing, &result.Candidate)
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.Questions) == 0 && len(result.UnresolvedQuestions) == 0
+	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
 }
 
