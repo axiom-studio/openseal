@@ -60,7 +60,7 @@ func TestCompilerRevalidatesAndRepairsStillInvalidSemanticResponse(t *testing.T)
 	}
 }
 
-func TestCompilerRepairsPlaintextCredentialQuestionIntoVaultReference(t *testing.T) {
+func TestCompilerRepairsPlaintextCredentialQuestionIntoOpaqueReference(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	invalidQuestion := RefinementQuestion{
 		ID: "reddit-credential", Category: RefinementCategoryCredential,
@@ -70,7 +70,7 @@ func TestCompilerRepairsPlaintextCredentialQuestionIntoVaultReference(t *testing
 		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}},
 	}
 	validQuestion := invalidQuestion
-	validQuestion.Prompt = "Which authorized Reddit credential should be bound from Vault?"
+	validQuestion.Prompt = "Which authorized Reddit credential reference should be bound?"
 	validQuestion.Answer.Kind = RefinementAnswerCredentialReference
 	semanticInvalid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{invalidQuestion}})
 	semanticValid, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{validQuestion}})

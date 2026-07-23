@@ -156,7 +156,7 @@ func TestRefinementSequenceCanGateSkillsAndScopeOnCredentialConfiguration(t *tes
 	if next := refinement.NextQuestion(); next == nil || next.ID != credential.ID {
 		t.Fatalf("first question = %#v", next)
 	}
-	refinement.Answers = append(refinement.Answers, RefinementAnswerEvent{QuestionID: credential.ID, Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: "oauth", ID: "opaque-vault-reference"}}})
+	refinement.Answers = append(refinement.Answers, RefinementAnswerEvent{QuestionID: credential.ID, Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: "oauth", ID: "opaque-credential-reference"}}})
 	if next := refinement.NextQuestion(); next == nil || next.ID != skills.ID {
 		t.Fatalf("second question = %#v", next)
 	}
@@ -176,7 +176,7 @@ func TestRefinementQuestionsRejectCyclesAndSecretShapedAnswers(t *testing.T) {
 		t.Fatal("credential answer accepted a text secret instead of an opaque reference")
 	}
 	second.DependsOn = nil
-	second.Provenance[0].Reference = "vault/tenant/opaque-reference"
+	second.Provenance[0].Reference = "credential/tenant/opaque-reference"
 	if err := validateRefinementQuestions([]RefinementQuestion{second}); err == nil {
 		t.Fatal("opaque credential reference was accepted in model-visible question provenance")
 	}
@@ -185,14 +185,14 @@ func TestRefinementQuestionsRejectCyclesAndSecretShapedAnswers(t *testing.T) {
 func TestProviderRefinementProjectionRedactsOpaqueCredentialReference(t *testing.T) {
 	value := ChangeSetRefinement{
 		Questions: []RefinementQuestion{{ID: "credential", Category: RefinementCategoryCredential, Prompt: "Configure credential", WhyNeeded: "Execution requires it", Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference}, Priority: 1, AutoResolvable: true, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}}}},
-		Answers:   []RefinementAnswerEvent{{QuestionID: "credential", Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: "oauth", ID: "vault/tenant/secret-reference"}}, Source: RefinementAnswerSourceRuntime}},
+		Answers:   []RefinementAnswerEvent{{QuestionID: "credential", Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: "oauth", ID: "credential/tenant/private-reference"}}, Source: RefinementAnswerSourceRuntime}},
 	}
 	payload, err := json.Marshal(providerRefinementContext(value))
 	if err != nil {
 		t.Fatal(err)
 	}
 	encoded := string(payload)
-	if strings.Contains(encoded, "vault/tenant/secret-reference") || strings.Contains(encoded, "credentialReference") || !strings.Contains(encoded, `"credentialConfigured":true`) || !strings.Contains(encoded, `"credentialKind":"oauth"`) {
+	if strings.Contains(encoded, "credential/tenant/private-reference") || strings.Contains(encoded, "credentialReference") || !strings.Contains(encoded, `"credentialConfigured":true`) || !strings.Contains(encoded, `"credentialKind":"oauth"`) {
 		t.Fatalf("provider projection=%s", encoded)
 	}
 }

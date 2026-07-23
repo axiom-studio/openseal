@@ -5,7 +5,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
 status=0
-for term in 'at''las' 'sen''tinel' 'cor''tex'; do
+for term in 'at''las' 'sen''tinel' 'cor''tex' 'va''ult'; do
   if rg -n -i --hidden \
     --glob '!.git/**' \
     --glob '!vendor/**' \
@@ -22,6 +22,7 @@ for identifier in \
   'AXIOM_OPENCLAW_SKILLS_DIR' \
   '/var/lib/axiom' \
   'Axiom-Agent-Runtime' \
+  'Axiom Bot' \
   'axiom-agents' \
   'axiom-openseal' \
   'axiom-sdk' \

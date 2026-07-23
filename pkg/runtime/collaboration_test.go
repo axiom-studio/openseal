@@ -55,7 +55,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
 				Goal: "Ship the release", Source: RunSourceManual,
-				Context: map[string]interface{}{"sourceOnly": true, "vaultBindingRef": "binding:must-not-transfer"},
+				Context: map[string]interface{}{"sourceOnly": true, "privateCredentialRef": "binding:must-not-transfer"},
 				Budget:  &BudgetPolicy{MaxTotalTokens: 1000}, Policy: map[string]interface{}{"risk": "guarded"},
 			})
 			if err != nil {
@@ -138,7 +138,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if accepted.Child.Owner != source.Owner || accepted.Child.AssignedAgentID != "marketing" || accepted.Child.Source != RunSourceRequest {
 				t.Fatalf("child ownership = %#v", accepted.Child)
 			}
-			if accepted.Child.Context["sourceOnly"] != nil || accepted.Child.Context["vaultBindingRef"] != nil || accepted.Child.Context["release"] != "2026.07" {
+			if accepted.Child.Context["sourceOnly"] != nil || accepted.Child.Context["privateCredentialRef"] != nil || accepted.Child.Context["release"] != "2026.07" {
 				t.Fatalf("child context leaked source state: %#v", accepted.Child.Context)
 			}
 			if accepted.Child.Checkpoint["phase"] != "draft" || accepted.Child.Checkpoint["audience"] != "platform-engineering" {

@@ -237,7 +237,7 @@ func TestCompilerRepairsLiveUnknownIDWithExactSchemaPath(t *testing.T) {
 		!strings.Contains(diagnostic, "allowed:") || !strings.Contains(diagnostic, "skillId") {
 		t.Fatalf("unknown-field repair diagnostic = %q", diagnostic)
 	}
-	if strings.Contains(string(valid), "vault://") || strings.Contains(diagnostic, "vault://") {
+	if strings.Contains(string(valid), "credential://") || strings.Contains(diagnostic, "credential://") {
 		t.Fatal("schema repair diagnostic exposed credential material")
 	}
 }
@@ -512,7 +512,7 @@ func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T)
 			Prompt: "Which email credential should be configured?", WhyNeeded: "Delivery requires an authorized credential.",
 			Blocking: []RefinementBlockingScope{RefinementBlocksApply},
 			Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference, Options: []RefinementQuestionOption{
-				{ID: "vault-binding-opaque-42", Label: "Production email"},
+				{ID: "credential-reference-opaque-42", Label: "Production email"},
 			}},
 			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}}, Priority: 100,
 		}},
@@ -530,7 +530,7 @@ func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T)
 		t.Fatalf("normalized credential question=%#v", question)
 	}
 	encoded, _ := json.Marshal(result)
-	if strings.Contains(string(encoded), "vault-binding-opaque-42") {
+	if strings.Contains(string(encoded), "credential-reference-opaque-42") {
 		t.Fatalf("provider credential identity persisted: %s", encoded)
 	}
 }

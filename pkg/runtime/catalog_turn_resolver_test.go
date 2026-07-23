@@ -134,7 +134,7 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	catalog := &resolverCatalog{
 		deployment: &kernelagent.AgentDeployment{
 			ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "vault", ID: "17"}},
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "17"}},
 		},
 		definition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Purpose: "Analyze", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
@@ -147,7 +147,7 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}
-	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "vault" || host.request.ModelCredential.ID != "17" {
+	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "model-provider" || host.request.ModelCredential.ID != "17" {
 		t.Fatalf("model credential = %#v", host.request.ModelCredential)
 	}
 	modelInput, _ := MarshalHostedTurnModelInput(host.request)
@@ -169,7 +169,7 @@ func TestCatalogTurnResolverIsolatesAgentRequestDecisionFromSkillsAndRunbooks(t 
 		deployment: &kernelagent.AgentDeployment{
 			ID: "reviewer", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "vault", ID: "model-binding"}},
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "model-binding"}},
 		},
 		definition: &kernelagent.AgentDefinition{
 			ID: "reviewer", Version: "1", Purpose: "Review launches", SystemPrompt: "Be precise.",

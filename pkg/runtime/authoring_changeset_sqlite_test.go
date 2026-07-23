@@ -297,7 +297,7 @@ func TestSQLiteWorkforceEvaluationValidatesExactSkillAuthorityBeforeReady(t *tes
 				Actions:   map[string]skill.Action{"read": {Name: "read", Description: "Read Reddit posts", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, InputSchema: map[string]interface{}{"type": "object"}, Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}}, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported}},
 			},
 			credentials: []authoring.SkillCredential{{Name: "reddit", Kind: "reddit-oauth", Actions: []string{"read"}}},
-			references:  map[string]capability.CredentialReference{"reddit-oauth": {Kind: "reddit-oauth", ID: "vault://tenant/reddit"}},
+			references:  map[string]capability.CredentialReference{"reddit-oauth": {Kind: "reddit-oauth", ID: "credential://tenant/reddit"}},
 			wantStatus:  authoring.ChangeSetReady,
 		},
 	} {

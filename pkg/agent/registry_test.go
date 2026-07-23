@@ -39,7 +39,7 @@ func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
 		ID: "operator-prod", Scope: scope, DefinitionID: "operator", ActiveVersion: "1.0.0",
 		DisplayName: "  Production Operator  ",
 		Environment: "production", SkillBindingIDs: []string{"git", "kubernetes"},
-		Credentials:  map[string]capability.CredentialReference{"git": {Kind: "git-token", ID: "opaque-vault-reference"}},
+		Credentials:  map[string]capability.CredentialReference{"git": {Kind: "git-token", ID: "opaque-credential-reference"}},
 		Restrictions: DeploymentRestrictions{MaximumRisk: &maximumRisk, AllowedSkillIDs: []string{"git"}, MaxConcurrentRuns: &concurrency, BudgetCeilings: map[string]float64{"usd": 25}},
 		Capacity:     DeploymentCapacity{MaxConcurrentRuns: 2, MaxQueuedRuns: 20}, RolloutStatus: RolloutActive,
 	}, "user", "admin", "initial activation")
@@ -161,13 +161,13 @@ func TestRegistryClonesCredentialReferencesWithoutValues(t *testing.T) {
 	deployment, _, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
 		ID: "agent", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, DefinitionID: "operator", ActiveVersion: "1",
 		RolloutStatus: RolloutActive, Environment: "prod", Capacity: DeploymentCapacity{MaxConcurrentRuns: 1},
-		Credentials: map[string]capability.CredentialReference{"api": {Kind: "provider-key", ID: "vault-ref"}},
+		Credentials: map[string]capability.CredentialReference{"api": {Kind: "provider-key", ID: "credential-ref"}},
 	}, "user", "admin", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(deployment)
-	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "vault-ref") {
+	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "credential-ref") {
 		t.Fatalf("deployment credential representation = %s", encoded)
 	}
 }
@@ -192,7 +192,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 	proposed.RolloutStatus = RolloutPaused
 	proposed.Placement = map[string]string{"modelProvider": "deepseek"}
 	proposed.Credentials = map[string]capability.CredentialReference{
-		"MODEL_PROVIDER": {Kind: "model-provider", ID: "vault://tenant-one/model-provider"},
+		"MODEL_PROVIDER": {Kind: "model-provider", ID: "credential://tenant-one/model-provider"},
 	}
 	proposed.SkillBindingIDs = []string{"zeta", "alpha", "alpha"}
 	proposed.Capacity.MaxQueuedRuns = 25
@@ -203,7 +203,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 	}
 	if updated.Revision != deployment.Revision+1 || updated.DisplayName != "Incident Operator" || updated.RolloutStatus != RolloutPaused || updated.Capacity.MaxQueuedRuns != 25 ||
 		len(updated.SkillBindingIDs) != 2 || updated.SkillBindingIDs[0] != "alpha" ||
-		updated.Credentials["MODEL_PROVIDER"].ID != "vault://tenant-one/model-provider" {
+		updated.Credentials["MODEL_PROVIDER"].ID != "credential://tenant-one/model-provider" {
 		t.Fatalf("updated deployment = %#v", updated)
 	}
 	if audit == nil || audit.ChangeKind != workforce.DeploymentChangeConfigurationUpdated || audit.FromVersion != "1" || audit.ToVersion != "1" ||
@@ -215,7 +215,7 @@ func TestUpdateDeploymentReconcilesOpaqueConfigurationWithAudit(t *testing.T) {
 		t.Fatalf("deployment history = %#v, %v", history, err)
 	}
 	encoded, _ := json.Marshal(updated)
-	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "vault://tenant-one/model-provider") {
+	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "credential://tenant-one/model-provider") {
 		t.Fatalf("credential projection = %s", encoded)
 	}
 }

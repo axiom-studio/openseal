@@ -41,7 +41,7 @@ sections:
         type: text
         label: Bot Username
         hint: Override the bot display name
-        placeholder: Axiom Bot
+        placeholder: Workspace Bot
       - key: iconEmoji
         type: text
         label: Icon Emoji
