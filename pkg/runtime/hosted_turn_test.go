@@ -23,6 +23,14 @@ func (h *recordingTurnHost) ExecuteHostedTurn(_ context.Context, request HostedT
 	return h.response, h.err
 }
 
+func hostedTestAgentTargets(ids ...string) []HostedAgentTarget {
+	targets := make([]HostedAgentTarget, 0, len(ids))
+	for _, id := range ids {
+		targets = append(targets, HostedAgentTarget{ID: id, DisplayName: id})
+	}
+	return targets
+}
+
 func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-7", NextRunStatus: AgentRunStatusCompleted,
@@ -346,7 +354,10 @@ func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			host := &recordingTurnHost{response: test.response}
-			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "lead", DefinitionID: "lead-definition", DefinitionVersion: "1"})
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "lead", DefinitionID: "lead-definition", DefinitionVersion: "1",
+				EligibleAgents: hostedTestAgentTargets("analyst", "researcher-a", "researcher-b"),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -357,6 +368,90 @@ func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.assertions(t, outcome)
+		})
+	}
+}
+
+func TestHostedTurnRunnerResolvesUniqueAgentDisplayNameToCanonicalID(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Delegate verification",
+		ProposedDelegation: &TurnDelegationProposal{
+			StepID: "verify", AssignedAgentID: "Agent 74", Goal: "Verify the result",
+			Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{},
+		},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+		EligibleAgents: []HostedAgentTarget{
+			{ID: "74", DisplayName: "Agent 74", Purpose: "Verify bounded work"},
+			{ID: "researcher", DisplayName: "Researcher", Purpose: "Research evidence"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Coordinate"},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ProposedDelegation == nil || outcome.ProposedDelegation.AssignedAgentID != "74" ||
+		len(host.request.EligibleAgents) != 2 || host.request.EligibleAgents[0].DisplayName != "Agent 74" {
+		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
+	}
+	projected, ok := host.request.InputContext["eligibleAgents"].([]HostedAgentTarget)
+	if !ok || len(projected) != 2 || projected[0].ID != "74" {
+		t.Fatalf("inputContext eligible Agents = %#v", host.request.InputContext["eligibleAgents"])
+	}
+	modelInput, err := MarshalHostedTurnModelInput(host.request)
+	if err != nil || !strings.Contains(string(modelInput), `"eligibleAgents":[{"id":"74","displayName":"Agent 74"`) {
+		t.Fatalf("model input = %s, %v", modelInput, err)
+	}
+}
+
+func TestHostedTurnRunnerRejectsAmbiguousOrUnknownAgentName(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reference string
+		want      []string
+	}{
+		{name: "ambiguous", reference: "Reviewer", want: []string{"ambiguous", "reviewer-primary", "reviewer-backup"}},
+		{name: "unknown", reference: "Publisher", want: []string{"not eligible", "reviewer-primary", "reviewer-backup"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := &recordingTurnHost{response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model",
+				ProposedDelegation: &TurnDelegationProposal{
+					StepID: "review", AssignedAgentID: tc.reference, Goal: "Review",
+					Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{},
+				},
+			}}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+				EligibleAgents: []HostedAgentTarget{
+					{ID: "reviewer-primary", DisplayName: "Reviewer"},
+					{ID: "reviewer-backup", DisplayName: "Reviewer"},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+				Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Coordinate"},
+				Turn: &AgentTurn{ID: "turn"},
+			})
+			if err == nil {
+				t.Fatal("invalid Agent name was accepted")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q does not contain %q", err, want)
+				}
+			}
 		})
 	}
 }
@@ -404,7 +499,10 @@ func TestHostedTurnRunnerRejectsInvalidWorkProposals(t *testing.T) {
 			if len(response.ProposedActions) > 0 {
 				actions = []capability.ModelAction{{Name: "research.read", SkillID: "research", Version: "1", Action: "read"}}
 			}
-			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "lead", DefinitionID: "lead-definition", DefinitionVersion: "1", Actions: actions})
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "lead", DefinitionID: "lead-definition", DefinitionVersion: "1", Actions: actions,
+				EligibleAgents: hostedTestAgentTargets("agent-a", "agent-b", "reviewer"),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -468,6 +566,7 @@ func TestHostedTurnRunnerRejectsChildBudgetsBelowPortableFloor(t *testing.T) {
 			host := &recordingTurnHost{response: test.response}
 			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
 				AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+				EligibleAgents: hostedTestAgentTargets("analyst", "a", "b"),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -530,6 +629,7 @@ func TestHostedTurnRunnerRejectsChildBudgetsBeyondRemainingCapacity(t *testing.T
 			host := &recordingTurnHost{response: test.response}
 			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
 				AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+				EligibleAgents: hostedTestAgentTargets("analyst", "a", "b"),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -563,6 +663,7 @@ func TestHostedTurnRunnerLeavesUnboundedChildDimensionsUnconstrained(t *testing.
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
 		AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+		EligibleAgents: hostedTestAgentTargets("analyst"),
 	})
 	if err != nil {
 		t.Fatal(err)

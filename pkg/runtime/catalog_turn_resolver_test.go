@@ -16,7 +16,9 @@ import (
 
 type resolverCatalog struct {
 	deployment            *kernelagent.AgentDeployment
+	deployments           []*kernelagent.AgentDeployment
 	definition            *kernelagent.AgentDefinition
+	definitions           map[string]*kernelagent.AgentDefinition
 	teamDeployment        *kernelteam.Deployment
 	teamDefinition        *kernelteam.Definition
 	activation            *skill.ActivationSnapshot
@@ -37,7 +39,20 @@ func (c *resolverCatalog) GetAgentDeployment(context.Context, skill.ScopeReferen
 	return c.deployment, nil
 }
 
-func (c *resolverCatalog) GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error) {
+func (c *resolverCatalog) ListAgentDeployments(context.Context, skill.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+	if c.deployments != nil {
+		return c.deployments, nil
+	}
+	if c.deployment == nil {
+		return nil, nil
+	}
+	return []*kernelagent.AgentDeployment{c.deployment}, nil
+}
+
+func (c *resolverCatalog) GetAgentDefinition(_ context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
+	if c.definitions != nil {
+		return c.definitions[id+"@"+version], nil
+	}
 	return c.definition, nil
 }
 
@@ -153,6 +168,58 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	modelInput, _ := MarshalHostedTurnModelInput(host.request)
 	if strings.Contains(string(modelInput), "17") || strings.Contains(strings.ToLower(string(modelInput)), "credential") {
 		t.Fatalf("model input leaked credential reference: %s", modelInput)
+	}
+}
+
+func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
+	}}
+	current := &kernelagent.AgentDeployment{
+		ID: "lead", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+		DefinitionID: "lead-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+	}
+	reviewer := &kernelagent.AgentDeployment{
+		ID: "reviewer-7", Scope: current.Scope,
+		DefinitionID: "reviewer-definition", ActiveVersion: "2", RolloutStatus: kernelagent.RolloutActive,
+	}
+	paused := &kernelagent.AgentDeployment{
+		ID: "paused-agent", Scope: current.Scope,
+		DefinitionID: "paused-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutPaused,
+	}
+	catalog := &resolverCatalog{
+		deployment:  current,
+		deployments: []*kernelagent.AgentDeployment{paused, reviewer, current},
+		definition:  &kernelagent.AgentDefinition{ID: "lead-definition", Version: "1", DisplayName: "Lead", Purpose: "Coordinate", SystemPrompt: "Coordinate safely."},
+		definitions: map[string]*kernelagent.AgentDefinition{
+			"lead-definition@1": {
+				ID: "lead-definition", Version: "1", DisplayName: "Lead", Purpose: "Coordinate", SystemPrompt: "Coordinate safely.",
+			},
+			"reviewer-definition@2": {
+				ID: "reviewer-definition", Version: "2", DisplayName: "Release Reviewer", Purpose: "Review releases", SystemPrompt: "Review safely.",
+			},
+		},
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID,
+		},
+	}
+	run := &AgentRun{
+		ID: "run", Scope: scope, Kind: RunKindAgentWork,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID,
+		Goal: "Delegate a release review", Context: map[string]interface{}{},
+	}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.EligibleAgents) != 1 ||
+		host.request.EligibleAgents[0] != (HostedAgentTarget{ID: "reviewer-7", DisplayName: "Release Reviewer", Purpose: "Review releases"}) {
+		t.Fatalf("eligible Agents = %#v", host.request.EligibleAgents)
 	}
 }
 

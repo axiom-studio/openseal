@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -16,6 +17,7 @@ import (
 // a durable Run to its immutable Agent definition and activated Skills.
 type AgentTurnCatalog interface {
 	GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error)
+	ListAgentDeployments(context.Context, skill.ScopeReference) ([]*kernelagent.AgentDeployment, error)
 	GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
 	OutreachTurnLifecycle
@@ -177,13 +179,17 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if config.Host == nil {
 		return nil, ErrTurnHostUnavailable
 	}
+	eligibleAgents, err := resolveHostedAgentTargets(ctx, catalog, scope, deployment.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve eligible Agent delegation targets: %w", err)
+	}
 	instructions := hostedAgentInstructions(definition)
 	if delegated, ok := run.Context["delegatedSystemPrompt"].(string); ok && strings.TrimSpace(delegated) != "" {
 		instructions = append(instructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
 	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
 		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-		SystemInstructions: instructions, SkillPrompts: prompts, Actions: actions,
+		SystemInstructions: instructions, EligibleAgents: eligibleAgents, SkillPrompts: prompts, Actions: actions,
 		ModelCredential: deploymentModelCredential(deployment),
 	})
 	if err != nil {
@@ -191,6 +197,38 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	base.Runner = runner
 	return &base, nil
+}
+
+func resolveHostedAgentTargets(
+	ctx context.Context,
+	catalog AgentTurnCatalog,
+	scope skill.ScopeReference,
+	currentDeploymentID string,
+) ([]HostedAgentTarget, error) {
+	deployments, err := catalog.ListAgentDeployments(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]HostedAgentTarget, 0, len(deployments))
+	for _, candidate := range deployments {
+		if candidate == nil || candidate.ID == currentDeploymentID ||
+			candidate.RolloutStatus != kernelagent.RolloutActive || strings.TrimSpace(candidate.ActiveVersion) == "" {
+			continue
+		}
+		definition, err := catalog.GetAgentDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
+		if err != nil {
+			return nil, fmt.Errorf("resolve Agent %s definition: %w", candidate.ID, err)
+		}
+		if definition == nil {
+			return nil, fmt.Errorf("resolve Agent %s definition: definition is unavailable", candidate.ID)
+		}
+		targets = append(targets, HostedAgentTarget{
+			ID: strings.TrimSpace(candidate.ID), DisplayName: strings.TrimSpace(definition.DisplayName),
+			Purpose: strings.TrimSpace(definition.Purpose),
+		})
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
+	return targets, nil
 }
 
 func hostedAgentInstructions(definition *kernelagent.AgentDefinition) []string {

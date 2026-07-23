@@ -41,6 +41,7 @@ type HostedTurnModelInput struct {
 	Goal                   string                   `json:"goal"`
 	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
+	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
 	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
@@ -53,7 +54,8 @@ type HostedTurnModelInput struct {
 func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 	return json.Marshal(HostedTurnModelInput{
 		Goal: request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
-		SkillPrompts: request.SkillPrompts, Actions: request.Actions, Budget: request.Budget,
+		EligibleAgents: request.EligibleAgents,
+		SkillPrompts:   request.SkillPrompts, Actions: request.Actions, Budget: request.Budget,
 		DependencyResults: request.DependencyResults, CollaborationResults: request.CollaborationResults,
 		ContinuationCheckpoint: request.ContinuationCheckpoint,
 		PendingInterventions:   request.PendingInterventions,
