@@ -38,7 +38,7 @@ func (s *Server) handleCreateAgentRequest(w http.ResponseWriter, r *http.Request
 		Requester: payload.Requester, Recipient: payload.Recipient, SourceRunID: strings.TrimSpace(payload.SourceRunID),
 		Goal: strings.TrimSpace(payload.Goal), Instructions: strings.TrimSpace(payload.Instructions), SemanticRole: strings.TrimSpace(payload.SemanticRole),
 		AcceptanceCriteria: payload.AcceptanceCriteria, ArtifactRequirements: payload.ArtifactRequirements,
-		SharedContext: payload.SharedContext, ConversationRefs: payload.ConversationRefs,
+		SharedContext: payload.SharedContext, ChildCheckpoint: payload.ChildCheckpoint, ConversationRefs: payload.ConversationRefs,
 		BudgetAllocation: payload.BudgetAllocation, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {

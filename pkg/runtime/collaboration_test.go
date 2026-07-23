@@ -75,7 +75,9 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 						"properties": map[string]interface{}{"wordCount": map[string]interface{}{"type": "integer", "minimum": 1}},
 					},
 				}},
-				SharedContext: map[string]interface{}{"release": "2026.07"}, ConversationRefs: []string{"team:gtm:42"},
+				SharedContext:    map[string]interface{}{"release": "2026.07"},
+				ChildCheckpoint:  map[string]interface{}{"phase": "draft", "audience": "platform-engineering"},
+				ConversationRefs: []string{"team:gtm:42"},
 				IdempotencyKey:   "release-launch-brief",
 				BudgetAllocation: &BudgetPolicy{MaxTotalTokens: 500},
 			}
@@ -89,6 +91,11 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			duplicate, err := service.CreateAgentRequest(ctx, create)
 			if err != nil || duplicate.Request.ID != created.Request.ID || len(duplicate.Events) != 0 {
 				t.Fatalf("idempotent request = %#v, %v", duplicate, err)
+			}
+			conflictingIntent := create
+			conflictingIntent.SharedContext = map[string]interface{}{"release": "different"}
+			if _, err := service.CreateAgentRequest(ctx, conflictingIntent); !errors.Is(err, ErrAgentRequestIdempotency) {
+				t.Fatalf("conflicting request intent error = %v", err)
 			}
 			listed, err := service.ListAgentRequests(ctx, AgentRequestFilter{Scope: scope, Recipient: &create.Recipient})
 			if err != nil || len(listed) != 1 || listed[0].ID != created.Request.ID {
@@ -129,6 +136,9 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			}
 			if accepted.Child.Context["sourceOnly"] != nil || accepted.Child.Context["vaultBindingRef"] != nil || accepted.Child.Context["release"] != "2026.07" {
 				t.Fatalf("child context leaked source state: %#v", accepted.Child.Context)
+			}
+			if accepted.Child.Checkpoint["phase"] != "draft" || accepted.Child.Checkpoint["audience"] != "platform-engineering" {
+				t.Fatalf("child checkpoint = %#v", accepted.Child.Checkpoint)
 			}
 			persistedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
 			if err != nil || persistedSource.Status != AgentRunStatusWaitingForDependency || persistedSource.WakeCondition == nil || persistedSource.WakeCondition.Reference != created.Request.ID {
@@ -352,6 +362,11 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 	unsafe.SharedContext = map[string]interface{}{"nested": map[string]interface{}{"api_token": "secret"}}
 	if _, err := service.CreateAgentRequest(ctx, unsafe); !errors.Is(err, ErrUnsafeSharedContext) {
 		t.Fatalf("unsafe context error = %v", err)
+	}
+	unsafeCheckpoint := base
+	unsafeCheckpoint.ChildCheckpoint = map[string]interface{}{"nested": map[string]interface{}{"accessToken": "secret"}}
+	if _, err := service.CreateAgentRequest(ctx, unsafeCheckpoint); !errors.Is(err, ErrUnsafeSharedContext) {
+		t.Fatalf("unsafe child checkpoint error = %v", err)
 	}
 	unauthorized := base
 	unauthorized.Requester = CollaborationParty{Type: OwnerTypeAgent, ID: "intruder"}

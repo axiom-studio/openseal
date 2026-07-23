@@ -83,6 +83,7 @@ type HostedTurnRequest struct {
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
 	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
 	DependencyResults      map[string]interface{}   `json:"dependencyResults,omitempty"`
+	CollaborationResults   map[string]interface{}   `json:"collaborationResults,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
 	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
 	// ModelCredential is an opaque, host-resolved binding. It crosses only the
@@ -378,6 +379,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	if err != nil {
 		return HostedTurnRequest{}, err
 	}
+	collaborationResults, err := projectHostedCollaborationResults(input.Run)
+	if err != nil {
+		return HostedTurnRequest{}, err
+	}
 	request := HostedTurnRequest{
 		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
 		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
@@ -387,6 +392,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		Actions:                cloneHostedModelActions(r.config.Actions),
 		Budget:                 budget,
 		DependencyResults:      dependencyResults,
+		CollaborationResults:   collaborationResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
@@ -432,6 +438,27 @@ func projectHostedDependencyResults(run *AgentRun) (map[string]interface{}, erro
 	projected := cloneMap(groups)
 	if err := ValidateCredentialFreeContext(projected); err != nil {
 		return nil, fmt.Errorf("project hosted dependency results: %w", err)
+	}
+	return projected, nil
+}
+
+// projectHostedCollaborationResults exposes only explicitly shared AgentRequest
+// results. General Run output remains private to the owning Agent.
+func projectHostedCollaborationResults(run *AgentRun) (map[string]interface{}, error) {
+	if run == nil || run.Output == nil {
+		return nil, nil
+	}
+	raw, exists := run.Output["collaborationResults"]
+	if !exists || raw == nil {
+		return nil, nil
+	}
+	results, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("project hosted collaboration results: durable collaborationResults output is invalid")
+	}
+	projected := cloneMap(results)
+	if err := ValidateCredentialFreeContext(projected); err != nil {
+		return nil, fmt.Errorf("project hosted collaboration results: %w", err)
 	}
 	return projected, nil
 }

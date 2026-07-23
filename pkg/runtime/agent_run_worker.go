@@ -365,33 +365,60 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 	}
 }
 
-func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
-	if p.forks == nil {
-		return nil, errors.New("durable delegation materialization is unavailable")
+func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
+	if p.collaboration == nil {
+		return nil, errors.New("durable collaboration materialization is unavailable")
 	}
 	if run == nil || turn == nil || turn.RequestedDelegation == nil || len(turn.RequestedActions) != 0 || turn.RequestedFork != nil {
 		return nil, errors.New("a bounded Turn must request exactly one delegation")
 	}
 	proposal := turn.RequestedDelegation
-	result, err := p.forks.Create(ctx, CreateRunForkRequest{
-		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
-		ForkID: proposal.StepID,
-		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{{
-			ID: "delegate", Goal: proposal.Goal, AssignedAgentID: proposal.AssignedAgentID,
-			Context: proposal.Context, Checkpoint: proposal.Checkpoint, Budget: proposal.Budget, Timeout: proposal.Timeout,
-			Mode: proposal.Mode,
-		}},
-		ContinuationCheckpoint: turn.ContinuationCheckpoint,
-		Actor:                  ActivityActor{Type: "worker", ID: workerID},
+	sharedContext := cloneMap(proposal.Context)
+	if sharedContext == nil {
+		sharedContext = make(map[string]interface{})
+	}
+	if proposal.Mode != "" {
+		sharedContext[DelegationModeContextKey] = proposal.Mode
+	}
+	key := strings.Join([]string{"delegation", run.ID, proposal.StepID}, ":")
+	created, err := p.collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		ID: stableCollaborationID(run.Scope, key, "request"), Scope: run.Scope, Kind: AgentRequestKindRequest,
+		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
+		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: proposal.AssignedAgentID},
+		SourceRunID: run.ID, Goal: proposal.Goal, SharedContext: sharedContext, ChildCheckpoint: proposal.Checkpoint,
+		BudgetAllocation: proposal.Budget, IdempotencyKey: key,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if result == nil || result.DependencyGroup == nil || result.DependencyGroup.Source == nil {
-		return nil, errors.New("delegation materialization returned no durable source Run")
+	if created == nil || created.Request == nil {
+		return nil, errors.New("delegation materialization returned no durable Agent request")
 	}
-	return result.DependencyGroup.Source, nil
+	if created.Request.Status == AgentRequestStatusPending {
+		accepted, acceptErr := p.collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+			Scope: run.Scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+			Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+			AssignedAgentID: proposal.AssignedAgentID,
+		})
+		if acceptErr != nil {
+			return nil, acceptErr
+		}
+		if accepted == nil || accepted.Source == nil || accepted.Child == nil {
+			return nil, errors.New("delegation acceptance returned no durable source and child Runs")
+		}
+		return accepted.Source, nil
+	}
+	if created.Request.Status != AgentRequestStatusAccepted && created.Request.Status != AgentRequestStatusCompleted {
+		return nil, fmt.Errorf("delegation request %s is %s", created.Request.ID, created.Request.Status)
+	}
+	source, err := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+	if err != nil || source == nil {
+		if err == nil {
+			err = ErrRunNotFound
+		}
+		return nil, err
+	}
+	return source, nil
 }
 
 func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun) {

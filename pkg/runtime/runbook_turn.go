@@ -459,6 +459,28 @@ func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interf
 	groups, _ := run.Output["dependencyGroups"].(map[string]interface{})
 	group, _ := groups[groupID].(map[string]interface{})
 	status, _ := group["status"].(string)
+	if status == "" {
+		requestKey := strings.Join([]string{"delegation", run.ID, stepID}, ":")
+		requestID := stableCollaborationID(run.Scope, requestKey, "request")
+		collaborationResults, _ := run.Output["collaborationResults"].(map[string]interface{})
+		result, _ := collaborationResults[requestID].(map[string]interface{})
+		if len(result) == 0 {
+			return false, nil, nil
+		}
+		if resultStatus, _ := result["status"].(string); resultStatus != "" {
+			message := "delegated Agent step " + stepID + " " + resultStatus
+			return false, r.failed(checkpoint, *state, nil, message), nil
+		}
+		output, _ := result["output"].(map[string]interface{})
+		step := r.definition.Steps[stepID]
+		if err := setRunbookPointer(checkpoint, step.Delegate.ResultPath, cloneMap(output)); err != nil {
+			return false, nil, stepError(stepID, err)
+		}
+		state.PendingDelegation = ""
+		state.Current = step.Delegate.Next
+		encodeRunbookState(checkpoint, *state)
+		return true, nil, nil
+	}
 	if status == "" || status == string(RunDependencyGroupWaiting) {
 		return false, nil, nil
 	}
