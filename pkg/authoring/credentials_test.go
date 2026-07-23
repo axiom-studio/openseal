@@ -95,3 +95,31 @@ func TestRequiredCredentialsIncludesRuntimeBindingOnlyForActiveCandidates(t *tes
 		t.Fatalf("inactive required credentials = %#v", values)
 	}
 }
+
+func TestActiveChangeSetCannotApplyWithoutRuntimeCredentialPlacement(t *testing.T) {
+	changeSet := &ChangeSet{
+		Result: CompileResult{Valid: true, Candidate: WorkforceCandidate{
+			Agents:     []*agent.AgentDefinition{{ID: "operator"}},
+			Activation: WorkforceActivationActive,
+		}},
+		RequiredCredentials: map[string][]string{
+			"operator": {agent.ModelProviderCredentialBinding},
+		},
+		Placement: ChangeSetPlacement{
+			Environment:        "production",
+			AgentDeploymentIDs: map[string]string{"operator": "operator-live"},
+		},
+	}
+	if err := validateApplyPlacement(changeSet); err == nil ||
+		!strings.Contains(err.Error(), "requires an opaque MODEL_PROVIDER credential reference") {
+		t.Fatalf("missing active runtime credential error = %v", err)
+	}
+	changeSet.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
+		"operator": {
+			agent.ModelProviderCredentialBinding: {Kind: "host-vault", ID: "credential-29"},
+		},
+	}
+	if err := validateApplyPlacement(changeSet); err != nil {
+		t.Fatalf("placed active runtime credential = %v", err)
+	}
+}
