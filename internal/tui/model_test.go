@@ -62,6 +62,8 @@ type fakeKernelClient struct {
 	agentCompletionKeys  []string
 	actionApprovals      []*runtime.ApprovalCheckpoint
 	approvalFilters      []runtime.ApprovalFilter
+	agentTurns           []*kernelapi.AgentTurnRecord
+	agentTurnFilters     []runtime.AgentTurnFilter
 	actionCalls          []*runtime.ActionCall
 	actionCallFilters    []runtime.ActionFilter
 	actionDecisions      []kernelapi.ResolveActionApprovalRequest
@@ -523,8 +525,15 @@ func (f *fakeKernelClient) GetActionCall(context.Context, runtime.Scope, string)
 	return nil, runtime.ErrActionNotFound
 }
 
-func (f *fakeKernelClient) ListAgentTurns(context.Context, runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
-	return nil, nil
+func (f *fakeKernelClient) ListAgentTurns(_ context.Context, filter runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
+	f.agentTurnFilters = append(f.agentTurnFilters, filter)
+	turns := make([]*kernelapi.AgentTurnRecord, 0, len(f.agentTurns))
+	for _, turn := range f.agentTurns {
+		if turn != nil && (filter.RunID == "" || turn.RunID == filter.RunID) {
+			turns = append(turns, turn)
+		}
+	}
+	return turns, nil
 }
 
 func (f *fakeKernelClient) GetAgentTurn(context.Context, runtime.Scope, string) (*kernelapi.AgentTurnRecord, error) {
@@ -2789,6 +2798,61 @@ func TestRunViewLoadsAndProjectsCanonicalActionCalls(t *testing.T) {
 	}
 	if strings.Contains(view, "must-not-render") || strings.Contains(strings.ToLower(view), "credential") {
 		t.Fatalf("ActionCall projection exposed private invocation state:\n%s", view)
+	}
+}
+
+func TestRunViewLoadsAndProjectsCanonicalAgentTurns(t *testing.T) {
+	run := testRun("run-turns", runtime.AgentRunStatusCompleted, 4)
+	fake := &fakeKernelClient{
+		document: kernelapi.Capabilities(),
+		runs:     []*runtime.AgentRun{run},
+		agentTurns: []*kernelapi.AgentTurnRecord{{
+			ID: "turn-1", RunID: run.ID, Sequence: 1, Status: runtime.AgentTurnStatusCompleted,
+			ModelProvider: "opencode", Model: "deepseek-v4-flash",
+			OutputSummary: "Requested governed source observation",
+			Usage:         runtime.TurnUsage{InputTokens: 120, OutputTokens: 24, DurationMS: 850},
+			Decisions: []kernelapi.AgentTurnDecisionRecord{{
+				Summary: "Selected the declared capability",
+			}},
+			RequestedActions: []kernelapi.AgentTurnActionRecord{{
+				Capability: "openseal.source.observe_feed", BindingID: "source-prod",
+				BindingRevision: 9, Summary: "Execute governed source observation",
+			}},
+		}},
+	}
+	model := newTestModel(t, fake)
+	model.ready = true
+	model.section = sectionRuns
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.agentTurnCapability = kernelapi.AgentTurnsCapability()
+	model.runs = fake.runs
+	model.selectedID = run.ID
+
+	applyCommand(t, model, model.loadSelectedAgentTurns())
+
+	if len(fake.agentTurnFilters) != 1 || fake.agentTurnFilters[0].RunID != run.ID || fake.agentTurnFilters[0].Limit != 100 {
+		t.Fatalf("agent turn filters = %#v", fake.agentTurnFilters)
+	}
+	view := model.renderRunsContent(140)
+	for _, expected := range []string{"Agent turns", "turn 1", "completed", "opencode/deepseek-v4-flash", "Requested governed source observation", "Selected the declared capability", "Execute governed source observation", "source-prod@9", "120 input · 24 output tokens · 850ms"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("AgentTurn projection missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestRunViewDoesNotLoadAgentTurnsWithoutCapability(t *testing.T) {
+	fake := &fakeKernelClient{runs: []*runtime.AgentRun{testRun("run-no-turns", runtime.AgentRunStatusRunning, 1)}}
+	model := newTestModel(t, fake)
+	model.ready = true
+	model.runCapability = kernelapi.AgentRunsCapability()
+	model.runs = fake.runs
+
+	if command := model.loadSelectedAgentTurns(); command != nil {
+		t.Fatal("TUI loaded Agent turns without an advertised capability")
+	}
+	if len(fake.agentTurnFilters) != 0 || strings.Contains(model.renderRunsContent(100), "Agent turns") {
+		t.Fatalf("unsupported Agent turn surface was not hidden: filters=%#v\n%s", fake.agentTurnFilters, model.renderRunsContent(100))
 	}
 }
 

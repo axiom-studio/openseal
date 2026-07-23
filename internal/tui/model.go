@@ -165,6 +165,7 @@ type Model struct {
 	err                         error
 	status                      string
 	runCapability               kernelapi.Capability
+	agentTurnCapability         kernelapi.Capability
 	actionCallCapability        kernelapi.Capability
 	requestCapability           kernelapi.Capability
 	approvalCapability          kernelapi.Capability
@@ -193,6 +194,10 @@ type Model struct {
 	authoringConfigSelected     int
 	authoringConfigChoices      map[string]int
 	runs                        []*runtime.AgentRun
+	agentTurns                  []*kernelapi.AgentTurnRecord
+	agentTurnsRunID             string
+	agentTurnsErr               error
+	loadingAgentTurns           bool
 	actionCalls                 []*runtime.ActionCall
 	actionCallsRunID            string
 	actionCallsErr              error
@@ -352,6 +357,12 @@ type runsLoaded struct {
 type actionCallsLoaded struct {
 	runID string
 	calls []*runtime.ActionCall
+	err   error
+}
+
+type agentTurnsLoaded struct {
+	runID string
+	turns []*kernelapi.AgentTurnRecord
 	err   error
 }
 
@@ -661,6 +672,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		runCapability, hasRuns := msg.document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+		agentTurnCapability, hasAgentTurns := msg.document.Find(kernelapi.AgentTurnsCapabilityID, kernelapi.AgentTurnsCapabilityVersion)
 		actionCallCapability, hasActionCalls := msg.document.Find(kernelapi.ActionCallsCapabilityID, kernelapi.ActionCallsCapabilityVersion)
 		requestCapability, hasRequests := msg.document.Find(kernelapi.AgentRequestsCapabilityID, kernelapi.AgentRequestsCapabilityVersion)
 		approvalCapability, hasApprovals := msg.document.Find(kernelapi.ActionApprovalsCapabilityID, kernelapi.ActionApprovalsCapabilityVersion)
@@ -681,6 +693,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		teamDefinitionCapability, hasTeamDefinitions := msg.document.Find(kernelapi.TeamDefinitionsCapabilityID, kernelapi.TeamDefinitionsCapabilityVersion)
 		sourcePolicyCapability, hasSourcePolicies := msg.document.Find(kernelapi.SourcePoliciesCapabilityID, kernelapi.SourcePoliciesCapabilityVersion)
 		m.runCapability = runCapability
+		m.agentTurnCapability = agentTurnCapability
 		m.actionCallCapability = actionCallCapability
 		m.requestCapability = requestCapability
 		m.approvalCapability = approvalCapability
@@ -709,6 +722,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
+		}
+		if !hasAgentTurns || !agentTurnCapability.Available || !agentTurnCapability.Supports(kernelapi.OperationList) {
+			m.agentTurnCapability = kernelapi.Capability{}
+			m.agentTurns, m.agentTurnsRunID, m.agentTurnsErr = nil, "", nil
+			m.loadingAgentTurns = false
 		}
 		if !hasActionCalls || !actionCallCapability.Available || !actionCallCapability.Supports(kernelapi.OperationList) {
 			m.actionCallCapability = kernelapi.Capability{}
@@ -1133,7 +1151,16 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.runs = msg.runs
 		m.restoreSelection()
-		return m, m.loadSelectedActionCalls()
+		return m, m.loadSelectedRunHistory()
+	case agentTurnsLoaded:
+		if run := m.selectedRun(); run == nil || run.ID != msg.runID {
+			return m, nil
+		}
+		m.loadingAgentTurns = false
+		m.agentTurnsRunID = msg.runID
+		m.agentTurns = msg.turns
+		m.agentTurnsErr = msg.err
+		return m, nil
 	case actionCallsLoaded:
 		if run := m.selectedRun(); run == nil || run.ID != msg.runID {
 			return m, nil
@@ -1529,7 +1556,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.restoreSelection()
 		m.section = sectionRuns
 		m.status = "Inspecting governed outreach Run · " + msg.run.ID + "."
-		return m, m.loadSelectedActionCalls()
+		return m, m.loadSelectedRunHistory()
 	case runCommanded:
 		m.busy = false
 		if msg.err != nil {
@@ -1702,7 +1729,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionSources {
 				return m, m.loadSelectedEventSource()
 			} else if m.section == sectionRuns {
-				return m, m.loadSelectedActionCalls()
+				return m, m.loadSelectedRunHistory()
 			}
 		case "down", "j":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
@@ -1721,13 +1748,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionSources {
 				return m, m.loadSelectedEventSource()
 			} else if m.section == sectionRuns {
-				return m, m.loadSelectedActionCalls()
+				return m, m.loadSelectedRunHistory()
 			}
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
 				m.resetEvidenceInspection()
-				return m, m.loadSelectedActionCalls()
+				return m, m.loadSelectedRunHistory()
 			}
 		case "R":
 			if m.requestCapability.Available {
@@ -2433,6 +2460,27 @@ func (m *Model) loadRuns() tea.Cmd {
 			return runs[i].UpdatedAt.After(runs[j].UpdatedAt)
 		})
 		return runsLoaded{runs: runs}
+	}
+}
+
+func (m *Model) loadSelectedRunHistory() tea.Cmd {
+	return tea.Batch(m.loadSelectedAgentTurns(), m.loadSelectedActionCalls())
+}
+
+func (m *Model) loadSelectedAgentTurns() tea.Cmd {
+	run := m.selectedRun()
+	if run == nil || !m.agentTurnCapability.Supports(kernelapi.OperationList) {
+		m.agentTurns, m.agentTurnsRunID, m.agentTurnsErr = nil, "", nil
+		m.loadingAgentTurns = false
+		return nil
+	}
+	runID := run.ID
+	m.loadingAgentTurns = true
+	return func() tea.Msg {
+		turns, err := m.client.ListAgentTurns(m.ctx, runtime.AgentTurnFilter{
+			Scope: m.config.Scope, RunID: runID, Limit: 100,
+		})
+		return agentTurnsLoaded{runID: runID, turns: turns, err: err}
 	}
 }
 
