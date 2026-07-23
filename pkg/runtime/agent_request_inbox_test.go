@@ -94,6 +94,159 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 	}
 }
 
+func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *testing.T) {
+	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
+	reconciler, err := NewAgentRequestInboxReconciler(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient")
+	if err != nil || first.DecisionRunsCreated != 1 {
+		t.Fatalf("first reconcile = %#v, %v", first, err)
+	}
+	runs, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: request.Scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("decision runs = %#v, %v", runs, err)
+	}
+
+	// Simulate a decision Run authored by an older OpenSeal release. Its
+	// idempotency fingerprint no longer matches the current enriched input,
+	// but its authoritative request lineage remains unchanged.
+	store.mu.Lock()
+	persisted := store.agentRuns[portfolioKey(request.Scope, runs[0].ID)]
+	inbox := persisted.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	delete(inbox, "clarificationQuestion")
+	delete(inbox, "clarificationResponse")
+	delete(inbox, "artifactRequirements")
+	store.mu.Unlock()
+
+	second, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.DecisionRunsReused != 1 || second.DecisionRunsCreated != 0 {
+		t.Fatalf("historical decision reconcile = %#v", second)
+	}
+	runs, err = store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: request.Scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("decision runs after drift = %#v, %v", runs, err)
+	}
+}
+
+func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t *testing.T) {
+	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
+	reconciler, err := NewAgentRequestInboxReconciler(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, reconcileErr := reconciler.Reconcile(t.Context(), request.Scope, "recipient"); reconcileErr != nil || result.DecisionRunsCreated != 1 {
+		t.Fatalf("create decision Run = %#v, %v", result, reconcileErr)
+	}
+	runs, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: request.Scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("decision runs = %#v, %v", runs, err)
+	}
+	activity := NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(t.Context(), request.Scope, runs[0].ID, RunTransitionRequest{
+		ExpectedRevision: runs[0].Revision, Status: AgentRunStatusRunning,
+		Summary: "Review started", Actor: ActivityActor{Type: "worker", ID: "recipient"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, _, err := activity.TransitionRun(t.Context(), request.Scope, running.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "provider exhausted retries",
+		Summary: "Review failed", Actor: ActivityActor{Type: "worker", ID: "recipient"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied, resolveErr := reconciler.ResolveDecisionRun(t.Context(), failed); resolveErr != nil || !applied {
+		t.Fatalf("resolve failed decision = %t, %v", applied, resolveErr)
+	}
+	persisted, err := NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	if err != nil || persisted.Status != AgentRequestStatusFailed || persisted.ResolutionReason != "provider exhausted retries" {
+		t.Fatalf("resolved request = %#v, %v", persisted, err)
+	}
+	resumed, err := store.GetAgentRun(t.Context(), request.Scope, source.ID)
+	if err != nil || resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil {
+		t.Fatalf("resumed source = %#v, %v", resumed, err)
+	}
+	results, _ := resumed.Output["collaborationResults"].(map[string]interface{})
+	result, _ := results[request.ID].(map[string]interface{})
+	if result["status"] != string(AgentRequestStatusFailed) || result["reason"] != "provider exhausted retries" {
+		t.Fatalf("source collaboration result = %#v", result)
+	}
+	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: request.Scope, RunID: source.ID, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failure *ActivityEvent
+	for _, event := range events {
+		if event.EventType == "collaboration.review_failed" {
+			failure = event
+			break
+		}
+	}
+	if failure == nil || failure.CausationID != failed.ID || failure.Payload["decisionRunId"] != failed.ID {
+		t.Fatalf("review failure event = %#v", failure)
+	}
+}
+
+func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
+	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
+	otherSource, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: request.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"},
+		AssignedAgentID: "other", Goal: "Unrelated work", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, "recipient")
+	if _, err := NewRunCommandService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: otherSource.ID,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "recipient"}, AssignedAgentID: "recipient",
+		ConcurrencyKey: "unrelated", Goal: "Unrelated review", Source: RunSourceRequestDecision,
+		Context: map[string]interface{}{AgentRequestInboxContextKey: map[string]interface{}{
+			"requestId": "another-request", "requestRevision": int64(1),
+		}},
+		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "test"},
+		Visibility: ActivityVisibilityTeam,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reconciler, err := NewAgentRequestInboxReconciler(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DecisionsApplied != 1 {
+		t.Fatalf("collision reconcile = %#v", first)
+	}
+	persisted, err := NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	if err != nil || persisted.Status != AgentRequestStatusFailed {
+		t.Fatalf("failed request = %#v, %v", persisted, err)
+	}
+	resumed, err := store.GetAgentRun(t.Context(), request.Scope, source.ID)
+	if err != nil || resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil {
+		t.Fatalf("resumed source = %#v, %v", resumed, err)
+	}
+	second, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RequestsScanned != 0 || second.DecisionsApplied != 0 {
+		t.Fatalf("terminal request retried = %#v", second)
+	}
+}
+
 func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
 	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
 	scope := Scope{Kind: "tenant", ID: "paginated-inbox"}
