@@ -605,6 +605,10 @@ func prepareDefinition(definition *AgentDefinition, now time.Time) (*AgentDefini
 }
 
 func definitionChanges(base, candidate *AgentDefinition) []DefinitionFieldChange {
+	base = cloneDefinition(base)
+	candidate = cloneDefinition(candidate)
+	canonicalizeDefinition(base)
+	canonicalizeDefinition(candidate)
 	baseMap, candidateMap := make(map[string]interface{}), make(map[string]interface{})
 	baseJSON, _ := json.Marshal(base)
 	candidateJSON, _ := json.Marshal(candidate)

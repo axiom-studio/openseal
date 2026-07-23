@@ -355,6 +355,40 @@ func TestAmendmentsRequireAllowedDiffEvaluationApprovalAndAtomicActivation(t *te
 	}
 }
 
+func TestDefinitionChangesIgnoreCanonicalizationForWorkforceAuthoredDefinition(t *testing.T) {
+	base := &AgentDefinition{
+		ID: "tenant/1/self-amendment-acceptance-agent", Version: "1.0.0",
+		DisplayName: "Self Amendment Acceptance Agent", Purpose: "Verify governed self-improvement.",
+		SystemPrompt: "When the user asks, propose changing your personality to: Calm, concise, and evidence-led.",
+		Authority: AuthorityPolicy{
+			MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1, RequireApprovalAt: capability.RiskLevelWrite,
+		},
+		Amendments: AmendmentPolicy{
+			AgentMayPropose:  true,
+			AllowedFields:    []string{"personality", "systemPrompt", "purpose", "operatingPrinciples"},
+			RequiresApproval: true, ApproverPrincipals: []string{"user:1"},
+		},
+		Provenance: DefinitionProvenance{},
+		Digest:     "sha256:4827628ebcea5df2a642dc1460a362aecfb95b4cc6b5a4c20dac8fc7d67b3aa7",
+		CreatedAt:  time.Date(2026, 7, 23, 18, 46, 39, 589387100, time.UTC),
+	}
+	candidate := cloneDefinition(base)
+	candidate.Version = "1.0.0.action.abcdef"
+	candidate.Personality = "Calm, concise, and evidence-led"
+	candidate.Digest = ""
+	prepared, err := prepareDefinition(candidate, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Provenance.DerivedFrom = base.Digest
+	prepared.Provenance.CreatedBy = "agent:agent:acceptance"
+
+	changes := definitionChanges(base, prepared)
+	if len(changes) != 1 || changes[0].Field != "personality" {
+		t.Fatalf("behavior-only amendment changes = %#v", changes)
+	}
+}
+
 func TestAmendmentsFailClosedOnPolicyEvaluationAndStaleState(t *testing.T) {
 	registry := NewRegistry()
 	base := testDefinition("1", capability.RiskLevelRead, 2)
