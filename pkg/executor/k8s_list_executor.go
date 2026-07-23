@@ -45,6 +45,7 @@ func (e *K8sListExecutor) Execute(ctx context.Context, step *StepDefinition, res
 	if err != nil {
 		return nil, wrapK8sError("k8s-list", err)
 	}
+	list = nonNilK8sItems(list)
 
 	return &StepResult{
 		Output: map[string]interface{}{
@@ -52,4 +53,15 @@ func (e *K8sListExecutor) Execute(ctx context.Context, step *StepDefinition, res
 			"count": len(list),
 		},
 	}, nil
+}
+
+// nonNilK8sItems keeps the typed Skill output truthful at the transport
+// boundary. A host client may represent an empty upstream collection as a nil
+// Go slice, but the public Kubernetes Skill contract always returns a JSON
+// array rather than null.
+func nonNilK8sItems(items []map[string]interface{}) []map[string]interface{} {
+	if items == nil {
+		return []map[string]interface{}{}
+	}
+	return items
 }
