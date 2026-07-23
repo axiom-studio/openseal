@@ -164,7 +164,8 @@ external Skill action, approval policy, delivery Run, and provider receipt.
 
 ## Deterministic workflows
 
-HCL workflows are an optional compatibility and runbook layer. They can be
-validated, run directly, loaded by the daemon, and triggered by cron or
-webhook. They do not replace Agent definitions, objectives, Runs, or Skills as
-the canonical autonomous-work model.
+HCL workflows are optional, process-bounded runbooks. They can be created,
+validated, and run explicitly with the CLI. The daemon does not load, schedule,
+or expose them through hidden APIs. Durable autonomous work uses Agent
+definitions, objectives, Agent Runs, objective schedules, event-source
+subscriptions, and governed Skills.

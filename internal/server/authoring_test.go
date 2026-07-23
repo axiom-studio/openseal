@@ -39,7 +39,7 @@ func TestStandaloneAuthoringFailureIsRetryableAndReplaySafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(failingAuthoringGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
 	api.SetWorkforceLifecycleAuthorizer(StandaloneRetryAuthorizer{ActorID: "operator-one"})
@@ -149,7 +149,7 @@ func TestWorkforcePlacementPatchIsContextualAuthorizedAndIdempotent(t *testing.T
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
 	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{actor: "configured-operator"})
@@ -190,7 +190,7 @@ func TestWorkforceCapabilityAdvertisesOnlySchemaMatchedBindingConfigurationField
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(bindingConfigAuthoringGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
 	development := int64(7)
@@ -238,7 +238,7 @@ func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(authoringFixtureGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -307,7 +307,7 @@ func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
 }
 
 func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
-	api := NewServer(nil, nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
+	api := NewServer(nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
 	unconfigured := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/compile", `{"mode":"create","prompt":"Create a Team","catalog":{}}`, "")
 	if unconfigured.Code != http.StatusNotImplemented {
 		t.Fatalf("unconfigured status = %d, body = %s", unconfigured.Code, unconfigured.Body.String())
@@ -347,7 +347,7 @@ func TestGovernedWorkforceLifecycleIsContextualExactAndAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
@@ -470,7 +470,7 @@ func TestWorkforceCapabilityDoesNotAdvertiseEvaluationBeforeCandidateExists(t *t
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
 	api.SetWorkforceAuthoringCompiler(compiler)
 	api.SetWorkforceLifecycleAuthorizer(governedFixtureAuthority{role: "operator", actor: "configured-operator"})

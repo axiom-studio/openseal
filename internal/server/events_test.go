@@ -13,7 +13,7 @@ import (
 
 func TestEventAPIProjectsCanonicalRunsAndRejectsProtocolDrift(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	server := NewServer(nil, store, zap.NewNop().Sugar())
 	objectiveBody := `{
 		"scope":{"kind":"tenant","id":"operations"},
 		"owner":{"type":"agent","id":"sre"},

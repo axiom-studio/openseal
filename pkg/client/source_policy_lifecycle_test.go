@@ -22,7 +22,7 @@ func TestSourcePolicyLifecycleHTTPRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kernel := server.NewServer(nil, nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
+	kernel := server.NewServer(nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
 	kernel.SetSourcePolicyLifecycle(service)
 	httpServer := httptest.NewServer(kernel.Handler())
 	defer httpServer.Close()

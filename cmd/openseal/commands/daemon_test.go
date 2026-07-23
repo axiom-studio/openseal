@@ -1,12 +1,14 @@
 package commands
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"go.uber.org/zap"
 )
 
 func TestStandaloneOperatorRequiresExplicitLoopbackAddress(t *testing.T) {
@@ -63,5 +65,33 @@ func TestCanonicalDaemonSkillRegistrationSurvivesRestart(t *testing.T) {
 	}
 	if err := ensureCanonicalSkill(t.Context(), restarted, outreach.SkillDefinition()); err != nil {
 		t.Fatalf("idempotent registration after restart: %v", err)
+	}
+}
+
+func TestOneShotRunbookRemainsAvailableOutsideDaemonRuntime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runbook.hcl")
+	if err := os.WriteFile(path, []byte(`workflow "one_shot" {
+  node "set" "assign" {
+    name = "result"
+    value = "portable"
+  }
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	wf, result, err := executeRunbook(t.Context(), path, zap.NewNop().Sugar())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf.Name != "one_shot" || result.Status != "completed" {
+		t.Fatalf("workflow=%q status=%q", wf.Name, result.Status)
+	}
+	node := result.NodeResults["assign"]
+	if node == nil {
+		t.Fatal("assign node result is missing")
+	}
+	output, ok := node.Output.(map[string]interface{})
+	if !ok || output["result"] != "portable" {
+		t.Fatalf("node result = %#v", node)
 	}
 }

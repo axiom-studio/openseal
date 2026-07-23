@@ -52,7 +52,6 @@ Docker Compose is also supported:
 make docker-up
 make docker-logs
 # API: http://localhost:8080/api/v1
-# Webhook listener: http://localhost:9090
 make docker-down
 ```
 
@@ -73,7 +72,7 @@ make docker-down
   and governed outreach records
 - SQLite for standalone durability and PostgreSQL for embedded deployments
 - Capability-discovered REST API, prompt-first TUI, and stable Go facade
-- Optional HCL workflows, cron triggers, and webhook triggers
+- Optional process-bounded HCL runbooks through `openseal run`
 
 The standalone daemon deliberately advertises only the operations it has been
 configured to execute. For example, prompt-to-workforce authoring appears only
@@ -119,9 +118,10 @@ engine.Start(ctx)
 defer engine.Stop()
 ```
 
-An engine defaults to an in-memory store, four workflow workers, and the
-default retry policy. Use an explicit persistent store for durable work. See
-the [architecture guide](docs/architecture/autonomous-agent-runtime.md) for the
+An engine defaults to an in-memory store. Use an explicit persistent store for
+durable work and configure the Agent and action workers required by the
+deployment. See the
+[architecture guide](docs/architecture/autonomous-agent-runtime.md) for the
 adapter boundary.
 
 ## Development

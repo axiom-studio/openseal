@@ -12,7 +12,7 @@ import (
 
 func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	server := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	server := NewServer(nil, store, zap.NewNop().Sugar())
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
 		"owner":{"type":"team","id":"engineering"},

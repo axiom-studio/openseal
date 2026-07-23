@@ -59,7 +59,7 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	kernel := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
