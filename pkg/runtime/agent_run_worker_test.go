@@ -683,6 +683,7 @@ func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *t
 		SourceRunID: source.ID, Goal: proposal.Goal,
 		SharedContext:   map[string]interface{}{"evidence": "artifact:one", DelegationModeContextKey: "reason"},
 		ChildCheckpoint: proposal.Checkpoint, BudgetAllocation: proposal.Budget, IdempotencyKey: key,
+		AcceptancePolicy: AgentRequestAcceptancePreauthorized,
 	})
 	if err != nil || pending.Request.Status != AgentRequestStatusPending {
 		t.Fatalf("pending request = %#v, %v", pending, err)

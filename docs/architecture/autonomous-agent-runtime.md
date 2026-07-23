@@ -173,6 +173,19 @@ Agent requests and handoffs create durable relationships between Runs. A Team
 request can be assigned to one roster Agent under delegation policy. The
 receiver keeps its own Skills, credentials, budgets, and policy.
 
+The recipient inbox is a kernel reconciliation loop rather than a
+human-authored Agent response. Kernel-authored, exact-recipient delegation can
+be marked preauthorized so a restart between request creation and acceptance is
+recovered idempotently. Otherwise the inbox creates a bounded, decision-only
+Run owned by the recipient. Agent recipients review their own request; Team
+recipients choose the first eligible active roster assignment deterministically
+and honor the active Team definition's acceptance policy. The decision Run may
+only return `accept`, `reject`, or `request_clarification`; action execution,
+forking, and further delegation fail closed. Applying the decision verifies the
+completed Run, assigned Agent, recipient owner, request identifier, and exact
+request revision. Accepted work is a separate child Run, preserving a clear
+boundary between deciding to take work and doing it.
+
 Conversations persist messages, reply and mention structure, participant
 cursors, leased presence, incremental change sequences, and participation
 rounds. Arbitration records who was eligible, who was suppressed, and why. A

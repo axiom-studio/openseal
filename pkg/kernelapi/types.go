@@ -645,8 +645,10 @@ type RespondAgentRequestRequest struct {
 	ExpectedRevision int64                        `json:"expectedRevision"`
 	Decision         runtime.AgentRequestDecision `json:"decision"`
 	Principal        runtime.CollaborationParty   `json:"principal"`
+	Actor            runtime.CollaborationParty   `json:"actor,omitempty"`
 	AssignedAgentID  string                       `json:"assignedAgentId,omitempty"`
 	Message          string                       `json:"message,omitempty"`
+	DecisionRunID    string                       `json:"decisionRunId,omitempty"`
 }
 
 type CompleteAgentRequestRequest struct {

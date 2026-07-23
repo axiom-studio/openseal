@@ -64,6 +64,27 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if err != nil || definition == nil {
 		return nil, fmt.Errorf("resolve active Agent definition: %w", err)
 	}
+	if _, requested := run.Context[AgentRequestInboxContextKey]; requested {
+		if config.Host == nil {
+			return nil, ErrTurnHostUnavailable
+		}
+		instructions := hostedAgentInstructions(definition)
+		instructions = append(instructions, agentRequestDecisionSystemInstruction)
+		runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
+			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			SystemInstructions: instructions, ModelCredential: deploymentModelCredential(deployment),
+		})
+		if runnerErr != nil {
+			return nil, runnerErr
+		}
+		return &TurnRunnerBinding{
+			Runner: &agentRequestDecisionTurnRunner{inner: runner}, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			InputContextRefs:  []string{"run:" + AgentRequestInboxContextKey},
+			BudgetReservation: BudgetUsage{Turns: 1},
+		}, nil
+	}
 	skillHost := config.SkillHost
 	if config.SkillHosts != nil {
 		resolved, resolveErr := config.SkillHosts.ResolveSkillHostCapabilities(ctx, scope, deployment.ID)
@@ -156,11 +177,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if config.Host == nil {
 		return nil, ErrTurnHostUnavailable
 	}
-	instructions := []string{definition.SystemPrompt, "Purpose: " + definition.Purpose}
-	if definition.Personality != "" {
-		instructions = append(instructions, "Personality: "+definition.Personality)
-	}
-	instructions = append(instructions, definition.OperatingPrinciples...)
+	instructions := hostedAgentInstructions(definition)
 	if delegated, ok := run.Context["delegatedSystemPrompt"].(string); ok && strings.TrimSpace(delegated) != "" {
 		instructions = append(instructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
@@ -174,6 +191,17 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	base.Runner = runner
 	return &base, nil
+}
+
+func hostedAgentInstructions(definition *kernelagent.AgentDefinition) []string {
+	if definition == nil {
+		return nil
+	}
+	instructions := []string{definition.SystemPrompt, "Purpose: " + definition.Purpose}
+	if definition.Personality != "" {
+		instructions = append(instructions, "Personality: "+definition.Personality)
+	}
+	return append(instructions, definition.OperatingPrinciples...)
 }
 
 func mergeOwnerModelActions(existing, owner []capability.ModelAction) ([]capability.ModelAction, map[string]struct{}, error) {

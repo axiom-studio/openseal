@@ -47,6 +47,20 @@ const (
 	AgentRequestStatusCanceled               AgentRequestStatus = "canceled"
 )
 
+type AgentRequestAcceptancePolicy string
+
+const (
+	// AgentRequestAcceptanceRecipientReview asks the recipient Agent, or one
+	// deterministic eligible member of the recipient Team, to evaluate the
+	// request before work starts.
+	AgentRequestAcceptanceRecipientReview AgentRequestAcceptancePolicy = "recipient_review"
+	// AgentRequestAcceptancePreauthorized is reserved for kernel-authored
+	// delegation intents whose originating bounded Turn already selected the
+	// exact recipient. The inbox reconciler completes acceptance after a crash
+	// between durable request creation and response.
+	AgentRequestAcceptancePreauthorized AgentRequestAcceptancePolicy = "preauthorized"
+)
+
 type AgentRequestDecision string
 
 const (
@@ -97,41 +111,42 @@ type ArtifactReference struct {
 // and activity projections. It contains references and explicitly shared
 // context only; credential values and bindings are never transferable.
 type AgentRequest struct {
-	ID                   string                 `json:"id"`
-	Scope                Scope                  `json:"scope"`
-	Kind                 AgentRequestKind       `json:"kind"`
-	Status               AgentRequestStatus     `json:"status"`
-	Requester            CollaborationParty     `json:"requester"`
-	Recipient            CollaborationParty     `json:"recipient"`
-	SourceRunID          string                 `json:"sourceRunId"`
-	ChildRunID           string                 `json:"childRunId,omitempty"`
-	AssignedAgentID      string                 `json:"assignedAgentId,omitempty"`
-	DependencyGroupID    string                 `json:"dependencyGroupId,omitempty"`
-	DependencyID         string                 `json:"dependencyId,omitempty"`
-	ObjectiveID          string                 `json:"objectiveId,omitempty"`
-	Goal                 string                 `json:"goal"`
-	Instructions         string                 `json:"instructions,omitempty"`
-	SemanticRole         string                 `json:"semanticRole,omitempty"`
-	AcceptanceCriteria   map[string]interface{} `json:"acceptanceCriteria,omitempty"`
-	ArtifactRequirements []ArtifactRequirement  `json:"artifactRequirements,omitempty"`
-	SharedContext        map[string]interface{} `json:"sharedContext,omitempty"`
-	ChildCheckpoint      map[string]interface{} `json:"childCheckpoint,omitempty"`
-	ConversationRefs     []string               `json:"conversationRefs,omitempty"`
-	BudgetAllocation     *BudgetPolicy          `json:"budgetAllocation,omitempty"`
-	Clarification        string                 `json:"clarification,omitempty"`
-	Response             string                 `json:"response,omitempty"`
-	CompletionSummary    string                 `json:"completionSummary,omitempty"`
-	ResolutionReason     string                 `json:"resolutionReason,omitempty"`
-	AcceptanceEvidence   map[string]interface{} `json:"acceptanceEvidence,omitempty"`
-	Artifacts            []ArtifactReference    `json:"artifacts,omitempty"`
-	IdempotencyKey       string                 `json:"idempotencyKey,omitempty"`
-	CompletionKey        string                 `json:"completionKey,omitempty"`
-	Revision             int64                  `json:"revision"`
-	CreatedAt            time.Time              `json:"createdAt"`
-	UpdatedAt            time.Time              `json:"updatedAt"`
-	AcceptedAt           *time.Time             `json:"acceptedAt,omitempty"`
-	CompletedAt          *time.Time             `json:"completedAt,omitempty"`
-	ResolvedAt           *time.Time             `json:"resolvedAt,omitempty"`
+	ID                   string                       `json:"id"`
+	Scope                Scope                        `json:"scope"`
+	Kind                 AgentRequestKind             `json:"kind"`
+	Status               AgentRequestStatus           `json:"status"`
+	Requester            CollaborationParty           `json:"requester"`
+	Recipient            CollaborationParty           `json:"recipient"`
+	SourceRunID          string                       `json:"sourceRunId"`
+	ChildRunID           string                       `json:"childRunId,omitempty"`
+	AssignedAgentID      string                       `json:"assignedAgentId,omitempty"`
+	DependencyGroupID    string                       `json:"dependencyGroupId,omitempty"`
+	DependencyID         string                       `json:"dependencyId,omitempty"`
+	ObjectiveID          string                       `json:"objectiveId,omitempty"`
+	Goal                 string                       `json:"goal"`
+	Instructions         string                       `json:"instructions,omitempty"`
+	SemanticRole         string                       `json:"semanticRole,omitempty"`
+	AcceptanceCriteria   map[string]interface{}       `json:"acceptanceCriteria,omitempty"`
+	ArtifactRequirements []ArtifactRequirement        `json:"artifactRequirements,omitempty"`
+	SharedContext        map[string]interface{}       `json:"sharedContext,omitempty"`
+	ChildCheckpoint      map[string]interface{}       `json:"childCheckpoint,omitempty"`
+	AcceptancePolicy     AgentRequestAcceptancePolicy `json:"acceptancePolicy"`
+	ConversationRefs     []string                     `json:"conversationRefs,omitempty"`
+	BudgetAllocation     *BudgetPolicy                `json:"budgetAllocation,omitempty"`
+	Clarification        string                       `json:"clarification,omitempty"`
+	Response             string                       `json:"response,omitempty"`
+	CompletionSummary    string                       `json:"completionSummary,omitempty"`
+	ResolutionReason     string                       `json:"resolutionReason,omitempty"`
+	AcceptanceEvidence   map[string]interface{}       `json:"acceptanceEvidence,omitempty"`
+	Artifacts            []ArtifactReference          `json:"artifacts,omitempty"`
+	IdempotencyKey       string                       `json:"idempotencyKey,omitempty"`
+	CompletionKey        string                       `json:"completionKey,omitempty"`
+	Revision             int64                        `json:"revision"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+	AcceptedAt           *time.Time                   `json:"acceptedAt,omitempty"`
+	CompletedAt          *time.Time                   `json:"completedAt,omitempty"`
+	ResolvedAt           *time.Time                   `json:"resolvedAt,omitempty"`
 }
 
 func (r *AgentRequest) Validate() error {
@@ -155,6 +170,9 @@ func (r *AgentRequest) Validate() error {
 	}
 	if !validAgentRequestStatus(r.Status) || r.Revision <= 0 {
 		return errors.New("agent request status and positive revision are required")
+	}
+	if !validAgentRequestAcceptancePolicy(r.AcceptancePolicy) {
+		return errors.New("agent request acceptance policy is invalid")
 	}
 	if (r.DependencyGroupID == "") != (r.DependencyID == "") {
 		return errors.New("agent request dependency group and edge must be set together")
@@ -217,6 +235,7 @@ type CreateAgentRequestRequest struct {
 	ArtifactRequirements []ArtifactRequirement
 	SharedContext        map[string]interface{}
 	ChildCheckpoint      map[string]interface{}
+	AcceptancePolicy     AgentRequestAcceptancePolicy
 	ConversationRefs     []string
 	BudgetAllocation     *BudgetPolicy
 	IdempotencyKey       string
@@ -236,6 +255,7 @@ type AgentRequestGroupSpec struct {
 	ArtifactRequirements []ArtifactRequirement
 	SharedContext        map[string]interface{}
 	ChildCheckpoint      map[string]interface{}
+	AcceptancePolicy     AgentRequestAcceptancePolicy
 	ConversationRefs     []string
 	BudgetAllocation     *BudgetPolicy
 	Required             *bool
@@ -266,8 +286,10 @@ type RespondAgentRequestRequest struct {
 	ExpectedRevision int64
 	Decision         AgentRequestDecision
 	Principal        CollaborationParty
+	Actor            CollaborationParty
 	AssignedAgentID  string
 	Message          string
+	DecisionRunID    string
 }
 
 type CompleteAgentRequestRequest struct {
@@ -444,6 +466,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
 		AcceptanceCriteria: cloneMap(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
 		SharedContext: cloneMap(req.SharedContext), ChildCheckpoint: cloneMap(req.ChildCheckpoint),
+		AcceptancePolicy: normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy),
 		ConversationRefs: append([]string(nil), req.ConversationRefs...),
 		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
 		IdempotencyKey:   strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -562,7 +585,8 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			ID: requestID, Scope: req.Scope, Kind: spec.Kind, Requester: req.Requester, Recipient: spec.Recipient,
 			SourceRunID: req.SourceRunID, Goal: spec.Goal, Instructions: spec.Instructions, SemanticRole: spec.SemanticRole,
 			AcceptanceCriteria: spec.AcceptanceCriteria, ArtifactRequirements: spec.ArtifactRequirements,
-			SharedContext: spec.SharedContext, ChildCheckpoint: spec.ChildCheckpoint, ConversationRefs: spec.ConversationRefs,
+			SharedContext: spec.SharedContext, ChildCheckpoint: spec.ChildCheckpoint, AcceptancePolicy: spec.AcceptancePolicy,
+			ConversationRefs: spec.ConversationRefs,
 			BudgetAllocation: spec.BudgetAllocation,
 			IdempotencyKey:   key + ":request:" + dependencyID, DependencyGroupID: groupID, DependencyID: dependencyID,
 		})
@@ -629,6 +653,16 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 	}
 	now := s.now()
+	actor := req.Actor
+	if strings.TrimSpace(actor.ID) == "" {
+		actor = req.Principal
+	}
+	if err := actor.Validate(); err != nil {
+		return nil, fmt.Errorf("actor: %w", err)
+	}
+	if err := s.validateDecisionRunAuthority(ctx, request, actor, req.DecisionRunID); err != nil {
+		return nil, err
+	}
 	updated := cloneAgentRequest(request)
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -643,7 +677,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 		updated.Status = AgentRequestStatusPending
 		eventType = "collaboration.clarification_provided"
-		summary = fmt.Sprintf("%s %s provided clarification", req.Principal.Type, req.Principal.ID)
+		summary = fmt.Sprintf("%s %s provided clarification", actor.Type, actor.ID)
 	case AgentRequestDecisionRequestClarification:
 		if request.Status != AgentRequestStatusPending {
 			return nil, ErrInvalidAgentRequestState
@@ -654,12 +688,12 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		updated.Status = AgentRequestStatusClarificationRequested
 		updated.Clarification = strings.TrimSpace(req.Message)
 		eventType = "collaboration.clarification_requested"
-		summary = fmt.Sprintf("%s %s requested clarification", req.Principal.Type, req.Principal.ID)
+		summary = fmt.Sprintf("%s %s requested clarification", actor.Type, actor.ID)
 	case AgentRequestDecisionReject:
 		updated.Status = AgentRequestStatusRejected
 		updated.ResolvedAt = &now
 		eventType = "collaboration.rejected"
-		summary = fmt.Sprintf("%s %s rejected the request", req.Principal.Type, req.Principal.ID)
+		summary = fmt.Sprintf("%s %s rejected the request", actor.Type, actor.ID)
 		if groupedDependency != nil {
 			reason := strings.TrimSpace(req.Message)
 			if reason == "" {
@@ -668,7 +702,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			record.DependencyResolution = &RunDependencyResolutionRecord{
 				Scope: updated.Scope, GroupID: updated.DependencyGroupID, DependencyID: updated.DependencyID,
 				ExpectedDependencyRevision: groupedDependency.Revision, State: RunDependencyStateFailed, Error: reason,
-				Actor: ActivityActor{Type: string(req.Principal.Type), ID: req.Principal.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+				Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
 			}
 		}
 	case AgentRequestDecisionAccept:
@@ -703,12 +737,14 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		if updated.Kind == AgentRequestKindHandoff {
 			eventType = "handoff.accepted"
 		}
-		summary = fmt.Sprintf("%s %s accepted the work", req.Principal.Type, req.Principal.ID)
-		record.ChildEvent = collaborationEvent(child, updated, eventType, summary, req.Principal, now)
+		summary = fmt.Sprintf("%s %s accepted the work", actor.Type, actor.ID)
+		record.ChildEvent = collaborationEvent(child, updated, eventType, summary, actor, now)
 	default:
 		return nil, errors.New("agent request decision is invalid")
 	}
-	record.SourceEvent = collaborationEvent(source, updated, eventType, summary, req.Principal, now)
+	record.SourceEvent = collaborationEvent(source, updated, eventType, summary, actor, now)
+	linkAgentRequestDecisionRun(record.SourceEvent, req.DecisionRunID)
+	linkAgentRequestDecisionRun(record.ChildEvent, req.DecisionRunID)
 	events, err := s.store.RespondAgentRequest(ctx, record)
 	if err != nil {
 		return nil, err
@@ -720,6 +756,43 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 	}
 	return &AgentRequestResult{Request: cloneAgentRequest(updated), Source: cloneAgentRun(source), Child: cloneAgentRun(record.ChildRun), Events: events}, nil
+}
+
+func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context, request *AgentRequest, actor CollaborationParty, decisionRunID string) error {
+	decisionRunID = strings.TrimSpace(decisionRunID)
+	if decisionRunID == "" {
+		return nil
+	}
+	run, err := s.runs.GetAgentRun(ctx, request.Scope, decisionRunID)
+	if err != nil {
+		return err
+	}
+	if run == nil || run.Source != RunSourceRequestDecision || run.Status != AgentRunStatusCompleted ||
+		run.AssignedAgentID != actor.ID || actor.Type != OwnerTypeAgent ||
+		run.Owner != (ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) {
+		return ErrAgentRequestUnauthorized
+	}
+	inbox, _ := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	inboxRequestID, _ := inbox["requestId"].(string)
+	if strings.TrimSpace(inboxRequestID) != request.ID {
+		return ErrAgentRequestUnauthorized
+	}
+	revision, revisionErr := positiveInt64(inbox["requestRevision"])
+	if revisionErr != nil || revision != request.Revision {
+		return ErrAgentRequestUnauthorized
+	}
+	return nil
+}
+
+func linkAgentRequestDecisionRun(event *ActivityEvent, decisionRunID string) {
+	if event == nil || strings.TrimSpace(decisionRunID) == "" {
+		return
+	}
+	event.CausationID = strings.TrimSpace(decisionRunID)
+	if event.Payload == nil {
+		event.Payload = make(map[string]interface{})
+	}
+	event.Payload["decisionRunId"] = strings.TrimSpace(decisionRunID)
 }
 
 // CompleteAgentRequest atomically records the recipient's result, completes
@@ -1320,7 +1393,11 @@ func collaborationEvent(run *AgentRun, request *AgentRequest, eventType, summary
 		TeamID: teamID, ConversationRefs: append([]string(nil), request.ConversationRefs...),
 		Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Summary: summary, Visibility: ActivityVisibilityTeam,
 		CorrelationID: request.ID, CausationID: request.SourceRunID, CreatedAt: now,
-		Payload: map[string]interface{}{"requestId": request.ID, "kind": request.Kind, "status": request.Status, "recipient": request.Recipient, "semanticRole": request.SemanticRole, "assignedAgentId": request.AssignedAgentID, "childRunId": request.ChildRunID},
+		Payload: map[string]interface{}{
+			"requestId": request.ID, "kind": request.Kind, "status": request.Status, "recipient": request.Recipient,
+			"semanticRole": request.SemanticRole, "acceptancePolicy": request.AcceptancePolicy,
+			"assignedAgentId": request.AssignedAgentID, "childRunId": request.ChildRunID,
+		},
 	}
 }
 
@@ -1615,6 +1692,7 @@ func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestReques
 	return existing.Kind == req.Kind && existing.Requester == req.Requester && existing.Recipient == req.Recipient &&
 		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal) &&
 		existing.Instructions == strings.TrimSpace(req.Instructions) && existing.SemanticRole == strings.TrimSpace(req.SemanticRole) &&
+		existing.AcceptancePolicy == normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy) &&
 		existing.DependencyGroupID == strings.TrimSpace(req.DependencyGroupID) && existing.DependencyID == strings.TrimSpace(req.DependencyID) &&
 		sameJSONValue(existing.AcceptanceCriteria, req.AcceptanceCriteria) &&
 		sameJSONValue(existing.ArtifactRequirements, req.ArtifactRequirements) &&
@@ -1670,6 +1748,22 @@ func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequest
 func validAgentRequestStatus(status AgentRequestStatus) bool {
 	switch status {
 	case AgentRequestStatusPending, AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompleted, AgentRequestStatusFailed, AgentRequestStatusRejected, AgentRequestStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAgentRequestAcceptancePolicy(policy AgentRequestAcceptancePolicy) AgentRequestAcceptancePolicy {
+	if policy == "" {
+		return AgentRequestAcceptanceRecipientReview
+	}
+	return policy
+}
+
+func validAgentRequestAcceptancePolicy(policy AgentRequestAcceptancePolicy) bool {
+	switch normalizeAgentRequestAcceptancePolicy(policy) {
+	case AgentRequestAcceptanceRecipientReview, AgentRequestAcceptancePreauthorized:
 		return true
 	default:
 		return false

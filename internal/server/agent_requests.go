@@ -105,7 +105,9 @@ func (s *Server) handleRespondAgentRequest(w http.ResponseWriter, r *http.Reques
 	}
 	result, err := service.RespondAgentRequest(r.Context(), runtime.RespondAgentRequestRequest{
 		Scope: scope, RequestID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
-		Decision: payload.Decision, Principal: payload.Principal, AssignedAgentID: strings.TrimSpace(payload.AssignedAgentID), Message: strings.TrimSpace(payload.Message),
+		Decision: payload.Decision, Principal: payload.Principal, Actor: payload.Actor,
+		AssignedAgentID: strings.TrimSpace(payload.AssignedAgentID), Message: strings.TrimSpace(payload.Message),
+		DecisionRunID: strings.TrimSpace(payload.DecisionRunID),
 	})
 	if err != nil {
 		s.respondAgentRequestError(w, err)

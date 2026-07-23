@@ -9,6 +9,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -152,6 +153,56 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	modelInput, _ := MarshalHostedTurnModelInput(host.request)
 	if strings.Contains(string(modelInput), "17") || strings.Contains(strings.ToLower(string(modelInput)), "credential") {
 		t.Fatalf("model input leaked credential reference: %s", modelInput)
+	}
+}
+
+func TestCatalogTurnResolverIsolatesAgentRequestDecisionFromSkillsAndRunbooks(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "openai-compatible", Model: "decision-model", OutputSummary: "Request accepted",
+		RunOutput: map[string]interface{}{AgentRequestDecisionOutputKey: map[string]interface{}{
+			"decision": string(AgentRequestDecisionAccept), "message": "The request is clear and within my role.",
+		}},
+	}}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "reviewer", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "vault", ID: "model-binding"}},
+		},
+		definition: &kernelagent.AgentDefinition{
+			ID: "reviewer", Version: "1", Purpose: "Review launches", SystemPrompt: "Be precise.",
+			Runbook: &runbook.Definition{APIVersion: runbook.APIVersion, ID: "normal-work", Version: "1"},
+		},
+	}
+	run := &AgentRun{
+		ID: "decision", Scope: scope, Kind: RunKindAgentWork,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer"}, AssignedAgentID: "reviewer",
+		Goal: "Evaluate incoming work", Source: RunSourceRequestDecision,
+		Context: map[string]interface{}{AgentRequestInboxContextKey: map[string]interface{}{
+			"requestId": "request", "requestRevision": int64(1),
+		}},
+	}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionRunner, ok := binding.Runner.(*agentRequestDecisionTurnRunner)
+	if !ok {
+		t.Fatalf("decision runner = %#v", binding.Runner)
+	}
+	hosted, hostedOK := decisionRunner.inner.(*HostedTurnRunner)
+	if !hostedOK || len(binding.ModelActions) != 0 || len(hosted.config.Actions) != 0 || len(hosted.config.SkillPrompts) != 0 ||
+		len(catalog.activationDeployments) != 0 || !containsString(binding.InputContextRefs, "run:"+AgentRequestInboxContextKey) ||
+		!containsString(hosted.config.SystemInstructions, agentRequestDecisionSystemInstruction) {
+		t.Fatalf("decision binding=%#v hosted=%#v activations=%v", binding, hosted, catalog.activationDeployments)
+	}
+	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
+	if err != nil || outcome.NextRunStatus != AgentRunStatusCompleted ||
+		host.request.ModelCredential == nil || host.request.ModelCredential.ID != "model-binding" ||
+		!containsString(host.request.SystemInstructions, agentRequestDecisionSystemInstruction) {
+		t.Fatalf("decision outcome=%#v request=%#v error=%v", outcome, host.request, err)
 	}
 }
 
