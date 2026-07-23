@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -152,13 +153,25 @@ func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilter
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(filter.RunID) == "" {
+		return nil, ErrRunNotFound
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_turns
-		WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND sequence > ?
-		ORDER BY sequence ASC LIMIT ?`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+	query := `SELECT payload FROM agent_turns
+		WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND sequence > ?`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence}
+	if len(filter.Statuses) > 0 {
+		query += ` AND status IN (` + strings.TrimRight(strings.Repeat("?,", len(filter.Statuses)), ",") + `)`
+		for _, status := range filter.Statuses {
+			args = append(args, status)
+		}
+	}
+	query += ` ORDER BY sequence ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

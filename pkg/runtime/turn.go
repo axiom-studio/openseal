@@ -122,6 +122,7 @@ func (t *AgentTurn) Validate() error {
 type AgentTurnFilter struct {
 	Scope         Scope
 	RunID         string
+	Statuses      []AgentTurnStatus
 	AfterSequence int64
 	Limit         int
 }

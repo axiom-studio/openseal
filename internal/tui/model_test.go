@@ -523,6 +523,14 @@ func (f *fakeKernelClient) GetActionCall(context.Context, runtime.Scope, string)
 	return nil, runtime.ErrActionNotFound
 }
 
+func (f *fakeKernelClient) ListAgentTurns(context.Context, runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
+	return nil, nil
+}
+
+func (f *fakeKernelClient) GetAgentTurn(context.Context, runtime.Scope, string) (*kernelapi.AgentTurnRecord, error) {
+	return nil, runtime.ErrTurnNotFound
+}
+
 func (f *fakeKernelClient) ListActionApprovals(_ context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
 	f.approvalFilters = append(f.approvalFilters, filter)
 	return f.actionApprovals, nil

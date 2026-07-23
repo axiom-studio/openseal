@@ -60,7 +60,7 @@ func (s *MemoryStore) ListAgentTurns(_ context.Context, filter AgentTurnFilter) 
 	runKey := portfolioKey(filter.Scope, filter.RunID)
 	result := make([]*AgentTurn, 0, len(s.turns[runKey]))
 	for _, turn := range s.turns[runKey] {
-		if turn.Sequence > filter.AfterSequence {
+		if turn.Sequence > filter.AfterSequence && matchesAgentTurnStatuses(turn.Status, filter.Statuses) {
 			result = append(result, cloneAgentTurn(turn))
 		}
 	}
@@ -73,6 +73,18 @@ func (s *MemoryStore) ListAgentTurns(_ context.Context, filter AgentTurnFilter) 
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+func matchesAgentTurnStatuses(status AgentTurnStatus, statuses []AgentTurnStatus) bool {
+	if len(statuses) == 0 {
+		return true
+	}
+	for _, candidate := range statuses {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) UpdateAgentTurn(_ context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {

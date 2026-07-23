@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -459,13 +460,27 @@ func (s *PostgresStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilt
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(filter.RunID) == "" {
+		return nil, ErrRunNotFound
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_turns")+`
-		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4
-		ORDER BY sequence ASC LIMIT $5`, filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence, limit)
+	query := `SELECT payload FROM ` + s.table("agent_turns") + `
+		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3 AND sequence > $4`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.RunID, filter.AfterSequence}
+	if len(filter.Statuses) > 0 {
+		placeholders := make([]string, 0, len(filter.Statuses))
+		for _, status := range filter.Statuses {
+			args = append(args, status)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		query += ` AND status IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(` ORDER BY sequence ASC LIMIT $%d`, len(args))
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -73,6 +73,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}", s.handleGetAgentRun)
 	s.mux.HandleFunc("POST /api/v1/agent-runs/{id}/commands", s.handleCommandAgentRun)
+	s.mux.HandleFunc("GET /api/v1/agent-turns", s.handleListAgentTurns)
+	s.mux.HandleFunc("GET /api/v1/agent-turns/{id}", s.handleGetAgentTurn)
 	s.mux.HandleFunc("POST /api/v1/agent-requests", s.handleCreateAgentRequest)
 	s.mux.HandleFunc("GET /api/v1/agent-requests", s.handleListAgentRequests)
 	s.mux.HandleFunc("GET /api/v1/agent-requests/{id}", s.handleGetAgentRequest)
@@ -153,7 +155,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.agentRunCreation != nil {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
 	}
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability()}
 	if s.sourcePolicies != nil {
 		capabilities = append(capabilities, kernelapi.SourcePoliciesCapability())
 	}
