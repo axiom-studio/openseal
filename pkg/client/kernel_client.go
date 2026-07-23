@@ -63,6 +63,8 @@ type KernelClient interface {
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
 	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
+	ListAgentTurns(context.Context, runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error)
+	GetAgentTurn(context.Context, runtime.Scope, string) (*kernelapi.AgentTurnRecord, error)
 	CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
 	ListAgentRequests(context.Context, runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error)
 	GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error)
@@ -1135,6 +1137,34 @@ func (c *KernelHTTPClient) GetActionCall(ctx context.Context, scope runtime.Scop
 		return nil, err
 	}
 	return &call, nil
+}
+
+func (c *KernelHTTPClient) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
+	query := scopeQuery(filter.Scope)
+	setIfPresent(query, "runId", filter.RunID)
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	if filter.AfterSequence > 0 {
+		query.Set("afterSequence", strconv.FormatInt(filter.AfterSequence, 10))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	var turns []*kernelapi.AgentTurnRecord
+	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-turns?"+query.Encode(), nil, "", &turns); err != nil {
+		return nil, err
+	}
+	return turns, nil
+}
+
+func (c *KernelHTTPClient) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID string) (*kernelapi.AgentTurnRecord, error) {
+	var turn kernelapi.AgentTurnRecord
+	path := "/api/v1/agent-turns/" + url.PathEscape(strings.TrimSpace(turnID)) + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &turn); err != nil {
+		return nil, err
+	}
+	return &turn, nil
 }
 
 func (c *KernelHTTPClient) ListActionApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {

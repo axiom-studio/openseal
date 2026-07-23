@@ -128,6 +128,18 @@ func TestActionCallsExposeOnlyDurableReadOperations(t *testing.T) {
 	}
 }
 
+func TestAgentTurnsExposeOnlyDurableReadOperations(t *testing.T) {
+	capability, ok := Capabilities().Find(AgentTurnsCapabilityID, AgentTurnsCapabilityVersion)
+	if !ok || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {
+		t.Fatalf("agent turn capability = %#v", capability)
+	}
+	for _, operation := range []string{OperationCreate, OperationUpdate, OperationResolve, OperationRetry} {
+		if capability.Supports(operation) {
+			t.Fatalf("agent turn capability advertised mutation %q: %#v", operation, capability.Operations)
+		}
+	}
+}
+
 func TestAgentRequestsAdvertisePortableCollaborationLifecycle(t *testing.T) {
 	capability := AgentRequestsCapability()
 	if capability.ID != AgentRequestsCapabilityID || capability.Version != AgentRequestsCapabilityVersion {

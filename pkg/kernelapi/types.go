@@ -50,6 +50,8 @@ const (
 	ActionApprovalsCapabilityVersion    = "1"
 	ActionCallsCapabilityID             = "action-calls"
 	ActionCallsCapabilityVersion        = "1"
+	AgentTurnsCapabilityID              = "agent-turns"
+	AgentTurnsCapabilityVersion         = "1"
 	ActivityCapabilityID                = "activity"
 	ActivityCapabilityVersion           = "1"
 	EventRoutingCapabilityID            = "event-routing"
@@ -418,6 +420,13 @@ func ActionCallsCapability() Capability {
 	}
 }
 
+func AgentTurnsCapability() Capability {
+	return Capability{
+		ID: AgentTurnsCapabilityID, Version: AgentTurnsCapabilityVersion, Available: true,
+		Operations: []string{OperationGet, OperationList},
+	}
+}
+
 func EventRoutingCapability() Capability {
 	return Capability{
 		ID: EventRoutingCapabilityID, Version: EventRoutingCapabilityVersion, Available: true,
@@ -456,7 +465,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), ObjectiveSchedulesCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), ObjectiveSchedulesCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
