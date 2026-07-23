@@ -2221,6 +2221,46 @@ func TestWorkforceCredentialPlacementUsesTypedAuthorizedChoices(t *testing.T) {
 	}
 }
 
+func TestWorkforceCredentialPlacementUsesDeploymentBindingKeys(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	changeSet := &authoring.ChangeSet{
+		ID: "model-credential-change", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3,
+		Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{
+			Agents:     []*kernelagent.AgentDefinition{{ID: "operator", DisplayName: "Operator"}},
+			Activation: authoring.WorkforceActivationActive,
+		}},
+		Catalog: authoring.CapabilityCatalog{AgentCredentialRequirements: []authoring.AgentCredentialRequirement{{
+			BindingKey: kernelagent.ModelProviderCredentialBinding, DisplayName: "Model provider",
+			Prompt: "Choose a model provider.", RequiredForActivation: true,
+		}}},
+		RequiredCredentials: map[string][]string{"operator": {kernelagent.ModelProviderCredentialBinding}},
+		Placement: authoring.ChangeSetPlacement{
+			AgentDeploymentIDs: map[string]string{"operator": "operator-live"}, Environment: "development",
+		},
+	}
+	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
+	capabilityDocument.Context = &kernelapi.CapabilityContext{
+		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
+		CredentialBindings: []capability.CredentialBindingChoice{{
+			Reference: capability.CredentialReference{Kind: "host-vault", ID: "29"}, DisplayName: "Primary model",
+			BindingKeys: []string{kernelagent.ModelProviderCredentialBinding},
+		}},
+	}
+	model := newTestModel(t, &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument)})
+	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
+	applyCommand(t, model, model.loadCapabilities())
+	rows := model.workforceCredentialRows()
+	if len(rows) != 1 || rows[0].Kind != kernelagent.ModelProviderCredentialBinding ||
+		rows[0].Label != "Model provider" || len(rows[0].Choices) != 1 ||
+		rows[0].Choices[0].Reference.Kind != "host-vault" {
+		t.Fatalf("deployment credential rows = %#v", rows)
+	}
+	if view := model.View(); !strings.Contains(view, "Model provider") || !strings.Contains(view, "Primary model") || strings.Contains(view, "host-vault") {
+		t.Fatalf("deployment credential choice was not rendered safely:\n%s", view)
+	}
+}
+
 func TestWorkforceBindingConfigurationUsesSequentialTypedAuthorizedChoices(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	definition := &kernelagent.AgentDefinition{
@@ -3192,7 +3232,7 @@ func evidenceSnapshotRun(id, snapshotID string, createdAt time.Time) *runtime.Ag
 		// This unrelated context proves the renderer consumes only the canonical
 		// credential-free projection rather than dumping Run context.
 		"privateCredentialRef": "opaque-secret-reference",
-		"rawContent":      "unbounded source body",
+		"rawContent":           "unbounded source body",
 	}
 	return run
 }

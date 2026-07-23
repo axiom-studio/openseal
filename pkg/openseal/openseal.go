@@ -158,6 +158,7 @@ type (
 	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
 	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
+	WorkforceAgentCredentialRequirement       = authoring.AgentCredentialRequirement
 	WorkforceCapabilitySourceScopeRequirement = authoring.CapabilitySourceScopeRequirement
 	WorkforceCapabilitySourcePolicyProposal   = authoring.CapabilitySourcePolicyProposal
 	WorkforceAuthorityConstraint              = authoring.AuthorityConstraint
@@ -1546,13 +1547,14 @@ const (
 	SkillSourcePlugin       = skillsource.RootPlugin
 	SkillSourceExtra        = skillsource.RootExtra
 
-	AgentRolloutPending    = kernelagent.RolloutPending
-	AgentRolloutActive     = kernelagent.RolloutActive
-	AgentRolloutDegraded   = kernelagent.RolloutDegraded
-	AgentRolloutPaused     = kernelagent.RolloutPaused
-	AgentRolloutRetired    = kernelagent.RolloutRetired
-	AgentCompilationClean  = kernelagent.CompilationClean
-	AgentCompilationFailed = kernelagent.CompilationFailed
+	AgentRolloutPending                 = kernelagent.RolloutPending
+	AgentRolloutActive                  = kernelagent.RolloutActive
+	AgentRolloutDegraded                = kernelagent.RolloutDegraded
+	AgentRolloutPaused                  = kernelagent.RolloutPaused
+	AgentRolloutRetired                 = kernelagent.RolloutRetired
+	AgentModelProviderCredentialBinding = kernelagent.ModelProviderCredentialBinding
+	AgentCompilationClean               = kernelagent.CompilationClean
+	AgentCompilationFailed              = kernelagent.CompilationFailed
 
 	AgentAmendmentEvaluating       = kernelagent.AmendmentEvaluating
 	AgentAmendmentAwaitingApproval = kernelagent.AmendmentAwaitingApproval

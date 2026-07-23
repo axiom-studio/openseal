@@ -2330,7 +2330,7 @@ func (m *Model) submitWorkforceCredentialPlacement() tea.Cmd {
 	labels := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if len(row.Choices) == 0 {
-			m.status = fmt.Sprintf("No authorized %s credential is available for %s.", row.Kind, row.AgentName)
+			m.status = fmt.Sprintf("No authorized %s credential is available for %s.", row.Label, row.AgentName)
 			return nil
 		}
 		selected := m.authoringCredentialChoices[row.Key]
@@ -2342,7 +2342,7 @@ func (m *Model) submitWorkforceCredentialPlacement() tea.Cmd {
 			credentialReferences[row.AgentID] = make(map[string]capability.CredentialReference)
 		}
 		credentialReferences[row.AgentID][row.Kind] = choice.Reference
-		labels = append(labels, row.AgentName+" / "+row.Kind+" → "+choice.DisplayName)
+		labels = append(labels, row.AgentName+" / "+row.Label+" → "+choice.DisplayName)
 	}
 	placement := m.authoringChangeSet.Placement
 	placement.CredentialReferences = credentialReferences
@@ -4304,6 +4304,7 @@ type workforceCredentialRow struct {
 	AgentID   string
 	AgentName string
 	Kind      string
+	Label     string
 	Choices   []capability.CredentialBindingChoice
 }
 
@@ -4439,7 +4440,15 @@ func (m *Model) workforceCredentialRows() []workforceCredentialRow {
 	for _, choice := range m.authoringCapability.Context.CredentialBindings {
 		kind := strings.TrimSpace(choice.Reference.Kind)
 		if kind != "" && strings.TrimSpace(choice.Reference.ID) != "" && strings.TrimSpace(choice.DisplayName) != "" {
-			choicesByKind[kind] = append(choicesByKind[kind], choice)
+			bindingKeys := append([]string(nil), choice.BindingKeys...)
+			if len(bindingKeys) == 0 {
+				bindingKeys = []string{kind}
+			}
+			for _, bindingKey := range bindingKeys {
+				if bindingKey = strings.TrimSpace(bindingKey); bindingKey != "" {
+					choicesByKind[bindingKey] = append(choicesByKind[bindingKey], choice)
+				}
+			}
 		}
 	}
 	for kind := range choicesByKind {
@@ -4458,6 +4467,10 @@ func (m *Model) workforceCredentialRows() []workforceCredentialRow {
 		}
 	}
 	rows := make([]workforceCredentialRow, 0)
+	labels := make(map[string]string, len(m.authoringChangeSet.Catalog.AgentCredentialRequirements))
+	for _, requirement := range m.authoringChangeSet.Catalog.AgentCredentialRequirements {
+		labels[requirement.BindingKey] = requirement.DisplayName
+	}
 	for agentID, kinds := range m.authoringChangeSet.RequiredCredentials {
 		for _, kind := range kinds {
 			kind = strings.TrimSpace(kind)
@@ -4468,7 +4481,11 @@ func (m *Model) workforceCredentialRows() []workforceCredentialRow {
 			if name == "" {
 				name = agentID
 			}
-			rows = append(rows, workforceCredentialRow{Key: agentID + "\x00" + kind, AgentID: agentID, AgentName: name, Kind: kind, Choices: choicesByKind[kind]})
+			label := strings.TrimSpace(labels[kind])
+			if label == "" {
+				label = kind
+			}
+			rows = append(rows, workforceCredentialRow{Key: agentID + "\x00" + kind, AgentID: agentID, AgentName: name, Kind: kind, Label: label, Choices: choicesByKind[kind]})
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool {

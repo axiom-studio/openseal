@@ -925,7 +925,7 @@ func (m *Model) renderAuthoringContent(width int) string {
 						choiceLabel += " · saved"
 					}
 				}
-				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s → %s", prefix, compact(row.AgentName, max(width-34, 16)), row.Kind, compact(choiceLabel, max(width-38, 18)))))
+				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s → %s", prefix, compact(row.AgentName, max(width-34, 16)), row.Label, compact(choiceLabel, max(width-38, 18)))))
 			}
 			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("b save credential placement"))
 		}

@@ -16,6 +16,7 @@ var (
 	catalogDiagnosticCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 	catalogDiagnosticReferencePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,255}$`)
 	authorityConstraintVersionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
+	credentialBindingKeyPattern       = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
 )
 
 func reconcileRefinement(current ChangeSetRefinement, result *CompileResult) ChangeSetRefinement {
@@ -773,6 +774,19 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				return fmt.Errorf("Skill %s compatibility requires a requirement and evidence", id)
 			}
 		}
+	}
+	credentialKeys := make(map[string]bool, len(catalog.AgentCredentialRequirements))
+	for index, requirement := range catalog.AgentCredentialRequirements {
+		key := strings.TrimSpace(requirement.BindingKey)
+		name := strings.TrimSpace(requirement.DisplayName)
+		prompt := strings.TrimSpace(requirement.Prompt)
+		if key != requirement.BindingKey || name != requirement.DisplayName || prompt != requirement.Prompt ||
+			!credentialBindingKeyPattern.MatchString(key) || name == "" || prompt == "" ||
+			len(name) > 200 || len(prompt) > 1024 || strings.ContainsAny(name+prompt, "\r\n\t") ||
+			credentialKeys[key] {
+			return fmt.Errorf("Agent credential requirement %d is invalid", index)
+		}
+		credentialKeys[key] = true
 	}
 	if len(catalog.CapabilityNeeds) > MaximumCapabilityNeeds {
 		return fmt.Errorf("capability catalog has more than %d capability needs", MaximumCapabilityNeeds)
