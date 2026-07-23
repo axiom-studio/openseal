@@ -43,6 +43,14 @@ func TestPrepareDefinitionIsTheCanonicalImportBoundary(t *testing.T) {
 	}
 }
 
+func TestAmendmentRequestDigestNormalizesEvidenceReferences(t *testing.T) {
+	first := AmendmentRequestDigest(" team ", " base ", " candidate ", " agent ", " one ", " rationale ", []string{" evidence:b ", "evidence:a", "evidence:a"})
+	second := AmendmentRequestDigest("team", "base", "candidate", "agent", "one", "rationale", []string{"evidence:a", "evidence:b"})
+	if first == "" || first != second {
+		t.Fatalf("normalized request digests = %q, %q", first, second)
+	}
+}
+
 func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *testing.T) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
