@@ -2358,9 +2358,9 @@ func (e *AIExecutor) buildSystemPromptWithSkills(originalPrompt string, enabledS
 		return originalPrompt, nil
 	}
 
-	skillsDir := os.Getenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV)
+	skillsDir := os.Getenv(config.OpenClawSkillsDirectoryEnvironment)
 	if skillsDir == "" {
-		skillsDir = config.AXIOM_OPENCLAW_SKILLS_DIR_DEFAULT
+		skillsDir = config.DefaultOpenClawSkillsDirectory
 	}
 
 	maxSizeKB := 20

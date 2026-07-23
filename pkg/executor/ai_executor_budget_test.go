@@ -23,7 +23,7 @@ metadata:
 
 ` + smallBody,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	result, warnings := executor.buildSystemPromptWithSkills("Original prompt.", []string{"small-skill"}, nil)
@@ -54,7 +54,7 @@ metadata:
 
 ` + bodyOverSoftLimit,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 	t.Setenv("SKILL_PROMPT_MAX_SIZE_KB", "1")
 
 	executor := NewAIExecutor()
@@ -89,7 +89,7 @@ metadata:
 
 ` + veryLargeBody,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 	t.Setenv("SKILL_PROMPT_MAX_SIZE_KB", "1")
 
 	executor := NewAIExecutor()
@@ -134,7 +134,7 @@ metadata:
 
 ` + mediumBody,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	t.Setenv("SKILL_PROMPT_MAX_SIZE_KB", "1")
 	softLimit, hardLimit := GetSkillPromptBudget()
@@ -199,7 +199,7 @@ metadata:
 
 ` + mediumBody,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 	t.Setenv("SKILL_PROMPT_MAX_SIZE_KB", "2")
 
 	executor := NewAIExecutor()

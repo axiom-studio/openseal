@@ -24,9 +24,9 @@ type MCPToolExecutor struct {
 	resolver TemplateResolver
 
 	// Connection caching
-	clients   map[string]*mcp.Client
-	sessions  map[string]*mcp.ClientSession
-	mu        sync.RWMutex
+	clients  map[string]*mcp.Client
+	sessions map[string]*mcp.ClientSession
+	mu       sync.RWMutex
 }
 
 // NewMCPToolExecutor creates a new MCP tool executor
@@ -134,7 +134,7 @@ func (e *MCPToolExecutor) getOrCreateSession(ctx context.Context, serverKey stri
 
 	// Create new client and session
 	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "axiom-openseal",
+		Name:    "openseal",
 		Version: "1.0.0",
 	}, nil)
 
@@ -145,7 +145,7 @@ func (e *MCPToolExecutor) getOrCreateSession(ctx context.Context, serverKey stri
 		command = "bunx"
 	}
 	var cmdArgs []string
-	
+
 	// Parse args - handle multiple types
 	switch a := config["args"].(type) {
 	case []interface{}:
@@ -313,7 +313,7 @@ func (d *MCPToolDiscovery) DiscoverTools(ctx context.Context, config map[string]
 
 	// Create client and connect
 	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "axiom-openseal-tool-discovery",
+		Name:    "openseal-tool-discovery",
 		Version: "1.0.0",
 	}, nil)
 
