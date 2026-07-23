@@ -68,7 +68,7 @@ You are an expert code reviewer. Follow these guidelines:
 - Provide constructive feedback
 `,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	originalPrompt := "Summarize the following code."
@@ -118,7 +118,7 @@ metadata:
 Alpha content here.
 `,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	originalPrompt := "Do something."
@@ -168,7 +168,7 @@ metadata:
 Always available content.
 `,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	originalPrompt := "Hello."
@@ -204,7 +204,7 @@ metadata:
 
 ` + largeBody,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	originalPrompt := "Original prompt."
@@ -263,7 +263,7 @@ metadata:
 Bravo body.
 `,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	originalPrompt := "Test."
@@ -285,7 +285,7 @@ Bravo body.
 
 func TestBuildSystemPromptWithSkills_MissingSkillFile(t *testing.T) {
 	skillsDir := setupTestSkillsDir(t, map[string]string{})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 
 	executor := NewAIExecutor()
 	originalPrompt := "Hello."
@@ -318,7 +318,7 @@ metadata:
 
 ` + mediumBody,
 	})
-	t.Setenv(config.AXIOM_OPENCLAW_SKILLS_DIR_ENV, skillsDir)
+	t.Setenv(config.OpenClawSkillsDirectoryEnvironment, skillsDir)
 	t.Setenv("SKILL_PROMPT_MAX_SIZE_KB", "1")
 
 	executor := NewAIExecutor()

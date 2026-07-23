@@ -393,7 +393,7 @@ def get_file(file_obj):
     req = urllib.request.Request(
         url,
         headers={
-            'User-Agent': 'Axiom-Agent-Runtime/1.0',
+            'User-Agent': 'OpenSeal-Agent-Runtime/1.0',
             'Accept': '*/*'
         }
     )
@@ -473,15 +473,15 @@ def emit(data, progress=None):
 _tools_config = _ctx.get('_tools')
 if _tools_config:
     # Add SDK directory to path if it exists
-    _sdk_path = '/axiom-sdk'
+    _sdk_path = '/openseal-sdk'
     if os.path.exists(_sdk_path) and _sdk_path not in sys.path:
         sys.path.insert(0, _sdk_path)
     
     try:
-        from axiom_sdk import inject_tools
+        from openseal_sdk import inject_tools
         # Note: inject_tools will be called after _exec_globals is created
     except ImportError as e:
-        print(f"Warning: Failed to import Axiom SDK: {e}", file=sys.stderr)
+        print(f"Warning: Failed to import OpenSeal SDK: {e}", file=sys.stderr)
         _tools_config = None  # Disable tools if SDK not available
 
 # Create execution context with all variables accessible
@@ -589,8 +589,8 @@ except Exception as e:
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
-									Name:      "axiom-sdk",
-									MountPath: "/axiom-sdk",
+									Name:      "openseal-sdk",
+									MountPath: "/openseal-sdk",
 									ReadOnly:  true,
 								},
 							},
@@ -598,7 +598,7 @@ except Exception as e:
 					},
 					Volumes: []corev1.Volume{
 						{
-							Name: "axiom-sdk",
+							Name: "openseal-sdk",
 							VolumeSource: corev1.VolumeSource{
 								ConfigMap: &corev1.ConfigMapVolumeSource{
 									LocalObjectReference: corev1.LocalObjectReference{

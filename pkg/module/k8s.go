@@ -15,12 +15,7 @@ func GetAgentsNamespace() string {
 	if ns := os.Getenv("AGENTS_NAMESPACE"); ns != "" {
 		return ns
 	}
-	return "axiom-agents"
-}
-
-// GetCodeExecutorNamespace is deprecated, use GetAgentsNamespace
-func GetCodeExecutorNamespace() string {
-	return GetAgentsNamespace()
+	return "openseal-agents"
 }
 
 func GetCodeExecutorImage() string {
@@ -51,7 +46,7 @@ func ProcessExecutorEnabled() bool {
 
 func NewRegistryConfigFromEnv() (*RegistryConfig, error) {
 	return &RegistryConfig{
-		Namespace:   GetCodeExecutorNamespace(),
+		Namespace:   GetAgentsNamespace(),
 		PythonImage: GetCodeExecutorImage(),
 	}, nil
 }
