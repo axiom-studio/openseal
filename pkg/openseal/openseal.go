@@ -1221,6 +1221,8 @@ const (
 	WorkforceChangeSetApplied                            = authoring.ChangeSetApplied
 	WorkforceChangeSetRejected                           = authoring.ChangeSetRejected
 	WorkforceChangeSetFailed                             = authoring.ChangeSetFailed
+	WorkforceActivationActive                            = authoring.WorkforceActivationActive
+	WorkforceActivationInactive                          = authoring.WorkforceActivationInactive
 	WorkforceInitiativeOwnerAgent                        = authoring.InitiativeOwnerAgent
 	WorkforceInitiativeOwnerTeam                         = authoring.InitiativeOwnerTeam
 	WorkforceInitiativeDeduplicateStableSource           = authoring.InitiativeDeduplicateStableSource
