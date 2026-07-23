@@ -12,8 +12,8 @@ import (
 
 const (
 	SkillID      = "openseal.outreach"
-	SkillVersion = "1.0.1"
-	SkillImage   = "axiomstudio/skill-openseal-outreach:1.0.0"
+	SkillVersion = "1.0.2"
+	SkillImage   = "axiomstudio/skill-openseal-outreach:1.0.2"
 	PostReply    = "post_reply"
 
 	PolicyDecisionTransportKey = "_opensealOutreachPolicyDecision"

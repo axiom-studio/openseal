@@ -17,8 +17,8 @@ import (
 
 const (
 	SkillID      = "openseal.document"
-	SkillVersion = "1.0.1"
-	SkillImage   = "axiomstudio/skill-openseal-document:1.0.0"
+	SkillVersion = "1.0.2"
+	SkillImage   = "axiomstudio/skill-openseal-document:1.0.2"
 	RenderPDF    = "render_pdf"
 )
 
