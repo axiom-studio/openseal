@@ -15,15 +15,17 @@ import (
 )
 
 func skillCmd(args []string) {
-	if err := runSkillCommand(os.Stdout, args); err != nil {
+	if err := runSkillCommand(os.Stdout, args, os.WriteFile); err != nil {
 		fmt.Fprintf(os.Stderr, "skill: %v\n", err)
 		return
 	}
 }
 
-func runSkillCommand(output io.Writer, args []string) error {
-	if len(args) != 2 || args[0] != "manifest" {
-		return errors.New("usage: openseal skill manifest <skill-id>")
+type skillManifestWriter func(string, []byte, os.FileMode) error
+
+func runSkillCommand(output io.Writer, args []string, writeFile skillManifestWriter) error {
+	if (len(args) != 2 && len(args) != 4) || args[0] != "manifest" || (len(args) == 4 && args[2] != "--output") {
+		return errors.New("usage: openseal skill manifest <skill-id> [--output <path>]")
 	}
 	definitions := bundledSkillDefinitions()
 	definition := definitions[args[1]]
@@ -42,6 +44,12 @@ func runSkillCommand(output io.Writer, args []string) error {
 	data, err := skill.EncodeManifestYAML(manifest)
 	if err != nil {
 		return err
+	}
+	if len(args) == 4 {
+		if args[3] == "" || writeFile == nil {
+			return errors.New("Skill manifest output path is required")
+		}
+		return writeFile(args[3], data, 0o644)
 	}
 	_, err = output.Write(data)
 	return err
