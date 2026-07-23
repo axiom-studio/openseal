@@ -195,6 +195,64 @@ func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t
 	}
 }
 
+func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnded(t *testing.T) {
+	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
+	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
+	reconciler, err := NewAgentRequestInboxReconciler(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, reconcileErr := reconciler.Reconcile(t.Context(), request.Scope, "recipient"); reconcileErr != nil || result.DecisionRunsCreated != 1 {
+		t.Fatalf("create decision Run = %#v, %v", result, reconcileErr)
+	}
+	runs, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: request.Scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("decision runs = %#v, %v", runs, err)
+	}
+	activity := NewRunActivityService(store, store)
+	currentSource, err := store.GetAgentRun(t.Context(), request.Scope, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endedSource, _, err := activity.TransitionRun(t.Context(), request.Scope, currentSource.ID, RunTransitionRequest{
+		ExpectedRevision: currentSource.Revision, Status: AgentRunStatusFailed, Error: "source independently exhausted retries",
+		Summary: "Source ended", Actor: ActivityActor{Type: "worker", ID: "requester"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, _, err := activity.TransitionRun(t.Context(), request.Scope, runs[0].ID, RunTransitionRequest{
+		ExpectedRevision: runs[0].Revision, Status: AgentRunStatusRunning,
+		Summary: "Review started", Actor: ActivityActor{Type: "worker", ID: "recipient"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, _, err := activity.TransitionRun(t.Context(), request.Scope, running.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "review provider unavailable",
+		Summary: "Review failed", Actor: ActivityActor{Type: "worker", ID: "recipient"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied, resolveErr := reconciler.ResolveDecisionRun(t.Context(), failed); resolveErr != nil || !applied {
+		t.Fatalf("resolve orphaned review = %t, %v", applied, resolveErr)
+	}
+	persisted, err := NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	if err != nil || persisted.Status != AgentRequestStatusFailed || persisted.ResolutionReason != "review provider unavailable" {
+		t.Fatalf("resolved request = %#v, %v", persisted, err)
+	}
+	unchangedSource, err := store.GetAgentRun(t.Context(), request.Scope, source.ID)
+	if err != nil || unchangedSource.Status != AgentRunStatusFailed || unchangedSource.Revision != endedSource.Revision ||
+		unchangedSource.Error != endedSource.Error {
+		t.Fatalf("terminal source changed = %#v, %v", unchangedSource, err)
+	}
+	second, err := reconciler.Reconcile(t.Context(), request.Scope, "recipient")
+	if err != nil || second.RequestsScanned != 0 {
+		t.Fatalf("terminal request retried = %#v, %v", second, err)
+	}
+}
+
 func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
 	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
