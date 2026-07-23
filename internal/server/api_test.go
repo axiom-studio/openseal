@@ -10,7 +10,7 @@ import (
 )
 
 func TestServerExposesKernelAPIWithoutBrowserFallback(t *testing.T) {
-	server := NewServer(nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
+	server := NewServer(runtime.NewMemoryStore(10), zap.NewNop().Sugar())
 
 	health := httptest.NewRecorder()
 	server.Handler().ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
@@ -26,7 +26,7 @@ func TestServerExposesKernelAPIWithoutBrowserFallback(t *testing.T) {
 }
 
 func TestServerDoesNotExposeLegacyWorkflowRuntime(t *testing.T) {
-	api := NewServer(nil, runtime.NewMemoryStore(10), zap.NewNop().Sugar())
+	api := NewServer(runtime.NewMemoryStore(10), zap.NewNop().Sugar())
 	for _, route := range []struct {
 		method string
 		path   string
@@ -39,6 +39,8 @@ func TestServerDoesNotExposeLegacyWorkflowRuntime(t *testing.T) {
 		{http.MethodPost, "/api/v1/workflows/legacy/run"},
 		{http.MethodGet, "/api/v1/runs"},
 		{http.MethodGet, "/api/v1/runs/1"},
+		{http.MethodGet, "/api/v1/skills"},
+		{http.MethodGet, "/api/v1/skills/http"},
 	} {
 		response := httptest.NewRecorder()
 		api.Handler().ServeHTTP(response, httptest.NewRequest(route.method, route.path, nil))

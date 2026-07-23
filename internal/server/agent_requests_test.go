@@ -24,7 +24,7 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := NewServer(nil, store, zap.NewNop().Sugar())
+	api := NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	kernel := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
@@ -100,7 +100,7 @@ func TestAgentRequestAPIRejectsUnsafeSharedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := NewServer(nil, store, zap.NewNop().Sugar())
+	api := NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	kernel := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())

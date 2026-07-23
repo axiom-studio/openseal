@@ -33,7 +33,7 @@ func TestAgentCompilationAPIIsCapabilityAdvertisedAndScopeIsolated(t *testing.T)
 	if _, err := registry.RecordCompilation(ctx, &kernelagent.DefinitionCompilation{ID: "source-1", Scope: scope, DeploymentID: "operator", DefinitionID: definition.ID, CandidateVersion: "1", Source: kernelagent.CompilationSource{Kind: "prompt", ID: "source", Version: "1", Digest: "sha256:source"}, TargetDigest: definition.Digest, Status: kernelagent.CompilationClean}); err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(nil, store, zap.NewNop().Sugar())
+	server := NewServer(store, zap.NewNop().Sugar())
 	capabilities := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), kernelapi.AgentDefinitionsCapabilityID) || !strings.Contains(capabilities.Body.String(), kernelapi.OperationListCompilations) {
 		t.Fatalf("capabilities = %d %s", capabilities.Code, capabilities.Body.String())

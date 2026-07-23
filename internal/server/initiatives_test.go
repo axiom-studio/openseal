@@ -12,7 +12,7 @@ import (
 
 func TestInitiativeAPIExposesIdempotentMultiObjectiveLifecycle(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	server := NewServer(nil, store, zap.NewNop().Sugar())
+	server := NewServer(store, zap.NewNop().Sugar())
 	objectiveBody := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"research"},"title":"Evidence","goal":"Collect evidence","status":"active"}`
 	objectiveResponse := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", objectiveBody, "evidence-objective")
 	if objectiveResponse.Code != http.StatusCreated {

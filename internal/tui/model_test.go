@@ -2485,7 +2485,7 @@ func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBounda
 	}); err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
@@ -3471,7 +3471,7 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 
 func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	api := server.NewServer(nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 
@@ -3523,7 +3523,7 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
@@ -3618,7 +3618,7 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(store, zap.NewNop().Sugar())
 	api.SetActionApprovalAuthorizer(runtime.ApprovalAuthorizerFunc(func(_ context.Context, principal runtime.ApprovalPrincipal, checkpoint *runtime.ApprovalCheckpoint) error {
 		if principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || checkpoint.ID != approval.ID {
 			return errors.New("not authorized")
@@ -3675,7 +3675,7 @@ func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())

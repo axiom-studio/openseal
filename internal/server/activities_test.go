@@ -37,7 +37,7 @@ func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := NewServer(nil, store, zap.NewNop().Sugar())
+	api := NewServer(store, zap.NewNop().Sugar())
 	capabilities := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"id":"activity"`) {
 		t.Fatalf("capabilities=%d %s", capabilities.Code, capabilities.Body.String())

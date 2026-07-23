@@ -65,7 +65,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := NewServer(nil, store, zap.NewNop().Sugar())
+	server := NewServer(store, zap.NewNop().Sugar())
 	agentRequest := skill.UpsertBindingRequest{
 		Binding: &skill.Binding{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
 		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Agent needs scoped research access",
@@ -101,7 +101,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restartedStore.Close()
-	restarted := NewServer(nil, restartedStore, zap.NewNop().Sugar())
+	restarted := NewServer(restartedStore, zap.NewNop().Sugar())
 	listed := performAgentRunRequest(t, restarted.Handler(), http.MethodGet, "/api/v1/team-deployments/research-one/skill-bindings?scopeKind=tenant&scopeId=one", "", "")
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"revision":1`) || !strings.Contains(listed.Body.String(), `"id":"credential-17"`) {
 		t.Fatalf("restarted Team binding = %d %s", listed.Code, listed.Body.String())

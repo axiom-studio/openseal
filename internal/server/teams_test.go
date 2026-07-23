@@ -40,7 +40,7 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(nil, store, zap.NewNop().Sugar())
+	server := NewServer(store, zap.NewNop().Sugar())
 	for _, version := range []string{"1", "2"} {
 		identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
 		definition := &kernelteam.Definition{
