@@ -652,6 +652,16 @@ func validateDefinition(definition *Definition) error {
 	if len(definition.Actions) == 0 && definition.Prompt == nil {
 		return errors.New("skill must declare at least one action or prompt module")
 	}
+	if definition.Category != strings.TrimSpace(definition.Category) || len(definition.Tags) > 32 {
+		return errors.New("skill category or tags are invalid")
+	}
+	seenTags := make(map[string]bool, len(definition.Tags))
+	for _, tag := range definition.Tags {
+		if tag != strings.TrimSpace(tag) || tag == "" || len(tag) > 64 || seenTags[tag] {
+			return errors.New("skill category or tags are invalid")
+		}
+		seenTags[tag] = true
+	}
 	if definition.Prompt != nil && strings.TrimSpace(definition.Prompt.Instructions) == "" {
 		return errors.New("skill prompt instructions are required")
 	}

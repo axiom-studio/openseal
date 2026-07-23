@@ -10,6 +10,8 @@ import (
 func TestSkillManifestRoundTripPreservesCompleteDefinition(t *testing.T) {
 	definition := testSkillDefinition()
 	definition.Installers = []capability.Installer{{ID: "oci", Kind: "oci", Package: "example/skill:1.0.0"}}
+	definition.Category = "research"
+	definition.Tags = []string{"evidence", "web"}
 	manifest, err := NewManifest(definition)
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +25,8 @@ func TestSkillManifestRoundTripPreservesCompleteDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.Definition.ID != definition.ID || len(decoded.Definition.Installers) != 1 ||
-		decoded.Definition.Installers[0].Package != "example/skill:1.0.0" {
+		decoded.Definition.Installers[0].Package != "example/skill:1.0.0" || decoded.Definition.Category != "research" ||
+		len(decoded.Definition.Tags) != 2 {
 		t.Fatalf("round trip lost canonical definition fields: %#v", decoded.Definition)
 	}
 }

@@ -64,7 +64,8 @@ func SkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Document renderer",
 		Description: "Render durable reports into governed PDF artifacts.",
-		Transport:   skill.TransportReference{Kind: "tool", Endpoint: SkillID},
+		Icon:        "file-text", Category: "documents", Tags: []string{"pdf", "report", "artifact"},
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		Actions: map[string]skill.Action{RenderPDF: {
 			Name: RenderPDF, Description: "Render a title and report body as a PDF artifact.",
 			InputSchema: map[string]interface{}{

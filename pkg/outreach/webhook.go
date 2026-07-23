@@ -27,7 +27,8 @@ func SkillDefinition() *skill.Definition {
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Governed source outreach",
 		Description: "Post a reviewed, identity-disclosed reply to an evidence-linked webhook-compatible source.",
-		Transport:   skill.TransportReference{Kind: "tool", Endpoint: SkillID},
+		Icon:        "message-circle", Category: "communication", Tags: []string{"outreach", "webhook", "approval", "research"},
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		Actions: map[string]skill.Action{PostReply: {
 			Name: PostReply, Description: "Post one reviewed follow-up to the exact evidence source URL.",
 			SemanticArguments: map[string]string{"target": "targetUri", "body": "body"},
