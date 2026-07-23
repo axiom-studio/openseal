@@ -50,6 +50,10 @@ type CredentialReference struct {
 type CredentialBindingChoice struct {
 	Reference   CredentialReference `json:"reference"`
 	DisplayName string              `json:"displayName"`
+	// BindingKeys identifies deployment credential slots this choice may fill.
+	// An empty list preserves the canonical Skill behavior where the reference
+	// kind itself is the binding key.
+	BindingKeys []string `json:"bindingKeys,omitempty"`
 }
 
 type ActionRetryPolicy struct {

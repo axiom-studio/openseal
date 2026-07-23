@@ -12,6 +12,8 @@ import (
 type RolloutStatus string
 
 const (
+	ModelProviderCredentialBinding = "MODEL_PROVIDER"
+
 	RolloutPending  RolloutStatus = "pending"
 	RolloutActive   RolloutStatus = "active"
 	RolloutDegraded RolloutStatus = "degraded"

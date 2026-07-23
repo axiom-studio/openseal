@@ -80,12 +80,24 @@ type SourcePolicySourceCapability struct {
 }
 
 type CapabilityCatalog struct {
-	Skills               map[string]SkillCapability        `json:"skills,omitempty"`
-	CapabilityNeeds      []CapabilityNeed                  `json:"capabilityNeeds,omitempty"`
-	AvailableCredentials map[string]bool                   `json:"availableCredentials,omitempty"`
-	SourcePolicies       map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
-	AuthorityConstraint  *AuthorityConstraint              `json:"authorityConstraint,omitempty"`
-	Diagnostics          []CatalogDiagnostic               `json:"diagnostics,omitempty"`
+	Skills                      map[string]SkillCapability        `json:"skills,omitempty"`
+	CapabilityNeeds             []CapabilityNeed                  `json:"capabilityNeeds,omitempty"`
+	AgentCredentialRequirements []AgentCredentialRequirement      `json:"agentCredentialRequirements,omitempty"`
+	AvailableCredentials        map[string]bool                   `json:"availableCredentials,omitempty"`
+	SourcePolicies              map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
+	AuthorityConstraint         *AuthorityConstraint              `json:"authorityConstraint,omitempty"`
+	Diagnostics                 []CatalogDiagnostic               `json:"diagnostics,omitempty"`
+}
+
+// AgentCredentialRequirement describes a deployment credential slot required
+// by the portable runtime. Hosts advertise authorized opaque choices for the
+// slot through CredentialBindingChoice.BindingKeys. Secret values and
+// host-specific credential storage never cross this contract.
+type AgentCredentialRequirement struct {
+	BindingKey            string `json:"bindingKey"`
+	DisplayName           string `json:"displayName"`
+	Prompt                string `json:"prompt"`
+	RequiredForActivation bool   `json:"requiredForActivation,omitempty"`
 }
 
 // AuthorityConstraint is the credential-free, versioned projection of the

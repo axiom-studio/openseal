@@ -1388,11 +1388,21 @@ func inheritAppliedRevisions(placement *ChangeSetPlacement, parent *ChangeSet) {
 
 func requiredCredentials(candidate WorkforceCandidate, catalog CapabilityCatalog) map[string][]string {
 	result := map[string][]string{}
+	activation, activationErr := EffectiveWorkforceActivationIntent(candidate.Activation)
 	for _, definition := range candidate.Agents {
 		if definition == nil {
 			continue
 		}
 		seen := map[string]bool{}
+		if activationErr == nil && activation == WorkforceActivationActive {
+			for _, requirement := range catalog.AgentCredentialRequirements {
+				if requirement.RequiredForActivation {
+					if key := strings.TrimSpace(requirement.BindingKey); key != "" {
+						seen[key] = true
+					}
+				}
+			}
+		}
 		for _, requirement := range definition.SkillRequirements {
 			for _, kind := range catalog.Skills[requirement.SkillID].CredentialKinds {
 				kind = strings.TrimSpace(kind)

@@ -55,3 +55,43 @@ func TestValidateCredentialPlacementRejectsUnprovenChoiceWithoutLeakingReference
 		t.Fatalf("secret-safe unavailable error = %v", err)
 	}
 }
+
+func TestValidateCredentialPlacementAcceptsAuthorizedDeploymentBinding(t *testing.T) {
+	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "operator"}}}
+	required := map[string][]string{"operator": {agent.ModelProviderCredentialBinding}}
+	choices := []capability.CredentialBindingChoice{{
+		Reference:   capability.CredentialReference{Kind: "host-vault", ID: "credential-29"},
+		DisplayName: "Primary model",
+		BindingKeys: []string{agent.ModelProviderCredentialBinding},
+	}}
+	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"operator": {agent.ModelProviderCredentialBinding: {Kind: "host-vault", ID: "credential-29"}},
+	}}
+	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err != nil {
+		t.Fatal(err)
+	}
+	placement.CredentialReferences["operator"][agent.ModelProviderCredentialBinding] =
+		capability.CredentialReference{Kind: "host-vault", ID: "credential-other"}
+	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err == nil ||
+		!strings.Contains(err.Error(), "unavailable or no longer authorized") {
+		t.Fatalf("unadvertised deployment binding error = %v", err)
+	}
+}
+
+func TestRequiredCredentialsIncludesRuntimeBindingOnlyForActiveCandidates(t *testing.T) {
+	catalog := CapabilityCatalog{AgentCredentialRequirements: []AgentCredentialRequirement{{
+		BindingKey: agent.ModelProviderCredentialBinding, DisplayName: "Model provider",
+		Prompt: "Choose the model provider this Agent should use.", RequiredForActivation: true,
+	}}}
+	active := WorkforceCandidate{
+		Agents:     []*agent.AgentDefinition{{ID: "operator"}},
+		Activation: WorkforceActivationActive,
+	}
+	if values := requiredCredentials(active, catalog)["operator"]; len(values) != 1 || values[0] != agent.ModelProviderCredentialBinding {
+		t.Fatalf("active required credentials = %#v", values)
+	}
+	active.Activation = WorkforceActivationInactive
+	if values := requiredCredentials(active, catalog)["operator"]; len(values) != 0 {
+		t.Fatalf("inactive required credentials = %#v", values)
+	}
+}

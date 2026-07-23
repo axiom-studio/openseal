@@ -110,6 +110,10 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 			},
 		}},
 		CapabilityNeeds: []CapabilityNeed{{ID: "source-choice", Prompt: "Choose a source", WhyNeeded: "Source is required", SkillIDs: []string{"source"}, Priority: 1}},
+		AgentCredentialRequirements: []AgentCredentialRequirement{{
+			BindingKey: "MODEL_PROVIDER", DisplayName: "Model provider",
+			Prompt: "Choose a model provider.", RequiredForActivation: true,
+		}},
 	}
 	generator, _ := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
 	if _, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a source Agent", Catalog: catalog}); err != nil {
@@ -124,7 +128,10 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	if len(modelRequest.Catalog.CapabilityNeeds) != 0 {
 		t.Fatalf("model-visible capability needs = %#v", modelRequest.Catalog.CapabilityNeeds)
 	}
-	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.CapabilityNeeds) != 1 {
+	if len(modelRequest.Catalog.AgentCredentialRequirements) != 0 {
+		t.Fatalf("model-visible Agent credential requirements = %#v", modelRequest.Catalog.AgentCredentialRequirements)
+	}
+	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.CapabilityNeeds) != 1 || len(catalog.AgentCredentialRequirements) != 1 {
 		t.Fatalf("canonical catalog was mutated = %#v", catalog)
 	}
 	canonicalBytes, _ := json.Marshal(catalog)
