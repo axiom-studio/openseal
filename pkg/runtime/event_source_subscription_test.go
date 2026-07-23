@@ -14,7 +14,7 @@ func TestEventSourceSubscriptionLifecycleHealthAndCheckpointSurviveRestart(t *te
 		open func(*testing.T) (KernelStore, func() KernelStore, func())
 	}{
 		{name: "memory", open: func(*testing.T) (KernelStore, func() KernelStore, func()) {
-			store := NewMemoryStore(100)
+			store := NewMemoryStore()
 			return store, func() KernelStore { return store }, func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func() KernelStore, func()) {
@@ -121,7 +121,7 @@ func TestEventSourceSubscriptionLifecycleHealthAndCheckpointSurviveRestart(t *te
 }
 
 func TestEventSourceSubscriptionRejectsCredentialLeakageAndInvalidSkillConnector(t *testing.T) {
-	service := NewEventSourceSubscriptionService(NewMemoryStore(20), NewMemoryStore(20))
+	service := NewEventSourceSubscriptionService(NewMemoryStore(), NewMemoryStore())
 	base := CreateEventSourceSubscriptionRequest{
 		Scope: Scope{Kind: "tenant", ID: "research"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
 		DisplayName: "Forum monitor", Source: "forum:example", EventTypes: []string{"forum.post"},

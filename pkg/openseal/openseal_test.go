@@ -104,7 +104,7 @@ func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 }
 
 func TestEngineExposesObjectivePortfolio(t *testing.T) {
-	engine, err := New(WithStore(runtime.NewMemoryStore(100)))
+	engine, err := New(WithStore(runtime.NewMemoryStore()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 }
 
 func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
-	store := runtime.NewMemoryStore(20)
+	store := runtime.NewMemoryStore()
 	scope := Scope{Kind: "local", ID: "autonomous"}
 	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return &TurnRunnerBinding{
@@ -272,7 +272,7 @@ func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
 }
 
 func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
-	store := runtime.NewMemoryStore(20)
+	store := runtime.NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "dynamic"}
 	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		if run.Kind != RunKindConversation {
@@ -331,7 +331,7 @@ func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
 }
 
 func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T) {
-	store := runtime.NewMemoryStore(50)
+	store := runtime.NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "conversation-runtime"}
 	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
 		return []ConversationParticipantBinding{{

@@ -22,7 +22,7 @@ func TestCancelWaitingApprovalClosesActionAndRepairsOutreachProjection(t *testin
 		name  string
 		store func(*testing.T) cancellationStore
 	}{
-		{name: "memory", store: func(*testing.T) cancellationStore { return NewMemoryStore(100) }},
+		{name: "memory", store: func(*testing.T) cancellationStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) cancellationStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cancel.db"))
 			if err != nil {

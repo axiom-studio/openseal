@@ -15,7 +15,7 @@ import (
 )
 
 func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	createBody := `{
@@ -97,7 +97,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 }
 
 func TestAgentRunAPIRejectsExplicitZeroBudgetLimitButAcceptsOmission(t *testing.T) {
-	store := runtime.NewMemoryStore(10)
+	store := runtime.NewMemoryStore()
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	base := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"agent"},"assignedAgentId":"agent","goal":"Read one source","source":"manual","budget":%s}`
@@ -114,7 +114,7 @@ func TestAgentRunAPIRejectsExplicitZeroBudgetLimitButAcceptsOmission(t *testing.
 }
 
 func TestCapabilitiesAdvertiseAgentRunOperations(t *testing.T) {
-	store := runtime.NewMemoryStore(10)
+	store := runtime.NewMemoryStore()
 	server := NewServer(store, zap.NewNop().Sugar())
 	recorder := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	var document kernelapi.CapabilityDocument

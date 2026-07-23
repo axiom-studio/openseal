@@ -12,7 +12,7 @@ import (
 )
 
 func TestKernelHTTPClientOperatesEventSourceSubscriptions(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()

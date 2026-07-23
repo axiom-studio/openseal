@@ -14,7 +14,7 @@ func TestInitiativeStoresAreScopedCASAndRestartSafe(t *testing.T) {
 		name string
 		open func(*testing.T) (InitiativeStore, func())
 	}{
-		{"memory", func(t *testing.T) (InitiativeStore, func()) { return NewMemoryStore(100), func() {} }},
+		{"memory", func(t *testing.T) (InitiativeStore, func()) { return NewMemoryStore(), func() {} }},
 		{"sqlite", func(t *testing.T) (InitiativeStore, func()) {
 			path := filepath.Join(t.TempDir(), "kernel.db")
 			s, err := NewSQLiteStore(path)
@@ -58,7 +58,7 @@ func TestInitiativeStoresAreScopedCASAndRestartSafe(t *testing.T) {
 }
 
 func TestInitiativeServiceIdempotencyAndActivity(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	svc := NewInitiativeService(store, store)
 	ctx := context.Background()
 	seedInitiativeObjectives(t, store, Scope{Kind: "tenant", ID: "a"})
@@ -109,7 +109,7 @@ func TestInitiativeSourceMonitorRequiresExecutableDriftFreeObjective(t *testing.
 		"policy drift": func(_ *Initiative, o *Objective) { o.Cadence.RunTemplate.Policy["sourcePolicyRef"] = "unapproved" },
 	} {
 		t.Run(name, func(t *testing.T) {
-			store := NewMemoryStore(20)
+			store := NewMemoryStore()
 			scope := Scope{Kind: "tenant", ID: "a"}
 			seedInitiativeObjectives(t, store, scope)
 			initiative := initiativeFixture(scope)
@@ -142,7 +142,7 @@ func TestInitiativeConcurrentIdempotentCreateHasOneWinner(t *testing.T) {
 			InitiativeStore
 			PortfolioStore
 		}, func()) {
-			return NewMemoryStore(100), func() {}
+			return NewMemoryStore(), func() {}
 		}},
 		{"sqlite", func(t *testing.T) (interface {
 			InitiativeStore
@@ -209,7 +209,7 @@ func TestInitiativeConcurrentIdempotentCreateHasOneWinner(t *testing.T) {
 	}
 }
 func TestInitiativePatchPreservesIdentityAndCreationProvenance(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "a"}
 	seedInitiativeObjectives(t, store, scope)
 	svc := NewInitiativeService(store, store)
@@ -282,7 +282,7 @@ func TestInitiativeStoreFiltersAndPaginatesInDeterministicOrder(t *testing.T) {
 	openers := []struct {
 		name string
 		open func(*testing.T) (InitiativeStore, func())
-	}{{"memory", func(*testing.T) (InitiativeStore, func()) { return NewMemoryStore(100), func() {} }}, {"sqlite", func(t *testing.T) (InitiativeStore, func()) {
+	}{{"memory", func(*testing.T) (InitiativeStore, func()) { return NewMemoryStore(), func() {} }}, {"sqlite", func(t *testing.T) (InitiativeStore, func()) {
 		s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "filter.db"))
 		if err != nil {
 			t.Fatal(err)

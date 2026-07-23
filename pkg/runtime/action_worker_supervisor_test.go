@@ -31,7 +31,7 @@ func (s *mutableActionWorkerScopeSource) set(scopes []Scope, err error) {
 }
 
 func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	source := &mutableActionWorkerScopeSource{scopes: []Scope{
 		{Kind: "tenant", ID: "2"}, {Kind: "tenant", ID: "1"}, {Kind: "tenant", ID: "1"},
 	}}
@@ -66,7 +66,7 @@ func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 
 func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
 	supervisor, err := NewActionWorkerSupervisor(
-		NewMemoryStore(10), skill.NewCatalog(), nil,
+		NewMemoryStore(), skill.NewCatalog(), nil,
 		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
 		WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},

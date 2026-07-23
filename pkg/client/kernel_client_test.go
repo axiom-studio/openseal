@@ -28,7 +28,7 @@ import (
 )
 
 func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	api.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	httpServer := httptest.NewServer(api.Handler())
@@ -552,7 +552,7 @@ func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
 }
 
 func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
@@ -801,7 +801,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 }
 
 func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	contentStore, err := artifactstore.NewLocalStore(t.TempDir())
 	if err != nil {

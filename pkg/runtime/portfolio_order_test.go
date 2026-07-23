@@ -8,7 +8,7 @@ import (
 
 func TestAgentRunCreatedDescendingOrderPrecedesPagination(t *testing.T) {
 	stores := map[string]func(*testing.T) PortfolioStore{
-		"memory": func(*testing.T) PortfolioStore { return NewMemoryStore(100) },
+		"memory": func(*testing.T) PortfolioStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) PortfolioStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
 			if err != nil {

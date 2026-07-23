@@ -8,7 +8,7 @@ import (
 
 func TestMemoryPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewPortfolioService(store)
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "marketing"}
@@ -53,7 +53,7 @@ func TestMemoryPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 
 func TestMemoryPortfolioFailsClosedAcrossScopesAndOnStaleRevision(t *testing.T) {
 	ctx := context.Background()
-	service := NewPortfolioService(NewMemoryStore(100))
+	service := NewPortfolioService(NewMemoryStore())
 	scopeA := Scope{Kind: "tenant", ID: "a"}
 	scopeB := Scope{Kind: "tenant", ID: "b"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}

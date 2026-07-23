@@ -1709,7 +1709,7 @@ func New(opts ...Option) (*Engine, error) {
 	logger, _ := zap.NewProduction()
 	sugar := logger.Sugar()
 
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
 	agentRegistry := kernelagent.NewRegistry()

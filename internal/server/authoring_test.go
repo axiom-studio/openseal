@@ -307,7 +307,7 @@ func TestWorkforceChangeSetAPIIsDurableScopedAndIdempotent(t *testing.T) {
 }
 
 func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
-	api := NewServer(runtime.NewMemoryStore(10), zap.NewNop().Sugar())
+	api := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
 	unconfigured := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/compile", `{"mode":"create","prompt":"Create a Team","catalog":{}}`, "")
 	if unconfigured.Code != http.StatusNotImplemented {
 		t.Fatalf("unconfigured status = %d, body = %s", unconfigured.Code, unconfigured.Body.String())

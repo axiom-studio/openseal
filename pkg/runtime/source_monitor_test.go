@@ -17,7 +17,7 @@ func TestSourceMonitorObservationIngestDeduplicatesAndSurvivesRestart(t *testing
 		open func(*testing.T) (KernelStore, func() KernelStore, func())
 	}{
 		{name: "memory", open: func(*testing.T) (KernelStore, func() KernelStore, func()) {
-			store := NewMemoryStore(50)
+			store := NewMemoryStore()
 			return store, func() KernelStore { return store }, func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func() KernelStore, func()) {
@@ -73,7 +73,7 @@ func TestSourceMonitorReadsExcludeExpiredEvidenceWithoutDeletingAuditRecords(t *
 		open func(*testing.T) (KernelStore, func() KernelStore, func())
 	}{
 		{name: "memory", open: func(*testing.T) (KernelStore, func() KernelStore, func()) {
-			store := NewMemoryStore(50)
+			store := NewMemoryStore()
 			return store, func() KernelStore { return store }, func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func() KernelStore, func()) {
@@ -134,7 +134,7 @@ func TestSourceMonitorReadsExcludeExpiredEvidenceWithoutDeletingAuditRecords(t *
 }
 
 func TestSourceMonitorObservationConcurrentCASCannotSkipEvidence(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "race"}
 	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
 	service := NewSourceMonitorService(store, store, store, store)
@@ -197,7 +197,7 @@ func TestSourceMonitorNoChangeCheckpointIsDurableAndReplaySafe(t *testing.T) {
 		open func(*testing.T) (KernelStore, func() KernelStore, func())
 	}{
 		{name: "memory", open: func(*testing.T) (KernelStore, func() KernelStore, func()) {
-			store := NewMemoryStore(50)
+			store := NewMemoryStore()
 			return store, func() KernelStore { return store }, func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func() KernelStore, func()) {
@@ -247,7 +247,7 @@ func TestSourceMonitorNoChangeCheckpointIsDurableAndReplaySafe(t *testing.T) {
 }
 
 func TestSourceMonitorNoChangeCheckpointConcurrentCAS(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "no-change-race"}
 	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
 	service := NewSourceMonitorService(store, store, store, store)

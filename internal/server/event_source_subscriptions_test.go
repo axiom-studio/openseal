@@ -12,7 +12,7 @@ import (
 )
 
 func TestEventSourceSubscriptionAPIExposesDurableLifecycleHealthAndCheckpoint(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	api := NewServer(store, zap.NewNop().Sugar())
 	createBody := `{
 		"id":"production-warnings","scope":{"kind":"tenant","id":"operations"},

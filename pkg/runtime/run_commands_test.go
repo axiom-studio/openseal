@@ -12,7 +12,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 		name  string
 		store func(*testing.T) RunCommandStore
 	}{
-		{name: "memory", store: func(*testing.T) RunCommandStore { return NewMemoryStore(100) }},
+		{name: "memory", store: func(*testing.T) RunCommandStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "commands.db"))
 			if err != nil {
@@ -116,7 +116,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 
 func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "local", ID: "wait"}
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -191,7 +191,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 }
 
 func TestRunCreationRejectsCredentialStateButAllowsTokenBudgets(t *testing.T) {
-	service := NewRunCommandService(NewMemoryStore(10))
+	service := NewRunCommandService(NewMemoryStore())
 	base := CreateAgentRunRequest{
 		Scope: Scope{Kind: "tenant", ID: "safe"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		Goal: "Operate safely", Source: RunSourceManual,

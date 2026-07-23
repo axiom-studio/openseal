@@ -8,7 +8,7 @@ import (
 
 func TestObjectiveLifecycleIsAtomicallyAudited(t *testing.T) {
 	stores := map[string]func(*testing.T) KernelStore{
-		"memory": func(*testing.T) KernelStore { return NewMemoryStore(20) },
+		"memory": func(*testing.T) KernelStore { return NewMemoryStore() },
 		"sqlite": func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 			if err != nil {

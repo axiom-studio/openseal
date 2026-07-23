@@ -15,7 +15,7 @@ import (
 
 func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "local", ID: "workspace"}
 	source, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
@@ -91,7 +91,7 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 
 func TestAgentRequestAPIRejectsUnsafeSharedContext(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore(10)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "local", ID: "workspace"}
 	source, err := runtime.NewPortfolioService(store).CreateAgentRun(context.Background(), runtime.CreateAgentRunRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",

@@ -57,7 +57,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		4:  {"skill_bindings", "skill_definitions", "agent_definition_amendments", "agent_definition_activations", "agent_deployments", "agent_definitions"},
 		3:  {"agent_turns", "run_activity"},
 		2:  {"agent_runs", "objectives"},
-		1:  {"runs"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
 		if version == 23 {

@@ -35,7 +35,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 		name string
 		open func(*testing.T) (CollaborationKernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (CollaborationKernelStore, func()) { return NewMemoryStore(100), func() {} }},
+		{name: "memory", open: func(*testing.T) (CollaborationKernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "collaboration.db"))
 			if err != nil {
@@ -189,7 +189,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 
 func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -262,7 +262,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 		})
 	}
 
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	portfolio := NewPortfolioService(store)
 	activity := NewRunActivityService(store, store)
 	service := NewCollaborationService(store)
@@ -331,7 +331,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 
 func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -362,7 +362,7 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 
 func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -504,7 +504,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 }
 
 func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "acme"}
 	portfolio := NewPortfolioService(store)
@@ -566,7 +566,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 }
 
 func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "artifact-delegation"}
 	portfolio := NewPortfolioService(store)

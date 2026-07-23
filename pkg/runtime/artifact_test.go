@@ -18,7 +18,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		open func(*testing.T) (ArtifactStore, func())
 	}{
 		{name: "memory", open: func(t *testing.T) (ArtifactStore, func()) {
-			return NewMemoryStore(100), func() {}
+			return NewMemoryStore(), func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (ArtifactStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
@@ -105,7 +105,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 }
 
 func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	catalog := NewArtifactCatalog(store)
 	catalog.now = func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }
 	artifact := validCatalogArtifact("game-log", 1)
@@ -137,7 +137,7 @@ func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 }
 
 func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T) {
-	catalog := NewArtifactCatalog(NewMemoryStore(100))
+	catalog := NewArtifactCatalog(NewMemoryStore())
 	tests := []struct {
 		name   string
 		mutate func(*Artifact)

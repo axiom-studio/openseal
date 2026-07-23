@@ -26,7 +26,7 @@ func (r *fixedOutreachActionReader) GetApproval(context.Context, Scope, string) 
 }
 
 func TestOutreachLifecyclePreservesEvidenceIdentityApprovalAndReceipt(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "research"}
 	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
 	sources := NewSourceMonitorService(store, store, store, store)
@@ -102,7 +102,7 @@ func TestOutreachLifecyclePreservesEvidenceIdentityApprovalAndReceipt(t *testing
 }
 
 func TestOutreachRejectsCovertIdentityAndDriftedEvidence(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "research"}
 	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
 	sources := NewSourceMonitorService(store, store, store, store)

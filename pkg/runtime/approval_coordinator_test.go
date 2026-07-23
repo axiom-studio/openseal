@@ -15,7 +15,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval.db"))
 			if err != nil {
@@ -79,7 +79,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 
 func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	coordinator := NewApprovalCoordinator(store, store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error {
@@ -116,7 +116,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval-rejection.db"))
 			if err != nil {

@@ -17,7 +17,7 @@ import (
 
 func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore(20)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "local", ID: "workspace"}
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},

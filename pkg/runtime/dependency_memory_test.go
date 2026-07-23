@@ -27,7 +27,7 @@ func createDependencySource(t *testing.T, store *MemoryStore, scope Scope, id st
 func TestMemoryDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	createDependencySource(t, store, scope, "source-all")
 	coordinator := NewDependencyCoordinator(store)
 	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 12, 1, 0, 0, time.UTC) }
@@ -97,7 +97,7 @@ func TestMemoryDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 func TestMemoryDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "concurrent"}
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	createDependencySource(t, store, scope, "source-any")
 	coordinator := NewDependencyCoordinator(store)
 	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }
@@ -166,7 +166,7 @@ func TestMemoryDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testin
 func TestMemoryDependencyCoordinatorOptionalCompletionContinuesAfterWake(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "optional"}
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	createDependencySource(t, store, scope, "source-optional")
 	coordinator := NewDependencyCoordinator(store)
 	optional := false

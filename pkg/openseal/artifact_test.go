@@ -10,7 +10,7 @@ import (
 )
 
 func TestEngineExposesArtifactEvidenceCatalog(t *testing.T) {
-	engine, err := New(WithStore(runtime.NewMemoryStore(100)))
+	engine, err := New(WithStore(runtime.NewMemoryStore()))
 	if err != nil {
 		t.Fatal(err)
 	}

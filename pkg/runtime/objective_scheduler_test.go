@@ -74,7 +74,7 @@ func TestObjectiveCadenceCapabilityRequiresBudgetForBothDurablePhases(t *testing
 
 func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 11, 4, 0, 0, 0, time.UTC)
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
@@ -168,7 +168,7 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 
 func TestObjectiveSchedulerDoesNotInventTeamAssignee(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 11, 5, 0, 0, 0, time.UTC)
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
@@ -196,7 +196,7 @@ func TestObjectiveSchedulerDoesNotInventTeamAssignee(t *testing.T) {
 
 func TestObjectiveSchedulerDefaultsAgentAssigneeToOwner(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 11, 5, 0, 0, 0, time.UTC)
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
@@ -224,7 +224,7 @@ func TestObjectiveSchedulerDefaultsAgentAssigneeToOwner(t *testing.T) {
 
 func TestObjectiveSchedulerDefersPausedInitiativeMonitor(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 11, 6, 0, 0, 0, time.UTC)
 	due := now.Add(-time.Minute)
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
@@ -265,7 +265,7 @@ func TestObjectiveSchedulerDefersPausedInitiativeMonitor(t *testing.T) {
 
 func TestObjectiveSchedulerPersistsBudgetExhaustionWithoutFailingScope(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	due := now.Add(-time.Minute)
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{

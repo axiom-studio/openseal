@@ -17,7 +17,7 @@ import (
 
 func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *testing.T) {
 	t.Parallel()
-	store := runtime.NewMemoryStore(20)
+	store := runtime.NewMemoryStore()
 	proposal := createActionApprovalFixture(t, store)
 	api := NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())

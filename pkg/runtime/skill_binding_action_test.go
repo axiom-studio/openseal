@@ -14,7 +14,7 @@ import (
 
 func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
@@ -127,7 +127,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 
 func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
@@ -234,7 +234,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: foreignRun, Bound: bound, Arguments: base}); err == nil {
 		t.Fatal("management binding from agent-a escalated into agent-b")
 	}
-	store := NewMemoryStore(5)
+	store := NewMemoryStore()
 	durableForeign, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: foreignRun.Owner, AssignedAgentID: foreignRun.AssignedAgentID, Goal: "Manage Skills", Source: RunSourceChat,
 	})

@@ -13,7 +13,7 @@ import (
 
 func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
@@ -77,7 +77,7 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 
 func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
@@ -123,7 +123,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 }
 
 func TestActionCoordinatorPersistsPolicyDenialAndRequeues(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
@@ -163,7 +163,7 @@ func TestActionCoordinatorPersistsTrustedTeamConversationAgentAttribution(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Now().UTC()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }

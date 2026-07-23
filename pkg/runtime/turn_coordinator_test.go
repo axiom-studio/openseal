@@ -12,7 +12,7 @@ import (
 )
 
 func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -81,7 +81,7 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 }
 
 func TestTurnCoordinatorPersistsRunnerFailure(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -104,7 +104,7 @@ func TestTurnCoordinatorPersistsRunnerFailure(t *testing.T) {
 }
 
 func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -229,7 +229,7 @@ func TestTurnCoordinatorReconcilesAcrossSQLiteRestart(t *testing.T) {
 }
 
 func TestTurnCoordinatorRejectsConcurrentLiveWorker(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -269,7 +269,7 @@ func TestTurnCoordinatorRejectsConcurrentLiveWorker(t *testing.T) {
 }
 
 func TestTurnCoordinatorPausesAndAccountsExhaustedBudget(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -302,7 +302,7 @@ func TestTurnCoordinatorPausesAndAccountsExhaustedBudget(t *testing.T) {
 }
 
 func TestTurnCoordinatorAllowsTerminalOutcomeAtExactBudgetLimit(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "terminal-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -332,7 +332,7 @@ func TestTurnCoordinatorAllowsTerminalOutcomeAtExactBudgetLimit(t *testing.T) {
 }
 
 func TestTurnCoordinatorCancelsAtDurableDurationCeiling(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "duration-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -367,7 +367,7 @@ func TestTurnCoordinatorCancelsAtDurableDurationCeiling(t *testing.T) {
 }
 
 func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "budget-recovery"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -404,7 +404,7 @@ func TestTurnBudgetReconciliationDoesNotDoubleCharge(t *testing.T) {
 }
 
 func TestTurnBudgetReservationPreventsKnownOverspend(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "budget-reservation"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
