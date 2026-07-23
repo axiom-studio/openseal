@@ -7,7 +7,7 @@ import (
 )
 
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	service := NewPortfolioService(store)
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }

@@ -13,7 +13,7 @@ import (
 )
 
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "scheduler"}
 	service := NewConversationService(store)
@@ -141,7 +141,7 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 }
 
 func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "canceled-conversation"}
 	service := NewConversationService(store)
@@ -199,7 +199,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 }
 
 func TestConversationRunTurnRunnerCompletesAndReplaysCommittedRound(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "runner"}
 	service := NewConversationService(store)
@@ -262,7 +262,7 @@ func TestConversationRunTurnRunnerCompletesAndReplaysCommittedRound(t *testing.T
 }
 
 func TestConversationRunTurnRunnerTruthfullyResolvesRequiredTeamRequestWhenEveryoneIsSilent(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "silent-team"}
 	service := NewConversationService(store)
@@ -326,7 +326,7 @@ func TestConversationRunTurnRunnerTruthfullyResolvesRequiredTeamRequestWhenEvery
 }
 
 func TestConversationRunTurnRunnerArbitratesOneGovernedTeamActionAndCompletesTruthfully(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "team-action"}
 	service := NewConversationService(store)
@@ -442,7 +442,7 @@ func mustConversationRunScheduler(t *testing.T, store *MemoryStore) *Conversatio
 }
 
 func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "agent-channel"}
 	service := NewConversationService(store)
@@ -539,7 +539,7 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 }
 
 func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarration(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "agent-result"}
 	service := NewConversationService(store)
@@ -606,7 +606,7 @@ func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarra
 }
 
 func TestConversationRunTurnRunnerProjectsGovernedAgentRejectionWithoutReproposal(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "agent-rejection"}
 	service := NewConversationService(store)
@@ -736,7 +736,7 @@ func TestGovernedConversationActionFailureProjectsStaleRevision(t *testing.T) {
 }
 
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "legacy-round"}
 	service := NewConversationService(store)
@@ -774,7 +774,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 }
 
 func TestConversationRunTurnRunnerRetriesWithoutPersistingProviderErrors(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "retry"}
 	service := NewConversationService(store)

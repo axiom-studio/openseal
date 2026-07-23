@@ -24,7 +24,7 @@ func (h *countedHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Hos
 }
 
 func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
@@ -62,7 +62,7 @@ func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
 }
 
 func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
@@ -195,7 +195,7 @@ func (h *blockingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Ho
 }
 
 func TestHostedTurnBudgetReservationIsAtomicAgainstConcurrentWorker(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "atomic-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
@@ -267,7 +267,7 @@ func (h *retryingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Ho
 }
 
 func TestHostedTurnBudgetRetryReusesAndSettlesOneReservation(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "retry-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",

@@ -11,7 +11,7 @@ import (
 
 func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }
@@ -110,7 +110,7 @@ func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 }
 
 func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
-	service := NewConversationService(NewMemoryStore(100))
+	service := NewConversationService(NewMemoryStore())
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "visibility"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
@@ -173,7 +173,7 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 
 func TestConversationServicePersistsAQuietRound(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "quiet"}
@@ -201,7 +201,7 @@ func TestConversationServicePersistsAQuietRound(t *testing.T) {
 
 func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }
@@ -300,7 +300,7 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 
 func TestConversationParticipationRoundIsAtomicUnderConcurrency(t *testing.T) {
 	t.Parallel()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return fixed }

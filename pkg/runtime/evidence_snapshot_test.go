@@ -24,7 +24,7 @@ func TestScheduledInitiativeEvidenceSnapshotPersistsAcrossStoresAndReplay(t *tes
 		open func(*testing.T) (evidenceProjectionStore, func() evidenceProjectionStore)
 	}{
 		{name: "memory", open: func(t *testing.T) (evidenceProjectionStore, func() evidenceProjectionStore) {
-			store := NewMemoryStore(20)
+			store := NewMemoryStore()
 			return store, func() evidenceProjectionStore { return store }
 		}},
 		{name: "sqlite", open: func(t *testing.T) (evidenceProjectionStore, func() evidenceProjectionStore) {
@@ -205,7 +205,7 @@ func TestScheduledInitiativeEvidenceSnapshotPersistsAcrossStoresAndReplay(t *tes
 
 func TestEvidenceSnapshotExcludesRetentionExpiredObservations(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "retention"}
 	initiative, monitorRuns := seedExecutableMonitorInitiative(t, store, scope)
 	base := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
@@ -229,7 +229,7 @@ func TestEvidenceSnapshotExcludesRetentionExpiredObservations(t *testing.T) {
 
 func TestObjectiveSchedulerDefersInactiveInitiativeSynthesis(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "paused-synthesis"}
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
 	due := now.Add(-time.Minute)
@@ -293,7 +293,7 @@ func TestEvidenceSnapshotProjectsToHostedInputWithoutRawSourceState(t *testing.T
 }
 
 func TestAgentRunWorkerRecordsEvidenceSnapshotInputReference(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "snapshot-ref"}
 	snapshot := &EvidenceSnapshot{APIVersion: evidenceSnapshotAPIVersion, ID: "sha256:stable", InitiativeID: "initiative-one", ObservationLimit: 25, SummaryRuneLimit: 1000, TotalSummaryRuneLimit: 20000, Observations: []EvidenceSnapshotObservation{}}
 	projected, err := evidenceSnapshotContext(snapshot)
@@ -339,7 +339,7 @@ func TestAgentRunWorkerRecordsEvidenceSnapshotInputReference(t *testing.T) {
 
 func TestObjectiveSchedulerFailsClosedForAmbiguousInitiativeMembership(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "ambiguous"}
 	due := time.Now().Add(-time.Minute).UTC()
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{

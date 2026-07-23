@@ -12,7 +12,7 @@ import (
 )
 
 func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(context.Background(), runtime.CreateAgentRunRequest{

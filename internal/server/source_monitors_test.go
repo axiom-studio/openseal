@@ -11,7 +11,7 @@ import (
 )
 
 func TestSourceMonitorAPIExposesCheckpointAndEvidenceReadOnly(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	ctx := context.Background()
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}

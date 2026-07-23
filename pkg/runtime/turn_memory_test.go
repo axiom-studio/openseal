@@ -10,7 +10,7 @@ import (
 )
 
 func TestMemoryAgentTurnsEnforceOneActiveTurn(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	portfolio := NewPortfolioService(store)

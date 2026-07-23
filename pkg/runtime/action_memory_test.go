@@ -11,7 +11,7 @@ import (
 )
 
 func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

@@ -12,7 +12,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore(50) }},
+		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-changes.db"))
 			if err != nil {
@@ -153,7 +153,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 }
 
 func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	conversations := NewConversationService(store)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "private-stream"}

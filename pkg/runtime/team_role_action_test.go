@@ -16,7 +16,7 @@ import (
 
 func TestGovernedTeamRoleActionActivatesImmutableDefinitionAndReplays(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	teams, agentDeploymentID := teamRoleActionRegistry(t, ctx, scope)
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "accessibility-team"}

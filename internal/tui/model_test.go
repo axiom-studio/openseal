@@ -2439,7 +2439,7 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 }
 
 func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "local", ID: "research"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	portfolio := runtime.NewPortfolioService(store)
@@ -3470,7 +3470,7 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 }
 
 func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
@@ -3514,7 +3514,7 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 }
 
 func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	source, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
 		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
@@ -3585,7 +3585,7 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 }
 
 func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
 	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
@@ -3656,7 +3656,7 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 }
 
 func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "local", ID: "activity-http"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
 	portfolio := runtime.NewPortfolioService(store)

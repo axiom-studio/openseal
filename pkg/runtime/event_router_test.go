@@ -16,7 +16,7 @@ func TestObjectiveEventRouterMatchesAndCreatesAuditedRunsExactlyOnce(t *testing.
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore(100) }},
+		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "events.db"))
 			if err != nil {
@@ -157,7 +157,7 @@ func TestObjectiveEventRuleCapabilityRequiresBudgetForBothDurablePhases(t *testi
 
 func TestObjectiveEventRouterIsScopeLifecycleAndCredentialSafe(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	router := NewObjectiveEventRouter(store)
 	activeScope := Scope{Kind: "tenant", ID: "active"}
 	pausedScope := Scope{Kind: "tenant", ID: "paused"}

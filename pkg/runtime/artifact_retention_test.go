@@ -20,7 +20,7 @@ func (s *retentionContentStore) Delete(_ context.Context, _ Scope, ref string) (
 
 func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T) {
 	ctx := t.Context()
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	catalog := NewArtifactCatalog(store)
 	now := time.Date(2026, 7, 13, 1, 0, 0, 0, time.UTC)
 	for _, fixture := range []struct {

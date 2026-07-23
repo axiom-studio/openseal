@@ -15,7 +15,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 		open func(*testing.T) (KernelStore, func())
 	}{
 		{name: "memory", open: func(*testing.T) (KernelStore, func()) {
-			return NewMemoryStore(50), func() {}
+			return NewMemoryStore(), func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cross-surface-activity.db"))

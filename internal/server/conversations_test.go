@@ -11,7 +11,7 @@ import (
 )
 
 func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	server := NewServer(store, zap.NewNop().Sugar())
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},

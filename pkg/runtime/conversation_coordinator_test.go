@@ -13,7 +13,7 @@ import (
 func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
@@ -151,7 +151,7 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 func TestConversationCoordinatorNeverExposesTargetedMessageToOtherAgents(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	service := NewConversationService(NewMemoryStore(100))
+	service := NewConversationService(NewMemoryStore())
 	scope := Scope{Kind: "tenant", ID: "private"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, Title: "Launch", IdempotencyKey: "private-channel",
@@ -223,7 +223,7 @@ func TestOpenConversationMessagesTracksDurableResolution(t *testing.T) {
 func TestConversationCoordinatorFailsClosedWithoutCommittingPartialRound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "failure"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
@@ -265,7 +265,7 @@ func TestConversationCoordinatorFailsClosedWithoutCommittingPartialRound(t *test
 func TestConversationCoordinatorIsolatesUnavailableParticipantAndPreservesHealthyWork(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	service := NewConversationService(NewMemoryStore(100))
+	service := NewConversationService(NewMemoryStore())
 	scope := Scope{Kind: "tenant", ID: "degraded"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops"}, Title: "Operations", IdempotencyKey: "degraded-channel",
@@ -349,7 +349,7 @@ func TestConversationCoordinatorIsolatesUnavailableParticipantAndPreservesHealth
 
 func TestConversationCoordinatorEnforcesExplicitRequiredRoleQuorum(t *testing.T) {
 	t.Parallel()
-	service := NewConversationService(NewMemoryStore(100))
+	service := NewConversationService(NewMemoryStore())
 	scope := Scope{Kind: "tenant", ID: "required-role"}
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops"}, Title: "Operations", IdempotencyKey: "required-role-channel",
@@ -393,7 +393,7 @@ func TestConversationCoordinatorEnforcesExplicitRequiredRoleQuorum(t *testing.T)
 func TestConversationCoordinatorRejectsStaleProposalsAfterChannelDrift(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "drift"}
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{

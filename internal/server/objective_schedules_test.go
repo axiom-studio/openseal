@@ -13,7 +13,7 @@ import (
 
 func TestObjectiveScheduleReconciliationProjectsCanonicalRuns(t *testing.T) {
 	ctx := t.Context()
-	store := runtime.NewMemoryStore(100)
+	store := runtime.NewMemoryStore()
 	due := time.Now().UTC().Add(-time.Minute)
 	objective, err := runtime.NewPortfolioService(store).CreateObjective(ctx, runtime.CreateObjectiveRequest{
 		Scope: runtime.Scope{Kind: "tenant", ID: "operations"},

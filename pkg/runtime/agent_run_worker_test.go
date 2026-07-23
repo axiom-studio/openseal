@@ -34,7 +34,7 @@ func (r *workerBudgetPlanningRunner) RunTurn(_ context.Context, input TurnExecut
 }
 
 func TestAgentRunWorkerPreservesRunnerBudgetPlanning(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher",
@@ -89,7 +89,7 @@ func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
 		name  string
 		store func(*testing.T) KernelStore
 	}{
-		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore(50) }},
+		{name: "memory", store: func(*testing.T) KernelStore { return NewMemoryStore() }},
 		{name: "sqlite", store: func(t *testing.T) KernelStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "workers.db"))
 			if err != nil {
@@ -173,7 +173,7 @@ func TestAgentRunWorkerPoolAdvancesSleepsAndResumes(t *testing.T) {
 }
 
 func TestAgentRunWorkerCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	portfolio := NewPortfolioService(store)
 	source, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
@@ -249,7 +249,7 @@ func TestAgentRunWorkerCompletesArtifactFreeHandoffFromTerminalChild(t *testing.
 }
 
 func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	catalog, scope := governedActionCatalog(t)
 	if err := catalog.Bind(t.Context(), &skill.Binding{
 		ID: "team-release-binding", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "release-team",
@@ -343,7 +343,7 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 }
 
 func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "proposal-failure"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -403,7 +403,7 @@ func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t
 }
 
 func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "fork-worker"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "fork", Source: RunSourceManual,
@@ -469,7 +469,7 @@ func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
 func TestAgentRunWorkersExecuteJoinAllAndJoinAnyConcurrently(t *testing.T) {
 	for _, mode := range []runbook.JoinMode{runbook.JoinAll, runbook.JoinAny} {
 		t.Run(string(mode), func(t *testing.T) {
-			store := NewMemoryStore(50)
+			store := NewMemoryStore()
 			scope := Scope{Kind: "tenant", ID: "fork-" + string(mode)}
 			steps := map[string]runbook.Step{
 				"fork": {Kind: runbook.StepFork, Fork: &runbook.ForkStep{Branches: map[string]string{"fast": "fast", "slow": "slow"}, Join: "join"}},
@@ -558,7 +558,7 @@ func countAgentRunsWithStatus(runs []*AgentRun, status AgentRunStatus) int {
 }
 
 func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
-	store := NewMemoryStore(50)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "delegation"}
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "parent", Version: "1", Name: "Parent", Entrypoints: map[string]string{"manual": "delegate"}, Steps: map[string]runbook.Step{
 		"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
@@ -630,7 +630,7 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 }
 
 func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -690,7 +690,7 @@ func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
 }
 
 func TestAgentRunWorkerPoolRenewsLeaseDuringLongTurn(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scope := Scope{Kind: "local", ID: "test"}

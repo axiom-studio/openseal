@@ -15,7 +15,7 @@ func TestEventSourceCheckpointIsBoundedAndSurvivesRestart(t *testing.T) {
 		open func(*testing.T) (EventSourceCheckpointStore, func() EventSourceCheckpointStore, func())
 	}{
 		{name: "memory", open: func(*testing.T) (EventSourceCheckpointStore, func() EventSourceCheckpointStore, func()) {
-			store := NewMemoryStore(10)
+			store := NewMemoryStore()
 			return store, func() EventSourceCheckpointStore { return store }, func() {}
 		}},
 		{name: "sqlite", open: func(t *testing.T) (EventSourceCheckpointStore, func() EventSourceCheckpointStore, func()) {
@@ -73,7 +73,7 @@ func TestEventSourceCheckpointIsBoundedAndSurvivesRestart(t *testing.T) {
 }
 
 func TestEventSourceCheckpointCASSerializesReplicas(t *testing.T) {
-	store := NewMemoryStore(10)
+	store := NewMemoryStore()
 	service := NewEventSourceCheckpointService(store)
 	scope := Scope{Kind: "tenant", ID: "race"}
 	requests := []AdvanceEventSourceCheckpointRequest{
@@ -109,7 +109,7 @@ func TestEventSourceCheckpointCASSerializesReplicas(t *testing.T) {
 }
 
 func TestEventSourceCheckpointRejectsUnsafeIdentity(t *testing.T) {
-	service := NewEventSourceCheckpointService(NewMemoryStore(10))
+	service := NewEventSourceCheckpointService(NewMemoryStore())
 	_, err := service.Advance(context.Background(), AdvanceEventSourceCheckpointRequest{
 		Scope: Scope{Kind: "tenant", ID: "acme"}, Source: "webhook", SubscriptionID: "bad\nidentity", EventIDs: []string{"event"},
 	})

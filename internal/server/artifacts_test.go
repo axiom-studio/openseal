@@ -18,7 +18,7 @@ import (
 )
 
 func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testing.T) {
-	server := NewServer(runtime.NewMemoryStore(100), zap.NewNop().Sugar())
+	server := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
 	body := `{
 		"artifact": {
 			"id":"report","version":1,"scope":{"kind":"tenant","id":"one"},
@@ -85,7 +85,7 @@ func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testin
 }
 
 func TestArtifactContentRoutesStreamOnlyConfiguredOperations(t *testing.T) {
-	server := NewServer(runtime.NewMemoryStore(100), zap.NewNop().Sugar())
+	server := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
 	contentStore, err := artifactstore.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

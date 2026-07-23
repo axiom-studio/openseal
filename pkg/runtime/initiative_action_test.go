@@ -83,7 +83,7 @@ func TestGovernedInitiativeCreateUsesApprovalActionAndIdempotencyLifecycle(t *te
 
 func TestInitiativeActionCatalogPublishesExecutableCompositeSchemas(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
-	catalog := initiativeActionCatalog(t, NewMemoryStore(20), scope, "research-team")
+	catalog := initiativeActionCatalog(t, NewMemoryStore(), scope, "research-team")
 	bound, err := catalog.Resolve(context.Background(), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "research-team", InitiativeManagementSkillID, InitiativeManagementSkillVersion, InitiativeActionCreate)
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestInitiativeActionCatalogPublishesExecutableCompositeSchemas(t *testing.T
 }
 
 func TestInitiativeActionsRejectInjectedOwnerForeignObjectivesTargetsAndStaleRevision(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "marketing"}
@@ -162,7 +162,7 @@ func TestInitiativeActionsRejectInjectedOwnerForeignObjectivesTargetsAndStaleRev
 }
 
 func TestInitiativePauseIsCASAndReplaySafe(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre"}
@@ -210,7 +210,7 @@ func TestInitiativePauseIsCASAndReplaySafe(t *testing.T) {
 }
 
 func TestGovernedInitiativeUpdateComposesMultipleObjectivesAndIsReplaySafe(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "go-to-market"}
@@ -274,7 +274,7 @@ type initiativeActionStoreCase struct {
 
 func initiativeActionStores() []initiativeActionStoreCase {
 	return []initiativeActionStoreCase{
-		{name: "memory", open: func(*testing.T) (InitiativeKernelStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "memory", open: func(*testing.T) (InitiativeKernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (InitiativeKernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "initiatives.db"))
 			if err != nil {

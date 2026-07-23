@@ -7,7 +7,7 @@ import (
 )
 
 func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "delegation-budget"}
 	portfolio := NewPortfolioService(store)
@@ -58,7 +58,7 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 }
 
 func TestGroupedDelegationCannotOverAllocateParentBudget(t *testing.T) {
-	store := NewMemoryStore(100)
+	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "group-budget"}
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

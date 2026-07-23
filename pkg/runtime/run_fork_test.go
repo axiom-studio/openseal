@@ -12,7 +12,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 		name string
 		open func(*testing.T) (atomicForkStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (atomicForkStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "memory", open: func(*testing.T) (atomicForkStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (atomicForkStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "coordinator.db"))
 			if err != nil {
@@ -68,7 +68,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 }
 
 func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: RunSourceManual,
@@ -117,7 +117,7 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 }
 
 func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "lead", Goal: "Coordinate research", Source: RunSourceManual,

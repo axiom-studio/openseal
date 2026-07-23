@@ -18,7 +18,7 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 		name string
 		open func(*testing.T) (KernelStore, func())
 	}{
-		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(20), func() {} }},
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
 		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "worker.db"))
 			if err != nil {
@@ -93,7 +93,7 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 }
 
 func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	baseCatalog, proposal := createRunnableAction(t, store, now)
 	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
@@ -149,7 +149,7 @@ func (c *toolTransportActionCatalog) Resolve(ctx context.Context, scope skill.Sc
 }
 
 func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, scope := governedActionCatalog(t)
 	portfolio := NewPortfolioService(store)
@@ -227,7 +227,7 @@ func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
 }
 
 func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0
@@ -265,7 +265,7 @@ func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
 }
 
 func TestActionWorkerRenewsLeaseDuringLongDispatch(t *testing.T) {
-	store := NewMemoryStore(20)
+	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
