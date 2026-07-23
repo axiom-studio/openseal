@@ -20,7 +20,16 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v7"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v8"
+
+// HostedAgentTarget is one active, same-scope Agent deployment eligible for
+// bounded delegation. ID is the only durable identity; DisplayName and Purpose
+// are model-facing discovery labels and are never persisted as substitutes.
+type HostedAgentTarget struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Purpose     string `json:"purpose,omitempty"`
+}
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
 // contains no binding configuration or credential value.
@@ -84,6 +93,7 @@ type HostedTurnRequest struct {
 	Goal                   string                   `json:"goal"`
 	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
+	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
 	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
@@ -161,6 +171,7 @@ type HostedTurnRunnerConfig struct {
 	DefinitionID       string
 	DefinitionVersion  string
 	SystemInstructions []string
+	EligibleAgents     []HostedAgentTarget
 	SkillPrompts       []HostedSkillPrompt
 	Actions            []capability.ModelAction
 	ModelCredential    *capability.CredentialReference
@@ -193,6 +204,16 @@ func NewHostedTurnRunner(host TurnHost, config HostedTurnRunnerConfig) (*HostedT
 			return nil, fmt.Errorf("hosted Skill prompt reference %q is ambiguous", reference)
 		}
 		seenPromptReferences[reference] = true
+	}
+	seenAgents := make(map[string]bool, len(config.EligibleAgents))
+	for _, target := range config.EligibleAgents {
+		if strings.TrimSpace(target.ID) == "" || strings.TrimSpace(target.DisplayName) == "" {
+			return nil, errors.New("eligible hosted Agents require canonical id and display name")
+		}
+		if seenAgents[target.ID] {
+			return nil, fmt.Errorf("eligible hosted Agent ID %q is duplicated", target.ID)
+		}
+		seenAgents[target.ID] = true
 	}
 	return &HostedTurnRunner{host: host, config: config}, nil
 }
@@ -286,6 +307,14 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response.ProposedFork != nil {
 		proposalCount++
+		for index := range response.ProposedFork.Branches {
+			response.ProposedFork.Branches[index].AssignedAgentID, err = resolveHostedAgentTarget(
+				response.ProposedFork.Branches[index].AssignedAgentID, request.EligibleAgents,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("invalid hosted fork branch %s target: %w", response.ProposedFork.Branches[index].ID, err)
+			}
+		}
 		if err := response.ProposedFork.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid hosted fork proposal: %w", err)
 		}
@@ -302,6 +331,12 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response.ProposedDelegation != nil {
 		proposalCount++
+		response.ProposedDelegation.AssignedAgentID, err = resolveHostedAgentTarget(
+			response.ProposedDelegation.AssignedAgentID, request.EligibleAgents,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("invalid hosted delegation target: %w", err)
+		}
 		if err := response.ProposedDelegation.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid hosted delegation proposal: %w", err)
 		}
@@ -404,11 +439,22 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	if err != nil {
 		return HostedTurnRequest{}, err
 	}
+	inputContext := cloneMap(input.Run.Context)
+	if len(r.config.EligibleAgents) > 0 {
+		if inputContext == nil {
+			inputContext = make(map[string]interface{})
+		}
+		// Keep the portable typed field authoritative while also projecting it
+		// into inputContext for hosts whose system contract already discovers
+		// delegation targets there.
+		inputContext["eligibleAgents"] = cloneHostedAgentTargets(r.config.EligibleAgents)
+	}
 	request := HostedTurnRequest{
 		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
 		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
-		Goal: input.Run.Goal, InputContext: cloneMap(input.Run.Context), SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
+		Goal: input.Run.Goal, InputContext: inputContext, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
+		EligibleAgents:         cloneHostedAgentTargets(r.config.EligibleAgents),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
 		Budget:                 budget,
@@ -426,6 +472,35 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		return HostedTurnRequest{}, err
 	}
 	return request, nil
+}
+
+func resolveHostedAgentTarget(reference string, eligible []HostedAgentTarget) (string, error) {
+	reference = strings.TrimSpace(reference)
+	for _, target := range eligible {
+		if reference == target.ID {
+			return target.ID, nil
+		}
+	}
+	matches := make([]string, 0, 1)
+	for _, target := range eligible {
+		if strings.EqualFold(reference, strings.TrimSpace(target.DisplayName)) {
+			matches = append(matches, target.ID)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("Agent name %q is ambiguous; use canonical ID %s", reference, strings.Join(matches, " or "))
+	}
+	ids := make([]string, 0, len(eligible))
+	for _, target := range eligible {
+		ids = append(ids, target.ID)
+	}
+	if len(ids) == 0 {
+		return "", fmt.Errorf("Agent %q is not eligible; no delegation targets are available", reference)
+	}
+	return "", fmt.Errorf("Agent %q is not eligible; use canonical ID %s", reference, strings.Join(ids, ", "))
 }
 
 func cloneHostedCredentialReference(reference *capability.CredentialReference) *capability.CredentialReference {
@@ -680,4 +755,11 @@ func cloneHostedSkillPrompts(values []HostedSkillPrompt) []HostedSkillPrompt {
 		return nil
 	}
 	return append([]HostedSkillPrompt(nil), values...)
+}
+
+func cloneHostedAgentTargets(values []HostedAgentTarget) []HostedAgentTarget {
+	if values == nil {
+		return nil
+	}
+	return append([]HostedAgentTarget(nil), values...)
 }
