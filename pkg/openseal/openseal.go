@@ -401,6 +401,9 @@ type (
 	AgentTurn                          = runtime.AgentTurn
 	AgentTurnStatus                    = runtime.AgentTurnStatus
 	AgentTurnFilter                    = runtime.AgentTurnFilter
+	AgentTurnRecord                    = kernelapi.AgentTurnRecord
+	AgentTurnDecisionRecord            = kernelapi.AgentTurnDecisionRecord
+	AgentTurnActionRecord              = kernelapi.AgentTurnActionRecord
 	TurnDecision                       = runtime.TurnDecision
 	TurnAction                         = runtime.TurnAction
 	TurnUsage                          = runtime.TurnUsage
@@ -714,6 +717,8 @@ const (
 	ActivityCapabilityVersion               = kernelapi.ActivityCapabilityVersion
 	ActionCallsCapabilityID                 = kernelapi.ActionCallsCapabilityID
 	ActionCallsCapabilityVersion            = kernelapi.ActionCallsCapabilityVersion
+	AgentTurnsCapabilityID                  = kernelapi.AgentTurnsCapabilityID
+	AgentTurnsCapabilityVersion             = kernelapi.AgentTurnsCapabilityVersion
 	SkillActionsCapabilityID                = kernelapi.SkillActionsCapabilityID
 	SkillActionsCapabilityVersion           = kernelapi.SkillActionsCapabilityVersion
 	SkillBindingsCapabilityID               = kernelapi.SkillBindingsCapabilityID
@@ -874,6 +879,14 @@ func ActivityCapability() KernelCapability {
 
 func ActionCallsCapability() KernelCapability {
 	return kernelapi.ActionCallsCapability()
+}
+
+func AgentTurnsCapability() KernelCapability {
+	return kernelapi.AgentTurnsCapability()
+}
+
+func ProjectAgentTurn(turn *AgentTurn) *AgentTurnRecord {
+	return kernelapi.ProjectAgentTurn(turn)
 }
 
 // SourcePoliciesCapability returns the portable credential-free governance
