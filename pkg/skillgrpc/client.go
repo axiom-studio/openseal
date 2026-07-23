@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
-	skillpb "github.com/axiom-studio/skills.sdk/grpc/skillpb"
 	"github.com/axiom-studio/skills.sdk/executor"
+	skillpb "github.com/axiom-studio/skills.sdk/grpc/skillpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -21,6 +22,16 @@ type Client struct {
 	client  skillpb.SkillServiceClient
 	skillID string
 	address string
+}
+
+// ExecutionContext identifies the durable execution invoking a managed Skill.
+// Variables must contain non-secret metadata only. Credential material belongs
+// exclusively in the bindings transport.
+type ExecutionContext struct {
+	RunID     string
+	AgentID   string
+	Namespace string
+	Variables map[string]string
 }
 
 // NewClient creates a new gRPC skill client
@@ -77,6 +88,17 @@ func (c *Client) Close() error {
 
 // Execute executes a node on the skill service
 func (c *Client) Execute(ctx context.Context, step *executor.StepDefinition, resolver executor.TemplateResolver) (*executor.StepResult, error) {
+	return c.ExecuteWithContext(ctx, step, resolver, executionContextFromResolver(resolver))
+}
+
+// ExecuteWithContext executes a node with authoritative durable execution
+// identity supplied by the caller.
+func (c *Client) ExecuteWithContext(
+	ctx context.Context,
+	step *executor.StepDefinition,
+	resolver executor.TemplateResolver,
+	execution ExecutionContext,
+) (*executor.StepResult, error) {
 	c.mu.RLock()
 	client := c.client
 	c.mu.RUnlock()
@@ -130,10 +152,10 @@ func (c *Client) Execute(ctx context.Context, step *executor.StepDefinition, res
 
 	// Build context
 	execCtx := &skillpb.ExecutionContext{
-		RunId:     "", // TODO: get from resolver
-		AgentId:   "", // TODO: get from resolver
-		Namespace: "", // TODO: get from resolver
-		Variables: make(map[string]string),
+		RunId:     strings.TrimSpace(execution.RunID),
+		AgentId:   strings.TrimSpace(execution.AgentID),
+		Namespace: strings.TrimSpace(execution.Namespace),
+		Variables: cloneVariables(execution.Variables),
 	}
 
 	// Build request
@@ -172,6 +194,47 @@ func (c *Client) Execute(ctx context.Context, step *executor.StepDefinition, res
 		Output:   output,
 		NextStep: resp.NextStep,
 	}, nil
+}
+
+func executionContextFromResolver(resolver executor.TemplateResolver) ExecutionContext {
+	provider, ok := resolver.(interface{ GetContextData() map[string]interface{} })
+	if !ok {
+		return ExecutionContext{}
+	}
+	data := provider.GetContextData()
+	run, _ := data["run"].(map[string]interface{})
+	self, _ := data["self"].(map[string]interface{})
+	return ExecutionContext{
+		RunID:     firstString(run, "id", "runId"),
+		AgentID:   firstString(run, "agentId", "deploymentId"),
+		Namespace: firstNonEmpty(firstString(run, "namespace"), firstString(self, "namespace")),
+	}
+}
+
+func firstString(values map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func cloneVariables(variables map[string]string) map[string]string {
+	cloned := make(map[string]string, len(variables))
+	for key, value := range variables {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // GetNodeTypes returns the node types this skill provides
