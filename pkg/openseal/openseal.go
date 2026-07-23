@@ -205,6 +205,7 @@ type (
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
 	WorkforceAuthoringRunStore                = runtime.WorkforceAuthoringRunStore
 	WorkforceAuthoringRunService              = runtime.WorkforceAuthoringRunService
+	WorkforceAuthoringCatalogResolver         = runtime.WorkforceAuthoringCatalogResolver
 	WorkforceAuthoringWorkerConfig            = runtime.WorkforceAuthoringWorkerConfig
 	WorkforceAuthoringWorker                  = runtime.WorkforceAuthoringWorker
 

@@ -32,6 +32,16 @@ type cancellationBoundaryWorkforceGenerator struct {
 	startedOnce      sync.Once
 }
 
+type staticWorkforceCatalogResolver struct {
+	catalog authoring.CapabilityCatalog
+	calls   atomic.Int32
+}
+
+func (r *staticWorkforceCatalogResolver) ResolveWorkforceAuthoringCatalog(context.Context, *authoring.ChangeSet) (authoring.CapabilityCatalog, error) {
+	r.calls.Add(1)
+	return r.catalog, nil
+}
+
 func (g *cancellationBoundaryWorkforceGenerator) Generate(ctx context.Context, _ authoring.GenerateRequest) ([]byte, error) {
 	g.startedOnce.Do(func() { close(g.started) })
 	<-ctx.Done()
@@ -129,6 +139,42 @@ func TestWorkforceAuthoringPrepareQueuesDurableRunAndConcurrentWorkersGenerateOn
 	}
 	if !hasWorkforceAuthoringEvent(events, "workforce.generation.phase", string(authoring.CompilePhaseCandidateValidate)) {
 		t.Fatalf("validation phase missing from events = %#v", events)
+	}
+}
+
+func TestWorkforceAuthoringWorkerResolvesCatalogInsideDurableRun(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	generator := testAuthoringGenerator(t)
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &staticWorkforceCatalogResolver{catalog: request.Catalog}
+	resolver.catalog.AvailableCredentials = map[string]bool{"vault": true}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, WorkerID: "catalog-worker",
+		LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second, CatalogResolver: resolver,
+	})
+	if worked, err := worker.RunOnce(context.Background()); err != nil || !worked {
+		t.Fatalf("worked=%t err=%v", worked, err)
+	}
+	generated, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || resolver.calls.Load() != 1 || !generated.Catalog.AvailableCredentials["vault"] ||
+		!generated.Generation.Request.Catalog.AvailableCredentials["vault"] {
+		t.Fatalf("generated=%#v calls=%d err=%v", generated, resolver.calls.Load(), err)
+	}
+	events, err := store.ListActivity(context.Background(), ActivityFilter{
+		Scope: Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, RunID: run.ID, Limit: 20,
+	})
+	if err != nil || !hasWorkforceAuthoringEvent(events, "workforce.generation.phase", string(authoring.CompilePhaseCapabilityResolve)) {
+		t.Fatalf("capability resolution events=%#v err=%v", events, err)
 	}
 }
 

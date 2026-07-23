@@ -525,6 +525,73 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 	return s.GeneratePreparedWithProgress(ctx, scope, id, expectedRevision, nil)
 }
 
+// RefreshPreparedCatalog replaces host-owned capability facts before provider
+// invocation. It is valid only while the durable generation intent is still
+// evaluating and uses revision CAS so concurrent workers cannot compile
+// different catalogs for the same attempt.
+func (s *ChangeSetService) RefreshPreparedCatalog(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64, catalog CapabilityCatalog) (*ChangeSet, error) {
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		return nil, fmt.Errorf("authoring capability catalog: %w", err)
+	}
+	changeSet, err := s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	if changeSet.Revision != expectedRevision || changeSet.Status != ChangeSetEvaluating || changeSet.Generation == nil {
+		return nil, ErrChangeSetRevision
+	}
+	currentDigest, err := digestJSON(changeSet.Catalog)
+	if err != nil {
+		return nil, err
+	}
+	nextDigest, err := digestJSON(catalog)
+	if err != nil {
+		return nil, err
+	}
+	if currentDigest == nextDigest {
+		return changeSet, nil
+	}
+	next := cloneChangeSet(changeSet)
+	next.Catalog = cloneCapabilityCatalog(catalog)
+	next.Generation.Request.Catalog = cloneCapabilityCatalog(catalog)
+	next.Revision++
+	next.UpdatedAt = s.now().UTC()
+	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{
+		Revision: next.Revision, From: ChangeSetEvaluating, To: ChangeSetEvaluating,
+		Reason: "capability_catalog_resolved", Actor: next.Actor, At: next.UpdatedAt,
+	})
+	return s.store.UpdateChangeSet(ctx, next, expectedRevision)
+}
+
+// FailPreparedGeneration terminally records a pre-provider failure such as a
+// host capability catalog lookup that could not fail closed. Retry remains an
+// explicit governed ChangeSet transition rather than an orphaned failed Run
+// attached to an evaluating aggregate.
+func (s *ChangeSetService) FailPreparedGeneration(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64, failureCode, publicMessage string) (*ChangeSet, error) {
+	failureCode, publicMessage = strings.TrimSpace(failureCode), strings.TrimSpace(publicMessage)
+	if failureCode == "" || publicMessage == "" {
+		return nil, errors.New("generation failure code and public message are required")
+	}
+	changeSet, err := s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	if changeSet.Revision != expectedRevision || changeSet.Status != ChangeSetEvaluating || changeSet.Generation == nil {
+		return nil, ErrChangeSetRevision
+	}
+	failed := cloneChangeSet(changeSet)
+	failed.Status = ChangeSetFailed
+	failed.Generation.FailureCode = failureCode
+	failed.Generation.LastError = publicMessage
+	failed.Revision++
+	failed.UpdatedAt = s.now().UTC()
+	failed.Lifecycle = append(failed.Lifecycle, ChangeSetLifecycleEvent{
+		Revision: failed.Revision, From: ChangeSetEvaluating, To: ChangeSetFailed,
+		Reason: "candidate_generation_failed", Actor: failed.Actor, At: failed.UpdatedAt,
+	})
+	return s.store.UpdateChangeSet(ctx, failed, expectedRevision)
+}
+
 // GeneratePreparedWithProgress is GeneratePrepared with a credential-free
 // compiler phase observer suitable for durable Run activity and checkpoints.
 func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64, observe CompileProgressObserver) (*ChangeSet, error) {

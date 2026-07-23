@@ -244,6 +244,7 @@ type RepairGenerator interface {
 type CompilePhase string
 
 const (
+	CompilePhaseCapabilityResolve CompilePhase = "resolving_capabilities"
 	CompilePhaseProviderRequest   CompilePhase = "requesting_provider"
 	CompilePhaseSchemaRepair      CompilePhase = "repairing_schema"
 	CompilePhaseCandidateValidate CompilePhase = "validating_candidate"
