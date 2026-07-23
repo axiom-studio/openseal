@@ -920,6 +920,12 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	if err != nil {
 		return nil, false, err
 	}
+	if isActivationContinuation(current) {
+		request.Placement, err = activationPlacementUpdate(current.Placement, request.Placement)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	canonicalizePlacement(&request.Placement, current.Scope, &current.Result.Candidate)
 	if err := validatePlacementReferences(request.Placement, &current.Result.Candidate); err != nil {
 		return nil, false, err
@@ -981,6 +987,70 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 		return s.UpdatePlacement(ctx, request)
 	}
 	return updated, false, err
+}
+
+func isActivationContinuation(value *ChangeSet) bool {
+	if value == nil || value.ParentID == "" || value.Result.Candidate.Activation != WorkforceActivationActive ||
+		len(value.Result.Diff) != 1 {
+		return false
+	}
+	return value.Result.Diff[0].Path == "activation"
+}
+
+// activationPlacementUpdate keeps the receipt-derived resource identities and
+// compare-and-swap revisions immutable. Clients may omit those server-owned
+// fields while selecting credentials or non-secret binding configuration, but
+// they may not retarget an activation plan to different resources.
+func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSetPlacement, error) {
+	if requested.TeamDeploymentID != "" && requested.TeamDeploymentID != current.TeamDeploymentID {
+		return ChangeSetPlacement{}, errors.New("activation target team deployment is immutable")
+	}
+	if requested.TeamExpectedRevision != 0 && requested.TeamExpectedRevision != current.TeamExpectedRevision {
+		return ChangeSetPlacement{}, errors.New("activation target team revision is immutable")
+	}
+	if requested.InitiativeID != "" && requested.InitiativeID != current.InitiativeID {
+		return ChangeSetPlacement{}, errors.New("activation target initiative is immutable")
+	}
+	if requested.InitiativeExpectedRevision != 0 &&
+		requested.InitiativeExpectedRevision != current.InitiativeExpectedRevision {
+		return ChangeSetPlacement{}, errors.New("activation target initiative revision is immutable")
+	}
+	if requested.Environment != "" && requested.Environment != current.Environment {
+		return ChangeSetPlacement{}, errors.New("activation target environment is immutable")
+	}
+	immutableMaps := []struct {
+		name      string
+		requested interface{}
+		current   interface{}
+		provided  bool
+	}{
+		{"Agent deployments", requested.AgentDeploymentIDs, current.AgentDeploymentIDs, requested.AgentDeploymentIDs != nil},
+		{"Agent revisions", requested.AgentExpectedRevisions, current.AgentExpectedRevisions, requested.AgentExpectedRevisions != nil},
+		{"objectives", requested.Objectives, current.Objectives, requested.Objectives != nil},
+		{"Skill sources", requested.SkillSourceIdentities, current.SkillSourceIdentities, requested.SkillSourceIdentities != nil},
+		{"Skill source versions", requested.SkillSourceVersions, current.SkillSourceVersions, requested.SkillSourceVersions != nil},
+		{"Skill runtime identities", requested.SkillRuntimeIdentities, current.SkillRuntimeIdentities, requested.SkillRuntimeIdentities != nil},
+	}
+	for _, field := range immutableMaps {
+		if !field.provided {
+			continue
+		}
+		requestedDigest, err := digestJSON(field.requested)
+		if err != nil {
+			return ChangeSetPlacement{}, fmt.Errorf("digest requested activation %s: %w", field.name, err)
+		}
+		currentDigest, err := digestJSON(field.current)
+		if err != nil {
+			return ChangeSetPlacement{}, fmt.Errorf("digest current activation %s: %w", field.name, err)
+		}
+		if requestedDigest != currentDigest {
+			return ChangeSetPlacement{}, fmt.Errorf("activation target %s are immutable", field.name)
+		}
+	}
+	next := clonePlacement(current)
+	next.CredentialReferences = clonePlacement(requested).CredentialReferences
+	next.BindingConfigs = clonePlacement(requested).BindingConfigs
+	return next, nil
 }
 
 func validatePlacementReferences(placement ChangeSetPlacement, candidate *WorkforceCandidate) error {

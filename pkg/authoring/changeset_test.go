@@ -380,19 +380,29 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 		t.Fatalf("missing provider apply err=%v", err)
 	}
 
-	placed := clonePlacement(evaluated.Placement)
-	if placed.CredentialReferences == nil {
-		placed.CredentialReferences = map[string]map[string]capability.CredentialReference{}
-	}
-	placed.CredentialReferences["tenant/one/community-researcher"] = map[string]capability.CredentialReference{
-		"MODEL_PROVIDER": {Kind: "vault", ID: "29"},
-	}
+	placed := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"tenant/one/community-researcher": {
+			"MODEL_PROVIDER": {Kind: "vault", ID: "29"},
+		},
+	}}
 	updated, _, err := service.UpdatePlacement(context.Background(), UpdateChangeSetPlacementRequest{
 		Scope: scope, ChangeSetID: evaluated.ID, ExpectedRevision: evaluated.Revision, Placement: placed,
 		Reason: "Select authorized model provider", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "place-provider",
 	})
-	if err != nil || updated.Status != ChangeSetReview {
+	if err != nil || updated.Status != ChangeSetReview ||
+		updated.Placement.AgentDeploymentIDs["tenant/one/community-researcher"] != activation.Placement.AgentDeploymentIDs["tenant/one/community-researcher"] ||
+		updated.Placement.AgentExpectedRevisions["tenant/one/community-researcher"] != activation.Placement.AgentExpectedRevisions["tenant/one/community-researcher"] ||
+		updated.Placement.TeamDeploymentID != activation.Placement.TeamDeploymentID ||
+		updated.Placement.TeamExpectedRevision != activation.Placement.TeamExpectedRevision {
 		t.Fatalf("placement=%#v err=%v", updated, err)
+	}
+	retargeted := clonePlacement(updated.Placement)
+	retargeted.AgentDeploymentIDs["tenant/one/community-researcher"] = "different-agent"
+	if _, _, err = service.UpdatePlacement(context.Background(), UpdateChangeSetPlacementRequest{
+		Scope: scope, ChangeSetID: updated.ID, ExpectedRevision: updated.Revision, Placement: retargeted,
+		Reason: "Retarget activation", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "retarget-activation",
+	}); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("retargeted activation err=%v", err)
 	}
 	reviewed, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
 		Scope: scope, ChangeSetID: updated.ID, ExpectedRevision: updated.Revision, CandidateDigest: updated.CandidateDigest,
