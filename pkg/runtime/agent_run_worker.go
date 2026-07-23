@@ -130,6 +130,7 @@ type AgentRunWorkerPool struct {
 	actionObserver ActionProposalObserver
 	forks          *RunForkCoordinator
 	collaboration  *CollaborationService
+	requestInbox   *AgentRequestInboxReconciler
 	resolver       TurnRunnerResolver
 	logger         *zap.SugaredLogger
 	wake           chan struct{}
@@ -176,6 +177,9 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	}
 	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
 		pool.collaboration = NewCollaborationService(collaborationStore)
+	}
+	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
+		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore)
 	}
 	return pool, nil
 }
@@ -356,7 +360,18 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 }
 
 func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {
-	if p.collaboration == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
+	if run == nil || !isTerminalAgentRunStatus(run.Status) {
+		return
+	}
+	if p.requestInbox != nil {
+		applied, err := p.requestInbox.ResolveDecisionRun(ctx, run)
+		if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrInvalidAgentRequestState) {
+			p.logger.Warnw("failed to resolve AgentRequest inbox decision", "runId", run.ID, "error", err)
+		} else if applied {
+			p.Wake()
+		}
+	}
+	if p.collaboration == nil {
 		return
 	}
 	_, err := p.collaboration.ResolveTerminalAgentRequestChild(ctx, run)
@@ -386,6 +401,7 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: proposal.AssignedAgentID},
 		SourceRunID: run.ID, Goal: proposal.Goal, SharedContext: sharedContext, ChildCheckpoint: proposal.Checkpoint,
+		AcceptancePolicy: AgentRequestAcceptancePreauthorized,
 		BudgetAllocation: proposal.Budget, IdempotencyKey: key,
 	})
 	if err != nil {
@@ -686,8 +702,22 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 		if len(result.Runs) > 0 {
 			p.Wake()
 		}
+		p.reconcileAgentRequestInbox(ctx)
 		p.reconcileForkChildren(ctx)
 		release()
+	}
+}
+
+func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) {
+	if p.requestInbox == nil || p.config.Kind != RunKindAgentWork {
+		return
+	}
+	result, err := p.requestInbox.Reconcile(ctx, p.config.Scope, p.config.AssignedAgentID)
+	if err != nil {
+		p.logger.Warnw("AgentRequest inbox reconciliation completed with failures", "error", err)
+	}
+	if result != nil && (result.RequestsAccepted > 0 || result.DecisionRunsCreated > 0 || result.DecisionsApplied > 0) {
+		p.Wake()
 	}
 }
 

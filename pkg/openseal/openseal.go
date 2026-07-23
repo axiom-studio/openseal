@@ -394,6 +394,7 @@ type (
 	AgentRequestKind                   = runtime.AgentRequestKind
 	AgentRequestStatus                 = runtime.AgentRequestStatus
 	AgentRequestDecision               = runtime.AgentRequestDecision
+	AgentRequestAcceptancePolicy       = runtime.AgentRequestAcceptancePolicy
 	AgentRequestFilter                 = runtime.AgentRequestFilter
 	CreateAgentRequestRequest          = runtime.CreateAgentRequestRequest
 	AgentRequestGroupSpec              = runtime.AgentRequestGroupSpec
@@ -1303,6 +1304,7 @@ const (
 	RunSourceEvent           = runtime.RunSourceEvent
 	RunSourceWebhook         = runtime.RunSourceWebhook
 	RunSourceRequest         = runtime.RunSourceRequest
+	RunSourceRequestDecision = runtime.RunSourceRequestDecision
 	RunSourceHandoff         = runtime.RunSourceHandoff
 	RunSourceObjective       = runtime.RunSourceObjective
 	RunSourceFork            = runtime.RunSourceFork
@@ -1383,6 +1385,9 @@ const (
 	AgentRequestDecisionReject               = runtime.AgentRequestDecisionReject
 	AgentRequestDecisionRequestClarification = runtime.AgentRequestDecisionRequestClarification
 	AgentRequestDecisionProvideClarification = runtime.AgentRequestDecisionProvideClarification
+
+	AgentRequestAcceptanceRecipientReview = runtime.AgentRequestAcceptanceRecipientReview
+	AgentRequestAcceptancePreauthorized   = runtime.AgentRequestAcceptancePreauthorized
 
 	ConversationStatusActive   = runtime.ConversationStatusActive
 	ConversationStatusArchived = runtime.ConversationStatusArchived
