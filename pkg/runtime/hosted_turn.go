@@ -62,6 +62,11 @@ type HostedRunBudget struct {
 	Allocated       BudgetPolicy `json:"allocated,omitempty"`
 	TurnReservation BudgetUsage  `json:"turnReservation,omitempty"`
 	Remaining       BudgetPolicy `json:"remaining"`
+	// MinimumChild is the portable hosted-protocol floor for one delegated or
+	// forked child. A positive value applies only when the corresponding parent
+	// dimension is bounded; clients must compare it with Remaining before
+	// proposing child work.
+	MinimumChild BudgetPolicy `json:"minimumChild,omitempty"`
 }
 
 // HostedTurnRequest is the portable execution envelope sent to an Agent host.
@@ -284,11 +289,27 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if err := response.ProposedFork.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid hosted fork proposal: %w", err)
 		}
+		allocations := make([]*BudgetPolicy, 0, len(response.ProposedFork.Branches))
+		for _, branch := range response.ProposedFork.Branches {
+			if err := validateHostedChildBudgetFloor(branch.Budget, request.Budget); err != nil {
+				return nil, fmt.Errorf("invalid hosted fork branch %s budget: %w", branch.ID, err)
+			}
+			allocations = append(allocations, branch.Budget)
+		}
+		if err := validateHostedChildBudgetCapacity(allocations, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted fork budget: %w", err)
+		}
 	}
 	if response.ProposedDelegation != nil {
 		proposalCount++
 		if err := response.ProposedDelegation.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid hosted delegation proposal: %w", err)
+		}
+		if err := validateHostedChildBudgetFloor(response.ProposedDelegation.Budget, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted delegation budget: %w", err)
+		}
+		if err := validateHostedChildBudgetCapacity([]*BudgetPolicy{response.ProposedDelegation.Budget}, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted delegation budget: %w", err)
 		}
 	}
 	if proposalCount > 1 {
@@ -495,7 +516,107 @@ func projectHostedRunBudget(run *AgentRun, currentTurnID string) (*HostedRunBudg
 	return &HostedRunBudget{
 		Policy: policy, CommittedUsage: run.BudgetUsage, EffectiveUsage: effective,
 		Allocated: allocated, TurnReservation: currentReservation, Remaining: remaining,
+		MinimumChild: hostedMinimumChildBudget(policy),
 	}, nil
+}
+
+func hostedMinimumChildBudget(policy BudgetPolicy) BudgetPolicy {
+	minimum := BudgetPolicy{
+		MaxAttempts: HostedTurnMinimumChildAttempts, MaxTurns: HostedTurnMinimumChildTurns,
+		MaxInputTokens: HostedTurnMinimumChildInputTokens, MaxOutputTokens: HostedTurnMinimumChildOutputTokens,
+		MaxTotalTokens: HostedTurnMinimumChildTotalTokens, MaxCostMicros: 1,
+		MaxDurationMS: HostedTurnMinimumChildDurationMS, MaxActions: HostedTurnMinimumChildActions,
+	}
+	if policy.MaxAttempts == 0 {
+		minimum.MaxAttempts = 0
+	}
+	if policy.MaxTurns == 0 {
+		minimum.MaxTurns = 0
+	}
+	if policy.MaxInputTokens == 0 {
+		minimum.MaxInputTokens = 0
+	}
+	if policy.MaxOutputTokens == 0 {
+		minimum.MaxOutputTokens = 0
+	}
+	if policy.MaxTotalTokens == 0 {
+		minimum.MaxTotalTokens = 0
+	}
+	if policy.MaxCostMicros == 0 {
+		minimum.MaxCostMicros = 0
+	}
+	if policy.MaxDurationMS == 0 {
+		minimum.MaxDurationMS = 0
+	}
+	if policy.MaxActions == 0 {
+		minimum.MaxActions = 0
+	}
+	return minimum
+}
+
+func validateHostedChildBudgetFloor(allocation *BudgetPolicy, budget *HostedRunBudget) error {
+	if budget == nil {
+		return nil
+	}
+	actual := BudgetPolicy{}
+	if allocation != nil {
+		actual = *allocation
+	}
+	for _, dimension := range []struct {
+		name          string
+		actual, floor int64
+	}{
+		{"maxAttempts", actual.MaxAttempts, budget.MinimumChild.MaxAttempts},
+		{"maxTurns", actual.MaxTurns, budget.MinimumChild.MaxTurns},
+		{"maxInputTokens", actual.MaxInputTokens, budget.MinimumChild.MaxInputTokens},
+		{"maxOutputTokens", actual.MaxOutputTokens, budget.MinimumChild.MaxOutputTokens},
+		{"maxTotalTokens", actual.MaxTotalTokens, budget.MinimumChild.MaxTotalTokens},
+		{"maxCostMicros", actual.MaxCostMicros, budget.MinimumChild.MaxCostMicros},
+		{"maxDurationMs", actual.MaxDurationMS, budget.MinimumChild.MaxDurationMS},
+		{"maxActions", actual.MaxActions, budget.MinimumChild.MaxActions},
+	} {
+		if dimension.floor > 0 && dimension.actual < dimension.floor {
+			return fmt.Errorf("%s %d is below the hosted minimum %d", dimension.name, dimension.actual, dimension.floor)
+		}
+	}
+	return nil
+}
+
+func validateHostedChildBudgetCapacity(allocations []*BudgetPolicy, budget *HostedRunBudget) error {
+	if budget == nil {
+		return nil
+	}
+	for _, dimension := range []struct {
+		name      string
+		bounded   bool
+		remaining int64
+		value     func(BudgetPolicy) int64
+	}{
+		{"maxAttempts", budget.Policy.MaxAttempts > 0, budget.Remaining.MaxAttempts, func(policy BudgetPolicy) int64 { return policy.MaxAttempts }},
+		{"maxTurns", budget.Policy.MaxTurns > 0, budget.Remaining.MaxTurns, func(policy BudgetPolicy) int64 { return policy.MaxTurns }},
+		{"maxInputTokens", budget.Policy.MaxInputTokens > 0, budget.Remaining.MaxInputTokens, func(policy BudgetPolicy) int64 { return policy.MaxInputTokens }},
+		{"maxOutputTokens", budget.Policy.MaxOutputTokens > 0, budget.Remaining.MaxOutputTokens, func(policy BudgetPolicy) int64 { return policy.MaxOutputTokens }},
+		{"maxTotalTokens", budget.Policy.MaxTotalTokens > 0, budget.Remaining.MaxTotalTokens, func(policy BudgetPolicy) int64 { return policy.MaxTotalTokens }},
+		{"maxCostMicros", budget.Policy.MaxCostMicros > 0, budget.Remaining.MaxCostMicros, func(policy BudgetPolicy) int64 { return policy.MaxCostMicros }},
+		{"maxDurationMs", budget.Policy.MaxDurationMS > 0, budget.Remaining.MaxDurationMS, func(policy BudgetPolicy) int64 { return policy.MaxDurationMS }},
+		{"maxActions", budget.Policy.MaxActions > 0, budget.Remaining.MaxActions, func(policy BudgetPolicy) int64 { return policy.MaxActions }},
+	} {
+		if !dimension.bounded {
+			continue
+		}
+		total := int64(0)
+		for _, allocation := range allocations {
+			actual := int64(0)
+			if allocation != nil {
+				actual = dimension.value(*allocation)
+			}
+			if actual > dimension.remaining-total {
+				return fmt.Errorf("%s allocations exceed hosted remaining capacity %d", dimension.name, dimension.remaining)
+			}
+			total += actual
+		}
+	}
+	return nil
 }
 
 func remainingBudgetDimension(limit, used, allocated int64) int64 {

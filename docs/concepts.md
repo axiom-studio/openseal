@@ -163,6 +163,13 @@ execute Skills, fork, delegate, or perform the requested work. Accepted work
 then starts as a separate child Run with its own Skills, credentials, budget,
 policy, and audit trail.
 
+Budgeted hosted turns expose a typed `minimumChild` floor beside their remaining
+capacity. Agents use those two values when proposing delegation or forks;
+people describe the outcome and boundaries rather than calculating internal
+token or duration allocations. The kernel rejects any positive bounded
+dimension below the portable floor and rejects aggregate child allocations
+that exceed the source Run's remaining capacity before it persists child work.
+
 ## Activity, artifacts, and evidence
 
 Meaningful state changes append scoped activity events with actor, causation,

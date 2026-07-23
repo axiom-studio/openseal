@@ -95,8 +95,17 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	if host.request.Budget.Remaining.MaxTotalTokens != 10000 || host.request.Budget.Remaining.MaxOutputTokens != 2000 {
 		t.Fatalf("remaining budget must exclude current reservation: %#v", host.request.Budget.Remaining)
 	}
+	if host.request.Budget.MinimumChild.MaxAttempts != HostedTurnMinimumChildAttempts ||
+		host.request.Budget.MinimumChild.MaxTurns != HostedTurnMinimumChildTurns ||
+		host.request.Budget.MinimumChild.MaxInputTokens != HostedTurnMinimumChildInputTokens ||
+		host.request.Budget.MinimumChild.MaxOutputTokens != HostedTurnMinimumChildOutputTokens ||
+		host.request.Budget.MinimumChild.MaxTotalTokens != HostedTurnMinimumChildTotalTokens ||
+		host.request.Budget.MinimumChild.MaxDurationMS != HostedTurnMinimumChildDurationMS {
+		t.Fatalf("minimum child budget = %#v", host.request.Budget.MinimumChild)
+	}
 	if host.request.Budget.Policy.MaxActions != 0 || host.request.Budget.Policy.MaxCostMicros != 0 ||
-		host.request.Budget.Remaining.MaxActions != 0 || host.request.Budget.Remaining.MaxCostMicros != 0 {
+		host.request.Budget.Remaining.MaxActions != 0 || host.request.Budget.Remaining.MaxCostMicros != 0 ||
+		host.request.Budget.MinimumChild.MaxActions != 0 || host.request.Budget.MinimumChild.MaxCostMicros != 0 {
 		t.Fatalf("omitted action and cost dimensions must remain unbounded: %#v", host.request.Budget)
 	}
 	if result.Run.Status != AgentRunStatusCompleted || result.Run.BudgetUsage.Turns != 1 || result.Run.BudgetUsage.InputTokens != 100 || result.Run.BudgetUsage.OutputTokens != 20 || len(result.Run.BudgetReservations) != 0 {

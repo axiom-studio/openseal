@@ -415,6 +415,174 @@ func TestHostedTurnRunnerRejectsInvalidWorkProposals(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerRejectsChildBudgetsBelowPortableFloor(t *testing.T) {
+	parentBudget := &BudgetPolicy{
+		MaxAttempts: 10, MaxTurns: 10, MaxInputTokens: 100000, MaxOutputTokens: 30000,
+		MaxTotalTokens: 130000, MaxCostMicros: 100000, MaxDurationMS: 900000, MaxActions: 10,
+	}
+	minimum := hostedMinimumChildBudget(*parentBudget)
+	valid := minimum
+	tests := []struct {
+		name     string
+		response *HostedTurnResponse
+		want     string
+	}{
+		{
+			name: "delegation input",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model",
+				ProposedDelegation: &TurnDelegationProposal{
+					StepID: "analyze", AssignedAgentID: "analyst", Goal: "Analyze evidence", Checkpoint: map[string]interface{}{},
+					Budget: func() *BudgetPolicy {
+						value := valid
+						value.MaxInputTokens = HostedTurnMinimumChildInputTokens - 1
+						return &value
+					}(),
+				},
+			},
+			want: "maxInputTokens",
+		},
+		{
+			name: "fork output",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model",
+				ProposedFork: &TurnForkProposal{
+					ForkID: "research", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+					Branches: []RunForkBranch{
+						{ID: "a", AssignedAgentID: "a", Goal: "Analyze A", Checkpoint: map[string]interface{}{}, Budget: &valid},
+						{ID: "b", AssignedAgentID: "b", Goal: "Analyze B", Checkpoint: map[string]interface{}{}, Budget: func() *BudgetPolicy {
+							value := valid
+							value.MaxOutputTokens = HostedTurnMinimumChildOutputTokens - 1
+							return &value
+						}()},
+					},
+				},
+			},
+			want: "maxOutputTokens",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host := &recordingTurnHost{response: test.response}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+				Run: &AgentRun{
+					ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Coordinate",
+					Budget: parentBudget,
+				},
+				Turn: &AgentTurn{ID: "turn"},
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "hosted minimum") {
+				t.Fatalf("under-floor proposal error = %v", err)
+			}
+		})
+	}
+}
+
+func TestHostedTurnRunnerRejectsChildBudgetsBeyondRemainingCapacity(t *testing.T) {
+	parentBudget := &BudgetPolicy{
+		MaxAttempts: 10, MaxTurns: 10, MaxInputTokens: 100000, MaxOutputTokens: 30000,
+		MaxTotalTokens: 130000, MaxCostMicros: 100000, MaxDurationMS: 900000, MaxActions: 10,
+	}
+	minimum := hostedMinimumChildBudget(*parentBudget)
+	tests := []struct {
+		name     string
+		response *HostedTurnResponse
+		want     string
+	}{
+		{
+			name: "delegation exceeds remaining actions",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model",
+				ProposedDelegation: &TurnDelegationProposal{
+					StepID: "analyze", AssignedAgentID: "analyst", Goal: "Analyze evidence", Checkpoint: map[string]interface{}{},
+					Budget: &minimum,
+				},
+			},
+			want: "maxActions",
+		},
+		{
+			name: "fork aggregate exceeds remaining input",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model",
+				ProposedFork: &TurnForkProposal{
+					ForkID: "research", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+					Branches: []RunForkBranch{
+						{ID: "a", AssignedAgentID: "a", Goal: "Analyze A", Checkpoint: map[string]interface{}{}, Budget: &minimum},
+						{ID: "b", AssignedAgentID: "b", Goal: "Analyze B", Checkpoint: map[string]interface{}{}, Budget: &minimum},
+					},
+				},
+			},
+			want: "maxInputTokens",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host := &recordingTurnHost{response: test.response}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run := &AgentRun{
+				ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Coordinate",
+				Budget: parentBudget,
+			}
+			switch test.name {
+			case "delegation exceeds remaining actions":
+				run.BudgetUsage.Actions = parentBudget.MaxActions
+			case "fork aggregate exceeds remaining input":
+				run.BudgetUsage.InputTokens = parentBudget.MaxInputTokens - HostedTurnMinimumChildInputTokens*2 + 1
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
+			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "remaining capacity") {
+				t.Fatalf("over-capacity proposal error = %v", err)
+			}
+		})
+	}
+}
+
+func TestHostedTurnRunnerLeavesUnboundedChildDimensionsUnconstrained(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model",
+		ProposedDelegation: &TurnDelegationProposal{
+			StepID: "analyze", AssignedAgentID: "analyst", Goal: "Analyze evidence", Checkpoint: map[string]interface{}{},
+			Budget: &BudgetPolicy{MaxTurns: HostedTurnMinimumChildTurns},
+		},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "lead", DefinitionID: "lead", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{
+			ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Coordinate",
+			Budget: &BudgetPolicy{MaxTurns: 10},
+		},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ProposedDelegation == nil || host.request.Budget.MinimumChild.MaxTurns != HostedTurnMinimumChildTurns ||
+		host.request.Budget.MinimumChild.MaxInputTokens != 0 || host.request.Budget.MinimumChild.MaxActions != 0 {
+		t.Fatalf("unbounded child projection = request %#v outcome %#v", host.request.Budget, outcome)
+	}
+}
+
 func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusCompleted,
