@@ -24,8 +24,20 @@ func skillCmd(args []string) {
 type skillManifestWriter func(string, []byte, os.FileMode) error
 
 func runSkillCommand(output io.Writer, args []string, writeFile skillManifestWriter) error {
+	if len(args) == 2 && args[0] == "validate" {
+		data, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+		manifest, err := skill.DecodeManifestYAML(data)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(output, "valid %s@%s\n", manifest.Definition.ID, manifest.Definition.Version)
+		return err
+	}
 	if (len(args) != 2 && len(args) != 4) || args[0] != "manifest" || (len(args) == 4 && args[2] != "--output") {
-		return errors.New("usage: openseal skill manifest <skill-id> [--output <path>]")
+		return errors.New("usage: openseal skill manifest <skill-id> [--output <path>] | openseal skill validate <path>")
 	}
 	definitions := bundledSkillDefinitions()
 	definition := definitions[args[1]]
