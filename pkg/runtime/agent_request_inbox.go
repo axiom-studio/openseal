@@ -415,7 +415,7 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 			ExpectedDependencyRevision: dependency.Revision, State: state, Error: updated.ResolutionReason,
 			Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
 		}
-	} else {
+	} else if sourceWaitsForAgentRequestDecision(source, request.ID) {
 		resumed, err := sourceResumingAfterAgentRequestDecision(source, updated, now)
 		if err != nil {
 			return false, err
