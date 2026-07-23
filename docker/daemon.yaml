@@ -1,7 +1,7 @@
-workflowsDir: /app/workflows
 logLevel: info
-webhook:
-  listenAddr: :9090
-  baseURL: http://localhost:9090
 api:
   listenAddr: :8080
+storage:
+  driver: sqlite
+  path: /app/data/openseal.db
+  artifactsPath: /app/data/artifacts

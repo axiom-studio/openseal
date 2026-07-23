@@ -27,7 +27,7 @@ func TestObjectiveScheduleReconciliationProjectsCanonicalRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	body := `{"scope":{"kind":"tenant","id":"operations"},"limit":10}`
 	response := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/objective-schedules/reconciliations", body, "")
 	if response.Code != http.StatusOK {

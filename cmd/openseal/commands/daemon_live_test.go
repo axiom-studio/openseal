@@ -46,15 +46,12 @@ func TestLiveStandaloneOutreachSurvivesApprovalRestart(t *testing.T) {
 		t.Skip("set " + liveOutreachTargetEnvironment + " to a public credential-free HTTPS webhook test URL")
 	}
 	configDir := t.TempDir()
-	apiPort, webhookPort := freeTCPPort(t), freeTCPPort(t)
+	apiPort := freeTCPPort(t)
 	apiBase := fmt.Sprintf("http://127.0.0.1:%d", apiPort)
 	configPath := filepath.Join(configDir, "daemon.yaml")
 	databasePath := filepath.Join(configDir, "kernel.db")
 	targetHost, targetPrefix := liveTargetPolicy(t, target)
-	config := DefaultLiveDaemonConfig(databasePath, filepath.Join(configDir, "artifacts"), apiPort, webhookPort, targetHost, targetPrefix)
-	if err := os.MkdirAll(config.WorkflowsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	config := DefaultLiveDaemonConfig(databasePath, filepath.Join(configDir, "artifacts"), apiPort, targetHost, targetPrefix)
 	if err := daemon.WriteDaemonConfig(configPath, config); err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +70,11 @@ func TestLiveStandaloneOutreachSurvivesApprovalRestart(t *testing.T) {
 	process.stop(t)
 }
 
-func DefaultLiveDaemonConfig(databasePath, artifactsPath string, apiPort, webhookPort int, host, pathPrefix string) *daemon.DaemonConfig {
+func DefaultLiveDaemonConfig(databasePath, artifactsPath string, apiPort int, host, pathPrefix string) *daemon.DaemonConfig {
 	return &daemon.DaemonConfig{
-		WorkflowsDir: filepath.Join(filepath.Dir(databasePath), "workflows"), LogLevel: "info",
-		Storage: daemon.StorageConfig{Driver: "sqlite", Path: databasePath, ArtifactsPath: artifactsPath},
-		API:     daemon.APIConfig{ListenAddr: fmt.Sprintf("127.0.0.1:%d", apiPort)},
-		Webhook: daemon.WebhookConfig{ListenAddr: fmt.Sprintf("127.0.0.1:%d", webhookPort), BaseURL: fmt.Sprintf("http://127.0.0.1:%d", webhookPort)},
+		LogLevel: "info",
+		Storage:  daemon.StorageConfig{Driver: "sqlite", Path: databasePath, ArtifactsPath: artifactsPath},
+		API:      daemon.APIConfig{ListenAddr: fmt.Sprintf("127.0.0.1:%d", apiPort)},
 		SourcePolicies: []daemon.ScopedSourcePolicy{{Scope: runtime.Scope{Kind: "local", ID: "research"}, Policy: source.Policy{
 			ID: "live-community", Version: "1", Enabled: true, MaximumItems: 10,
 			Sources:  []source.PolicySource{{Host: host, PathPrefixes: []string{pathPrefix}}},

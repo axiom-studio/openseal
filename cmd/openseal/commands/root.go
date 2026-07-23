@@ -48,7 +48,7 @@ Usage:
 Commands:
   tui       Open the prompt-first Agent and Team workspace (default)
   run       Execute a workflow from an HCL file
-  daemon    Start the daemon with trigger-driven execution
+  daemon    Start the durable Agent and Team kernel
   validate  Validate a workflow HCL file
   workflow  Manage workflows (create)
   skill     Export canonical bundled Skill manifests

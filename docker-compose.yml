@@ -10,9 +10,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"   # Versioned kernel API
-      - "9090:9090"   # Webhook server
     volumes:
-      - ./workflows:/app/workflows:ro
       - ./docker/daemon.yaml:/app/daemon.yaml:ro
       - openseal-data:/app/data
     environment:

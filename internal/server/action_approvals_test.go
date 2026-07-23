@@ -19,7 +19,7 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 	t.Parallel()
 	store := runtime.NewMemoryStore(20)
 	proposal := createActionApprovalFixture(t, store)
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	kernel := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())

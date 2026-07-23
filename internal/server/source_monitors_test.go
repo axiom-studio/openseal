@@ -33,7 +33,7 @@ func TestSourceMonitorAPIExposesCheckpointAndEvidenceReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	checkpoint := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/initiatives/initiative-1/source-monitors/monitor-1/checkpoint?scopeKind=tenant&scopeId=one", "", "")
 	if checkpoint.Code != http.StatusOK || !strings.Contains(checkpoint.Body.String(), `"cursor":"cursor-1"`) || !strings.Contains(checkpoint.Body.String(), `"observationCount":0`) {
 		t.Fatalf("checkpoint=%d %s", checkpoint.Code, checkpoint.Body.String())

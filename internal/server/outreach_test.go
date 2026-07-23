@@ -81,7 +81,7 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	withoutDispatcher := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	if withoutDispatcher.Code != http.StatusOK || !strings.Contains(withoutDispatcher.Body.String(), `"id":"outreach"`) || strings.Contains(withoutDispatcher.Body.String(), `"deliver"`) {
 		t.Fatalf("capabilities without dispatcher = %d %s", withoutDispatcher.Code, withoutDispatcher.Body.String())

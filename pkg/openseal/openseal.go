@@ -206,9 +206,6 @@ type (
 	WorkforceAuthoringWorkerConfig            = runtime.WorkforceAuthoringWorkerConfig
 	WorkforceAuthoringWorker                  = runtime.WorkforceAuthoringWorker
 
-	RunRecord                          = runtime.RunRecord
-	RetryPolicy                        = runtime.RetryPolicy
-	ExecutionStore                     = runtime.ExecutionStore
 	PortfolioStore                     = runtime.PortfolioStore
 	KernelStore                        = runtime.KernelStore
 	PostgresStore                      = runtime.PostgresStore
@@ -1607,13 +1604,10 @@ var (
 	ErrAuthorityProgressionNoChange  = progression.ErrNoChange
 )
 
-// Engine is the primary entry point for OpenSeal.
-// It wires together the registry, execution store, worker pool, and scheduler.
+// Engine is the primary entry point for OpenSeal. It composes the durable
+// Agent, Team, objective, collaboration, action, approval, and Skill services.
 type Engine struct {
-	registry                      *executor.Registry
 	store                         runtime.KernelStore
-	pool                          *runtime.WorkerPool
-	scheduler                     *runtime.Scheduler
 	portfolio                     *runtime.PortfolioService
 	initiatives                   *runtime.InitiativeService
 	sourceMonitors                *runtime.SourceMonitorService
@@ -1710,28 +1704,17 @@ type actionWorkerSupervisorSpec struct {
 type Option func(*Engine) error
 
 // New creates an Engine with the given options.
-// Defaults: MemoryStore (100 runs), 4 workers, default retry policy.
+// The default store is in-memory; durable worker pools are opt-in.
 func New(opts ...Option) (*Engine, error) {
 	logger, _ := zap.NewProduction()
 	sugar := logger.Sugar()
 
-	reg := executor.NewRegistry(nil)
 	store := runtime.NewMemoryStore(100)
-	pool := runtime.NewWorkerPool(
-		executor.NewPipelineExecutor(reg, sugar),
-		store,
-		sugar,
-		4,
-		runtime.DefaultRetryPolicy(),
-	)
 	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
 	agentRegistry := kernelagent.NewRegistry()
 	e := &Engine{
-		registry:                 reg,
 		store:                    store,
-		pool:                     pool,
-		scheduler:                runtime.NewScheduler(pool, store),
 		portfolio:                runtime.NewPortfolioService(store),
 		initiatives:              runtime.NewInitiativeService(store, store),
 		sourceMonitors:           runtime.NewSourceMonitorService(store, store, store, store),
@@ -1821,9 +1804,8 @@ func New(opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
-// Start begins background goroutines (worker pool).
+// Start begins configured background workers.
 func (e *Engine) Start(ctx context.Context) {
-	e.pool.Start(ctx)
 	if e.conversationRunReconciler != nil {
 		e.conversationRunReconciler.Start(ctx)
 	}
@@ -1858,54 +1840,6 @@ func (e *Engine) Stop() {
 	for _, pool := range e.agentPools {
 		pool.Stop()
 	}
-	e.pool.Stop()
-}
-
-// ExecuteWorkflow runs a workflow synchronously and returns the result.
-// For async execution, use ScheduleWorkflow.
-func (e *Engine) ExecuteWorkflow(
-	ctx context.Context,
-	nodes []*executor.NodeDefinition,
-	connections []*executor.ConnectionDefinition,
-	startNodeID string,
-	triggerData map[string]interface{},
-) (*executor.ExecutionResult, error) {
-	pe := executor.NewPipelineExecutor(e.registry, e.logger)
-	return pe.Execute(ctx, 0, nodes, connections, startNodeID, triggerData, nil)
-}
-
-// ScheduleWorkflow enqueues a workflow for async execution.
-// Returns the run ID immediately. Check the store for completion status.
-func (e *Engine) ScheduleWorkflow(
-	ctx context.Context,
-	workflowName string,
-	nodes []*executor.NodeDefinition,
-	connections []*executor.ConnectionDefinition,
-	startNodeID string,
-	triggerData map[string]interface{},
-) (int, error) {
-	entry := runtime.WorkflowEntry{
-		Name:        workflowName,
-		Nodes:       nodes,
-		Connections: connections,
-		StartNodeID: startNodeID,
-	}
-	return e.Schedule(ctx, entry, triggerData)
-}
-
-// Schedule enqueues an already-built deterministic workflow entry. It lets
-// compatibility API and trigger adapters share the Engine-owned worker pool
-// instead of constructing a second scheduler and lifecycle.
-func (e *Engine) Schedule(ctx context.Context, entry runtime.WorkflowEntry, triggerData map[string]interface{}) (int, error) {
-	if e == nil || e.scheduler == nil {
-		return 0, errors.New("workflow scheduler is unavailable")
-	}
-	return e.scheduler.Schedule(ctx, entry, triggerData)
-}
-
-// Registry returns the executor registry for registering custom executors.
-func (e *Engine) Registry() *executor.Registry {
-	return e.registry
 }
 
 // Store returns the execution store.
@@ -1924,25 +1858,10 @@ func (e *Engine) Logger() *zap.SugaredLogger {
 	return e.logger
 }
 
-// WithRegistry replaces the default registry.
-func WithRegistry(reg *executor.Registry) Option {
-	return func(e *Engine) error {
-		e.registry = reg
-		// Rebuild pool with new registry
-		pe := executor.NewPipelineExecutor(reg, e.logger)
-		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, 4, runtime.DefaultRetryPolicy())
-		e.pool.SetWorkerLimiter(e.workerLimiter)
-		e.scheduler = runtime.NewScheduler(e.pool, e.store)
-		return nil
-	}
-}
-
 // WithStore replaces the default in-memory store.
 func WithStore(store runtime.KernelStore) Option {
 	return func(e *Engine) error {
 		e.store = store
-		e.pool.SetStore(store)
-		e.scheduler = runtime.NewScheduler(e.pool, store)
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.eventSources = runtime.NewEventSourceCheckpointService(store)
 		e.eventSourceSubscriptions = runtime.NewEventSourceSubscriptionService(store, store)
@@ -2150,21 +2069,10 @@ func WithLogger(logger *zap.SugaredLogger) Option {
 	}
 }
 
-// WithWorkerPool configures the async worker pool.
-func WithWorkerPool(concurrency int, retry *runtime.RetryPolicy) Option {
-	return func(e *Engine) error {
-		pe := executor.NewPipelineExecutor(e.registry, e.logger)
-		e.pool = runtime.NewWorkerPool(pe, e.store, e.logger, concurrency, retry)
-		e.pool.SetWorkerLimiter(e.workerLimiter)
-		e.scheduler = runtime.NewScheduler(e.pool, e.store)
-		return nil
-	}
-}
-
-// WithWorkerConcurrencyLimit bounds all workflow, Agent, conversation, and
-// action execution admitted by one Engine process. Replica safety remains
-// durable in the store; this protects shared host resources as scope count
-// grows and while rolling deployments overlap.
+// WithWorkerConcurrencyLimit bounds Agent, conversation, and action execution
+// admitted by one Engine process. Replica safety remains durable in the store;
+// this protects shared host resources as scope count grows and while rolling
+// deployments overlap.
 func WithWorkerConcurrencyLimit(limit int) Option {
 	return func(e *Engine) error {
 		limiter, err := runtime.NewWorkerLimiter(limit)
@@ -2172,7 +2080,6 @@ func WithWorkerConcurrencyLimit(limit int) Option {
 			return err
 		}
 		e.workerLimiter = limiter
-		e.pool.SetWorkerLimiter(limiter)
 		return nil
 	}
 }

@@ -40,38 +40,22 @@ Options:
 	}
 	sugar := logger.Sugar()
 
-	wf, err := workflow.LoadWorkflow(path)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	wf, result, err := executeRunbook(ctx, path, sugar)
 	if err != nil {
-		sugar.Fatalf("failed to load workflow: %v", err)
+		sugar.Fatalf("runbook execution failed: %v", err)
 	}
 
-	sugar.Infow("workflow loaded",
+	sugar.Infow("runbook loaded",
 		"name", wf.Name,
 		"nodes", len(wf.Nodes),
 		"edges", len(wf.Edges),
 		"source", wf.SourceFile,
 	)
 
-	reg := executor.NewRegistry(nil)
-	pe := executor.NewPipelineExecutor(reg, sugar)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
-	nodes := convertNodes(wf.Nodes)
-	connections := convertEdges(wf.Edges)
-
-	startNodeId := ""
-	if len(nodes) > 0 {
-		startNodeId = nodes[0].Id
-	}
-
-	result, err := pe.Execute(ctx, 0, nodes, connections, startNodeId, nil, nil)
-	if err != nil {
-		sugar.Fatalf("workflow execution failed: %v", err)
-	}
-
-	sugar.Infow("workflow completed",
+	sugar.Infow("runbook completed",
 		"status", result.Status,
 		"duration", result.CompletedAt.Sub(result.StartedAt),
 	)
@@ -81,6 +65,25 @@ Options:
 		out, _ := json.MarshalIndent(nr.Output, "", "  ")
 		fmt.Printf("\n[%s] %s (%s):\n%s\n", nr.NodeId, nr.NodeName, nr.NodeType, out)
 	}
+}
+
+func executeRunbook(ctx context.Context, path string, logger *zap.SugaredLogger) (*workflow.Workflow, *executor.ExecutionResult, error) {
+	wf, err := workflow.LoadWorkflow(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load HCL: %w", err)
+	}
+	nodes := convertNodes(wf.Nodes)
+	connections := convertEdges(wf.Edges)
+	startNodeID := ""
+	if len(nodes) > 0 {
+		startNodeID = nodes[0].Id
+	}
+	result, err := executor.NewPipelineExecutor(executor.NewRegistry(nil), logger).
+		Execute(ctx, 0, nodes, connections, startNodeID, nil, nil)
+	if err != nil {
+		return wf, result, err
+	}
+	return wf, result, nil
 }
 
 func convertNodes(nodes []workflow.Node) []*executor.NodeDefinition {

@@ -145,12 +145,10 @@ revocation, and lifecycle audit. Source policies contain credential-free HTTPS
 host, path, method, item, retention, and outreach bounds. Network credentials
 remain outside policy records.
 
-## Deterministic workflow compatibility
-
-The daemon also exposes workflow list/get/create/validate/HCL/run routes and
-legacy workflow execution Run inspection under `/workflows` and `/runs`. These
-operate the optional HCL workflow layer; `/agent-runs` is the canonical durable
-autonomous-work resource.
+The daemon deliberately has no generic `/workflows` or numeric `/runs`
+compatibility surface. `/agent-runs` is the canonical durable autonomous-work
+resource. Optional deterministic HCL runbooks are explicit, process-bounded CLI
+operations and do not create daemon state.
 
 ## Go clients
 

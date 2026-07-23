@@ -29,7 +29,7 @@ import (
 
 func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	api.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
@@ -252,7 +252,7 @@ func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
@@ -395,7 +395,7 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	ctx := context.Background()
@@ -440,7 +440,7 @@ func TestKernelHTTPClientGovernsAgentDefinitionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	ctx := context.Background()
@@ -535,7 +535,7 @@ func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 
@@ -553,7 +553,7 @@ func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
 
 func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 
@@ -666,7 +666,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
@@ -802,7 +802,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 
 func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 	store := runtime.NewMemoryStore(100)
-	api := server.NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := server.NewServer(nil, store, zap.NewNop().Sugar())
 	contentStore, err := artifactstore.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

@@ -8,31 +8,24 @@ commands for standalone and embedded OpenSeal deployments.
 The daemon reads YAML. Missing files are created from defaults.
 
 ```yaml
-workflowsDir: workflows
 logLevel: info
 storage:
   driver: sqlite
   path: data/openseal.db
   artifactsPath: data/artifacts
-webhook:
-  listenAddr: :9090
-  baseURL: http://localhost:9090
 api:
   listenAddr: :8080
-triggers: {}
 ```
 
-Only `sqlite` is accepted by the standalone configuration. Relative workflow,
-database, artifact, and Skill paths are resolved from the configuration file's
-directory. `OPENSEAL_SKILLS_DIR` overrides the daemon's default `skills`
-directory.
+Only `sqlite` is accepted by the standalone configuration. Relative database,
+artifact, and Skill paths are resolved from the configuration file's directory.
+`OPENSEAL_SKILLS_DIR` overrides the daemon's default `skills` directory.
 
-The daemon starts two HTTP listeners:
-
-- `api.listenAddr` serves the versioned kernel API.
-- `webhook.listenAddr` serves trigger ingress and its `/health` endpoint.
-
-Use `/api/v1/health` on the API listener for normal health checks.
+The daemon starts one HTTP listener. `api.listenAddr` serves the versioned
+kernel API; use `/api/v1/health` for health checks. Durable schedules and
+external events are configured through objective schedules and event-source
+subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
+rejected instead of being silently ignored.
 
 ## Model-backed authoring
 
@@ -70,11 +63,22 @@ flowchart TB
     Worker --> Adapter[Model / Skill transport adapters]
 ```
 
-For a graceful stop, send `SIGINT` or `SIGTERM`. OpenSeal stops trigger
-registration, workers, and both HTTP servers. On restart it restores persistent
-registries and installed ClawHub Skills. An expired Run or action lease is
-reclaimable from its last durable checkpoint; idempotency keys protect repeated
-commands and dispatch proposals.
+For a graceful stop, send `SIGINT` or `SIGTERM`. OpenSeal stops workers and the
+kernel API server. On restart it restores persistent registries and installed
+ClawHub Skills. An expired Run or action lease is reclaimable from its last
+durable checkpoint; idempotency keys protect repeated commands and dispatch
+proposals.
+
+Deterministic HCL runbooks remain available as explicit, process-bounded
+operations:
+
+```bash
+openseal validate ./runbook.hcl
+openseal run ./runbook.hcl
+```
+
+They are not loaded or scheduled by the daemon and do not create durable Agent
+Runs.
 
 Back up the SQLite database and artifact content together. Do not copy a live
 database file without using a SQLite-safe snapshot procedure.

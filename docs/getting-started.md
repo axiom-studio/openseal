@@ -38,10 +38,9 @@ Pass a path that does not yet exist to create a default local configuration:
 ./openseal daemon --config ./local.yaml
 ```
 
-The generated file listens on `:8080`, loads workflows from `workflows`, stores
-kernel state in `data/openseal.db`, and stores artifact bytes in
-`data/artifacts`. Relative paths are resolved from the configuration file's
-directory.
+The generated file listens on `:8080`, stores kernel state in
+`data/openseal.db`, and stores artifact bytes in `data/artifacts`. Relative
+paths are resolved from the configuration file's directory.
 
 Check the process from another terminal:
 
@@ -140,9 +139,9 @@ make docker-logs
 make docker-down
 ```
 
-Compose mounts `docker/daemon.yaml`, the `workflows` directory, and a named
-volume for `/app/data`. `make docker-down` uses `docker compose down -v` and
-therefore removes the named data volume.
+Compose mounts `docker/daemon.yaml` and a named volume for `/app/data`.
+`make docker-down` uses `docker compose down -v` and therefore removes the
+named data volume.
 
 ## Next steps
 

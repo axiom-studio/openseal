@@ -25,13 +25,12 @@ WORKDIR /app
 
 COPY --from=builder /build/openseal .
 
-# Create directories for runtime data
-RUN mkdir -p /app/workflows /app/data
+# Create the runtime data directory.
+RUN mkdir -p /app/data
 
-ENV OPENSEAL_WORKFLOWS_DIR=/app/workflows
 ENV OPENSEAL_DB_PATH=/app/data/openseal.db
 
-EXPOSE 8080 9090
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:8080/api/v1/health || exit 1

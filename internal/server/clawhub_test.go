@@ -59,7 +59,7 @@ func TestStandaloneClawHubLifecycleCapabilityAndMutations(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := runtime.NewMemoryStore(1000)
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	api.SetClawHubLifecycle(engine, false)
 	server := httptest.NewServer(api.Handler())
 	defer server.Close()
@@ -79,7 +79,7 @@ func TestStandaloneClawHubLifecycleCapabilityAndMutations(t *testing.T) {
 	}
 	response.Body.Close()
 	server.Close()
-	api = NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api = NewServer(nil, store, zap.NewNop().Sugar())
 	api.SetClawHubLifecycle(engine, true)
 	server = httptest.NewServer(api.Handler())
 	defer server.Close()

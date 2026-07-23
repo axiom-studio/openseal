@@ -40,7 +40,7 @@ func TestSkillActionDiscoveryReturnsExactSecretSafeSemanticBindings(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	api := NewServer(nil, nil, store, zap.NewNop().Sugar())
+	api := NewServer(nil, store, zap.NewNop().Sugar())
 	response := performAgentRunRequest(t, api.Handler(), http.MethodGet,
 		"/api/v1/agent-deployments/researcher/skill-actions?scopeKind=tenant&scopeId=one&semanticRole=target&semanticRole=body&sideEffect=external", "", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"bindingId":"community-account"`) ||

@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	internalWorkflow "github.com/axiom-studio/openseal/internal/workflow"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
@@ -17,11 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// Server exposes the versioned OpenSeal kernel API and temporary workflow
-// compatibility routes. Interactive clients discover its capabilities.
+// Server exposes the versioned OpenSeal kernel API. Interactive clients
+// discover its exact capabilities rather than depending on hidden routes.
 type Server struct {
 	registry           *executor.Registry
-	scheduler          workflowScheduler
 	store              runtime.KernelStore
 	artifactContent    runtime.ArtifactContentStore
 	artifactResolver   runtime.ArtifactContentResolver
@@ -33,9 +31,6 @@ type Server struct {
 	authoringMu        sync.Mutex
 	workforceAuthority WorkforceLifecycleAuthorizer
 	actionApprovalAuth runtime.ApprovalAuthorizer
-	workflowsDir       string
-	workflows          map[string]*WorkflowEntry
-	muWorkflows        sync.RWMutex
 	logger             *zap.SugaredLogger
 	mux                *http.ServeMux
 	httpServer         *http.Server
@@ -46,10 +41,6 @@ type Server struct {
 	sourcePolicies     *source.LifecycleService
 }
 
-type workflowScheduler interface {
-	Schedule(context.Context, runtime.WorkflowEntry, map[string]interface{}) (int, error)
-}
-
 // SetClawHubLifecycle enables the canonical registry/install engine. Mutation
 // authority is supplied by the host and should only be true at a trusted local
 // operator boundary; read operations remain available otherwise.
@@ -57,73 +48,16 @@ func (s *Server) SetClawHubLifecycle(engine *opensealkernel.Engine, allowMutatio
 	s.clawHub, s.clawHubMutations = engine, allowMutations
 }
 
-// WorkflowEntry holds a loaded workflow with its source info.
-type WorkflowEntry struct {
-	Name   string                 `json:"name"`
-	Source string                 `json:"source"`
-	Nodes  []WorkflowNode         `json:"nodes"`
-	Edges  []WorkflowEdge         `json:"edges"`
-	Config map[string]interface{} `json:"config,omitempty"`
-}
-
-// WorkflowNode is the JSON representation of a node.
-type WorkflowNode struct {
-	ID     string                 `json:"id"`
-	Type   string                 `json:"type"`
-	Config map[string]interface{} `json:"config,omitempty"`
-}
-
-// WorkflowEdge is the JSON representation of an edge.
-type WorkflowEdge struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Condition string `json:"condition,omitempty"`
-}
-
 // NewServer creates a new API server.
-func NewServer(registry *executor.Registry, scheduler workflowScheduler, store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
-	return NewServerWithDir(registry, scheduler, store, "", logger)
-}
-
-// NewServerWithDir creates a new API server with a workflows directory for persistence.
-func NewServerWithDir(registry *executor.Registry, scheduler workflowScheduler, store runtime.KernelStore, workflowsDir string, logger *zap.SugaredLogger) *Server {
+func NewServer(registry *executor.Registry, store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
 	s := &Server{
-		registry:     registry,
-		scheduler:    scheduler,
-		store:        store,
-		workflowsDir: workflowsDir,
-		workflows:    make(map[string]*WorkflowEntry),
-		logger:       logger,
-		mux:          http.NewServeMux(),
+		registry: registry,
+		store:    store,
+		logger:   logger,
+		mux:      http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
-}
-
-// SetWorkflows updates the server's workflow cache.
-func (s *Server) SetWorkflows(workflows []*internalWorkflow.Workflow) {
-	s.muWorkflows.Lock()
-	defer s.muWorkflows.Unlock()
-	s.workflows = make(map[string]*WorkflowEntry)
-	for _, wf := range workflows {
-		entry := &WorkflowEntry{
-			Name:   wf.Name,
-			Source: wf.SourceFile,
-			Nodes:  make([]WorkflowNode, len(wf.Nodes)),
-			Edges:  make([]WorkflowEdge, len(wf.Edges)),
-		}
-		for i, n := range wf.Nodes {
-			entry.Nodes[i] = WorkflowNode{ID: n.ID, Type: n.Type, Config: n.Config}
-		}
-		for i, e := range wf.Edges {
-			entry.Edges[i] = WorkflowEdge{From: e.From, To: e.To, Condition: e.Condition}
-		}
-		key := wf.Name
-		if _, exists := s.workflows[key]; exists {
-			key = wf.SourceFile
-		}
-		s.workflows[key] = entry
-	}
 }
 
 // Handler returns the server's HTTP handler.
