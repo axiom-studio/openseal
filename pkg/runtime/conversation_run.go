@@ -949,6 +949,26 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 		}
 	}
 	resourceType := strings.TrimSpace(fmt.Sprint(result["resourceType"]))
+	if resourceType == agentBehaviorResourceType {
+		deployment := conversationResultMap(result["deployment"])
+		id := strings.TrimSpace(fmt.Sprint(deployment["id"]))
+		if !validOpaqueIdentifier(id, 256) {
+			return nil, false
+		}
+		displayName := strings.TrimSpace(fmt.Sprint(deployment["displayName"]))
+		activeVersion := strings.TrimSpace(fmt.Sprint(deployment["activeVersion"]))
+		content := "Agent behavior was updated successfully."
+		if displayName != "" {
+			content = "Agent “" + displayName + "” behavior was updated successfully."
+		}
+		if activeVersion != "" {
+			content = strings.TrimSuffix(content, ".") + " using definition " + activeVersion + "."
+		}
+		return &governedConversationCompletion{
+			Content: content, ResourceType: resourceType, ResourceID: id,
+			References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+		}, true
+	}
 	if resourceType != "objective" && resourceType != "initiative" {
 		return nil, false
 	}
@@ -1021,6 +1041,8 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	}
 	resourceType, label, kind, idField := "", "", ConversationReferenceKind(""), ""
 	switch strings.TrimSpace(fmt.Sprint(last["skillId"])) {
+	case AgentManagementSkillID:
+		resourceType, label = agentBehaviorResourceType, "Agent behavior"
 	case ObjectiveManagementSkillID:
 		resourceType, label, kind, idField = "objective", "Objective", ConversationReferenceObjective, "objectiveId"
 	case InitiativeManagementSkillID:
@@ -1029,23 +1051,28 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		return nil, false
 	}
 	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
-	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause {
+	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause &&
+		operation != AgentActionAmendBehavior {
 		return nil, false
 	}
+	actionDescription := label + " " + strings.ReplaceAll(operation, "_", " ")
+	if resourceType == agentBehaviorResourceType {
+		actionDescription = "Agent behavior"
+	}
 	disposition := strings.TrimSpace(fmt.Sprint(last["approvalStatus"]))
-	content := label + " " + operation + " was not applied because policy denied the action."
+	content := actionDescription + " was not applied because policy denied the action."
 	if terminalStatus == governedActionProposalFailedStatus {
-		content = label + " " + operation + " could not be proposed."
+		content = actionDescription + " could not be proposed."
 		if transition := strings.TrimPrefix(strings.TrimSpace(fmt.Sprint(last["error"])), "invalid objective transition: "); transition != strings.TrimSpace(fmt.Sprint(last["error"])) && transition != "" {
-			content = label + " " + operation + " could not be proposed because the requested lifecycle change is invalid (" + strings.ReplaceAll(transition, " -> ", " → ") + ")."
+			content = actionDescription + " could not be proposed because the requested lifecycle change is invalid (" + strings.ReplaceAll(transition, " -> ", " → ") + ")."
 		}
 	} else if terminalStatus == string(ActionCallStatusFailed) {
-		content = label + " " + operation + " could not be applied because execution failed. Review the Run details and try again."
+		content = actionDescription + " could not be applied because execution failed. Review the Run details and try again."
 		if strings.Contains(strings.ToLower(strings.TrimSpace(fmt.Sprint(last["error"]))), "revision conflict") {
-			content = label + " " + operation + " was not applied because the " + label + " changed while approval was pending. Review the latest state and try again."
+			content = actionDescription + " was not applied because the " + label + " changed while approval was pending. Review the latest state and try again."
 		}
 	} else if disposition != "" {
-		content = label + " " + operation + " was not applied because approval was " + strings.ReplaceAll(disposition, "_", " ") + "."
+		content = actionDescription + " was not applied because approval was " + strings.ReplaceAll(disposition, "_", " ") + "."
 	}
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
 	if rawApprovalID, present := last["approvalId"]; present && rawApprovalID != nil {
@@ -1054,7 +1081,9 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		}
 	}
 	resourceID := ""
-	if arguments, argumentsOK := last["arguments"].(map[string]interface{}); argumentsOK {
+	if resourceType == agentBehaviorResourceType {
+		resourceID = run.Owner.ID
+	} else if arguments, argumentsOK := last["arguments"].(map[string]interface{}); argumentsOK {
 		resourceID = strings.TrimSpace(fmt.Sprint(arguments[idField]))
 		if validOpaqueIdentifier(resourceID, 256) {
 			references = append(references, ConversationReference{Kind: kind, ID: resourceID})
@@ -1082,6 +1111,8 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 	skillID := strings.Join(parts[:len(parts)-1], ".")
 	version := ""
 	switch skillID {
+	case AgentManagementSkillID:
+		version = AgentManagementSkillVersion
 	case ObjectiveManagementSkillID:
 		version = ObjectiveManagementSkillVersion
 	case InitiativeManagementSkillID:
@@ -1089,7 +1120,8 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 	default:
 		return nil, false
 	}
-	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause {
+	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause &&
+		action != AgentActionAmendBehavior {
 		return nil, false
 	}
 	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, requested.InputRef)

@@ -684,6 +684,49 @@ func TestGovernedConversationActionCompletionProjectsInitiativeIdentity(t *testi
 	}
 }
 
+func TestGovernedConversationActionCompletionProjectsAgentBehaviorIdentity(t *testing.T) {
+	run := &AgentRun{
+		ID: "run-agent-behavior", Checkpoint: map[string]interface{}{
+			"lastAction": map[string]interface{}{
+				"status": "succeeded",
+				"result": map[string]interface{}{
+					"resourceType": agentBehaviorResourceType, "operation": AgentActionAmendBehavior, "replayed": false,
+					"deployment": map[string]interface{}{
+						"id": "researcher", "displayName": "Researcher", "activeVersion": "1.0.0.action.abc123", "revision": float64(4),
+					},
+				},
+			},
+		},
+	}
+	completion, ok := governedConversationActionCompletion(run)
+	if !ok || completion.Content != "Agent “Researcher” behavior was updated successfully using definition 1.0.0.action.abc123." ||
+		completion.ResourceType != agentBehaviorResourceType || completion.ResourceID != "researcher" ||
+		len(completion.References) != 1 ||
+		completion.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) {
+		t.Fatalf("Agent behavior completion = %#v, ok=%v", completion, ok)
+	}
+}
+
+func TestGovernedConversationAgentBehaviorDenialResolvesWithoutModelRetry(t *testing.T) {
+	run := &AgentRun{
+		ID: "run-agent-denied", Kind: RunKindConversation,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		Checkpoint: map[string]interface{}{"lastAction": map[string]interface{}{
+			"status": ActionCallStatusDenied, "skillId": AgentManagementSkillID, "action": AgentActionAmendBehavior,
+			"arguments":  map[string]interface{}{"personality": "More concise", "rationale": "Reduce noise"},
+			"approvalId": "approval-agent", "approvalStatus": ApprovalStatusRejected,
+		}},
+	}
+	outcome, ok := governedConversationActionOutcome(run)
+	if !ok || outcome.Content != "Agent behavior was not applied because approval was rejected." ||
+		outcome.ResourceType != agentBehaviorResourceType || outcome.ResourceID != "researcher" ||
+		len(outcome.References) != 2 ||
+		outcome.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) ||
+		outcome.References[1] != (ConversationReference{Kind: ConversationReferenceApproval, ID: "approval-agent"}) {
+		t.Fatalf("Agent behavior denial = %#v, ok=%v", outcome, ok)
+	}
+}
+
 func TestGovernedConversationProposalFailureProjectsLifecycleError(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-pause", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},

@@ -69,6 +69,12 @@ dispatcher. Read and lifecycle operations can remain available independently.
 Activation and amendment operations bind actor, reason, expected revision, and
 the exact reviewed definition or amendment.
 
+The same lifecycle is available prompt-first through portable kernel Skills:
+`openseal.agents/amend_behavior` is self-only, `openseal.teams/update_role`
+changes current Team role behavior, and `openseal.skills/*` manages exact Skill
+authority. Their deployment selectors and concurrency revisions are
+kernel-resolved; conversation models never choose those authority facts.
+
 ## Prompt-first authoring
 
 Workforce authoring routes are grouped under
