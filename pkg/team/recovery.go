@@ -181,7 +181,7 @@ func participationRecoveryCandidate(base *Definition, req RecoverParticipationRe
 	if !found {
 		return nil, errors.New("participation recovery role is not declared by the Team definition")
 	}
-	return prepareDefinition(candidate, now)
+	return PrepareDefinition(candidate, now)
 }
 
 func participationRecoveryDigest(req RecoverParticipationRequest) string {

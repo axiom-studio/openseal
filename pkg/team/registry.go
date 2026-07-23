@@ -48,7 +48,7 @@ func (r *Registry) RegisterDefinition(ctx context.Context, definition *Definitio
 	if r == nil || r.store == nil {
 		return nil, errors.New("team registry is not configured")
 	}
-	candidate, err := prepareDefinition(definition, r.now().UTC())
+	candidate, err := PrepareDefinition(definition, r.now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	if strings.TrimSpace(req.ProposerType) == "" || strings.TrimSpace(req.ProposerID) == "" || strings.TrimSpace(req.Rationale) == "" {
 		return nil, errors.New("team amendment proposer and rationale are required")
 	}
-	candidate, err := prepareDefinition(req.Candidate, r.now().UTC())
+	candidate, err := PrepareDefinition(req.Candidate, r.now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +500,14 @@ func (r *Registry) validateRoster(ctx context.Context, definition *Definition, d
 	return nil
 }
 
-func prepareDefinition(definition *Definition, now time.Time) (*Definition, error) {
+// PrepareDefinition returns the canonical immutable representation used by the
+// Team registry without persisting it. Importers and storage migrations should
+// use this function instead of duplicating normalization or digest rules.
+//
+// createdAt is part of the immutable record but is deliberately excluded from
+// the digest. Callers migrating an existing definition should pass its original
+// creation time; new registrations normally pass the current time.
+func PrepareDefinition(definition *Definition, createdAt time.Time) (*Definition, error) {
 	candidate := cloneDefinition(definition)
 	if candidate == nil {
 		return nil, errors.New("team definition is required")
@@ -545,7 +552,7 @@ func prepareDefinition(definition *Definition, now time.Time) (*Definition, erro
 	}
 	digest := sha256.Sum256(encoded)
 	candidate.Digest = "sha256:" + hex.EncodeToString(digest[:])
-	candidate.CreatedAt = now
+	candidate.CreatedAt = createdAt
 	return candidate, nil
 }
 
