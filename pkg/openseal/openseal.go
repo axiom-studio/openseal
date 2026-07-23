@@ -106,6 +106,14 @@ type (
 	KernelAgentAmendmentActivationResult      = kernelapi.AgentDefinitionAmendmentActivationResult
 	KernelAgentDefinitionCompilationHistory   = kernelapi.AgentDefinitionCompilationHistory
 	TeamDefinition                            = kernelteam.Definition
+	TeamManifest                              = kernelteam.Manifest
+	TeamManifestMetadata                      = kernelteam.ManifestMetadata
+	TeamManifestSpec                          = kernelteam.ManifestSpec
+	TeamManifestRoleSlot                      = kernelteam.ManifestRoleSlot
+	TeamManifestRoleSkillGrant                = kernelteam.ManifestRoleSkillGrant
+	TeamManifestCoordinationPolicy            = kernelteam.ManifestCoordinationPolicy
+	TeamManifestDelegationPolicy              = kernelteam.ManifestDelegationPolicy
+	TeamManifestSharedContextPolicy           = kernelteam.ManifestSharedContextPolicy
 	TeamRoleSlot                              = kernelteam.RoleSlot
 	TeamRoleSkillGrant                        = kernelteam.RoleSkillGrant
 	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
@@ -636,6 +644,8 @@ type (
 const (
 	AgentManifestAPIVersion             = kernelagent.ManifestAPIVersion
 	AgentManifestKind                   = kernelagent.ManifestKind
+	TeamManifestAPIVersion              = kernelteam.ManifestAPIVersion
+	TeamManifestKind                    = kernelteam.ManifestKind
 	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
 	ClawHubCompilationPreviewAPIVersion = clawhub.CompilationPreviewAPIVersion
 	ActionCredentialLeaseVersion        = runtime.ActionCredentialLeaseVersion
@@ -648,6 +658,14 @@ func CompileAgentManifest(manifest *AgentManifest, definitionID string, provenan
 
 func DecodeAgentManifestYAML(data []byte) (*AgentManifest, error) {
 	return kernelagent.DecodeManifestYAML(data)
+}
+
+func CompileTeamManifest(manifest *TeamManifest, definitionID string, provenance WorkforceDefinitionProvenance) (*TeamDefinition, error) {
+	return kernelteam.CompileManifest(manifest, definitionID, provenance)
+}
+
+func DecodeTeamManifestYAML(data []byte) (*TeamManifest, error) {
+	return kernelteam.DecodeManifestYAML(data)
 }
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
