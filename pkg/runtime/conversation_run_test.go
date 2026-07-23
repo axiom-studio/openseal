@@ -692,7 +692,10 @@ func TestGovernedConversationActionCompletionProjectsAgentBehaviorIdentity(t *te
 				"result": map[string]interface{}{
 					"resourceType": agentBehaviorResourceType, "operation": AgentActionAmendBehavior, "replayed": false,
 					"deployment": map[string]interface{}{
-						"id": "researcher", "displayName": "Researcher", "activeVersion": "1.0.0.action.abc123", "revision": float64(4),
+						"id": "researcher", "activeVersion": "1.0.0.action.abc123", "revision": float64(4),
+					},
+					"amendment": map[string]interface{}{
+						"candidate": map[string]interface{}{"displayName": "Researcher"},
 					},
 				},
 			},
