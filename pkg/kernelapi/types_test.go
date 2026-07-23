@@ -36,7 +36,8 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 
 func TestWorkforceAuthoringVersionDeclaresCredentialBoundActivationContract(t *testing.T) {
 	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	if capability.Version != "9" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) || capability.Supports(OperationRefine) || capability.Supports(OperationPatch) {
+	if capability.Version != "10" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) ||
+		capability.Supports(OperationActivate) || capability.Supports(OperationRefine) || capability.Supports(OperationPatch) {
 		t.Fatalf("workforce authoring capability = %#v", capability)
 	}
 }
