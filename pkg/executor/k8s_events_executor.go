@@ -49,6 +49,7 @@ func (e *K8sEventsExecutor) Execute(ctx context.Context, step *StepDefinition, r
 	if err != nil {
 		return nil, wrapK8sError("k8s-events", err)
 	}
+	events = nonNilK8sItems(events)
 
 	return &StepResult{
 		Output: map[string]interface{}{
