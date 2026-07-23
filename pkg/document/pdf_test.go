@@ -29,6 +29,9 @@ func TestPlainTextPDFRendererIsDeterministicAndPaged(t *testing.T) {
 	if definition.Transport.Kind != "tool" || definition.Transport.Endpoint != SkillID {
 		t.Fatalf("transport = %#v, want tool transport targeting %q", definition.Transport, SkillID)
 	}
+	if len(definition.Installers) != 1 || definition.Installers[0].Kind != "oci" || definition.Installers[0].Package != SkillImage {
+		t.Fatalf("document Skill OCI installer mismatch: %#v", definition.Installers)
+	}
 }
 
 func TestPlainTextPDFRendererFailsExplicitlyForUnsupportedUnicode(t *testing.T) {

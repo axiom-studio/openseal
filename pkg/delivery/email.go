@@ -13,6 +13,7 @@ import (
 const (
 	SkillID             = "openseal.delivery"
 	SkillVersion        = "1.1.0"
+	SkillImage          = "axiomstudio/skill-openseal-delivery:1.1.0"
 	SendEmail           = "send_email"
 	EmailCredentialName = "email-delivery"
 	EmailCredentialKind = "email-delivery"
@@ -80,5 +81,8 @@ func SkillDefinition() *skill.Definition {
 			UserInvocable: true, AllowedTools: []string{SendEmail},
 		},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
+		Installers: []capability.Installer{{
+			ID: "oci", Kind: "oci", Label: "Governed delivery service image", Package: SkillImage,
+		}},
 	}
 }

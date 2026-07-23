@@ -70,6 +70,9 @@ func TestSourceSkillContractIsTypedAndReadOnly(t *testing.T) {
 		len(action.Permissions) != 1 || action.Permissions[0] != "network:https:read" || action.OutputSchema == nil {
 		t.Fatalf("source Skill contract mismatch: %#v", definition)
 	}
+	if len(definition.Installers) != 1 || definition.Installers[0].Kind != "oci" || definition.Installers[0].Package != SkillImage {
+		t.Fatalf("source Skill OCI installer mismatch: %#v", definition.Installers)
+	}
 	properties := action.OutputSchema["properties"].(map[string]interface{})
 	if properties["observationRefs"] == nil || properties["checkpointRevision"] == nil || properties["sourceObservations"] != nil {
 		t.Fatalf("source Skill exposed transient rather than canonical output: %#v", action.OutputSchema)

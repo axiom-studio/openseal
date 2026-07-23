@@ -18,6 +18,7 @@ import (
 const (
 	SkillID      = "openseal.document"
 	SkillVersion = "1.0.0"
+	SkillImage   = "axiomstudio/skill-openseal-document:1.0.0"
 	RenderPDF    = "render_pdf"
 )
 
@@ -92,6 +93,9 @@ func SkillDefinition() *skill.Definition {
 		}},
 		Prompt:       &capability.PromptModule{Instructions: "Use render_pdf when work requires a durable PDF deliverable. Cite sources in the body before rendering.", UserInvocable: true, AllowedTools: []string{RenderPDF}},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
+		Installers: []capability.Installer{{
+			ID: "oci", Kind: "oci", Label: "Document renderer service image", Package: SkillImage,
+		}},
 	}
 }
 

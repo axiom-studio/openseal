@@ -13,6 +13,7 @@ import (
 const (
 	SkillID      = "openseal.outreach"
 	SkillVersion = "1.0.0"
+	SkillImage   = "axiomstudio/skill-openseal-outreach:1.0.0"
 	PostReply    = "post_reply"
 
 	PolicyDecisionTransportKey = "_opensealOutreachPolicyDecision"
@@ -62,5 +63,8 @@ func SkillDefinition() *skill.Definition {
 			UserInvocable: true, AllowedTools: []string{PostReply},
 		},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
+		Installers: []capability.Installer{{
+			ID: "oci", Kind: "oci", Label: "Governed outreach service image", Package: SkillImage,
+		}},
 	}
 }
