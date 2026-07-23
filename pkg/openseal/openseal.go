@@ -476,6 +476,7 @@ type (
 	UpsertSkillBindingRequest          = skill.UpsertBindingRequest
 	DisableSkillBindingRequest         = skill.DisableBindingRequest
 	SkillScope                         = skill.ScopeReference
+	SkillIdentity                      = capability.SkillIdentity
 	SkillRiskLevel                     = skill.RiskLevel
 	SkillSideEffect                    = skill.SideEffect
 	SkillIdempotencyMode               = skill.IdempotencyMode
@@ -666,6 +667,10 @@ func CompileTeamManifest(manifest *TeamManifest, definitionID string, provenance
 
 func DecodeTeamManifestYAML(data []byte) (*TeamManifest, error) {
 	return kernelteam.DecodeManifestYAML(data)
+}
+
+func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
+	return capability.NewSkillIdentity(id, version, sourceIdentity)
 }
 
 type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
