@@ -22,6 +22,7 @@ import (
 const (
 	SkillID      = "openseal.source"
 	SkillVersion = "1.0.2"
+	SkillImage   = "axiomstudio/skill-openseal-source:1.0.2"
 	ObserveFeed  = "observe_feed"
 	MaximumItems = 100
 )
@@ -76,6 +77,9 @@ func SkillDefinition() *skill.Definition {
 			UserInvocable: true, AllowedTools: []string{ObserveFeed},
 		},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
+		Installers: []capability.Installer{{
+			ID: "oci", Kind: "oci", Label: "Source observer service image", Package: SkillImage,
+		}},
 	}
 }
 

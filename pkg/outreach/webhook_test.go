@@ -15,6 +15,9 @@ func TestWebhookOutreachSkillIsExactExternalAndReceiptBound(t *testing.T) {
 		action.SemanticArguments["target"] != "targetUri" || action.SemanticArguments["body"] != "body" {
 		t.Fatalf("definition = %#v", definition)
 	}
+	if len(definition.Installers) != 1 || definition.Installers[0].Kind != "oci" || definition.Installers[0].Package != SkillImage {
+		t.Fatalf("outreach Skill OCI installer mismatch: %#v", definition.Installers)
+	}
 	catalog := skill.NewCatalog()
 	if err := catalog.Register(context.Background(), definition); err != nil {
 		t.Fatal(err)

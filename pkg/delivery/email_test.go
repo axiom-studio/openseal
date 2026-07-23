@@ -22,6 +22,9 @@ func TestEmailSkillIsGovernedCredentialedAndArtifactSafe(t *testing.T) {
 		len(action.Credentials) != 1 || action.Credentials[0].Name != EmailCredentialName || action.Credentials[0].Kind != EmailCredentialKind {
 		t.Fatalf("email definition = %#v", definition)
 	}
+	if len(definition.Installers) != 1 || definition.Installers[0].Kind != "oci" || definition.Installers[0].Package != SkillImage {
+		t.Fatalf("delivery Skill OCI installer mismatch: %#v", definition.Installers)
+	}
 	catalog := skill.NewCatalog()
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
