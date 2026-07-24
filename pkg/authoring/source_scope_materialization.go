@@ -39,6 +39,9 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 		}
 		matches := matchingSourceScopeInvocations(candidate, need, request.Catalog)
 		if len(matches) == 0 {
+			if !sourceCapabilityRequiresDurableAction(request) {
+				continue
+			}
 			issues = append(issues, issue(
 				"objectives.cadence.runTemplate.capability",
 				"source_scope_action_not_found",

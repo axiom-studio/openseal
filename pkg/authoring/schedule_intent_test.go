@@ -149,6 +149,61 @@ func TestScheduleIntentQuestionDefersScheduleBlockedSourceMaterialization(t *tes
 	}
 }
 
+func TestAnsweredSourceScopeAsksForExecutionModeInsteadOfBlocking(t *testing.T) {
+	candidate := scheduledAuthoringCandidate(nil)
+	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "reddit-search", VersionConstraint: "2.0.0", RequiredActions: []string{"search"}}}
+	candidate.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-search"}
+	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a Reddit agent that can scour the vibecoding subreddit",
+		Catalog: sourceScopeCatalog(),
+		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"), Source: RefinementAnswerSourceUser,
+			Value: RefinementProviderAnswerValue{Items: []string{"vibecoding"}},
+		}}},
+	})
+	if err != nil || result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 1 ||
+		result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
+		t.Fatalf("execution mode refinement = %#v, err = %v", result, err)
+	}
+}
+
+func TestOnDemandSourceScopeProducesUsableUnscheduledAgent(t *testing.T) {
+	candidate := scheduledAuthoringCandidate(nil)
+	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "reddit-search", VersionConstraint: "2.0.0", RequiredActions: []string{"search"}}}
+	candidate.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-search"}
+	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{
+		{
+			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"), Source: RefinementAnswerSourceUser,
+			Value: RefinementProviderAnswerValue{Items: []string{"vibecoding"}},
+		},
+		{
+			QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
+			Value: RefinementProviderAnswerValue{Text: "on demand"},
+		},
+	}}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a Reddit agent that can scour the vibecoding subreddit",
+		Catalog: sourceScopeCatalog(), Refinement: refinement,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 0 ||
+		len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 {
+		t.Fatalf("on-demand source agent = %#v", result)
+	}
+}
+
 func TestScheduleIntentAuditedAnswerAuthorizesExactCadence(t *testing.T) {
 	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
 		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,

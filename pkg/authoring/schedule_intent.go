@@ -58,6 +58,10 @@ func enforceScheduleIntentAuthority(generated *GenerationResponse, request Gener
 		if restoreExistingAndRemoveNewCadences(&generated.Candidate, request.Existing) {
 			generated.Assumptions = append(generated.Assumptions, "Provider-created recurring schedules were removed because recurring execution was not requested.")
 		}
+		if answeredSourceScopeNeedsExecutionChoice(&generated.Candidate, request) {
+			upsertScheduleIntentQuestion(generated)
+			return nil
+		}
 		removeScheduleIntentQuestion(generated)
 		return nil
 	case scheduleIntentAmbiguous:
@@ -195,8 +199,8 @@ func upsertScheduleIntentQuestion(generated *GenerationResponse) {
 	generated.UnresolvedQuestions = append(generated.UnresolvedQuestions, RefinementQuestion{
 		ID:        scheduleIntentQuestionID,
 		Category:  RefinementCategoryPolicy,
-		Prompt:    "When should this work run? Specify an exact cadence, such as “daily at 09:00 UTC”, “weekly on Monday at 09:00 America/New_York”, or “every 30 minutes”.",
-		WhyNeeded: "Recurring execution changes operating behavior and cost, so OpenSeal requires an explicit portable schedule before it can authorize a cadence.",
+		Prompt:    "When should this work run? Choose “on demand”, or specify an exact schedule such as “daily at 09:00 UTC”.",
+		WhyNeeded: "This source is ready, but OpenSeal needs to know whether the Agent should wait for you or run automatically.",
 		Blocking:  []RefinementBlockingScope{RefinementBlocksCandidate, RefinementBlocksApply},
 		Answer: RefinementAnswerSchema{
 			Kind: RefinementAnswerText, Minimum: 1, Maximum: 256,
@@ -206,6 +210,38 @@ func upsertScheduleIntentQuestion(generated *GenerationResponse) {
 		}},
 		Priority: 950,
 	})
+}
+
+// answeredSourceScopeNeedsExecutionChoice prevents a guided source setup from
+// ending in the impossible state where every visible question is answered but
+// no execution mode was authorized. Existing durable actions remain valid;
+// otherwise the operator chooses on-demand work or an exact schedule.
+func answeredSourceScopeNeedsExecutionChoice(candidate *WorkforceCandidate, request GenerateRequest) bool {
+	if request.Refinement == nil {
+		return false
+	}
+	answered := make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
+	for _, answer := range request.Refinement.Answers {
+		answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
+	}
+	for _, need := range request.Catalog.CapabilityNeeds {
+		if need.SourceScope == nil {
+			continue
+		}
+		answer, exists := answered[CapabilitySourceScopeQuestionID(need.ID)]
+		if !exists || len(nonEmptyUnique(answer.Items)) == 0 {
+			continue
+		}
+		selected := selectedCapabilityNeed(need, answered)
+		if len(matchingSourceScopeInvocations(candidate, selected, request.Catalog)) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func sourceCapabilityRequiresDurableAction(request GenerateRequest) bool {
+	return parseScheduleIntent(scheduleIntentAuthorityText(request)).kind != scheduleIntentManual
 }
 
 func removeScheduleIntentQuestion(generated *GenerationResponse) {
