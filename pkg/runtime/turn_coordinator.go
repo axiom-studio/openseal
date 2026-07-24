@@ -503,6 +503,15 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		"decisions":       append([]TurnDecision(nil), turn.Decisions...),
 		"usage":           turn.Usage,
 	}
+	if definitionID := strings.TrimSpace(turn.DefinitionID); definitionID != "" {
+		activityPayload["definitionId"] = definitionID
+	}
+	if definitionVersion := strings.TrimSpace(turn.DefinitionVersion); definitionVersion != "" {
+		activityPayload["definitionVersion"] = definitionVersion
+	}
+	if step := runbookStepFromCheckpoint(turn.ContinuationCheckpoint); step != "" {
+		activityPayload["runbookStep"] = step
+	}
 	if len(turn.RequestedActions) > 0 {
 		activityPayload["requestedActions"] = append([]TurnAction(nil), turn.RequestedActions...)
 	}
@@ -535,6 +544,15 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		return nil, err
 	}
 	return &AdvanceAgentRunResult{Run: updated, Turn: turn, Event: event, Reconciled: reconciled}, nil
+}
+
+func runbookStepFromCheckpoint(checkpoint map[string]interface{}) string {
+	runbookState, ok := checkpoint["runbook"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	current, _ := runbookState["current"].(string)
+	return strings.TrimSpace(current)
 }
 
 func turnExhaustsBudget(run *AgentRun, turn *AgentTurn) bool {

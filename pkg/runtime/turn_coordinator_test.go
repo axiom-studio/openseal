@@ -34,12 +34,13 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 			OutputSummary: "Waiting for the next event", NextRunStatus: AgentRunStatusWaitingForEvent,
 			SkillSelections:        []HostedSkillSelection{{SkillRef: "skill:events@1", Disposition: HostedSkillApplied, Summary: "Applied event monitoring"}},
 			WakeCondition:          &WakeCondition{Type: "event", Reference: "work.ready"},
-			ContinuationCheckpoint: map[string]interface{}{"phase": "waiting"},
+			ContinuationCheckpoint: map[string]interface{}{"phase": "waiting", "runbook": map[string]interface{}{"current": "await-event"}},
 			Decisions:              []TurnDecision{{Summary: "Use the event monitor", EvidenceRefs: []string{"skill:events@1"}}},
 		}, nil
 	})
 	partial, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker-1", Model: "fake",
+		DefinitionID: "event-agent", DefinitionVersion: "7",
 	}, runner)
 	if !errors.Is(err, forcedCrash) {
 		t.Fatalf("advance error = %v", err)
@@ -72,7 +73,8 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 		t.Fatalf("activity is not linked to turn: %#v", result.Event)
 	}
 	auditPayload, marshalErr := json.Marshal(result.Event.Payload)
-	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || !strings.Contains(string(auditPayload), `"disposition":"applied"`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" {
+	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || !strings.Contains(string(auditPayload), `"disposition":"applied"`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" ||
+		result.Event.Payload["definitionId"] != "event-agent" || result.Event.Payload["definitionVersion"] != "7" || result.Event.Payload["runbookStep"] != "await-event" {
 		t.Fatalf("activity does not expose bounded-turn audit evidence: %#v", result.Event.Payload)
 	}
 	if result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != "work.ready" || result.Run.Checkpoint["phase"] != "waiting" {
