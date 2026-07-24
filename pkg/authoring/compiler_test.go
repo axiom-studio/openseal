@@ -326,7 +326,12 @@ func deterministicRunbookPayloads(t *testing.T) (valid, invalid []byte) {
 						ResultPath: "/results/report", Next: "done",
 					},
 				},
-				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+				"done": {
+					Kind: runbook.StepEnd,
+					End: &runbook.EndStep{Outputs: map[string]runbook.Value{
+						"artifact": {Ref: "/results/report"},
+					}},
+				},
 			},
 		},
 	}}}
@@ -396,6 +401,44 @@ func TestCompilerRejectsPersistentlyInvalidRunbookStepPlacement(t *testing.T) {
 	if !errors.As(err, &schemaError) || generator.repairs != maximumSchemaRepairAttempts ||
 		!strings.Contains(schemaError.Diagnostic, "move to candidate.agents[0].runbook.steps.render.action.resultPath") {
 		t.Fatalf("persistent invalid runbook error=%#v repairs=%d err=%v", schemaError, generator.repairs, err)
+	}
+}
+
+func TestCompilerRepairsRawRunbookValueWithExactCanonicalForms(t *testing.T) {
+	valid, _ := deterministicRunbookPayloads(t)
+	var document map[string]interface{}
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
+	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	outputs := steps["done"].(map[string]interface{})["end"].(map[string]interface{})["outputs"].(map[string]interface{})
+	outputs["artifact"] = "/results/report"
+	invalid, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{invalid, valid}}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {
+				ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"},
+				MaximumRisk: capability.RiskLevelWrite,
+			},
+		}},
+	})
+	if err != nil || result == nil || !result.Valid || generator.repairs != 2 {
+		t.Fatalf("Runbook Value repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	for attempt, repairError := range generator.repairErrors {
+		diagnostic := repairError.Error()
+		if !strings.Contains(diagnostic, "candidate.agents.runbook.steps.end.outputs") ||
+			!strings.Contains(diagnostic, "expects a Runbook Value object, not string") ||
+			!strings.Contains(diagnostic, `{"ref":"<JSON Pointer>"}`) {
+			t.Fatalf("Runbook Value repair diagnostic %d = %q", attempt+1, diagnostic)
+		}
 	}
 }
 

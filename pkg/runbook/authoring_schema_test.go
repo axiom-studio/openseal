@@ -34,6 +34,11 @@ func TestAuthoringSchemaProjectionKeepsActionFieldsInsideActionPayload(t *testin
 	if field, ok := StepPayloadFieldForJSONField(StepDecision, "resultPath"); ok || field != "" {
 		t.Fatalf("decision resultPath payload field = %q, %t", field, ok)
 	}
+	if !projection.Value.ExactlyOneSource || !containsField(projection.Value.Fields, "literal") ||
+		!containsField(projection.Value.Fields, "ref") || !containsField(projection.Value.Fields, "template") ||
+		len(projection.Value.Forms) != 3 {
+		t.Fatalf("Value projection = %#v", projection.Value)
+	}
 }
 
 func containsField(fields []string, expected string) bool {

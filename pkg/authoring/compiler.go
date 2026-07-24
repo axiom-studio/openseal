@@ -457,6 +457,18 @@ func contextualizeStrictJSONError(payload []byte, decodeErr error) error {
 	if decodeErr == nil {
 		return nil
 	}
+	var typeError *json.UnmarshalTypeError
+	if errors.As(decodeErr, &typeError) && typeError.Type == reflect.TypeOf(runbook.Value{}) {
+		field := strings.TrimSpace(typeError.Field)
+		if field == "" {
+			field = "unknown"
+		}
+		diagnostic := fmt.Sprintf(
+			"field %s expects a Runbook Value object, not %s; use exactly one of {\"ref\":\"<JSON Pointer>\"}, {\"literal\":<JSON value>}, or {\"template\":[{\"text\":\"...\"} or {\"ref\":\"<JSON Pointer>\"}]}",
+			field, typeError.Value,
+		)
+		return &strictJSONSchemaError{cause: decodeErr, diagnostic: diagnostic}
+	}
 	message := strings.TrimSpace(decodeErr.Error())
 	const unknownPrefix = "json: unknown field \""
 	if !strings.HasPrefix(message, unknownPrefix) || !strings.HasSuffix(message, "\"") {
