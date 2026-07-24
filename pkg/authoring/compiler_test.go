@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/source"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -91,6 +92,62 @@ func TestCompilerVerifiesPromptGeneratedWorkforceAndCapabilityGaps(t *testing.T)
 	}
 	if len(result.Diff) != 1 || result.Diff[0].Path != "workforce" {
 		t.Fatalf("create diff = %#v", result.Diff)
+	}
+}
+
+func TestCompilerAcceptsPromptAuthoredCallableRunbook(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "release-agent", Version: "1", DisplayName: "Release Agent",
+		Purpose: "Prepare releases", SystemPrompt: "Prepare releases safely.",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "release", VersionConstraint: "1.0.0", RequiredActions: []string{"collect"},
+		}},
+		Authority: agent.AuthorityPolicy{
+			MaximumRisk: capability.RiskLevelRead, AllowedSkillIDs: []string{"release"}, MaxConcurrentRuns: 1,
+		},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "release-evidence", Version: "1", Name: "Release evidence",
+			Entrypoints: map[string]string{"collect": "collect"},
+			Interfaces: map[string]runbook.Interface{"collect": {
+				Description: "Collect release evidence in the exact required order.",
+				InputSchema: map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{"release": map[string]interface{}{"type": "string"}},
+					"required":   []interface{}{"release"},
+				},
+				OutputSchema: map[string]interface{}{"type": "object"},
+			}},
+			Steps: map[string]runbook.Step{
+				"collect": {
+					Kind: runbook.StepAction,
+					Action: &runbook.ActionStep{
+						SkillID: "release", SkillVersion: "1.0.0", Action: "collect",
+						Arguments:  map[string]runbook.Value{"release": {Ref: "/input/release"}},
+						ResultPath: "/results/collect", Next: "done",
+					},
+				},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+			},
+		},
+	}}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, err := NewCompiler(staticGenerator{payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode:   ModeCreate,
+		Prompt: "Create one Agent with a deterministic repeatable operation that collects release evidence in an exact sequence.",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"release": {ID: "release", Version: "1.0.0", Actions: []string{"collect"}, MaximumRisk: capability.RiskLevelRead},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.Candidate.Agents) != 1 || result.Candidate.Agents[0].Runbook == nil ||
+		result.Candidate.Agents[0].Runbook.Interfaces["collect"].Description == "" {
+		t.Fatalf("result=%#v", result)
 	}
 }
 
