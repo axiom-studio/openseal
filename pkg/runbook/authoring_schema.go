@@ -16,6 +16,13 @@ type authoringSchemaProjection struct {
 	InterfaceFields  []string                                 `json:"interfaceFields"`
 	StepFields       []string                                 `json:"stepFields"`
 	StepKinds        map[StepKind]authoringStepKindProjection `json:"stepKinds"`
+	Value            authoringValueProjection                 `json:"value"`
+}
+
+type authoringValueProjection struct {
+	Fields           []string `json:"fields"`
+	ExactlyOneSource bool     `json:"exactlyOneSource"`
+	Forms            []string `json:"forms"`
 }
 
 type stepPayloadType struct {
@@ -77,6 +84,15 @@ func buildAuthoringSchemaProjection() string {
 		InterfaceFields:  jsonFieldNames(reflect.TypeOf(Interface{})),
 		StepFields:       jsonFieldNames(reflect.TypeOf(Step{})),
 		StepKinds:        make(map[StepKind]authoringStepKindProjection, len(stepPayloadTypes)),
+		Value: authoringValueProjection{
+			Fields:           jsonFieldNames(reflect.TypeOf(Value{})),
+			ExactlyOneSource: true,
+			Forms: []string{
+				`{"ref":"<JSON Pointer>"}`,
+				`{"literal":<JSON value>}`,
+				`{"template":[{"text":"<text>"} or {"ref":"<JSON Pointer>"}]}`,
+			},
+		},
 	}
 	for _, candidate := range stepPayloadTypes {
 		projection.StepKinds[candidate.kind] = authoringStepKindProjection{

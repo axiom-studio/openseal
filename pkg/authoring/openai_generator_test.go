@@ -250,6 +250,8 @@ func TestOpenAICompatibleRepairSuppliesExactStrictContractChecklist(t *testing.T
 		`"stepFields":["kind","name","action","delegate","decision","transform","wait","fork","join","forEach","loopReturn","end"]`,
 		`"action":{"payloadField":"action"`,
 		`"resultPath"`,
+		`"exactlyOneSource":true`,
+		`"forms":["{\"ref\":\"\u003cJSON Pointer\u003e\"}"`,
 	} {
 		if !strings.Contains(system, expected) {
 			t.Fatalf("system prompt missing generated Runbook projection %q:\n%s", expected, system)
@@ -260,6 +262,7 @@ func TestOpenAICompatibleRepairSuppliesExactStrictContractChecklist(t *testing.T
 		"Every unresolvedQuestions entry must include all required fields", "whyNeeded", "priority (integer 1..1000)",
 		`dependsOn is an array of {"questionId":"<existing question id>"`,
 		"move it to steps.<id>.action.resultPath", "do not repeat it at the Step root",
+		"a raw string is never a Value",
 		"unknown field id at candidate.agents[0].skillRequirements[0].id",
 	} {
 		if !strings.Contains(repair, expected) {
