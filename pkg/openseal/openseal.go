@@ -764,6 +764,8 @@ const (
 	ObjectiveSchedulesCapabilityVersion     = kernelapi.ObjectiveSchedulesCapabilityVersion
 	SourcePoliciesCapabilityID              = kernelapi.SourcePoliciesCapabilityID
 	SourcePoliciesCapabilityVersion         = kernelapi.SourcePoliciesCapabilityVersion
+	WorkforceAuthoringCapabilityID          = kernelapi.WorkforceAuthoringCapabilityID
+	WorkforceAuthoringCapabilityVersion     = kernelapi.WorkforceAuthoringCapabilityVersion
 	KernelOperationCreate                   = kernelapi.OperationCreate
 	KernelOperationList                     = kernelapi.OperationList
 	KernelOperationGet                      = kernelapi.OperationGet
