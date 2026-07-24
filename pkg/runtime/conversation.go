@@ -267,6 +267,7 @@ type ChannelMessage struct {
 	Audience             ConversationAudience      `json:"audience"`
 	ThreadRootID         string                    `json:"threadRootId,omitempty"`
 	ReplyToMessageID     string                    `json:"replyToMessageId,omitempty"`
+	BroadcastToChannel   bool                      `json:"broadcastToChannel,omitempty"`
 	Mentions             []ConversationParticipant `json:"mentions,omitempty"`
 	References           []ConversationReference   `json:"references,omitempty"`
 	RequiresResponse     bool                      `json:"requiresResponse,omitempty"`
@@ -307,6 +308,9 @@ func (m *ChannelMessage) Validate() error {
 		if id != "" && !validOpaqueIdentifier(id, 128) {
 			return fmt.Errorf("%w: linked message and round ids must be portable", ErrInvalidConversation)
 		}
+	}
+	if m.BroadcastToChannel && m.ThreadRootID == "" {
+		return fmt.Errorf("%w: only a thread reply can be broadcast to its channel", ErrInvalidConversation)
 	}
 	seenMentions := make(map[ConversationParticipant]struct{}, len(m.Mentions))
 	for _, mention := range m.Mentions {

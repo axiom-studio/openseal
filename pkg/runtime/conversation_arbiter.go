@@ -91,23 +91,24 @@ func (a ParticipationAvailability) Validate() error {
 // relevance check. It contains no chain-of-thought: only the proposed message,
 // structured intent, audience, and independently auditable signals.
 type ParticipationProposal struct {
-	ID                string                    `json:"id"`
-	RoundID           string                    `json:"roundId"`
-	Participant       ConversationParticipant   `json:"participant"`
-	SemanticRoles     []string                  `json:"semanticRoles,omitempty"`
-	WantsToSpeak      bool                      `json:"wantsToSpeak"`
-	Intent            ConversationMessageIntent `json:"intent,omitempty"`
-	Content           string                    `json:"content,omitempty"`
-	ContributionKey   string                    `json:"contributionKey,omitempty"`
-	Audience          ConversationAudience      `json:"audience,omitempty"`
-	Mentions          []ConversationParticipant `json:"mentions,omitempty"`
-	References        []ConversationReference   `json:"references,omitempty"`
-	ReplyToMessageID  string                    `json:"replyToMessageId,omitempty"`
-	RequiresResponse  bool                      `json:"requiresResponse,omitempty"`
-	ResolvesMessageID string                    `json:"resolvesMessageId,omitempty"`
-	Signals           ParticipationSignals      `json:"signals"`
-	Priority          int                       `json:"priority,omitempty"`
-	Availability      ParticipationAvailability `json:"availability"`
+	ID                 string                    `json:"id"`
+	RoundID            string                    `json:"roundId"`
+	Participant        ConversationParticipant   `json:"participant"`
+	SemanticRoles      []string                  `json:"semanticRoles,omitempty"`
+	WantsToSpeak       bool                      `json:"wantsToSpeak"`
+	Intent             ConversationMessageIntent `json:"intent,omitempty"`
+	Content            string                    `json:"content,omitempty"`
+	ContributionKey    string                    `json:"contributionKey,omitempty"`
+	Audience           ConversationAudience      `json:"audience,omitempty"`
+	Mentions           []ConversationParticipant `json:"mentions,omitempty"`
+	References         []ConversationReference   `json:"references,omitempty"`
+	ReplyToMessageID   string                    `json:"replyToMessageId,omitempty"`
+	BroadcastToChannel bool                      `json:"broadcastToChannel,omitempty"`
+	RequiresResponse   bool                      `json:"requiresResponse,omitempty"`
+	ResolvesMessageID  string                    `json:"resolvesMessageId,omitempty"`
+	Signals            ParticipationSignals      `json:"signals"`
+	Priority           int                       `json:"priority,omitempty"`
+	Availability       ParticipationAvailability `json:"availability"`
 	// ProposedAction is an optional, already-authorized capability request made
 	// by this participant. It remains part of the visible participation record;
 	// arbitration selects at most one speaker action and the Conversation Run
@@ -134,7 +135,7 @@ func (p ParticipationProposal) Validate() error {
 	}
 	if !p.WantsToSpeak {
 		if strings.TrimSpace(p.Content) != "" || p.ContributionKey != "" || p.Intent != "" || len(p.Mentions) > 0 || len(p.References) > 0 ||
-			p.ReplyToMessageID != "" || p.RequiresResponse || p.ResolvesMessageID != "" || p.ProposedAction != nil || len(p.ActionInputs) > 0 {
+			p.ReplyToMessageID != "" || p.BroadcastToChannel || p.RequiresResponse || p.ResolvesMessageID != "" || p.ProposedAction != nil || len(p.ActionInputs) > 0 {
 			return errors.New("silent participation proposal cannot include message output")
 		}
 		return nil
@@ -150,6 +151,9 @@ func (p ParticipationProposal) Validate() error {
 	}
 	if p.ReplyToMessageID != "" && !validOpaqueIdentifier(p.ReplyToMessageID, 128) {
 		return errors.New("participation reply id must be portable")
+	}
+	if p.BroadcastToChannel && p.ReplyToMessageID == "" {
+		return errors.New("only a participation thread reply can be broadcast to its channel")
 	}
 	if p.ResolvesMessageID != "" && !validOpaqueIdentifier(p.ResolvesMessageID, 128) {
 		return errors.New("resolved message id must be portable")

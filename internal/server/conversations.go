@@ -91,7 +91,8 @@ func (s *Server) handlePostChannelMessage(w http.ResponseWriter, r *http.Request
 	result, err := service.PostChannelMessage(r.Context(), runtime.PostChannelMessageRequest{
 		ID: payload.ID, Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision,
 		Sender: payload.Sender, Intent: payload.Intent, Content: payload.Content, Audience: payload.Audience,
-		ReplyToMessageID: payload.ReplyToMessageID, Mentions: payload.Mentions, References: payload.References,
+		ReplyToMessageID: payload.ReplyToMessageID, BroadcastToChannel: payload.BroadcastToChannel,
+		Mentions: payload.Mentions, References: payload.References,
 		RequiresResponse: payload.RequiresResponse, ResolvesMessageID: payload.ResolvesMessageID,
 		SupersedesMessageID: payload.SupersedesMessageID, IdempotencyKey: key,
 	})
