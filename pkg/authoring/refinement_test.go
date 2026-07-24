@@ -181,6 +181,14 @@ func TestRefinementAtomicallyAddsHostVerifiedDiscoveredSkill(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "must be verified") {
 		t.Fatalf("unverified discovered Skill error = %v", err)
 	}
+	identity := SkillSearchIdentity{ID: candidate.ID, Version: candidate.Version, SourceIdentity: candidate.SourceIdentity}
+	if _, _, err := service.AnswerRefinement(context.Background(), AnswerChangeSetRefinementRequest{
+		Scope: scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, QuestionID: question.ID,
+		Value: RefinementAnswerValue{SkillIDs: []string{candidate.ID}}, DiscoveredSkill: &identity,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "answer-client-only-discovery",
+	}); err == nil || !strings.Contains(err.Error(), "verified by the host") {
+		t.Fatalf("unverified client discovery error = %v", err)
+	}
 	answered, replayed, err := service.AnswerRefinement(context.Background(), AnswerChangeSetRefinementRequest{
 		Scope: scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, QuestionID: question.ID,
 		Value: RefinementAnswerValue{SkillIDs: []string{candidate.ID}}, TrustedSkill: &candidate,

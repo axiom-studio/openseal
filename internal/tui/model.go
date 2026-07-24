@@ -169,6 +169,7 @@ type Model struct {
 	clawHubClient               client.ClawHubClient
 	skillBindingClient          client.SkillBindingClient
 	sourcePolicyClient          client.SourcePolicyLifecycleClient
+	workforceSkillSearchClient  client.WorkforceSkillSearchClient
 	config                      Config
 	editor                      textarea.Model
 	focus                       focusArea
@@ -301,6 +302,9 @@ type Model struct {
 	pendingRefinementKey        string
 	pendingRefinementIntent     string
 	activeRefinementQuestionID  string
+	refinementSkillQuery        string
+	refinementSkillResults      []authoring.SkillSearchCandidate
+	refinementSkillNextCursor   string
 	pendingObjectiveKey         string
 	pendingObjectivePrompt      string
 	pendingEventSourceID        string
@@ -345,6 +349,13 @@ type workforceGoverned struct {
 type workforceLoaded struct {
 	changeSet *authoring.ChangeSet
 	err       error
+}
+
+type workforceSkillsSearched struct {
+	query  string
+	page   *authoring.SkillSearchPage
+	append bool
+	err    error
 }
 
 type teamDeploymentsLoaded struct {
@@ -649,12 +660,13 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
 		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
-		agentLifecycleClient:  agentLifecycleClient(kernelClient),
-		agentCapabilityClient: agentCapabilityClient(kernelClient),
-		conversationClient:    conversationClient(kernelClient),
-		clawHubClient:         clawHubClient(kernelClient),
-		skillBindingClient:    skillBindingClient(kernelClient),
-		sourcePolicyClient:    sourcePolicyClient(kernelClient),
+		agentLifecycleClient:       agentLifecycleClient(kernelClient),
+		agentCapabilityClient:      agentCapabilityClient(kernelClient),
+		conversationClient:         conversationClient(kernelClient),
+		clawHubClient:              clawHubClient(kernelClient),
+		skillBindingClient:         skillBindingClient(kernelClient),
+		sourcePolicyClient:         sourcePolicyClient(kernelClient),
+		workforceSkillSearchClient: workforceSkillSearchClient(kernelClient),
 	}, nil
 }
 
@@ -918,6 +930,23 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.action + " recorded in the durable workforce audit."
 		m.focusPanelList()
 		return m, m.loadCapabilities()
+	case workforceSkillsSearched:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Skill search failed."
+			return m, nil
+		}
+		m.err = nil
+		m.refinementSkillQuery = msg.query
+		if !msg.append {
+			m.refinementSkillResults = nil
+		}
+		m.refinementSkillResults = append(m.refinementSkillResults, msg.page.Items...)
+		m.refinementSkillNextCursor = msg.page.NextCursor
+		m.editor.Reset()
+		m.status = fmt.Sprintf("%d verified catalog result(s) available to review.", len(m.refinementSkillResults))
+		return m, nil
 	case workforceLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -2273,7 +2302,25 @@ func (m *Model) submitWorkforceRefinement() tea.Cmd {
 		}
 		return nil
 	}
+	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && strings.HasPrefix(strings.ToLower(input), "/find ") {
+		return m.searchWorkforceSkills(strings.TrimSpace(input[len("/find "):]), "", false)
+	}
+	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && strings.EqualFold(input, "/more") {
+		if m.refinementSkillNextCursor == "" {
+			m.status = "There are no more Skill results."
+			return nil
+		}
+		return m.searchWorkforceSkills(m.refinementSkillQuery, m.refinementSkillNextCursor, true)
+	}
+	var discovered *authoring.SkillSearchIdentity
 	value, err := m.parseRefinementAnswer(*question, input)
+	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection {
+		if candidate, ok := matchSearchedSkill(m.refinementSkillResults, input); ok {
+			value = authoring.RefinementAnswerValue{SkillIDs: []string{candidate.ID}}
+			discovered = &authoring.SkillSearchIdentity{ID: candidate.ID, Version: candidate.Version, SourceIdentity: candidate.SourceIdentity}
+			err = nil
+		}
+	}
 	if err != nil {
 		m.err = err
 		m.status = "That answer does not match the requested format."
@@ -2287,7 +2334,8 @@ func (m *Model) submitWorkforceRefinement() tea.Cmd {
 	request := authoring.AnswerChangeSetRefinementRequest{
 		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
 		QuestionID: question.ID, Value: value, Source: authoring.RefinementAnswerSourceUser,
-		Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+		DiscoveredSkill: discovered,
+		Actor:           authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
 	}
 	key := m.pendingRefinementKey
 	m.busy, m.err, m.status = true, nil, "Saving the answer and regenerating the proposal…"
@@ -2295,6 +2343,50 @@ func (m *Model) submitWorkforceRefinement() tea.Cmd {
 		result, err := m.client.AnswerWorkforceChangeSetRefinement(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: "Refinement answer", err: err}
 	}
+}
+
+func (m *Model) searchWorkforceSkills(query, cursor string, appendResults bool) tea.Cmd {
+	if m.workforceSkillSearchClient == nil || !m.supportsAuthoring(kernelapi.OperationSearch) {
+		m.status = "This server does not advertise Skill search."
+		return nil
+	}
+	if strings.TrimSpace(query) == "" {
+		m.status = "Enter a Skill name or outcome after /find."
+		return nil
+	}
+	request := authoring.SkillSearchRequest{
+		Scope: m.authoringChangeSet.Scope, Query: query, Cursor: cursor,
+		Limit: authoring.DefaultSkillSearchLimit,
+	}
+	m.busy, m.err, m.status = true, nil, "Searching authorized Skill catalogs…"
+	return func() tea.Msg {
+		page, err := m.workforceSkillSearchClient.SearchWorkforceSkills(m.ctx, request)
+		return workforceSkillsSearched{query: query, page: page, append: appendResults, err: err}
+	}
+}
+
+func matchSearchedSkill(results []authoring.SkillSearchCandidate, input string) (authoring.SkillSearchCandidate, bool) {
+	input = strings.TrimSpace(input)
+	for _, candidate := range results {
+		if candidate.Verification != authoring.SkillSearchVerificationVerified || candidate.Readiness == authoring.SkillReadinessUnavailable {
+			continue
+		}
+		if strings.EqualFold(input, candidate.ID+"@"+candidate.Version) ||
+			(strings.EqualFold(input, candidate.ID) && uniqueSearchedSkillID(results, candidate.ID)) {
+			return candidate, true
+		}
+	}
+	return authoring.SkillSearchCandidate{}, false
+}
+
+func uniqueSearchedSkillID(results []authoring.SkillSearchCandidate, id string) bool {
+	count := 0
+	for _, candidate := range results {
+		if strings.EqualFold(candidate.ID, id) {
+			count++
+		}
+	}
+	return count == 1
 }
 
 func (m *Model) parseRefinementAnswer(question authoring.RefinementQuestion, input string) (authoring.RefinementAnswerValue, error) {
@@ -4270,6 +4362,8 @@ func (m *Model) activateReadyRefinement() {
 	if changed {
 		m.editor.Reset()
 		m.pendingRefinementKey, m.pendingRefinementIntent = "", ""
+		m.refinementSkillQuery, m.refinementSkillNextCursor = "", ""
+		m.refinementSkillResults = nil
 	}
 	m.activeRefinementQuestionID = question.ID
 	m.mode = modeWorkforceRefinement
@@ -6186,6 +6280,11 @@ func skillBindingClient(kernelClient client.KernelClient) client.SkillBindingCli
 
 func sourcePolicyClient(kernelClient client.KernelClient) client.SourcePolicyLifecycleClient {
 	value, _ := kernelClient.(client.SourcePolicyLifecycleClient)
+	return value
+}
+
+func workforceSkillSearchClient(kernelClient client.KernelClient) client.WorkforceSkillSearchClient {
+	value, _ := kernelClient.(client.WorkforceSkillSearchClient)
 	return value
 }
 

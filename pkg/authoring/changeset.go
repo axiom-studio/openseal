@@ -243,6 +243,7 @@ type AnswerChangeSetRefinementRequest struct {
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	QuestionID       string                    `json:"questionId"`
 	Value            RefinementAnswerValue     `json:"value"`
+	DiscoveredSkill  *SkillSearchIdentity      `json:"discoveredSkill,omitempty"`
 	// TrustedSkill is an optional host-resolved search candidate. It is never
 	// accepted from an API payload. When present, AnswerRefinement atomically
 	// adds this exact verified candidate to the durable catalog before recording
@@ -717,13 +718,23 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 		return nil, false, err
 	}
 	request.Value = normalizeRefinementAnswerValue(request.Value)
+	if request.DiscoveredSkill != nil && request.TrustedSkill == nil {
+		return nil, false, errors.New("discovered Skill must be verified by the host")
+	}
+	if request.DiscoveredSkill != nil && request.TrustedSkill != nil &&
+		(strings.TrimSpace(request.DiscoveredSkill.ID) != strings.TrimSpace(request.TrustedSkill.ID) ||
+			strings.TrimSpace(request.DiscoveredSkill.Version) != strings.TrimSpace(request.TrustedSkill.Version) ||
+			strings.TrimSpace(request.DiscoveredSkill.SourceIdentity) != strings.TrimSpace(request.TrustedSkill.SourceIdentity)) {
+		return nil, false, errors.New("verified Skill does not match the discovered identity")
+	}
 	requestDigest, err := digestJSON(struct {
-		QuestionID   string
-		Value        RefinementAnswerValue
-		TrustedSkill *SkillSearchCandidate
-		Source       RefinementAnswerSource
-		Actor        ChangeSetActor
-	}{request.QuestionID, request.Value, request.TrustedSkill, request.Source, request.Actor})
+		QuestionID      string
+		Value           RefinementAnswerValue
+		DiscoveredSkill *SkillSearchIdentity
+		TrustedSkill    *SkillSearchCandidate
+		Source          RefinementAnswerSource
+		Actor           ChangeSetActor
+	}{request.QuestionID, request.Value, request.DiscoveredSkill, request.TrustedSkill, request.Source, request.Actor})
 	if err != nil {
 		return nil, false, err
 	}

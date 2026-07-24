@@ -3,13 +3,56 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 )
+
+func (s *Server) handleSearchWorkforceSkills(w http.ResponseWriter, r *http.Request) {
+	if s.authoringSkillSearch == nil {
+		s.respondError(w, http.StatusNotImplemented, "workforce Skill search is not configured")
+		return
+	}
+	scope, err := scopeFromQuery(r)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil {
+			s.respondError(w, http.StatusBadRequest, "Skill search limit is invalid")
+			return
+		}
+	}
+	request, err := authoring.NormalizeSkillSearchRequest(authoring.SkillSearchRequest{
+		Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Query: r.URL.Query().Get("query"),
+		RequiredActions: r.URL.Query()["requiredAction"],
+		MaximumRisk:     capability.RiskLevel(r.URL.Query().Get("maximumRisk")),
+		Cursor:          r.URL.Query().Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, err := s.authoringSkillSearch.SearchAuthoringSkills(r.Context(), request)
+	if err != nil {
+		s.respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	page, err = authoring.NormalizeSkillSearchPage(request, page)
+	if err != nil {
+		s.respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	s.respondJSON(w, http.StatusOK, page)
+}
 
 type WorkforceLifecycleAuthorization struct {
 	Actor                        authoring.ChangeSetActor
@@ -61,6 +104,14 @@ func (s *Server) handleAnswerWorkforceChangeSetRefinement(w http.ResponseWriter,
 	// resolvers call the in-process Run service after deriving host facts; a
 	// client cannot forge runtime provenance in its request body.
 	request.Source = authoring.RefinementAnswerSourceUser
+	if request.DiscoveredSkill != nil {
+		candidate, err := s.resolveDiscoveredSkill(r.Context(), request.Scope, *request.DiscoveredSkill)
+		if err != nil {
+			s.respondError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		request.TrustedSkill = candidate
+	}
 	result, _, replayed, err := s.authoringRuns.AnswerRefinement(r.Context(), request)
 	if err != nil {
 		s.respondWorkforceMutation(w, result, replayed, err)
@@ -72,6 +123,42 @@ func (s *Server) handleAnswerWorkforceChangeSetRefinement(w http.ResponseWriter,
 		status = http.StatusOK
 	}
 	s.respondJSON(w, status, result)
+}
+
+func (s *Server) resolveDiscoveredSkill(ctx context.Context, scope capability.ScopeReference, identity authoring.SkillSearchIdentity) (*authoring.SkillSearchCandidate, error) {
+	if s.authoringSkillSearch == nil {
+		return nil, errors.New("workforce Skill search is not configured")
+	}
+	identity.ID, identity.Version, identity.SourceIdentity = strings.TrimSpace(identity.ID), strings.TrimSpace(identity.Version), strings.TrimSpace(identity.SourceIdentity)
+	if identity.ID == "" || identity.Version == "" || identity.SourceIdentity == "" {
+		return nil, errors.New("discovered Skill exact identity is required")
+	}
+	request := authoring.SkillSearchRequest{Scope: scope, Query: identity.ID, Limit: authoring.MaximumSkillSearchLimit}
+	for pages := 0; pages < 100; pages++ {
+		normalized, err := authoring.NormalizeSkillSearchRequest(request)
+		if err != nil {
+			return nil, err
+		}
+		page, err := s.authoringSkillSearch.SearchAuthoringSkills(ctx, normalized)
+		if err != nil {
+			return nil, fmt.Errorf("verify discovered Skill: %w", err)
+		}
+		page, err = authoring.NormalizeSkillSearchPage(normalized, page)
+		if err != nil {
+			return nil, fmt.Errorf("verify discovered Skill: %w", err)
+		}
+		for index := range page.Items {
+			candidate := page.Items[index]
+			if candidate.ID == identity.ID && candidate.Version == identity.Version && candidate.SourceIdentity == identity.SourceIdentity {
+				return &candidate, nil
+			}
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		request.Cursor = page.NextCursor
+	}
+	return nil, errors.New("discovered Skill is no longer available")
 }
 
 func (s *Server) handleCompileWorkforce(w http.ResponseWriter, r *http.Request) {

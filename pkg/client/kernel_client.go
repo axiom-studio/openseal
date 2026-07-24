@@ -121,7 +121,14 @@ type WorkforceRefinementClient interface {
 	AnswerWorkforceChangeSetRefinement(context.Context, authoring.AnswerChangeSetRefinementRequest, string) (*authoring.ChangeSet, error)
 }
 
+// WorkforceSkillSearchClient is the narrow discovery boundary used by
+// prompt-first authoring surfaces.
+type WorkforceSkillSearchClient interface {
+	SearchWorkforceSkills(context.Context, authoring.SkillSearchRequest) (*authoring.SkillSearchPage, error)
+}
+
 var _ WorkforceRefinementClient = (*KernelHTTPClient)(nil)
+var _ WorkforceSkillSearchClient = (*KernelHTTPClient)(nil)
 
 // AgentDefinitionLifecycleClient is the narrow public boundary for governed
 // immutable definition rollout, rollback, and amendment review. Read-only
@@ -580,6 +587,30 @@ func (c *KernelHTTPClient) UpdateWorkforceChangeSetPlacement(ctx context.Context
 
 func (c *KernelHTTPClient) AnswerWorkforceChangeSetRefinement(ctx context.Context, request authoring.AnswerChangeSetRefinementRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
 	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "refinements", request, idempotencyKey)
+}
+
+func (c *KernelHTTPClient) SearchWorkforceSkills(ctx context.Context, request authoring.SkillSearchRequest) (*authoring.SkillSearchPage, error) {
+	query := url.Values{}
+	query.Set("scopeKind", request.Scope.Kind)
+	query.Set("scopeId", request.Scope.ID)
+	query.Set("query", request.Query)
+	for _, action := range request.RequiredActions {
+		query.Add("requiredAction", action)
+	}
+	if request.MaximumRisk != "" {
+		query.Set("maximumRisk", string(request.MaximumRisk))
+	}
+	if request.Cursor != "" {
+		query.Set("cursor", request.Cursor)
+	}
+	if request.Limit > 0 {
+		query.Set("limit", strconv.Itoa(request.Limit))
+	}
+	var page authoring.SkillSearchPage
+	if err := c.do(ctx, http.MethodGet, "/api/v1/authoring/workforce/skills?"+query.Encode(), nil, "", &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
 }
 
 func (c *KernelHTTPClient) EvaluateWorkforceChangeSet(ctx context.Context, request authoring.SubmitChangeSetEvaluationRequest, idempotencyKey string) (*authoring.ChangeSet, error) {

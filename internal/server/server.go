@@ -18,25 +18,33 @@ import (
 // Server exposes the versioned OpenSeal kernel API. Interactive clients
 // discover its exact capabilities rather than depending on hidden routes.
 type Server struct {
-	store              runtime.KernelStore
-	artifactContent    runtime.ArtifactContentStore
-	artifactResolver   runtime.ArtifactContentResolver
-	authoring          *authoring.Compiler
-	authoringChanges   *authoring.ChangeSetService
-	authoringRuns      *runtime.WorkforceAuthoringRunService
-	authoringWorker    *runtime.WorkforceAuthoringWorker
-	authoringScope     runtime.Scope
-	authoringMu        sync.Mutex
-	workforceAuthority WorkforceLifecycleAuthorizer
-	actionApprovalAuth runtime.ApprovalAuthorizer
-	logger             *zap.SugaredLogger
-	mux                *http.ServeMux
-	httpServer         *http.Server
-	clawHub            *opensealkernel.Engine
-	clawHubMutations   bool
-	outreachDelivery   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
-	agentRunCreation   func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
-	sourcePolicies     *source.LifecycleService
+	store                runtime.KernelStore
+	artifactContent      runtime.ArtifactContentStore
+	artifactResolver     runtime.ArtifactContentResolver
+	authoring            *authoring.Compiler
+	authoringChanges     *authoring.ChangeSetService
+	authoringRuns        *runtime.WorkforceAuthoringRunService
+	authoringWorker      *runtime.WorkforceAuthoringWorker
+	authoringSkillSearch authoring.SkillSearchProvider
+	authoringScope       runtime.Scope
+	authoringMu          sync.Mutex
+	workforceAuthority   WorkforceLifecycleAuthorizer
+	actionApprovalAuth   runtime.ApprovalAuthorizer
+	logger               *zap.SugaredLogger
+	mux                  *http.ServeMux
+	httpServer           *http.Server
+	clawHub              *opensealkernel.Engine
+	clawHubMutations     bool
+	outreachDelivery     func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	agentRunCreation     func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	sourcePolicies       *source.LifecycleService
+}
+
+// SetWorkforceSkillSearchProvider enables verified, paginated Skill discovery
+// during authoring. The provider remains the authority for current catalog
+// identity and readiness.
+func (s *Server) SetWorkforceSkillSearchProvider(provider authoring.SkillSearchProvider) {
+	s.authoringSkillSearch = provider
 }
 
 // SetClawHubLifecycle enables the canonical registry/install engine. Mutation

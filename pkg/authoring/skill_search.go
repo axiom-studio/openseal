@@ -71,6 +71,15 @@ type SkillSearchPage struct {
 	Diagnostics []CatalogDiagnostic    `json:"diagnostics,omitempty"`
 }
 
+// SkillSearchIdentity is the client-visible exact identity of a discovered
+// candidate. It carries no authority: an API host must resolve it again
+// against its current provider before passing a TrustedSkill to the kernel.
+type SkillSearchIdentity struct {
+	ID             string `json:"id"`
+	Version        string `json:"version"`
+	SourceIdentity string `json:"sourceIdentity"`
+}
+
 type SkillSearchProvider interface {
 	SearchAuthoringSkills(context.Context, SkillSearchRequest) (*SkillSearchPage, error)
 }
