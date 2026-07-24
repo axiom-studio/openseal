@@ -23,6 +23,13 @@ type (
 	WorkforceRefinementAnswerSource           = authoring.RefinementAnswerSource
 	WorkforceSkillReadiness                   = authoring.SkillReadiness
 	WorkforceSkillCompatibility               = authoring.SkillCompatibility
+	WorkforceSkillSearchOrigin                = authoring.SkillSearchOrigin
+	WorkforceSkillSearchRequest               = authoring.SkillSearchRequest
+	WorkforceSkillSearchProvenance            = authoring.SkillSearchProvenance
+	WorkforceSkillSearchCandidate             = authoring.SkillSearchCandidate
+	WorkforceSkillSearchPage                  = authoring.SkillSearchPage
+	WorkforceSkillSearchProvider              = authoring.SkillSearchProvider
+	WorkforceSkillSearchProviderFunc          = authoring.SkillSearchProviderFunc
 	AnswerWorkforceChangeSetRefinementRequest = authoring.AnswerChangeSetRefinementRequest
 )
 
@@ -52,7 +59,22 @@ const (
 	WorkforceSkillNeedsBinding             = authoring.SkillReadinessNeedsBinding
 	WorkforceSkillNeedsInstallation        = authoring.SkillReadinessNeedsInstallation
 	WorkforceSkillUnavailable              = authoring.SkillReadinessUnavailable
+	WorkforceSkillSearchEnabled            = authoring.SkillSearchOriginEnabled
+	WorkforceSkillSearchCatalog            = authoring.SkillSearchOriginCatalog
 )
+
+const (
+	DefaultWorkforceSkillSearchLimit = authoring.DefaultSkillSearchLimit
+	MaximumWorkforceSkillSearchLimit = authoring.MaximumSkillSearchLimit
+)
+
+func NormalizeWorkforceSkillSearchRequest(request WorkforceSkillSearchRequest) (WorkforceSkillSearchRequest, error) {
+	return authoring.NormalizeSkillSearchRequest(request)
+}
+
+func NormalizeWorkforceSkillSearchPage(request WorkforceSkillSearchRequest, page *WorkforceSkillSearchPage) (*WorkforceSkillSearchPage, error) {
+	return authoring.NormalizeSkillSearchPage(request, page)
+}
 
 // AnswerWorkforceChangeSetRefinement appends an audited answer and schedules
 // the next durable generation attempt. Hosts without the canonical Run service
