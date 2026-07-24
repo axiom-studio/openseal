@@ -483,7 +483,9 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 				return &TurnOutcome{
 					NextRunStatus: AgentRunStatusCompleted,
 					OutputSummary: "Release evidence summarized",
-					RunOutput:     map[string]interface{}{"summary": "The release evidence is healthy."},
+					RunOutput: map[string]interface{}{
+						"summary": "The release evidence is healthy.", "broadcastToChannel": true,
+					},
 					SkillSelections: []HostedSkillSelection{{
 						SkillRef: "skill:summarize@1", Disposition: HostedSkillApplied, Summary: "Applied summarization",
 					}},
@@ -509,6 +511,7 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 2 || messages[1].Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-42"}) ||
 		messages[1].Content != "The release evidence is healthy." || messages[1].ReplyToMessageID != trigger.ID ||
+		!messages[1].BroadcastToChannel ||
 		len(messages[1].References) != 1 || messages[1].References[0].Kind != ConversationReferenceRun || messages[1].References[0].ID != scheduled.Run.ID {
 		t.Fatalf("Agent channel messages = %#v, %v", messages, err)
 	}

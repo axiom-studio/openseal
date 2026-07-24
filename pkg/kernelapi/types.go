@@ -870,6 +870,7 @@ type PostChannelMessageRequest struct {
 	Content             string                            `json:"content"`
 	Audience            runtime.ConversationAudience      `json:"audience"`
 	ReplyToMessageID    string                            `json:"replyToMessageId,omitempty"`
+	BroadcastToChannel  bool                              `json:"broadcastToChannel,omitempty"`
 	Mentions            []runtime.ConversationParticipant `json:"mentions,omitempty"`
 	References          []runtime.ConversationReference   `json:"references,omitempty"`
 	RequiresResponse    bool                              `json:"requiresResponse,omitempty"`

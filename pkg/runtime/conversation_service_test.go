@@ -60,7 +60,7 @@ func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 			{
 				Participant: developer, WantsToSpeak: true, Intent: MessageIntentAnswer,
 				Content: "The release is ready; deployment and smoke-test evidence are linked.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-				ReplyToMessageID: question.Message.ID, ResolvesMessageID: question.Message.ID,
+				ReplyToMessageID: question.Message.ID, BroadcastToChannel: true, ResolvesMessageID: question.Message.ID,
 				References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: "smoke-evidence", Version: 1}},
 				Signals:    ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, HasEvidence: true, ResolvesOpenWork: true},
 			},
@@ -76,7 +76,8 @@ func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(round.Messages) != 1 || round.Messages[0].Sender != developer || round.Messages[0].Sequence != 2 ||
-		round.Messages[0].ThreadRootID != question.Message.ID || round.Messages[0].ResolvesMessageID != question.Message.ID ||
+		round.Messages[0].ThreadRootID != question.Message.ID || !round.Messages[0].BroadcastToChannel ||
+		round.Messages[0].ResolvesMessageID != question.Message.ID ||
 		round.Conversation.LastSequence != 2 || round.Conversation.Revision != 3 {
 		t.Fatalf("round = %#v", round)
 	}

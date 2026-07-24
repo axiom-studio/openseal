@@ -37,6 +37,7 @@ type PostChannelMessageRequest struct {
 	Content             string
 	Audience            ConversationAudience
 	ReplyToMessageID    string
+	BroadcastToChannel  bool
 	Mentions            []ConversationParticipant
 	References          []ConversationReference
 	RequiresResponse    bool
@@ -281,7 +282,8 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	message := &ChannelMessage{
 		ID: id, Scope: req.Scope, ConversationID: conversation.ID, Sequence: conversation.LastSequence + 1,
 		Sender: req.Sender, Intent: req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
-		ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), Mentions: cloneParticipants(req.Mentions),
+		ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
+		Mentions:   cloneParticipants(req.Mentions),
 		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
 		IdempotencyKey: key, CreatedAt: now,
@@ -381,7 +383,8 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 			Sequence: sequence, Sender: proposal.Participant, Intent: proposal.Intent, Content: strings.TrimSpace(proposal.Content),
 			ContributionKey: proposal.ContributionKey,
 			Audience:        proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID,
-			Mentions: cloneParticipants(proposal.Mentions), References: cloneConversationReferences(proposal.References),
+			BroadcastToChannel: proposal.BroadcastToChannel,
+			Mentions:           cloneParticipants(proposal.Mentions), References: cloneConversationReferences(proposal.References),
 			RequiresResponse: proposal.RequiresResponse, ResolvesMessageID: proposal.ResolvesMessageID,
 			IdempotencyKey: key + ":speaker:" + proposal.ID, ParticipationRoundID: roundID, CreatedAt: now,
 		}
@@ -676,6 +679,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		existing.Sender == req.Sender && existing.Intent == req.Intent && existing.Content == strings.TrimSpace(req.Content) &&
 		existing.Audience.Kind == req.Audience.Kind && reflect.DeepEqual(existing.Audience.Participants, req.Audience.Participants) &&
 		reflect.DeepEqual(existing.Audience.Roles, req.Audience.Roles) && existing.ReplyToMessageID == strings.TrimSpace(req.ReplyToMessageID) &&
+		existing.BroadcastToChannel == req.BroadcastToChannel &&
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
