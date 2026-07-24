@@ -149,7 +149,7 @@ func TestScheduleIntentQuestionDefersScheduleBlockedSourceMaterialization(t *tes
 	}
 }
 
-func TestAnsweredSourceScopeAsksForExecutionModeInsteadOfBlocking(t *testing.T) {
+func TestAnsweredSourceScopeWithoutRecurrenceDefaultsToOnDemand(t *testing.T) {
 	candidate := scheduledAuthoringCandidate(nil)
 	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "reddit-search", VersionConstraint: "2.0.0", RequiredActions: []string{"search"}}}
 	candidate.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-search"}
@@ -166,9 +166,8 @@ func TestAnsweredSourceScopeAsksForExecutionModeInsteadOfBlocking(t *testing.T) 
 			Value: RefinementProviderAnswerValue{Items: []string{"vibecoding"}},
 		}}},
 	})
-	if err != nil || result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 1 ||
-		result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
-		t.Fatalf("execution mode refinement = %#v, err = %v", result, err)
+	if err != nil || !result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 0 {
+		t.Fatalf("on-demand source candidate = %#v, err = %v", result, err)
 	}
 }
 

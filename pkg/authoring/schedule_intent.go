@@ -58,10 +58,6 @@ func enforceScheduleIntentAuthority(generated *GenerationResponse, request Gener
 		if restoreExistingAndRemoveNewCadences(&generated.Candidate, request.Existing) {
 			generated.Assumptions = append(generated.Assumptions, "Provider-created recurring schedules were removed because recurring execution was not requested.")
 		}
-		if answeredSourceScopeNeedsExecutionChoice(&generated.Candidate, request) {
-			upsertScheduleIntentQuestion(generated)
-			return nil
-		}
 		removeScheduleIntentQuestion(generated)
 		return nil
 	case scheduleIntentAmbiguous:
@@ -212,36 +208,13 @@ func upsertScheduleIntentQuestion(generated *GenerationResponse) {
 	})
 }
 
-// answeredSourceScopeNeedsExecutionChoice prevents a guided source setup from
-// ending in the impossible state where every visible question is answered but
-// no execution mode was authorized. Existing durable actions remain valid;
-// otherwise the operator chooses on-demand work or an exact schedule.
-func answeredSourceScopeNeedsExecutionChoice(candidate *WorkforceCandidate, request GenerateRequest) bool {
-	if request.Refinement == nil {
+func sourceCapabilityRequiresDurableAction(request GenerateRequest) bool {
+	switch parseScheduleIntent(scheduleIntentAuthorityText(request)).kind {
+	case scheduleIntentAmbiguous, scheduleIntentExact:
+		return true
+	default:
 		return false
 	}
-	answered := make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
-	for _, answer := range request.Refinement.Answers {
-		answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
-	}
-	for _, need := range request.Catalog.CapabilityNeeds {
-		if need.SourceScope == nil {
-			continue
-		}
-		answer, exists := answered[CapabilitySourceScopeQuestionID(need.ID)]
-		if !exists || len(nonEmptyUnique(answer.Items)) == 0 {
-			continue
-		}
-		selected := selectedCapabilityNeed(need, answered)
-		if len(matchingSourceScopeInvocations(candidate, selected, request.Catalog)) == 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func sourceCapabilityRequiresDurableAction(request GenerateRequest) bool {
-	return parseScheduleIntent(scheduleIntentAuthorityText(request)).kind != scheduleIntentManual
 }
 
 func removeScheduleIntentQuestion(generated *GenerationResponse) {
