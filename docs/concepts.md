@@ -196,7 +196,7 @@ external Skill action, approval policy, delivery Run, and provider receipt.
 
 ## Deterministic workflows
 
-HCL workflows are optional, process-bounded runbooks. They can be created,
+HCL workflows are optional, process-bounded CLI runbooks. They can be created,
 validated, and run explicitly with the CLI. The daemon does not load, schedule,
 or expose them through hidden APIs. Durable autonomous work uses Agent
 definitions, objectives, Agent Runs, objective schedules, event-source
