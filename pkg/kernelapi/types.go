@@ -198,8 +198,15 @@ type WorkforceExecutionTarget struct {
 	Revision    int64  `json:"revision"`
 }
 
+type WorkforceExecutionTargetCandidate struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Environment string `json:"environment"`
+}
+
 type WorkforceExecutionTargetList struct {
-	Items []WorkforceExecutionTarget `json:"items"`
+	Items      []WorkforceExecutionTarget          `json:"items"`
+	Candidates []WorkforceExecutionTargetCandidate `json:"candidates,omitempty"`
 }
 
 type ActionApprovalCapabilityFeatures struct {
