@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
@@ -1910,6 +1911,9 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	if strings.Contains(view, "field changes") {
 		t.Fatalf("create preview was presented as an amendment:\n%s", view)
 	}
+	if strings.Contains(view, "Automations") {
+		t.Fatalf("cognitive-only Agent invented an automation:\n%s", view)
+	}
 	model.editor.SetValue("Require approval before external outreach")
 	applyCommand(t, model, model.submitWorkforceAuthoring())
 	if len(fake.authoringRequests) != 2 || fake.authoringRequests[1].Mode != authoring.ModeAmend ||
@@ -1921,6 +1925,111 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	}
 	if !strings.Contains(model.View(), "1 field changes") {
 		t.Fatalf("amendment diff was not rendered:\n%s", model.View())
+	}
+}
+
+func TestWorkforceAuthoringShowsAndScopesDeterministicRunbookRefinement(t *testing.T) {
+	definition := &kernelagent.AgentDefinition{
+		ID: "publisher", Version: "1", DisplayName: "Document Publisher", Purpose: "Publish reports",
+		SystemPrompt: "Publish approved reports.",
+		SkillRequirements: []kernelagent.SkillRequirement{{
+			SkillID: "openseal.document", VersionConstraint: "1.0.2", RequiredActions: []string{"render_pdf"},
+		}},
+		Authority: kernelagent.AuthorityPolicy{
+			MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1,
+			AllowedSkillIDs: []string{"openseal.document"}, RequireApprovalAt: capability.RiskLevelWrite,
+		},
+		ObjectiveTemplates: []workforce.ObjectiveTemplate{{
+			ID: "weekly-report", Title: "Publish weekly report", Goal: "Render an approved report", Priority: 1,
+			Cadence: map[string]interface{}{
+				"type": "weekly", "dayOfWeek": "monday", "timeOfDay": "09:00", "assignedAgentId": "publisher",
+				"runBudget":   map[string]interface{}{"maxAttempts": 3, "maxActions": 2, "maxDurationMs": 60000},
+				"runTemplate": map[string]interface{}{"entrypoint": "render_report"},
+			},
+		}},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "render-report", Version: "1", Name: "Render report",
+			Entrypoints: map[string]string{"render_report": "render"},
+			Interfaces: map[string]runbook.Interface{"render_report": {
+				Description: "Render one approved Markdown report.",
+				InputSchema: map[string]interface{}{
+					"type": "object", "properties": map[string]interface{}{
+						"markdown": map[string]interface{}{"type": "string"},
+						"title":    map[string]interface{}{"type": "string"},
+					}, "required": []interface{}{"markdown"},
+				},
+				OutputSchema: map[string]interface{}{
+					"type": "object", "properties": map[string]interface{}{
+						"pdfArtifact": map[string]interface{}{"type": "string"},
+					}, "required": []interface{}{"pdfArtifact"},
+				},
+			}},
+			Steps: map[string]runbook.Step{
+				"render": {
+					Kind: runbook.StepAction,
+					Action: &runbook.ActionStep{
+						SkillID: "openseal.document", SkillVersion: "1.0.2", Action: "render_pdf",
+						ResultPath: "/results/render", Next: "done",
+					},
+				},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+			},
+		},
+	}
+	result := authoring.CompileResult{
+		Valid: true, Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{definition}},
+	}
+	parent := &authoring.ChangeSet{
+		ID: "change-render", Scope: capability.ScopeReference{Kind: "local", ID: "default"},
+		Mode: authoring.ModeCreate, Result: result, Status: authoring.ChangeSetReview, Revision: 4,
+	}
+	child := &authoring.ChangeSet{
+		ID: "change-render-refined", ParentID: parent.ID, Scope: parent.Scope,
+		Mode: authoring.ModeAmend, Result: result, Status: authoring.ChangeSetReview, Revision: 1,
+	}
+	fake := &fakeKernelClient{changeSets: []*authoring.ChangeSet{child}}
+	model := newTestModel(t, fake)
+	model.ready, model.section, model.focus = true, sectionAuthoring, focusPanel
+	model.authoringCapability = kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	model.authoringResult, model.authoringChangeSet = &result, parent
+
+	view := model.renderAuthoringContent(110)
+	for _, expected := range []string{
+		"Automations · 1", "Document Publisher · render_report · render-report@1",
+		"Takes · markdown:string · title:string?", "Returns · pdfArtifact:string",
+		"2 durable steps · approval at write · failure stops at checkpoint",
+		"openseal.document@1.0.2/render_pdf",
+		"monday at 09:00 · Publish weekly report · 3 attempts · 2 actions · 60s",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("automation review missing %q:\n%s", expected, view)
+		}
+	}
+
+	model.prepareWorkforceAutomationRefinement()
+	if model.authoringAutomationFocus == nil || model.focus != focusComposer ||
+		!strings.Contains(model.renderComposer(60), "Refine deterministic operation") {
+		t.Fatalf("automation refinement was not focused:\n%s", model.renderComposer(60))
+	}
+	model.editor.SetValue("Require a signed approval receipt as an input.")
+	applyCommand(t, model, model.submitWorkforceAuthoring())
+	if len(fake.changeSetRequests) != 1 || fake.changeSetRequests[0].ParentID != parent.ID {
+		t.Fatalf("focused refinement did not create a child ChangeSet: %#v", fake.changeSetRequests)
+	}
+	prompt := fake.changeSetRequests[0].Prompt
+	for _, expected := range []string{
+		`Update only the deterministic operation "render_report"`,
+		`Agent "Document Publisher" (publisher)`,
+		"runbook render-report@1",
+		"Preserve every unrelated Agent, Team, objective, policy, Skill binding, runbook, and operation exactly.",
+		"Require a signed approval receipt as an input.",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("scoped refinement prompt missing %q: %s", expected, prompt)
+		}
+	}
+	if model.authoringAutomationFocus != nil {
+		t.Fatal("successful child proposal retained stale automation focus")
 	}
 }
 
