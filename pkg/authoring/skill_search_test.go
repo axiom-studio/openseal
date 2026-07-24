@@ -64,12 +64,15 @@ func TestNormalizeSkillSearchPagePreservesProviderRankingAndLifecycleTruth(t *te
 			},
 		},
 		NextCursor: " next ",
+		Diagnostics: []CatalogDiagnostic{{
+			Code: "catalog_partial", Message: "One configured catalog is temporarily unavailable.", Reference: "catalog",
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.NextCursor != "next" || page.Items[0].ID != "reddit-observer" || page.Items[1].ID != "openseal.source" ||
-		len(page.Items[0].Actions) != 1 || !page.Items[0].RequiresApproval {
+		len(page.Items[0].Actions) != 1 || !page.Items[0].RequiresApproval || len(page.Diagnostics) != 1 {
 		t.Fatalf("normalized page = %#v", page)
 	}
 }
