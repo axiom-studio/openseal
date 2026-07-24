@@ -163,6 +163,7 @@ type (
 	WorkforceCapabilitySourceScopeRequirement = authoring.CapabilitySourceScopeRequirement
 	WorkforceCapabilitySourcePolicyProposal   = authoring.CapabilitySourcePolicyProposal
 	WorkforceAuthorityConstraint              = authoring.AuthorityConstraint
+	WorkforceCatalogDiagnostic                = authoring.CatalogDiagnostic
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
