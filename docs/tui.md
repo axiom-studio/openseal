@@ -45,7 +45,8 @@ Depending on the connected server, the workspace can expose:
   place approved credential references and binding configuration, inspect
   evaluation, resolve eligible requirements, and apply a reviewed ChangeSet
 - **Readiness** — Agent deployment state, compilation history, and governed
-  definition amendments, including self-proposed conversation changes
+  definition amendments, including self-proposed conversation changes and
+  direct invocation of callable operations from the exact active runbook
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
 - **Objectives / Initiatives** — multi-objective portfolios, schedule supervision,
   and project context
@@ -73,6 +74,16 @@ checkpoint failure behavior. Use `j`/`k` to select an operation and `m` to
 describe a scoped change. The resulting prompt creates a child ChangeSet and
 preserves unrelated candidate state; reviewing an operation never activates it.
 Agents whose work is entirely cognitive do not show an Automations section.
+
+After activation, **Readiness** projects callable operations from the exact
+active Agent definition. Select an operation with `j`/`k`, press `n`, and
+provide one credential-free JSON object matching its displayed input contract.
+`Ctrl+S` creates a canonical durable Run with the active deployment as owner
+and assignee and the selected entrypoint; the TUI then opens that Run in
+**Work**. Failed transport attempts preserve both the draft and idempotency key
+for safe retry. Paused deployments, historical or malformed definitions,
+cognitive-only Agents, and kernels without advertised Run-create authority
+remain read-only.
 
 ## Navigation keys
 
@@ -102,7 +113,7 @@ Common controls:
 | `Tab` | Move between composer and current list |
 | `Ctrl+S` | Submit the current composer operation |
 | `↑` / `↓` or `k` / `j` | Select an item or current requirement |
-| `n` | Begin a supported creation or install operation in the section |
+| `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
 | `m` | Refine the selected deterministic Workforce operation; elsewhere, open the contextual message/amendment composer |
 | `p` | Pause/resume selected Run, Agent, Team, Initiative, or event source; pin/unpin a Skill |
