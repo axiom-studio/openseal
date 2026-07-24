@@ -144,7 +144,7 @@ func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created.Children) != 1 || created.Children[0].Entrypoint != "collect" ||
+	if len(created.Children) != 1 || created.Children[0].Kind != RunKindAgentWork || created.Children[0].Entrypoint != "collect" ||
 		created.Children[0].Context["release"] != "2.0.0" {
 		t.Fatalf("created=%#v", created)
 	}

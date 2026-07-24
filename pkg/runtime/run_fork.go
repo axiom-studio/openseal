@@ -283,8 +283,12 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 				deadline = &candidate
 			}
 		}
+		childKind := source.Kind
+		if strings.TrimSpace(branch.Entrypoint) != "" {
+			childKind = RunKindAgentWork
+		}
 		child, err := buildAgentRun(ctx, c.store, CreateAgentRunRequest{
-			Kind: source.Kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
+			Kind: childKind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
 			Owner: source.Owner, AssignedAgentID: assignedAgentID, Entrypoint: strings.TrimSpace(branch.Entrypoint),
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
 			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
