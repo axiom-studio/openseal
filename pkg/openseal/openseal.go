@@ -813,6 +813,7 @@ const (
 	KernelOperationRetry                    = kernelapi.OperationRetry
 	KernelOperationRefine                   = kernelapi.OperationRefine
 	KernelOperationPatch                    = kernelapi.OperationPatch
+	KernelOperationSearch                   = kernelapi.OperationSearch
 	KernelOperationDeliver                  = kernelapi.OperationDeliver
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
