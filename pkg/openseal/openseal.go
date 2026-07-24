@@ -203,6 +203,7 @@ type (
 	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
 	WorkforceAppliedResourceReference         = authoring.AppliedResourceReference
 	WorkforceExecutionTarget                  = kernelapi.WorkforceExecutionTarget
+	WorkforceExecutionTargetCandidate         = kernelapi.WorkforceExecutionTargetCandidate
 	WorkforceExecutionTargetList              = kernelapi.WorkforceExecutionTargetList
 	WorkforceChangeSetStore                   = authoring.ChangeSetStore
 	PendingWorkforceChangeSetGenerationStore  = authoring.PendingChangeSetGenerationStore
