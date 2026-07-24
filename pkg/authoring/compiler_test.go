@@ -404,7 +404,7 @@ func TestCompilerRejectsPersistentlyInvalidRunbookStepPlacement(t *testing.T) {
 	}
 }
 
-func TestCompilerRepairsRawRunbookValueWithExactCanonicalForms(t *testing.T) {
+func TestCompilerCanonicalizesUnambiguousRawRunbookValues(t *testing.T) {
 	valid, _ := deterministicRunbookPayloads(t)
 	var document map[string]interface{}
 	if err := json.Unmarshal(valid, &document); err != nil {
@@ -414,11 +414,12 @@ func TestCompilerRepairsRawRunbookValueWithExactCanonicalForms(t *testing.T) {
 	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
 	outputs := steps["done"].(map[string]interface{})["end"].(map[string]interface{})["outputs"].(map[string]interface{})
 	outputs["artifact"] = "/results/report"
+	outputs["filename"] = "report.pdf"
 	invalid, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{invalid, valid}}
+	generator := &repairingGenerator{generated: invalid}
 	compiler, _ := NewCompiler(generator)
 	result, err := compiler.Compile(t.Context(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.",
@@ -429,16 +430,47 @@ func TestCompilerRepairsRawRunbookValueWithExactCanonicalForms(t *testing.T) {
 			},
 		}},
 	})
-	if err != nil || result == nil || !result.Valid || generator.repairs != 2 {
+	if err != nil || result == nil || !result.Valid || generator.repairs != 0 {
 		t.Fatalf("Runbook Value repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
 	}
-	for attempt, repairError := range generator.repairErrors {
-		diagnostic := repairError.Error()
-		if !strings.Contains(diagnostic, "candidate.agents.runbook.steps.end.outputs") ||
-			!strings.Contains(diagnostic, "expects a Runbook Value object, not string") ||
-			!strings.Contains(diagnostic, `{"ref":"<JSON Pointer>"}`) {
-			t.Fatalf("Runbook Value repair diagnostic %d = %q", attempt+1, diagnostic)
-		}
+	output := result.Candidate.Agents[0].Runbook.Steps["done"].End.Outputs["artifact"]
+	if output.Ref != "/results/report" || len(output.Literal) != 0 || len(output.Template) != 0 {
+		t.Fatalf("canonicalized Runbook Value = %#v", output)
+	}
+	filename := result.Candidate.Agents[0].Runbook.Steps["done"].End.Outputs["filename"]
+	if string(filename.Literal) != `"report.pdf"` || filename.Ref != "" || len(filename.Template) != 0 {
+		t.Fatalf("canonicalized literal Runbook Value = %#v", filename)
+	}
+}
+
+func TestCompilerPreservesStrictRunbookValueObjectDiagnostics(t *testing.T) {
+	valid, _ := deterministicRunbookPayloads(t)
+	var document map[string]interface{}
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
+	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	outputs := steps["done"].(map[string]interface{})["end"].(map[string]interface{})["outputs"].(map[string]interface{})
+	outputs["artifact"] = map[string]interface{}{"reff": "/results/report"}
+	invalid, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{invalid, invalid}}
+	compiler, _ := NewCompiler(generator)
+	_, err = compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {
+				ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"},
+				MaximumRisk: capability.RiskLevelWrite,
+			},
+		}},
+	})
+	var schemaError *SchemaGenerationError
+	if !errors.As(err, &schemaError) || !strings.Contains(schemaError.Diagnostic, "unknown field reff") {
+		t.Fatalf("misspelled Runbook Value field error=%#v err=%v", schemaError, err)
 	}
 }
 

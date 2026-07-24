@@ -416,6 +416,7 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	payload = normalizeGeneratedRefinementBlocking(payload)
 	payload = normalizeGeneratedRefinementProvenance(payload)
 	payload = normalizeGeneratedRefinementDependencies(payload)
+	payload = normalizeGeneratedRunbookValues(payload)
 	var generated GenerationResponse
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
@@ -432,6 +433,106 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	normalizeCandidateObjectiveRunBudgets(&generated.Candidate)
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
+}
+
+// normalizeGeneratedRunbookValues canonicalizes unambiguous scalar shorthand
+// only at fields whose declared portable type is runbook.Value. A JSON Pointer
+// string becomes a ref and every other primitive becomes a literal. Objects
+// remain untouched so misspelled Value fields still fail strict decoding.
+func normalizeGeneratedRunbookValues(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	normalized, changed := normalizeRunbookValuesAtType(document, reflect.TypeOf(GenerationResponse{}), 0)
+	if !changed {
+		return payload
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+func normalizeRunbookValuesAtType(value interface{}, expected reflect.Type, depth int) (interface{}, bool) {
+	if expected == nil || depth > 64 {
+		return value, false
+	}
+	for expected.Kind() == reflect.Pointer {
+		expected = expected.Elem()
+	}
+	if expected == reflect.TypeOf(runbook.Value{}) {
+		if _, isObject := value.(map[string]interface{}); isObject {
+			return value, false
+		}
+		if reference, ok := value.(string); ok && generatedRunbookReferenceShorthand(reference) {
+			return map[string]interface{}{"ref": reference}, true
+		}
+		return map[string]interface{}{"literal": value}, true
+	}
+	switch expected.Kind() {
+	case reflect.Struct:
+		object, ok := value.(map[string]interface{})
+		if !ok {
+			return value, false
+		}
+		fields := jsonStructFields(expected)
+		changed := false
+		for name, child := range object {
+			childType, known := fields[name]
+			if !known {
+				continue
+			}
+			normalized, childChanged := normalizeRunbookValuesAtType(child, childType, depth+1)
+			if childChanged {
+				object[name] = normalized
+				changed = true
+			}
+		}
+		return object, changed
+	case reflect.Slice, reflect.Array:
+		items, ok := value.([]interface{})
+		if !ok {
+			return value, false
+		}
+		changed := false
+		for index, child := range items {
+			normalized, childChanged := normalizeRunbookValuesAtType(child, expected.Elem(), depth+1)
+			if childChanged {
+				items[index] = normalized
+				changed = true
+			}
+		}
+		return items, changed
+	case reflect.Map:
+		object, ok := value.(map[string]interface{})
+		if !ok || expected.Key().Kind() != reflect.String {
+			return value, false
+		}
+		changed := false
+		for name, child := range object {
+			normalized, childChanged := normalizeRunbookValuesAtType(child, expected.Elem(), depth+1)
+			if childChanged {
+				object[name] = normalized
+				changed = true
+			}
+		}
+		return object, changed
+	default:
+		return value, false
+	}
+}
+
+func generatedRunbookReferenceShorthand(value string) bool {
+	for _, root := range []string{"/input", "/results", "/context"} {
+		if value == root || strings.HasPrefix(value, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // strictJSONSchemaError preserves the decoder failure for errors.Is/As while
