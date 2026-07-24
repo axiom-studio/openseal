@@ -133,6 +133,77 @@ func TestChangeSetRefinementIsSequentialAuditedAndRestartSafe(t *testing.T) {
 	}
 }
 
+func TestRefinementAtomicallyAddsHostVerifiedDiscoveredSkill(t *testing.T) {
+	question := RefinementQuestion{
+		ID: "select-analysis-skill", Category: RefinementCategorySkill,
+		Prompt: "Which Skill should analyze the evidence?", WhyNeeded: "Analysis needs an executable capability.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Minimum: 1, Maximum: 1},
+		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	generator := &refinementGenerator{payloads: [][]byte{
+		refinementPayload(t, "1", question),
+		refinementPayload(t, "2"),
+	}}
+	compiler, _ := NewCompiler(generator)
+	service, _ := NewChangeSetService(compiler, NewMemoryChangeSetStore())
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	changeSet, _, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: scope, Prompt: "Analyze research",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}, Readiness: SkillReadinessReady},
+		}},
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-discovery-refinement",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := SkillSearchCandidate{
+		SkillCapability: SkillCapability{
+			ID: "marketplace.summarize", Version: "1.2.3", SourceIdentity: "registry.example::publisher/summarize",
+			Name: "Summarize", Description: "Summarizes evidence.", Actions: []string{"summarize"},
+			Readiness: SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "installation", Compatible: true, Evidence: "Verified compilation receipt.", Reference: "receipt:sha256:abc",
+			}},
+		},
+		Origin: SkillSearchOriginCatalog, Verification: SkillSearchVerificationVerified,
+		Provenance:       SkillSearchProvenance{Registry: "registry.example", Publisher: "publisher", Reference: "listing:7"},
+		RequiresApproval: true,
+	}
+	unverified := candidate
+	unverified.ID = "marketplace.unverified"
+	unverified.Verification = SkillSearchVerificationRequired
+	if _, _, err := service.AnswerRefinement(context.Background(), AnswerChangeSetRefinementRequest{
+		Scope: scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, QuestionID: question.ID,
+		Value: RefinementAnswerValue{SkillIDs: []string{unverified.ID}}, TrustedSkill: &unverified,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "answer-unverified-skill",
+	}); err == nil || !strings.Contains(err.Error(), "must be verified") {
+		t.Fatalf("unverified discovered Skill error = %v", err)
+	}
+	answered, replayed, err := service.AnswerRefinement(context.Background(), AnswerChangeSetRefinementRequest{
+		Scope: scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, QuestionID: question.ID,
+		Value: RefinementAnswerValue{SkillIDs: []string{candidate.ID}}, TrustedSkill: &candidate,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "answer-discovered-skill",
+	})
+	if err != nil || replayed {
+		t.Fatalf("answer discovered Skill: replayed=%t err=%v", replayed, err)
+	}
+	added, exists := answered.Catalog.Skills[candidate.ID]
+	if !exists || added.Version != candidate.Version || added.SourceIdentity != candidate.SourceIdentity {
+		t.Fatalf("durable discovered Skill = %#v", added)
+	}
+	if got := answered.Generation.Request.Catalog.Skills[candidate.ID]; got.Version != candidate.Version {
+		t.Fatalf("generation catalog Skill = %#v", got)
+	}
+	if got := answered.Refinement.CurrentAnswer(question.ID); got == nil || len(got.Value.SkillIDs) != 1 || got.Value.SkillIDs[0] != candidate.ID {
+		t.Fatalf("durable answer = %#v", got)
+	}
+	if options := answered.Refinement.Questions[0].Answer.Options; len(options) != 1 || options[0].ID != candidate.ID {
+		t.Fatalf("durable options = %#v", options)
+	}
+}
+
 func TestRefinementSequenceCanGateSkillsAndScopeOnCredentialConfiguration(t *testing.T) {
 	credential := RefinementQuestion{
 		ID: "reddit-credential", Category: RefinementCategoryCredential, Prompt: "Which authorized Reddit credential should be used?", WhyNeeded: "Reddit access requires an authorized credential.",

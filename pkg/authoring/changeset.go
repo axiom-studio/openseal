@@ -243,9 +243,15 @@ type AnswerChangeSetRefinementRequest struct {
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	QuestionID       string                    `json:"questionId"`
 	Value            RefinementAnswerValue     `json:"value"`
-	Source           RefinementAnswerSource    `json:"source"`
-	Actor            ChangeSetActor            `json:"actor"`
-	IdempotencyKey   string                    `json:"idempotencyKey"`
+	// TrustedSkill is an optional host-resolved search candidate. It is never
+	// accepted from an API payload. When present, AnswerRefinement atomically
+	// adds this exact verified candidate to the durable catalog before recording
+	// the Skill selection, so catalog discovery cannot become client-authored
+	// authority.
+	TrustedSkill   *SkillSearchCandidate  `json:"-"`
+	Source         RefinementAnswerSource `json:"source"`
+	Actor          ChangeSetActor         `json:"actor"`
+	IdempotencyKey string                 `json:"idempotencyKey"`
 }
 
 type SubmitChangeSetEvaluationRequest struct {
@@ -712,11 +718,12 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 	}
 	request.Value = normalizeRefinementAnswerValue(request.Value)
 	requestDigest, err := digestJSON(struct {
-		QuestionID string
-		Value      RefinementAnswerValue
-		Source     RefinementAnswerSource
-		Actor      ChangeSetActor
-	}{request.QuestionID, request.Value, request.Source, request.Actor})
+		QuestionID   string
+		Value        RefinementAnswerValue
+		TrustedSkill *SkillSearchCandidate
+		Source       RefinementAnswerSource
+		Actor        ChangeSetActor
+	}{request.QuestionID, request.Value, request.TrustedSkill, request.Source, request.Actor})
 	if err != nil {
 		return nil, false, err
 	}
@@ -734,6 +741,12 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 	}
 	if current.Status == ChangeSetEvaluating || current.Status == ChangeSetApplied || current.Status == ChangeSetFailed {
 		return nil, false, fmt.Errorf("%w: cannot answer refinement in status %s", ErrChangeSetTransition, current.Status)
+	}
+	if request.TrustedSkill != nil {
+		current = cloneChangeSet(current)
+		if err := addTrustedRefinementSkill(current, request.QuestionID, request.Value, *request.TrustedSkill); err != nil {
+			return nil, false, err
+		}
 	}
 	var question *RefinementQuestion
 	for i := range current.Refinement.Questions {
@@ -785,6 +798,65 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 		return s.AnswerRefinement(ctx, request)
 	}
 	return updated, false, err
+}
+
+func addTrustedRefinementSkill(changeSet *ChangeSet, questionID string, value RefinementAnswerValue, candidate SkillSearchCandidate) error {
+	if changeSet == nil {
+		return errors.New("change set is required")
+	}
+	if len(value.SkillIDs) != 1 || strings.TrimSpace(value.SkillIDs[0]) != strings.TrimSpace(candidate.ID) {
+		return errors.New("trusted Skill must match the selected Skill identity")
+	}
+	normalized, err := NormalizeSkillSearchPage(SkillSearchRequest{
+		Scope: changeSet.Scope, Query: candidate.ID, Limit: 1,
+	}, &SkillSearchPage{Items: []SkillSearchCandidate{candidate}})
+	if err != nil {
+		return fmt.Errorf("trusted Skill candidate: %w", err)
+	}
+	candidate = normalized.Items[0]
+	if candidate.Verification != SkillSearchVerificationVerified || candidate.Readiness == SkillReadinessUnavailable {
+		return errors.New("trusted Skill candidate is not verified and selectable")
+	}
+	for _, fact := range candidate.Compatibility {
+		if fact.Compatible || fact.Requirement == "installation" || strings.HasPrefix(fact.Requirement, "credential:") {
+			continue
+		}
+		return fmt.Errorf("trusted Skill candidate is incompatible with %s", fact.Requirement)
+	}
+	if existing, ok := changeSet.Catalog.Skills[candidate.ID]; ok {
+		if existing.Version != candidate.Version || existing.SourceIdentity != candidate.SourceIdentity {
+			return errors.New("trusted Skill conflicts with the authorized catalog identity")
+		}
+	}
+	var question *RefinementQuestion
+	for index := range changeSet.Refinement.Questions {
+		if changeSet.Refinement.Questions[index].ID == questionID {
+			question = &changeSet.Refinement.Questions[index]
+			break
+		}
+	}
+	if question == nil || question.Answer.Kind != RefinementAnswerSkillSelection {
+		return errors.New("trusted Skill can only answer a Skill selection question")
+	}
+	if changeSet.Catalog.Skills == nil {
+		changeSet.Catalog.Skills = make(map[string]SkillCapability)
+	}
+	if _, exists := changeSet.Catalog.Skills[candidate.ID]; !exists {
+		changeSet.Catalog.Skills[candidate.ID] = candidate.SkillCapability
+	}
+	found := false
+	for _, option := range question.Answer.Options {
+		if option.ID == candidate.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		question.Answer.Options = append(question.Answer.Options, RefinementQuestionOption{
+			ID: candidate.ID, Label: candidate.Name, Description: candidate.Description,
+		})
+	}
+	return nil
 }
 
 func generationAttempt(value *ChangeSet) int {
