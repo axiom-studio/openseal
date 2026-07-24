@@ -202,6 +202,8 @@ type (
 	RetryWorkforceChangeSetGenerationRequest  = authoring.RetryChangeSetGenerationRequest
 	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
 	WorkforceAppliedResourceReference         = authoring.AppliedResourceReference
+	WorkforceExecutionTarget                  = kernelapi.WorkforceExecutionTarget
+	WorkforceExecutionTargetList              = kernelapi.WorkforceExecutionTargetList
 	WorkforceChangeSetStore                   = authoring.ChangeSetStore
 	PendingWorkforceChangeSetGenerationStore  = authoring.PendingChangeSetGenerationStore
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
@@ -949,6 +951,10 @@ func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Kernel
 
 func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures) KernelCapability {
 	return kernelapi.WorkforceAuthoringCapability(features)
+}
+
+func WorkforceExecutionTargetsCapability(management bool) KernelCapability {
+	return kernelapi.WorkforceExecutionTargetsCapability(management)
 }
 
 // NewKernelCapabilityDocument composes the exact capability envelope consumed

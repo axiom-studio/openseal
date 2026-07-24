@@ -15,49 +15,51 @@ import (
 )
 
 const (
-	APIVersion                          = "agent-kernel/v1"
-	AgentRunsCapabilityID               = "agent-runs"
-	AgentRunsCapabilityVersion          = "1"
-	ObjectivesCapabilityID              = "objectives"
-	ObjectivesCapabilityVersion         = "1"
-	ObjectiveSchedulesCapabilityID      = "objective-schedules"
-	ObjectiveSchedulesCapabilityVersion = "1"
-	InitiativesCapabilityID             = "initiatives"
-	InitiativesCapabilityVersion        = "1"
-	SourceMonitorsCapabilityID          = "source-monitors"
-	SourceMonitorsCapabilityVersion     = "1"
-	OutreachCapabilityID                = "outreach"
-	OutreachCapabilityVersion           = "1"
-	SkillActionsCapabilityID            = "skill-actions"
-	SkillActionsCapabilityVersion       = "1"
-	SkillBindingsCapabilityID           = "skill-bindings"
-	SkillBindingsCapabilityVersion      = "1"
-	ArtifactsCapabilityID               = "artifacts"
-	ArtifactsCapabilityVersion          = "1"
-	ChannelsCapabilityID                = "channels"
-	ChannelsCapabilityVersion           = "4"
-	TeamDefinitionsCapabilityID         = "team-definitions"
-	TeamDefinitionsCapabilityVersion    = "3"
-	WorkforceAuthoringCapabilityID      = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion = "10"
-	ClawHubLifecycleCapabilityID        = "clawhub-lifecycle"
-	ClawHubLifecycleCapabilityVersion   = clawhub.LifecycleAPIVersion
-	AgentDefinitionsCapabilityID        = "agent-definitions"
-	AgentDefinitionsCapabilityVersion   = "6"
-	AgentRequestsCapabilityID           = "agent-requests"
-	AgentRequestsCapabilityVersion      = "1"
-	ActionApprovalsCapabilityID         = "action-approvals"
-	ActionApprovalsCapabilityVersion    = "1"
-	ActionCallsCapabilityID             = "action-calls"
-	ActionCallsCapabilityVersion        = "1"
-	AgentTurnsCapabilityID              = "agent-turns"
-	AgentTurnsCapabilityVersion         = "1"
-	ActivityCapabilityID                = "activity"
-	ActivityCapabilityVersion           = "1"
-	EventRoutingCapabilityID            = "event-routing"
-	EventRoutingCapabilityVersion       = "1"
-	SourcePoliciesCapabilityID          = "source-policies"
-	SourcePoliciesCapabilityVersion     = source.LifecycleAPIVersion
+	APIVersion                                 = "agent-kernel/v1"
+	AgentRunsCapabilityID                      = "agent-runs"
+	AgentRunsCapabilityVersion                 = "1"
+	ObjectivesCapabilityID                     = "objectives"
+	ObjectivesCapabilityVersion                = "1"
+	ObjectiveSchedulesCapabilityID             = "objective-schedules"
+	ObjectiveSchedulesCapabilityVersion        = "1"
+	InitiativesCapabilityID                    = "initiatives"
+	InitiativesCapabilityVersion               = "1"
+	SourceMonitorsCapabilityID                 = "source-monitors"
+	SourceMonitorsCapabilityVersion            = "1"
+	OutreachCapabilityID                       = "outreach"
+	OutreachCapabilityVersion                  = "1"
+	SkillActionsCapabilityID                   = "skill-actions"
+	SkillActionsCapabilityVersion              = "1"
+	SkillBindingsCapabilityID                  = "skill-bindings"
+	SkillBindingsCapabilityVersion             = "1"
+	ArtifactsCapabilityID                      = "artifacts"
+	ArtifactsCapabilityVersion                 = "1"
+	ChannelsCapabilityID                       = "channels"
+	ChannelsCapabilityVersion                  = "4"
+	TeamDefinitionsCapabilityID                = "team-definitions"
+	TeamDefinitionsCapabilityVersion           = "3"
+	WorkforceAuthoringCapabilityID             = "workforce-authoring"
+	WorkforceAuthoringCapabilityVersion        = "10"
+	WorkforceExecutionTargetsCapabilityID      = "workforce-execution-targets"
+	WorkforceExecutionTargetsCapabilityVersion = "1"
+	ClawHubLifecycleCapabilityID               = "clawhub-lifecycle"
+	ClawHubLifecycleCapabilityVersion          = clawhub.LifecycleAPIVersion
+	AgentDefinitionsCapabilityID               = "agent-definitions"
+	AgentDefinitionsCapabilityVersion          = "6"
+	AgentRequestsCapabilityID                  = "agent-requests"
+	AgentRequestsCapabilityVersion             = "1"
+	ActionApprovalsCapabilityID                = "action-approvals"
+	ActionApprovalsCapabilityVersion           = "1"
+	ActionCallsCapabilityID                    = "action-calls"
+	ActionCallsCapabilityVersion               = "1"
+	AgentTurnsCapabilityID                     = "agent-turns"
+	AgentTurnsCapabilityVersion                = "1"
+	ActivityCapabilityID                       = "activity"
+	ActivityCapabilityVersion                  = "1"
+	EventRoutingCapabilityID                   = "event-routing"
+	EventRoutingCapabilityVersion              = "1"
+	SourcePoliciesCapabilityID                 = "source-policies"
+	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
 )
 
 const (
@@ -183,6 +185,21 @@ type AgentDefinitionCapabilityFeatures struct {
 // capability response and must never be inferred from these feature flags.
 type WorkforceAuthoringCapabilityFeatures struct {
 	ChangeSets bool
+}
+
+// WorkforceExecutionTarget is the product-neutral placement surface used to
+// choose where authored work may execute. Embedding hosts retain cluster,
+// credential, and transport details behind the opaque target ID.
+type WorkforceExecutionTarget struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Environment string `json:"environment"`
+	Status      string `json:"status"`
+	Revision    int64  `json:"revision"`
+}
+
+type WorkforceExecutionTargetList struct {
+	Items []WorkforceExecutionTarget `json:"items"`
 }
 
 type ActionApprovalCapabilityFeatures struct {
@@ -585,6 +602,17 @@ func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures)
 		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
 	}
 	return capability
+}
+
+func WorkforceExecutionTargetsCapability(management bool) Capability {
+	operations := []string{OperationGet, OperationList}
+	if management {
+		operations = append(operations, OperationCreate, OperationUpdate)
+	}
+	return Capability{
+		ID: WorkforceExecutionTargetsCapabilityID, Version: WorkforceExecutionTargetsCapabilityVersion,
+		Available: true, Operations: operations,
+	}
 }
 
 func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
