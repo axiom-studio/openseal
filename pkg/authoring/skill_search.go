@@ -24,6 +24,14 @@ const (
 	SkillSearchOriginCatalog SkillSearchOrigin = "catalog"
 )
 
+type SkillSearchVerification string
+
+const (
+	SkillSearchVerificationVerified SkillSearchVerification = "verified"
+	SkillSearchVerificationRequired SkillSearchVerification = "required"
+	SkillSearchVerificationFailed   SkillSearchVerification = "failed"
+)
+
 // SkillSearchRequest is the product-neutral query used while composing an
 // Agent, Team, or Workforce. Cursor values are opaque, host-authored values.
 type SkillSearchRequest struct {
@@ -51,9 +59,10 @@ type SkillSearchProvenance struct {
 // does not imply that approval has already been requested or granted.
 type SkillSearchCandidate struct {
 	SkillCapability
-	Origin           SkillSearchOrigin     `json:"origin"`
-	Provenance       SkillSearchProvenance `json:"provenance,omitempty"`
-	RequiresApproval bool                  `json:"requiresApproval,omitempty"`
+	Origin           SkillSearchOrigin       `json:"origin"`
+	Verification     SkillSearchVerification `json:"verification"`
+	Provenance       SkillSearchProvenance   `json:"provenance,omitempty"`
+	RequiresApproval bool                    `json:"requiresApproval,omitempty"`
 }
 
 type SkillSearchPage struct {
@@ -145,6 +154,14 @@ func NormalizeSkillSearchPage(request SkillSearchRequest, page *SkillSearchPage)
 		default:
 			return nil, fmt.Errorf("Skill search candidate %d has invalid origin", index)
 		}
+		switch candidate.Verification {
+		case SkillSearchVerificationVerified, SkillSearchVerificationRequired, SkillSearchVerificationFailed:
+		default:
+			return nil, fmt.Errorf("Skill search candidate %d has invalid verification", index)
+		}
+		if candidate.Origin == SkillSearchOriginEnabled && candidate.Verification != SkillSearchVerificationVerified {
+			return nil, fmt.Errorf("enabled Skill search candidate %d must be verified", index)
+		}
 		switch candidate.Readiness {
 		case SkillReadinessReady, SkillReadinessNeedsBinding, SkillReadinessNeedsInstallation, SkillReadinessUnavailable:
 		default:
@@ -155,6 +172,9 @@ func NormalizeSkillSearchPage(request SkillSearchRequest, page *SkillSearchPage)
 		}
 		if candidate.Readiness == SkillReadinessNeedsInstallation && candidate.Origin != SkillSearchOriginCatalog {
 			return nil, fmt.Errorf("installable Skill search candidate %d must come from a catalog", index)
+		}
+		if candidate.Readiness == SkillReadinessNeedsInstallation && candidate.Verification != SkillSearchVerificationVerified {
+			return nil, fmt.Errorf("installable Skill search candidate %d must be verified", index)
 		}
 		if candidate.Readiness == SkillReadinessNeedsInstallation && !hasReceiptBackedInstallation(candidate.Compatibility) {
 			return nil, fmt.Errorf("installable Skill search candidate %d lacks receipt-backed compatibility evidence", index)
