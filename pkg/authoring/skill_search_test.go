@@ -124,6 +124,31 @@ func TestNormalizeSkillSearchPageRejectsUnsafeCatalogClaims(t *testing.T) {
 	}
 }
 
+func TestNormalizeSkillSearchAllowsUnverifiedCatalogListingWithoutRuntimeIdentity(t *testing.T) {
+	request, err := NormalizeSkillSearchRequest(SkillSearchRequest{
+		Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, Query: "reddit", Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := NormalizeSkillSearchPage(request, &SkillSearchPage{Items: []SkillSearchCandidate{{
+		SkillCapability: SkillCapability{
+			ID: "registry-listing-42", Version: "3.0.0", Name: "Reddit researcher",
+			Readiness: SkillReadinessUnavailable,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "compilation", Compatible: false,
+				Evidence: "Select this catalog listing to verify compatibility before installation.",
+			}},
+		},
+		Origin:       SkillSearchOriginCatalog,
+		Verification: SkillSearchVerificationRequired,
+		Provenance:   SkillSearchProvenance{Registry: "clawhub", Reference: "listing:42"},
+	}}})
+	if err != nil || page.Items[0].SourceIdentity != "" {
+		t.Fatalf("unverified catalog page = %#v, err = %v", page, err)
+	}
+}
+
 func TestNormalizeSkillSearchRejectsOversizedOrDuplicateResults(t *testing.T) {
 	request, err := NormalizeSkillSearchRequest(SkillSearchRequest{
 		Scope: skill.ScopeReference{Kind: "tenant", ID: "7"}, Query: "summary", Limit: 1,

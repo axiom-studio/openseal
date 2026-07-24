@@ -167,8 +167,8 @@ func NormalizeSkillSearchPage(request SkillSearchRequest, page *SkillSearchPage)
 		default:
 			return nil, fmt.Errorf("Skill search candidate %d has invalid readiness", index)
 		}
-		if candidate.Origin == SkillSearchOriginCatalog && candidate.SourceIdentity == "" {
-			return nil, fmt.Errorf("catalog Skill search candidate %d requires exact source identity", index)
+		if candidate.Origin == SkillSearchOriginCatalog && candidate.Verification == SkillSearchVerificationVerified && candidate.SourceIdentity == "" {
+			return nil, fmt.Errorf("verified catalog Skill search candidate %d requires exact source identity", index)
 		}
 		if candidate.Readiness == SkillReadinessNeedsInstallation && candidate.Origin != SkillSearchOriginCatalog {
 			return nil, fmt.Errorf("installable Skill search candidate %d must come from a catalog", index)
