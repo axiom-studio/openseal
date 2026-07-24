@@ -41,6 +41,20 @@ type Config struct {
 	PollInterval time.Duration
 }
 
+type authoringAutomationFocus struct {
+	AgentID        string
+	AgentName      string
+	RunbookID      string
+	RunbookVersion string
+	Entrypoint     string
+}
+
+type authoringAutomationRow struct {
+	Focus      authoringAutomationFocus
+	Definition *kernelagent.AgentDefinition
+	FirstStep  string
+}
+
 func DefaultConfig() Config {
 	return Config{
 		Endpoint:     client.DefaultKernelBaseURL,
@@ -194,6 +208,8 @@ type Model struct {
 	authoringCredentialChoices  map[string]int
 	authoringConfigSelected     int
 	authoringConfigChoices      map[string]int
+	authoringAutomationSelected int
+	authoringAutomationFocus    *authoringAutomationFocus
 	runs                        []*runtime.AgentRun
 	agentTurns                  []*kernelapi.AgentTurnRecord
 	agentTurnsRunID             string
@@ -861,6 +877,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.authoringResult = nil
 		}
 		m.authoringAmendment = msg.mode == authoring.ModeAmend
+		m.authoringAutomationFocus = nil
 		m.pendingAuthoringKey, m.pendingAuthoringPrompt, m.pendingAuthoringParentID = "", "", ""
 		m.editor.Reset()
 		m.editor.Placeholder = "Describe what should change…"
@@ -1722,6 +1739,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceBindingConfigurationSelection(-1)
 			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialSelection(-1)
+			} else if m.section == sectionAuthoring && len(m.authoringAutomationRows()) > 0 {
+				m.moveWorkforceAutomationSelection(-1)
 			} else {
 				m.movePanelSelection(-1)
 			}
@@ -1741,6 +1760,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceBindingConfigurationSelection(1)
 			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
 				m.moveWorkforceCredentialSelection(1)
+			} else if m.section == sectionAuthoring && len(m.authoringAutomationRows()) > 0 {
+				m.moveWorkforceAutomationSelection(1)
 			} else {
 				m.movePanelSelection(1)
 			}
@@ -1923,6 +1944,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "m":
 			if m.section == sectionActivity && m.activityHasMore {
 				return m, m.loadActivity(true)
+			} else if m.section == sectionAuthoring && m.selectedWorkforceAutomation() != nil {
+				m.prepareWorkforceAutomationRefinement()
 			} else if m.section == sectionReadiness && m.canProposeAgentBehaviorAmendment() {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentPropose, "systemPrompt|personality\nConcise rationale\nNew immutable value")
 			} else if m.section == sectionTeams && m.canProposeTeamPurposeAmendment() {
@@ -2141,12 +2164,19 @@ func (m *Model) loadWorkforceChangeSet() tea.Cmd {
 }
 
 func (m *Model) submitWorkforceAuthoring() tea.Cmd {
-	prompt := strings.TrimSpace(m.editor.Value())
-	if !m.supportsWorkforceAuthoring() || m.busy || prompt == "" {
-		if prompt == "" {
+	userPrompt := strings.TrimSpace(m.editor.Value())
+	if !m.supportsWorkforceAuthoring() || m.busy || userPrompt == "" {
+		if userPrompt == "" {
 			m.status = "Describe the workforce before compiling it."
 		}
 		return nil
+	}
+	prompt := userPrompt
+	if focus := m.authoringAutomationFocus; focus != nil {
+		prompt = fmt.Sprintf(
+			"Update only the deterministic operation %q on Agent %q (%s) in runbook %s@%s. Preserve every unrelated Agent, Team, objective, policy, Skill binding, runbook, and operation exactly. Requested change: %s",
+			focus.Entrypoint, focus.AgentName, focus.AgentID, focus.RunbookID, focus.RunbookVersion, userPrompt,
+		)
 	}
 	m.busy = true
 	m.err = nil
@@ -5658,6 +5688,68 @@ func (m *Model) prepareWorkforceGovernanceComposer(mode editorMode, placeholder 
 	m.focusComposerEditor()
 }
 
+func (m *Model) authoringAutomationRows() []authoringAutomationRow {
+	if m == nil || m.authoringResult == nil {
+		return nil
+	}
+	rows := make([]authoringAutomationRow, 0)
+	for _, definition := range m.authoringResult.Candidate.Agents {
+		if definition == nil || definition.Runbook == nil {
+			continue
+		}
+		entrypoints := make([]string, 0, len(definition.Runbook.Entrypoints))
+		for entrypoint := range definition.Runbook.Entrypoints {
+			entrypoints = append(entrypoints, entrypoint)
+		}
+		sort.Strings(entrypoints)
+		for _, entrypoint := range entrypoints {
+			rows = append(rows, authoringAutomationRow{
+				Focus: authoringAutomationFocus{
+					AgentID: definition.ID, AgentName: definition.DisplayName,
+					RunbookID: definition.Runbook.ID, RunbookVersion: definition.Runbook.Version,
+					Entrypoint: entrypoint,
+				},
+				Definition: definition,
+				FirstStep:  definition.Runbook.Entrypoints[entrypoint],
+			})
+		}
+	}
+	return rows
+}
+
+func (m *Model) selectedWorkforceAutomation() *authoringAutomationRow {
+	rows := m.authoringAutomationRows()
+	if len(rows) == 0 {
+		return nil
+	}
+	m.authoringAutomationSelected = max(0, min(len(rows)-1, m.authoringAutomationSelected))
+	row := rows[m.authoringAutomationSelected]
+	return &row
+}
+
+func (m *Model) moveWorkforceAutomationSelection(delta int) {
+	rows := m.authoringAutomationRows()
+	if len(rows) == 0 {
+		m.authoringAutomationSelected = 0
+		return
+	}
+	m.authoringAutomationSelected = max(0, min(len(rows)-1, m.authoringAutomationSelected+delta))
+}
+
+func (m *Model) prepareWorkforceAutomationRefinement() {
+	row := m.selectedWorkforceAutomation()
+	if row == nil || !m.supportsWorkforceAuthoring() {
+		return
+	}
+	focus := row.Focus
+	m.authoringAutomationFocus = &focus
+	m.mode = modeWorkforceAuthoring
+	m.editor.Reset()
+	m.editor.Placeholder = fmt.Sprintf("Describe the change to %s…", focus.Entrypoint)
+	m.status = fmt.Sprintf("Refining %s · %s. Unrelated candidate state will be preserved.", focus.AgentName, focus.Entrypoint)
+	m.focusComposerEditor()
+}
+
 func (m *Model) prepareRequestComposer(mode editorMode, placeholder string) {
 	m.mode = mode
 	m.editor.Reset()
@@ -5765,6 +5857,7 @@ func (m *Model) resetComposerMode() {
 		return
 	}
 	if m.section == sectionAuthoring {
+		m.authoringAutomationFocus = nil
 		if m.readyRefinement() != nil {
 			m.activateReadyRefinement()
 			return

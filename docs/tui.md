@@ -66,6 +66,14 @@ server-provided lifecycle, actor, reason, policy decisions, approval
 eligibility, exact candidate digest, receipt, and created resource references.
 It does not infer authority from candidate content.
 
+When an Agent candidate contains a deterministic runbook, Workforce also shows
+its named callable operations, typed input/output fields, exact pinned Skill
+actions, matching schedule or event triggers, budgets, approval threshold, and
+checkpoint failure behavior. Use `j`/`k` to select an operation and `m` to
+describe a scoped change. The resulting prompt creates a child ChangeSet and
+preserves unrelated candidate state; reviewing an operation never activates it.
+Agents whose work is entirely cognitive do not show an Automations section.
+
 ## Navigation keys
 
 Section shortcuts work while the list panel is focused:
@@ -96,6 +104,7 @@ Common controls:
 | `↑` / `↓` or `k` / `j` | Select an item or current requirement |
 | `n` | Begin a supported creation or install operation in the section |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
+| `m` | Refine the selected deterministic Workforce operation; elsewhere, open the contextual message/amendment composer |
 | `p` | Pause/resume selected Run, Agent, Team, Initiative, or event source; pin/unpin a Skill |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `m` | Post to a selected channel, propose a Team purpose amendment, or load more activity |

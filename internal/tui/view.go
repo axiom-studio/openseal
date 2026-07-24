@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -195,14 +196,20 @@ func (m *Model) renderComposer(width int) string {
 		description = "Atomically activate this exact reviewed definition and reload authoritative Team state."
 		owner = "Optimistic revision · immutable activation audit"
 	case modeWorkforceAuthoring:
-		if m.authoringResult == nil {
+		if focus := m.authoringAutomationFocus; focus != nil {
+			title = "Refine deterministic operation"
+			description = fmt.Sprintf("Describe the change to %s on %s. OpenSeal will preserve unrelated candidate state.", focus.Entrypoint, focus.AgentName)
+			owner = fmt.Sprintf("Scoped review · %s@%s · authoring never activates state", focus.RunbookID, focus.RunbookVersion)
+		} else if m.authoringResult == nil {
 			title = "Create Agents and Teams"
 			description = "Describe outcomes, roles, boundaries, and collaboration. Review the exact candidate before activation."
 		} else {
 			title = "Refine the workforce"
 			description = "Describe a change. OpenSeal will compile a new immutable candidate and show its governed diff."
 		}
-		owner = "Governed review · authoring never activates state"
+		if m.authoringAutomationFocus == nil {
+			owner = "Governed review · authoring never activates state"
+		}
 	case modeWorkforceRefinement:
 		question := m.readyRefinement()
 		title = "One question before continuing"
@@ -952,6 +959,7 @@ func (m *Model) renderAuthoringContent(width int) string {
 	for _, agent := range result.Candidate.Agents {
 		lines = append(lines, fmt.Sprintf("• %s  %s · %d concurrent", compact(agent.DisplayName, max(width-28, 18)), agent.Authority.MaximumRisk, agent.Authority.MaxConcurrentRuns))
 	}
+	lines = append(lines, m.renderAuthoringAutomations(width)...)
 	if m.authoringChangeSet == nil {
 		for _, question := range result.UnresolvedQuestions {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question.Prompt, max(width-8, 24))))
@@ -973,6 +981,242 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderAuthoringAutomations(width int) []string {
+	rows := m.authoringAutomationRows()
+	if len(rows) == 0 {
+		return nil
+	}
+	selected := max(0, min(len(rows)-1, m.authoringAutomationSelected))
+	lines := []string{
+		"",
+		headerStyle.Render(fmt.Sprintf("Automations · %d", len(rows))),
+		mutedStyle.Render("Exact Agent-callable operations · j/k select · m refine"),
+	}
+	for index, row := range rows {
+		prefix, style := "  ", mutedStyle
+		if index == selected {
+			prefix, style = "› ", selectedStyle
+		}
+		runbook := row.Definition.Runbook
+		lines = append(lines, style.Render(compact(
+			fmt.Sprintf("%s%s · %s · %s@%s", prefix, row.Focus.AgentName, row.Focus.Entrypoint, row.Focus.RunbookID, row.Focus.RunbookVersion),
+			max(width-8, 24),
+		)))
+		if index != selected {
+			continue
+		}
+		if operation, ok := runbook.Interfaces[row.Focus.Entrypoint]; ok {
+			lines = append(lines,
+				mutedStyle.Render(compact("    "+operation.Description, max(width-12, 20))),
+				mutedStyle.Render(compact("    Takes · "+runbookSchemaContract(operation.InputSchema, "No input"), max(width-12, 20))),
+				mutedStyle.Render(compact("    Returns · "+runbookSchemaContract(operation.OutputSchema, "No structured output"), max(width-12, 20))),
+			)
+		}
+		approval := "evaluated per action"
+		if row.Definition.Authority.RequireApprovalAt != "" {
+			approval = "at " + string(row.Definition.Authority.RequireApprovalAt)
+		}
+		lines = append(lines, mutedStyle.Render(compact(
+			fmt.Sprintf("    Flow · starts %s · %d durable steps · approval %s · failure stops at checkpoint", row.FirstStep, len(runbook.Steps), approval),
+			max(width-12, 20),
+		)))
+		stepIDs := make([]string, 0, len(runbook.Steps))
+		for stepID := range runbook.Steps {
+			stepIDs = append(stepIDs, stepID)
+		}
+		sort.Strings(stepIDs)
+		for _, stepID := range stepIDs {
+			step := runbook.Steps[stepID]
+			if step.Action == nil {
+				continue
+			}
+			lines = append(lines, mutedStyle.Render(compact(
+				fmt.Sprintf("    Action · %s · %s@%s/%s", stepID, step.Action.SkillID, step.Action.SkillVersion, step.Action.Action),
+				max(width-12, 20),
+			)))
+		}
+		triggers := authoringAutomationTriggers(m.authoringResult.Candidate, row.Definition, row.Focus.Entrypoint)
+		if len(triggers) == 0 {
+			lines = append(lines, mutedStyle.Render("    Trigger · Agent or manual"))
+		} else {
+			for _, trigger := range triggers[:min(3, len(triggers))] {
+				lines = append(lines, mutedStyle.Render(compact("    Trigger · "+trigger, max(width-12, 20))))
+			}
+		}
+	}
+	return lines
+}
+
+func runbookSchemaContract(schema map[string]interface{}, emptyLabel string) string {
+	if len(schema) == 0 {
+		return emptyLabel
+	}
+	properties, _ := schema["properties"].(map[string]interface{})
+	if len(properties) == 0 {
+		if schemaType, _ := schema["type"].(string); schemaType != "" {
+			return schemaType
+		}
+		return "structured value"
+	}
+	required := make(map[string]bool)
+	switch values := schema["required"].(type) {
+	case []string:
+		for _, value := range values {
+			required[value] = true
+		}
+	case []interface{}:
+		for _, value := range values {
+			if name, ok := value.(string); ok {
+				required[name] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	fields := make([]string, 0, min(4, len(names)))
+	for _, name := range names[:min(4, len(names))] {
+		definition, _ := properties[name].(map[string]interface{})
+		fieldType, _ := definition["type"].(string)
+		if fieldType == "" {
+			fieldType = "value"
+		}
+		if fieldType == "array" {
+			if items, ok := definition["items"].(map[string]interface{}); ok {
+				if itemType, _ := items["type"].(string); itemType != "" {
+					fieldType = itemType + "[]"
+				}
+			}
+		}
+		optional := ""
+		if !required[name] {
+			optional = "?"
+		}
+		fields = append(fields, name+":"+fieldType+optional)
+	}
+	if remaining := len(names) - len(fields); remaining > 0 {
+		fields = append(fields, fmt.Sprintf("+%d more", remaining))
+	}
+	return strings.Join(fields, " · ")
+}
+
+func authoringAutomationTriggers(candidate authoring.WorkforceCandidate, definition *kernelagent.AgentDefinition, entrypoint string) []string {
+	if definition == nil {
+		return nil
+	}
+	triggers := make([]string, 0)
+	for _, objective := range definition.ObjectiveTemplates {
+		triggers = append(triggers, objectiveAutomationTriggers(objective, definition.ID, entrypoint, false)...)
+	}
+	if candidate.Team != nil {
+		for _, objective := range candidate.Team.ObjectiveTemplates {
+			triggers = append(triggers, objectiveAutomationTriggers(objective, definition.ID, entrypoint, true)...)
+		}
+	}
+	return triggers
+}
+
+func objectiveAutomationTriggers(objective workforce.ObjectiveTemplate, agentID, entrypoint string, requiresAssignment bool) []string {
+	triggers := make([]string, 0, 2)
+	if template, ok := objective.Cadence["runTemplate"].(map[string]interface{}); ok {
+		templateEntrypoint, _ := template["entrypoint"].(string)
+		assigned, _ := objective.Cadence["assignedAgentId"].(string)
+		if templateEntrypoint == entrypoint && ((!requiresAssignment && (assigned == "" || assigned == agentID)) || assigned == agentID) {
+			label := cadenceTriggerLabel(objective.Cadence) + " · " + objective.Title
+			if budget := automationBudgetLabel(objective.Cadence["runBudget"]); budget != "" {
+				label += " · " + budget
+			}
+			triggers = append(triggers, label)
+		}
+	}
+	rules, _ := objective.EventRules["rules"].([]interface{})
+	for _, raw := range rules {
+		rule, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		template, _ := rule["runTemplate"].(map[string]interface{})
+		templateEntrypoint, _ := template["entrypoint"].(string)
+		if templateEntrypoint != entrypoint {
+			continue
+		}
+		assigned, _ := rule["assignedAgentId"].(string)
+		if (requiresAssignment && assigned == "") || (assigned != "" && assigned != agentID) {
+			continue
+		}
+		eventType, _ := rule["eventType"].(string)
+		if eventType == "" {
+			eventType = "event"
+		}
+		label := eventType
+		if source, _ := rule["source"].(string); source != "" {
+			label += " from " + source
+		}
+		label += " · " + objective.Title
+		if budget := automationBudgetLabel(rule["runBudget"]); budget != "" {
+			label += " · " + budget
+		}
+		triggers = append(triggers, label)
+	}
+	return triggers
+}
+
+func cadenceTriggerLabel(cadence map[string]interface{}) string {
+	switch cadenceType, _ := cadence["type"].(string); cadenceType {
+	case "interval":
+		if seconds := positiveJSONNumber(cadence["intervalSeconds"]); seconds > 0 {
+			if seconds%3600 == 0 {
+				return fmt.Sprintf("Every %dh", seconds/3600)
+			}
+			if seconds%60 == 0 {
+				return fmt.Sprintf("Every %dm", seconds/60)
+			}
+			return fmt.Sprintf("Every %ds", seconds)
+		}
+	case "daily":
+		return "Daily at " + fmt.Sprint(cadence["timeOfDay"])
+	case "weekly":
+		return fmt.Sprintf("%v at %v", cadence["dayOfWeek"], cadence["timeOfDay"])
+	case "cron":
+		return "Cron · " + fmt.Sprint(cadence["cronExpression"])
+	}
+	return "Scheduled"
+}
+
+func automationBudgetLabel(value interface{}) string {
+	budget, _ := value.(map[string]interface{})
+	parts := make([]string, 0, 3)
+	if attempts := positiveJSONNumber(budget["maxAttempts"]); attempts > 0 {
+		parts = append(parts, fmt.Sprintf("%d attempts", attempts))
+	}
+	if actions := positiveJSONNumber(budget["maxActions"]); actions > 0 {
+		parts = append(parts, fmt.Sprintf("%d actions", actions))
+	}
+	if duration := positiveJSONNumber(budget["maxDurationMs"]); duration > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", (duration+999)/1000))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func positiveJSONNumber(value interface{}) int64 {
+	switch number := value.(type) {
+	case int:
+		return int64(max(number, 0))
+	case int64:
+		return max(number, 0)
+	case float64:
+		if number > 0 {
+			return int64(number)
+		}
+	case json.Number:
+		result, _ := number.Int64()
+		return max(result, 0)
+	}
+	return 0
 }
 
 func (m *Model) authoringActivationIntent() authoring.WorkforceActivationIntent {
