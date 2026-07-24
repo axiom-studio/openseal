@@ -3902,6 +3902,182 @@ func TestRuntimeReadinessRendersLatestCompilationTruth(t *testing.T) {
 	}
 }
 
+func TestRuntimeReadinessStartsExactTypedActiveRunbookOperation(t *testing.T) {
+	entry := testActiveRunbookAgentEntry()
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(
+			kernelapi.AgentRunsCapability(kernelapi.OperationCreate),
+			kernelapi.AgentDefinitionsCapability(),
+		),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{entry},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section, model.focus = sectionReadiness, focusPanel
+
+	view := model.View()
+	for _, expected := range []string{
+		"Callable operations · 1",
+		"collect_findings · research-cycle@1.0.0",
+		"Takes · limit:integer · subreddit:string",
+		"Returns · findings:array",
+		"n start operation",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("active operation view missing %q:\n%s", expected, view)
+		}
+	}
+
+	model.prepareActiveRunbookOperation()
+	if model.mode != modeRunbookOperationStart || !strings.Contains(model.editor.Placeholder, `"subreddit"`) {
+		t.Fatalf("operation composer mode=%v placeholder=%q", model.mode, model.editor.Placeholder)
+	}
+	model.editor.SetValue(`{"subreddit":"vibecoding","limit":25}`)
+	applyCommand(t, model, model.submitRunbookOperation())
+	if len(fake.createRequests) != 1 || len(fake.createKeys) != 1 || fake.createKeys[0] == "" {
+		t.Fatalf("run creates=%#v keys=%#v", fake.createRequests, fake.createKeys)
+	}
+	request := fake.createRequests[0]
+	if request.Owner != (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}) ||
+		request.AssignedAgentID != "operator" || request.Entrypoint != "collect_findings" ||
+		request.Source != runtime.RunSourceManual || request.Context["subreddit"] != "vibecoding" ||
+		fmt.Sprint(request.Context["limit"]) != "25" {
+		t.Fatalf("created exact operation request = %#v", request)
+	}
+	if model.section != sectionRuns || model.selectedID != "created" {
+		t.Fatalf("created Run was not immediately inspectable: section=%v selected=%q", model.section, model.selectedID)
+	}
+}
+
+func TestRuntimeReadinessPreservesOperationIdempotencyAndValidatesInput(t *testing.T) {
+	entry := testActiveRunbookAgentEntry()
+	fake := &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(
+			kernelapi.AgentRunsCapability(kernelapi.OperationCreate),
+			kernelapi.AgentDefinitionsCapability(),
+		),
+		agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{entry},
+		createErrors:     []error{errors.New("temporary transport failure"), nil},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section, model.focus = sectionReadiness, focusPanel
+	model.prepareActiveRunbookOperation()
+
+	model.editor.SetValue(`{"subreddit":"vibecoding","limit":"many"}`)
+	if command := model.submitRunbookOperation(); command != nil || len(fake.createRequests) != 0 ||
+		!strings.Contains(model.status, "does not match") {
+		t.Fatalf("invalid input dispatched: command=%v creates=%d status=%q", command != nil, len(fake.createRequests), model.status)
+	}
+
+	model.editor.SetValue(`{"subreddit":"vibecoding","limit":10}`)
+	applyCommand(t, model, model.submitRunbookOperation())
+	if len(fake.createKeys) != 1 || model.editor.Value() == "" || model.pendingKey == "" {
+		t.Fatalf("failed attempt did not preserve retry intent: keys=%#v draft=%q pending=%q", fake.createKeys, model.editor.Value(), model.pendingKey)
+	}
+	applyCommand(t, model, model.submitRunbookOperation())
+	if len(fake.createKeys) != 2 || fake.createKeys[0] != fake.createKeys[1] {
+		t.Fatalf("retry idempotency keys = %#v", fake.createKeys)
+	}
+}
+
+func TestRuntimeReadinessNeverOffersInactiveHistoricalUnauthorizedOrMalformedOperations(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*kernelapi.AgentDeploymentCatalogEntry)
+		runs   kernelapi.Capability
+	}{
+		{
+			name: "inactive",
+			mutate: func(entry *kernelapi.AgentDeploymentCatalogEntry) {
+				entry.Deployment.RolloutStatus = kernelagent.RolloutPaused
+			},
+			runs: kernelapi.AgentRunsCapability(kernelapi.OperationCreate),
+		},
+		{
+			name: "historical",
+			mutate: func(entry *kernelapi.AgentDeploymentCatalogEntry) {
+				entry.Definition.Version = "0.9.0"
+			},
+			runs: kernelapi.AgentRunsCapability(kernelapi.OperationCreate),
+		},
+		{
+			name:   "unauthorized",
+			mutate: func(*kernelapi.AgentDeploymentCatalogEntry) {},
+			runs:   kernelapi.AgentRunsCapability(kernelapi.OperationList),
+		},
+		{
+			name: "malformed",
+			mutate: func(entry *kernelapi.AgentDeploymentCatalogEntry) {
+				delete(entry.Definition.Runbook.Steps, "done")
+			},
+			runs: kernelapi.AgentRunsCapability(kernelapi.OperationCreate),
+		},
+		{
+			name: "cognitive-only",
+			mutate: func(entry *kernelapi.AgentDeploymentCatalogEntry) {
+				entry.Definition.Runbook = nil
+			},
+			runs: kernelapi.AgentRunsCapability(kernelapi.OperationCreate),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			entry := testActiveRunbookAgentEntry()
+			testCase.mutate(&entry)
+			fake := &fakeKernelClient{
+				document: kernelapi.NewCapabilityDocument(
+					testCase.runs,
+					kernelapi.AgentDefinitionsCapability(),
+				),
+				agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{entry},
+			}
+			model := newTestModel(t, fake)
+			applyCommand(t, model, model.loadCapabilities())
+			model.section, model.focus = sectionReadiness, focusPanel
+			if strings.Contains(model.View(), "n start operation") || model.canStartActiveRunbookOperation() {
+				t.Fatalf("%s operation was presented as runnable:\n%s", testCase.name, model.View())
+			}
+		})
+	}
+}
+
+func testActiveRunbookAgentEntry() kernelapi.AgentDeploymentCatalogEntry {
+	return kernelapi.AgentDeploymentCatalogEntry{
+		Deployment: &kernelagent.AgentDeployment{
+			ID: "operator", Scope: capability.ScopeReference{Kind: "local", ID: "default"},
+			DefinitionID: "researcher", ActiveVersion: "1.0.0", RolloutStatus: kernelagent.RolloutActive,
+			Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1,
+		},
+		Definition: &kernelagent.AgentDefinition{
+			ID: "researcher", Version: "1.0.0", DisplayName: "Researcher", Purpose: "Collect findings",
+			Runbook: &runbook.Definition{
+				APIVersion: runbook.APIVersion, ID: "research-cycle", Version: "1.0.0", Name: "Research cycle",
+				Entrypoints: map[string]string{"collect_findings": "done"},
+				Interfaces: map[string]runbook.Interface{"collect_findings": {
+					Description: "Collect a bounded set of findings.",
+					InputSchema: map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"subreddit": map[string]interface{}{"type": "string"},
+							"limit":     map[string]interface{}{"type": "integer"},
+						},
+						"required": []interface{}{"subreddit", "limit"},
+					},
+					OutputSchema: map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"findings": map[string]interface{}{"type": "array"},
+						},
+						"required": []interface{}{"findings"},
+					},
+				}},
+				Steps: map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
+			},
+		},
+	}
+}
+
 func TestRuntimePlacementPauseUsesAdvertisedGovernedUpdate(t *testing.T) {
 	definitionCapability := kernelapi.AgentDefinitionsCapability()
 	fake := &fakeKernelClient{

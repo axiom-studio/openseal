@@ -100,6 +100,9 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeWorkforceRefinement && m.readyRefinement() == nil {
 		return m.renderUnavailableComposer(width, "Answer proposal question", "This exact proposal revision does not advertise refinement authority.")
 	}
+	if m.mode == modeRunbookOperationStart && !m.canStartActiveRunbookOperation() {
+		return m.renderUnavailableComposer(width, "Start deterministic operation", "The active Agent or kernel does not advertise this operation.")
+	}
 	if m.mode == modeObjectiveCreate && !m.supportsObjective(kernelapi.OperationCreate) {
 		return m.renderUnavailableComposer(width, "Add an objective", "This server does not advertise objective creation.")
 	}
@@ -145,7 +148,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -218,6 +221,16 @@ func (m *Model) renderComposer(width int) string {
 		if guidance := m.renderRefinementGuidance(*question, max(width-8, 24)); guidance != "" {
 			owner += "\n\n" + guidance
 		}
+	case modeRunbookOperationStart:
+		row := m.selectedActiveRunbookOperation()
+		title = "Start deterministic operation"
+		description = fmt.Sprintf("Provide one JSON object for %s. The kernel validates it against the active immutable interface.", row.Focus.Entrypoint)
+		contract := row.Definition.Runbook.Interfaces[row.Focus.Entrypoint]
+		owner = fmt.Sprintf(
+			"%s · %s@%s\nInputs · %s\nCtrl+S creates one durable Run; nothing executes locally.",
+			row.Focus.AgentName, row.Focus.RunbookID, row.Focus.RunbookVersion,
+			runbookSchemaContract(contract.InputSchema, "No input"),
+		)
 	case modeWorkforceApprove:
 		title = "Approve policy requirement"
 		description = "Record why the exact advertised requirement is satisfied. The decision is permanent."
@@ -559,6 +572,7 @@ func (m *Model) renderReadinessContent(width int) string {
 		sort.Strings(kinds)
 		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Credentials · %d opaque reference(s) · %s", len(kinds), strings.Join(kinds, ", ")), max(width-8, 24))))
 	}
+	lines = append(lines, m.renderActiveRunbookOperations(width)...)
 	lines = append(lines, "", mutedStyle.Render("Native runtime readiness"))
 	if len(m.compilations) == 0 {
 		lines = append(lines, mutedStyle.Render("No compilation record exists for this Agent. Runtime readiness is unverified."))
@@ -615,6 +629,9 @@ func (m *Model) renderReadinessContent(width int) string {
 		}
 	}
 	actions := []string{"r refresh"}
+	if m.canStartActiveRunbookOperation() {
+		actions = append(actions, "j/k operation", "n start operation")
+	}
 	if m.supportsAgentDefinition(kernelapi.OperationUpdate) && (deployment.RolloutStatus == kernelagent.RolloutActive || deployment.RolloutStatus == kernelagent.RolloutPaused) {
 		actions = append(actions, "p pause/resume")
 	}
@@ -635,6 +652,38 @@ func (m *Model) renderReadinessContent(width int) string {
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, " · ")))
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderActiveRunbookOperations(width int) []string {
+	rows := m.activeRunbookOperations()
+	if len(rows) == 0 {
+		return nil
+	}
+	selected := max(0, min(len(rows)-1, m.activeRunbookSelected))
+	lines := []string{"", headerStyle.Render(fmt.Sprintf("Callable operations · %d", len(rows)))}
+	for index, row := range rows {
+		prefix, style := "  ", mutedStyle
+		if index == selected {
+			prefix, style = "› ", selectedStyle
+		}
+		lines = append(lines, style.Render(compact(
+			fmt.Sprintf("%s%s · %s@%s", prefix, row.Focus.Entrypoint, row.Focus.RunbookID, row.Focus.RunbookVersion),
+			max(width-8, 24),
+		)))
+		if index != selected {
+			continue
+		}
+		contract := row.Definition.Runbook.Interfaces[row.Focus.Entrypoint]
+		lines = append(lines,
+			mutedStyle.Render(compact("    "+contract.Description, max(width-12, 20))),
+			mutedStyle.Render(compact("    Takes · "+runbookSchemaContract(contract.InputSchema, "No input"), max(width-12, 20))),
+			mutedStyle.Render(compact("    Returns · "+runbookSchemaContract(contract.OutputSchema, "No structured output"), max(width-12, 20))),
+		)
+	}
+	if !m.canStartActiveRunbookOperation() {
+		lines = append(lines, mutedStyle.Render("Read-only · requires the active definition and Run create authority"))
+	}
+	return lines
 }
 
 func (m *Model) renderTeamsContent(width int) string {

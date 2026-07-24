@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"sort"
@@ -21,6 +22,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
@@ -115,6 +117,7 @@ const (
 	modeWorkforceAuthoring
 	modeWorkforceRefinement
 	modeGuide
+	modeRunbookOperationStart
 	modeChannelCreate
 	modeChannelPost
 	modeObjectiveCreate
@@ -210,6 +213,7 @@ type Model struct {
 	authoringConfigChoices      map[string]int
 	authoringAutomationSelected int
 	authoringAutomationFocus    *authoringAutomationFocus
+	activeRunbookSelected       int
 	runs                        []*runtime.AgentRun
 	agentTurns                  []*kernelapi.AgentTurnRecord
 	agentTurnsRunID             string
@@ -1640,6 +1644,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.mode {
 			case modeGuide:
 				return m, m.submitGuidance()
+			case modeRunbookOperationStart:
+				return m, m.submitRunbookOperation()
 			case modeChannelCreate:
 				return m, m.submitConversation()
 			case modeChannelPost:
@@ -1741,6 +1747,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceCredentialSelection(-1)
 			} else if m.section == sectionAuthoring && len(m.authoringAutomationRows()) > 0 {
 				m.moveWorkforceAutomationSelection(-1)
+			} else if m.section == sectionReadiness && len(m.activeRunbookOperations()) > 0 {
+				m.moveActiveRunbookSelection(-1)
 			} else {
 				m.movePanelSelection(-1)
 			}
@@ -1762,6 +1770,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveWorkforceCredentialSelection(1)
 			} else if m.section == sectionAuthoring && len(m.authoringAutomationRows()) > 0 {
 				m.moveWorkforceAutomationSelection(1)
+			} else if m.section == sectionReadiness && len(m.activeRunbookOperations()) > 0 {
+				m.moveActiveRunbookSelection(1)
 			} else {
 				m.movePanelSelection(1)
 			}
@@ -1843,7 +1853,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedConversation()
 			}
 		case "n":
-			if m.section == sectionRequests && m.canCreateAgentRequestFromSelectedRun() {
+			if m.section == sectionReadiness && m.canStartActiveRunbookOperation() {
+				m.prepareActiveRunbookOperation()
+			} else if m.section == sectionRequests && m.canCreateAgentRequestFromSelectedRun() {
 				m.mode = modeRequestCreate
 				m.editor.Reset()
 				m.editor.Placeholder = "First line: agent:researcher or handoff team:marketing\nRemaining lines: requested outcome"
@@ -4033,6 +4045,63 @@ func (m *Model) submitRun() tea.Cmd {
 	}
 }
 
+func (m *Model) submitRunbookOperation() tea.Cmd {
+	row := m.selectedActiveRunbookOperation()
+	entry := m.agentDeployment
+	if row == nil || entry == nil || entry.Deployment == nil || entry.Definition == nil ||
+		!m.canStartActiveRunbookOperation() || m.busy {
+		return nil
+	}
+	contract, ok := entry.Definition.Runbook.Interfaces[row.Focus.Entrypoint]
+	if !ok {
+		m.status = "This runbook entrypoint has no callable input contract."
+		return nil
+	}
+	raw := strings.TrimSpace(m.editor.Value())
+	if raw == "" {
+		raw = "{}"
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var inputs map[string]interface{}
+	if err := decoder.Decode(&inputs); err != nil {
+		m.status = "Operation input must be one JSON object: " + err.Error()
+		return nil
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		m.status = "Operation input must contain exactly one JSON object."
+		return nil
+	}
+	if err := runbook.ValidateInterfaceInput(contract.InputSchema, inputs); err != nil {
+		m.status = "Operation input does not match the active interface: " + err.Error()
+		return nil
+	}
+	canonical, err := json.Marshal(inputs)
+	if err != nil {
+		m.status = "Operation input could not be normalized."
+		return nil
+	}
+	intent := row.Focus.AgentID + "\x00" + row.Focus.RunbookID + "\x00" + row.Focus.RunbookVersion + "\x00" + row.Focus.Entrypoint + "\x00" + string(canonical)
+	if m.pendingKey == "" || m.pendingGoal != intent {
+		m.pendingKey, m.pendingGoal = uuid.NewString(), intent
+	}
+	m.busy, m.err = true, nil
+	m.status = "Starting the exact deterministic operation…"
+	deploymentID := entry.Deployment.ID
+	request := kernelapi.CreateAgentRunRequest{
+		Scope: m.config.Scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deploymentID},
+		AssignedAgentID: deploymentID, Entrypoint: row.Focus.Entrypoint,
+		Goal:   fmt.Sprintf("Run %s · %s", row.Focus.AgentName, row.Focus.Entrypoint),
+		Source: runtime.RunSourceManual, Context: inputs, Actor: m.config.Actor,
+	}
+	idempotencyKey := m.pendingKey
+	return func() tea.Msg {
+		result, createErr := m.client.CreateAgentRun(m.ctx, request, idempotencyKey)
+		return runCreated{result: result, err: createErr}
+	}
+}
+
 func (m *Model) submitGuidance() tea.Cmd {
 	instruction := strings.TrimSpace(m.editor.Value())
 	if instruction == "" {
@@ -5748,6 +5817,129 @@ func (m *Model) prepareWorkforceAutomationRefinement() {
 	m.editor.Placeholder = fmt.Sprintf("Describe the change to %s…", focus.Entrypoint)
 	m.status = fmt.Sprintf("Refining %s · %s. Unrelated candidate state will be preserved.", focus.AgentName, focus.Entrypoint)
 	m.focusComposerEditor()
+}
+
+func (m *Model) activeRunbookOperations() []authoringAutomationRow {
+	if m == nil || m.agentDeployment == nil || m.agentDeployment.Deployment == nil ||
+		m.agentDeployment.Definition == nil || m.agentDeployment.Definition.Runbook == nil {
+		return nil
+	}
+	definition := m.agentDeployment.Definition
+	deployment := m.agentDeployment.Deployment
+	if definition.ID != deployment.DefinitionID || definition.Version != deployment.ActiveVersion {
+		return nil
+	}
+	if diagnostics := runbook.Validate(definition.Runbook); len(diagnostics) > 0 {
+		return nil
+	}
+	entrypoints := make([]string, 0, len(definition.Runbook.Interfaces))
+	for entrypoint := range definition.Runbook.Interfaces {
+		if _, ok := definition.Runbook.Entrypoints[entrypoint]; ok {
+			entrypoints = append(entrypoints, entrypoint)
+		}
+	}
+	sort.Strings(entrypoints)
+	rows := make([]authoringAutomationRow, 0, len(entrypoints))
+	for _, entrypoint := range entrypoints {
+		rows = append(rows, authoringAutomationRow{
+			Focus: authoringAutomationFocus{
+				AgentID: definition.ID, AgentName: definition.DisplayName,
+				RunbookID: definition.Runbook.ID, RunbookVersion: definition.Runbook.Version,
+				Entrypoint: entrypoint,
+			},
+			Definition: definition,
+			FirstStep:  definition.Runbook.Entrypoints[entrypoint],
+		})
+	}
+	return rows
+}
+
+func (m *Model) selectedActiveRunbookOperation() *authoringAutomationRow {
+	rows := m.activeRunbookOperations()
+	if len(rows) == 0 {
+		return nil
+	}
+	m.activeRunbookSelected = max(0, min(len(rows)-1, m.activeRunbookSelected))
+	row := rows[m.activeRunbookSelected]
+	return &row
+}
+
+func (m *Model) moveActiveRunbookSelection(delta int) {
+	rows := m.activeRunbookOperations()
+	if len(rows) == 0 {
+		m.activeRunbookSelected = 0
+		return
+	}
+	m.activeRunbookSelected = max(0, min(len(rows)-1, m.activeRunbookSelected+delta))
+}
+
+func (m *Model) canStartActiveRunbookOperation() bool {
+	row := m.selectedActiveRunbookOperation()
+	return row != nil && m.agentDeployment != nil && m.agentDeployment.Deployment != nil &&
+		m.agentDeployment.Deployment.RolloutStatus == kernelagent.RolloutActive &&
+		m.supportsRun(kernelapi.OperationCreate)
+}
+
+func (m *Model) prepareActiveRunbookOperation() {
+	row := m.selectedActiveRunbookOperation()
+	if row == nil || !m.canStartActiveRunbookOperation() {
+		return
+	}
+	contract := row.Definition.Runbook.Interfaces[row.Focus.Entrypoint]
+	m.mode = modeRunbookOperationStart
+	m.editor.Reset()
+	if runbookInputAllowsEmpty(contract.InputSchema) {
+		m.editor.SetValue("{}")
+	}
+	m.editor.Placeholder = runbookInputTemplate(contract.InputSchema)
+	m.status = fmt.Sprintf("Starting %s · %s from the active definition.", row.Focus.AgentName, row.Focus.Entrypoint)
+	m.focusComposerEditor()
+}
+
+func runbookInputAllowsEmpty(schema map[string]interface{}) bool {
+	return len(schemaRequiredFields(schema)) == 0
+}
+
+func runbookInputTemplate(schema map[string]interface{}) string {
+	properties, _ := schema["properties"].(map[string]interface{})
+	if len(properties) == 0 {
+		return "{}"
+	}
+	required := schemaRequiredFields(schema)
+	example := make(map[string]interface{}, len(required))
+	for _, name := range required {
+		definition, _ := properties[name].(map[string]interface{})
+		switch definition["type"] {
+		case "boolean":
+			example[name] = false
+		case "integer", "number":
+			example[name] = 0
+		case "array":
+			example[name] = []interface{}{}
+		case "object":
+			example[name] = map[string]interface{}{}
+		default:
+			example[name] = "<required>"
+		}
+	}
+	encoded, _ := json.MarshalIndent(example, "", "  ")
+	return string(encoded)
+}
+
+func schemaRequiredFields(schema map[string]interface{}) []string {
+	fields := make([]string, 0)
+	switch required := schema["required"].(type) {
+	case []string:
+		fields = append(fields, required...)
+	case []interface{}:
+		for _, value := range required {
+			if field, ok := value.(string); ok {
+				fields = append(fields, field)
+			}
+		}
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 func (m *Model) prepareRequestComposer(mode editorMode, placeholder string) {
