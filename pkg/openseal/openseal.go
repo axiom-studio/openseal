@@ -1626,6 +1626,8 @@ const (
 	SourceMonitorDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
 )
 
+var ErrWorkforceChangeSetPlacementConflict = authoring.ErrChangeSetPlacementConflict
+
 var (
 	ErrWorkforceChangeSetNotFound    = authoring.ErrChangeSetNotFound
 	ErrWorkforceChangeSetIdempotency = authoring.ErrChangeSetIdempotency

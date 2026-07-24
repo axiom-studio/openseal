@@ -366,10 +366,11 @@ type PendingChangeSetEvaluationStore interface {
 }
 
 var (
-	ErrChangeSetNotFound    = errors.New("workforce change set not found")
-	ErrChangeSetIdempotency = errors.New("workforce change set idempotency conflict")
-	ErrChangeSetRevision    = errors.New("workforce change set revision conflict")
-	ErrChangeSetTransition  = errors.New("invalid workforce change set transition")
+	ErrChangeSetNotFound          = errors.New("workforce change set not found")
+	ErrChangeSetIdempotency       = errors.New("workforce change set idempotency conflict")
+	ErrChangeSetRevision          = errors.New("workforce change set revision conflict")
+	ErrChangeSetTransition        = errors.New("invalid workforce change set transition")
+	ErrChangeSetPlacementConflict = errors.New("workforce placement conflict")
 )
 
 type ChangeSetService struct {
@@ -1346,6 +1347,18 @@ func (e *ChangeSetReadinessError) Error() string {
 	return "workforce placement is not ready: " + e.Issues[0].Message
 }
 
+func (e *ChangeSetReadinessError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	for _, issue := range e.Issues {
+		if issue.Code == "agent_deployment_identity_conflict" {
+			return ErrChangeSetPlacementConflict
+		}
+	}
+	return nil
+}
+
 func validateApplyPlacement(value *ChangeSet) error {
 	if !value.Result.Valid || len(value.Result.MissingRequirements) > 0 {
 		return errors.New("workforce candidate has unresolved requirements")
@@ -1919,7 +1932,8 @@ func replaceReadinessValidation(existing, readiness []ValidationIssue) []Validat
 
 func isReadinessValidationCode(code string) bool {
 	return strings.HasPrefix(code, readinessValidationCodePrefix) ||
-		strings.HasPrefix(code, "execution_target_")
+		strings.HasPrefix(code, "execution_target_") ||
+		strings.HasPrefix(code, "agent_deployment_")
 }
 
 func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveChangeSetApprovalRequest) (*ChangeSet, bool, error) {
