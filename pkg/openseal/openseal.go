@@ -974,6 +974,7 @@ var (
 	ErrTurnHostUnavailable             = runtime.ErrTurnHostUnavailable
 	ErrTurnHostConfiguration           = runtime.ErrTurnHostConfiguration
 	ValidateRunbook                    = runbook.Validate
+	ValidateRunbookInterfaceInput      = runbook.ValidateInterfaceInput
 	NewRunbookTurnRunner               = runtime.NewRunbookTurnRunner
 	NewRunForkCoordinator              = runtime.NewRunForkCoordinator
 	ObjectiveManagementSkill           = runtime.ObjectiveManagementSkill

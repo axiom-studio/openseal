@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 var (
@@ -378,15 +379,19 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if err := response.ProposedRunbook.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid hosted runbook proposal: %w", err)
 		}
-		authorized := false
+		var selected *HostedRunbookOperation
 		for _, operation := range request.RunbookOperations {
 			if operation.Entrypoint == response.ProposedRunbook.Entrypoint {
-				authorized = true
+				copy := operation
+				selected = &copy
 				break
 			}
 		}
-		if !authorized {
+		if selected == nil {
 			return nil, errors.New("turn host proposed an unauthorized runbook entrypoint")
+		}
+		if err := runbook.ValidateInterfaceInput(selected.InputSchema, response.ProposedRunbook.Arguments); err != nil {
+			return nil, fmt.Errorf("invalid hosted runbook arguments: %w", err)
 		}
 		if err := validateHostedChildBudgetFloor(response.ProposedRunbook.Budget, request.Budget); err != nil {
 			return nil, fmt.Errorf("invalid hosted runbook budget: %w", err)
