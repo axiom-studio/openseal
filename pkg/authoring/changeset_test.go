@@ -171,6 +171,40 @@ func TestPreparedGenerationFailureIsDurable(t *testing.T) {
 	}
 }
 
+func TestPreparedInvalidRunbookGenerationNeverPersistsCandidate(t *testing.T) {
+	_, invalid := deterministicRunbookPayloads(t)
+	generator := &repairingGenerator{
+		generated: invalid, repairSequence: [][]byte{invalid, invalid},
+	}
+	compiler, _ := NewCompiler(generator)
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope:  capability.ScopeReference{Kind: "tenant", ID: "one"},
+		Prompt: "Create a deterministic report publisher.",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {
+				ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"},
+				MaximumRisk: capability.RiskLevelWrite,
+			},
+		}},
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "failed-runbook-shape",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
+	if err == nil || failed == nil || failed.Status != ChangeSetFailed ||
+		failed.Generation.FailureCode != "schema_failed" || len(failed.Result.Candidate.Agents) != 0 ||
+		failed.CandidateDigest != "" {
+		t.Fatalf("failed=%#v err=%v", failed, err)
+	}
+	restored, getErr := service.Get(context.Background(), prepared.Scope, prepared.ID)
+	if getErr != nil || len(restored.Result.Candidate.Agents) != 0 || restored.CandidateDigest != "" {
+		t.Fatalf("restored invalid candidate=%#v err=%v", restored.Result.Candidate, getErr)
+	}
+}
+
 func TestSchemaGenerationFailureClassificationIsActionable(t *testing.T) {
 	code, message := classifyGenerationFailure(&SchemaGenerationError{RepairAttempts: 2, Diagnostic: "field candidate.team.roles expects []team.RoleSlot but received string"})
 	if code != "schema_failed" || !strings.Contains(message, "2 bounded schema repairs") || !strings.Contains(message, "candidate.team.roles") {

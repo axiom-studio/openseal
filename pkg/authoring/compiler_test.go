@@ -299,7 +299,8 @@ func TestCompilerRepairsLiveUnknownIDWithExactSchemaPath(t *testing.T) {
 	}
 }
 
-func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
+func deterministicRunbookPayloads(t *testing.T) (valid, invalid []byte) {
+	t.Helper()
 	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
 		ID: "publisher", Version: "1", DisplayName: "Publisher",
 		Purpose: "Render reports", SystemPrompt: "Render approved reports.",
@@ -343,12 +344,16 @@ func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
 	action := render["action"].(map[string]interface{})
 	render["resultPath"] = action["resultPath"]
 	delete(action, "resultPath")
-	invalid, err := json.Marshal(document)
+	invalid, err = json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return valid, invalid
+}
 
-	generator := &repairingGenerator{generated: invalid, repaired: valid}
+func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
+	valid, invalid := deterministicRunbookPayloads(t)
+	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{invalid, valid}}
 	compiler, _ := NewCompiler(generator)
 	result, err := compiler.Compile(t.Context(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.", InvocationKey: "change-set:runbook-map:0",
@@ -359,13 +364,38 @@ func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
 			},
 		}},
 	})
-	if err != nil || result == nil || !result.Valid || generator.repairs != 1 {
+	if err != nil || result == nil || !result.Valid || generator.repairs != 2 {
 		t.Fatalf("path-guided runbook repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
 	}
-	diagnostic := generator.repairErrors[0].Error()
-	if !strings.Contains(diagnostic, "candidate.agents[0].runbook.steps.render.resultPath") ||
-		!strings.Contains(diagnostic, "allowed:") || !strings.Contains(diagnostic, "action") {
-		t.Fatalf("runbook repair diagnostic = %q", diagnostic)
+	for attempt, repairError := range generator.repairErrors {
+		diagnostic := repairError.Error()
+		if !strings.Contains(diagnostic, "candidate.agents[0].runbook.steps.render.resultPath") ||
+			!strings.Contains(diagnostic, "allowed:") ||
+			!strings.Contains(diagnostic, "move to candidate.agents[0].runbook.steps.render.action.resultPath") {
+			t.Fatalf("runbook repair diagnostic %d = %q", attempt+1, diagnostic)
+		}
+	}
+}
+
+func TestCompilerRejectsPersistentlyInvalidRunbookStepPlacement(t *testing.T) {
+	_, invalid := deterministicRunbookPayloads(t)
+	generator := &repairingGenerator{
+		generated: invalid, repairSequence: [][]byte{invalid, invalid},
+	}
+	compiler, _ := NewCompiler(generator)
+	_, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {
+				ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"},
+				MaximumRisk: capability.RiskLevelWrite,
+			},
+		}},
+	})
+	var schemaError *SchemaGenerationError
+	if !errors.As(err, &schemaError) || generator.repairs != maximumSchemaRepairAttempts ||
+		!strings.Contains(schemaError.Diagnostic, "move to candidate.agents[0].runbook.steps.render.action.resultPath") {
+		t.Fatalf("persistent invalid runbook error=%#v repairs=%d err=%v", schemaError, generator.repairs, err)
 	}
 }
 
