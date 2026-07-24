@@ -257,6 +257,11 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 				}
 				outputs[name] = resolved
 			}
+			if contract, ok := r.definition.Interfaces[r.entrypoint]; ok && len(contract.OutputSchema) > 0 {
+				if err := runbook.ValidateInterfaceInput(contract.OutputSchema, outputs); err != nil {
+					return nil, fmt.Errorf("runbook output does not satisfy interface %q: %w", r.entrypoint, err)
+				}
+			}
 			encodeRunbookState(checkpoint, state)
 			return &TurnOutcome{Decisions: decisions, OutputSummary: "Completed runbook " + r.definition.Name, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusCompleted, RunOutput: outputs}, nil
 		default:

@@ -45,7 +45,11 @@ func TestHostedTurnRunnerAuthorizesCallableRunbookProposal(t *testing.T) {
 		RunbookOperations: []HostedRunbookOperation{{
 			Entrypoint: "collect-release-evidence", Name: "Collect release evidence",
 			Description: "Collect the exact evidence required for a release.",
-			InputSchema: map[string]interface{}{"type": "object"},
+			InputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{"release": map[string]interface{}{"type": "string"}},
+				"required":   []interface{}{"release"},
+			},
 		}},
 	})
 	if err != nil {
@@ -63,6 +67,14 @@ func TestHostedTurnRunnerAuthorizesCallableRunbookProposal(t *testing.T) {
 		t.Fatalf("outcome=%#v request=%#v", outcome, host.request)
 	}
 
+	host.response.ProposedRunbook.Arguments = map[string]interface{}{}
+	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Prepare", Checkpoint: map[string]interface{}{}},
+		Turn: &AgentTurn{ID: "turn-runbook"},
+	}); err == nil {
+		t.Fatal("expected invalid runbook arguments to fail")
+	}
+	host.response.ProposedRunbook.Arguments = map[string]interface{}{"release": "2.0.0"}
 	host.response.ProposedRunbook.Entrypoint = "undeclared"
 	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
 		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Prepare", Checkpoint: map[string]interface{}{}},

@@ -49,6 +49,35 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	}
 }
 
+func TestRunbookTurnValidatesCallableOutput(t *testing.T) {
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "typed", Version: "1", Name: "Typed",
+		Entrypoints: map[string]string{"manual": "done"},
+		Interfaces: map[string]runbook.Interface{"manual": {
+			Description: "Return a typed result.", InputSchema: map[string]interface{}{"type": "object"},
+			OutputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{"result": map[string]interface{}{"type": "string"}},
+				"required":   []interface{}{"result"},
+			},
+		}},
+		Steps: map[string]runbook.Step{"done": {
+			Kind: runbook.StepEnd,
+			End:  &runbook.EndStep{Outputs: map[string]runbook.Value{"result": {Literal: []byte(`42`)}}},
+		}},
+	}
+	runner, err := NewRunbookTurnRunner(definition, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Context: map[string]interface{}{}},
+		Turn: &AgentTurn{ID: "turn"},
+	}); err == nil {
+		t.Fatal("expected output schema mismatch to fail")
+	}
+}
+
 func TestRunbookTurnProposesConcurrentForkAndRunsBoundedForEach(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "deterministic", Version: "1", Name: "Deterministic", Entrypoints: map[string]string{"manual": "choose"}, Steps: map[string]runbook.Step{
 		"choose": {Kind: runbook.StepDecision, Decision: &runbook.DecisionStep{Cases: []runbook.DecisionCase{{When: runbook.Predicate{Operator: runbook.PredicateTruthy, Left: runbookRef("/input/parallel")}, Next: "fork"}}, Default: "loop"}},

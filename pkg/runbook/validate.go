@@ -65,10 +65,14 @@ func (v *validator) validate() {
 		}
 		if schemaType, _ := contract.InputSchema["type"].(string); schemaType != "object" {
 			v.add("interfaces."+name+".inputSchema", "interface.input_object_required", "callable input schema must have type object")
+		} else if _, err := compileInterfaceSchema(contract.InputSchema); err != nil {
+			v.add("interfaces."+name+".inputSchema", "interface.input_schema_invalid", "callable input schema is invalid: %v", err)
 		}
 		if len(contract.OutputSchema) > 0 {
 			if schemaType, _ := contract.OutputSchema["type"].(string); schemaType != "object" {
 				v.add("interfaces."+name+".outputSchema", "interface.output_object_required", "callable output schema must have type object")
+			} else if _, err := compileInterfaceSchema(contract.OutputSchema); err != nil {
+				v.add("interfaces."+name+".outputSchema", "interface.output_schema_invalid", "callable output schema is invalid: %v", err)
 			}
 		}
 	}
