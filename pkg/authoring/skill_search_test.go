@@ -47,7 +47,8 @@ func TestNormalizeSkillSearchPagePreservesProviderRankingAndLifecycleTruth(t *te
 						Reference: "preview:sha256:abc",
 					}},
 				},
-				Origin: SkillSearchOriginCatalog,
+				Origin:       SkillSearchOriginCatalog,
+				Verification: SkillSearchVerificationVerified,
 				Provenance: SkillSearchProvenance{
 					Registry: "clawhub", Publisher: "@example", Reference: "preview:sha256:abc", Digest: "sha256:abc",
 				},
@@ -58,7 +59,8 @@ func TestNormalizeSkillSearchPagePreservesProviderRankingAndLifecycleTruth(t *te
 					ID: "openseal.source", Version: "1.0.4", Name: "Source observer",
 					Actions: []string{"observe_feed"}, Readiness: SkillReadinessReady,
 				},
-				Origin: SkillSearchOriginEnabled,
+				Origin:       SkillSearchOriginEnabled,
+				Verification: SkillSearchVerificationVerified,
 			},
 		},
 		NextCursor: " next ",
@@ -88,7 +90,8 @@ func TestNormalizeSkillSearchPageRejectsUnsafeCatalogClaims(t *testing.T) {
 				Requirement: "source_digest", Compatible: true, Evidence: "Verified immutable compilation", Reference: "preview:1",
 			}},
 		},
-		Origin: SkillSearchOriginCatalog,
+		Origin:       SkillSearchOriginCatalog,
+		Verification: SkillSearchVerificationVerified,
 	}
 	for name, mutate := range map[string]func(*SkillSearchCandidate){
 		"missing exact source": func(candidate *SkillSearchCandidate) {},
@@ -103,6 +106,10 @@ func TestNormalizeSkillSearchPageRejectsUnsafeCatalogClaims(t *testing.T) {
 		"invalid readiness": func(candidate *SkillSearchCandidate) {
 			candidate.SourceIdentity = "registry::reddit"
 			candidate.Readiness = "magic"
+		},
+		"unverified cannot be installable": func(candidate *SkillSearchCandidate) {
+			candidate.SourceIdentity = "registry::reddit"
+			candidate.Verification = SkillSearchVerificationRequired
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -127,6 +134,7 @@ func TestNormalizeSkillSearchRejectsOversizedOrDuplicateResults(t *testing.T) {
 	enabled := SkillSearchCandidate{
 		SkillCapability: SkillCapability{ID: "summarize", Version: "1", Name: "Summarize", Readiness: SkillReadinessReady},
 		Origin:          SkillSearchOriginEnabled,
+		Verification:    SkillSearchVerificationVerified,
 	}
 	if _, err := NormalizeSkillSearchPage(request, &SkillSearchPage{Items: []SkillSearchCandidate{enabled, enabled}}); err == nil ||
 		!strings.Contains(err.Error(), "exceeded") {
