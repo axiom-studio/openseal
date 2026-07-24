@@ -15,6 +15,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("GET /api/v1/activity", s.handleListActivity)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/compile", s.handleCompileWorkforce)
+	s.mux.HandleFunc("GET /api/v1/authoring/workforce/skills", s.handleSearchWorkforceSkills)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets", s.handleCreateWorkforceChangeSet)
 	s.mux.HandleFunc("GET /api/v1/authoring/workforce/change-sets/{id}", s.handleGetWorkforceChangeSet)
 	s.mux.HandleFunc("PATCH /api/v1/authoring/workforce/change-sets/{id}/placement", s.handleUpdateWorkforceChangeSetPlacement)
@@ -202,9 +203,10 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			capabilities = append(capabilities, kernelapi.SkillBindingsCapability(true))
 		}
 	}
-	if s.authoring != nil {
+	if s.authoring != nil || s.authoringSkillSearch != nil {
 		workforceCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{
-			ChangeSets: s.authoringRuns != nil && s.authoringWorker != nil,
+			ChangeSets:  s.authoringRuns != nil && s.authoringWorker != nil,
+			SkillSearch: s.authoringSkillSearch != nil,
 		})
 		if s.authoringChanges != nil {
 			s.composeWorkforceLifecycleCapability(r, &workforceCapability)

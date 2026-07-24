@@ -132,6 +132,24 @@ type fakeKernelClient struct {
 	skillBindingError    error
 }
 
+func TestMatchSearchedSkillRequiresExactSelectableIdentity(t *testing.T) {
+	results := []authoring.SkillSearchCandidate{
+		{SkillCapability: authoring.SkillCapability{ID: "summarize", Version: "1.0.0", SourceIdentity: "catalog:a", Readiness: authoring.SkillReadinessReady}, Verification: authoring.SkillSearchVerificationVerified},
+		{SkillCapability: authoring.SkillCapability{ID: "summarize", Version: "2.0.0", SourceIdentity: "catalog:b", Readiness: authoring.SkillReadinessNeedsInstallation}, Verification: authoring.SkillSearchVerificationVerified},
+		{SkillCapability: authoring.SkillCapability{ID: "unsafe", Version: "1.0.0", SourceIdentity: "catalog:c", Readiness: authoring.SkillReadinessUnavailable}, Verification: authoring.SkillSearchVerificationVerified},
+	}
+	if _, ok := matchSearchedSkill(results, "summarize"); ok {
+		t.Fatal("ambiguous bare Skill ID was selectable")
+	}
+	selected, ok := matchSearchedSkill(results, "summarize@2.0.0")
+	if !ok || selected.SourceIdentity != "catalog:b" {
+		t.Fatalf("selected=%#v ok=%t", selected, ok)
+	}
+	if _, ok := matchSearchedSkill(results, "unsafe@1.0.0"); ok {
+		t.Fatal("unavailable Skill was selectable")
+	}
+}
+
 var (
 	_ client.KernelClient                    = (*fakeKernelClient)(nil)
 	_ client.AgentDefinitionCapabilityClient = (*fakeKernelClient)(nil)

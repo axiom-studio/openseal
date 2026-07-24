@@ -1284,6 +1284,23 @@ func (m *Model) authoringActivationIntent() authoring.WorkforceActivationIntent 
 
 func (m *Model) renderRefinementGuidance(question authoring.RefinementQuestion, width int) string {
 	lines := make([]string, 0)
+	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && m.supportsAuthoring(kernelapi.OperationSearch) {
+		lines = append(lines, mutedStyle.Render("Find another Skill: /find <name or outcome>"))
+		for _, candidate := range m.refinementSkillResults {
+			selector := candidate.ID + "@" + candidate.Version
+			state := string(candidate.Readiness)
+			if candidate.Verification != authoring.SkillSearchVerificationVerified {
+				state = "verification " + string(candidate.Verification)
+			}
+			lines = append(lines, compact(fmt.Sprintf("• %s — %s · %s", selector, candidate.Name, state), width))
+			if candidate.SourceIdentity != "" {
+				lines = append(lines, refinementDetail("Source", candidate.SourceIdentity, width)...)
+			}
+		}
+		if m.refinementSkillNextCursor != "" {
+			lines = append(lines, mutedStyle.Render("More matches are available: /more"))
+		}
+	}
 	for _, option := range question.Answer.Options {
 		label := fmt.Sprintf("• %s — %s", option.ID, option.Label)
 		if option.Description != "" {
