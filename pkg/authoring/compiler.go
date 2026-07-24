@@ -18,6 +18,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -447,8 +448,9 @@ func (e *strictJSONSchemaError) Error() string { return e.diagnostic }
 func (e *strictJSONSchemaError) Unwrap() error { return e.cause }
 
 type unknownJSONFieldLocation struct {
-	path    string
-	allowed []string
+	path       string
+	allowed    []string
+	correction string
 }
 
 func contextualizeStrictJSONError(payload []byte, decodeErr error) error {
@@ -474,6 +476,9 @@ func contextualizeStrictJSONError(payload []byte, decodeErr error) error {
 		part := location.path
 		if len(location.allowed) > 0 {
 			part += " (allowed: " + strings.Join(location.allowed, ", ") + ")"
+		}
+		if location.correction != "" {
+			part += "; move to " + location.correction
 		}
 		parts = append(parts, part)
 	}
@@ -521,7 +526,11 @@ func locateUnknownJSONFields(payload []byte, field string, rootType reflect.Type
 				}
 				if !known {
 					if name == field {
-						locations = append(locations, unknownJSONFieldLocation{path: childPath, allowed: allowed})
+						locations = append(locations, unknownJSONFieldLocation{
+							path:       childPath,
+							allowed:    allowed,
+							correction: strictJSONFieldCorrection(expected, object, path, name),
+						})
 					}
 					continue
 				}
@@ -554,6 +563,24 @@ func locateUnknownJSONFields(payload []byte, field string, rootType reflect.Type
 	}
 	walk(document, rootType, "", 0)
 	return locations
+}
+
+func strictJSONFieldCorrection(expected reflect.Type, object map[string]interface{}, path, field string) string {
+	if expected != reflect.TypeOf(runbook.Step{}) {
+		return ""
+	}
+	kindValue, ok := object["kind"].(string)
+	if !ok {
+		return ""
+	}
+	payloadField, ok := runbook.StepPayloadFieldForJSONField(runbook.StepKind(kindValue), field)
+	if !ok {
+		return ""
+	}
+	if path == "" {
+		return payloadField + "." + field
+	}
+	return path + "." + payloadField + "." + field
 }
 
 func jsonStructFields(structType reflect.Type) map[string]reflect.Type {

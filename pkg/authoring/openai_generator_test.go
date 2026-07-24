@@ -244,10 +244,22 @@ func TestOpenAICompatibleRepairSuppliesExactStrictContractChecklist(t *testing.T
 		t.Fatalf("repair messages = %#v", messages)
 	}
 	repair := messages[2]["content"]
+	system := messages[0]["content"]
+	for _, expected := range []string{
+		"Portable Runbook schema projection (generated from canonical OpenSeal types)",
+		`"stepFields":["kind","name","action","delegate","decision","transform","wait","fork","join","forEach","loopReturn","end"]`,
+		`"action":{"payloadField":"action"`,
+		`"resultPath"`,
+	} {
+		if !strings.Contains(system, expected) {
+			t.Fatalf("system prompt missing generated Runbook projection %q:\n%s", expected, system)
+		}
+	}
 	for _, expected := range []string{
 		"value-free authoritative paths", "skillRequirements entries use skillId (never id)",
 		"Every unresolvedQuestions entry must include all required fields", "whyNeeded", "priority (integer 1..1000)",
 		`dependsOn is an array of {"questionId":"<existing question id>"`,
+		"move it to steps.<id>.action.resultPath", "do not repeat it at the Step root",
 		"unknown field id at candidate.agents[0].skillRequirements[0].id",
 	} {
 		if !strings.Contains(repair, expected) {
