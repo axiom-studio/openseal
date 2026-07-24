@@ -535,6 +535,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			DefinitionID: agentBinding.DefinitionID, DefinitionVersion: agentBinding.DefinitionVersion,
 			ModelProvider: agentBinding.ModelProvider, Model: agentBinding.Model,
 			ModelActions:      append([]capability.ModelAction(nil), agentBinding.ModelActions...),
+			RunbookOperations: cloneHostedRunbookOperations(agentBinding.RunbookOperations),
 			PreparedRuntimes:  append([]PreparedSkillRuntime(nil), agentBinding.PreparedRuntimes...),
 			InputContextRefs:  append([]string(nil), agentBinding.InputContextRefs...),
 			BudgetReservation: agentBinding.BudgetReservation,

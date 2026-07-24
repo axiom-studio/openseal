@@ -31,6 +31,47 @@ func hostedTestAgentTargets(ids ...string) []HostedAgentTarget {
 	return targets
 }
 
+func TestHostedTurnRunnerAuthorizesCallableRunbookProposal(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-runbook",
+		ModelProvider: "openai-compatible", Model: "test-model", NextRunStatus: AgentRunStatusRunning,
+		ProposedRunbook: &TurnRunbookProposal{
+			Entrypoint: "collect-release-evidence", Summary: "Collect release evidence deterministically",
+			Arguments: map[string]interface{}{"release": "2.0.0"},
+		},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "release-agent", DefinitionID: "release-agent", DefinitionVersion: "2",
+		RunbookOperations: []HostedRunbookOperation{{
+			Entrypoint: "collect-release-evidence", Name: "Collect release evidence",
+			Description: "Collect the exact evidence required for a release.",
+			InputSchema: map[string]interface{}{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Prepare the release", Checkpoint: map[string]interface{}{}},
+		Turn: &AgentTurn{ID: "turn-runbook"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ProposedRunbook == nil || outcome.ProposedRunbook.Entrypoint != "collect-release-evidence" ||
+		len(host.request.RunbookOperations) != 1 {
+		t.Fatalf("outcome=%#v request=%#v", outcome, host.request)
+	}
+
+	host.response.ProposedRunbook.Entrypoint = "undeclared"
+	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Prepare", Checkpoint: map[string]interface{}{}},
+		Turn: &AgentTurn{ID: "turn-runbook"},
+	}); err == nil {
+		t.Fatal("expected undeclared runbook entrypoint to fail")
+	}
+}
+
 func TestHostedTurnRunnerUsesDurableIdentityAndAuthorizedPromptProjection(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-7", NextRunStatus: AgentRunStatusCompleted,

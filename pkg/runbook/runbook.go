@@ -12,13 +12,23 @@ import (
 const APIVersion = "openseal.dev/runbook/v1alpha1"
 
 type Definition struct {
-	APIVersion  string            `json:"apiVersion"`
-	ID          string            `json:"id"`
-	Version     string            `json:"version"`
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Entrypoints map[string]string `json:"entrypoints"`
-	Steps       map[string]Step   `json:"steps"`
+	APIVersion  string               `json:"apiVersion"`
+	ID          string               `json:"id"`
+	Version     string               `json:"version"`
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Entrypoints map[string]string    `json:"entrypoints"`
+	Interfaces  map[string]Interface `json:"interfaces,omitempty"`
+	Steps       map[string]Step      `json:"steps"`
+}
+
+// Interface makes one runbook entrypoint safely callable by a cognitive Agent.
+// Schemas describe only credential-free invocation data and durable outputs;
+// Skill bindings and approval authority remain kernel-owned.
+type Interface struct {
+	Description  string                 `json:"description"`
+	InputSchema  map[string]interface{} `json:"inputSchema"`
+	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"`
 }
 
 type StepKind string

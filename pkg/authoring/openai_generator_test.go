@@ -193,6 +193,9 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"approval requirement at write risk",
 		"never claim semantic equivalence",
 		"never weaken or omit an explicit commitment",
+		"only when the prompt requires a repeatable, exact, deterministic multi-step operation",
+		"Prefer a small named operation over encoding the Agent's entire job as a runbook",
+		"a cognitive Agent may invoke the same operation as a governed tool",
 	} {
 		if !strings.Contains(authoringSystemPrompt, expected) {
 			t.Fatalf("authoring schema missing %q", expected)

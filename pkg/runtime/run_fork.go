@@ -23,11 +23,35 @@ type RunForkBranch struct {
 	ID              string                 `json:"id"`
 	Goal            string                 `json:"goal"`
 	AssignedAgentID string                 `json:"assignedAgentId,omitempty"`
+	Entrypoint      string                 `json:"entrypoint,omitempty"`
 	Context         map[string]interface{} `json:"context,omitempty"`
 	Checkpoint      map[string]interface{} `json:"checkpoint"`
 	Budget          *BudgetPolicy          `json:"budget,omitempty"`
 	Timeout         time.Duration          `json:"timeout,omitempty"`
 	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
+}
+
+// TurnRunbookProposal invokes one exact callable entrypoint on the current
+// Agent as a durable child Run. The parent remains cognitive and resumes with
+// the deterministic result through normal dependency fan-in.
+type TurnRunbookProposal struct {
+	Entrypoint string                 `json:"entrypoint"`
+	Summary    string                 `json:"summary"`
+	Arguments  map[string]interface{} `json:"arguments,omitempty"`
+	Budget     *BudgetPolicy          `json:"budget,omitempty"`
+}
+
+func (p *TurnRunbookProposal) Validate() error {
+	if p == nil || !validOpaqueIdentifier(p.Entrypoint, 128) || strings.TrimSpace(p.Summary) == "" {
+		return errors.New("runbook proposal requires an exact entrypoint and summary")
+	}
+	if err := ValidateCredentialFreeContext(p.Arguments); err != nil {
+		return err
+	}
+	if p.Budget != nil {
+		return p.Budget.Validate()
+	}
+	return nil
 }
 
 // TurnForkProposal is a proposal-only durable Turn output. The worker
@@ -91,6 +115,9 @@ func (p *TurnForkProposal) Validate() error {
 		}
 		if !validOpaqueIdentifier(id, 128) || branch.AssignedAgentID != "" && !validOpaqueIdentifier(branch.AssignedAgentID, 128) {
 			return errors.New("fork proposal branch and assigned Agent IDs must be portable opaque identifiers")
+		}
+		if branch.Entrypoint != "" && !validOpaqueIdentifier(branch.Entrypoint, 128) {
+			return errors.New("fork proposal branch entrypoint must be a portable opaque identifier")
 		}
 		seen[id] = true
 		if err := ValidateCredentialFreeContext(branch.Context); err != nil {
@@ -186,6 +213,9 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		if branch.Timeout < 0 {
 			return nil, fmt.Errorf("branch %s timeout cannot be negative", branch.ID)
 		}
+		if branch.Entrypoint != "" && !validOpaqueIdentifier(branch.Entrypoint, 128) {
+			return nil, fmt.Errorf("branch %s entrypoint is invalid", branch.ID)
+		}
 		if branch.Mode != "" && branch.Mode != runbook.DelegateBehavior && branch.Mode != runbook.DelegateReason {
 			return nil, fmt.Errorf("branch %s delegation mode is invalid", branch.ID)
 		}
@@ -255,7 +285,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 		child, err := buildAgentRun(ctx, c.store, CreateAgentRunRequest{
 			Kind: source.Kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
-			Owner: source.Owner, AssignedAgentID: assignedAgentID,
+			Owner: source.Owner, AssignedAgentID: assignedAgentID, Entrypoint: strings.TrimSpace(branch.Entrypoint),
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
 			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
 			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,

@@ -145,6 +145,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	base := TurnRunnerBinding{
 		DeploymentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		ModelActions: actions, PreparedRuntimes: prepared, InputContextRefs: contextRefs,
+		RunbookOperations: projectCallableRunbookOperations(definition.Runbook),
 		BudgetReservation: BudgetUsage{Turns: 1},
 	}
 	if _, requested := run.Context[OutreachInvocationContextKey]; requested {
@@ -166,7 +167,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return &base, nil
 	}
 	delegationMode, _ := run.Context[DelegationModeContextKey].(string)
-	if definition.Runbook != nil && delegationMode != string(runbook.DelegateReason) {
+	if definition.Runbook != nil && strings.TrimSpace(run.Entrypoint) != "" && delegationMode != string(runbook.DelegateReason) {
 		entrypoint := catalogRunbookEntrypoint(definition, run)
 		runner, resolveErr := NewRunbookTurnRunner(definition.Runbook, entrypoint)
 		if resolveErr != nil {
@@ -190,13 +191,34 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
 		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		SystemInstructions: instructions, EligibleAgents: eligibleAgents, SkillPrompts: prompts, Actions: actions,
-		ModelCredential: deploymentModelCredential(deployment),
+		RunbookOperations: base.RunbookOperations,
+		ModelCredential:   deploymentModelCredential(deployment),
 	})
 	if err != nil {
 		return nil, err
 	}
 	base.Runner = runner
 	return &base, nil
+}
+
+func projectCallableRunbookOperations(definition *runbook.Definition) []HostedRunbookOperation {
+	if definition == nil || len(definition.Interfaces) == 0 {
+		return nil
+	}
+	entrypoints := make([]string, 0, len(definition.Interfaces))
+	for entrypoint := range definition.Interfaces {
+		entrypoints = append(entrypoints, entrypoint)
+	}
+	sort.Strings(entrypoints)
+	operations := make([]HostedRunbookOperation, 0, len(entrypoints))
+	for _, entrypoint := range entrypoints {
+		contract := definition.Interfaces[entrypoint]
+		operations = append(operations, HostedRunbookOperation{
+			Entrypoint: entrypoint, Name: definition.Name + " · " + entrypoint,
+			Description: contract.Description, InputSchema: cloneMap(contract.InputSchema), OutputSchema: cloneMap(contract.OutputSchema),
+		})
+	}
+	return operations
 }
 
 func resolveHostedAgentTargets(

@@ -20,7 +20,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v8"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v9"
 
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for
 // bounded delegation. ID is the only durable identity; DisplayName and Purpose
@@ -29,6 +29,17 @@ type HostedAgentTarget struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
 	Purpose     string `json:"purpose,omitempty"`
+}
+
+// HostedRunbookOperation is one immutable deterministic operation the current
+// cognitive Agent may invoke. It contains no graph internals or credentials;
+// the kernel resolves the exact active definition again at materialization.
+type HostedRunbookOperation struct {
+	Entrypoint   string                 `json:"entrypoint"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	InputSchema  map[string]interface{} `json:"inputSchema"`
+	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"`
 }
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
@@ -94,6 +105,7 @@ type HostedTurnRequest struct {
 	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
 	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
+	RunbookOperations      []HostedRunbookOperation `json:"runbookOperations,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
 	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
@@ -119,6 +131,7 @@ type HostedTurnResponse struct {
 	ProposedActions        []TurnAction             `json:"proposedActions,omitempty"`
 	ProposedFork           *TurnForkProposal        `json:"proposedFork,omitempty"`
 	ProposedDelegation     *TurnDelegationProposal  `json:"proposedDelegation,omitempty"`
+	ProposedRunbook        *TurnRunbookProposal     `json:"proposedRunbook,omitempty"`
 	OutputSummary          string                   `json:"outputSummary"`
 	Usage                  TurnUsage                `json:"usage,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
@@ -172,6 +185,7 @@ type HostedTurnRunnerConfig struct {
 	DefinitionVersion  string
 	SystemInstructions []string
 	EligibleAgents     []HostedAgentTarget
+	RunbookOperations  []HostedRunbookOperation
 	SkillPrompts       []HostedSkillPrompt
 	Actions            []capability.ModelAction
 	ModelCredential    *capability.CredentialReference
@@ -214,6 +228,17 @@ func NewHostedTurnRunner(host TurnHost, config HostedTurnRunnerConfig) (*HostedT
 			return nil, fmt.Errorf("eligible hosted Agent ID %q is duplicated", target.ID)
 		}
 		seenAgents[target.ID] = true
+	}
+	seenRunbooks := make(map[string]bool, len(config.RunbookOperations))
+	for _, operation := range config.RunbookOperations {
+		if !validOpaqueIdentifier(operation.Entrypoint, 128) || strings.TrimSpace(operation.Name) == "" ||
+			strings.TrimSpace(operation.Description) == "" || operation.InputSchema["type"] != "object" {
+			return nil, errors.New("hosted runbook operations require entrypoint, name, description, and an object input schema")
+		}
+		if seenRunbooks[operation.Entrypoint] {
+			return nil, fmt.Errorf("hosted runbook entrypoint %q is duplicated", operation.Entrypoint)
+		}
+		seenRunbooks[operation.Entrypoint] = true
 	}
 	return &HostedTurnRunner{host: host, config: config}, nil
 }
@@ -288,6 +313,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			response.ProposedActions = nil
 			response.ProposedFork = nil
 			response.ProposedDelegation = nil
+			response.ProposedRunbook = nil
 			response.NextRunStatus = AgentRunStatusRunning
 			response.WakeCondition = nil
 			response.ContinuationCheckpoint["lastAction"] = deepCloneCheckpointMap(reused)
@@ -347,8 +373,30 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, fmt.Errorf("invalid hosted delegation budget: %w", err)
 		}
 	}
+	if response.ProposedRunbook != nil {
+		proposalCount++
+		if err := response.ProposedRunbook.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid hosted runbook proposal: %w", err)
+		}
+		authorized := false
+		for _, operation := range request.RunbookOperations {
+			if operation.Entrypoint == response.ProposedRunbook.Entrypoint {
+				authorized = true
+				break
+			}
+		}
+		if !authorized {
+			return nil, errors.New("turn host proposed an unauthorized runbook entrypoint")
+		}
+		if err := validateHostedChildBudgetFloor(response.ProposedRunbook.Budget, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted runbook budget: %w", err)
+		}
+		if err := validateHostedChildBudgetCapacity([]*BudgetPolicy{response.ProposedRunbook.Budget}, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted runbook budget: %w", err)
+		}
+	}
 	if proposalCount > 1 {
-		return nil, errors.New("a bounded hosted Turn can propose only one action, fork, or delegation")
+		return nil, errors.New("a bounded hosted Turn can propose only one action, fork, delegation, or runbook")
 	}
 	if proposalCount == 1 && response.NextRunStatus != AgentRunStatusRunning {
 		return nil, errors.New("a hosted Turn proposal must remain running until the kernel materializes it")
@@ -388,7 +436,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ModelProvider: response.ModelProvider, Model: response.Model,
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
 		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
-		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation,
+		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook,
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
@@ -455,6 +503,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
 		Goal: input.Run.Goal, InputContext: inputContext, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		EligibleAgents:         cloneHostedAgentTargets(r.config.EligibleAgents),
+		RunbookOperations:      cloneHostedRunbookOperations(r.config.RunbookOperations),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
 		Budget:                 budget,
@@ -472,6 +521,16 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		return HostedTurnRequest{}, err
 	}
 	return request, nil
+}
+
+func cloneHostedRunbookOperations(values []HostedRunbookOperation) []HostedRunbookOperation {
+	cloned := make([]HostedRunbookOperation, len(values))
+	for index, value := range values {
+		cloned[index] = value
+		cloned[index].InputSchema = cloneMap(value.InputSchema)
+		cloned[index].OutputSchema = cloneMap(value.OutputSchema)
+	}
+	return cloned
 }
 
 func resolveHostedAgentTarget(reference string, eligible []HostedAgentTarget) (string, error) {
