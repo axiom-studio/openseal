@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -19,7 +20,12 @@ func (s *PostgresStore) ValidateChangeSetReadiness(ctx context.Context, value *a
 	return validateWorkforceChangeSetReadiness(ctx, s, value)
 }
 
-func validateWorkforceChangeSetReadiness(ctx context.Context, store skill.CatalogStore, value *authoring.ChangeSet) ([]authoring.ValidationIssue, error) {
+type workforceChangeSetReadinessStore interface {
+	skill.CatalogStore
+	GetDeployment(context.Context, capability.ScopeReference, string) (*agent.AgentDeployment, error)
+}
+
+func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceChangeSetReadinessStore, value *authoring.ChangeSet) ([]authoring.ValidationIssue, error) {
 	if value == nil {
 		return nil, fmt.Errorf("ChangeSet is required")
 	}
@@ -33,7 +39,30 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store skill.Catalo
 		if agentDefinition == nil {
 			continue
 		}
-		bindings, err := materializeWorkforceSkillBindings(value, agentDefinition, value.Placement.AgentDeploymentIDs[agentDefinition.ID], activation == authoring.WorkforceActivationActive)
+		deploymentID := strings.TrimSpace(value.Placement.AgentDeploymentIDs[agentDefinition.ID])
+		if value.Placement.AgentExpectedRevisions[agentDefinition.ID] == 0 && deploymentID != "" {
+			existing, deploymentErr := store.GetDeployment(ctx, value.Scope, deploymentID)
+			switch {
+			case deploymentErr == nil && existing != nil:
+				displayName := strings.TrimSpace(agentDefinition.DisplayName)
+				if displayName == "" {
+					displayName = agentDefinition.ID
+				}
+				issues = append(issues, authoring.ValidationIssue{
+					Path: "placement.agentDeploymentIds." + agentDefinition.ID,
+					Code: "agent_deployment_identity_conflict",
+					Message: fmt.Sprintf(
+						"Agent %q cannot use deployment identity %q because it already exists. Change the Agent identity or amend the existing Agent before continuing",
+						displayName,
+						deploymentID,
+					),
+				})
+			case errors.Is(deploymentErr, agent.ErrDeploymentNotFound):
+			case deploymentErr != nil:
+				return nil, deploymentErr
+			}
+		}
+		bindings, err := materializeWorkforceSkillBindings(value, agentDefinition, deploymentID, activation == authoring.WorkforceActivationActive)
 		if err != nil {
 			issues = append(issues, authoring.ValidationIssue{
 				Path:    "agents." + agentDefinition.ID + ".skillRequirements",

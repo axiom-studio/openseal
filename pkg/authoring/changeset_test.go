@@ -56,6 +56,23 @@ func (v *staticChangeSetReadinessValidator) ValidateChangeSetReadiness(context.C
 	return append([]ValidationIssue(nil), v.issues...), nil
 }
 
+func TestChangeSetReadinessErrorClassifiesOnlyAgentDeploymentIdentityConflicts(t *testing.T) {
+	conflict := &ChangeSetReadinessError{Issues: []ValidationIssue{{
+		Code:    "agent_deployment_identity_conflict",
+		Message: "Agent deployment identity already exists",
+	}}}
+	if !errors.Is(conflict, ErrChangeSetPlacementConflict) {
+		t.Fatalf("identity conflict classification = %v", conflict)
+	}
+	ordinary := &ChangeSetReadinessError{Issues: []ValidationIssue{{
+		Code:    "skill_binding_definition_unavailable",
+		Message: "Skill is unavailable",
+	}}}
+	if errors.Is(ordinary, ErrChangeSetPlacementConflict) {
+		t.Fatalf("ordinary readiness failure classified as placement conflict: %v", ordinary)
+	}
+}
+
 func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	generator := &sequenceChangeSetGenerator{payloads: [][]byte{payload}}

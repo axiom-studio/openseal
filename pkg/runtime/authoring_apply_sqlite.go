@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
+	"github.com/mattn/go-sqlite3"
 )
 
 func (s *SQLiteStore) ApplyChangeSet(ctx context.Context, value *authoring.ChangeSet, expectedRevision int64) (*authoring.ChangeSet, error) {
@@ -110,6 +111,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 			}
 		}
 		if err != nil {
+			if expectedDeploymentRevision == 0 && sqliteUniqueConstraint(err) {
+				return nil, workforceAgentDeploymentIdentityConflict(deployment.ID)
+			}
 			return nil, err
 		}
 		if application.activation == authoring.WorkforceActivationActive {
@@ -222,6 +226,15 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		return nil, err
 	}
 	return decodeChangeSet(string(payload))
+}
+
+func sqliteUniqueConstraint(err error) bool {
+	var sqliteErr sqlite3.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	return sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey ||
+		sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
 }
 
 func applySQLiteWorkforceInitiative(ctx context.Context, tx *sql.Tx, initiative *Initiative, expectedRevision int64) error {

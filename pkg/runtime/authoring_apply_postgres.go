@@ -94,6 +94,9 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 			}
 		}
 		if err != nil {
+			if expectedDeploymentRevision == 0 && postgresUniqueViolation(err) {
+				return nil, workforceAgentDeploymentIdentityConflict(deployment.ID)
+			}
 			return nil, err
 		}
 		if a.activation == authoring.WorkforceActivationActive {

@@ -425,6 +425,111 @@ func TestSQLiteWorkforceApplyRequiresExactSourceForCollidingSkills(t *testing.T)
 	}
 }
 
+func TestSQLiteWorkforceReadinessBlocksExistingAgentDeploymentIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	occupier := testApplicableWorkforceChangeSet()
+	occupier.ID = "occupier"
+	if _, _, err = store.CreateChangeSet(ctx, occupier, "occupier", "occupier"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplyChangeSet(
+		ctx,
+		appliedRuntimeChangeSet(occupier, "occupier-receipt", "occupier-apply", occupier.UpdatedAt.Add(time.Minute)),
+		occupier.Revision,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := testAgentDeploymentIdentityCollisionChangeSet("collision-review")
+	candidate.Status, candidate.Revision = authoring.ChangeSetReview, 1
+	if _, _, err = store.CreateChangeSet(ctx, candidate, "collision-review", "collision-review"); err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := authoring.NewCompiler(&countedWorkforceGenerator{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := authoring.NewChangeSetService(compiler, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _, err := service.SubmitEvaluation(ctx, authoring.SubmitChangeSetEvaluationRequest{
+		Scope: candidate.Scope, ChangeSetID: candidate.ID, ExpectedRevision: candidate.Revision,
+		CandidateDigest: candidate.CandidateDigest, Allowed: true,
+		Actor: authoring.ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow-collision",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != authoring.ChangeSetBlocked || result.Result.Valid || len(result.Result.Validation) != 1 {
+		t.Fatalf("colliding readiness result = %#v", result)
+	}
+	issue := result.Result.Validation[0]
+	if issue.Code != "agent_deployment_identity_conflict" ||
+		issue.Path != "placement.agentDeploymentIds.agent-collision" ||
+		!strings.Contains(issue.Message, `"Analyst Agent"`) ||
+		!strings.Contains(issue.Message, `"agent-live"`) ||
+		!strings.Contains(issue.Message, "amend the existing Agent") {
+		t.Fatalf("colliding readiness issue = %#v", issue)
+	}
+}
+
+func TestSQLiteAtomicWorkforceApplyMapsAgentDeploymentIdentityRaceWithoutPartialState(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	candidate := testAgentDeploymentIdentityCollisionChangeSet("collision-race")
+	if _, _, err = store.CreateChangeSet(ctx, candidate, "collision-race", "collision-race"); err != nil {
+		t.Fatal(err)
+	}
+	occupier := testApplicableWorkforceChangeSet()
+	occupier.ID = "race-occupier"
+	if _, _, err = store.CreateChangeSet(ctx, occupier, "race-occupier", "race-occupier"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplyChangeSet(
+		ctx,
+		appliedRuntimeChangeSet(occupier, "occupier-receipt", "occupier-apply", occupier.UpdatedAt.Add(time.Minute)),
+		occupier.Revision,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ApplyChangeSet(
+		ctx,
+		appliedRuntimeChangeSet(candidate, "collision-receipt", "collision-apply", candidate.UpdatedAt.Add(2*time.Minute)),
+		candidate.Revision,
+	)
+	if !errors.Is(err, authoring.ErrChangeSetPlacementConflict) {
+		t.Fatalf("colliding apply error = %v", err)
+	}
+	if message := strings.ToLower(err.Error()); strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "agent_deployments_pkey") ||
+		strings.Contains(message, "sql") {
+		t.Fatalf("colliding apply leaked storage detail: %v", err)
+	}
+	if _, err = store.GetDefinition(ctx, "agent-collision", "1"); !errors.Is(err, agent.ErrDefinitionNotFound) {
+		t.Fatalf("colliding apply leaked Agent definition: %v", err)
+	}
+	if _, err = store.GetTeamDefinition(ctx, "team-collision-race", "1"); !errors.Is(err, team.ErrDefinitionNotFound) {
+		t.Fatalf("colliding apply leaked Team definition: %v", err)
+	}
+	current, err := store.GetChangeSet(ctx, candidate.Scope, candidate.ID)
+	if err != nil || current.Status != authoring.ChangeSetReady || current.ApplyReceipt != nil {
+		t.Fatalf("colliding ChangeSet = %#v, err = %v", current, err)
+	}
+}
+
 func TestSQLiteWorkforceApplyBindsImmutableSourceVersionBehindDeclaredContract(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
@@ -1099,6 +1204,30 @@ func testApplicableWorkforceChangeSet() *authoring.ChangeSet {
 	agentDefinition := &agent.AgentDefinition{ID: "agent", Version: "1", DisplayName: "Agent", Purpose: "Work", SystemPrompt: "Do the work", Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}, ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "agent-goal", Title: "Agent goal", Goal: "Finish agent work"}}}
 	teamDefinition := &team.Definition{ID: "team", Version: "1", DisplayName: "Team", Purpose: "Work together", Roles: []team.RoleSlot{{ID: "worker", DisplayName: "Worker", Purpose: "Work", MinimumMembers: 1, MaximumMembers: 1, RequiredDefinitionIDs: []string{"agent"}}}, Coordination: team.CoordinationPolicy{Mode: team.CoordinationDynamic}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}, ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "team-goal", Title: "Team goal", Goal: "Finish team work"}}}
 	return &authoring.ChangeSet{ID: "change", Scope: scope, Mode: authoring.ModeCreate, Prompt: "Create", PromptDigest: "prompt", CandidateDigest: "candidate", Result: authoring.CompileResult{Candidate: authoring.WorkforceCandidate{Agents: []*agent.AgentDefinition{agentDefinition}, Team: teamDefinition, Assignments: []authoring.Assignment{{ID: "worker", RoleID: "worker", AgentDefinitionID: "agent"}}}, Valid: true}, Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "team-live", AgentDeploymentIDs: map[string]string{"agent": "agent-live"}, Objectives: map[string]authoring.ObjectivePlacement{authoring.WorkforceObjectiveKey("agent", "agent", "agent-goal"): {ID: "objective:agent"}, authoring.WorkforceObjectiveKey("team", "team", "team-goal"): {ID: "objective:team"}}, Environment: "test"}, Status: authoring.ChangeSetReady, Actor: authoring.ChangeSetActor{Type: "user", ID: "7"}, Revision: 2, CreatedAt: now, UpdatedAt: now}
+}
+
+func testAgentDeploymentIdentityCollisionChangeSet(id string) *authoring.ChangeSet {
+	value := testApplicableWorkforceChangeSet()
+	value.ID = id
+	value.CandidateDigest = "candidate-" + id
+	agentDefinition := value.Result.Candidate.Agents[0]
+	agentDefinition.ID = "agent-collision"
+	agentDefinition.DisplayName = "Analyst Agent"
+	teamDefinition := value.Result.Candidate.Team
+	teamDefinition.ID = "team-" + id
+	teamDefinition.Roles[0].RequiredDefinitionIDs = []string{agentDefinition.ID}
+	value.Result.Candidate.Assignments[0].AgentDefinitionID = agentDefinition.ID
+	value.Placement.TeamDeploymentID = "team-" + id + "-live"
+	value.Placement.AgentDeploymentIDs = map[string]string{agentDefinition.ID: "agent-live"}
+	value.Placement.Objectives = map[string]authoring.ObjectivePlacement{
+		authoring.WorkforceObjectiveKey("agent", agentDefinition.ID, "agent-goal"): {
+			ID: "objective:" + id + ":agent",
+		},
+		authoring.WorkforceObjectiveKey("team", teamDefinition.ID, "team-goal"): {
+			ID: "objective:" + id + ":team",
+		},
+	}
+	return value
 }
 
 func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {

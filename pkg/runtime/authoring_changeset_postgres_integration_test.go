@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -216,6 +217,65 @@ func TestPostgresWorkforceChangeSetsAreReplicaSafeAndDurable(t *testing.T) {
 	modifiedCandidate.CandidateDigest, modifiedCandidate.Revision = "changed", 3
 	if _, err := replica.UpdateChangeSet(ctx, &modifiedCandidate, 2); !errors.Is(err, authoring.ErrChangeSetRevision) {
 		t.Fatalf("candidate mutation = %v", err)
+	}
+}
+
+func TestPostgresAtomicWorkforceApplyMapsAgentDeploymentIdentityRaceWithoutPartialState(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	schema := "openseal_placement_conflict_" + uuid.NewString()[:8]
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
+		_ = store.Close()
+	})
+
+	candidate := testAgentDeploymentIdentityCollisionChangeSet("postgres-collision-race")
+	if _, _, err = store.CreateChangeSet(ctx, candidate, "collision-race", "collision-race"); err != nil {
+		t.Fatal(err)
+	}
+	occupier := testApplicableWorkforceChangeSet()
+	occupier.ID = "postgres-race-occupier"
+	if _, _, err = store.CreateChangeSet(ctx, occupier, "race-occupier", "race-occupier"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplyChangeSet(
+		ctx,
+		appliedRuntimeChangeSet(occupier, "occupier-receipt", "occupier-apply", occupier.UpdatedAt.Add(time.Minute)),
+		occupier.Revision,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ApplyChangeSet(
+		ctx,
+		appliedRuntimeChangeSet(candidate, "collision-receipt", "collision-apply", candidate.UpdatedAt.Add(2*time.Minute)),
+		candidate.Revision,
+	)
+	if !errors.Is(err, authoring.ErrChangeSetPlacementConflict) {
+		t.Fatalf("colliding apply error = %v", err)
+	}
+	if message := strings.ToLower(err.Error()); strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "agent_deployments_pkey") ||
+		strings.Contains(message, "sqlstate") {
+		t.Fatalf("colliding apply leaked storage detail: %v", err)
+	}
+	if _, err = store.GetDefinition(ctx, "agent-collision", "1"); !errors.Is(err, agent.ErrDefinitionNotFound) {
+		t.Fatalf("colliding apply leaked Agent definition: %v", err)
+	}
+	if _, err = store.GetTeamDefinition(ctx, "team-postgres-collision-race", "1"); !errors.Is(err, team.ErrDefinitionNotFound) {
+		t.Fatalf("colliding apply leaked Team definition: %v", err)
+	}
+	current, err := store.GetChangeSet(ctx, candidate.Scope, candidate.ID)
+	if err != nil || current.Status != authoring.ChangeSetReady || current.ApplyReceipt != nil {
+		t.Fatalf("colliding ChangeSet = %#v, err = %v", current, err)
 	}
 }
 
