@@ -145,7 +145,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		if len(materializationIssues) == 0 && !hasScheduleIntentQuestion(generated.UnresolvedQuestions) {
 			validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
 		}
-		validation = append(validation, validateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
+		validation = append(validation, ValidateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
 			validation = append(validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
@@ -209,7 +209,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	if len(materializationIssues) == 0 && !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
 	}
-	result.Validation = append(result.Validation, validateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
+	result.Validation = append(result.Validation, ValidateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
 	refinementValidation := make([]ValidationIssue, 0, 2)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
@@ -299,18 +299,34 @@ func applyAuthorityConstraint(candidate *WorkforceCandidate, constraint *Authori
 	}
 }
 
-func validateCandidateAuthorityConstraint(candidate *WorkforceCandidate, constraint *AuthorityConstraint) []ValidationIssue {
-	if candidate == nil || constraint == nil || riskRank(constraint.MaximumRisk) < 0 {
+// ValidateCandidateAuthorityConstraint rechecks a generated candidate against
+// a current host authority projection. Hosts use the same deterministic
+// contract at compilation, readiness evaluation, and final mutation time.
+func ValidateCandidateAuthorityConstraint(candidate *WorkforceCandidate, constraint *AuthorityConstraint) []ValidationIssue {
+	if candidate == nil || constraint == nil {
 		return nil
 	}
 	maximumRank := riskRank(constraint.MaximumRisk)
+	approvalRank := riskRank(constraint.RequireApprovalAt)
 	issues := make([]ValidationIssue, 0)
 	for index, definition := range candidate.Agents {
-		if definition != nil && riskRank(definition.Authority.MaximumRisk) > maximumRank {
+		if definition == nil {
+			continue
+		}
+		agentMaximumRank := riskRank(definition.Authority.MaximumRisk)
+		if maximumRank >= 0 && agentMaximumRank > maximumRank {
 			issues = append(issues, issue(
 				fmt.Sprintf("agents[%d].authority.maximumRisk", index),
 				"authority_maximum_risk_exceeded",
 				fmt.Sprintf("Host authority constraint %s@%s permits maximum risk %s", constraint.ID, constraint.Version, constraint.MaximumRisk),
+			))
+		}
+		agentApprovalRank := riskRank(definition.Authority.RequireApprovalAt)
+		if approvalRank >= 0 && agentMaximumRank >= approvalRank && (agentApprovalRank < 0 || agentApprovalRank > approvalRank) {
+			issues = append(issues, issue(
+				fmt.Sprintf("agents[%d].authority.requireApprovalAt", index),
+				"authority_approval_threshold_exceeded",
+				fmt.Sprintf("Host authority constraint %s@%s requires approval at %s risk or earlier", constraint.ID, constraint.Version, constraint.RequireApprovalAt),
 			))
 		}
 	}

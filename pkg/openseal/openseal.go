@@ -204,6 +204,8 @@ type (
 	WorkforceChangeSetStore                   = authoring.ChangeSetStore
 	PendingWorkforceChangeSetGenerationStore  = authoring.PendingChangeSetGenerationStore
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
+	WorkforceChangeSetReadinessValidator      = authoring.ChangeSetReadinessValidator
+	WorkforceChangeSetReadinessError          = authoring.ChangeSetReadinessError
 	WorkforceAuthoringRunStore                = runtime.WorkforceAuthoringRunStore
 	WorkforceAuthoringRunService              = runtime.WorkforceAuthoringRunService
 	WorkforceAuthoringCatalogResolver         = runtime.WorkforceAuthoringCatalogResolver
@@ -1233,6 +1235,7 @@ const (
 	WorkforceInitiativeDeduplicateStableSource           = authoring.InitiativeDeduplicateStableSource
 	WorkforceInitiativeDeduplicateContentDigest          = authoring.InitiativeDeduplicateContentDigest
 	WorkforceInitiativeDeduplicateStableSourceAndContent = authoring.InitiativeDeduplicateStableSourceAndContent
+	WorkforceCatalogDiagnosticExecutionTargetMissing     = authoring.CatalogDiagnosticExecutionTargetMissing
 
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
@@ -1602,6 +1605,10 @@ const (
 	ArtifactEvidenceTargetClaim          = runtime.EvidenceTargetClaim
 )
 
+func ValidateWorkforceCandidateAuthority(candidate *WorkforceCandidate, constraint *WorkforceAuthorityConstraint) []WorkforceAuthoringValidationIssue {
+	return authoring.ValidateCandidateAuthorityConstraint(candidate, constraint)
+}
+
 const (
 	SourceMonitorDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
 	SourceMonitorDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
@@ -1690,6 +1697,7 @@ type Engine struct {
 	progression                   *progression.Service
 	authoring                     *authoring.Compiler
 	authoringChanges              *authoring.ChangeSetService
+	authoringReadinessValidators  []authoring.ChangeSetReadinessValidator
 	authoringRuns                 *runtime.WorkforceAuthoringRunService
 	logger                        *zap.SugaredLogger
 	workerLimiter                 *runtime.WorkerLimiter
@@ -2173,6 +2181,22 @@ func WithWorkforceAuthoringGenerator(generator authoring.Generator) Option {
 	}
 }
 
+// WithWorkforceChangeSetReadinessValidators composes deterministic checks
+// owned by an embedding host with OpenSeal's native Skill readiness checks.
+// Validators are re-run before a ChangeSet becomes ready and immediately
+// before atomic apply, so stale placement can never widen runtime authority.
+func WithWorkforceChangeSetReadinessValidators(validators ...authoring.ChangeSetReadinessValidator) Option {
+	return func(e *Engine) error {
+		for _, validator := range validators {
+			if validator == nil {
+				return errors.New("workforce readiness validator is required")
+			}
+			e.authoringReadinessValidators = append(e.authoringReadinessValidators, validator)
+		}
+		return nil
+	}
+}
+
 func (e *Engine) rebuildAuthoringChangeSets() error {
 	e.authoringChanges = nil
 	e.authoringRuns = nil
@@ -2183,7 +2207,7 @@ func (e *Engine) rebuildAuthoringChangeSets() error {
 	if !ok {
 		return nil
 	}
-	service, err := authoring.NewChangeSetService(e.authoring, store)
+	service, err := authoring.NewChangeSetService(e.authoring, store, e.authoringReadinessValidators...)
 	if err != nil {
 		return err
 	}

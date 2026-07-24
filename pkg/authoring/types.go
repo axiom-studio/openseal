@@ -167,6 +167,7 @@ const (
 	CatalogDiagnosticDiscoveryUnavailable   = "capability_discovery_unavailable"
 	CatalogDiagnosticDiscoveryTimeout       = "capability_discovery_timeout"
 	CatalogDiagnosticDiscoveryStale         = "capability_discovery_stale"
+	CatalogDiagnosticExecutionTargetMissing = "execution_target_unavailable"
 )
 
 // CatalogDiagnostic is bounded, host-supplied availability guidance. It is a
