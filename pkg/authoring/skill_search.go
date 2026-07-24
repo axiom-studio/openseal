@@ -66,8 +66,9 @@ type SkillSearchCandidate struct {
 }
 
 type SkillSearchPage struct {
-	Items      []SkillSearchCandidate `json:"items"`
-	NextCursor string                 `json:"nextCursor,omitempty"`
+	Items       []SkillSearchCandidate `json:"items"`
+	NextCursor  string                 `json:"nextCursor,omitempty"`
+	Diagnostics []CatalogDiagnostic    `json:"diagnostics,omitempty"`
 }
 
 type SkillSearchProvider interface {
@@ -128,7 +129,14 @@ func NormalizeSkillSearchPage(request SkillSearchRequest, page *SkillSearchPage)
 	if len(nextCursor) > 2048 {
 		return nil, errors.New("Skill search provider cursor is too long")
 	}
-	result := &SkillSearchPage{Items: make([]SkillSearchCandidate, 0, len(page.Items)), NextCursor: nextCursor}
+	if err := ValidateCapabilityCatalog(CapabilityCatalog{Diagnostics: page.Diagnostics}); err != nil {
+		return nil, fmt.Errorf("Skill search diagnostics are invalid: %w", err)
+	}
+	result := &SkillSearchPage{
+		Items:       make([]SkillSearchCandidate, 0, len(page.Items)),
+		NextCursor:  nextCursor,
+		Diagnostics: append([]CatalogDiagnostic(nil), page.Diagnostics...),
+	}
 	seen := make(map[string]struct{}, len(page.Items))
 	for index, candidate := range page.Items {
 		candidate.ID = strings.TrimSpace(candidate.ID)
