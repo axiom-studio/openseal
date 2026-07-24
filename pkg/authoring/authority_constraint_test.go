@@ -86,6 +86,18 @@ func TestCompilerRejectsAuthorityAboveHostMaximum(t *testing.T) {
 	}
 }
 
+func TestCurrentHostAuthorityRevalidationRejectsStaleApprovalThreshold(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelExternal)
+	candidate.Agents[0].Authority.RequireApprovalAt = capability.RiskLevelProduction
+	issues := ValidateCandidateAuthorityConstraint(&candidate, &AuthorityConstraint{
+		ID: "current-placement", Version: "4", MaximumRisk: capability.RiskLevelExternal,
+		RequireApprovalAt: capability.RiskLevelWrite,
+	})
+	if len(issues) != 1 || issues[0].Code != "authority_approval_threshold_exceeded" {
+		t.Fatalf("issues = %#v", issues)
+	}
+}
+
 func TestValidateCapabilityCatalogRejectsMalformedAuthorityConstraint(t *testing.T) {
 	tests := []AuthorityConstraint{
 		{Version: "1", RequireApprovalAt: capability.RiskLevelWrite},

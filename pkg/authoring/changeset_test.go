@@ -46,6 +46,16 @@ func (g recoverExistingChangeSetGenerator) Generate(_ context.Context, request G
 	return append([]byte(nil), g.initial...), nil
 }
 
+type staticChangeSetReadinessValidator struct {
+	issues []ValidationIssue
+	calls  int
+}
+
+func (v *staticChangeSetReadinessValidator) ValidateChangeSetReadiness(context.Context, *ChangeSet) ([]ValidationIssue, error) {
+	v.calls++
+	return append([]ValidationIssue(nil), v.issues...), nil
+}
+
 func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	generator := &sequenceChangeSetGenerator{payloads: [][]byte{payload}}
@@ -932,6 +942,35 @@ func TestChangeSetEvaluationCanMakeCandidateReadyOrRejectIt(t *testing.T) {
 				t.Fatalf("updated = %#v, err = %v", updated, err)
 			}
 		})
+	}
+}
+
+func TestHostReadinessValidatorKeepsReviewableCandidateBlocked(t *testing.T) {
+	store := NewMemoryChangeSetStore()
+	now := time.Now().UTC()
+	value := &ChangeSet{
+		ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"},
+		CandidateDigest: "candidate", Status: ChangeSetReview, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "create", "digest"); err != nil {
+		t.Fatal(err)
+	}
+	validator := &staticChangeSetReadinessValidator{issues: []ValidationIssue{{
+		Path: "placement.environment", Code: "execution_target_unavailable",
+		Message: "Choose where this workforce can run before applying it.",
+	}}}
+	service := &ChangeSetService{
+		store: store, readinessValidators: []ChangeSetReadinessValidator{validator},
+		now: func() time.Time { return now.Add(time.Minute) },
+	}
+	updated, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{
+		Scope: value.Scope, ChangeSetID: value.ID, ExpectedRevision: 1,
+		CandidateDigest: "candidate", Allowed: true,
+		Actor: ChangeSetActor{Type: "evaluator", ID: "one"}, IdempotencyKey: "eval",
+	})
+	if err != nil || updated.Status != ChangeSetBlocked || !strings.Contains(updated.Result.Validation[0].Message, "Choose where") || validator.calls != 1 {
+		t.Fatalf("updated=%#v calls=%d err=%v", updated, validator.calls, err)
 	}
 }
 

@@ -366,16 +366,30 @@ var (
 )
 
 type ChangeSetService struct {
-	compiler *Compiler
-	store    ChangeSetStore
-	now      func() time.Time
+	compiler            *Compiler
+	store               ChangeSetStore
+	readinessValidators []ChangeSetReadinessValidator
+	now                 func() time.Time
 }
 
-func NewChangeSetService(compiler *Compiler, store ChangeSetStore) (*ChangeSetService, error) {
+func NewChangeSetService(compiler *Compiler, store ChangeSetStore, validators ...ChangeSetReadinessValidator) (*ChangeSetService, error) {
 	if compiler == nil || store == nil {
 		return nil, errors.New("workforce compiler and change set store are required")
 	}
-	return &ChangeSetService{compiler: compiler, store: store, now: time.Now}, nil
+	readinessValidators := make([]ChangeSetReadinessValidator, 0, len(validators)+1)
+	if validator, ok := store.(ChangeSetReadinessValidator); ok {
+		readinessValidators = append(readinessValidators, validator)
+	}
+	for _, validator := range validators {
+		if validator != nil {
+			readinessValidators = append(readinessValidators, validator)
+		}
+	}
+	return &ChangeSetService{
+		compiler: compiler, store: store,
+		readinessValidators: readinessValidators,
+		now:                 time.Now,
+	}, nil
 }
 
 func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRequest) (*ChangeSet, bool, error) {
@@ -1212,6 +1226,13 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	if current.Status != ChangeSetReady {
 		return nil, false, fmt.Errorf("%w: cannot apply status %s", ErrChangeSetTransition, current.Status)
 	}
+	readinessIssues, err := s.validateReadiness(ctx, current, true)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(readinessIssues) > 0 {
+		return nil, false, &ChangeSetReadinessError{Issues: readinessIssues}
+	}
 	if err := validateApplyPlacement(current); err != nil {
 		return nil, false, err
 	}
@@ -1226,6 +1247,20 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetApplied, Reason: request.Reason, Actor: request.Actor, At: now})
 	applied, err := store.ApplyChangeSet(ctx, next, current.Revision)
 	return applied, false, err
+}
+
+// ChangeSetReadinessError reports current deterministic placement failures at
+// the final mutation boundary. It is safe to surface to operators and contains
+// no host credentials or hidden model state.
+type ChangeSetReadinessError struct {
+	Issues []ValidationIssue
+}
+
+func (e *ChangeSetReadinessError) Error() string {
+	if e == nil || len(e.Issues) == 0 {
+		return "workforce placement is not ready"
+	}
+	return "workforce placement is not ready: " + e.Issues[0].Message
 }
 
 func validateApplyPlacement(value *ChangeSet) error {
@@ -1766,13 +1801,16 @@ func (s *ChangeSetService) validateReadiness(ctx context.Context, value *ChangeS
 	if !enabled {
 		return nil, nil
 	}
-	validator, ok := s.store.(ChangeSetReadinessValidator)
-	if !ok {
+	if len(s.readinessValidators) == 0 {
 		return nil, nil
 	}
-	issues, err := validator.ValidateChangeSetReadiness(ctx, value)
-	if err != nil {
-		return nil, fmt.Errorf("validate workforce readiness: %w", err)
+	issues := make([]ValidationIssue, 0)
+	for _, validator := range s.readinessValidators {
+		result, err := validator.ValidateChangeSetReadiness(ctx, value)
+		if err != nil {
+			return nil, fmt.Errorf("validate workforce readiness: %w", err)
+		}
+		issues = append(issues, result...)
 	}
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Path != issues[j].Path {
@@ -1789,11 +1827,16 @@ func (s *ChangeSetService) validateReadiness(ctx context.Context, value *ChangeS
 func replaceReadinessValidation(existing, readiness []ValidationIssue) []ValidationIssue {
 	result := make([]ValidationIssue, 0, len(existing)+len(readiness))
 	for _, issue := range existing {
-		if !strings.HasPrefix(issue.Code, readinessValidationCodePrefix) {
+		if !isReadinessValidationCode(issue.Code) {
 			result = append(result, issue)
 		}
 	}
 	return append(result, readiness...)
+}
+
+func isReadinessValidationCode(code string) bool {
+	return strings.HasPrefix(code, readinessValidationCodePrefix) ||
+		strings.HasPrefix(code, "execution_target_")
 }
 
 func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveChangeSetApprovalRequest) (*ChangeSet, bool, error) {
