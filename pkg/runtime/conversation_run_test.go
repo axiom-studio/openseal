@@ -538,6 +538,38 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 	}
 }
 
+func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
+	for _, claim := range []string{
+		"The approval has been submitted.",
+		"The permission request was already submitted and is pending approval.",
+		"We are awaiting approval.",
+	} {
+		if !unverifiedApprovalClaim(claim) {
+			t.Fatalf("unverified approval claim was accepted: %q", claim)
+		}
+	}
+	for _, truthful := range []string{
+		"I need approval before I can do that.",
+		"Please ask an administrator to configure the governed capability.",
+		"No request has been created.",
+	} {
+		if unverifiedApprovalClaim(truthful) {
+			t.Fatalf("truthful capability guidance was rejected: %q", truthful)
+		}
+	}
+
+	conversation := &Conversation{ID: "channel-1", Title: "Operations"}
+	trigger := &ChannelMessage{ID: "message-1"}
+	goal, err := agentConversationGoal(conversation, trigger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goal, "Never state or imply that an approval") ||
+		!strings.Contains(goal, "proposes the corresponding governed action through proposedActions") {
+		t.Fatalf("Agent conversation truthfulness contract missing from goal: %s", goal)
+	}
+}
+
 func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarration(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
