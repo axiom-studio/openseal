@@ -28,6 +28,7 @@ type (
 	WorkforceSkillSearchRequest               = authoring.SkillSearchRequest
 	WorkforceSkillSearchProvenance            = authoring.SkillSearchProvenance
 	WorkforceSkillSearchCandidate             = authoring.SkillSearchCandidate
+	WorkforceSkillSearchIdentity              = authoring.SkillSearchIdentity
 	WorkforceSkillSearchPage                  = authoring.SkillSearchPage
 	WorkforceSkillSearchProvider              = authoring.SkillSearchProvider
 	WorkforceSkillSearchProviderFunc          = authoring.SkillSearchProviderFunc
