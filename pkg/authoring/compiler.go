@@ -481,9 +481,10 @@ func contextualizeStrictJSONError(payload []byte, decodeErr error) error {
 	return &strictJSONSchemaError{cause: decodeErr, diagnostic: diagnostic}
 }
 
-// locateUnknownJSONFields walks only statically typed JSON objects. Maps and
-// interface values are intentionally opaque because their keys are permitted
-// by the portable contract. It returns paths and field names, never values.
+// locateUnknownJSONFields walks only statically typed JSON values. Map keys are
+// permitted by the portable contract, but map values may still have a declared
+// schema (for example, named runbook steps). Interface values remain opaque. It
+// returns paths and field names, never values.
 func locateUnknownJSONFields(payload []byte, field string, rootType reflect.Type) []unknownJSONFieldLocation {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
@@ -534,8 +535,20 @@ func locateUnknownJSONFields(payload []byte, field string, rootType reflect.Type
 			for index, child := range items {
 				walk(child, expected.Elem(), fmt.Sprintf("%s[%d]", path, index), depth+1)
 			}
-		case reflect.Map, reflect.Interface:
-			// Arbitrary keys are part of this field's declared schema.
+		case reflect.Map:
+			object, ok := value.(map[string]interface{})
+			if !ok || expected.Key().Kind() != reflect.String {
+				return
+			}
+			for name, child := range object {
+				childPath := name
+				if path != "" {
+					childPath = path + "." + name
+				}
+				walk(child, expected.Elem(), childPath, depth+1)
+			}
+		case reflect.Interface:
+			// Arbitrary values are part of this field's declared schema.
 			return
 		}
 	}
