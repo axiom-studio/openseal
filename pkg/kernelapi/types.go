@@ -39,7 +39,7 @@ const (
 	TeamDefinitionsCapabilityID                = "team-definitions"
 	TeamDefinitionsCapabilityVersion           = "3"
 	WorkforceAuthoringCapabilityID             = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion        = "10"
+	WorkforceAuthoringCapabilityVersion        = "11"
 	WorkforceExecutionTargetsCapabilityID      = "workforce-execution-targets"
 	WorkforceExecutionTargetsCapabilityVersion = "1"
 	ClawHubLifecycleCapabilityID               = "clawhub-lifecycle"
@@ -97,6 +97,7 @@ const (
 	OperationRollback             = "rollback"
 	OperationListActivations      = "list-activations"
 	OperationCompile              = "compile"
+	OperationSearch               = "search"
 	OperationPropose              = "propose"
 	OperationEvaluate             = "evaluate"
 	OperationApprove              = "approve"
@@ -184,7 +185,8 @@ type AgentDefinitionCapabilityFeatures struct {
 // Resource-specific lifecycle authority is composed into a contextual
 // capability response and must never be inferred from these feature flags.
 type WorkforceAuthoringCapabilityFeatures struct {
-	ChangeSets bool
+	ChangeSets  bool
+	SkillSearch bool
 }
 
 // WorkforceExecutionTarget is the product-neutral placement surface used to
@@ -607,6 +609,9 @@ func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures)
 	}
 	if features.ChangeSets {
 		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
+	}
+	if features.SkillSearch {
+		capability.Operations = append(capability.Operations, OperationSearch)
 	}
 	return capability
 }
