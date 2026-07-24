@@ -299,6 +299,76 @@ func TestCompilerRepairsLiveUnknownIDWithExactSchemaPath(t *testing.T) {
 	}
 }
 
+func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "publisher", Version: "1", DisplayName: "Publisher",
+		Purpose: "Render reports", SystemPrompt: "Render approved reports.",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "openseal.document", VersionConstraint: "1.0.2", RequiredActions: []string{"render_pdf"},
+		}},
+		Authority: agent.AuthorityPolicy{
+			MaximumRisk: capability.RiskLevelWrite, AllowedSkillIDs: []string{"openseal.document"}, MaxConcurrentRuns: 1,
+		},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "render-report", Version: "1", Name: "Render report",
+			Entrypoints: map[string]string{"render_report": "render"},
+			Interfaces: map[string]runbook.Interface{"render_report": {
+				Description:  "Render an approved report as a PDF.",
+				InputSchema:  map[string]interface{}{"type": "object"},
+				OutputSchema: map[string]interface{}{"type": "object"},
+			}},
+			Steps: map[string]runbook.Step{
+				"render": {
+					Kind: runbook.StepAction,
+					Action: &runbook.ActionStep{
+						SkillID: "openseal.document", SkillVersion: "1.0.2", Action: "render_pdf",
+						ResultPath: "/results/report", Next: "done",
+					},
+				},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+			},
+		},
+	}}}
+	valid, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]interface{}
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
+	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	render := steps["render"].(map[string]interface{})
+	action := render["action"].(map[string]interface{})
+	render["resultPath"] = action["resultPath"]
+	delete(action, "resultPath")
+	invalid, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	generator := &repairingGenerator{generated: invalid, repaired: valid}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.", InvocationKey: "change-set:runbook-map:0",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {
+				ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"},
+				MaximumRisk: capability.RiskLevelWrite,
+			},
+		}},
+	})
+	if err != nil || result == nil || !result.Valid || generator.repairs != 1 {
+		t.Fatalf("path-guided runbook repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	diagnostic := generator.repairErrors[0].Error()
+	if !strings.Contains(diagnostic, "candidate.agents[0].runbook.steps.render.resultPath") ||
+		!strings.Contains(diagnostic, "allowed:") || !strings.Contains(diagnostic, "action") {
+		t.Fatalf("runbook repair diagnostic = %q", diagnostic)
+	}
+}
+
 func TestCompilerRepairsLiveRefinementMissingFieldsWithExactQuestionPath(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	invalid, err := json.Marshal(GenerationResponse{
