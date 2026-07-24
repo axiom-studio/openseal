@@ -302,7 +302,7 @@ func TestCompilerSynthesizesSourceScopeAfterSkillAndCredentialPrerequisites(t *t
 	}
 }
 
-func TestAnsweredSourceScopeCannotProduceCandidateWithoutMaterializedAction(t *testing.T) {
+func TestAnsweredSourceScopeWithoutMaterializedActionAsksForExecutionMode(t *testing.T) {
 	catalog := capabilityNeedCatalog(false, "openseal.source")
 	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
 		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
@@ -327,15 +327,11 @@ func TestAnsweredSourceScopeCannotProduceCandidateWithoutMaterializedAction(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.UnresolvedQuestions) != 0 {
-		t.Fatalf("answered scope was asked again: %#v", result.UnresolvedQuestions)
+	if len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
+		t.Fatalf("execution mode question = %#v", result.UnresolvedQuestions)
 	}
-	found := false
-	for _, issue := range result.Validation {
-		found = found || issue.Code == "source_scope_action_not_found" && issue.Path == "objectives.cadence.runTemplate.capability"
-	}
-	if !found || result.Valid {
-		t.Fatalf("missing source monitor did not fail closed: valid=%v validation=%#v", result.Valid, result.Validation)
+	if len(result.Validation) != 0 || result.Valid {
+		t.Fatalf("missing execution choice was not cleanly deferred: valid=%v validation=%#v", result.Valid, result.Validation)
 	}
 }
 
