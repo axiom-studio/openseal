@@ -26,6 +26,7 @@ type TurnRunnerBinding struct {
 	ModelProvider      string
 	Model              string
 	ModelActions       []capability.ModelAction
+	RunbookOperations  []HostedRunbookOperation
 	PreparedRuntimes   []PreparedSkillRuntime
 	InputContextRefs   []string
 	BudgetReservation  BudgetUsage
@@ -319,6 +320,16 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			current = materialized
 			return
 		}
+		if result != nil && result.Turn != nil && result.Turn.RequestedRunbook != nil {
+			materialized, materializeErr := p.materializeTurnRunbook(ctx, workerID, current, result.Turn, binding)
+			if materializeErr != nil {
+				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
+				return
+			}
+			current = materialized
+			p.Wake()
+			return
+		}
 		if result != nil && result.Turn != nil && result.Turn.RequestedFork != nil {
 			materialized, materializeErr := p.materializeTurnFork(ctx, workerID, current, result.Turn)
 			if materializeErr != nil {
@@ -357,6 +368,46 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
 	}
 	p.Wake()
+}
+
+func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
+	if p.forks == nil {
+		return nil, errors.New("durable runbook materialization is unavailable")
+	}
+	if run == nil || turn == nil || binding == nil || turn.RequestedRunbook == nil ||
+		len(turn.RequestedActions) != 0 || turn.RequestedFork != nil || turn.RequestedDelegation != nil {
+		return nil, errors.New("a bounded Turn must request exactly one runbook")
+	}
+	proposal := turn.RequestedRunbook
+	authorized := false
+	for _, operation := range binding.RunbookOperations {
+		if operation.Entrypoint == proposal.Entrypoint {
+			authorized = true
+			break
+		}
+	}
+	if !authorized {
+		return nil, fmt.Errorf("requested runbook entrypoint %q is not authorized", proposal.Entrypoint)
+	}
+	result, err := p.forks.Create(ctx, CreateRunForkRequest{
+		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
+		ForkID: "runbook-" + proposal.Entrypoint,
+		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{{
+			ID: "operation", Goal: proposal.Summary, AssignedAgentID: run.AssignedAgentID,
+			Entrypoint: proposal.Entrypoint, Context: cloneMap(proposal.Arguments), Checkpoint: map[string]interface{}{},
+			Budget: cloneBudgetPolicy(proposal.Budget),
+		}},
+		ContinuationCheckpoint: turn.ContinuationCheckpoint,
+		Actor:                  ActivityActor{Type: "worker", ID: workerID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.DependencyGroup == nil || result.DependencyGroup.Source == nil {
+		return nil, errors.New("runbook materialization returned no durable source Run")
+	}
+	return result.DependencyGroup.Source, nil
 }
 
 func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {

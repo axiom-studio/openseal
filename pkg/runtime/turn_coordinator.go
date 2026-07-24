@@ -40,6 +40,7 @@ type TurnOutcome struct {
 	ProposedActions        []TurnAction
 	ProposedFork           *TurnForkProposal
 	ProposedDelegation     *TurnDelegationProposal
+	ProposedRunbook        *TurnRunbookProposal
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
@@ -350,6 +351,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.RequestedActions = outcome.ProposedActions
 			finish.RequestedFork = outcome.ProposedFork
 			finish.RequestedDelegation = outcome.ProposedDelegation
+			finish.RequestedRunbook = outcome.ProposedRunbook
 			finish.OutputSummary = outcome.OutputSummary
 			finish.Usage = outcome.Usage
 			finish.ContinuationCheckpoint = outcome.ContinuationCheckpoint
@@ -510,6 +512,9 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if turn.RequestedDelegation != nil {
 		activityPayload["requestedDelegation"] = turn.RequestedDelegation
 	}
+	if turn.RequestedRunbook != nil {
+		activityPayload["requestedRunbook"] = turn.RequestedRunbook
+	}
 	eventType := ""
 	if turn.NextRunStatus == AgentRunStatusPaused && turnExhaustsBudget(run, turn) {
 		eventType = "budget.exhausted"
@@ -601,8 +606,11 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 	if outcome.ProposedDelegation != nil {
 		proposalCount++
 	}
+	if outcome.ProposedRunbook != nil {
+		proposalCount++
+	}
 	if proposalCount > 1 {
-		return errors.New("a bounded Turn can propose only one action, fork, or delegation")
+		return errors.New("a bounded Turn can propose only one action, fork, delegation, or runbook")
 	}
 	if outcome.ProposedDelegation != nil {
 		if err := outcome.ProposedDelegation.Validate(); err != nil {
@@ -618,6 +626,14 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 		}
 		if outcome.NextRunStatus != AgentRunStatusRunning {
 			return errors.New("a proposed fork must leave the source Run running until materialized")
+		}
+	}
+	if outcome.ProposedRunbook != nil {
+		if err := outcome.ProposedRunbook.Validate(); err != nil {
+			return err
+		}
+		if outcome.NextRunStatus != AgentRunStatusRunning {
+			return errors.New("a proposed runbook must leave the source Run running until materialized")
 		}
 	}
 	return nil

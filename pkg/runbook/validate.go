@@ -56,6 +56,22 @@ func (v *validator) validate() {
 		}
 		v.requireStep("entrypoints."+name, target)
 	}
+	for name, contract := range v.definition.Interfaces {
+		if _, ok := v.definition.Entrypoints[name]; !ok {
+			v.add("interfaces."+name, "interface.entrypoint_unknown", "callable interface must name an exact entrypoint")
+		}
+		if strings.TrimSpace(contract.Description) == "" {
+			v.add("interfaces."+name+".description", "interface.description_required", "callable interface description is required")
+		}
+		if schemaType, _ := contract.InputSchema["type"].(string); schemaType != "object" {
+			v.add("interfaces."+name+".inputSchema", "interface.input_object_required", "callable input schema must have type object")
+		}
+		if len(contract.OutputSchema) > 0 {
+			if schemaType, _ := contract.OutputSchema["type"].(string); schemaType != "object" {
+				v.add("interfaces."+name+".outputSchema", "interface.output_object_required", "callable output schema must have type object")
+			}
+		}
+	}
 	for id, step := range v.definition.Steps {
 		path := "steps." + id
 		if strings.TrimSpace(id) == "" {

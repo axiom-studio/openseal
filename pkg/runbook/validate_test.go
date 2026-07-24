@@ -33,6 +33,30 @@ func TestValidateRepresentativeGovernedRunbook(t *testing.T) {
 	}
 }
 
+func TestValidateCallableEntrypointInterfaces(t *testing.T) {
+	definition := &Definition{
+		APIVersion: APIVersion, ID: "release", Version: "1", Name: "Release",
+		Entrypoints: map[string]string{"collect": "done"},
+		Interfaces: map[string]Interface{"collect": {
+			Description:  "Collect release evidence.",
+			InputSchema:  map[string]interface{}{"type": "object"},
+			OutputSchema: map[string]interface{}{"type": "object"},
+		}},
+		Steps: map[string]Step{"done": {Kind: StepEnd, End: &EndStep{}}},
+	}
+	if diagnostics := Validate(definition); len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+	definition.Interfaces["unknown"] = Interface{
+		Description: "Unknown.", InputSchema: map[string]interface{}{"type": "array"},
+	}
+	diagnostics := Validate(definition)
+	if len(diagnostics) != 2 || diagnostics[0].Code != "interface.entrypoint_unknown" ||
+		diagnostics[1].Code != "interface.input_object_required" {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+}
+
 func TestValidateReturnsPathSpecificDiagnostics(t *testing.T) {
 	definition := &Definition{APIVersion: "wrong", ID: "bad", Version: "1", Name: "Bad", Entrypoints: map[string]string{"manual": "a"}, Steps: map[string]Step{
 		"a":      {Kind: StepAction, Action: &ActionStep{SkillID: "", SkillVersion: "1", Action: "run", ResultPath: "not-pointer", Next: "b"}},

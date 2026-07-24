@@ -116,6 +116,40 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 	}
 }
 
+func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "7"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "parent", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{
+		Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := NewRunForkCoordinator(store).Create(t.Context(), CreateRunForkRequest{
+		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision,
+		WorkerID: "worker", ForkID: "runbook-collect",
+		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{{
+			ID: "operation", Goal: "Collect evidence", AssignedAgentID: "agent", Entrypoint: "collect",
+			Context: map[string]interface{}{"release": "2.0.0"}, Checkpoint: map[string]interface{}{},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created.Children) != 1 || created.Children[0].Entrypoint != "collect" ||
+		created.Children[0].Context["release"] != "2.0.0" {
+		t.Fatalf("created=%#v", created)
+	}
+}
+
 func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}

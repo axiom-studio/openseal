@@ -40,6 +40,7 @@ type (
 	StepExecutor             = executor.StepExecutor
 	ExecutionGraph           = executor.ExecutionGraph
 	RunbookDefinition        = runbook.Definition
+	RunbookInterface         = runbook.Interface
 	RunbookStep              = runbook.Step
 	RunbookStepKind          = runbook.StepKind
 	RunbookActionStep        = runbook.ActionStep
@@ -415,6 +416,7 @@ type (
 	AgentTurnActionRecord              = kernelapi.AgentTurnActionRecord
 	TurnDecision                       = runtime.TurnDecision
 	TurnAction                         = runtime.TurnAction
+	TurnRunbookProposal                = runtime.TurnRunbookProposal
 	TurnUsage                          = runtime.TurnUsage
 	BeginAgentTurnRequest              = runtime.BeginAgentTurnRequest
 	FinishAgentTurnRequest             = runtime.FinishAgentTurnRequest
@@ -426,6 +428,7 @@ type (
 	HostedSkillPrompt                  = runtime.HostedSkillPrompt
 	HostedSkillSelection               = runtime.HostedSkillSelection
 	HostedSkillDisposition             = runtime.HostedSkillDisposition
+	HostedRunbookOperation             = runtime.HostedRunbookOperation
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
 	HostedTurnModelInput               = runtime.HostedTurnModelInput
