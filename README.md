@@ -88,6 +88,8 @@ fixed surface.
   verify a local daemon
 - [Core concepts](docs/concepts.md) — Agents, Teams, objectives, Runs, Skills,
   approvals, conversations, evidence, and recovery
+- [Callable runbooks](docs/callable-runbooks.md) — typed deterministic
+  operations that cognitive Agents invoke through durable Runs
 - [Architecture](docs/architecture/autonomous-agent-runtime.md) — implemented
   layers, execution lifecycle, and extension boundaries
 - [Terminal UI](docs/tui.md) — workspace configuration and keyboard model

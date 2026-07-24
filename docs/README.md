@@ -6,10 +6,12 @@ Use these guides in order for a first deployment:
    standalone daemon.
 2. [Core concepts](concepts.md) — understand Agents, Teams, objectives, Runs,
    Skills, approvals, conversations, and evidence.
-3. [Terminal UI](tui.md) — create and operate resources interactively.
-4. [CLI reference](cli.md) — inspect every implemented command and option.
-5. [REST API](api.md) — build capability-aware clients and integrations.
-6. [Operations](operations.md) — persistence, recovery, secrets, PostgreSQL, and
+3. [Callable runbooks](callable-runbooks.md) — compose exact deterministic
+   operations into otherwise cognitive Agents.
+4. [Terminal UI](tui.md) — create and operate resources interactively.
+5. [CLI reference](cli.md) — inspect every implemented command and option.
+6. [REST API](api.md) — build capability-aware clients and integrations.
+7. [Operations](operations.md) — persistence, recovery, secrets, PostgreSQL, and
    test gates.
 
 Architecture and compatibility references:
