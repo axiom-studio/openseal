@@ -225,7 +225,7 @@ func TestAnsweredSourceCapabilityNeedRequiresAnExactObjectiveAction(t *testing.T
 	candidate := capabilityNeedCandidate()
 	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "openseal.source", VersionConstraint: "1.0.0"}}
 	request := GenerateRequest{
-		Mode: ModeCreate, Prompt: "Monitor Reddit", Catalog: catalog,
+		Mode: ModeCreate, Prompt: "Monitor Reddit every 5 minutes", Catalog: catalog,
 		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
 			QuestionID: CapabilityNeedQuestionID("reddit-access"), Value: RefinementProviderAnswerValue{SkillIDs: []string{"openseal.source"}}, Source: RefinementAnswerSourceUser,
 		}}},
@@ -302,7 +302,7 @@ func TestCompilerSynthesizesSourceScopeAfterSkillAndCredentialPrerequisites(t *t
 	}
 }
 
-func TestAnsweredSourceScopeWithoutMaterializedActionAsksForExecutionMode(t *testing.T) {
+func TestAnsweredSourceScopeWithoutScheduleDefaultsToOnDemand(t *testing.T) {
 	catalog := capabilityNeedCatalog(false, "openseal.source")
 	catalog.CapabilityNeeds[0].SourceScope = &CapabilitySourceScopeRequirement{
 		Prompt: "Which subreddits should be monitored?", WhyNeeded: "Monitoring targets must be explicit.",
@@ -327,11 +327,11 @@ func TestAnsweredSourceScopeWithoutMaterializedActionAsksForExecutionMode(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
-		t.Fatalf("execution mode question = %#v", result.UnresolvedQuestions)
+	if len(result.UnresolvedQuestions) != 0 {
+		t.Fatalf("unexpected on-demand refinement = %#v", result.UnresolvedQuestions)
 	}
-	if len(result.Validation) != 0 || result.Valid {
-		t.Fatalf("missing execution choice was not cleanly deferred: valid=%v validation=%#v", result.Valid, result.Validation)
+	if len(result.Validation) != 0 || !result.Valid {
+		t.Fatalf("on-demand source agent remained blocked: valid=%v validation=%#v", result.Valid, result.Validation)
 	}
 }
 
