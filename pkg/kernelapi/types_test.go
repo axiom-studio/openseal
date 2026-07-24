@@ -247,6 +247,17 @@ func TestWorkforceAuthoringAdvertisesCompilationWithoutActivation(t *testing.T) 
 	}
 }
 
+func TestWorkforceExecutionTargetsCapabilityReflectsManagement(t *testing.T) {
+	readOnly := WorkforceExecutionTargetsCapability(false)
+	if readOnly.Supports(OperationCreate) || !readOnly.Supports(OperationList) {
+		t.Fatalf("read-only execution targets = %#v", readOnly)
+	}
+	managed := WorkforceExecutionTargetsCapability(true)
+	if !managed.Supports(OperationCreate) || !managed.Supports(OperationUpdate) {
+		t.Fatalf("managed execution targets = %#v", managed)
+	}
+}
+
 func TestContextualApprovalEligibilityIsTypedAndNotAnOperationInference(t *testing.T) {
 	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
 	for _, operation := range []string{OperationCompile, OperationPropose, OperationGet} {
