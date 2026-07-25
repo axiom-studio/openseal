@@ -61,6 +61,19 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 	}); !errors.Is(err, ErrExternalConversationConflict) {
 		t.Fatalf("stale update error = %v", err)
 	}
+	retired := ExternalConversationGatewayRetired
+	retiredGateway, err := service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: updated.Revision, Status: &retired,
+	})
+	if err != nil || retiredGateway.Status != ExternalConversationGatewayRetired {
+		t.Fatalf("retired gateway = %#v, err = %v", retiredGateway, err)
+	}
+	paused := ExternalConversationGatewayPaused
+	if _, err := service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: retiredGateway.Revision, Status: &paused,
+	}); !errors.Is(err, ErrExternalConversationConflict) {
+		t.Fatalf("retired gateway mutation error = %v", err)
+	}
 }
 
 func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T) {
