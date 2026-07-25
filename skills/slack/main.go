@@ -9,7 +9,7 @@ import (
 
 const (
 	slackConversationSkillID      = "openseal.slack-conversations"
-	slackConversationSkillVersion = "1.0.0"
+	slackConversationSkillVersion = "1.0.1"
 )
 
 func main() {

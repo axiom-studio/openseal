@@ -2,7 +2,7 @@ apiVersion: openseal.dev/v1alpha1
 kind: SkillDefinition
 definition:
   id: openseal.slack-conversations
-  version: 1.0.0
+  version: 1.0.1
   name: Slack Conversations
   description: Receive and reply to governed Slack conversations.
   category: communication
@@ -13,13 +13,13 @@ definition:
     identity: https://github.com/axiom-studio/openseal::openseal.slack-conversations
     registry: https://github.com/axiom-studio/openseal
     reference: openseal.slack-conversations
-    resolvedVersion: 1.0.0
+    resolvedVersion: 1.0.1
     license: MIT
   installers:
     - id: oci
       kind: oci
       label: Slack Skill service image
-      package: axiomstudio/skill-slack-conversations:1.0.0
+      package: axiomstudio/skill-slack-conversations:1.0.1
   transport:
     kind: tool
     endpoint: openseal-slack-conversations
