@@ -1904,6 +1904,9 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 			WhyNeeded: "The workforce needs an explicit source scope.", Blocking: []authoring.RefinementBlockingScope{authoring.RefinementBlocksCandidate},
 			Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerText}, Provenance: []authoring.RefinementQuestionProvenance{{Kind: authoring.RefinementProvenancePrompt}}, Priority: 1,
 		}},
+		MissingRequirements: []authoring.MissingRequirement{{
+			Kind: "skill_installation", ID: "reddit-search", RequiredBy: "agent:researcher",
+		}},
 		Diff: []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "candidate"}},
 	}
 	fake := &fakeKernelClient{
@@ -1921,10 +1924,13 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	if len(fake.authoringRequests) != 1 || fake.authoringRequests[0].Catalog.Skills != nil {
 		t.Fatalf("authoring requests = %#v", fake.authoringRequests)
 	}
-	for _, expected := range []string{"Research Team", "Activation intent · active", "1 Agents", "Which sources are authorized?", "Nothing is active"} {
+	for _, expected := range []string{"Research Team", "Activation intent · active", "1 Agents", "Which sources are authorized?", "Setup needed · Install Reddit Search for Researcher", "Nothing is active"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("authoring preview missing %q:\n%s", expected, view)
 		}
+	}
+	if strings.Contains(view, "skill_installation") || strings.Contains(view, "agent:researcher") {
+		t.Fatalf("authoring preview exposed compiler internals:\n%s", view)
 	}
 	if strings.Contains(view, "field changes") {
 		t.Fatalf("create preview was presented as an amendment:\n%s", view)
