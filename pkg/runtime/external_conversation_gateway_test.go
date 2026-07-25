@@ -62,3 +62,24 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatalf("stale update error = %v", err)
 	}
 }
+
+func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	service := NewExternalConversationGatewayService(store, catalog)
+	gateway := ExternalConversationIngressGateway{
+		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
+	}
+	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "exact-slack", Name: "Exact Slack", Gateway: gateway,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gateway.Adapter.BindingRevision++
+	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "stale-slack", Name: "Stale Slack", Gateway: gateway,
+	}); !errors.Is(err, ErrInvalidExternalConversation) {
+		t.Fatalf("stale exact adapter error = %v", err)
+	}
+}
