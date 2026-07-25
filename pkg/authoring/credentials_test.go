@@ -60,18 +60,18 @@ func TestValidateCredentialPlacementAcceptsAuthorizedDeploymentBinding(t *testin
 	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "operator"}}}
 	required := map[string][]string{"operator": {agent.ModelProviderCredentialBinding}}
 	choices := []capability.CredentialBindingChoice{{
-		Reference:   capability.CredentialReference{Kind: "host-vault", ID: "credential-29"},
+		Reference:   capability.CredentialReference{Kind: "managed-secret", ID: "credential-29"},
 		DisplayName: "Primary model",
 		BindingKeys: []string{agent.ModelProviderCredentialBinding},
 	}}
 	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
-		"operator": {agent.ModelProviderCredentialBinding: {Kind: "host-vault", ID: "credential-29"}},
+		"operator": {agent.ModelProviderCredentialBinding: {Kind: "managed-secret", ID: "credential-29"}},
 	}}
 	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err != nil {
 		t.Fatal(err)
 	}
 	placement.CredentialReferences["operator"][agent.ModelProviderCredentialBinding] =
-		capability.CredentialReference{Kind: "host-vault", ID: "credential-other"}
+		capability.CredentialReference{Kind: "managed-secret", ID: "credential-other"}
 	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err == nil ||
 		!strings.Contains(err.Error(), "unavailable or no longer authorized") {
 		t.Fatalf("unadvertised deployment binding error = %v", err)
@@ -83,19 +83,19 @@ func TestValidateCredentialPlacementKeepsOptionalDeploymentBindingSeparateFromSk
 	required := map[string][]string{"slack-agent": {"slack_bot_token"}}
 	choices := []capability.CredentialBindingChoice{
 		{
-			Reference:   capability.CredentialReference{Kind: "vault", ID: "36"},
+			Reference:   capability.CredentialReference{Kind: "managed-secret", ID: "36"},
 			DisplayName: "Primary model",
 			BindingKeys: []string{agent.ModelProviderCredentialBinding},
 		},
 		{
-			Reference:   capability.CredentialReference{Kind: "slack_bot_token", ID: "vault://007.token"},
+			Reference:   capability.CredentialReference{Kind: "slack_bot_token", ID: "credential://007.token"},
 			DisplayName: "Slack workspace",
 		},
 	}
 	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		"slack-agent": {
-			agent.ModelProviderCredentialBinding: {Kind: "vault", ID: "36"},
-			"slack_bot_token":                    {Kind: "slack_bot_token", ID: "vault://007.token"},
+			agent.ModelProviderCredentialBinding: {Kind: "managed-secret", ID: "36"},
+			"slack_bot_token":                    {Kind: "slack_bot_token", ID: "credential://007.token"},
 		},
 	}}
 	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err != nil {
@@ -172,13 +172,13 @@ func TestValidateCredentialPlacementRequiresExactSkillBindingChoice(t *testing.T
 	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "security-reviewer"}}}
 	required := map[string][]string{"security-reviewer": {"TOOLWEB_API_KEY"}}
 	unrelatedChoice := []capability.CredentialBindingChoice{{
-		Reference:   capability.CredentialReference{Kind: "environment-secret", ID: "vault://other"},
+		Reference:   capability.CredentialReference{Kind: "environment-secret", ID: "credential://other"},
 		DisplayName: "Other integration",
 		BindingKeys: []string{"OTHER_TOKEN"},
 	}}
 	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		"security-reviewer": {
-			"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "vault://other"},
+			"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "credential://other"},
 		},
 	}}
 	if err := ValidateCredentialPlacement(candidate, required, placement, unrelatedChoice); err == nil ||
@@ -187,12 +187,12 @@ func TestValidateCredentialPlacementRequiresExactSkillBindingChoice(t *testing.T
 	}
 
 	exactChoice := []capability.CredentialBindingChoice{{
-		Reference:   capability.CredentialReference{Kind: "environment-secret", ID: "vault://toolweb"},
+		Reference:   capability.CredentialReference{Kind: "environment-secret", ID: "credential://toolweb"},
 		DisplayName: "ToolWeb",
 		BindingKeys: []string{"TOOLWEB_API_KEY"},
 	}}
 	placement.CredentialReferences["security-reviewer"]["TOOLWEB_API_KEY"] =
-		capability.CredentialReference{Kind: "environment-secret", ID: "vault://toolweb"}
+		capability.CredentialReference{Kind: "environment-secret", ID: "credential://toolweb"}
 	if err := ValidateCredentialPlacement(candidate, required, placement, exactChoice); err != nil {
 		t.Fatalf("exact Skill binding choice = %v", err)
 	}
@@ -201,7 +201,7 @@ func TestValidateCredentialPlacementRequiresExactSkillBindingChoice(t *testing.T
 	if err := ValidateCredentialPlacement(otherCandidate, map[string][]string{"observer": nil}, ChangeSetPlacement{
 		CredentialReferences: map[string]map[string]capability.CredentialReference{
 			"observer": {
-				"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "vault://toolweb"},
+				"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "credential://toolweb"},
 			},
 		},
 	}, exactChoice); err == nil || !strings.Contains(err.Error(), "does not require") {
@@ -247,7 +247,7 @@ func TestActiveChangeSetCannotApplyWithoutRuntimeCredentialPlacement(t *testing.
 	}
 	changeSet.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
 		"operator": {
-			agent.ModelProviderCredentialBinding: {Kind: "host-vault", ID: "credential-29"},
+			agent.ModelProviderCredentialBinding: {Kind: "managed-secret", ID: "credential-29"},
 		},
 	}
 	if err := validateApplyPlacement(changeSet); err != nil {
