@@ -293,6 +293,105 @@ func TestSkillReferenceUpgradeIncludesEventDrivenObjectivesAndRejectsStalePlans(
 	}
 }
 
+func TestTeamSkillReferenceUpgradeRequiresTargetRoleAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		includeTarget bool
+		wantError     bool
+	}{
+		{name: "target grant ready", includeTarget: true},
+		{name: "target grant missing", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			engine, err := openseal.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			from, to := clonedSourceDefinition(t, "5.0.0"), clonedSourceDefinition(t, "5.1.0")
+			if err = engine.RegisterSkill(ctx, from); err != nil {
+				t.Fatal(err)
+			}
+			if err = engine.RegisterSkill(ctx, to); err != nil {
+				t.Fatal(err)
+			}
+			scope := openseal.SkillScope{Kind: "tenant", ID: "team-upgrade"}
+			agentDefinition, err := engine.RegisterAgentDefinition(ctx, &openseal.AgentDefinition{
+				ID: "researcher", Version: "1.0.0", DisplayName: "Researcher", Purpose: "Observe sources",
+				SystemPrompt: "Observe carefully.",
+				Authority:    openseal.AgentAuthorityPolicy{MaximumRisk: openseal.SkillRiskRead, MaxConcurrentRuns: 1},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = engine.CreateAgentDeployment(ctx, &openseal.AgentDeployment{
+				ID: "researcher-live", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
+				RolloutStatus: openseal.AgentRolloutActive, Environment: "test",
+				Capacity: openseal.AgentDeploymentCapacity{MaxConcurrentRuns: 1},
+			}, "service", "test", "activate"); err != nil {
+				t.Fatal(err)
+			}
+			grants := []openseal.TeamRoleSkillGrant{{
+				SkillID: source.SkillID, SkillVersion: from.Version, AllowedActions: []string{source.ObserveFeed},
+				MaximumRisk: openseal.SkillRiskRead,
+			}}
+			if test.includeTarget {
+				grants = append(grants, openseal.TeamRoleSkillGrant{
+					SkillID: source.SkillID, SkillVersion: to.Version, AllowedActions: []string{source.ObserveFeed},
+					MaximumRisk: openseal.SkillRiskRead,
+				})
+			}
+			teamDefinition, err := engine.RegisterTeamDefinition(ctx, &openseal.TeamDefinition{
+				ID: "research-team", Version: "1.0.0", DisplayName: "Research Team", Purpose: "Coordinate research",
+				Roles: []openseal.TeamRoleSlot{{
+					ID: "researcher", DisplayName: "Researcher", Purpose: "Observe sources",
+					MinimumMembers: 1, MaximumMembers: 1, RequiredDefinitionIDs: []string{agentDefinition.ID},
+					SkillGrants: grants, ChannelParticipation: openseal.TeamRoleChannelActive,
+				}},
+				Coordination: openseal.TeamCoordinationPolicy{Mode: openseal.TeamCoordinationPeer},
+				Approvals:    openseal.TeamApprovalPolicy{MaximumRisk: openseal.SkillRiskRead},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = engine.CreateTeamDeployment(ctx, &openseal.TeamDeployment{
+				ID: "research-team-live", Scope: scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
+				Roster: []openseal.TeamRosterAssignment{{
+					ID: "researcher", RoleID: "researcher", AgentDeploymentID: "researcher-live", DisplayName: "Researcher",
+				}},
+				Restrictions: openseal.TeamDeploymentRestrictions{MaximumRisk: openseal.SkillRiskRead, MaximumConcurrency: 1},
+				Status:       openseal.TeamDeploymentActive,
+			}, "service", "test", "activate"); err != nil {
+				t.Fatal(err)
+			}
+			binding, err := engine.UpsertTeamSkillBinding(ctx, "research-team-live", openseal.UpsertSkillBindingRequest{
+				Binding: &openseal.SkillBinding{
+					ID: "source", Scope: scope, DeploymentID: "research-team-live", SkillID: source.SkillID,
+					SkillVersion: from.Version, AllowedActions: []string{source.ObserveFeed}, MaximumRisk: openseal.SkillRiskRead,
+				},
+				Actor: openseal.SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Enable source",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := engine.PlanSkillReferenceUpgrade(ctx, openseal.PlanSkillReferenceUpgradeRequest{
+				Scope: openseal.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research-team-live",
+				BindingID: binding.ID, ToVersion: to.Version,
+			})
+			if test.wantError {
+				if !errors.Is(err, openseal.ErrSkillReferenceUpgradeInvalid) {
+					t.Fatalf("expected missing Team authority error, plan=%#v err=%v", plan, err)
+				}
+				return
+			}
+			if err != nil || plan.TeamAuthority == nil || plan.TeamAuthority.ExpectedRevision != 1 ||
+				len(plan.TeamAuthority.AuthorizedRoleIDs) != 1 || plan.TeamAuthority.AuthorizedRoleIDs[0] != "researcher" {
+				t.Fatalf("Team authority impact=%#v err=%v", plan, err)
+			}
+		})
+	}
+}
+
 func clonedSourceDefinition(t *testing.T, version string) *openseal.SkillDefinition {
 	t.Helper()
 	encoded, err := json.Marshal(source.SkillDefinition())

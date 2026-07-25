@@ -14,6 +14,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 const SkillReferenceUpgradeAPIVersion = "openseal.io/skill-reference-upgrade/v1"
@@ -49,6 +50,14 @@ type SkillReferenceInitiativeImpact struct {
 	MonitorIDs       []string `json:"monitorIds"`
 }
 
+type SkillReferenceTeamAuthorityImpact struct {
+	DeploymentID      string   `json:"deploymentId"`
+	ExpectedRevision  int64    `json:"expectedRevision"`
+	DefinitionID      string   `json:"definitionId"`
+	DefinitionVersion string   `json:"definitionVersion"`
+	AuthorizedRoleIDs []string `json:"authorizedRoleIds"`
+}
+
 type SkillReferenceUpgradeFinding struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -58,19 +67,20 @@ type SkillReferenceUpgradeFinding struct {
 // durable reference that must move together. Historical Runs and ActionCalls
 // are deliberately absent and remain immutable.
 type SkillReferenceUpgradePlan struct {
-	APIVersion              string                           `json:"apiVersion"`
-	Scope                   Scope                            `json:"scope"`
-	DeploymentID            string                           `json:"deploymentId"`
-	BindingID               string                           `json:"bindingId"`
-	ExpectedBindingRevision int64                            `json:"expectedBindingRevision"`
-	From                    SkillReferenceIdentity           `json:"from"`
-	To                      SkillReferenceIdentity           `json:"to"`
-	Objectives              []SkillReferenceObjectiveImpact  `json:"objectives,omitempty"`
-	Initiatives             []SkillReferenceInitiativeImpact `json:"initiatives,omitempty"`
-	Findings                []SkillReferenceUpgradeFinding   `json:"findings,omitempty"`
-	ApprovalRequired        bool                             `json:"approvalRequired"`
-	Digest                  string                           `json:"digest"`
-	GeneratedAt             time.Time                        `json:"generatedAt"`
+	APIVersion              string                             `json:"apiVersion"`
+	Scope                   Scope                              `json:"scope"`
+	DeploymentID            string                             `json:"deploymentId"`
+	BindingID               string                             `json:"bindingId"`
+	ExpectedBindingRevision int64                              `json:"expectedBindingRevision"`
+	From                    SkillReferenceIdentity             `json:"from"`
+	To                      SkillReferenceIdentity             `json:"to"`
+	Objectives              []SkillReferenceObjectiveImpact    `json:"objectives,omitempty"`
+	Initiatives             []SkillReferenceInitiativeImpact   `json:"initiatives,omitempty"`
+	TeamAuthority           *SkillReferenceTeamAuthorityImpact `json:"teamAuthority,omitempty"`
+	Findings                []SkillReferenceUpgradeFinding     `json:"findings,omitempty"`
+	ApprovalRequired        bool                               `json:"approvalRequired"`
+	Digest                  string                             `json:"digest"`
+	GeneratedAt             time.Time                          `json:"generatedAt"`
 }
 
 type PlanSkillReferenceUpgradeRequest struct {
@@ -141,6 +151,11 @@ type SkillReferenceUpgradeStore interface {
 	ApplySkillReferenceUpgrade(context.Context, *SkillReferenceUpgradeMutation) error
 }
 
+type SkillReferenceUpgradeTeamAuthority interface {
+	GetDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+	GetDefinition(context.Context, string, string) (*kernelteam.Definition, error)
+}
+
 func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutation) error {
 	if mutation == nil || mutation.Plan == nil || mutation.Binding == nil || mutation.Receipt == nil ||
 		mutation.Plan.Digest == "" || mutation.Receipt.PlanDigest != mutation.Plan.Digest ||
@@ -189,11 +204,16 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 type SkillReferenceUpgradeService struct {
 	store   SkillReferenceUpgradeStore
 	catalog *skill.Catalog
+	teams   SkillReferenceUpgradeTeamAuthority
 	now     func() time.Time
 }
 
-func NewSkillReferenceUpgradeService(store SkillReferenceUpgradeStore, catalog *skill.Catalog) *SkillReferenceUpgradeService {
-	return &SkillReferenceUpgradeService{store: store, catalog: catalog, now: time.Now}
+func NewSkillReferenceUpgradeService(store SkillReferenceUpgradeStore, catalog *skill.Catalog, teams ...SkillReferenceUpgradeTeamAuthority) *SkillReferenceUpgradeService {
+	service := &SkillReferenceUpgradeService{store: store, catalog: catalog, now: time.Now}
+	if len(teams) > 0 {
+		service.teams = teams[0]
+	}
+	return service
 }
 
 func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillReferenceUpgradeRequest) (*SkillReferenceUpgradePlan, error) {
@@ -323,12 +343,16 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	sort.Slice(initiativeImpacts, func(i, j int) bool { return initiativeImpacts[i].ID < initiativeImpacts[j].ID })
 
 	findings := compareUpgradeContracts(previous, target, current.AllowedActions, referencedActions)
+	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, target)
+	if err != nil {
+		return nil, err
+	}
 	plan := &SkillReferenceUpgradePlan{
 		APIVersion: SkillReferenceUpgradeAPIVersion, Scope: req.Scope, DeploymentID: req.DeploymentID,
 		BindingID: current.ID, ExpectedBindingRevision: current.Revision,
 		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
-		Objectives: objectiveImpacts, Initiatives: initiativeImpacts, Findings: findings,
+		Objectives: objectiveImpacts, Initiatives: initiativeImpacts, TeamAuthority: teamAuthority, Findings: findings,
 		ApprovalRequired: len(findings) > 0, GeneratedAt: s.now().UTC(),
 	}
 	plan.Digest, err = skillReferenceUpgradeDigest(plan)
@@ -550,6 +574,81 @@ func skillReferenceUpgradeActivityPayload(plan *SkillReferenceUpgradePlan, reaso
 		"to":           map[string]interface{}{"id": plan.To.ID, "version": plan.To.Version, "sourceIdentity": plan.To.SourceIdentity},
 		"reason":       reason,
 	}
+}
+
+func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
+	ctx context.Context,
+	scope Scope,
+	deploymentID string,
+	current *skill.Binding,
+	target *skill.Definition,
+) (*SkillReferenceTeamAuthorityImpact, error) {
+	if s == nil || s.teams == nil {
+		return nil, nil
+	}
+	teamScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	deployment, err := s.teams.GetDeployment(ctx, teamScope, deploymentID)
+	if errors.Is(err, kernelteam.ErrDeploymentNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if deployment == nil || deployment.Scope != teamScope || deployment.Status == kernelteam.DeploymentArchived {
+		return nil, fmt.Errorf("%w: Team deployment is unavailable for a Skill upgrade", ErrSkillReferenceUpgradeInvalid)
+	}
+	definition, err := s.teams.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil || definition == nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: active Team definition is unavailable", ErrSkillReferenceUpgradeInvalid)
+	}
+	fromIdentity := capability.NewSkillIdentity(current.SkillID, current.SkillVersion, current.SourceIdentity)
+	toIdentity := capability.NewSkillIdentity(target.ID, target.Version, skill.DefinitionSourceIdentity(target))
+	authorizedRoles := make([]string, 0)
+	for _, role := range definition.Roles {
+		var previous, next *kernelteam.RoleSkillGrant
+		for index := range role.SkillGrants {
+			grant := &role.SkillGrants[index]
+			switch {
+			case grant.ExactIdentity().Equal(fromIdentity):
+				previous = grant
+			case grant.ExactIdentity().Equal(toIdentity):
+				next = grant
+			}
+		}
+		if next != nil {
+			authorizedRoles = append(authorizedRoles, role.ID)
+		}
+		if previous == nil {
+			continue
+		}
+		if next == nil {
+			return nil, fmt.Errorf("%w: Team role %s must grant target Skill %s@%s before upgrading its binding",
+				ErrSkillReferenceUpgradeInvalid, role.ID, target.ID, target.Version)
+		}
+		if previous.EnablePrompt && !next.EnablePrompt {
+			return nil, fmt.Errorf("%w: Team role %s target grant removes prompt authority", ErrSkillReferenceUpgradeInvalid, role.ID)
+		}
+		for _, actionName := range previous.AllowedActions {
+			action, ok := target.Actions[actionName]
+			if !ok || !teamSkillGrantAllowsAction(*next, actionName, action.Risk) {
+				return nil, fmt.Errorf("%w: Team role %s target grant does not preserve action %s",
+					ErrSkillReferenceUpgradeInvalid, role.ID, actionName)
+			}
+		}
+	}
+	if len(authorizedRoles) == 0 {
+		return nil, fmt.Errorf("%w: active Team definition must grant target Skill %s@%s before upgrading its binding",
+			ErrSkillReferenceUpgradeInvalid, target.ID, target.Version)
+	}
+	sort.Strings(authorizedRoles)
+	return &SkillReferenceTeamAuthorityImpact{
+		DeploymentID: deployment.ID, ExpectedRevision: deployment.Revision,
+		DefinitionID: deployment.DefinitionID, DefinitionVersion: deployment.ActiveVersion,
+		AuthorizedRoleIDs: authorizedRoles,
+	}, nil
 }
 
 func compareUpgradeContracts(previous, target *skill.Definition, bindingActions []string, referenced map[string]bool) []SkillReferenceUpgradeFinding {
