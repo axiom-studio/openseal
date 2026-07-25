@@ -793,6 +793,51 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 	}
 }
 
+func TestPlacementAwareMissingRequirementsResolvesPromptDeliveredByPlannedSkillInstallation(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "tenant/one/auditor",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "community.audit", VersionConstraint: "1.0.0", PromptRequired: true,
+		}},
+	}}}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"community.audit": {
+			ID: "community.audit", Version: "1.0.0",
+			SourceIdentity: "registry.example::community/audit",
+			Readiness:      SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "installation", Compatible: false,
+				Evidence: "Verified immutable build is available.", Reference: "listing:84",
+			}},
+		},
+	}}
+	placement := ChangeSetPlacement{
+		SkillSourceIdentities: map[string]map[string]string{
+			"tenant/one/auditor": {"community.audit": "registry.example::community/audit"},
+		},
+		SkillSourceVersions: map[string]map[string]string{
+			"tenant/one/auditor": {"community.audit": "1.0.0"},
+		},
+		SkillRuntimeIdentities: map[string]map[string]capability.SkillIdentity{
+			"tenant/one/auditor": {
+				"community.audit": capability.NewSkillIdentity(
+					"community-audit-runtime", "1.0.0", "registry.example::community/audit",
+				),
+			},
+		},
+		PlannedSkillInstallations: []SkillInstallationIntent{{
+			SkillID: "community.audit", Version: "1.0.0",
+			SourceIdentity: "registry.example::community/audit", Reference: "listing:84",
+		}},
+	}
+	if missing := missingRequirements(&candidate, catalog); len(missing) != 2 {
+		t.Fatalf("unplaced prompt Skill requirements = %#v", missing)
+	}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 0 {
+		t.Fatalf("planned prompt Skill installation remained missing = %#v", missing)
+	}
+}
+
 func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})

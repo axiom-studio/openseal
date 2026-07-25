@@ -1576,6 +1576,8 @@ func placementAwareMissingRequirements(candidate *WorkforceCandidate, catalog Ca
 			continue
 		case requirement.Kind == "skill_installation" && skillInstallationPlanned(requirement, catalog, placement):
 			continue
+		case requirement.Kind == "prompt" && skillInstallationPlanned(requirement, catalog, placement):
+			continue
 		}
 		resolved = append(resolved, requirement)
 	}
