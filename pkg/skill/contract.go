@@ -154,6 +154,62 @@ func (c *Catalog) GetDefinitionVariant(ctx context.Context, id, version, sourceI
 	return cloneDefinition(definition), nil
 }
 
+// ValidateBindingCandidate validates an exact binding projection against its
+// immutable Skill definition without persisting it. It is used by governed
+// change-set operations that must validate every dependent reference before
+// committing any mutation.
+func (c *Catalog) ValidateBindingCandidate(ctx context.Context, binding *Binding) error {
+	if c == nil {
+		return errors.New("skill catalog is not configured")
+	}
+	if err := validateBindingShape(binding); err != nil {
+		return err
+	}
+	if binding.Disabled {
+		return errors.New("disabled skill binding cannot be used as an upgrade candidate")
+	}
+	definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+	if err != nil {
+		return err
+	}
+	if definition == nil {
+		return errors.New("skill definition is not registered")
+	}
+	normalized := cloneBinding(binding)
+	normalized.SourceIdentity = DefinitionSourceIdentity(definition)
+	return validateBindingAgainstDefinition(normalized, definition)
+}
+
+// ValidateDefinitionInput validates credential-free durable inputs against one
+// exact action contract without resolving a mutable binding. Scheduled
+// Objective and Initiative references use this during transactional upgrades
+// so an incompatible target can never partially advance durable work.
+func (c *Catalog) ValidateDefinitionInput(ctx context.Context, id, version, sourceIdentity, actionName string, input map[string]interface{}) error {
+	if c == nil {
+		return errors.New("skill catalog is not configured")
+	}
+	definition, err := c.definitionFor(ctx, id, version, sourceIdentity)
+	if err != nil {
+		return err
+	}
+	if definition == nil {
+		return errors.New("skill definition is not registered")
+	}
+	if _, ok := definition.Actions[actionName]; !ok {
+		return fmt.Errorf("skill action %s does not exist", actionName)
+	}
+	c.mu.RLock()
+	schemas := c.schemas[actionKey(definition.ID, definition.Version, DefinitionSourceIdentity(definition), actionName)]
+	c.mu.RUnlock()
+	if schemas == nil || schemas.input == nil {
+		return errors.New("input schema is not compiled")
+	}
+	if err := schemas.input.validate(input); err != nil {
+		return fmt.Errorf("skill input is invalid: %w", err)
+	}
+	return nil
+}
+
 func (c *Catalog) Bind(ctx context.Context, binding *Binding) error {
 	if c == nil {
 		return errors.New("skill catalog is not configured")
