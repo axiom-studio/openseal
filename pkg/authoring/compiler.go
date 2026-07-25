@@ -87,6 +87,9 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	if request.Prompt == "" {
 		return nil, errors.New("authoring prompt is required")
 	}
+	if err := ValidateAuthoringPrompt(request.Prompt); err != nil {
+		return nil, err
+	}
 	if request.Mode == ModeAmend && request.Existing == nil {
 		return nil, errors.New("amend authoring requires the existing workforce candidate")
 	}
@@ -127,6 +130,9 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		}
 		reportCompileProgress(observe, CompilePhaseCandidateValidate, 1, 1)
 		generated, decodeErr = decodeGenerationResponse(payload)
+	}
+	if err := ValidateWorkforceCandidateSensitiveInput(&generated.Candidate); err != nil {
+		return nil, err
 	}
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 	synthesizeCapabilityNeedRefinements(&generated, request)
@@ -189,6 +195,9 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 				continue
 			}
 			generated = candidate
+			if err := ValidateWorkforceCandidateSensitiveInput(&generated.Candidate); err != nil {
+				return nil, err
+			}
 			materializationIssues = materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 			synthesizeCapabilityNeedRefinements(&generated, request)
 			scheduleIntentIssues = enforceScheduleIntentAuthority(&generated, request)
