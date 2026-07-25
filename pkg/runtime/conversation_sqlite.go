@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -82,7 +83,8 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 		return nil, false, err
 	}
 	if existing != nil {
-		if existing.Owner != conversation.Owner || existing.Title != conversation.Title {
+		if existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) {
 			return nil, false, ErrMessageConflict
 		}
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {

@@ -16,6 +16,7 @@ type CreateConversationRequest struct {
 	Scope          Scope
 	Owner          ObjectiveOwner
 	Title          string
+	Origin         *ConversationReference
 	IdempotencyKey string
 }
 
@@ -33,6 +34,7 @@ type PostChannelMessageRequest struct {
 	ConversationID      string
 	ExpectedRevision    int64
 	Sender              ConversationParticipant
+	SenderDisplayName   string
 	Intent              ConversationMessageIntent
 	Content             string
 	Audience            ConversationAudience
@@ -190,7 +192,8 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	if existing, err := s.store.FindConversationByIdempotencyKey(ctx, req.Scope, key); err != nil {
 		return nil, false, err
 	} else if existing != nil {
-		if existing.Owner != req.Owner || existing.Title != strings.TrimSpace(req.Title) {
+		if existing.Owner != req.Owner || existing.Title != strings.TrimSpace(req.Title) ||
+			!reflect.DeepEqual(existing.Origin, req.Origin) {
 			return nil, false, ErrMessageConflict
 		}
 		return existing, true, nil
@@ -202,7 +205,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	now := s.now().UTC()
 	conversation := &Conversation{
 		ID: id, Scope: req.Scope, Owner: req.Owner, Title: strings.TrimSpace(req.Title), Status: ConversationStatusActive,
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Origin: cloneConversationReference(req.Origin), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
@@ -281,7 +284,8 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	}
 	message := &ChannelMessage{
 		ID: id, Scope: req.Scope, ConversationID: conversation.ID, Sequence: conversation.LastSequence + 1,
-		Sender: req.Sender, Intent: req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
+		Sender: req.Sender, SenderDisplayName: strings.TrimSpace(req.SenderDisplayName),
+		Intent: req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
 		ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
 		Mentions:   cloneParticipants(req.Mentions),
 		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse,
@@ -676,13 +680,22 @@ func stableConversationID(scope Scope, key, suffix string) string {
 
 func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageRequest) bool {
 	return existing != nil && existing.Scope == req.Scope && existing.ConversationID == strings.TrimSpace(req.ConversationID) &&
-		existing.Sender == req.Sender && existing.Intent == req.Intent && existing.Content == strings.TrimSpace(req.Content) &&
+		existing.Sender == req.Sender && existing.SenderDisplayName == strings.TrimSpace(req.SenderDisplayName) &&
+		existing.Intent == req.Intent && existing.Content == strings.TrimSpace(req.Content) &&
 		existing.Audience.Kind == req.Audience.Kind && reflect.DeepEqual(existing.Audience.Participants, req.Audience.Participants) &&
 		reflect.DeepEqual(existing.Audience.Roles, req.Audience.Roles) && existing.ReplyToMessageID == strings.TrimSpace(req.ReplyToMessageID) &&
 		existing.BroadcastToChannel == req.BroadcastToChannel &&
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
+}
+
+func cloneConversationReference(in *ConversationReference) *ConversationReference {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func sameParticipationRoundIntent(existing *ParticipationRound, req CoordinateParticipationRequest, roundID string, proposals []ParticipationProposal, policy ConversationArbitrationPolicy) bool {
