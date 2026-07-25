@@ -152,6 +152,8 @@ type ObjectivePlacement struct {
 type ConversationEndpointPlacement struct {
 	ID               string                 `json:"id"`
 	ExpectedRevision int64                  `json:"expectedRevision,omitempty"`
+	InstallationID   string                 `json:"installationId,omitempty"`
+	ApplicationID    string                 `json:"applicationId,omitempty"`
 	Address          string                 `json:"address,omitempty"`
 	Configuration    map[string]interface{} `json:"configuration,omitempty"`
 }

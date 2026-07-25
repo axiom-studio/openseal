@@ -155,24 +155,26 @@ func (r ExternalConversationAdapterReference) Validate() error {
 // an opaque provider resource such as a channel, inbox, number, or web-chat
 // installation; Configuration is non-secret and interpreted only by the Skill.
 type ExternalConversationEndpoint struct {
-	ID            string                               `json:"id"`
-	IngressRoute  string                               `json:"ingressRoute"`
-	Scope         Scope                                `json:"scope"`
-	Owner         ObjectiveOwner                       `json:"owner"`
-	DeploymentID  string                               `json:"deploymentId"`
-	Name          string                               `json:"name"`
-	Adapter       ExternalConversationAdapterReference `json:"adapter"`
-	Provider      string                               `json:"provider"`
-	Mode          capability.ConversationEndpointMode  `json:"mode"`
-	Address       string                               `json:"address,omitempty"`
-	Handler       ExternalConversationHandler          `json:"handler"`
-	Policy        ExternalConversationPolicy           `json:"policy"`
-	Configuration map[string]interface{}               `json:"configuration,omitempty"`
-	Status        ExternalConversationEndpointStatus   `json:"status"`
-	Revision      int64                                `json:"revision"`
-	CreatedAt     time.Time                            `json:"createdAt"`
-	UpdatedAt     time.Time                            `json:"updatedAt"`
-	RetiredAt     *time.Time                           `json:"retiredAt,omitempty"`
+	ID             string                               `json:"id"`
+	IngressRoute   string                               `json:"ingressRoute"`
+	Scope          Scope                                `json:"scope"`
+	Owner          ObjectiveOwner                       `json:"owner"`
+	DeploymentID   string                               `json:"deploymentId"`
+	Name           string                               `json:"name"`
+	Adapter        ExternalConversationAdapterReference `json:"adapter"`
+	Provider       string                               `json:"provider"`
+	Mode           capability.ConversationEndpointMode  `json:"mode"`
+	InstallationID string                               `json:"installationId,omitempty"`
+	ApplicationID  string                               `json:"applicationId,omitempty"`
+	Address        string                               `json:"address,omitempty"`
+	Handler        ExternalConversationHandler          `json:"handler"`
+	Policy         ExternalConversationPolicy           `json:"policy"`
+	Configuration  map[string]interface{}               `json:"configuration,omitempty"`
+	Status         ExternalConversationEndpointStatus   `json:"status"`
+	Revision       int64                                `json:"revision"`
+	CreatedAt      time.Time                            `json:"createdAt"`
+	UpdatedAt      time.Time                            `json:"updatedAt"`
+	RetiredAt      *time.Time                           `json:"retiredAt,omitempty"`
 }
 
 func (e *ExternalConversationEndpoint) Validate() error {
@@ -182,6 +184,8 @@ func (e *ExternalConversationEndpoint) Validate() error {
 		!validAgentReference(strings.TrimSpace(e.DeploymentID), 256) ||
 		strings.TrimSpace(e.Name) == "" || len(e.Name) > 160 ||
 		!validOpaqueIdentifier(e.Provider, 128) ||
+		len(e.InstallationID) > 1024 || strings.ContainsAny(e.InstallationID, "\r\n") ||
+		len(e.ApplicationID) > 1024 || strings.ContainsAny(e.ApplicationID, "\r\n") ||
 		len(e.Address) > 1024 || strings.ContainsAny(e.Address, "\r\n") ||
 		e.Revision < 1 || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() || e.UpdatedAt.Before(e.CreatedAt) {
 		return ErrInvalidExternalConversation
@@ -256,6 +260,7 @@ type ExternalConversationEndpointStore interface {
 	GetExternalConversationEndpoint(context.Context, Scope, string) (*ExternalConversationEndpoint, error)
 	GetExternalConversationEndpointByIngressRoute(context.Context, string) (*ExternalConversationEndpoint, error)
 	ListExternalConversationEndpoints(context.Context, ExternalConversationEndpointFilter) ([]*ExternalConversationEndpoint, error)
+	ListExternalConversationEndpointsByVerifiedRoute(context.Context, ExternalConversationVerifiedRoute) ([]*ExternalConversationEndpoint, error)
 	UpdateExternalConversationEndpoint(context.Context, *ExternalConversationEndpoint, int64) error
 }
 

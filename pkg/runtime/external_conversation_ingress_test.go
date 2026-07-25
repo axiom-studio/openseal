@@ -15,6 +15,19 @@ type externalConversationIngressHostStub struct {
 	result  *ExternalConversationIngressHostResult
 }
 
+type externalConversationGatewayHostStub struct {
+	request ExternalConversationGatewayHostRequest
+	result  *ExternalConversationGatewayHostResult
+}
+
+func (h *externalConversationGatewayHostStub) NormalizeExternalConversationGateway(
+	_ context.Context,
+	request ExternalConversationGatewayHostRequest,
+) (*ExternalConversationGatewayHostResult, error) {
+	h.request = request
+	return h.result, nil
+}
+
 func (h *externalConversationIngressHostStub) NormalizeExternalConversation(
 	_ context.Context,
 	request ExternalConversationIngressHostRequest,
@@ -104,5 +117,63 @@ func TestExternalConversationPublicIngressResolvesAuthoritativeScopeFromOpaqueRo
 		Route: "unknown-route", Method: http.MethodPost, Body: []byte(`{}`),
 	}, host); !errors.Is(err, ErrExternalConversationEndpointNotFound) {
 		t.Fatalf("unknown route error = %v", err)
+	}
+}
+
+func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	previousRevision := endpoint.Revision
+	endpoint.InstallationID = "T123"
+	endpoint.ApplicationID = "A123"
+	endpoint.Address = "C123"
+	endpoint.Revision++
+	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+		t.Fatal(err)
+	}
+	event := NormalizedExternalConversationEvent{
+		ID: "Ev-shared", Type: capability.ConversationEventMessageReceived,
+		ExternalConversationID: "C123", ExternalMessageID: "171.003",
+		ExternalParticipantID: "U123", Text: "Hello shared app",
+		OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC(),
+	}
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
+		StatusCode: http.StatusOK,
+		Events: []ExternalConversationGatewayEvent{{
+			InstallationID: "T123", ApplicationID: "A123", Address: "C123", Event: event,
+		}},
+	}}
+	gateway := ExternalConversationIngressGateway{
+		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
+	}
+	service := NewExternalConversationTransportService(store, catalog)
+
+	first, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, ExternalConversationPublicIngressRequest{
+		Route: "shared-slack", Method: http.MethodPost,
+		Headers: map[string][]string{"X-Slack-Signature": {"v0=verified-by-skill"}},
+		Body:    []byte(`{"team_id":"T123","event":{"channel":"C123"}}`),
+	}, host)
+	if err != nil || len(first.Received) != 1 || !first.Received[0].Accepted ||
+		host.request.Adapter.Adapter.Provider != "slack" {
+		t.Fatalf("shared ingress = %#v host=%#v err=%v", first, host.request, err)
+	}
+	replayed, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, ExternalConversationPublicIngressRequest{
+		Route: "shared-slack", Method: http.MethodPost,
+		Headers: map[string][]string{"X-Slack-Signature": {"v0=verified-by-skill"}},
+		Body:    []byte(`{"team_id":"T123","event":{"channel":"C123"}}`),
+	}, host)
+	if err != nil || len(replayed.Received) != 1 || !replayed.Received[0].Replayed {
+		t.Fatalf("shared replay = %#v err=%v", replayed, err)
+	}
+
+	host.result.Events[0].ApplicationID = "wrong-app"
+	unmatched, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, ExternalConversationPublicIngressRequest{
+		Route: "shared-slack", Method: http.MethodPost,
+		Body: []byte(`{"team_id":"T123","event":{"channel":"C123"}}`),
+	}, host)
+	if err != nil || len(unmatched.Received) != 0 {
+		t.Fatalf("wrong app shared ingress = %#v err=%v", unmatched, err)
 	}
 }

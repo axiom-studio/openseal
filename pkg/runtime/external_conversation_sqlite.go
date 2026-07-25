@@ -24,6 +24,8 @@ func migrateExternalConversations(db *sql.DB) error {
 			ON external_conversation_endpoints(scope_kind, scope_id, owner_type, owner_id, status, updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_external_conversation_endpoints_provider
 			ON external_conversation_endpoints(scope_kind, scope_id, provider, status, updated_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_external_conversation_endpoints_gateway
+			ON external_conversation_endpoints(provider, status);
 
 		CREATE TABLE IF NOT EXISTS external_conversation_inbox (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
@@ -224,6 +226,33 @@ func (s *SQLiteStore) ListExternalConversationEndpoints(ctx context.Context, fil
 			return nil, scanErr
 		}
 		result = append(result, endpoint)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLiteStore) ListExternalConversationEndpointsByVerifiedRoute(
+	ctx context.Context,
+	route ExternalConversationVerifiedRoute,
+) ([]*ExternalConversationEndpoint, error) {
+	if err := route.Validate(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM external_conversation_endpoints
+		WHERE provider=? AND status=? ORDER BY scope_kind,scope_id,id`,
+		route.Provider, ExternalConversationEndpointActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*ExternalConversationEndpoint, 0)
+	for rows.Next() {
+		endpoint, scanErr := scanSQLiteExternalConversationEndpoint(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if externalConversationEndpointMatchesVerifiedRoute(endpoint, route) {
+			result = append(result, endpoint)
+		}
 	}
 	return result, rows.Err()
 }
