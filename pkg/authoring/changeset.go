@@ -123,8 +123,21 @@ type ChangeSetPlacement struct {
 	// definition variant. It is placement metadata: models select catalog ids,
 	// while apply and runtime authority consume only these exact identities.
 	SkillRuntimeIdentities map[string]map[string]capability.SkillIdentity `json:"skillRuntimeIdentities,omitempty"`
-	Objectives             map[string]ObjectivePlacement                  `json:"objectives,omitempty"`
-	Environment            string                                         `json:"environment,omitempty"`
+	// PlannedSkillInstallations records exact, reviewed acquisition work that
+	// an authorized host may fulfill only after the ChangeSet reaches its
+	// governed apply boundary. The reference is opaque to OpenSeal (for
+	// example, a registry receipt or listing reference); it never grants
+	// runtime authority by itself.
+	PlannedSkillInstallations []SkillInstallationIntent     `json:"plannedSkillInstallations,omitempty"`
+	Objectives                map[string]ObjectivePlacement `json:"objectives,omitempty"`
+	Environment               string                        `json:"environment,omitempty"`
+}
+
+type SkillInstallationIntent struct {
+	SkillID        string `json:"skillId"`
+	Version        string `json:"version"`
+	SourceIdentity string `json:"sourceIdentity"`
+	Reference      string `json:"reference"`
 }
 
 type ObjectivePlacement struct {
@@ -1096,6 +1109,9 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	if err := validatePlacementReferences(request.Placement, &current.Result.Candidate); err != nil {
 		return nil, false, err
 	}
+	if err := validatePlannedSkillInstallations(request.Placement, current.Catalog); err != nil {
+		return nil, false, err
+	}
 	placementDigest, err := digestJSON(request.Placement)
 	if err != nil {
 		return nil, false, fmt.Errorf("digest workforce placement: %w", err)
@@ -1197,6 +1213,7 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 		{"Skill sources", requested.SkillSourceIdentities, current.SkillSourceIdentities, requested.SkillSourceIdentities != nil},
 		{"Skill source versions", requested.SkillSourceVersions, current.SkillSourceVersions, requested.SkillSourceVersions != nil},
 		{"Skill runtime identities", requested.SkillRuntimeIdentities, current.SkillRuntimeIdentities, requested.SkillRuntimeIdentities != nil},
+		{"planned Skill installations", requested.PlannedSkillInstallations, current.PlannedSkillInstallations, requested.PlannedSkillInstallations != nil},
 	}
 	for _, field := range immutableMaps {
 		if !field.provided {
@@ -1218,6 +1235,41 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 	next.CredentialReferences = clonePlacement(requested).CredentialReferences
 	next.BindingConfigs = clonePlacement(requested).BindingConfigs
 	return next, nil
+}
+
+func validatePlannedSkillInstallations(placement ChangeSetPlacement, catalog CapabilityCatalog) error {
+	seen := make(map[string]struct{}, len(placement.PlannedSkillInstallations))
+	for _, planned := range placement.PlannedSkillInstallations {
+		skillID := strings.TrimSpace(planned.SkillID)
+		version := strings.TrimSpace(planned.Version)
+		sourceIdentity := strings.TrimSpace(planned.SourceIdentity)
+		reference := strings.TrimSpace(planned.Reference)
+		if skillID == "" || version == "" || sourceIdentity == "" || reference == "" {
+			return errors.New("planned Skill installation requires an exact Skill, version, source identity, and reference")
+		}
+		key := skillID + "\x00" + version + "\x00" + sourceIdentity + "\x00" + reference
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("planned Skill installation %s is duplicated", skillID)
+		}
+		seen[key] = struct{}{}
+		skill, exists := catalog.Skills[skillID]
+		if !exists || skill.Readiness != SkillReadinessNeedsInstallation ||
+			strings.TrimSpace(skill.Version) != version || strings.TrimSpace(skill.SourceIdentity) != sourceIdentity {
+			return fmt.Errorf("planned Skill installation %s does not match an exact installable catalog capability", skillID)
+		}
+		verifiedReference := false
+		for _, compatibility := range skill.Compatibility {
+			if compatibility.Requirement == "installation" && !compatibility.Compatible &&
+				strings.TrimSpace(compatibility.Reference) == reference {
+				verifiedReference = true
+				break
+			}
+		}
+		if !verifiedReference {
+			return fmt.Errorf("planned Skill installation %s lacks its verified catalog reference", skillID)
+		}
+	}
+	return nil
 }
 
 func validatePlacementReferences(placement ChangeSetPlacement, candidate *WorkforceCandidate) error {
@@ -1368,6 +1420,9 @@ func validateApplyPlacement(value *ChangeSet) error {
 	if err := validatePlacementReferences(value.Placement, &value.Result.Candidate); err != nil {
 		return err
 	}
+	if err := validatePlannedSkillInstallations(value.Placement, value.Catalog); err != nil {
+		return err
+	}
 	if strings.TrimSpace(value.Placement.Environment) == "" {
 		return errors.New("deployment environment placement is required")
 	}
@@ -1420,11 +1475,35 @@ func placementAwareMissingRequirements(candidate *WorkforceCandidate, catalog Ca
 	requirements := missingRequirements(candidate, catalog)
 	resolved := make([]MissingRequirement, 0, len(requirements))
 	for _, requirement := range requirements {
-		if requirement.Kind != "skill_binding" || !skillBindingPlacementPresent(requirement, catalog, placement) {
-			resolved = append(resolved, requirement)
+		switch {
+		case requirement.Kind == "skill_binding" && skillBindingPlacementPresent(requirement, catalog, placement):
+			continue
+		case requirement.Kind == "skill_installation" && skillInstallationPlanned(requirement, catalog, placement):
+			continue
 		}
+		resolved = append(resolved, requirement)
 	}
 	return resolved
+}
+
+func skillInstallationPlanned(requirement MissingRequirement, catalog CapabilityCatalog, placement ChangeSetPlacement) bool {
+	skill, exists := catalog.Skills[requirement.ID]
+	if !exists || skill.Readiness != SkillReadinessNeedsInstallation {
+		return false
+	}
+	for _, planned := range placement.PlannedSkillInstallations {
+		if strings.TrimSpace(planned.SkillID) == requirement.ID &&
+			strings.TrimSpace(planned.Version) == strings.TrimSpace(skill.Version) &&
+			strings.TrimSpace(planned.SourceIdentity) == strings.TrimSpace(skill.SourceIdentity) {
+			for _, compatibility := range skill.Compatibility {
+				if compatibility.Requirement == "installation" && !compatibility.Compatible &&
+					strings.TrimSpace(compatibility.Reference) == strings.TrimSpace(planned.Reference) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func skillBindingPlacementPresent(requirement MissingRequirement, catalog CapabilityCatalog, placement ChangeSetPlacement) bool {
@@ -1609,6 +1688,26 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		}
 	}
 	placement.SkillRuntimeIdentities = skillIdentities
+	for index := range placement.PlannedSkillInstallations {
+		planned := &placement.PlannedSkillInstallations[index]
+		planned.SkillID = strings.TrimSpace(planned.SkillID)
+		planned.Version = strings.TrimSpace(planned.Version)
+		planned.SourceIdentity = strings.TrimSpace(planned.SourceIdentity)
+		planned.Reference = strings.TrimSpace(planned.Reference)
+	}
+	sort.Slice(placement.PlannedSkillInstallations, func(i, j int) bool {
+		left, right := placement.PlannedSkillInstallations[i], placement.PlannedSkillInstallations[j]
+		if left.SkillID != right.SkillID {
+			return left.SkillID < right.SkillID
+		}
+		if left.Version != right.Version {
+			return left.Version < right.Version
+		}
+		if left.SourceIdentity != right.SourceIdentity {
+			return left.SourceIdentity < right.SourceIdentity
+		}
+		return left.Reference < right.Reference
+	})
 	if strings.TrimSpace(placement.Environment) == "" {
 		placement.Environment = "default"
 	}
@@ -2216,6 +2315,7 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 			copy.SkillRuntimeIdentities[agentID] = nested
 		}
 	}
+	copy.PlannedSkillInstallations = append([]SkillInstallationIntent(nil), value.PlannedSkillInstallations...)
 	if value.Objectives != nil {
 		copy.Objectives = make(map[string]ObjectivePlacement, len(value.Objectives))
 		for key, placement := range value.Objectives {

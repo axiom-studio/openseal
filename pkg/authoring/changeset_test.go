@@ -584,6 +584,46 @@ func TestPlacementAwareMissingRequirementsResolvesConfiguredSkillBinding(t *test
 	}
 }
 
+func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallation(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "tenant/one/researcher",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "community.research",
+		}},
+	}}}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"community.research": {
+			ID: "community.research", Version: "2.1.0",
+			SourceIdentity: "registry.example::community/research",
+			Readiness:      SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "installation", Compatible: false,
+				Evidence: "Verified immutable build is available.", Reference: "listing:42",
+			}},
+		},
+	}}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, ChangeSetPlacement{}); len(missing) != 1 || missing[0].Kind != "skill_installation" {
+		t.Fatalf("unplanned requirements = %#v", missing)
+	}
+	placement := ChangeSetPlacement{PlannedSkillInstallations: []SkillInstallationIntent{{
+		SkillID: "community.research", Version: "2.1.0",
+		SourceIdentity: "registry.example::community/research", Reference: "listing:42",
+	}}}
+	if err := validatePlannedSkillInstallations(placement, catalog); err != nil {
+		t.Fatalf("validate exact installation plan: %v", err)
+	}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 0 {
+		t.Fatalf("reviewed installation remained missing = %#v", missing)
+	}
+	placement.PlannedSkillInstallations[0].Reference = "listing:forged"
+	if err := validatePlannedSkillInstallations(placement, catalog); err == nil {
+		t.Fatal("forged installation reference was accepted")
+	}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 1 || missing[0].Kind != "skill_installation" {
+		t.Fatalf("forged installation resolved requirements = %#v", missing)
+	}
+}
+
 func TestAtomicMemoryApplyUsesSafeDefaultPlacement(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
