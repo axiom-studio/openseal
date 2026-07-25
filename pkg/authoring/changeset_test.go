@@ -192,6 +192,17 @@ func TestPreparedCatalogRefreshRetainsExactAnsweredDiscoveredSkill(t *testing.T)
 		"openseal.kubernetes": {
 			ID: "openseal.kubernetes", Version: "1.1.0", Readiness: SkillReadinessReady,
 		},
+		discovered.ID: {
+			ID: discovered.ID, Version: discovered.Version, SourceIdentity: discovered.SourceIdentity,
+			Readiness: SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "installation", Compatible: false,
+				Evidence: "Installation is still required.", Reference: "needs_installation",
+			}, {
+				Requirement: "source_digest", Compatible: true,
+				Evidence: "The current registry snapshot remains verified.", Reference: "sha256:current",
+			}},
+		},
 	}}
 	refreshed, err := service.RefreshPreparedCatalog(
 		context.Background(), scope, changeSet.ID, answered.Revision, refreshedCatalog,
@@ -206,6 +217,9 @@ func TestPreparedCatalogRefreshRetainsExactAnsweredDiscoveredSkill(t *testing.T)
 		if skill.ID != discovered.ID || skill.Version != discovered.Version ||
 			skill.SourceIdentity != discovered.SourceIdentity || skill.Readiness != SkillReadinessNeedsInstallation {
 			t.Fatalf("%s exact selected Skill = %#v", surface, skill)
+		}
+		if reference := plannedInstallationReference(skill); reference != discovered.Provenance.Reference {
+			t.Fatalf("%s exact selected Skill acquisition reference = %q", surface, reference)
 		}
 	}
 }

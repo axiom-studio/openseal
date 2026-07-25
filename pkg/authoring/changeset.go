@@ -641,9 +641,33 @@ func retainAnsweredSkillSelections(changeSet *ChangeSet, catalog *CapabilityCata
 				strings.TrimSpace(fresh.SourceIdentity) != strings.TrimSpace(reviewed.SourceIdentity) {
 				return fmt.Errorf("answered Skill %s changed immutable source or version", selectedID)
 			}
+			if fresh.Readiness == SkillReadinessNeedsInstallation &&
+				reviewed.Readiness == SkillReadinessNeedsInstallation {
+				reference := plannedInstallationReference(reviewed)
+				if reference != "" {
+					for index := range fresh.Compatibility {
+						compatibility := &fresh.Compatibility[index]
+						if compatibility.Requirement == "installation" && !compatibility.Compatible {
+							compatibility.Reference = reference
+						}
+					}
+					catalog.Skills[selectedID] = fresh
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func plannedInstallationReference(skill SkillCapability) string {
+	for _, compatibility := range skill.Compatibility {
+		if compatibility.Requirement == "installation" && !compatibility.Compatible {
+			if reference := strings.TrimSpace(compatibility.Reference); reference != "" {
+				return reference
+			}
+		}
+	}
+	return ""
 }
 
 // FailPreparedGeneration terminally records a pre-provider failure such as a
