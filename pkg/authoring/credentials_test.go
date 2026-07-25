@@ -113,6 +113,102 @@ func TestValidateCredentialPlacementKeepsOptionalDeploymentBindingSeparateFromSk
 	}
 }
 
+func TestStructuredSkillCredentialsUseExactNamedBindingSlots(t *testing.T) {
+	skill := SkillCapability{
+		ID: "security-scorecard",
+		Credentials: []SkillCredential{
+			{Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"score"}},
+			{Name: "REPORTING_API_KEY", Kind: "environment-secret", Actions: []string{"publish"}},
+			{Name: "OPTIONAL_TOKEN", Kind: "environment-secret", Optional: true},
+		},
+	}
+	bindings := requiredSkillCredentialBindings(skill, []string{"score"})
+	if len(bindings) != 1 || bindings[0].Key != "TOOLWEB_API_KEY" || bindings[0].Kind != "environment-secret" {
+		t.Fatalf("score bindings = %#v", bindings)
+	}
+	bindings = requiredSkillCredentialBindings(skill, []string{"score", "publish"})
+	if len(bindings) != 2 ||
+		bindings[0].Key != "REPORTING_API_KEY" ||
+		bindings[1].Key != "TOOLWEB_API_KEY" {
+		t.Fatalf("independent same-kind bindings = %#v", bindings)
+	}
+}
+
+func TestStructuredSkillCredentialCannotBeSatisfiedByUnrelatedSameKindSecret(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "security-reviewer",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "security-scorecard", RequiredActions: []string{"score"},
+		}},
+	}}}
+	catalog := CapabilityCatalog{
+		Skills: map[string]SkillCapability{
+			"security-scorecard": {
+				ID:      "security-scorecard",
+				Actions: []string{"score"},
+				Credentials: []SkillCredential{{
+					Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"score"},
+				}},
+			},
+		},
+		AvailableCredentials: map[string]bool{"environment-secret": true, "OTHER_TOKEN": true},
+	}
+	missing := missingRequirements(&candidate, catalog)
+	if len(missing) != 1 || missing[0].Kind != "credential" || missing[0].ID != "TOOLWEB_API_KEY" {
+		t.Fatalf("unrelated same-kind secret missing requirements = %#v", missing)
+	}
+	catalog.AvailableCredentials["TOOLWEB_API_KEY"] = true
+	if missing = missingRequirements(&candidate, catalog); len(missing) != 0 {
+		t.Fatalf("exact named credential missing requirements = %#v", missing)
+	}
+
+	required := requiredCredentials(candidate, catalog)
+	if len(required["security-reviewer"]) != 1 || required["security-reviewer"][0] != "TOOLWEB_API_KEY" {
+		t.Fatalf("exact required credential slots = %#v", required)
+	}
+}
+
+func TestValidateCredentialPlacementRequiresExactSkillBindingChoice(t *testing.T) {
+	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "security-reviewer"}}}
+	required := map[string][]string{"security-reviewer": {"TOOLWEB_API_KEY"}}
+	unrelatedChoice := []capability.CredentialBindingChoice{{
+		Reference:   capability.CredentialReference{Kind: "environment-secret", ID: "vault://other"},
+		DisplayName: "Other integration",
+		BindingKeys: []string{"OTHER_TOKEN"},
+	}}
+	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"security-reviewer": {
+			"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "vault://other"},
+		},
+	}}
+	if err := ValidateCredentialPlacement(candidate, required, placement, unrelatedChoice); err == nil ||
+		!strings.Contains(err.Error(), "must match credential kind") {
+		t.Fatalf("unrelated exact binding choice error = %v", err)
+	}
+
+	exactChoice := []capability.CredentialBindingChoice{{
+		Reference:   capability.CredentialReference{Kind: "environment-secret", ID: "vault://toolweb"},
+		DisplayName: "ToolWeb",
+		BindingKeys: []string{"TOOLWEB_API_KEY"},
+	}}
+	placement.CredentialReferences["security-reviewer"]["TOOLWEB_API_KEY"] =
+		capability.CredentialReference{Kind: "environment-secret", ID: "vault://toolweb"}
+	if err := ValidateCredentialPlacement(candidate, required, placement, exactChoice); err != nil {
+		t.Fatalf("exact Skill binding choice = %v", err)
+	}
+
+	otherCandidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "observer"}}}
+	if err := ValidateCredentialPlacement(otherCandidate, map[string][]string{"observer": nil}, ChangeSetPlacement{
+		CredentialReferences: map[string]map[string]capability.CredentialReference{
+			"observer": {
+				"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "vault://toolweb"},
+			},
+		},
+	}, exactChoice); err == nil || !strings.Contains(err.Error(), "does not require") {
+		t.Fatalf("unrequired exact Skill binding error = %v", err)
+	}
+}
+
 func TestRequiredCredentialsIncludesRuntimeBindingOnlyForActiveCandidates(t *testing.T) {
 	catalog := CapabilityCatalog{AgentCredentialRequirements: []AgentCredentialRequirement{{
 		BindingKey: agent.ModelProviderCredentialBinding, DisplayName: "Model provider",

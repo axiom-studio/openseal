@@ -5,14 +5,73 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
+
+type skillCredentialBinding struct {
+	Key  string
+	Kind string
+}
+
+// requiredSkillCredentialBindings returns the exact deployment slots consumed
+// by the selected Skill authority. Structured credential declarations use
+// their stable names so two credentials of the same transport kind cannot
+// satisfy or overwrite one another. CredentialKinds remains a legacy fallback
+// for older host catalogs that do not yet project structured credentials.
+func requiredSkillCredentialBindings(skill SkillCapability, requiredActions []string) []skillCredentialBinding {
+	selectedActions := make(map[string]bool, len(requiredActions))
+	for _, action := range requiredActions {
+		if action = strings.TrimSpace(action); action != "" {
+			selectedActions[action] = true
+		}
+	}
+	result := make([]skillCredentialBinding, 0, len(skill.Credentials)+len(skill.CredentialKinds))
+	seen := make(map[string]bool, cap(result))
+	if len(skill.Credentials) > 0 {
+		for _, credential := range skill.Credentials {
+			if credential.Optional {
+				continue
+			}
+			needed := len(credential.Actions) == 0
+			for _, action := range credential.Actions {
+				if selectedActions[strings.TrimSpace(action)] {
+					needed = true
+					break
+				}
+			}
+			if !needed {
+				continue
+			}
+			key, kind := strings.TrimSpace(credential.Name), strings.TrimSpace(credential.Kind)
+			if key == "" {
+				key = kind
+			}
+			if key == "" || kind == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, skillCredentialBinding{Key: key, Kind: kind})
+		}
+	} else {
+		for _, value := range skill.CredentialKinds {
+			kind := strings.TrimSpace(value)
+			if kind == "" || seen[kind] {
+				continue
+			}
+			seen[kind] = true
+			result = append(result, skillCredentialBinding{Key: kind, Kind: kind})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Key < result[j].Key })
+	return result
+}
 
 // ValidateCredentialPlacement verifies that every supplied placement uses a
 // canonical credential kind and one currently authorized opaque reference.
 // When a generated candidate is supplied, references are also restricted to
-// the exact kinds required by that Agent. Resolved credential values never
-// cross this boundary.
+// the exact binding slots required by that Agent. Resolved credential values
+// never cross this boundary.
 func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[string][]string, placement ChangeSetPlacement, choices []capability.CredentialBindingChoice) error {
 	authorized := make(map[string]map[string]bool)
 	declaredBindings := make(map[string]bool)
@@ -36,7 +95,7 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 			}
 			seenKeys[bindingKey] = true
 			declaredBindings[bindingKey] = true
-			if explicitBindingKeys {
+			if explicitBindingKeys && bindingKey == agent.ModelProviderCredentialBinding {
 				deploymentBindings[bindingKey] = true
 			}
 			if authorized[bindingKey] == nil {
@@ -67,7 +126,7 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 		if agentID == "" {
 			return fmt.Errorf("credential placement requires an Agent definition ID")
 		}
-		allowedKinds, knownAgent := requiredByAgent[agentID]
+		allowedBindings, knownAgent := requiredByAgent[agentID]
 		if candidate != nil && !knownAgent {
 			return fmt.Errorf("credential placement Agent %s is not part of this workforce candidate", agentID)
 		}
@@ -86,8 +145,8 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 			// become required (for example, an inactive Agent may already have
 			// its model provider selected). Skill credentials remain restricted
 			// to the exact requirements declared by the candidate.
-			if candidate != nil && !allowedKinds[key] && !deploymentBindings[key] {
-				expected := sortedCredentialKinds(allowedKinds)
+			if candidate != nil && !allowedBindings[key] && !deploymentBindings[key] {
+				expected := sortedCredentialBindings(allowedBindings)
 				if len(expected) == 0 {
 					return fmt.Errorf("Agent %s does not require credential kind %s", agentID, key)
 				}
@@ -101,7 +160,7 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 	return nil
 }
 
-func sortedCredentialKinds(values map[string]bool) []string {
+func sortedCredentialBindings(values map[string]bool) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {
 		result = append(result, value)

@@ -1476,7 +1476,7 @@ func placementAwareMissingRequirements(candidate *WorkforceCandidate, catalog Ca
 	resolved := make([]MissingRequirement, 0, len(requirements))
 	for _, requirement := range requirements {
 		switch {
-		case requirement.Kind == "skill_binding" && skillBindingPlacementPresent(requirement, catalog, placement):
+		case requirement.Kind == "skill_binding" && skillBindingPlacementPresent(candidate, requirement, catalog, placement):
 			continue
 		case requirement.Kind == "skill_installation" && skillInstallationPlanned(requirement, catalog, placement):
 			continue
@@ -1544,7 +1544,7 @@ func runtimeSkillVersionMatchesPlanned(runtimeVersion, plannedVersion string) bo
 	return strings.HasPrefix(runtimeVersion, plannedVersion+separator)
 }
 
-func skillBindingPlacementPresent(requirement MissingRequirement, catalog CapabilityCatalog, placement ChangeSetPlacement) bool {
+func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement MissingRequirement, catalog CapabilityCatalog, placement ChangeSetPlacement) bool {
 	skill, exists := catalog.Skills[requirement.ID]
 	if !exists {
 		return false
@@ -1561,12 +1561,25 @@ func skillBindingPlacementPresent(requirement MissingRequirement, catalog Capabi
 			return false
 		}
 	}
-	if len(skill.CredentialKinds) > 0 {
+	var selected agent.SkillRequirement
+	for _, definition := range candidate.Agents {
+		if definition == nil || definition.ID != agentID {
+			continue
+		}
+		for _, candidateRequirement := range definition.SkillRequirements {
+			if strings.TrimSpace(candidateRequirement.SkillID) == requirement.ID {
+				selected = candidateRequirement
+				break
+			}
+		}
+	}
+	credentialBindings := requiredSkillCredentialBindings(skill, selected.RequiredActions)
+	if len(credentialBindings) > 0 {
 		hasPlacementGap = true
 		references := placement.CredentialReferences[agentID]
-		for _, kind := range skill.CredentialKinds {
-			reference := references[kind]
-			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+		for _, binding := range credentialBindings {
+			reference := references[binding.Key]
+			if strings.TrimSpace(reference.Kind) != binding.Kind || strings.TrimSpace(reference.ID) == "" {
 				return false
 			}
 		}
@@ -1961,10 +1974,12 @@ func requiredCredentials(candidate WorkforceCandidate, catalog CapabilityCatalog
 			}
 		}
 		for _, requirement := range definition.SkillRequirements {
-			for _, kind := range catalog.Skills[requirement.SkillID].CredentialKinds {
-				kind = strings.TrimSpace(kind)
-				if kind != "" {
-					seen[kind] = true
+			for _, binding := range requiredSkillCredentialBindings(
+				catalog.Skills[requirement.SkillID],
+				requirement.RequiredActions,
+			) {
+				if binding.Key != "" {
+					seen[binding.Key] = true
 				}
 			}
 		}
