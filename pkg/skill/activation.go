@@ -51,6 +51,7 @@ const (
 	AdapterResourceStaging = "resource-staging"
 	AdapterPreparedRuntime = "prepared-runtime"
 	AdapterHTTPAction      = "openseal.http.request"
+	AdapterConversation    = "openseal.conversation.adapter"
 )
 
 type AdapterCapability struct {
@@ -67,22 +68,34 @@ type AvailabilityReason struct {
 }
 
 type ActivatedSkill struct {
-	BindingID        string                 `json:"bindingId"`
-	BindingRevision  int64                  `json:"bindingRevision"`
-	SkillID          string                 `json:"skillId"`
-	SkillVersion     string                 `json:"skillVersion"`
-	SourceIdentity   string                 `json:"sourceIdentity,omitempty"`
-	Name             string                 `json:"name"`
-	Description      string                 `json:"description,omitempty"`
-	SourceDigest     string                 `json:"sourceDigest,omitempty"`
-	ConfigurationKey string                 `json:"configurationKey,omitempty"`
-	Configuration    map[string]interface{} `json:"configuration,omitempty"`
-	ResourceRoot     string                 `json:"resourceRoot,omitempty"`
-	ResourceRevision string                 `json:"resourceRevision,omitempty"`
-	ResourceAdapter  string                 `json:"resourceAdapter,omitempty"`
-	PreparedRuntime  *PreparedRuntime       `json:"preparedRuntime,omitempty"`
-	Prompt           *PromptModule          `json:"prompt,omitempty"`
-	Actions          []ModelAction          `json:"actions,omitempty"`
+	BindingID            string                         `json:"bindingId"`
+	BindingRevision      int64                          `json:"bindingRevision"`
+	SkillID              string                         `json:"skillId"`
+	SkillVersion         string                         `json:"skillVersion"`
+	SourceIdentity       string                         `json:"sourceIdentity,omitempty"`
+	Name                 string                         `json:"name"`
+	Description          string                         `json:"description,omitempty"`
+	SourceDigest         string                         `json:"sourceDigest,omitempty"`
+	ConfigurationKey     string                         `json:"configurationKey,omitempty"`
+	Configuration        map[string]interface{}         `json:"configuration,omitempty"`
+	ResourceRoot         string                         `json:"resourceRoot,omitempty"`
+	ResourceRevision     string                         `json:"resourceRevision,omitempty"`
+	ResourceAdapter      string                         `json:"resourceAdapter,omitempty"`
+	PreparedRuntime      *PreparedRuntime               `json:"preparedRuntime,omitempty"`
+	Prompt               *PromptModule                  `json:"prompt,omitempty"`
+	Actions              []ModelAction                  `json:"actions,omitempty"`
+	ConversationAdapters []ActivatedConversationAdapter `json:"conversationAdapters,omitempty"`
+}
+
+// ActivatedConversationAdapter is the exact secret-free adapter projection a
+// generic host may run for one immutable Skill binding.
+type ActivatedConversationAdapter struct {
+	ID              string              `json:"id"`
+	BindingID       string              `json:"bindingId"`
+	BindingRevision int64               `json:"bindingRevision"`
+	SkillID         string              `json:"skillId"`
+	SkillVersion    string              `json:"skillVersion"`
+	Adapter         ConversationAdapter `json:"adapter"`
 }
 
 type UnavailableSkill struct {
@@ -251,6 +264,15 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			})
 		}
 		sort.Slice(actions, func(i, j int) bool { return actions[i].Name < actions[j].Name })
+		conversationAdapters := make([]ActivatedConversationAdapter, 0, len(binding.EnabledConversationAdapters))
+		for _, adapterID := range binding.EnabledConversationAdapters {
+			conversationAdapters = append(conversationAdapters, ActivatedConversationAdapter{
+				ID: adapterID, BindingID: binding.ID, BindingRevision: binding.Revision,
+				SkillID: definition.ID, SkillVersion: definition.Version,
+				Adapter: cloneDefinition(definition).ConversationAdapters[adapterID],
+			})
+		}
+		sort.Slice(conversationAdapters, func(i, j int) bool { return conversationAdapters[i].ID < conversationAdapters[j].ID })
 		digest := ""
 		if definition.Source != nil {
 			digest = definition.Source.Digest
@@ -262,7 +284,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			SourceDigest: digest, ConfigurationKey: definition.ConfigurationKey, Configuration: cloneMap(binding.Config),
 			ResourceRoot: resourceRoot, ResourceRevision: resourceRevision, ResourceAdapter: resourceAdapter,
 			PreparedRuntime: preparedRuntime,
-			Prompt:          prompt, Actions: actions,
+			Prompt:          prompt, Actions: actions, ConversationAdapters: conversationAdapters,
 		})
 	}
 	sort.Slice(snapshot.Unavailable, func(i, j int) bool { return snapshot.Unavailable[i].BindingID < snapshot.Unavailable[j].BindingID })
@@ -289,6 +311,11 @@ func bindingRequiresStagedResources(definition *Definition, binding *Binding) bo
 			if err == nil {
 				search = append(search, string(literal))
 			}
+		}
+	}
+	for _, adapterID := range binding.EnabledConversationAdapters {
+		if adapter, ok := definition.ConversationAdapters[adapterID]; ok {
+			search = append(search, adapter.Transport.IngressEndpoint, adapter.Transport.DeliveryEndpoint)
 		}
 	}
 	for _, value := range search {
@@ -328,6 +355,44 @@ func evaluateAvailability(definition *Definition, binding *Binding, host HostCap
 			}
 			if !ok || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
 				reasons = append(reasons, AvailabilityReason{Code: "credential_missing", Requirement: requirement.Kind, Message: "required prompt credential is unavailable"})
+			}
+		}
+	}
+	if len(binding.EnabledConversationAdapters) > 0 {
+		hostAdapter, available := host.Adapters[AdapterConversation]
+		if !available || hostAdapter.State != AdapterStateAvailable {
+			reasons = append(reasons, AvailabilityReason{
+				Code: "conversation_adapter_host_unavailable", Requirement: AdapterConversation,
+				Message: "the generic conversation adapter host is unavailable",
+			})
+		} else {
+			features := make(map[string]bool, len(hostAdapter.Features))
+			for _, feature := range hostAdapter.Features {
+				features[strings.ToLower(strings.TrimSpace(feature))] = true
+			}
+			for _, adapterID := range binding.EnabledConversationAdapters {
+				adapter, ok := definition.ConversationAdapters[adapterID]
+				if !ok {
+					continue
+				}
+				if len(features) > 0 && !features[strings.ToLower(adapter.Transport.Kind)] {
+					reasons = append(reasons, AvailabilityReason{
+						Code: "conversation_adapter_transport_unavailable", Requirement: adapter.Transport.Kind,
+						Message: "the generic conversation adapter host does not support the Skill transport",
+					})
+				}
+				for _, requirement := range adapter.Credentials {
+					ref, exists := binding.Credentials[requirement.Name]
+					if requirement.Optional && !exists {
+						continue
+					}
+					if !exists || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
+						reasons = append(reasons, AvailabilityReason{
+							Code: "credential_missing", Requirement: requirement.Kind,
+							Message: "required conversation adapter credential is unavailable",
+						})
+					}
+				}
 			}
 		}
 	}

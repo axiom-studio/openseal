@@ -859,6 +859,41 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				}
 			}
 		}
+		adapterIDs := make(map[string]bool, len(skill.ConversationAdapters))
+		for index, adapter := range skill.ConversationAdapters {
+			if adapter.ID == "" || adapter.ID != strings.TrimSpace(adapter.ID) || len(adapter.ID) > 128 || adapterIDs[adapter.ID] {
+				return fmt.Errorf("Skill %s conversation adapter %d has an invalid or duplicate id", id, index)
+			}
+			normalized, err := capability.NormalizeConversationAdapter(capability.ConversationAdapter{
+				ProtocolVersion: adapter.ProtocolVersion,
+				Name:            adapter.ID, Description: adapter.ID, Provider: adapter.Provider,
+				EndpointModes: adapter.EndpointModes, InboundEventTypes: adapter.InboundEventTypes, Features: adapter.Features,
+				Delivery: adapter.Delivery,
+				Transport: capability.ConversationAdapterTransport{
+					Kind: "authoring", IngressEndpoint: "authoring", DeliveryEndpoint: "authoring",
+				},
+			})
+			if err != nil || normalized.Provider != adapter.Provider ||
+				!reflect.DeepEqual(normalized.EndpointModes, adapter.EndpointModes) ||
+				!reflect.DeepEqual(normalized.InboundEventTypes, adapter.InboundEventTypes) ||
+				!reflect.DeepEqual(normalized.Features, adapter.Features) {
+				return fmt.Errorf("Skill %s conversation adapter %d is invalid or non-canonical", id, index)
+			}
+			seenAdapterCredentials := make(map[string]bool, len(adapter.Credentials))
+			for credentialIndex, credential := range adapter.Credentials {
+				if credential.Name == "" || credential.Name != strings.TrimSpace(credential.Name) ||
+					credential.Kind == "" || credential.Kind != strings.TrimSpace(credential.Kind) ||
+					len(credential.Name) > 128 || len(credential.Kind) > 128 || seenAdapterCredentials[credential.Name] {
+					return fmt.Errorf("Skill %s conversation adapter %d credential %d is invalid", id, index, credentialIndex)
+				}
+				normalizedOAuth2, oauthErr := capability.NormalizeOAuth2Requirement(credential.OAuth2)
+				if oauthErr != nil || !reflect.DeepEqual(normalizedOAuth2, credential.OAuth2) {
+					return fmt.Errorf("Skill %s conversation adapter %d credential %d OAuth 2 requirement is invalid or non-canonical", id, index, credentialIndex)
+				}
+				seenAdapterCredentials[credential.Name] = true
+			}
+			adapterIDs[adapter.ID] = true
+		}
 	}
 	for bindingKey, grants := range catalog.AvailableCredentialGrants {
 		if bindingKey != strings.TrimSpace(bindingKey) || bindingKey == "" || len(bindingKey) > 128 || len(grants) > 32 {

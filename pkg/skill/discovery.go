@@ -59,6 +59,20 @@ type DiscoveryCredential struct {
 	OAuth2     *OAuth2Requirement `json:"oauth2,omitempty"`
 }
 
+// DiscoveryConversationAdapter is the credential-free catalog projection of
+// a Skill-owned provider adapter. Executable entrypoints and opaque connection
+// references are intentionally absent.
+type DiscoveryConversationAdapter struct {
+	ID                string                           `json:"id"`
+	ProtocolVersion   string                           `json:"protocolVersion"`
+	Provider          string                           `json:"provider"`
+	EndpointModes     []ConversationEndpointMode       `json:"endpointModes"`
+	InboundEventTypes []string                         `json:"inboundEventTypes"`
+	Features          []ConversationAdapterFeature     `json:"features,omitempty"`
+	Delivery          ConversationDeliveryCapabilities `json:"delivery"`
+	Credentials       []DiscoveryCredential            `json:"credentials,omitempty"`
+}
+
 // DiscoveryCompatibility is host-supplied evidence. Consumers may rank this
 // fact but must not infer compatibility that the provider did not assert.
 type DiscoveryCompatibility struct {
@@ -72,13 +86,14 @@ type DiscoveryCompatibility struct {
 // SourceIdentity is mandatory for sourced variants so a later binding cannot
 // silently select a different publisher with the same declared ID/version.
 type DiscoveryCandidate struct {
-	ID             string                `json:"id"`
-	Version        string                `json:"version"`
-	SourceIdentity string                `json:"sourceIdentity,omitempty"`
-	Name           string                `json:"name"`
-	Description    string                `json:"description,omitempty"`
-	Actions        []DiscoveryAction     `json:"actions,omitempty"`
-	Credentials    []DiscoveryCredential `json:"credentials,omitempty"`
+	ID                   string                         `json:"id"`
+	Version              string                         `json:"version"`
+	SourceIdentity       string                         `json:"sourceIdentity,omitempty"`
+	Name                 string                         `json:"name"`
+	Description          string                         `json:"description,omitempty"`
+	Actions              []DiscoveryAction              `json:"actions,omitempty"`
+	Credentials          []DiscoveryCredential          `json:"credentials,omitempty"`
+	ConversationAdapters []DiscoveryConversationAdapter `json:"conversationAdapters,omitempty"`
 	// BindingConfigSchema contains non-secret constraints for host-owned
 	// configuration that must be reviewed before binding. It never contains
 	// configured values.
@@ -203,6 +218,51 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 			credentialNames[credential.Name] = struct{}{}
 		}
 		sort.Slice(value.Credentials, func(i, j int) bool { return value.Credentials[i].Name < value.Credentials[j].Name })
+		adapterIDs := make(map[string]struct{}, len(value.ConversationAdapters))
+		for adapterIndex := range value.ConversationAdapters {
+			adapter := &value.ConversationAdapters[adapterIndex]
+			adapter.ID, adapter.Provider = strings.TrimSpace(adapter.ID), strings.TrimSpace(adapter.Provider)
+			if adapter.ID == "" || len(adapter.ID) > 128 {
+				return nil, fmt.Errorf("discovery candidate %d conversation adapter %d is invalid", index, adapterIndex)
+			}
+			if _, exists := adapterIDs[adapter.ID]; exists {
+				return nil, fmt.Errorf("discovery candidate %d repeats conversation adapter %q", index, adapter.ID)
+			}
+			adapterIDs[adapter.ID] = struct{}{}
+			normalized, err := capability.NormalizeConversationAdapter(capability.ConversationAdapter{
+				ProtocolVersion: adapter.ProtocolVersion,
+				Name:            adapter.ID, Description: adapter.ID, Provider: adapter.Provider,
+				EndpointModes: adapter.EndpointModes, InboundEventTypes: adapter.InboundEventTypes,
+				Features: adapter.Features, Delivery: adapter.Delivery,
+				Transport: capability.ConversationAdapterTransport{
+					Kind: "discovery", IngressEndpoint: "discovery", DeliveryEndpoint: "discovery",
+				},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("discovery candidate %d conversation adapter %d is invalid: %w", index, adapterIndex, err)
+			}
+			adapter.ProtocolVersion, adapter.Provider, adapter.EndpointModes = normalized.ProtocolVersion, normalized.Provider, normalized.EndpointModes
+			adapter.InboundEventTypes, adapter.Features = normalized.InboundEventTypes, normalized.Features
+			adapter.Delivery = normalized.Delivery
+			credentialNames := make(map[string]struct{}, len(adapter.Credentials))
+			for credentialIndex := range adapter.Credentials {
+				credential := &adapter.Credentials[credentialIndex]
+				credential.Name, credential.Kind = strings.TrimSpace(credential.Name), strings.TrimSpace(credential.Kind)
+				if credential.Name == "" || credential.Kind == "" || len(credential.Name) > 128 || len(credential.Kind) > 128 {
+					return nil, fmt.Errorf("discovery candidate %d conversation adapter %d credential %d is invalid", index, adapterIndex, credentialIndex)
+				}
+				if _, exists := credentialNames[credential.Name]; exists {
+					return nil, fmt.Errorf("discovery candidate %d conversation adapter %d repeats credential %q", index, adapterIndex, credential.Name)
+				}
+				credentialNames[credential.Name] = struct{}{}
+				credential.OAuth2, err = capability.NormalizeOAuth2Requirement(credential.OAuth2)
+				if err != nil {
+					return nil, fmt.Errorf("discovery candidate %d conversation adapter %d credential %d OAuth 2 requirement is invalid: %w", index, adapterIndex, credentialIndex, err)
+				}
+			}
+			sort.Slice(adapter.Credentials, func(i, j int) bool { return adapter.Credentials[i].Name < adapter.Credentials[j].Name })
+		}
+		sort.Slice(value.ConversationAdapters, func(i, j int) bool { return value.ConversationAdapters[i].ID < value.ConversationAdapters[j].ID })
 		if value.BindingConfigSchema != nil {
 			encoded, err := json.Marshal(value.BindingConfigSchema)
 			if err != nil || len(encoded) > 64<<10 {
