@@ -535,7 +535,7 @@ func TestCompilerRepairsLiveRefinementMissingFieldsWithExactQuestionPath(t *test
 }
 
 func TestCompilerNormalizesOnlyDefinitionVersionNumbers(t *testing.T) {
-	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":1.0,"displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"team":{"id":"workers","version":2,"displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker"}]}}`)
+	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":1.0,"displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"team":{"id":"workers","version":2,"displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker"}]}}`)
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"})
 	if err != nil || !result.Valid {
@@ -553,7 +553,7 @@ func TestCompilerNormalizesOnlyDefinitionVersionNumbers(t *testing.T) {
 }
 
 func TestCompilerNormalizesOnlyDeclaredHumanDurationFields(t *testing.T) {
-	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":"1","displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1},"memory":{"retention":"30d","maximumBytes":1024},"escalation":{"afterDuration":"2h"}}],"team":{"id":"workers","version":"1","displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{"mode":"dynamic"},"sharedContext":{"retention":"2w","maximumBytes":2048},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker","displayName":"Worker"}]}}`)
+	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":"1","displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1},"memory":{"retention":"30d","maximumBytes":1024},"escalation":{"afterDuration":"2h"}}],"team":{"id":"workers","version":"1","displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{},"sharedContext":{"retention":"2w","maximumBytes":2048},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker","displayName":"Worker"}]}}`)
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"})
 	if err != nil || !result.Valid {
@@ -1266,7 +1266,7 @@ func marketingCandidate(version string, risk capability.RiskLevel) WorkforceCand
 	teamDefinition := &team.Definition{
 		ID: "gtm-research", Version: version, DisplayName: "GTM research", Purpose: "Research demand and synthesize findings",
 		Roles:        []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1, RequiredDefinitionIDs: []string{agentDefinition.ID}, ChannelParticipation: team.RoleChannelActive}},
-		Coordination: team.CoordinationPolicy{Mode: team.CoordinationDynamic, MaximumSpeakersPerRound: 2, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
+		Coordination: team.CoordinationPolicy{MaximumSpeakersPerRound: 2, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
 		Delegation:   team.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true},
 		Approvals:    team.ApprovalPolicy{MaximumRisk: risk},
 	}
@@ -1283,7 +1283,7 @@ func TestTeamRoleSkillGrantsUseCatalogIdentityAndRejectModelRuntimeIdentity(t *t
 			ID: "analyst", DisplayName: "Analyst", Purpose: "Analyze", ChannelParticipation: team.RoleChannelActive,
 			SkillGrants: []team.RoleSkillGrant{{SkillID: "clawhub-listing", SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead}},
 		}},
-		Coordination: team.CoordinationPolicy{Mode: team.CoordinationDynamic}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Coordination: team.CoordinationPolicy{}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}}
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
 		"clawhub-listing": {ID: "clawhub-listing", Version: "1.0.0", Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead},

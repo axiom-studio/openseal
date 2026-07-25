@@ -29,7 +29,7 @@ func TestCompileManifestBuildsPortableTeamWithCalmDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.ID != "catalog-market-research" || definition.Coordination.Mode != CoordinationDynamic ||
+	if definition.ID != "catalog-market-research" ||
 		definition.Coordination.MaximumSpeakersPerRound != 2 || !definition.Coordination.QuietByDefault ||
 		!definition.Coordination.RequireRoleRelevance || !definition.Coordination.SuppressDuplicateContent ||
 		!definition.Delegation.RequireAcceptance || !definition.Delegation.RequireCompletionReview ||
@@ -61,7 +61,7 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 				}},
 			}},
 			Coordination: ManifestCoordinationPolicy{
-				Mode: CoordinationPeer, MaximumSpeakersPerRound: 5, QuietByDefault: &no,
+				MaximumSpeakersPerRound: 5, QuietByDefault: &no,
 				RequireRoleRelevance: &no, SuppressDuplicateContent: &no,
 			},
 			Delegation: ManifestDelegationPolicy{
@@ -118,6 +118,10 @@ spec:
 		if _, err = DecodeManifestYAML([]byte(invalid)); err == nil {
 			t.Fatalf("host-owned field %s was accepted", field)
 		}
+	}
+	retiredMode := strings.Replace(string(data), "  sharedContext:\n", "  coordination:\n    mode: peer\n  sharedContext:\n", 1)
+	if _, err = DecodeManifestYAML([]byte(retiredMode)); err == nil || !strings.Contains(err.Error(), "mode") {
+		t.Fatalf("retired coordination mode was accepted: %v", err)
 	}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {

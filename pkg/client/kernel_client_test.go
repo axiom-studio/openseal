@@ -678,7 +678,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 		registered, err := client.RegisterTeamDefinition(ctx, &kernelteam.Definition{
 			ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce findings",
 			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
-			Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, QuietByDefault: true},
+			Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true},
 			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
 			Evaluations:  []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
 			Amendments:   workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},

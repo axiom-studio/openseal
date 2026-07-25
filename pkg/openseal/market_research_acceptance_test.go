@@ -351,7 +351,7 @@ func composeResearchWorkforce(
 		Purpose: "Monitor approved sources and deliver evidence-backed reports",
 		Roles:   roles,
 		Coordination: TeamCoordinationPolicy{
-			Mode: TeamCoordinationDynamic, QuietByDefault: true, RequireRoleRelevance: true, MaximumSpeakersPerRound: 2,
+			QuietByDefault: true, RequireRoleRelevance: true, MaximumSpeakersPerRound: 2,
 		},
 		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"publisher"}},
 	})

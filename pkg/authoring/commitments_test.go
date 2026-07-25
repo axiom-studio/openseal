@@ -230,7 +230,7 @@ func threeAgentTeamCandidate() WorkforceCandidate {
 	definition := &team.Definition{
 		ID: "three-agent-team", Version: "1", DisplayName: "Three Agent Team", Purpose: "Coordinate three Agents",
 		Roles:        []team.RoleSlot{{ID: "member", DisplayName: "Member", Purpose: "Contribute role-relevant work", MinimumMembers: 3, MaximumMembers: 3, RequiredDefinitionIDs: requiredDefinitions}},
-		Coordination: team.CoordinationPolicy{Mode: team.CoordinationDynamic}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Coordination: team.CoordinationPolicy{}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{
 			{ID: "first", Title: "First objective", Goal: "Complete the first outcome", Priority: 1},
 			{ID: "second", Title: "Second objective", Goal: "Complete the second outcome", Priority: 2},

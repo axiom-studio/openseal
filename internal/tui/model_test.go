@@ -1399,7 +1399,7 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
 	definition := &kernelteam.Definition{
 		ID: "gtm-research", Version: "3", DisplayName: "GTM Research", Purpose: "Find evidence, synthesize it, and coordinate approved outreach.",
-		Coordination:       kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
+		Coordination:       kernelteam.CoordinationPolicy{},
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "monitor", Title: "Monitor source communities"}, {ID: "report", Title: "Deliver cited report"}},
 		Roles: []kernelteam.RoleSlot{{ID: "research", DisplayName: "Researcher", Purpose: "Find evidence", SkillGrants: []kernelteam.RoleSkillGrant{{
 			SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing", RuntimeIdentity: &identity,
@@ -1422,7 +1422,7 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 		t.Fatalf("team projection section=%v selected=%q", model.section, model.selectedTeamDeployment)
 	}
 	view := model.View()
-	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "dynamic coordination", "Researcher · research · Agent agent-research", "Role authority", "clawhub-listing → summarize@1.0.0", "exact source variant", "2 template(s)", "p pause/resume"} {
+	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "relevance-arbitrated", "Researcher · research · Agent agent-research", "Role authority", "clawhub-listing → summarize@1.0.0", "exact source variant", "2 template(s)", "p pause/resume"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Team view missing %q:\n%s", expected, view)
 		}
@@ -1547,7 +1547,7 @@ func TestTeamAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *t
 	definition := &kernelteam.Definition{
 		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Monitor evidence",
 		Roles:        []kernelteam.RoleSlot{{ID: "analyst", DisplayName: "Analyst", Purpose: "Synthesize evidence"}},
-		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Coordination: kernelteam.CoordinationPolicy{}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
 		Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:local"}},
 	}
@@ -1930,7 +1930,7 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 			Team: &kernelteam.Definition{
 				ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
 				Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
-				Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
+				Coordination: kernelteam.CoordinationPolicy{},
 				Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 			},
 		},
@@ -2098,7 +2098,7 @@ func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
 		Candidate: authoring.WorkforceCandidate{Team: &kernelteam.Definition{
 			ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
 			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
-			Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic},
+			Coordination: kernelteam.CoordinationPolicy{},
 			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		}},
 	}

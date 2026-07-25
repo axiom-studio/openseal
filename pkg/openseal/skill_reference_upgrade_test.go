@@ -348,7 +348,7 @@ func TestTeamSkillReferenceUpgradeRequiresTargetRoleAuthority(t *testing.T) {
 					MinimumMembers: 1, MaximumMembers: 1, RequiredDefinitionIDs: []string{agentDefinition.ID},
 					SkillGrants: grants, ChannelParticipation: openseal.TeamRoleChannelActive,
 				}},
-				Coordination: openseal.TeamCoordinationPolicy{Mode: openseal.TeamCoordinationPeer},
+				Coordination: openseal.TeamCoordinationPolicy{},
 				Approvals:    openseal.TeamApprovalPolicy{MaximumRisk: openseal.SkillRiskRead},
 			})
 			if err != nil {
