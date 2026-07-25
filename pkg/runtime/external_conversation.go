@@ -156,6 +156,7 @@ func (r ExternalConversationAdapterReference) Validate() error {
 // installation; Configuration is non-secret and interpreted only by the Skill.
 type ExternalConversationEndpoint struct {
 	ID            string                               `json:"id"`
+	IngressRoute  string                               `json:"ingressRoute"`
 	Scope         Scope                                `json:"scope"`
 	Owner         ObjectiveOwner                       `json:"owner"`
 	DeploymentID  string                               `json:"deploymentId"`
@@ -177,6 +178,7 @@ type ExternalConversationEndpoint struct {
 func (e *ExternalConversationEndpoint) Validate() error {
 	if e == nil || e.Scope.Validate() != nil || e.Owner.Validate() != nil ||
 		!validOpaqueIdentifier(strings.TrimSpace(e.ID), 256) ||
+		!validOpaqueIdentifier(strings.TrimSpace(e.IngressRoute), 128) ||
 		!validAgentReference(strings.TrimSpace(e.DeploymentID), 256) ||
 		strings.TrimSpace(e.Name) == "" || len(e.Name) > 160 ||
 		!validOpaqueIdentifier(e.Provider, 128) ||
@@ -252,6 +254,7 @@ type UpdateExternalConversationEndpointRequest struct {
 type ExternalConversationEndpointStore interface {
 	CreateExternalConversationEndpoint(context.Context, *ExternalConversationEndpoint) error
 	GetExternalConversationEndpoint(context.Context, Scope, string) (*ExternalConversationEndpoint, error)
+	GetExternalConversationEndpointByIngressRoute(context.Context, string) (*ExternalConversationEndpoint, error)
 	ListExternalConversationEndpoints(context.Context, ExternalConversationEndpointFilter) ([]*ExternalConversationEndpoint, error)
 	UpdateExternalConversationEndpoint(context.Context, *ExternalConversationEndpoint, int64) error
 }
@@ -290,6 +293,7 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 	if endpoint.ID == "" {
 		endpoint.ID = "conversation-endpoint:" + s.newID()
 	}
+	endpoint.IngressRoute = s.newID()
 	resolved, err := s.resolveAdapter(ctx, endpoint)
 	if err != nil {
 		return nil, err

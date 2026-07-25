@@ -90,14 +90,25 @@ func (s *PostgresStore) CreateExternalConversationEndpoint(ctx context.Context, 
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO `+s.table("external_conversation_endpoints")+`
-		(scope_kind,scope_id,id,owner_type,owner_id,provider,status,revision,updated_at,payload)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.Owner.Type, endpoint.Owner.ID,
-		endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload))
+		(scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
+		endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
+		endpoint.Revision, endpoint.UpdatedAt, string(payload))
 	if postgresUniqueViolation(err) {
 		return ErrExternalConversationConflict
 	}
 	return err
+}
+
+func (s *PostgresStore) GetExternalConversationEndpointByIngressRoute(ctx context.Context, route string) (*ExternalConversationEndpoint, error) {
+	route = strings.TrimSpace(route)
+	if !validOpaqueIdentifier(route, 128) {
+		return nil, ErrInvalidExternalConversation
+	}
+	return scanSQLiteExternalConversationEndpoint(s.db.QueryRowContext(ctx,
+		`SELECT payload FROM `+s.table("external_conversation_endpoints")+` WHERE ingress_route=$1`,
+		route))
 }
 
 func (s *PostgresStore) GetExternalConversationEndpoint(ctx context.Context, scope Scope, id string) (*ExternalConversationEndpoint, error) {
@@ -160,9 +171,9 @@ func (s *PostgresStore) UpdateExternalConversationEndpoint(ctx context.Context, 
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("external_conversation_endpoints")+`
 		SET status=$1,revision=$2,updated_at=$3,payload=$4::jsonb
-		WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`,
+		WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND ingress_route=$8 AND revision=$9`,
 		endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
-		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, expectedRevision)
+		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute, expectedRevision)
 	if err != nil {
 		return err
 	}

@@ -737,6 +737,12 @@ type (
 	EnqueueExternalConversationDeliveryRequest  = runtime.EnqueueExternalConversationDeliveryRequest
 	EnqueueExternalConversationDeliveryResult   = runtime.EnqueueExternalConversationDeliveryResult
 	ExternalConversationTransportService        = runtime.ExternalConversationTransportService
+	ExternalConversationIngressRequest          = runtime.ExternalConversationIngressRequest
+	ExternalConversationPublicIngressRequest    = runtime.ExternalConversationPublicIngressRequest
+	ExternalConversationIngressHostResult       = runtime.ExternalConversationIngressHostResult
+	ExternalConversationIngressHostRequest      = runtime.ExternalConversationIngressHostRequest
+	ExternalConversationIngressAdapterHost      = runtime.ExternalConversationIngressAdapterHost
+	ExternalConversationIngressResult           = runtime.ExternalConversationIngressResult
 	ExternalConversationDispatchRequest         = runtime.ExternalConversationDispatchRequest
 	ExternalConversationDispatchResult          = runtime.ExternalConversationDispatchResult
 	ExternalConversationDispatcher              = runtime.ExternalConversationDispatcher
@@ -755,11 +761,6 @@ type (
 	ExternalConversationReplyStore              = runtime.ExternalConversationReplyStore
 	ExternalConversationReplyWorker             = runtime.ExternalConversationReplyWorker
 	ExternalConversationSupervisor              = runtime.ExternalConversationSupervisor
-	ExternalConversationIngressRequest          = runtime.ExternalConversationIngressRequest
-	ExternalConversationIngressHostResult       = runtime.ExternalConversationIngressHostResult
-	ExternalConversationIngressHostRequest      = runtime.ExternalConversationIngressHostRequest
-	ExternalConversationIngressAdapterHost      = runtime.ExternalConversationIngressAdapterHost
-	ExternalConversationIngressResult           = runtime.ExternalConversationIngressResult
 	ResolvedExternalConversationRunbook         = runtime.ResolvedExternalConversationRunbook
 	ExternalConversationRunbookResolver         = runtime.ExternalConversationRunbookResolver
 	ExternalConversationRunbookEventDispatcher  = runtime.ExternalConversationRunbookEventDispatcher
@@ -3604,6 +3605,21 @@ func (e *Engine) NormalizeExternalConversationIngress(
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
 	result, err := e.externalConversations.transport.NormalizeExternalConversationIngress(ctx, request, host)
+	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Wake()
+	}
+	return result, err
+}
+
+func (e *Engine) NormalizeExternalConversationPublicIngress(
+	ctx context.Context,
+	request runtime.ExternalConversationPublicIngressRequest,
+	host runtime.ExternalConversationIngressAdapterHost,
+) (*runtime.ExternalConversationIngressResult, error) {
+	if e == nil || e.externalConversations.transport == nil {
+		return nil, fmt.Errorf("external conversation transport is not configured")
+	}
+	result, err := e.externalConversations.transport.NormalizeExternalConversationPublicIngress(ctx, request, host)
 	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
 		e.externalConversations.supervisor.Wake()
 	}

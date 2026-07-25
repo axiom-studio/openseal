@@ -248,16 +248,18 @@ func applyPostgresWorkforceConversationEndpoints(
 				return authoring.ErrChangeSetRevision
 			}
 			endpoint.CreatedAt = current.CreatedAt
+			endpoint.IngressRoute = current.IngressRoute
 		}
 		payload, _ := json.Marshal(endpoint)
 		if desired.expectedRevision == 0 {
 			if _, err := tx.ExecContext(
 				ctx,
 				`INSERT INTO `+table+`
-				 (scope_kind,scope_id,id,owner_type,owner_id,provider,status,revision,updated_at,payload)
-				 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.Owner.Type, endpoint.Owner.ID,
-				endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+				 (scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
+				 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
+				endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
+				endpoint.Revision, endpoint.UpdatedAt, string(payload),
 			); err != nil {
 				if postgresUniqueViolation(err) {
 					return authoring.ErrChangeSetRevision

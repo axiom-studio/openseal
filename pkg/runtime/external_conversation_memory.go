@@ -18,8 +18,28 @@ func (s *MemoryStore) CreateExternalConversationEndpoint(_ context.Context, endp
 	if _, exists := s.externalEndpoints[key]; exists {
 		return ErrExternalConversationConflict
 	}
+	for _, existing := range s.externalEndpoints {
+		if existing.IngressRoute == endpoint.IngressRoute {
+			return ErrExternalConversationConflict
+		}
+	}
 	s.externalEndpoints[key] = cloneExternalConversationEndpoint(endpoint)
 	return nil
+}
+
+func (s *MemoryStore) GetExternalConversationEndpointByIngressRoute(_ context.Context, route string) (*ExternalConversationEndpoint, error) {
+	route = strings.TrimSpace(route)
+	if !validOpaqueIdentifier(route, 128) {
+		return nil, ErrInvalidExternalConversation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, endpoint := range s.externalEndpoints {
+		if endpoint.IngressRoute == route {
+			return cloneExternalConversationEndpoint(endpoint), nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *MemoryStore) GetExternalConversationEndpoint(_ context.Context, scope Scope, id string) (*ExternalConversationEndpoint, error) {
@@ -71,6 +91,7 @@ func (s *MemoryStore) UpdateExternalConversationEndpoint(_ context.Context, endp
 	if current.Revision != expectedRevision || endpoint.Revision != expectedRevision+1 ||
 		current.Scope != endpoint.Scope || current.Owner != endpoint.Owner || current.DeploymentID != endpoint.DeploymentID ||
 		current.Adapter != endpoint.Adapter || current.Provider != endpoint.Provider || current.Mode != endpoint.Mode ||
+		current.IngressRoute != endpoint.IngressRoute ||
 		!current.CreatedAt.Equal(endpoint.CreatedAt) {
 		return ErrExternalConversationConflict
 	}

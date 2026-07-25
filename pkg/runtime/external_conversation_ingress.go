@@ -23,6 +23,27 @@ type ExternalConversationIngressRequest struct {
 	Body       []byte              `json:"body"`
 }
 
+// ExternalConversationPublicIngressRequest is the provider-facing form. Its
+// opaque route is globally unique but is not an authentication secret; the
+// exact installed Skill still verifies the provider signature before any
+// event can enter the durable inbox.
+type ExternalConversationPublicIngressRequest struct {
+	Route   string              `json:"route"`
+	Method  string              `json:"method"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Body    []byte              `json:"body"`
+}
+
+func (r *ExternalConversationPublicIngressRequest) Validate() error {
+	if r == nil || !validOpaqueIdentifier(strings.TrimSpace(r.Route), 128) {
+		return ErrInvalidExternalConversation
+	}
+	return (&ExternalConversationIngressRequest{
+		Scope:      Scope{Kind: "tenant", ID: "route-validation"},
+		EndpointID: "route-validation", Method: r.Method, Headers: r.Headers, Body: r.Body,
+	}).Validate()
+}
+
 func (r *ExternalConversationIngressRequest) Validate() error {
 	if r == nil || r.Scope.Validate() != nil || !validOpaqueIdentifier(r.EndpointID, 256) ||
 		r.Method != http.MethodPost || len(r.Body) == 0 || len(r.Body) > MaximumExternalConversationIngressBytes ||
@@ -130,4 +151,31 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 		received = append(received, persisted)
 	}
 	return &ExternalConversationIngressResult{Response: result, Received: received}, nil
+}
+
+// NormalizeExternalConversationPublicIngress resolves the opaque host route
+// to its authoritative scope and endpoint before invoking Skill-owned
+// verification. No provider-controlled tenant or endpoint input is trusted.
+func (s *ExternalConversationTransportService) NormalizeExternalConversationPublicIngress(
+	ctx context.Context,
+	request ExternalConversationPublicIngressRequest,
+	host ExternalConversationIngressAdapterHost,
+) (*ExternalConversationIngressResult, error) {
+	if s == nil || s.store == nil || host == nil {
+		return nil, errors.New("external conversation ingress is not configured")
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	endpoint, err := s.store.GetExternalConversationEndpointByIngressRoute(ctx, strings.TrimSpace(request.Route))
+	if err != nil {
+		return nil, err
+	}
+	if endpoint == nil {
+		return nil, ErrExternalConversationEndpointNotFound
+	}
+	return s.NormalizeExternalConversationIngress(ctx, ExternalConversationIngressRequest{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: request.Method,
+		Headers: request.Headers, Body: request.Body,
+	}, host)
 }

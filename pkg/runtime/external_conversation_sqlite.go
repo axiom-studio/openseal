@@ -7,12 +7,15 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func migrateExternalConversations(db *sql.DB) error {
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS external_conversation_endpoints (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
+			ingress_route TEXT NOT NULL,
 			owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, provider TEXT NOT NULL,
 			status TEXT NOT NULL, revision INTEGER NOT NULL, updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, id)
@@ -70,8 +73,83 @@ func migrateExternalConversations(db *sql.DB) error {
 			ON external_conversation_deliveries(scope_kind, scope_id, status, available_at, lease_expires_at, created_at);
 		CREATE INDEX IF NOT EXISTS idx_external_conversation_deliveries_conversation
 			ON external_conversation_deliveries(scope_kind, scope_id, endpoint_id, conversation_id, created_at DESC);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+	return migrateExternalConversationIngressRoutesSQLite(db)
+}
+
+func migrateExternalConversationIngressRoutesSQLite(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(external_conversation_endpoints)`)
+	if err != nil {
+		return err
+	}
+	hasRoute := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, kind string
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		hasRoute = hasRoute || name == "ingress_route"
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !hasRoute {
+		if _, err := db.Exec(`ALTER TABLE external_conversation_endpoints ADD COLUMN ingress_route TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	existing, err := db.Query(`SELECT scope_kind,scope_id,id,payload FROM external_conversation_endpoints WHERE ingress_route=''`)
+	if err != nil {
+		return err
+	}
+	type backfill struct{ scopeKind, scopeID, id, route, payload string }
+	updates := make([]backfill, 0)
+	for existing.Next() {
+		var item backfill
+		if err := existing.Scan(&item.scopeKind, &item.scopeID, &item.id, &item.payload); err != nil {
+			existing.Close()
+			return err
+		}
+		var endpoint ExternalConversationEndpoint
+		if err := json.Unmarshal([]byte(item.payload), &endpoint); err != nil {
+			existing.Close()
+			return err
+		}
+		item.route = uuid.NewString()
+		endpoint.IngressRoute = item.route
+		encoded, err := json.Marshal(&endpoint)
+		if err != nil {
+			existing.Close()
+			return err
+		}
+		item.payload = string(encoded)
+		updates = append(updates, item)
+	}
+	if err := existing.Close(); err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, item := range updates {
+		if _, err := tx.Exec(`UPDATE external_conversation_endpoints SET ingress_route=?,payload=?
+			WHERE scope_kind=? AND scope_id=? AND id=? AND ingress_route=''`,
+			item.route, item.payload, item.scopeKind, item.scopeID, item.id); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_external_conversation_endpoints_ingress_route
+		ON external_conversation_endpoints(ingress_route)`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) CreateExternalConversationEndpoint(ctx context.Context, endpoint *ExternalConversationEndpoint) error {
@@ -83,14 +161,24 @@ func (s *SQLiteStore) CreateExternalConversationEndpoint(ctx context.Context, en
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO external_conversation_endpoints
-		(scope_kind,scope_id,id,owner_type,owner_id,provider,status,revision,updated_at,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.Owner.Type, endpoint.Owner.ID,
-		endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload))
+		(scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
+		endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
+		endpoint.Revision, endpoint.UpdatedAt, string(payload))
 	if sqliteUniqueViolation(err) {
 		return ErrExternalConversationConflict
 	}
 	return err
+}
+
+func (s *SQLiteStore) GetExternalConversationEndpointByIngressRoute(ctx context.Context, route string) (*ExternalConversationEndpoint, error) {
+	route = strings.TrimSpace(route)
+	if !validOpaqueIdentifier(route, 128) {
+		return nil, ErrInvalidExternalConversation
+	}
+	return scanSQLiteExternalConversationEndpoint(s.db.QueryRowContext(ctx,
+		`SELECT payload FROM external_conversation_endpoints WHERE ingress_route=?`, route))
 }
 
 func (s *SQLiteStore) GetExternalConversationEndpoint(ctx context.Context, scope Scope, id string) (*ExternalConversationEndpoint, error) {
@@ -150,9 +238,9 @@ func (s *SQLiteStore) UpdateExternalConversationEndpoint(ctx context.Context, en
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE external_conversation_endpoints
 		SET status=?,revision=?,updated_at=?,payload=?
-		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
+		WHERE scope_kind=? AND scope_id=? AND id=? AND ingress_route=? AND revision=?`,
 		endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
-		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, expectedRevision)
+		endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute, expectedRevision)
 	if err != nil {
 		return err
 	}
