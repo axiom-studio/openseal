@@ -856,6 +856,30 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 	return nil
 }
 
+// ValidateBindingConfiguration validates host-owned, non-secret binding
+// configuration against the same local-only JSON Schema contract used when a
+// durable Skill binding is written. Callers may use this during authoring
+// placement without constructing or persisting a binding.
+func ValidateBindingConfiguration(schemaValue map[string]interface{}, config map[string]interface{}) error {
+	if schemaValue == nil {
+		if len(config) != 0 {
+			return errors.New("binding config is not declared by the skill")
+		}
+		return nil
+	}
+	schema, err := compileSchema("binding-config.json", schemaValue)
+	if err != nil {
+		return fmt.Errorf("compile binding config schema: %w", err)
+	}
+	if config == nil {
+		config = map[string]interface{}{}
+	}
+	if err := schema.validate(config); err != nil {
+		return fmt.Errorf("binding config is invalid: %w", err)
+	}
+	return nil
+}
+
 func validateCredentialRequirements(requirements []CredentialRequirement) error {
 	seen := make(map[string]bool, len(requirements))
 	for _, requirement := range requirements {

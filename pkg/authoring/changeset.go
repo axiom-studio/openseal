@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	skillcontract "github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/google/uuid"
 )
@@ -449,7 +450,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	if len(materializationIssues) == 0 {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
 	}
-	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
+	result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, request.Catalog, request.Placement)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
@@ -661,7 +662,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	if len(materializationIssues) == 0 {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
 	}
-	result.MissingRequirements = missingRequirements(&result.Candidate, changeSet.Catalog)
+	result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, changeSet.Catalog, changeSet.Placement)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
@@ -1130,6 +1131,7 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	now := s.now().UTC()
 	next := cloneChangeSet(current)
 	next.Placement = clonePlacement(request.Placement)
+	next.Result.MissingRequirements = placementAwareMissingRequirements(&next.Result.Candidate, next.Catalog, next.Placement)
 	// Readiness findings are derived from the exact placement. Clear the stale
 	// projection when placement changes; the next governed ready transition
 	// recomputes it against the newly selected immutable resources.
@@ -1407,6 +1409,52 @@ func validateApplyPlacement(value *ChangeSet) error {
 
 func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
 	return ownerType + ":" + definitionID + ":" + templateID
+}
+
+// placementAwareMissingRequirements keeps installation and semantic gaps from
+// compilation while resolving the lifecycle-only "needs binding" projection
+// once the host has selected every required non-secret configuration and
+// opaque credential reference. Exact schema and authority validation still
+// runs at the governed ready transition.
+func placementAwareMissingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalog, placement ChangeSetPlacement) []MissingRequirement {
+	requirements := missingRequirements(candidate, catalog)
+	resolved := make([]MissingRequirement, 0, len(requirements))
+	for _, requirement := range requirements {
+		if requirement.Kind != "skill_binding" || !skillBindingPlacementPresent(requirement, catalog, placement) {
+			resolved = append(resolved, requirement)
+		}
+	}
+	return resolved
+}
+
+func skillBindingPlacementPresent(requirement MissingRequirement, catalog CapabilityCatalog, placement ChangeSetPlacement) bool {
+	skill, exists := catalog.Skills[requirement.ID]
+	if !exists {
+		return false
+	}
+	agentID := strings.TrimPrefix(requirement.RequiredBy, "agent:")
+	if agentID == requirement.RequiredBy || strings.TrimSpace(agentID) == "" {
+		return false
+	}
+	hasPlacementGap := false
+	if skill.BindingConfigSchema != nil {
+		hasPlacementGap = true
+		config := placement.BindingConfigs[agentID][requirement.ID]
+		if err := skillcontract.ValidateBindingConfiguration(skill.BindingConfigSchema, config); err != nil {
+			return false
+		}
+	}
+	if len(skill.CredentialKinds) > 0 {
+		hasPlacementGap = true
+		references := placement.CredentialReferences[agentID]
+		for _, kind := range skill.CredentialKinds {
+			reference := references[kind]
+			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+				return false
+			}
+		}
+	}
+	return hasPlacementGap
 }
 
 func canonicalIdentity(scope capability.ScopeReference, id string) string {
