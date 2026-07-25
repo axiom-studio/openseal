@@ -33,8 +33,6 @@ definition:
       inboundEventTypes: [conversation.message.received]
       features: [mentions, threads]
       credentials:
-        - name: SLACK_SIGNING_SECRET
-          kind: slack-signing-secret
         - name: SLACK_CONNECTION
           kind: slack-oauth
           oauth2:
@@ -47,6 +45,8 @@ definition:
               - groups:history
               - im:history
               - mpim:history
+        - name: SLACK_SIGNING_SECRET
+          kind: slack-signing-secret
       delivery:
         operations: [message.send]
         ordering: thread
