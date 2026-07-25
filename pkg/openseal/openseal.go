@@ -1191,6 +1191,7 @@ var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversat
 var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
+var OAuthSessionIDFromState = kerneloauth.SessionIDFromState
 
 var (
 	ErrOAuthInvalid            = kerneloauth.ErrInvalid

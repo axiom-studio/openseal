@@ -198,10 +198,15 @@ func (s *Service) BeginAuthorization(ctx context.Context, request BeginAuthoriza
 	if provider == nil {
 		return nil, fmt.Errorf("%w: OAuth provider %s is not registered", ErrInvalid, requirement.Provider)
 	}
-	state, err := s.random(stateBytes)
+	sessionID := s.newID()
+	if !validIdentifier(sessionID, 512) {
+		return nil, fmt.Errorf("%w: generated OAuth session identity is invalid", ErrInvalid)
+	}
+	stateNonce, err := s.random(stateBytes)
 	if err != nil {
 		return nil, err
 	}
+	state := sessionID + "." + stateNonce
 	verifier, err := s.random(pkceVerifierBytes)
 	if err != nil {
 		return nil, err
@@ -213,7 +218,7 @@ func (s *Service) BeginAuthorization(ctx context.Context, request BeginAuthoriza
 		return nil, fmt.Errorf("store OAuth PKCE verifier: %w", err)
 	}
 	session := &AuthorizationSession{
-		APIVersion: APIVersion, Scope: request.Scope, ID: s.newID(),
+		APIVersion: APIVersion, Scope: request.Scope, ID: sessionID,
 		ConnectionID: strings.TrimSpace(request.ConnectionID), Kind: strings.TrimSpace(request.Kind),
 		Owner: request.Owner, Requirement: *requirement, RedirectURI: strings.TrimSpace(request.RedirectURI),
 		ResumeReference: strings.TrimSpace(request.ResumeReference), Status: SessionPending,
@@ -383,6 +388,22 @@ func subtleDigestMismatch(expectedDigest, value string) bool {
 func pkceChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// SessionIDFromState extracts the non-secret durable routing identity from an
+// OAuth callback state value. The complete state remains high entropy, hashed
+// at rest, tenant-bound, expiring, and single-use.
+func SessionIDFromState(state string) (string, error) {
+	state = strings.TrimSpace(state)
+	separator := strings.IndexByte(state, '.')
+	if separator <= 0 || separator == len(state)-1 {
+		return "", ErrStateMismatch
+	}
+	sessionID, nonce := state[:separator], state[separator+1:]
+	if !validIdentifier(sessionID, 512) || len(nonce) < 32 {
+		return "", ErrStateMismatch
+	}
+	return sessionID, nil
 }
 
 func validOwner(owner Owner) bool {
