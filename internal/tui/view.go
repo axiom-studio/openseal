@@ -1841,9 +1841,31 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 			if !binding.Disabled && m.supportsSkillBinding(kernelapi.OperationDisable) {
 				keys = append(keys, "x disable")
 			}
+			if !binding.Disabled && m.supportsSkillBinding(kernelapi.OperationPlanUpgrade) {
+				keys = append(keys, "g review update")
+			}
 			if len(keys) > 0 {
 				lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(keys, "  ·  ")))
 			}
+		}
+	}
+	if plan := m.skillBindingUpgradePlan; plan != nil {
+		lines = append(lines, "",
+			headerStyle.Render(fmt.Sprintf("Reviewed update · %s@%s → %s@%s", plan.From.ID, plan.From.Version, plan.To.ID, plan.To.Version)),
+			mutedStyle.Render(fmt.Sprintf("%d Objective(s) · %d Initiative(s) · historical Runs stay unchanged", len(plan.Objectives), len(plan.Initiatives))),
+		)
+		if plan.TeamAuthority != nil {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Team authority · definition %s@%s · roles %s",
+				plan.TeamAuthority.DefinitionID, plan.TeamAuthority.DefinitionVersion, strings.Join(plan.TeamAuthority.AuthorizedRoleIDs, ", "))))
+		}
+		for _, finding := range plan.Findings {
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("• "+finding.Message))
+		}
+		if plan.ApprovalRequired {
+			lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render("Explicit approval is required because this update widens authority."))
+		}
+		if m.supportsSkillBinding(kernelapi.OperationApplyUpgrade) {
+			lines = append(lines, mutedStyle.Render("Review the impact above, then record the reason and press Ctrl+S to apply every reference together."))
 		}
 	}
 	lines = append(lines, "", mutedStyle.Render("Installed packages"))

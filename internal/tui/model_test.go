@@ -129,6 +129,9 @@ type fakeKernelClient struct {
 	skillBindings        []*capability.Binding
 	skillBindingUpserts  []skill.UpsertBindingRequest
 	skillBindingDisables []skill.DisableBindingRequest
+	skillUpgradePlans    []runtime.PlanSkillReferenceUpgradeRequest
+	skillUpgradeApplies  []runtime.ApplySkillReferenceUpgradeRequest
+	skillUpgradePlan     *runtime.SkillReferenceUpgradePlan
 	skillBindingError    error
 }
 
@@ -181,6 +184,38 @@ func (f *fakeKernelClient) DisableSkillBinding(_ context.Context, _ client.Skill
 	value.Disabled = true
 	value.Revision++
 	return &kernelapi.SkillBindingMutationResult{Binding: &value}, nil
+}
+func (f *fakeKernelClient) PlanSkillReferenceUpgrade(_ context.Context, _ client.SkillBindingOwner, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
+	f.skillUpgradePlans = append(f.skillUpgradePlans, request)
+	if f.skillBindingError != nil {
+		return nil, f.skillBindingError
+	}
+	if f.skillUpgradePlan != nil {
+		return f.skillUpgradePlan, nil
+	}
+	return &runtime.SkillReferenceUpgradePlan{
+		APIVersion: runtime.SkillReferenceUpgradeAPIVersion, Scope: request.Scope, DeploymentID: request.DeploymentID,
+		BindingID: request.BindingID, ExpectedBindingRevision: 1,
+		From:   runtime.SkillReferenceIdentity{ID: "reader", Version: "1"},
+		To:     runtime.SkillReferenceIdentity{ID: "reader", Version: request.ToVersion, SourceIdentity: request.ToSourceIdentity},
+		Digest: "sha256:reviewed",
+	}, nil
+}
+func (f *fakeKernelClient) ApplySkillReferenceUpgrade(_ context.Context, _ client.SkillBindingOwner, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+	f.skillUpgradeApplies = append(f.skillUpgradeApplies, request)
+	if f.skillBindingError != nil {
+		return nil, f.skillBindingError
+	}
+	value := *f.skillBindings[0]
+	value.SkillVersion = request.Plan.To.Version
+	value.SourceIdentity = request.Plan.To.SourceIdentity
+	value.Revision++
+	f.skillBindings = []*capability.Binding{&value}
+	return &runtime.SkillReferenceUpgradeReceipt{
+		APIVersion: runtime.SkillReferenceUpgradeAPIVersion, PlanDigest: request.Plan.Digest,
+		Scope: request.Plan.Scope, DeploymentID: request.Plan.DeploymentID, BindingID: request.Plan.BindingID,
+		BindingRevision: value.Revision, From: request.Plan.From, To: request.Plan.To, Actor: request.Actor, Reason: request.Reason,
+	}, nil
 }
 
 func (f *fakeKernelClient) RouteEvent(_ context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
@@ -4188,6 +4223,63 @@ func TestSkillBindingTUIUsesCASForAgentAndRecoversFromConflict(t *testing.T) {
 	_, followup := model.Update(message)
 	if followup == nil || !strings.Contains(model.status, "changed elsewhere") || model.editor.Value() == "" {
 		t.Fatalf("conflict recovery status=%q draft=%q", model.status, model.editor.Value())
+	}
+}
+
+func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	existing := &capability.Binding{
+		ID: "research", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research-team",
+		SkillID: "source", SkillVersion: "1", SourceIdentity: "registry:source", AllowedActions: []string{"search"},
+		MaximumRisk: capability.RiskLevelRead, Revision: 4,
+	}
+	plan := &runtime.SkillReferenceUpgradePlan{
+		APIVersion: runtime.SkillReferenceUpgradeAPIVersion, Scope: scope, DeploymentID: "research-team", BindingID: existing.ID,
+		ExpectedBindingRevision: existing.Revision,
+		From:                    runtime.SkillReferenceIdentity{ID: "source", Version: "1", SourceIdentity: "registry:source"},
+		To:                      runtime.SkillReferenceIdentity{ID: "source", Version: "2", SourceIdentity: "registry:source"},
+		Objectives:              []runtime.SkillReferenceObjectiveImpact{{ID: "monitor-hourly", ExpectedRevision: 3}},
+		Initiatives:             []runtime.SkillReferenceInitiativeImpact{{ID: "market-research", ExpectedRevision: 5, MonitorIDs: []string{"forums"}}},
+		TeamAuthority: &runtime.SkillReferenceTeamAuthorityImpact{
+			DeploymentID: "research-team", ExpectedRevision: 2, DefinitionID: "research", DefinitionVersion: "4", AuthorizedRoleIDs: []string{"analyst"},
+		},
+		Findings:         []runtime.SkillReferenceUpgradeFinding{{Code: "action_added", Message: "Target exposes one additional governed action."}},
+		ApprovalRequired: true, Digest: "sha256:reviewed",
+	}
+	fake := &fakeKernelClient{skillBindings: []*capability.Binding{existing}, skillUpgradePlan: plan}
+	config := DefaultConfig()
+	config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research-team"}
+	config.PollInterval = -1
+	model, err := NewModel(context.Background(), fake, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.width, model.height = 120, 36
+	model.ready = true
+	model.section = sectionSkills
+	model.skillBindingCapability = kernelapi.SkillBindingsCapability(true)
+	model.skillBindings = fake.skillBindings
+	model.restoreSkillBindingSelection()
+
+	model.prepareSkillBindingUpgradeComposer()
+	model.editor.SetValue("version: 2\nsource: registry:source")
+	applyCommand(t, model, model.submitSkillBindingUpgradePlan())
+	view := model.renderClawHubSkillsContent(120)
+	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "1 Initiative(s)", "historical Runs stay unchanged", "roles analyst", "additional governed action", "Explicit approval"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("upgrade review missing %q:\n%s", expected, view)
+		}
+	}
+	if len(fake.skillUpgradePlans) != 1 || fake.skillUpgradePlans[0].BindingID != existing.ID || model.mode != modeSkillBindingUpgradeApply {
+		t.Fatalf("plans=%#v mode=%v", fake.skillUpgradePlans, model.mode)
+	}
+
+	model.editor.SetValue("reason: reviewed dependent monitoring work\napproval: approved bounded action expansion")
+	applyCommand(t, model, model.submitSkillBindingUpgradeApply())
+	if len(fake.skillUpgradeApplies) != 1 || fake.skillUpgradeApplies[0].Approval == nil ||
+		fake.skillUpgradeApplies[0].Approval.Reason != "approved bounded action expansion" ||
+		model.skillBindingUpgradePlan != nil || !strings.Contains(model.status, "Skill updated to source@2") {
+		t.Fatalf("applies=%#v plan=%#v status=%q", fake.skillUpgradeApplies, model.skillBindingUpgradePlan, model.status)
 	}
 }
 

@@ -712,6 +712,12 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := skillCatalog.Register(ctx, &skill.Definition{
+		ID: "reader", Version: "2", Name: "Reader", Transport: capability.TransportReference{Kind: "local"},
+		Actions: map[string]capability.Action{"read": {Name: "read", Description: "Read current data", Risk: capability.RiskLevelRead, SideEffect: capability.SideEffectRead, Idempotency: capability.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	agentOwner := SkillBindingOwner{Type: runtime.OwnerTypeAgent, DeploymentID: agentDeployment.ID}
 	agentBinding, err := client.UpsertSkillBinding(ctx, agentOwner, skill.UpsertBindingRequest{
 		Binding: &skill.Binding{ID: "reader", Scope: scope, DeploymentID: agentDeployment.ID, SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
@@ -723,6 +729,18 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	agentBindings, err := client.ListSkillBindings(ctx, scope, agentOwner)
 	if err != nil || len(agentBindings.Items) != 1 {
 		t.Fatalf("listed Agent Skill bindings = %#v, err = %v", agentBindings, err)
+	}
+	agentUpgradePlan, err := client.PlanSkillReferenceUpgrade(ctx, agentOwner, runtime.PlanSkillReferenceUpgradeRequest{
+		Scope: runtime.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: agentDeployment.ID, BindingID: "reader", ToVersion: "2",
+	})
+	if err != nil || agentUpgradePlan.To.Version != "2" || agentUpgradePlan.ExpectedBindingRevision != 1 {
+		t.Fatalf("Agent Skill upgrade plan = %#v, err = %v", agentUpgradePlan, err)
+	}
+	agentUpgrade, err := client.ApplySkillReferenceUpgrade(ctx, agentOwner, runtime.ApplySkillReferenceUpgradeRequest{
+		Plan: agentUpgradePlan, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "reviewed exact Reader upgrade",
+	})
+	if err != nil || agentUpgrade.BindingRevision != 2 || agentUpgrade.To.Version != "2" || agentUpgrade.Actor.ID != "operator" {
+		t.Fatalf("Agent Skill upgrade = %#v, err = %v", agentUpgrade, err)
 	}
 	teamBinding, err := client.UpsertTeamSkillBinding(ctx, created.Deployment.ID, skill.UpsertBindingRequest{
 		Binding: &skill.Binding{ID: "reader", Scope: scope, DeploymentID: created.Deployment.ID, SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
