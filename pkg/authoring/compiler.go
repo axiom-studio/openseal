@@ -139,6 +139,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 		applyActivationCommitment(&generated.Candidate, commitments)
+		deferInactiveCredentialRefinements(&generated)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
 		validation = append(validation, materializationIssues...)
 		validation = append(validation, scheduleIntentIssues...)
@@ -231,6 +232,27 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+// deferInactiveCredentialRefinements keeps creation and activation as separate
+// governed boundaries. An explicitly inactive workforce cannot execute a
+// credentialed Skill, so selecting an execution credential is setup for the
+// later activation ChangeSet rather than information required to create the
+// inert resources. PrepareActivation recomputes the exact named credential
+// slots from the then-current catalog and fails closed until they are placed.
+func deferInactiveCredentialRefinements(generated *GenerationResponse) {
+	if generated == nil || generated.Candidate.Activation != WorkforceActivationInactive {
+		return
+	}
+	filtered := generated.UnresolvedQuestions[:0]
+	for _, question := range generated.UnresolvedQuestions {
+		if question.Category == RefinementCategoryCredential ||
+			question.Answer.Kind == RefinementAnswerCredentialReference {
+			continue
+		}
+		filtered = append(filtered, question)
+	}
+	generated.UnresolvedQuestions = filtered
 }
 
 // materializeDefaultAgentSkillAuthority gives an omitted allowlist the only
@@ -1261,7 +1283,7 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				key := kind + ":" + requirement.SkillID + ":" + definition.ID
 				missing[key] = MissingRequirement{Kind: kind, ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
 			}
-			if capability.Readiness == SkillReadinessNeedsBinding {
+			if candidate.Activation != WorkforceActivationInactive && capability.Readiness == SkillReadinessNeedsBinding {
 				key := "skill_binding:" + requirement.SkillID + ":" + definition.ID
 				missing[key] = MissingRequirement{Kind: "skill_binding", ID: requirement.SkillID, RequiredBy: "agent:" + definition.ID}
 			}
@@ -1276,10 +1298,12 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 					missing[key] = MissingRequirement{Kind: "action", ID: requirement.SkillID + "/" + action, RequiredBy: "agent:" + definition.ID}
 				}
 			}
-			for _, binding := range requiredSkillCredentialBindings(capability, requirement.RequiredActions) {
-				if !catalog.AvailableCredentials[binding.Key] {
-					key := "credential:" + binding.Key + ":" + definition.ID
-					missing[key] = MissingRequirement{Kind: "credential", ID: binding.Key, RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID}
+			if candidate.Activation != WorkforceActivationInactive {
+				for _, binding := range requiredSkillCredentialBindings(capability, requirement.RequiredActions) {
+					if !catalog.AvailableCredentials[binding.Key] {
+						key := "credential:" + binding.Key + ":" + definition.ID
+						missing[key] = MissingRequirement{Kind: "credential", ID: binding.Key, RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID}
+					}
 				}
 			}
 		}

@@ -209,16 +209,29 @@ func TestValidateCredentialPlacementRequiresExactSkillBindingChoice(t *testing.T
 	}
 }
 
-func TestRequiredCredentialsIncludesRuntimeBindingOnlyForActiveCandidates(t *testing.T) {
-	catalog := CapabilityCatalog{AgentCredentialRequirements: []AgentCredentialRequirement{{
-		BindingKey: agent.ModelProviderCredentialBinding, DisplayName: "Model provider",
-		Prompt: "Choose the model provider this Agent should use.", RequiredForActivation: true,
-	}}}
+func TestRequiredCredentialsIncludesRuntimeAndSkillBindingsOnlyForActiveCandidates(t *testing.T) {
+	catalog := CapabilityCatalog{
+		AgentCredentialRequirements: []AgentCredentialRequirement{{
+			BindingKey: agent.ModelProviderCredentialBinding, DisplayName: "Model provider",
+			Prompt: "Choose the model provider this Agent should use.", RequiredForActivation: true,
+		}},
+		Skills: map[string]SkillCapability{"posture": {
+			ID: "posture", Actions: []string{"execute"},
+			Credentials: []SkillCredential{{
+				Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"execute"},
+			}},
+		}},
+	}
 	active := WorkforceCandidate{
-		Agents:     []*agent.AgentDefinition{{ID: "operator"}},
+		Agents: []*agent.AgentDefinition{{
+			ID: "operator", SkillRequirements: []agent.SkillRequirement{{
+				SkillID: "posture", RequiredActions: []string{"execute"},
+			}},
+		}},
 		Activation: WorkforceActivationActive,
 	}
-	if values := requiredCredentials(active, catalog)["operator"]; len(values) != 1 || values[0] != agent.ModelProviderCredentialBinding {
+	if values := requiredCredentials(active, catalog)["operator"]; len(values) != 2 ||
+		values[0] != agent.ModelProviderCredentialBinding || values[1] != "TOOLWEB_API_KEY" {
 		t.Fatalf("active required credentials = %#v", values)
 	}
 	active.Activation = WorkforceActivationInactive
