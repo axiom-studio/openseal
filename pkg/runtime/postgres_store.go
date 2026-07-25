@@ -378,6 +378,14 @@ type postgresMigrationQuerier interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
+func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query postgresMigrationQuerier, version int64) (bool, error) {
+	var applied bool
+	err := query.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = $1
+	)`, version).Scan(&applied)
+	return applied, err
+}
+
 // postgresSchemaCurrent verifies the complete contiguous migration ledger
 // while the caller holds migration leadership. A highest-version-only check
 // could hide a partially restored or manually damaged ledger.

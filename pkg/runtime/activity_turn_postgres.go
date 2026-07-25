@@ -165,6 +165,17 @@ func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx)
 }
 
 func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) error {
+	activityProjectionApplied, err := s.postgresMigrationApplied(ctx, tx, 6)
+	if err != nil {
+		return err
+	}
+	initiativeProjectionApplied, err := s.postgresMigrationApplied(ctx, tx, 23)
+	if err != nil {
+		return err
+	}
+	if activityProjectionApplied && initiativeProjectionApplied {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE `+s.table("run_activity")+`
 		ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT '',
 		ADD COLUMN IF NOT EXISTS objective_id TEXT NOT NULL DEFAULT '',
@@ -197,7 +208,7 @@ func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) err
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (6, 'indexed activity projections') ON CONFLICT (version) DO NOTHING`); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (23, 'indexed initiative activity projections') ON CONFLICT (version) DO NOTHING`)
+	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (23, 'indexed initiative activity projections') ON CONFLICT (version) DO NOTHING`)
 	return err
 }
 
