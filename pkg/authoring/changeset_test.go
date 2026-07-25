@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
@@ -539,6 +540,47 @@ func TestEffectiveChangeSetActivationIntentMigratesTypedCommitmentWithoutPromptP
 	legacy.Result.Candidate.Activation = WorkforceActivationActive
 	if _, err := EffectiveChangeSetActivationIntent(legacy); err == nil {
 		t.Fatal("conflicting candidate and commitment activation was accepted")
+	}
+}
+
+func TestPlacementAwareMissingRequirementsResolvesConfiguredSkillBinding(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "tenant/one/operator",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "openseal.kubernetes",
+		}},
+	}}}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"openseal.kubernetes": {
+			ID:        "openseal.kubernetes",
+			Readiness: SkillReadinessNeedsBinding,
+			BindingConfigSchema: map[string]interface{}{
+				"type":     "object",
+				"required": []interface{}{"clusterId"},
+				"properties": map[string]interface{}{
+					"clusterId": map[string]interface{}{"type": "integer", "minimum": 1},
+				},
+			},
+		},
+	}}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, ChangeSetPlacement{}); len(missing) != 1 || missing[0].Kind != "skill_binding" {
+		t.Fatalf("unconfigured missing requirements = %#v", missing)
+	}
+	invalidPlacement := ChangeSetPlacement{BindingConfigs: map[string]map[string]map[string]interface{}{
+		"tenant/one/operator": {
+			"openseal.kubernetes": {"clusterId": 0},
+		},
+	}}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, invalidPlacement); len(missing) != 1 || missing[0].Kind != "skill_binding" {
+		t.Fatalf("invalid configuration resolved requirements = %#v", missing)
+	}
+	placement := ChangeSetPlacement{BindingConfigs: map[string]map[string]map[string]interface{}{
+		"tenant/one/operator": {
+			"openseal.kubernetes": {"clusterId": 1},
+		},
+	}}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 0 {
+		t.Fatalf("configured missing requirements = %#v", missing)
 	}
 }
 
