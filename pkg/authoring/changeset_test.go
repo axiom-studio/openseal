@@ -133,6 +133,83 @@ func TestPreparedCatalogRefreshIsCASBoundAndAuditable(t *testing.T) {
 	}
 }
 
+func TestPreparedCatalogRefreshRetainsExactAnsweredDiscoveredSkill(t *testing.T) {
+	question := RefinementQuestion{
+		ID: CapabilityNeedQuestionID("kubernetes-audit"), Category: RefinementCategorySkill,
+		Prompt: "Which verified Skill should audit Kubernetes RBAC?", WhyNeeded: "The audit needs one exact capability.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer: RefinementAnswerSchema{
+			Kind: RefinementAnswerSkillSelection, Minimum: 1, Maximum: 1,
+			Options: []RefinementQuestionOption{{ID: "openseal.kubernetes", Label: "Kubernetes operations"}},
+		},
+		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	initialPayload, err := json.Marshal(GenerationResponse{
+		Candidate: marketingCandidate("1", capability.RiskLevelRead), UnresolvedQuestions: []RefinementQuestion{question},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{initialPayload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	changeSet, _, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope: scope, Prompt: "Audit Kubernetes RBAC",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.kubernetes": {
+				ID: "openseal.kubernetes", Version: "1.1.0", Readiness: SkillReadinessReady,
+			},
+		}},
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-exact-skill-refresh",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovered := SkillSearchCandidate{
+		SkillCapability: SkillCapability{
+			ID: "auditing-k8s-rbac", Version: "1.0.0", SourceIdentity: "https://clawhub.ai::auditing-k8s-rbac",
+			Name: "Kubernetes RBAC audit", PromptAvailable: true, Readiness: SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "installation", Compatible: true, Evidence: "Verified compilation receipt.",
+				Reference: "listing:13946960",
+			}},
+		},
+		Origin: SkillSearchOriginCatalog, Verification: SkillSearchVerificationVerified,
+		Provenance: SkillSearchProvenance{
+			Registry: "https://clawhub.ai", Reference: "listing:13946960",
+		},
+	}
+	answered, _, err := service.AnswerRefinement(context.Background(), AnswerChangeSetRefinementRequest{
+		Scope: scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, QuestionID: question.ID,
+		Value: RefinementAnswerValue{SkillIDs: []string{discovered.ID}}, TrustedSkill: &discovered,
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "choose-exact-discovered-skill",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedCatalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"openseal.kubernetes": {
+			ID: "openseal.kubernetes", Version: "1.1.0", Readiness: SkillReadinessReady,
+		},
+	}}
+	refreshed, err := service.RefreshPreparedCatalog(
+		context.Background(), scope, changeSet.ID, answered.Revision, refreshedCatalog,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for surface, skill := range map[string]SkillCapability{
+		"change set":         refreshed.Catalog.Skills[discovered.ID],
+		"generation request": refreshed.Generation.Request.Catalog.Skills[discovered.ID],
+	} {
+		if skill.ID != discovered.ID || skill.Version != discovered.Version ||
+			skill.SourceIdentity != discovered.SourceIdentity || skill.Readiness != SkillReadinessNeedsInstallation {
+			t.Fatalf("%s exact selected Skill = %#v", surface, skill)
+		}
+	}
+}
+
 func TestPreparedCatalogFailureTerminatesGenerationIntent(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()
