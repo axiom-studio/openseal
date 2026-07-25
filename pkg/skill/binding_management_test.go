@@ -105,6 +105,41 @@ func TestCanonicalBindingManagementPersistsLifecycleAcrossCatalogRestart(t *test
 	}
 }
 
+func TestCanonicalBindingManagementCanInspectAndRepairLegacyEmptyAuthority(t *testing.T) {
+	ctx := context.Background()
+	store := newBindingManagementStore()
+	catalog := NewCatalogWithStore(store)
+	definition := testSkillDefinition()
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := ScopeReference{Kind: "tenant", ID: "one"}
+	invalid := &Binding{
+		ID: "legacy-empty", Scope: scope, DeploymentID: "release-agent", SkillID: definition.ID,
+		SkillVersion: definition.Version, MaximumRisk: RiskLevelProduction, Disabled: true, Revision: 1,
+	}
+	store.bindings[bindingKey(scope, invalid.DeploymentID, invalid.ID)] = cloneBinding(invalid)
+
+	listed, err := catalog.ListBindings(ctx, scope, invalid.DeploymentID)
+	if err != nil || len(listed) != 1 || listed[0].ID != invalid.ID {
+		t.Fatalf("inspect legacy binding = %#v, %v", listed, err)
+	}
+	if _, err := catalog.ListModelActions(ctx, scope, invalid.DeploymentID); !errors.Is(err, ErrBindingInvalid) {
+		t.Fatalf("legacy binding resolved as runtime authority: %v", err)
+	}
+	repaired, err := catalog.UpsertBinding(ctx, UpsertBindingRequest{
+		Binding: &Binding{
+			ID: invalid.ID, Scope: scope, DeploymentID: invalid.DeploymentID, SkillID: definition.ID,
+			SkillVersion: definition.Version, AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
+			Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "credential://tenant/one/git"}},
+		},
+		ExpectedRevision: 1, Actor: BindingActor{Type: "user", ID: "admin"}, Reason: "repair legacy empty authority",
+	})
+	if err != nil || repaired.Revision != 2 || repaired.Disabled || len(repaired.AllowedActions) != 1 {
+		t.Fatalf("repair legacy binding = %#v, %v", repaired, err)
+	}
+}
+
 func TestCanonicalBindingManagementSerializesConcurrentCAS(t *testing.T) {
 	ctx := context.Background()
 	catalog := NewCatalog()

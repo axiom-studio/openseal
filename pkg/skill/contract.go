@@ -298,7 +298,7 @@ func (c *Catalog) currentBindingWithoutDefinition(ctx context.Context, scope Sco
 	}
 	for _, candidate := range bindings {
 		if candidate != nil && candidate.ID == bindingID {
-			if err := validateBindingShape(candidate); err != nil {
+			if err := validateBindingManagementShape(candidate); err != nil {
 				return nil, fmt.Errorf("stored skill binding is invalid: %w", err)
 			}
 			return cloneBinding(candidate), nil
@@ -792,6 +792,19 @@ func validateDefinition(definition *Definition) error {
 }
 
 func validateBindingShape(binding *Binding) error {
+	if err := validateBindingManagementShape(binding); err != nil {
+		return err
+	}
+	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt) || !validRisk(binding.MaximumRisk) {
+		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions and set maximum risk", ErrBindingInvalid)
+	}
+	return nil
+}
+
+// validateBindingManagementShape permits an authority-invalid legacy binding
+// to remain inspectable and CAS-repairable without permitting it to resolve as
+// executable model authority.
+func validateBindingManagementShape(binding *Binding) error {
 	if binding == nil || strings.TrimSpace(binding.ID) == "" || strings.TrimSpace(binding.SkillID) == "" ||
 		strings.TrimSpace(binding.SkillVersion) == "" || binding.Revision < 1 {
 		return fmt.Errorf("%w: binding id, skill id, version, and revision are required", ErrBindingInvalid)
@@ -801,9 +814,6 @@ func validateBindingShape(binding *Binding) error {
 	}
 	if err := validateSourceIdentity(binding.SourceIdentity); err != nil {
 		return fmt.Errorf("%w: binding source identity is invalid: %v", ErrBindingInvalid, err)
-	}
-	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt) || !validRisk(binding.MaximumRisk) {
-		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions and set maximum risk", ErrBindingInvalid)
 	}
 	if err := validateNonSecretConfiguration(binding.Config, ""); err != nil {
 		return fmt.Errorf("%w: %v", ErrBindingInvalid, err)
