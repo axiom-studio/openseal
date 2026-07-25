@@ -33,8 +33,9 @@ func slackChatbotCandidate() WorkforceCandidate {
 				},
 				Interfaces: map[string]runbook.Interface{
 					"respond": {
-						Description: "Respond to one canonical conversation message.",
-						InputSchema: CanonicalConversationTriggerInputSchema(),
+						Description:  "Respond to one canonical conversation message.",
+						InputSchema:  CanonicalConversationTriggerInputSchema(),
+						OutputSchema: CanonicalConversationReplyOutputSchema(),
 					},
 				},
 				Triggers: map[string]runbook.Trigger{
@@ -61,7 +62,7 @@ func slackChatbotCandidate() WorkforceCandidate {
 					"done": {
 						Kind: runbook.StepEnd,
 						End: &runbook.EndStep{Outputs: map[string]runbook.Value{
-							"summary": {Ref: "/results/response/summary"},
+							"reply": {Ref: "/results/response/summary"},
 						}},
 					},
 				},
@@ -208,6 +209,13 @@ func TestReactiveConversationIntentRejectsProseOnlyAndDirectHandlerSubstitutes(t
 	})
 	if !hasValidationCode(issues, "conversation_trigger_input_contract_mismatch") {
 		t.Fatalf("trigger-contract issues = %#v", issues)
+	}
+
+	candidate = slackChatbotCandidate()
+	delete(candidate.Agents[0].Runbook.Steps["done"].End.Outputs, "reply")
+	issues = validateConversationEndpointBlueprints(&candidate)
+	if !hasValidationCode(issues, "conversation_canonical_reply_missing") {
+		t.Fatalf("canonical-reply issues = %#v", issues)
 	}
 }
 
