@@ -158,7 +158,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		return commitments, validation, missingRequirements(&generated.Candidate, request.Catalog)
 	}
 	commitments, validation, missing := validateGenerated()
-	repairableMissing := sourcePolicyProposalRepairableMissing(&generated.Candidate, missing, request.Catalog)
+	repairableMissing := providerRepairableMissingRequirements(&generated.Candidate, missing, request)
 	// Structural schema repair and deterministic contract repair have separate,
 	// bounded budgets. Every semantic repair is revalidated before it can replace
 	// the canonical result; a second bounded attempt receives the new diagnostic
@@ -192,7 +192,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 				materializationIssues = deferScheduleBlockedMaterializationIssues(materializationIssues)
 			}
 			commitments, validation, missing = validateGenerated()
-			repairableMissing = sourcePolicyProposalRepairableMissing(&generated.Candidate, missing, request.Catalog)
+			repairableMissing = providerRepairableMissingRequirements(&generated.Candidate, missing, request)
 			repairReason = deterministicContractError(validation, repairableMissing)
 		}
 	}
