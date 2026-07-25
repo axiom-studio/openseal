@@ -14,6 +14,7 @@ import (
 
 type ExternalConversationStore interface {
 	ExternalConversationEndpointStore
+	ExternalConversationGatewayStore
 	ExternalConversationTransportStore
 	ConversationStore
 }
