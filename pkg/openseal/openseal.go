@@ -1174,6 +1174,7 @@ type PostgresMigrationStats = runtime.PostgresMigrationStats
 const (
 	PostgresMigrationWaiting  = runtime.PostgresMigrationWaiting
 	PostgresMigrationAcquired = runtime.PostgresMigrationAcquired
+	PostgresMigrationCurrent  = runtime.PostgresMigrationCurrent
 	PostgresMigrationComplete = runtime.PostgresMigrationComplete
 	PostgresMigrationTimeout  = runtime.PostgresMigrationTimeout
 )
