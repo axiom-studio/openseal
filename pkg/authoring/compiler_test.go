@@ -95,6 +95,89 @@ func TestCompilerVerifiesPromptGeneratedWorkforceAndCapabilityGaps(t *testing.T)
 	}
 }
 
+func TestCompilerDefersExecutionCredentialSetupForExplicitlyInactiveAgent(t *testing.T) {
+	candidate := WorkforceCandidate{
+		Agents: []*agent.AgentDefinition{{
+			ID: "security-reviewer", Version: "1", DisplayName: "Security reviewer",
+			Purpose: "Review cluster security", SystemPrompt: "Review cluster security without acting until activated.",
+			SkillRequirements: []agent.SkillRequirement{{
+				SkillID: "posture", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"},
+			}},
+			Authority: agent.AuthorityPolicy{
+				MaximumRisk: capability.RiskLevelExternal, AllowedSkillIDs: []string{"posture"},
+				MaxConcurrentRuns: 1, RequireApprovalAt: capability.RiskLevelWrite,
+			},
+		}},
+		Activation: WorkforceActivationInactive,
+	}
+	credentialQuestion := RefinementQuestion{
+		ID: "credential-toolweb", Category: RefinementCategoryCredential,
+		Prompt: "Which authorized credential should be used?", WhyNeeded: "The Skill needs execution authority.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference},
+		Provenance: []RefinementQuestionProvenance{{
+			Kind: RefinementProvenanceCredential,
+		}},
+		Priority: 1,
+	}
+	payload, err := json.Marshal(GenerationResponse{
+		Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{credentialQuestion},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(staticGenerator{payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{"posture": {
+		ID: "posture", Version: "1.0.0", Actions: []string{"execute"},
+		Readiness: SkillReadinessNeedsBinding, MaximumRisk: capability.RiskLevelExternal,
+		Credentials: []SkillCredential{{
+			Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"execute"},
+		}},
+	}}}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create one security reviewer. Do not activate.", Catalog: catalog,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.UnresolvedQuestions) != 0 || len(result.MissingRequirements) != 0 ||
+		result.Candidate.Activation != WorkforceActivationInactive {
+		t.Fatalf("inactive credential setup was not deferred = %#v", result)
+	}
+
+	candidate.Activation = WorkforceActivationActive
+	activePayload, err := json.Marshal(GenerationResponse{
+		Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{credentialQuestion},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeCompiler, err := NewCompiler(staticGenerator{payload: activePayload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := activeCompiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create and activate one security reviewer.", Catalog: catalog,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.Valid || len(active.UnresolvedQuestions) != 1 {
+		t.Fatalf("active credential question was not preserved = %#v", active)
+	}
+	foundCredential, foundBinding := false, false
+	for _, missing := range active.MissingRequirements {
+		foundCredential = foundCredential || missing.Kind == "credential" && missing.ID == "TOOLWEB_API_KEY"
+		foundBinding = foundBinding || missing.Kind == "skill_binding" && missing.ID == "posture"
+	}
+	if !foundCredential || !foundBinding {
+		t.Fatalf("active execution setup requirements = %#v", active.MissingRequirements)
+	}
+}
+
 func TestCompilerAcceptsPromptAuthoredCallableRunbook(t *testing.T) {
 	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
 		ID: "release-agent", Version: "1", DisplayName: "Release Agent",

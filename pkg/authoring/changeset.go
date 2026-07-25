@@ -1973,13 +1973,15 @@ func requiredCredentials(candidate WorkforceCandidate, catalog CapabilityCatalog
 				}
 			}
 		}
-		for _, requirement := range definition.SkillRequirements {
-			for _, binding := range requiredSkillCredentialBindings(
-				catalog.Skills[requirement.SkillID],
-				requirement.RequiredActions,
-			) {
-				if binding.Key != "" {
-					seen[binding.Key] = true
+		if activationErr == nil && activation == WorkforceActivationActive {
+			for _, requirement := range definition.SkillRequirements {
+				for _, binding := range requiredSkillCredentialBindings(
+					catalog.Skills[requirement.SkillID],
+					requirement.RequiredActions,
+				) {
+					if binding.Key != "" {
+						seen[binding.Key] = true
+					}
 				}
 			}
 		}
