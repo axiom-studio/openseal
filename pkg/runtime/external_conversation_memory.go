@@ -15,10 +15,10 @@ func (s *MemoryStore) CreateExternalConversationEndpoint(_ context.Context, endp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := externalConversationEndpointKey(endpoint.Scope, endpoint.ID)
-	if _, exists := s.externalConversationEndpoints[key]; exists {
+	if _, exists := s.externalEndpoints[key]; exists {
 		return ErrExternalConversationConflict
 	}
-	s.externalConversationEndpoints[key] = cloneExternalConversationEndpoint(endpoint)
+	s.externalEndpoints[key] = cloneExternalConversationEndpoint(endpoint)
 	return nil
 }
 
@@ -28,7 +28,7 @@ func (s *MemoryStore) GetExternalConversationEndpoint(_ context.Context, scope S
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneExternalConversationEndpoint(s.externalConversationEndpoints[externalConversationEndpointKey(scope, strings.TrimSpace(id))]), nil
+	return cloneExternalConversationEndpoint(s.externalEndpoints[externalConversationEndpointKey(scope, strings.TrimSpace(id))]), nil
 }
 
 func (s *MemoryStore) ListExternalConversationEndpoints(_ context.Context, filter ExternalConversationEndpointFilter) ([]*ExternalConversationEndpoint, error) {
@@ -38,7 +38,7 @@ func (s *MemoryStore) ListExternalConversationEndpoints(_ context.Context, filte
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]*ExternalConversationEndpoint, 0)
-	for _, endpoint := range s.externalConversationEndpoints {
+	for _, endpoint := range s.externalEndpoints {
 		if endpoint.Scope != filter.Scope || (filter.Owner != nil && endpoint.Owner != *filter.Owner) ||
 			!externalConversationEndpointStatusMatches(endpoint.Status, filter.Statuses) {
 			continue
@@ -64,7 +64,7 @@ func (s *MemoryStore) UpdateExternalConversationEndpoint(_ context.Context, endp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := externalConversationEndpointKey(endpoint.Scope, endpoint.ID)
-	current := s.externalConversationEndpoints[key]
+	current := s.externalEndpoints[key]
 	if current == nil {
 		return ErrExternalConversationEndpointNotFound
 	}
@@ -74,7 +74,7 @@ func (s *MemoryStore) UpdateExternalConversationEndpoint(_ context.Context, endp
 		!current.CreatedAt.Equal(endpoint.CreatedAt) {
 		return ErrExternalConversationConflict
 	}
-	s.externalConversationEndpoints[key] = cloneExternalConversationEndpoint(endpoint)
+	s.externalEndpoints[key] = cloneExternalConversationEndpoint(endpoint)
 	return nil
 }
 
@@ -84,24 +84,24 @@ func (s *MemoryStore) ReceiveExternalConversationEvent(_ context.Context, item *
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	endpoint := s.externalConversationEndpoints[externalConversationEndpointKey(item.Scope, item.EndpointID)]
+	endpoint := s.externalEndpoints[externalConversationEndpointKey(item.Scope, item.EndpointID)]
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision || endpoint.Adapter != item.Adapter {
 		return nil, false, ErrExternalConversationConflict
 	}
 	deduplicationKey := externalConversationInboxDeduplicationKey(item.Scope, item.EndpointID, item.Event.ID)
-	if existingID := s.externalConversationInboxKeys[deduplicationKey]; existingID != "" {
-		existing := s.externalConversationInbox[externalConversationInboxKey(item.Scope, existingID)]
+	if existingID := s.externalInboxKeys[deduplicationKey]; existingID != "" {
+		existing := s.externalInbox[externalConversationInboxKey(item.Scope, existingID)]
 		if !sameExternalConversationInboxIntent(existing, item) {
 			return nil, false, ErrExternalConversationConflict
 		}
 		return cloneExternalConversationInboxItem(existing), true, nil
 	}
 	key := externalConversationInboxKey(item.Scope, item.ID)
-	if _, exists := s.externalConversationInbox[key]; exists {
+	if _, exists := s.externalInbox[key]; exists {
 		return nil, false, ErrExternalConversationConflict
 	}
-	s.externalConversationInbox[key] = cloneExternalConversationInboxItem(item)
-	s.externalConversationInboxKeys[deduplicationKey] = item.ID
+	s.externalInbox[key] = cloneExternalConversationInboxItem(item)
+	s.externalInboxKeys[deduplicationKey] = item.ID
 	return cloneExternalConversationInboxItem(item), false, nil
 }
 
@@ -111,7 +111,7 @@ func (s *MemoryStore) GetExternalConversationInboxItem(_ context.Context, scope 
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneExternalConversationInboxItem(s.externalConversationInbox[externalConversationInboxKey(scope, strings.TrimSpace(id))]), nil
+	return cloneExternalConversationInboxItem(s.externalInbox[externalConversationInboxKey(scope, strings.TrimSpace(id))]), nil
 }
 
 func (s *MemoryStore) ListExternalConversationInbox(_ context.Context, filter ExternalConversationInboxFilter) ([]*ExternalConversationInboxItem, error) {
@@ -121,7 +121,7 @@ func (s *MemoryStore) ListExternalConversationInbox(_ context.Context, filter Ex
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]*ExternalConversationInboxItem, 0)
-	for _, item := range s.externalConversationInbox {
+	for _, item := range s.externalInbox {
 		if item.Scope != filter.Scope || (filter.EndpointID != "" && item.EndpointID != filter.EndpointID) ||
 			!externalConversationInboxStatusMatches(item.Status, filter.Statuses) {
 			continue
@@ -144,11 +144,11 @@ func (s *MemoryStore) ClaimExternalConversationInbox(_ context.Context, scope Sc
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var selected *ExternalConversationInboxItem
-	for _, item := range s.externalConversationInbox {
+	for _, item := range s.externalInbox {
 		if item.Scope != scope || item.AvailableAt.After(now) || !externalConversationInboxClaimable(item, now) {
 			continue
 		}
-		endpoint := s.externalConversationEndpoints[externalConversationEndpointKey(scope, item.EndpointID)]
+		endpoint := s.externalEndpoints[externalConversationEndpointKey(scope, item.EndpointID)]
 		if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision {
 			continue
 		}
@@ -176,7 +176,7 @@ func (s *MemoryStore) SaveExternalConversationInbox(_ context.Context, item *Ext
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current := s.externalConversationInbox[externalConversationInboxKey(item.Scope, item.ID)]
+	current := s.externalInbox[externalConversationInboxKey(item.Scope, item.ID)]
 	if current == nil {
 		return ErrExternalConversationInboxNotFound
 	}
@@ -188,7 +188,7 @@ func (s *MemoryStore) SaveExternalConversationInbox(_ context.Context, item *Ext
 		!current.CreatedAt.Equal(item.CreatedAt) {
 		return ErrExternalConversationLeaseLost
 	}
-	s.externalConversationInbox[externalConversationInboxKey(item.Scope, item.ID)] = cloneExternalConversationInboxItem(item)
+	s.externalInbox[externalConversationInboxKey(item.Scope, item.ID)] = cloneExternalConversationInboxItem(item)
 	return nil
 }
 
@@ -198,7 +198,7 @@ func (s *MemoryStore) GetExternalConversationMapping(_ context.Context, scope Sc
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneExternalConversationMapping(s.externalConversationMappings[externalConversationMappingKey(scope, endpointID, externalConversationID, externalThreadID)]), nil
+	return cloneExternalConversationMapping(s.externalMappings[externalConversationMappingKey(scope, endpointID, externalConversationID, externalThreadID)]), nil
 }
 
 func (s *MemoryStore) SaveExternalConversationMapping(_ context.Context, mapping *ExternalConversationMapping, expectedRevision int64) error {
@@ -208,7 +208,7 @@ func (s *MemoryStore) SaveExternalConversationMapping(_ context.Context, mapping
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := externalConversationMappingKey(mapping.Scope, mapping.EndpointID, mapping.ExternalConversationID, mapping.ExternalThreadID)
-	current := s.externalConversationMappings[key]
+	current := s.externalMappings[key]
 	if !validExternalMappingRevision(current == nil, currentRevisionExternalConversation(current), mapping.Revision, expectedRevision) {
 		return ErrExternalConversationConflict
 	}
@@ -217,7 +217,7 @@ func (s *MemoryStore) SaveExternalConversationMapping(_ context.Context, mapping
 		!current.CreatedAt.Equal(mapping.CreatedAt)) {
 		return ErrExternalConversationConflict
 	}
-	s.externalConversationMappings[key] = cloneExternalConversationMapping(mapping)
+	s.externalMappings[key] = cloneExternalConversationMapping(mapping)
 	return nil
 }
 
@@ -227,7 +227,7 @@ func (s *MemoryStore) GetExternalParticipantMapping(_ context.Context, scope Sco
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneExternalParticipantMapping(s.externalParticipantMappings[externalParticipantMappingKey(scope, endpointID, externalParticipantID)]), nil
+	return cloneExternalParticipantMapping(s.externalParticipants[externalParticipantMappingKey(scope, endpointID, externalParticipantID)]), nil
 }
 
 func (s *MemoryStore) SaveExternalParticipantMapping(_ context.Context, mapping *ExternalParticipantMapping, expectedRevision int64) error {
@@ -237,7 +237,7 @@ func (s *MemoryStore) SaveExternalParticipantMapping(_ context.Context, mapping 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := externalParticipantMappingKey(mapping.Scope, mapping.EndpointID, mapping.ExternalParticipantID)
-	current := s.externalParticipantMappings[key]
+	current := s.externalParticipants[key]
 	if !validExternalMappingRevision(current == nil, currentRevisionExternalParticipant(current), mapping.Revision, expectedRevision) {
 		return ErrExternalConversationConflict
 	}
@@ -245,7 +245,7 @@ func (s *MemoryStore) SaveExternalParticipantMapping(_ context.Context, mapping 
 		current.ExternalParticipantID != mapping.ExternalParticipantID || !current.CreatedAt.Equal(mapping.CreatedAt)) {
 		return ErrExternalConversationConflict
 	}
-	s.externalParticipantMappings[key] = cloneExternalParticipantMapping(mapping)
+	s.externalParticipants[key] = cloneExternalParticipantMapping(mapping)
 	return nil
 }
 
@@ -255,7 +255,7 @@ func (s *MemoryStore) GetExternalMessageMapping(_ context.Context, scope Scope, 
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneExternalMessageMapping(s.externalMessageMappings[externalMessageMappingKey(scope, endpointID, direction, externalMessageID)]), nil
+	return cloneExternalMessageMapping(s.externalMessages[externalMessageMappingKey(scope, endpointID, direction, externalMessageID)]), nil
 }
 
 func (s *MemoryStore) SaveExternalMessageMapping(_ context.Context, mapping *ExternalMessageMapping, expectedRevision int64) error {
@@ -265,7 +265,7 @@ func (s *MemoryStore) SaveExternalMessageMapping(_ context.Context, mapping *Ext
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := externalMessageMappingKey(mapping.Scope, mapping.EndpointID, mapping.Direction, mapping.ExternalMessageID)
-	current := s.externalMessageMappings[key]
+	current := s.externalMessages[key]
 	if !validExternalMappingRevision(current == nil, currentRevisionExternalMessage(current), mapping.Revision, expectedRevision) {
 		return ErrExternalConversationConflict
 	}
@@ -274,7 +274,7 @@ func (s *MemoryStore) SaveExternalMessageMapping(_ context.Context, mapping *Ext
 		!current.CreatedAt.Equal(mapping.CreatedAt)) {
 		return ErrExternalConversationConflict
 	}
-	s.externalMessageMappings[key] = cloneExternalMessageMapping(mapping)
+	s.externalMessages[key] = cloneExternalMessageMapping(mapping)
 	return nil
 }
 
@@ -284,25 +284,25 @@ func (s *MemoryStore) EnqueueExternalConversationDelivery(_ context.Context, del
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	endpoint := s.externalConversationEndpoints[externalConversationEndpointKey(delivery.Scope, delivery.EndpointID)]
+	endpoint := s.externalEndpoints[externalConversationEndpointKey(delivery.Scope, delivery.EndpointID)]
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != delivery.EndpointRevision ||
 		endpoint.Adapter != delivery.Adapter {
 		return nil, false, ErrExternalConversationConflict
 	}
 	deduplicationKey := externalConversationDeliveryDeduplicationKey(delivery.Scope, delivery.EndpointID, delivery.IdempotencyKey)
-	if existingID := s.externalConversationDeliveryKeys[deduplicationKey]; existingID != "" {
-		existing := s.externalConversationDeliveries[externalConversationDeliveryKey(delivery.Scope, existingID)]
+	if existingID := s.externalDeliveryKeys[deduplicationKey]; existingID != "" {
+		existing := s.externalDeliveries[externalConversationDeliveryKey(delivery.Scope, existingID)]
 		if !sameExternalConversationDeliveryIntent(existing, delivery) {
 			return nil, false, ErrExternalConversationConflict
 		}
 		return cloneExternalConversationDelivery(existing), true, nil
 	}
 	key := externalConversationDeliveryKey(delivery.Scope, delivery.ID)
-	if _, exists := s.externalConversationDeliveries[key]; exists {
+	if _, exists := s.externalDeliveries[key]; exists {
 		return nil, false, ErrExternalConversationConflict
 	}
-	s.externalConversationDeliveries[key] = cloneExternalConversationDelivery(delivery)
-	s.externalConversationDeliveryKeys[deduplicationKey] = delivery.ID
+	s.externalDeliveries[key] = cloneExternalConversationDelivery(delivery)
+	s.externalDeliveryKeys[deduplicationKey] = delivery.ID
 	return cloneExternalConversationDelivery(delivery), false, nil
 }
 
@@ -312,7 +312,7 @@ func (s *MemoryStore) GetExternalConversationDelivery(_ context.Context, scope S
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneExternalConversationDelivery(s.externalConversationDeliveries[externalConversationDeliveryKey(scope, strings.TrimSpace(id))]), nil
+	return cloneExternalConversationDelivery(s.externalDeliveries[externalConversationDeliveryKey(scope, strings.TrimSpace(id))]), nil
 }
 
 func (s *MemoryStore) ListExternalConversationDeliveries(_ context.Context, filter ExternalConversationDeliveryFilter) ([]*ExternalConversationDelivery, error) {
@@ -322,7 +322,7 @@ func (s *MemoryStore) ListExternalConversationDeliveries(_ context.Context, filt
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]*ExternalConversationDelivery, 0)
-	for _, delivery := range s.externalConversationDeliveries {
+	for _, delivery := range s.externalDeliveries {
 		if delivery.Scope != filter.Scope || (filter.EndpointID != "" && delivery.EndpointID != filter.EndpointID) ||
 			(filter.ConversationID != "" && delivery.ConversationID != filter.ConversationID) ||
 			!externalConversationDeliveryStatusMatches(delivery.Status, filter.Statuses) {
@@ -346,11 +346,11 @@ func (s *MemoryStore) ClaimExternalConversationDelivery(_ context.Context, scope
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var selected *ExternalConversationDelivery
-	for _, delivery := range s.externalConversationDeliveries {
+	for _, delivery := range s.externalDeliveries {
 		if delivery.Scope != scope || delivery.AvailableAt.After(now) || !externalConversationDeliveryClaimable(delivery, now) {
 			continue
 		}
-		endpoint := s.externalConversationEndpoints[externalConversationEndpointKey(scope, delivery.EndpointID)]
+		endpoint := s.externalEndpoints[externalConversationEndpointKey(scope, delivery.EndpointID)]
 		if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != delivery.EndpointRevision {
 			continue
 		}
@@ -378,7 +378,7 @@ func (s *MemoryStore) SaveExternalConversationDelivery(_ context.Context, delive
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current := s.externalConversationDeliveries[externalConversationDeliveryKey(delivery.Scope, delivery.ID)]
+	current := s.externalDeliveries[externalConversationDeliveryKey(delivery.Scope, delivery.ID)]
 	if current == nil {
 		return ErrExternalConversationDeliveryNotFound
 	}
@@ -391,7 +391,7 @@ func (s *MemoryStore) SaveExternalConversationDelivery(_ context.Context, delive
 		current.IdempotencyKey != delivery.IdempotencyKey || !current.CreatedAt.Equal(delivery.CreatedAt) {
 		return ErrExternalConversationLeaseLost
 	}
-	s.externalConversationDeliveries[externalConversationDeliveryKey(delivery.Scope, delivery.ID)] = cloneExternalConversationDelivery(delivery)
+	s.externalDeliveries[externalConversationDeliveryKey(delivery.Scope, delivery.ID)] = cloneExternalConversationDelivery(delivery)
 	return nil
 }
 
