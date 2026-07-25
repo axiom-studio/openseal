@@ -70,6 +70,20 @@ func CanonicalConversationTriggerInputSchema() map[string]interface{} {
 	}
 }
 
+// CanonicalConversationReplyOutputSchema is the typed handoff from an event
+// Runbook back into the canonical Conversation outbox. Provider fields never
+// enter the Runbook; the Skill adapter maps this reply at delivery time.
+func CanonicalConversationReplyOutputSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]interface{}{
+			"reply": map[string]interface{}{"type": "string"},
+		},
+		"required": []interface{}{"reply"},
+	}
+}
+
 func ValidateRuntimeCompositionCapability(value *RuntimeCompositionCapability) error {
 	if value == nil {
 		return nil
@@ -175,11 +189,20 @@ func validateConversationHandlerBlueprint(
 			return []ValidationIssue{issue(path+".trigger", "conversation_trigger_missing", "Runbook handler must expose a conversation.message.received event trigger")}
 		}
 		hasDelegation := false
+		hasCanonicalReply := false
 		for _, step := range definition.Runbook.Steps {
 			hasDelegation = hasDelegation || step.Kind == runbook.StepDelegate
+			if step.Kind == runbook.StepEnd && step.End != nil {
+				reply, ok := step.End.Outputs["reply"]
+				hasCanonicalReply = hasCanonicalReply || ok && (reply.Ref != "" || len(reply.Literal) > 0 || len(reply.Template) > 0)
+			}
 		}
 		if !hasDelegation {
 			return []ValidationIssue{issue(path, "conversation_cognitive_handler_missing", "Chatbot Runbook must invoke a bounded Agent through a delegate step")}
+		}
+		contract, ok := definition.Runbook.Interfaces[trigger.Entrypoint]
+		if !hasCanonicalReply || !ok || !reflect.DeepEqual(contract.OutputSchema, CanonicalConversationReplyOutputSchema()) {
+			return []ValidationIssue{issue(path, "conversation_canonical_reply_missing", "Chatbot Runbook must return the exact canonical reply output")}
 		}
 	default:
 		return []ValidationIssue{issue(path+".kind", "invalid_conversation_handler", "Conversation handler kind is invalid")}

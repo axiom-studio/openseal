@@ -752,6 +752,9 @@ type (
 	ExternalConversationAdapterHost             = runtime.ExternalConversationAdapterHost
 	ExternalConversationDeliveryWorkerConfig    = runtime.ExternalConversationDeliveryWorkerConfig
 	ExternalConversationDeliveryWorker          = runtime.ExternalConversationDeliveryWorker
+	ExternalConversationReplyStore              = runtime.ExternalConversationReplyStore
+	ExternalConversationReplyWorker             = runtime.ExternalConversationReplyWorker
+	ExternalConversationSupervisor              = runtime.ExternalConversationSupervisor
 	ResolvedExternalConversationRunbook         = runtime.ResolvedExternalConversationRunbook
 	ExternalConversationRunbookResolver         = runtime.ExternalConversationRunbookResolver
 	ExternalConversationRunbookEventDispatcher  = runtime.ExternalConversationRunbookEventDispatcher
@@ -1187,8 +1190,11 @@ var NewExternalConversationTransportService = runtime.NewExternalConversationTra
 var NewCanonicalExternalConversationDispatcher = runtime.NewCanonicalExternalConversationDispatcher
 var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWorker
 var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
+var NewExternalConversationReplyWorker = runtime.NewExternalConversationReplyWorker
+var NewExternalConversationSupervisor = runtime.NewExternalConversationSupervisor
 var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
 var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
+var CanonicalConversationReplyOutputSchema = authoring.CanonicalConversationReplyOutputSchema
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 var OAuthSessionIDFromState = kerneloauth.SessionIDFromState
@@ -1978,6 +1984,7 @@ type Engine struct {
 	conversationRunReconciler     *runtime.ConversationRunReconciler
 	conversationRunConfig         *ConversationRunConfig
 	conversationRunScopes         runtime.WorkerScopeSource
+	externalConversations         externalConversationRuntime
 	conversationChanges           *runtime.ConversationChangeService
 	collaboration                 *runtime.CollaborationService
 	turns                         *runtime.AgentTurnService
@@ -2039,6 +2046,16 @@ type ConversationRunConfig struct {
 	Runner     runtime.ConversationRunTurnRunnerConfig
 	Reconciler runtime.ConversationRunReconcilerConfig
 	Workers    runtime.DynamicAgentRunWorkerConfig
+}
+
+type ExternalConversationSupervisorConfig = runtime.ExternalConversationSupervisorConfig
+
+type externalConversationRuntime struct {
+	transport  *runtime.ExternalConversationTransportService
+	supervisor *runtime.ExternalConversationSupervisor
+	config     *runtime.ExternalConversationSupervisorConfig
+	scopes     runtime.WorkerScopeSource
+	host       runtime.ExternalConversationAdapterHost
 }
 
 type actionWorkerSpec struct {
@@ -2111,6 +2128,9 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.rebuildConversationRuns(); err != nil {
 		return nil, fmt.Errorf("conversation Run configuration: %w", err)
 	}
+	if err := e.rebuildExternalConversations(); err != nil {
+		return nil, fmt.Errorf("external conversation configuration: %w", err)
+	}
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
 	}
@@ -2169,6 +2189,9 @@ func (e *Engine) Start(ctx context.Context) {
 	if e.conversationRunReconciler != nil {
 		e.conversationRunReconciler.Start(ctx)
 	}
+	if e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Start(ctx)
+	}
 	for _, pool := range e.agentPools {
 		pool.Start(ctx)
 	}
@@ -2185,6 +2208,9 @@ func (e *Engine) Start(ctx context.Context) {
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	if e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Stop()
+	}
 	if e.conversationRunReconciler != nil {
 		e.conversationRunReconciler.Stop()
 	}
@@ -2362,6 +2388,25 @@ func WithDynamicConversationRuns(config ConversationRunConfig, scopes runtime.Wo
 	}
 }
 
+// WithExternalConversationTransport enables the durable provider-neutral
+// inbox, Runbook/Agent reply projection, and Skill-owned delivery outbox.
+// Provider adapters and credential redemption stay behind host.
+func WithExternalConversationTransport(
+	config runtime.ExternalConversationSupervisorConfig,
+	scopes runtime.WorkerScopeSource,
+	host runtime.ExternalConversationAdapterHost,
+) Option {
+	return func(e *Engine) error {
+		if scopes == nil || host == nil {
+			return fmt.Errorf("external conversation scope source and adapter host are required")
+		}
+		e.externalConversations.config = &config
+		e.externalConversations.scopes = scopes
+		e.externalConversations.host = host
+		return nil
+	}
+}
+
 func (e *Engine) rebuildConversationCoordinator() error {
 	e.conversationCoordinator = nil
 	if e.conversationParticipants == nil && e.participationProposals == nil {
@@ -2424,6 +2469,54 @@ func (e *Engine) rebuildConversationRuns() error {
 		config: config.Workers, source: e.conversationRunScopes, resolver: runner,
 	})
 	return nil
+}
+
+func (e *Engine) rebuildExternalConversations() error {
+	e.externalConversations.transport = nil
+	e.externalConversations.supervisor = nil
+	store, ok := e.store.(runtime.ExternalConversationReplyStore)
+	if !ok || e.skills == nil {
+		if e.externalConversations.config != nil {
+			return fmt.Errorf("persistent store does not implement external conversation storage")
+		}
+		return nil
+	}
+	e.externalConversations.transport = runtime.NewExternalConversationTransportService(store, e.skills)
+	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
+		return nil
+	}
+	if e.externalConversations.config == nil || e.externalConversations.scopes == nil || e.externalConversations.host == nil ||
+		e.conversationRunScheduler == nil {
+		return fmt.Errorf("external conversation transport requires dynamic conversation Runs, scopes, host, and config")
+	}
+	workforce, ok := e.store.(runtime.ExternalConversationWorkforceCatalog)
+	if !ok {
+		return fmt.Errorf("persistent store does not implement external conversation workforce resolution")
+	}
+	runbookResolver, err := runtime.NewCatalogExternalConversationRunbookResolver(workforce)
+	if err != nil {
+		return err
+	}
+	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
+	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
+	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox)
+	if err != nil {
+		return err
+	}
+	replies, err := runtime.NewExternalConversationReplyWorker(store, e.skills)
+	if err != nil {
+		return err
+	}
+	delivery, err := runtime.NewExternalConversationDeliveryWorker(
+		store, e.skills, e.externalConversations.host, e.externalConversations.config.Delivery,
+	)
+	if err != nil {
+		return err
+	}
+	e.externalConversations.supervisor, err = runtime.NewExternalConversationSupervisor(
+		inbox, replies, delivery, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
+	)
+	return err
 }
 
 // WithLogger replaces the default logger.
@@ -3479,6 +3572,44 @@ func (e *Engine) ConversationCoordinationAvailable() bool {
 // automatically projected into durable, recoverable conversation Runs.
 func (e *Engine) ConversationRunsAvailable() bool {
 	return e != nil && e.conversationRunScheduler != nil && e.conversationRunReconciler != nil
+}
+
+// ReceiveExternalConversationEvent persists an event already verified and
+// normalized by the exact Skill-owned adapter.
+func (e *Engine) ReceiveExternalConversationEvent(
+	ctx context.Context,
+	request runtime.ReceiveExternalConversationEventRequest,
+) (*runtime.ReceiveExternalConversationEventResult, error) {
+	if e == nil || e.externalConversations.transport == nil {
+		return nil, fmt.Errorf("external conversation transport is not configured")
+	}
+	result, err := e.externalConversations.transport.Receive(ctx, request)
+	if err == nil && e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Wake()
+	}
+	return result, err
+}
+
+func (e *Engine) EnqueueExternalConversationDelivery(
+	ctx context.Context,
+	request runtime.EnqueueExternalConversationDeliveryRequest,
+) (*runtime.EnqueueExternalConversationDeliveryResult, error) {
+	if e == nil || e.externalConversations.transport == nil {
+		return nil, fmt.Errorf("external conversation transport is not configured")
+	}
+	result, err := e.externalConversations.transport.Enqueue(ctx, request)
+	if err == nil && e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Wake()
+	}
+	return result, err
+}
+
+func (e *Engine) ExternalConversationTransportAvailable() bool {
+	return e != nil && e.externalConversations.transport != nil
+}
+
+func (e *Engine) ExternalConversationWorkersAvailable() bool {
+	return e != nil && e.externalConversations.supervisor != nil
 }
 
 func (e *Engine) GetParticipationRound(ctx context.Context, scope runtime.Scope, conversationID, roundID string) (*runtime.ParticipationRoundResult, error) {
