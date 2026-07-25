@@ -584,6 +584,49 @@ func TestPlacementAwareMissingRequirementsResolvesConfiguredSkillBinding(t *test
 	}
 }
 
+func TestPlacementAwareMissingRequirementsRequiresExactNamedSkillCredential(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "tenant/one/security-reviewer",
+		SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "security-scorecard", RequiredActions: []string{"score"},
+		}},
+	}}}
+	catalog := CapabilityCatalog{
+		Skills: map[string]SkillCapability{
+			"security-scorecard": {
+				ID:        "security-scorecard",
+				Readiness: SkillReadinessNeedsBinding,
+				Actions:   []string{"score"},
+				Credentials: []SkillCredential{{
+					Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"score"},
+				}},
+			},
+		},
+		AvailableCredentials: map[string]bool{"TOOLWEB_API_KEY": true},
+	}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, ChangeSetPlacement{}); len(missing) != 1 ||
+		missing[0].Kind != "skill_binding" {
+		t.Fatalf("unplaced exact credential missing requirements = %#v", missing)
+	}
+	wrongPlacement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"tenant/one/security-reviewer": {
+			"environment-secret": {Kind: "environment-secret", ID: "vault://toolweb"},
+		},
+	}}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, wrongPlacement); len(missing) != 1 ||
+		missing[0].Kind != "skill_binding" {
+		t.Fatalf("kind-only placement resolved exact credential = %#v", missing)
+	}
+	exactPlacement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"tenant/one/security-reviewer": {
+			"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "vault://toolweb"},
+		},
+	}}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, exactPlacement); len(missing) != 0 {
+		t.Fatalf("exact credential placement missing requirements = %#v", missing)
+	}
+}
+
 func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallation(t *testing.T) {
 	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
 		ID: "tenant/one/researcher",

@@ -1276,10 +1276,10 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 					missing[key] = MissingRequirement{Kind: "action", ID: requirement.SkillID + "/" + action, RequiredBy: "agent:" + definition.ID}
 				}
 			}
-			for _, credential := range capability.CredentialKinds {
-				if !catalog.AvailableCredentials[credential] {
-					key := "credential:" + credential + ":" + definition.ID
-					missing[key] = MissingRequirement{Kind: "credential", ID: credential, RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID}
+			for _, binding := range requiredSkillCredentialBindings(capability, requirement.RequiredActions) {
+				if !catalog.AvailableCredentials[binding.Key] {
+					key := "credential:" + binding.Key + ":" + definition.ID
+					missing[key] = MissingRequirement{Kind: "credential", ID: binding.Key, RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID}
 				}
 			}
 		}
