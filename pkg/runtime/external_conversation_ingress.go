@@ -336,6 +336,20 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 		if err != nil {
 			return nil, err
 		}
+		// Tenant- and local-owned gateways may route only within their own
+		// ownership boundary. A host may deliberately provision a platform
+		// gateway for one provider application shared across tenants, but a
+		// tenant-controlled signing credential must never be able to select a
+		// different tenant by signing invented provider routing claims.
+		if gateway.Scope.Kind != "platform" {
+			scoped := endpoints[:0]
+			for _, endpoint := range endpoints {
+				if endpoint != nil && endpoint.Scope == gateway.Scope {
+					scoped = append(scoped, endpoint)
+				}
+			}
+			endpoints = scoped
+		}
 		if len(endpoints) > 100 {
 			return nil, fmt.Errorf("%w: verified ingress route fanout exceeds limit", ErrInvalidExternalConversation)
 		}

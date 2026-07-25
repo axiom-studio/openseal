@@ -198,3 +198,66 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 		t.Fatalf("paused gateway error = %v", err)
 	}
 }
+
+func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	previousRevision := endpoint.Revision
+	endpoint.InstallationID = "T-shared"
+	endpoint.ApplicationID = "A-shared"
+	endpoint.Address = "C-shared"
+	endpoint.Revision++
+	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+		t.Fatal(err)
+	}
+	other := cloneExternalConversationEndpoint(endpoint)
+	other.ID = "other-tenant-endpoint"
+	other.IngressRoute = "other-tenant-route"
+	other.Scope = Scope{Kind: "tenant", ID: "other"}
+	other.CreatedAt = other.CreatedAt.Add(time.Second)
+	other.UpdatedAt = other.CreatedAt
+	other.Revision = 1
+	if err := store.CreateExternalConversationEndpoint(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	event := NormalizedExternalConversationEvent{
+		ID: "Ev-tenant-boundary", Type: capability.ConversationEventMessageReceived,
+		ExternalConversationID: "C-shared", ExternalMessageID: "171.004",
+		ExternalParticipantID: "U123", Text: "Tenant boundary",
+		OrderingKey: "C-shared:171.004", OccurredAt: time.Now().UTC(),
+	}
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
+		StatusCode: http.StatusOK,
+		Events: []ExternalConversationGatewayEvent{{
+			InstallationID: "T-shared", ApplicationID: "A-shared", Address: "C-shared", Event: event,
+		}},
+	}}
+	registration, err := NewExternalConversationGatewayService(store).Create(
+		ctx,
+		CreateExternalConversationGatewayRequest{
+			ID: "tenant-slack", Name: "Tenant Slack",
+			Gateway: ExternalConversationIngressGateway{
+				Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+				Adapter: endpoint.Adapter, Provider: endpoint.Provider,
+			},
+			Status: ExternalConversationGatewayActive,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewExternalConversationTransportService(store, catalog).
+		NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+			Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`),
+		}, host)
+	if err != nil || len(result.Received) != 1 || result.Received[0].Item.Scope != endpoint.Scope {
+		t.Fatalf("tenant-bounded ingress = %#v, err = %v", result, err)
+	}
+	items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
+		Scope: other.Scope, EndpointID: other.ID, Limit: 10,
+	})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("cross-tenant inbox = %#v, err = %v", items, err)
+	}
+}

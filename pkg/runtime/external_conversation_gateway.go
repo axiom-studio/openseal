@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
@@ -95,13 +96,21 @@ type ExternalConversationGatewayStore interface {
 }
 
 type ExternalConversationGatewayService struct {
-	store ExternalConversationGatewayStore
-	now   func() time.Time
-	newID func() string
+	store    ExternalConversationGatewayStore
+	resolver ExternalConversationAdapterResolver
+	now      func() time.Time
+	newID    func() string
 }
 
-func NewExternalConversationGatewayService(store ExternalConversationGatewayStore) *ExternalConversationGatewayService {
-	return &ExternalConversationGatewayService{store: store, now: time.Now, newID: uuid.NewString}
+func NewExternalConversationGatewayService(
+	store ExternalConversationGatewayStore,
+	resolver ...ExternalConversationAdapterResolver,
+) *ExternalConversationGatewayService {
+	service := &ExternalConversationGatewayService{store: store, now: time.Now, newID: uuid.NewString}
+	if len(resolver) > 0 {
+		service.resolver = resolver[0]
+	}
+	return service
 }
 
 func (s *ExternalConversationGatewayService) Create(
@@ -125,6 +134,9 @@ func (s *ExternalConversationGatewayService) Create(
 		value.ID = s.newID()
 	}
 	if err := value.Validate(); err != nil {
+		return nil, err
+	}
+	if err := s.resolveGateway(ctx, value.Gateway); err != nil {
 		return nil, err
 	}
 	if err := s.store.CreateExternalConversationGateway(ctx, value); err != nil {
@@ -214,10 +226,43 @@ func (s *ExternalConversationGatewayService) Update(
 	if err := current.Validate(); err != nil {
 		return nil, err
 	}
+	if err := s.resolveGateway(ctx, current.Gateway); err != nil {
+		return nil, err
+	}
 	if err := s.store.UpdateExternalConversationGateway(ctx, current, request.ExpectedRevision); err != nil {
 		return nil, err
 	}
 	return cloneExternalConversationGateway(current), nil
+}
+
+// resolveGateway proves that a lifecycle mutation still points at the exact,
+// enabled Skill binding reviewed by the operator. Structural validation alone
+// must not create a public webhook that will fail only after a provider begins
+// sending signed traffic.
+func (s *ExternalConversationGatewayService) resolveGateway(
+	ctx context.Context,
+	gateway ExternalConversationIngressGateway,
+) error {
+	if s.resolver == nil {
+		return nil
+	}
+	ref := gateway.Adapter
+	resolved, err := s.resolver.ResolveConversationAdapter(
+		ctx,
+		skill.ScopeReference{Kind: gateway.Scope.Kind, ID: gateway.Scope.ID},
+		gateway.DeploymentID,
+		ref.SkillID,
+		ref.SkillVersion,
+		ref.AdapterID,
+		skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+	)
+	if err != nil || resolved == nil || resolved.Binding == nil ||
+		resolved.Binding.SourceIdentity != ref.SourceIdentity ||
+		resolved.Adapter.Provider != gateway.Provider ||
+		strings.TrimSpace(resolved.Adapter.Transport.IngressEndpoint) == "" {
+		return fmt.Errorf("%w: exact gateway Skill adapter is unavailable or stale", ErrInvalidExternalConversation)
+	}
+	return nil
 }
 
 func cloneExternalConversationGateway(value *ExternalConversationGatewayRegistration) *ExternalConversationGatewayRegistration {

@@ -2525,7 +2525,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		return nil
 	}
 	e.externalConversations.transport = runtime.NewExternalConversationTransportService(store, e.skills)
-	e.externalConversations.gateways = runtime.NewExternalConversationGatewayService(store)
+	e.externalConversations.gateways = runtime.NewExternalConversationGatewayService(store, e.skills)
 	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
 		return nil
 	}
