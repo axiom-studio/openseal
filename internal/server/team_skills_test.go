@@ -44,7 +44,10 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Research",
 		Roles: []kernelteam.RoleSlot{{
 			ID: "analyst", DisplayName: "Analyst", Purpose: "Analyze", MinimumMembers: 1,
-			SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead}},
+			SkillGrants: []kernelteam.RoleSkillGrant{
+				{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
+				{SkillID: "forum", SkillVersion: "2", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
+			},
 		}},
 		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationPeer}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
@@ -61,6 +64,12 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	if err := catalog.Register(ctx, &skill.Definition{
 		ID: "forum", Version: "1", Name: "Forum", Transport: capability.TransportReference{Kind: "local"},
 		Actions: map[string]capability.Action{"search": {Name: "search", Description: "Search", Risk: capability.RiskLevelRead, SideEffect: capability.SideEffectRead, Idempotency: capability.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Register(ctx, &skill.Definition{
+		ID: "forum", Version: "2", Name: "Forum", Transport: capability.TransportReference{Kind: "local"},
+		Actions: map[string]capability.Action{"search": {Name: "search", Description: "Search current sources", Risk: capability.RiskLevelRead, SideEffect: capability.SideEffectRead, Idempotency: capability.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +93,26 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"deploymentId":"research-one"`) || !strings.Contains(created.Body.String(), `"action":"created"`) {
 		t.Fatalf("create Team binding = %d %s", created.Code, created.Body.String())
 	}
+	planPayload, _ := json.Marshal(runtime.PlanSkillReferenceUpgradeRequest{ToVersion: "2"})
+	planned := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/upgrade-plan?scopeKind=tenant&scopeId=one", string(planPayload), "")
+	if planned.Code != http.StatusOK || !strings.Contains(planned.Body.String(), `"version":"2"`) || !strings.Contains(planned.Body.String(), `"authorizedRoleIds":["analyst"]`) {
+		t.Fatalf("plan Team binding upgrade = %d %s", planned.Code, planned.Body.String())
+	}
+	var plan runtime.SkillReferenceUpgradePlan
+	if err := json.Unmarshal(planned.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	applyPayload, _ := json.Marshal(runtime.ApplySkillReferenceUpgradeRequest{
+		Plan: &plan, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "reviewed exact forum upgrade",
+	})
+	applied := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/upgrade?scopeKind=tenant&scopeId=one", string(applyPayload), "")
+	if applied.Code != http.StatusOK || !strings.Contains(applied.Body.String(), `"bindingRevision":2`) || !strings.Contains(applied.Body.String(), `"reason":"reviewed exact forum upgrade"`) {
+		t.Fatalf("apply Team binding upgrade = %d %s", applied.Code, applied.Body.String())
+	}
+	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/upgrade?scopeKind=tenant&scopeId=one", string(applyPayload), "")
+	if replayed.Code != http.StatusBadRequest && replayed.Code != http.StatusConflict {
+		t.Fatalf("replay Team binding upgrade = %d %s", replayed.Code, replayed.Body.String())
+	}
 	stale := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/team-deployments/research-one/skill-bindings/forum?scopeKind=tenant&scopeId=one", string(payload), "")
 	if stale.Code != http.StatusConflict {
 		t.Fatalf("stale Team binding = %d %s", stale.Code, stale.Body.String())
@@ -103,12 +132,12 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	defer restartedStore.Close()
 	restarted := NewServer(restartedStore, zap.NewNop().Sugar())
 	listed := performAgentRunRequest(t, restarted.Handler(), http.MethodGet, "/api/v1/team-deployments/research-one/skill-bindings?scopeKind=tenant&scopeId=one", "", "")
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"revision":1`) || !strings.Contains(listed.Body.String(), `"id":"credential-17"`) {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"revision":2`) || !strings.Contains(listed.Body.String(), `"skillVersion":"2"`) || !strings.Contains(listed.Body.String(), `"id":"credential-17"`) {
 		t.Fatalf("restarted Team binding = %d %s", listed.Code, listed.Body.String())
 	}
-	disable, _ := json.Marshal(skill.DisableBindingRequest{ExpectedRevision: 1, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "rotate account"})
+	disable, _ := json.Marshal(skill.DisableBindingRequest{ExpectedRevision: 2, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "rotate account"})
 	disabled := performAgentRunRequest(t, restarted.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/disable?scopeKind=tenant&scopeId=one", string(disable), "")
-	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"disabled":true`) || !strings.Contains(disabled.Body.String(), `"revision":2`) || !strings.Contains(disabled.Body.String(), `"action":"disabled"`) {
+	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"disabled":true`) || !strings.Contains(disabled.Body.String(), `"revision":3`) || !strings.Contains(disabled.Body.String(), `"action":"disabled"`) {
 		t.Fatalf("disable Team binding = %d %s", disabled.Code, disabled.Body.String())
 	}
 }

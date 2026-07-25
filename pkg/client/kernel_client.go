@@ -189,6 +189,8 @@ type TeamSkillClient interface {
 	ListTeamSkillBindings(context.Context, capability.ScopeReference, string) (*kernelapi.SkillBindingList, error)
 	UpsertTeamSkillBinding(context.Context, string, skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
 	DisableTeamSkillBinding(context.Context, string, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
+	PlanTeamSkillReferenceUpgrade(context.Context, string, runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error)
+	ApplyTeamSkillReferenceUpgrade(context.Context, string, runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error)
 }
 
 // SkillBindingOwner identifies the canonical deployment resource that owns a
@@ -204,6 +206,8 @@ type SkillBindingClient interface {
 	ListSkillBindings(context.Context, capability.ScopeReference, SkillBindingOwner) (*kernelapi.SkillBindingList, error)
 	UpsertSkillBinding(context.Context, SkillBindingOwner, skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
 	DisableSkillBinding(context.Context, SkillBindingOwner, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
+	PlanSkillReferenceUpgrade(context.Context, SkillBindingOwner, runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error)
+	ApplySkillReferenceUpgrade(context.Context, SkillBindingOwner, runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error)
 }
 
 var _ TeamSkillClient = (*KernelHTTPClient)(nil)
@@ -1362,6 +1366,45 @@ func (c *KernelHTTPClient) DisableSkillBinding(ctx context.Context, owner SkillB
 		return nil, err
 	}
 	path := root + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.BindingID)) + "/disable?" + capabilityScopeQuery(request.Scope).Encode()
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) PlanTeamSkillReferenceUpgrade(ctx context.Context, deploymentID string, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
+	return c.PlanSkillReferenceUpgrade(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+}
+
+func (c *KernelHTTPClient) PlanSkillReferenceUpgrade(ctx context.Context, owner SkillBindingOwner, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
+	var result runtime.SkillReferenceUpgradePlan
+	root, err := skillBindingOwnerPath(owner)
+	if err != nil {
+		return nil, err
+	}
+	scope := capability.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	path := root + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.BindingID)) + "/upgrade-plan?" + capabilityScopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) ApplyTeamSkillReferenceUpgrade(ctx context.Context, deploymentID string, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+	return c.ApplySkillReferenceUpgrade(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+}
+
+func (c *KernelHTTPClient) ApplySkillReferenceUpgrade(ctx context.Context, owner SkillBindingOwner, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+	if request.Plan == nil {
+		return nil, errors.New("reviewed Skill reference upgrade plan is required")
+	}
+	var result runtime.SkillReferenceUpgradeReceipt
+	root, err := skillBindingOwnerPath(owner)
+	if err != nil {
+		return nil, err
+	}
+	scope := capability.ScopeReference{Kind: request.Plan.Scope.Kind, ID: request.Plan.Scope.ID}
+	path := root + "/skill-bindings/" + url.PathEscape(strings.TrimSpace(request.Plan.BindingID)) + "/upgrade?" + capabilityScopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err
 	}

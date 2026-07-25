@@ -132,6 +132,8 @@ const (
 	modeSkillRemove
 	modeSkillBindingUpsert
 	modeSkillBindingDisable
+	modeSkillBindingUpgradePlan
+	modeSkillBindingUpgradeApply
 	modeSourcePolicyRegister
 	modeSourcePolicyActivate
 	modeSourcePolicyRevoke
@@ -274,6 +276,7 @@ type Model struct {
 	clawHubSkills               []clawhub.InstalledState
 	skillActions                []capability.ModelAction
 	skillBindings               []*capability.Binding
+	skillBindingUpgradePlan     *runtime.SkillReferenceUpgradePlan
 	sourcePolicies              []*source.Lifecycle
 	skillBindingSelected        int
 	selectedSkillBinding        string
@@ -575,6 +578,14 @@ type sourcePolicyChanged struct {
 type skillBindingChanged struct {
 	binding *capability.Binding
 	action  string
+	err     error
+}
+type skillBindingUpgradePlanned struct {
+	plan *runtime.SkillReferenceUpgradePlan
+	err  error
+}
+type skillBindingUpgradeApplied struct {
+	receipt *runtime.SkillReferenceUpgradeReceipt
 	err     error
 }
 type clawHubLifecycleCompleted struct {
@@ -1168,6 +1179,46 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Skill binding %s · revision %d.", msg.action, msg.binding.Revision)
 		}
 		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions())
+	case skillBindingUpgradePlanned:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Skill update review failed. The requested target is preserved for retry."
+			return m, nil
+		}
+		m.err, m.skillBindingUpgradePlan = nil, msg.plan
+		m.mode = modeSkillBindingUpgradeApply
+		m.editor.Reset()
+		if msg.plan != nil && msg.plan.ApprovalRequired {
+			m.editor.SetValue("reason: reviewed every affected reference\napproval: record why the widened authority is approved")
+		} else {
+			m.editor.SetValue("reason: reviewed every affected reference")
+		}
+		m.editor.Placeholder = "reason: why this exact update should be applied\napproval: required only when authority widens"
+		m.focusComposerEditor()
+		m.status = "Update plan ready. Review its complete impact, record the audit reason, then apply."
+		return m, nil
+	case skillBindingUpgradeApplied:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			if isHTTPStatus(msg.err, http.StatusConflict) {
+				m.status = "This binding or dependent work changed. Latest state reloaded; request a new update plan."
+				m.skillBindingUpgradePlan = nil
+				return m, m.loadSkillBindings()
+			}
+			m.status = "Skill update was not applied. The reviewed plan is preserved for retry."
+			return m, nil
+		}
+		m.err, m.skillBindingUpgradePlan = nil, nil
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.receipt != nil {
+			m.selectedSkillBinding = msg.receipt.BindingID
+			m.status = fmt.Sprintf("Skill updated to %s@%s · binding revision %d.", msg.receipt.To.ID, msg.receipt.To.Version, msg.receipt.BindingRevision)
+		}
+		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions(), m.loadObjectives(), m.loadInitiatives(), m.loadActivity(false))
 	case clawHubLifecycleCompleted:
 		m.busy = false
 		if msg.err != nil {
@@ -1663,6 +1714,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc":
 		if m.mode != modeCreate {
+			if m.mode == modeSkillBindingUpgradePlan || m.mode == modeSkillBindingUpgradeApply {
+				m.skillBindingUpgradePlan = nil
+			}
 			m.resetComposerMode()
 			m.editor.Reset()
 			m.status = "Draft canceled."
@@ -1703,6 +1757,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitSkillBindingUpsert()
 			case modeSkillBindingDisable:
 				return m, m.submitSkillBindingDisable()
+			case modeSkillBindingUpgradePlan:
+				return m, m.submitSkillBindingUpgradePlan()
+			case modeSkillBindingUpgradeApply:
+				return m, m.submitSkillBindingUpgradeApply()
 			case modeSourcePolicyRegister:
 				return m, m.submitSourcePolicyRegister()
 			case modeSourcePolicyActivate:
@@ -2071,7 +2129,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareRequestComposer(modeRequestProvideClarification, "Provide the clarification requested by the recipient…")
 			}
 		case "g":
-			if m.section == sectionObjectives {
+			if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && m.supportsSkillBinding(kernelapi.OperationPlanUpgrade) {
+				m.prepareSkillBindingUpgradeComposer()
+			} else if m.section == sectionObjectives {
 				return m, m.reconcileObjectiveSchedules()
 			} else if m.section == sectionRuns {
 				if run := m.selectedRun(); run != nil && m.supportsRun(kernelapi.OperationIntervene) && !isTerminal(run.Status) {
@@ -3944,6 +4004,92 @@ func (m *Model) submitSkillBindingDisable() tea.Cmd {
 		return skillBindingChanged{binding: result.Binding, action: "disabled", err: changeErr}
 	}
 }
+
+func (m *Model) prepareSkillBindingUpgradeComposer() {
+	binding := m.selectedSkillBindingRecord()
+	if binding == nil || !m.supportsSkillBinding(kernelapi.OperationPlanUpgrade) {
+		return
+	}
+	targetVersion := ""
+	for _, installed := range m.clawHubSkills {
+		if binding.SourceIdentity != "" && installed.SourceIdentity == binding.SourceIdentity && installed.Version != binding.SkillVersion {
+			targetVersion = installed.Version
+			break
+		}
+	}
+	m.skillBindingUpgradePlan = nil
+	m.mode = modeSkillBindingUpgradePlan
+	m.editor.Reset()
+	m.editor.SetValue(fmt.Sprintf("version: %s\nsource: %s", targetVersion, binding.SourceIdentity))
+	m.editor.Placeholder = "version: exact installed target version\nsource: optional exact source identity"
+	m.focusComposerEditor()
+	m.status = "Choose an exact installed Skill version. OpenSeal will calculate every durable reference affected before changing anything."
+}
+
+func (m *Model) submitSkillBindingUpgradePlan() tea.Cmd {
+	binding := m.selectedSkillBindingRecord()
+	if binding == nil || m.busy || !m.supportsSkillBinding(kernelapi.OperationPlanUpgrade) {
+		return nil
+	}
+	fields := parseTUIKeyValueLines(m.editor.Value())
+	version := strings.TrimSpace(fields["version"])
+	if version == "" || version == binding.SkillVersion {
+		m.status = "Enter a different exact installed target version."
+		return nil
+	}
+	request := runtime.PlanSkillReferenceUpgradeRequest{
+		Scope: runtime.Scope{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, DeploymentID: m.config.Owner.ID,
+		BindingID: binding.ID, ToVersion: version, ToSourceIdentity: strings.TrimSpace(fields["source"]),
+	}
+	m.busy, m.err, m.status = true, nil, "Calculating the atomic Skill update impact…"
+	return func() tea.Msg {
+		plan, err := m.skillBindingClient.PlanSkillReferenceUpgrade(m.ctx, m.skillBindingOwner(), request)
+		return skillBindingUpgradePlanned{plan: plan, err: err}
+	}
+}
+
+func (m *Model) submitSkillBindingUpgradeApply() tea.Cmd {
+	plan := m.skillBindingUpgradePlan
+	if plan == nil || m.busy || !m.supportsSkillBinding(kernelapi.OperationApplyUpgrade) {
+		return nil
+	}
+	fields := parseTUIKeyValueLines(m.editor.Value())
+	reason := strings.TrimSpace(fields["reason"])
+	approvalReason := strings.TrimSpace(fields["approval"])
+	if reason == "" {
+		m.status = "Record why this reviewed update should be applied."
+		return nil
+	}
+	request := runtime.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: m.config.Actor, Reason: reason}
+	if plan.ApprovalRequired {
+		if approvalReason == "" {
+			m.status = "This update widens authority. Record the explicit approval reason."
+			return nil
+		}
+		request.Approval = &runtime.SkillReferenceUpgradeApproval{Principal: m.config.Actor, Reason: approvalReason}
+	}
+	m.busy, m.err, m.status = true, nil, "Applying every reviewed Skill reference atomically…"
+	return func() tea.Msg {
+		receipt, err := m.skillBindingClient.ApplySkillReferenceUpgrade(m.ctx, m.skillBindingOwner(), request)
+		return skillBindingUpgradeApplied{receipt: receipt, err: err}
+	}
+}
+
+func parseTUIKeyValueLines(value string) map[string]string {
+	fields := map[string]string{}
+	for _, line := range strings.Split(value, "\n") {
+		key, raw, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key, raw = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(raw)
+		if key != "" && raw != "" {
+			fields[key] = raw
+		}
+	}
+	return fields
+}
+
 func (m *Model) pinOrUnpinClawHub() tea.Cmd {
 	skill := m.selectedClawHubRecord()
 	if skill == nil {
