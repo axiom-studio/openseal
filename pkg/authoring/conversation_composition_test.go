@@ -228,6 +228,34 @@ func TestCompilerCreatesExecutableSlackChatbotComposition(t *testing.T) {
 	}
 }
 
+func TestConversationEndpointDeterministicallyFulfillsCapabilityNeed(t *testing.T) {
+	catalog := slackChatbotCatalog()
+	catalog.Skills["slack-actions"] = SkillCapability{
+		ID: "slack-actions", Version: "2.0.0", Name: "Slack actions",
+		Actions: []string{"send_message"}, Readiness: SkillReadinessReady,
+	}
+	catalog.CapabilityNeeds = []CapabilityNeed{{
+		ID: "team-messaging", Prompt: "Which messaging Skill should be used?",
+		WhyNeeded: "An exact authorized messaging capability is required.",
+		SkillIDs:  []string{"slack", "slack-actions"}, Priority: 30,
+	}}
+	generated := GenerationResponse{Candidate: directChatbotCandidate(
+		"slack", capability.ConversationEndpointChannel, ConversationReplyThread,
+	)}
+	request := GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog}
+	synthesizeCapabilityNeedRefinements(&generated, request)
+	if len(generated.UnresolvedQuestions) != 0 {
+		t.Fatalf("exact conversation adapter produced redundant Skill choice: %#v", generated.UnresolvedQuestions)
+	}
+
+	generated.Candidate.ConversationEndpoints[0].AdapterID = "missing"
+	synthesizeCapabilityNeedRefinements(&generated, request)
+	if len(generated.UnresolvedQuestions) != 1 ||
+		generated.UnresolvedQuestions[0].ID != CapabilityNeedQuestionID("team-messaging") {
+		t.Fatalf("invalid conversation adapter suppressed Skill choice: %#v", generated.UnresolvedQuestions)
+	}
+}
+
 func TestCompilerDerivesConversationRequirementsBeforeProviderGeneration(t *testing.T) {
 	candidate := directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
 	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
