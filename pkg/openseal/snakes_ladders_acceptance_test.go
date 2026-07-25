@@ -268,7 +268,7 @@ func (h *snakesAcceptance) composeWorkforce(ctx context.Context, engine *Engine)
 	}
 	definition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: gameTeamID, Version: "1", DisplayName: "Snakes and Ladders Team", Purpose: "Complete a replayable multi-agent game",
-		Roles: roles, Coordination: TeamCoordinationPolicy{Mode: TeamCoordinationDynamic, MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true},
+		Roles: roles, Coordination: TeamCoordinationPolicy{MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true},
 		Delegation: TeamDelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 3},
 		Approvals:  TeamApprovalPolicy{MaximumRisk: capability.RiskLevelWrite, ApproverRoleIDs: []string{roles[0].ID}},
 	})

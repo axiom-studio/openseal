@@ -62,20 +62,11 @@ const (
 	RoleChannelDisabled    RoleChannelParticipation = "disabled"
 )
 
-type CoordinationMode string
-
-const (
-	CoordinationDynamic           CoordinationMode = "dynamic"
-	CoordinationPeer              CoordinationMode = "peer"
-	CoordinationLeaderFacilitated CoordinationMode = "leader_facilitated"
-)
-
 type CoordinationPolicy struct {
-	Mode                     CoordinationMode `json:"mode"`
-	MaximumSpeakersPerRound  int              `json:"maximumSpeakersPerRound,omitempty"`
-	QuietByDefault           bool             `json:"quietByDefault,omitempty"`
-	RequireRoleRelevance     bool             `json:"requireRoleRelevance,omitempty"`
-	SuppressDuplicateContent bool             `json:"suppressDuplicateContent,omitempty"`
+	MaximumSpeakersPerRound  int  `json:"maximumSpeakersPerRound,omitempty"`
+	QuietByDefault           bool `json:"quietByDefault,omitempty"`
+	RequireRoleRelevance     bool `json:"requireRoleRelevance,omitempty"`
+	SuppressDuplicateContent bool `json:"suppressDuplicateContent,omitempty"`
 }
 
 type DelegationPolicy struct {
@@ -121,7 +112,7 @@ func (d *Definition) Validate() error {
 		strings.TrimSpace(d.DisplayName) == "" || strings.TrimSpace(d.Purpose) == "" || len(d.Roles) == 0 {
 		return errors.New("team definition id, valid version, display name, purpose, and roles are required")
 	}
-	if !validCoordinationMode(d.Coordination.Mode) || d.Coordination.MaximumSpeakersPerRound < 0 ||
+	if d.Coordination.MaximumSpeakersPerRound < 0 ||
 		d.Delegation.MaximumDepth < 0 || d.Delegation.MaximumConcurrent < 0 ||
 		d.SharedContext.Retention < 0 || d.SharedContext.MaximumBytes < 0 || !validRisk(d.Approvals.MaximumRisk) {
 		return errors.New("team definition policies are invalid")
@@ -172,15 +163,6 @@ func (d *Definition) Validate() error {
 func validRoleChannelParticipation(value RoleChannelParticipation) bool {
 	switch value {
 	case "", RoleChannelActive, RoleChannelObserveOnly, RoleChannelDisabled:
-		return true
-	default:
-		return false
-	}
-}
-
-func validCoordinationMode(mode CoordinationMode) bool {
-	switch mode {
-	case CoordinationDynamic, CoordinationPeer, CoordinationLeaderFacilitated:
 		return true
 	default:
 		return false

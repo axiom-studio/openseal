@@ -17,7 +17,7 @@ func (workforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringReq
 type evaluableWorkforceFixtureGenerator struct{}
 
 func (evaluableWorkforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
-	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{"mode":"dynamic"},"approvals":{"maximumRisk":"read"}},"assignments":[]}}`), nil
+	return []byte(`{"candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{},"approvals":{"maximumRisk":"read"}},"assignments":[]}}`), nil
 }
 
 type sourceQualifiedWorkforceFixtureGenerator struct{}

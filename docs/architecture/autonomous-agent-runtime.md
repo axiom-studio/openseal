@@ -78,6 +78,25 @@ and versioned. Deployments are mutable activations with optimistic revisions.
 Agents and Teams are peer owners of objectives, Runs, Skills, activity, and
 artifacts; Teams additionally add roster and collaboration policy.
 
+### Team coordination
+
+Team channels use one relevance-arbitrated coordination model. There is no
+leader-only, peer, or dynamic mode switch: those labels previously projected
+the same runtime and made the contract misleading. Every active participant
+observes the shared channel context and may propose a contribution. The
+deterministic arbiter then applies the Team's explicit controls:
+
+- quiet-by-default materiality;
+- required or preferred role relevance;
+- duplicate-content suppression;
+- maximum speakers and concurrency;
+- audience, mention, thread, and role-participation boundaries.
+
+Leaders can coordinate through an ordinary semantic role and relevant
+handoffs, summaries, or decisions, but they are never mandatory spokespeople.
+Exact governed actions remain idempotently deduplicated even when repeated
+conversation content is allowed.
+
 ## Prompt-first authoring
 
 Natural-language authoring compiles to a durable **Workforce ChangeSet**, not a

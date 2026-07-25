@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 23
+const currentPostgresSchemaVersion int64 = naturalTeamCoordinationMigrationVersion
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -59,6 +59,21 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == naturalTeamCoordinationMigrationVersion {
+			for _, statement := range []string{
+				`UPDATE ` + s.table("team_definitions") + `
+				 SET payload = jsonb_set(payload, '{coordination,mode}', '"dynamic"'::jsonb, true)`,
+				`UPDATE ` + s.table("team_definition_amendments") + `
+				 SET payload = jsonb_set(payload, '{candidate,coordination,mode}', '"dynamic"'::jsonb, true)`,
+				`UPDATE ` + s.table("workforce_change_sets") + `
+				 SET payload = jsonb_set(payload, '{result,candidate,team,coordination,mode}', '"dynamic"'::jsonb, true)
+				 WHERE payload #> '{result,candidate,team}' IS NOT NULL`,
+			} {
+				if _, err := tx.ExecContext(ctx, statement); err != nil {
+					return err
+				}
+			}
+		}
 		if version == 23 {
 			if _, err := tx.ExecContext(ctx, `
 				DROP INDEX IF EXISTS `+s.table("run_activity_initiative_feed_idx")+`;

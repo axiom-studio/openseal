@@ -83,11 +83,10 @@ type ManifestRoleSkillGrant struct {
 }
 
 type ManifestCoordinationPolicy struct {
-	Mode                     CoordinationMode `json:"mode,omitempty" yaml:"mode,omitempty"`
-	MaximumSpeakersPerRound  int              `json:"maximumSpeakersPerRound,omitempty" yaml:"maximumSpeakersPerRound,omitempty"`
-	QuietByDefault           *bool            `json:"quietByDefault,omitempty" yaml:"quietByDefault,omitempty"`
-	RequireRoleRelevance     *bool            `json:"requireRoleRelevance,omitempty" yaml:"requireRoleRelevance,omitempty"`
-	SuppressDuplicateContent *bool            `json:"suppressDuplicateContent,omitempty" yaml:"suppressDuplicateContent,omitempty"`
+	MaximumSpeakersPerRound  int   `json:"maximumSpeakersPerRound,omitempty" yaml:"maximumSpeakersPerRound,omitempty"`
+	QuietByDefault           *bool `json:"quietByDefault,omitempty" yaml:"quietByDefault,omitempty"`
+	RequireRoleRelevance     *bool `json:"requireRoleRelevance,omitempty" yaml:"requireRoleRelevance,omitempty"`
+	SuppressDuplicateContent *bool `json:"suppressDuplicateContent,omitempty" yaml:"suppressDuplicateContent,omitempty"`
 }
 
 type ManifestDelegationPolicy struct {
@@ -171,14 +170,10 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 		maximumBytes = defaultSharedContextBytes
 	}
 	coordination := CoordinationPolicy{
-		Mode:                     manifest.Spec.Coordination.Mode,
 		MaximumSpeakersPerRound:  manifest.Spec.Coordination.MaximumSpeakersPerRound,
 		QuietByDefault:           booleanDefault(manifest.Spec.Coordination.QuietByDefault, true),
 		RequireRoleRelevance:     booleanDefault(manifest.Spec.Coordination.RequireRoleRelevance, true),
 		SuppressDuplicateContent: booleanDefault(manifest.Spec.Coordination.SuppressDuplicateContent, true),
-	}
-	if coordination.Mode == "" {
-		coordination.Mode = CoordinationDynamic
 	}
 	if coordination.MaximumSpeakersPerRound == 0 {
 		coordination.MaximumSpeakersPerRound = 2

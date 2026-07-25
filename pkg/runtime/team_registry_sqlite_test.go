@@ -104,7 +104,7 @@ func sqliteTeamDefinition(version string) *kernelteam.Definition {
 	return &kernelteam.Definition{
 		ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce evidence-backed findings",
 		Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1, RequiredSkillIDs: []string{"web"}}},
-		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationDynamic, MaximumSpeakersPerRound: 2, QuietByDefault: true},
+		Coordination: kernelteam.CoordinationPolicy{MaximumSpeakersPerRound: 2, QuietByDefault: true},
 		Delegation:   kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 4, RequireAcceptance: true},
 		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"researcher"}},
 		Amendments: workforce.AmendmentPolicy{

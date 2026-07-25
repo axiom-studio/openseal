@@ -49,7 +49,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 				{SkillID: "forum", SkillVersion: "2", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
 			},
 		}},
-		Coordination: kernelteam.CoordinationPolicy{Mode: kernelteam.CoordinationPeer}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Coordination: kernelteam.CoordinationPolicy{}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -722,7 +722,7 @@ func (m *Model) renderTeamsContent(width int) string {
 	lines = append(lines, "", mutedStyle.Render("Selected"))
 	if definition != nil {
 		lines = append(lines, compact(definition.Purpose, max(width-8, 24)))
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Definition %s@%s · %s coordination", definition.ID, definition.Version, definition.Coordination.Mode)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Definition %s@%s · relevance-arbitrated", definition.ID, definition.Version)))
 	} else {
 		lines = append(lines, mutedStyle.Render("Definition metadata is unavailable."))
 	}
