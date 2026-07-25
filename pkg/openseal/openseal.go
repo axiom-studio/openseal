@@ -216,6 +216,7 @@ type (
 	SkillReferenceObjectiveReference          = runtime.SkillReferenceObjectiveReference
 	SkillReferenceObjectiveImpact             = runtime.SkillReferenceObjectiveImpact
 	SkillReferenceInitiativeImpact            = runtime.SkillReferenceInitiativeImpact
+	SkillReferenceTeamAuthorityImpact         = runtime.SkillReferenceTeamAuthorityImpact
 	PlanSkillReferenceUpgradeRequest          = runtime.PlanSkillReferenceUpgradeRequest
 	ApplySkillReferenceUpgradeRequest         = runtime.ApplySkillReferenceUpgradeRequest
 	SkillReferenceUpgradeApproval             = runtime.SkillReferenceUpgradeApproval
@@ -1807,7 +1808,7 @@ func New(opts ...Option) (*Engine, error) {
 		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
 		logger:                   sugar,
 	}
-	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills)
+	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills, e.teams)
 	e.progression = progression.NewService(e.agents, e.teams)
 
 	for _, opt := range opts {
@@ -2000,7 +2001,7 @@ func WithStore(store runtime.KernelStore) Option {
 			e.skills = skill.NewCatalogWithStore(skillStore)
 		}
 		if upgradeStore, ok := store.(runtime.SkillReferenceUpgradeStore); ok && e.skills != nil {
-			e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills)
+			e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills, e.teams)
 		} else {
 			e.skillReferenceUpgrades = nil
 		}
