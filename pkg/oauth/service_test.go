@@ -130,7 +130,7 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 	}
 	service.now = func() time.Time { return now }
 	service.newID = func() string { return "session-one" }
-	randomValues := []string{"callback-state-secret", "pkce-verifier-secret"}
+	randomValues := []string{"callback-state-secret-with-at-least-thirty-two-bytes", "pkce-verifier-secret"}
 	service.random = func(_ int) (string, error) {
 		value := randomValues[0]
 		randomValues = randomValues[1:]
@@ -154,7 +154,8 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Query().Get("state") != "callback-state-secret" ||
+	callbackState := "session-one.callback-state-secret-with-at-least-thirty-two-bytes"
+	if parsed.Query().Get("state") != callbackState ||
 		parsed.Query().Get("code_challenge") != pkceChallenge("pkce-verifier-secret") {
 		t.Fatalf("authorization URL does not contain bound state and S256 challenge: %s", begin.AuthorizationURL)
 	}
@@ -169,7 +170,7 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 		t.Fatalf("session JSON exposed callback authority: %s", encodedSession)
 	}
 	result, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
-		Scope: scope, SessionID: begin.SessionID, State: "callback-state-secret", Code: "valid-code",
+		Scope: scope, SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +181,9 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 		result.Connection.Grant.Provider != "slack" ||
 		strings.Join(result.Connection.Grant.Scopes, ",") != "channels:history,chat:write" {
 		t.Fatalf("completed OAuth result = %#v", result)
+	}
+	if sessionID, err := SessionIDFromState(callbackState); err != nil || sessionID != begin.SessionID {
+		t.Fatalf("callback state session ID = %q, %v", sessionID, err)
 	}
 	encodedResult, _ := json.Marshal(result)
 	for _, secret := range []string{"secret-access-token", "secret-refresh-token", "pkce-verifier-secret", "callback-state-secret"} {
@@ -229,7 +233,7 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 	service, _ := NewService(store, credentials, provider)
 	service.now = func() time.Time { return now }
 	service.newID = func() string { return "session-one" }
-	values := []string{"state-value", "verifier-value"}
+	values := []string{"state-value-with-at-least-thirty-two-bytes", "verifier-value"}
 	service.random = func(_ int) (string, error) {
 		value := values[0]
 		values = values[1:]
@@ -248,9 +252,10 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	callbackState := "session-one.state-value-with-at-least-thirty-two-bytes"
 	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
 		Scope:     capability.ScopeReference{Kind: "tenant", ID: "tenant-2"},
-		SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
+		SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	}); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("cross-tenant callback error = %v", err)
 	}
@@ -260,7 +265,7 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 		t.Fatalf("wrong-state callback error = %v", err)
 	}
 	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
-		Scope: scope, SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
+		Scope: scope, SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	}); !errors.Is(err, ErrScopeMismatch) {
 		t.Fatalf("under-scoped callback error = %v", err)
 	}
@@ -268,7 +273,7 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 		t.Fatalf("provider exchanges = %d", provider.exchanges)
 	}
 	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
-		Scope: scope, SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
+		Scope: scope, SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	}); !errors.Is(err, ErrSessionConsumed) {
 		t.Fatalf("callback replay error = %v", err)
 	}
