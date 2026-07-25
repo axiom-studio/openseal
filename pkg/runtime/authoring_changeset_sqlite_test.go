@@ -297,6 +297,47 @@ func TestWorkforceAuthoringRejectsSkillRequirementsWithoutAuthorityBeforeApply(t
 	}
 }
 
+func TestInactiveWorkforceBindingDefersExactExecutionCredentialUntilActivation(t *testing.T) {
+	value := testApplicableWorkforceChangeSet()
+	definition := value.Result.Candidate.Agents[0]
+	definition.SkillRequirements = []agent.SkillRequirement{{
+		SkillID: "posture", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"},
+	}}
+	definition.Authority.AllowedSkillIDs = []string{"posture"}
+	definition.Authority.MaximumRisk = capability.RiskLevelExternal
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		"posture": {
+			ID: "posture", Version: "1.0.0", Actions: []string{"execute"},
+			MaximumRisk: capability.RiskLevelExternal,
+			Credentials: []authoring.SkillCredential{{
+				Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"execute"},
+			}},
+		},
+	}}
+	value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{
+		definition.ID: {"posture": capability.NewSkillIdentity("posture", "1.0.0", "")},
+	}
+
+	inactive, err := materializeWorkforceSkillBindings(value, definition, "agent-live", false)
+	if err != nil || len(inactive) != 1 || !inactive[0].Disabled || len(inactive[0].Credentials) != 0 {
+		t.Fatalf("inactive deferred binding=%#v error=%v", inactive, err)
+	}
+	if _, err = materializeWorkforceSkillBindings(value, definition, "agent-live", true); err == nil ||
+		!strings.Contains(err.Error(), "TOOLWEB_API_KEY") {
+		t.Fatalf("active missing exact credential error=%v", err)
+	}
+
+	reference := capability.CredentialReference{Kind: "environment-secret", ID: "credential://toolweb"}
+	value.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
+		definition.ID: {"TOOLWEB_API_KEY": reference},
+	}
+	active, err := materializeWorkforceSkillBindings(value, definition, "agent-live", true)
+	if err != nil || len(active) != 1 || active[0].Disabled ||
+		active[0].Credentials["TOOLWEB_API_KEY"] != reference {
+		t.Fatalf("active exact credential binding=%#v error=%v", active, err)
+	}
+}
+
 func TestSkillBindingStoresRejectMalformedAuthority(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
@@ -346,7 +387,7 @@ func TestSQLiteWorkforceEvaluationValidatesExactSkillAuthorityBeforeReady(t *tes
 				Actions:   map[string]skill.Action{"read": {Name: "read", Description: "Read Reddit posts", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, InputSchema: map[string]interface{}{"type": "object"}, Credentials: []skill.CredentialRequirement{{Name: "reddit", Kind: "reddit-oauth"}}, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported}},
 			},
 			credentials: []authoring.SkillCredential{{Name: "reddit", Kind: "reddit-oauth", Actions: []string{"read"}}},
-			references:  map[string]capability.CredentialReference{"reddit-oauth": {Kind: "reddit-oauth", ID: "credential://tenant/reddit"}},
+			references:  map[string]capability.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://tenant/reddit"}},
 			wantStatus:  authoring.ChangeSetReady,
 		},
 	} {
