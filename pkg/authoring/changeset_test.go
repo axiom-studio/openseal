@@ -612,6 +612,22 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 	if err := validatePlannedSkillInstallations(placement, catalog); err != nil {
 		t.Fatalf("validate exact installation plan: %v", err)
 	}
+	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 1 || missing[0].Kind != "skill_installation" {
+		t.Fatalf("installation without consuming Agent placement resolved requirements = %#v", missing)
+	}
+	placement.SkillSourceIdentities = map[string]map[string]string{
+		"tenant/one/researcher": {"community.research": "registry.example::community/research"},
+	}
+	placement.SkillSourceVersions = map[string]map[string]string{
+		"tenant/one/researcher": {"community.research": "2.1.0"},
+	}
+	placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{
+		"tenant/one/researcher": {
+			"community.research": capability.NewSkillIdentity(
+				"community.research", "2.1.0", "registry.example::community/research",
+			),
+		},
+	}
 	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 0 {
 		t.Fatalf("reviewed installation remained missing = %#v", missing)
 	}

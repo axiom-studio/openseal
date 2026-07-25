@@ -1491,10 +1491,24 @@ func skillInstallationPlanned(requirement MissingRequirement, catalog Capability
 	if !exists || skill.Readiness != SkillReadinessNeedsInstallation {
 		return false
 	}
+	agentID := strings.TrimPrefix(requirement.RequiredBy, "agent:")
+	if agentID == requirement.RequiredBy || strings.TrimSpace(agentID) == "" {
+		return false
+	}
 	for _, planned := range placement.PlannedSkillInstallations {
 		if strings.TrimSpace(planned.SkillID) == requirement.ID &&
 			strings.TrimSpace(planned.Version) == strings.TrimSpace(skill.Version) &&
 			strings.TrimSpace(planned.SourceIdentity) == strings.TrimSpace(skill.SourceIdentity) {
+			if strings.TrimSpace(placement.SkillSourceIdentities[agentID][requirement.ID]) != strings.TrimSpace(planned.SourceIdentity) ||
+				strings.TrimSpace(placement.SkillSourceVersions[agentID][requirement.ID]) != strings.TrimSpace(planned.Version) {
+				continue
+			}
+			runtimeIdentity := placement.SkillRuntimeIdentities[agentID][requirement.ID].Normalized()
+			if !runtimeIdentity.Valid() ||
+				runtimeIdentity.Version != strings.TrimSpace(planned.Version) ||
+				runtimeIdentity.SourceIdentity != strings.TrimSpace(planned.SourceIdentity) {
+				continue
+			}
 			for _, compatibility := range skill.Compatibility {
 				if compatibility.Requirement == "installation" && !compatibility.Compatible &&
 					strings.TrimSpace(compatibility.Reference) == strings.TrimSpace(planned.Reference) {
