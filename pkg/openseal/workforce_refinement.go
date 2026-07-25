@@ -25,6 +25,7 @@ type (
 	WorkforceSkillCompatibility               = authoring.SkillCompatibility
 	WorkforceSkillSearchOrigin                = authoring.SkillSearchOrigin
 	WorkforceSkillSearchVerification          = authoring.SkillSearchVerification
+	WorkforceSkillSearchTrust                 = authoring.SkillSearchTrust
 	WorkforceSkillSearchRequest               = authoring.SkillSearchRequest
 	WorkforceSkillSearchProvenance            = authoring.SkillSearchProvenance
 	WorkforceSkillSearchCandidate             = authoring.SkillSearchCandidate
@@ -66,6 +67,9 @@ const (
 	WorkforceSkillSearchVerified           = authoring.SkillSearchVerificationVerified
 	WorkforceSkillSearchVerificationNeeded = authoring.SkillSearchVerificationRequired
 	WorkforceSkillSearchVerificationFailed = authoring.SkillSearchVerificationFailed
+	WorkforceSkillSearchVerifiedPublisher  = authoring.SkillSearchTrustVerifiedPublisher
+	WorkforceSkillSearchPrivate            = authoring.SkillSearchTrustPrivate
+	WorkforceSkillSearchCommunity          = authoring.SkillSearchTrustCommunity
 )
 
 const (

@@ -51,6 +51,7 @@ func TestNormalizeSkillSearchPagePreservesProviderRankingAndLifecycleTruth(t *te
 				Verification: SkillSearchVerificationVerified,
 				Provenance: SkillSearchProvenance{
 					Registry: "clawhub", Publisher: "@example", Reference: "preview:sha256:abc", Digest: "sha256:abc",
+					Trust: SkillSearchTrustCommunity,
 				},
 				RequiresApproval: true,
 			},
@@ -72,7 +73,8 @@ func TestNormalizeSkillSearchPagePreservesProviderRankingAndLifecycleTruth(t *te
 		t.Fatal(err)
 	}
 	if page.NextCursor != "next" || page.Items[0].ID != "reddit-observer" || page.Items[1].ID != "openseal.source" ||
-		len(page.Items[0].Actions) != 1 || !page.Items[0].RequiresApproval || len(page.Diagnostics) != 1 {
+		len(page.Items[0].Actions) != 1 || !page.Items[0].RequiresApproval || len(page.Diagnostics) != 1 ||
+		page.Items[0].Provenance.Trust != SkillSearchTrustCommunity {
 		t.Fatalf("normalized page = %#v", page)
 	}
 }
@@ -113,6 +115,10 @@ func TestNormalizeSkillSearchPageRejectsUnsafeCatalogClaims(t *testing.T) {
 		"unverified cannot be installable": func(candidate *SkillSearchCandidate) {
 			candidate.SourceIdentity = "registry::reddit"
 			candidate.Verification = SkillSearchVerificationRequired
+		},
+		"invalid provenance trust": func(candidate *SkillSearchCandidate) {
+			candidate.SourceIdentity = "registry::reddit"
+			candidate.Provenance.Trust = "self_asserted"
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

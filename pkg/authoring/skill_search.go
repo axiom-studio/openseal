@@ -32,6 +32,17 @@ const (
 	SkillSearchVerificationFailed   SkillSearchVerification = "failed"
 )
 
+// SkillSearchTrust is a host-verified classification of the catalog boundary
+// that supplied a Skill. It is independent of marketplace branding so clients
+// never need to infer trust from a publisher name or registry URL.
+type SkillSearchTrust string
+
+const (
+	SkillSearchTrustVerifiedPublisher SkillSearchTrust = "verified_publisher"
+	SkillSearchTrustPrivate           SkillSearchTrust = "private"
+	SkillSearchTrustCommunity         SkillSearchTrust = "community"
+)
+
 // SkillSearchRequest is the product-neutral query used while composing an
 // Agent, Team, or Workforce. Cursor values are opaque, host-authored values.
 type SkillSearchRequest struct {
@@ -47,10 +58,11 @@ type SkillSearchRequest struct {
 // an opaque immutable receipt or registry identifier; it must never contain a
 // credential or secret-bearing installation argument.
 type SkillSearchProvenance struct {
-	Registry  string `json:"registry,omitempty"`
-	Publisher string `json:"publisher,omitempty"`
-	Reference string `json:"reference,omitempty"`
-	Digest    string `json:"digest,omitempty"`
+	Registry  string           `json:"registry,omitempty"`
+	Publisher string           `json:"publisher,omitempty"`
+	Reference string           `json:"reference,omitempty"`
+	Digest    string           `json:"digest,omitempty"`
+	Trust     SkillSearchTrust `json:"trust,omitempty"`
 }
 
 // SkillSearchCandidate is an exact Skill possibility for a reviewable plan.
@@ -165,6 +177,11 @@ func NormalizeSkillSearchPage(request SkillSearchRequest, page *SkillSearchPage)
 			len(candidate.Provenance.Registry) > 256 || len(candidate.Provenance.Publisher) > 256 ||
 			len(candidate.Provenance.Reference) > 2048 || len(candidate.Provenance.Digest) > 256 {
 			return nil, fmt.Errorf("Skill search candidate %d exceeds metadata limits", index)
+		}
+		switch candidate.Provenance.Trust {
+		case "", SkillSearchTrustVerifiedPublisher, SkillSearchTrustPrivate, SkillSearchTrustCommunity:
+		default:
+			return nil, fmt.Errorf("Skill search candidate %d has invalid provenance trust", index)
 		}
 		switch candidate.Origin {
 		case SkillSearchOriginEnabled, SkillSearchOriginCatalog:
