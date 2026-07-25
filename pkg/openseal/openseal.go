@@ -155,6 +155,7 @@ type (
 	WorkforceAuthoringMode                    = authoring.Mode
 	WorkforceSkillCapability                  = authoring.SkillCapability
 	WorkforceSkillCredential                  = authoring.SkillCredential
+	WorkforceConversationAdapterCapability    = authoring.ConversationAdapterCapability
 	WorkforceCredentialBindingRequirement     = authoring.CredentialBindingRequirement
 	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
@@ -508,6 +509,14 @@ type (
 	OAuth2Subject                      = capability.OAuth2Subject
 	OAuth2Requirement                  = capability.OAuth2Requirement
 	OAuth2GrantSummary                 = capability.OAuth2GrantSummary
+	ConversationEndpointMode           = capability.ConversationEndpointMode
+	ConversationAdapterFeature         = capability.ConversationAdapterFeature
+	ConversationDeliveryOperation      = capability.ConversationDeliveryOperation
+	ConversationDeliveryOrdering       = capability.ConversationDeliveryOrdering
+	ConversationDeliveryCapabilities   = capability.ConversationDeliveryCapabilities
+	ConversationAdapterTransport       = capability.ConversationAdapterTransport
+	ConversationAdapter                = capability.ConversationAdapter
+	BoundConversationAdapter           = capability.BoundConversationAdapter
 	SkillTransportReference            = skill.TransportReference
 	SkillTransportArgument             = skill.TransportArgument
 	SkillArgumentRule                  = skill.ArgumentRule
@@ -533,12 +542,14 @@ type (
 	SkillAvailabilityReason            = skill.AvailabilityReason
 	SkillBindingActivationPreview      = skill.BindingActivationPreview
 	ActivatedSkill                     = skill.ActivatedSkill
+	ActivatedConversationAdapter       = skill.ActivatedConversationAdapter
 	UnavailableSkill                   = skill.UnavailableSkill
 	SkillActivationSnapshot            = skill.ActivationSnapshot
 	SkillDiscoveryReadiness            = skill.DiscoveryReadiness
 	SkillDiscoveryRequest              = skill.DiscoveryRequest
 	SkillDiscoveryAction               = skill.DiscoveryAction
 	SkillDiscoveryCredential           = skill.DiscoveryCredential
+	SkillDiscoveryConversationAdapter  = skill.DiscoveryConversationAdapter
 	SkillDiscoveryCompatibility        = skill.DiscoveryCompatibility
 	SkillDiscoveryCandidate            = skill.DiscoveryCandidate
 	SkillDiscoveryPage                 = skill.DiscoveryPage
@@ -1001,9 +1012,10 @@ func RequiredWorkforceCredentialBindings(candidate WorkforceCandidate, catalog W
 }
 
 var (
-	NormalizeOAuth2Requirement  = capability.NormalizeOAuth2Requirement
-	NormalizeOAuth2GrantSummary = capability.NormalizeOAuth2GrantSummary
-	OAuth2GrantSatisfies        = capability.OAuth2GrantSatisfies
+	NormalizeOAuth2Requirement   = capability.NormalizeOAuth2Requirement
+	NormalizeOAuth2GrantSummary  = capability.NormalizeOAuth2GrantSummary
+	OAuth2GrantSatisfies         = capability.OAuth2GrantSatisfies
+	NormalizeConversationAdapter = capability.NormalizeConversationAdapter
 )
 
 var (
@@ -1586,8 +1598,41 @@ const (
 	SkillAdapterRemoteNode      = skill.AdapterRemoteNode
 	SkillAdapterResourceStaging = skill.AdapterResourceStaging
 	SkillAdapterPreparedRuntime = skill.AdapterPreparedRuntime
-	SkillAdapterHTTPAction      = skill.AdapterHTTPAction
-	HTTPActionTransportName     = httpaction.TransportName
+	SkillAdapterConversation    = skill.AdapterConversation
+
+	ConversationEndpointChannel = capability.ConversationEndpointChannel
+	ConversationEndpointDirect  = capability.ConversationEndpointDirect
+
+	ConversationAdapterProtocolV1 = capability.ConversationAdapterProtocolV1
+
+	ConversationFeatureThreads     = capability.ConversationFeatureThreads
+	ConversationFeatureMentions    = capability.ConversationFeatureMentions
+	ConversationFeatureAttachments = capability.ConversationFeatureAttachments
+	ConversationFeatureReactions   = capability.ConversationFeatureReactions
+	ConversationFeatureEdits       = capability.ConversationFeatureEdits
+	ConversationFeatureDeletes     = capability.ConversationFeatureDeletes
+	ConversationFeatureTyping      = capability.ConversationFeatureTyping
+
+	ConversationDeliveryMessageSend     = capability.ConversationDeliveryMessageSend
+	ConversationDeliveryMessageUpdate   = capability.ConversationDeliveryMessageUpdate
+	ConversationDeliveryMessageDelete   = capability.ConversationDeliveryMessageDelete
+	ConversationDeliveryReactionAdd     = capability.ConversationDeliveryReactionAdd
+	ConversationDeliveryReactionRemove  = capability.ConversationDeliveryReactionRemove
+	ConversationDeliveryTypingIndicator = capability.ConversationDeliveryTypingIndicator
+
+	ConversationDeliveryOrderEndpoint     = capability.ConversationDeliveryOrderEndpoint
+	ConversationDeliveryOrderConversation = capability.ConversationDeliveryOrderConversation
+	ConversationDeliveryOrderThread       = capability.ConversationDeliveryOrderThread
+
+	ConversationEventMessageReceived   = capability.ConversationEventMessageReceived
+	ConversationEventMessageUpdated    = capability.ConversationEventMessageUpdated
+	ConversationEventMessageDeleted    = capability.ConversationEventMessageDeleted
+	ConversationEventReactionAdded     = capability.ConversationEventReactionAdded
+	ConversationEventReactionRemoved   = capability.ConversationEventReactionRemoved
+	ConversationEventParticipantJoined = capability.ConversationEventParticipantJoined
+	ConversationEventParticipantLeft   = capability.ConversationEventParticipantLeft
+	SkillAdapterHTTPAction             = skill.AdapterHTTPAction
+	HTTPActionTransportName            = httpaction.TransportName
 
 	SkillRuntimePreparing   = skill.RuntimePreparationPreparing
 	SkillRuntimeReady       = skill.RuntimePreparationReady

@@ -20,20 +20,35 @@ const (
 )
 
 type SkillCapability struct {
-	ID                  string                          `json:"id"`
-	Version             string                          `json:"version,omitempty"`
-	SourceIdentity      string                          `json:"sourceIdentity,omitempty"`
-	Name                string                          `json:"name,omitempty"`
-	Description         string                          `json:"description,omitempty"`
-	Actions             []string                        `json:"actions,omitempty"`
-	ActionRisks         map[string]capability.RiskLevel `json:"actionRisks,omitempty"`
-	CredentialKinds     []string                        `json:"credentialKinds,omitempty"`
-	Credentials         []SkillCredential               `json:"credentials,omitempty"`
-	BindingConfigSchema map[string]interface{}          `json:"bindingConfigSchema,omitempty"`
-	PromptAvailable     bool                            `json:"promptAvailable,omitempty"`
-	MaximumRisk         capability.RiskLevel            `json:"maximumRisk,omitempty"`
-	Readiness           SkillReadiness                  `json:"readiness,omitempty"`
-	Compatibility       []SkillCompatibility            `json:"compatibility,omitempty"`
+	ID                   string                          `json:"id"`
+	Version              string                          `json:"version,omitempty"`
+	SourceIdentity       string                          `json:"sourceIdentity,omitempty"`
+	Name                 string                          `json:"name,omitempty"`
+	Description          string                          `json:"description,omitempty"`
+	Actions              []string                        `json:"actions,omitempty"`
+	ActionRisks          map[string]capability.RiskLevel `json:"actionRisks,omitempty"`
+	CredentialKinds      []string                        `json:"credentialKinds,omitempty"`
+	Credentials          []SkillCredential               `json:"credentials,omitempty"`
+	ConversationAdapters []ConversationAdapterCapability `json:"conversationAdapters,omitempty"`
+	BindingConfigSchema  map[string]interface{}          `json:"bindingConfigSchema,omitempty"`
+	PromptAvailable      bool                            `json:"promptAvailable,omitempty"`
+	MaximumRisk          capability.RiskLevel            `json:"maximumRisk,omitempty"`
+	Readiness            SkillReadiness                  `json:"readiness,omitempty"`
+	Compatibility        []SkillCompatibility            `json:"compatibility,omitempty"`
+}
+
+// ConversationAdapterCapability is the model-safe projection used to compose
+// reactive conversation endpoints. It contains no executable entrypoint,
+// opaque connection reference, or external account identity.
+type ConversationAdapterCapability struct {
+	ID                string                                      `json:"id"`
+	ProtocolVersion   string                                      `json:"protocolVersion"`
+	Provider          string                                      `json:"provider"`
+	EndpointModes     []capability.ConversationEndpointMode       `json:"endpointModes"`
+	InboundEventTypes []string                                    `json:"inboundEventTypes"`
+	Features          []capability.ConversationAdapterFeature     `json:"features,omitempty"`
+	Delivery          capability.ConversationDeliveryCapabilities `json:"delivery"`
+	Credentials       []SkillCredential                           `json:"credentials,omitempty"`
 }
 
 type SkillReadiness string

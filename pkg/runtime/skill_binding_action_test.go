@@ -309,6 +309,82 @@ func TestSkillManagementSkillMakesPromptOnlyAuthorityExplicit(t *testing.T) {
 	if !ok || items["pattern"] != `^[^*]+$` {
 		t.Fatalf("allowedActions item schema permits wildcard authority: %#v", allowed["items"])
 	}
+	if _, ok := properties["enabledConversationAdapters"].(map[string]interface{}); !ok {
+		t.Fatalf("conversation adapter authority is absent from binding schema: %#v", properties)
+	}
+	discover := SkillManagementSkill().Actions[SkillActionDiscoverBinding]
+	outputProperties := discover.OutputSchema["properties"].(map[string]interface{})
+	candidates := outputProperties["items"].(map[string]interface{})["items"].(map[string]interface{})
+	candidateProperties := candidates["properties"].(map[string]interface{})
+	if _, ok := candidateProperties["conversationAdapters"].(map[string]interface{}); !ok {
+		t.Fatalf("conversation adapters are absent from discovery schema: %#v", candidateProperties)
+	}
+}
+
+func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	deploymentID := "slack-agent"
+	catalog := skill.NewCatalog()
+	for _, definition := range []*skill.Definition{SkillManagementSkill(), slackConversationSkillDefinition()} {
+		if err := catalog.Register(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := catalog.Bind(ctx, &skill.Binding{
+		ID: "skills", Scope: skillScope, DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
+		AllowedActions: []string{SkillActionUpsertBinding}, MaximumRisk: skill.RiskLevelWrite, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := catalog.Resolve(ctx, skillScope, deploymentID, SkillManagementSkillID, SkillManagementSkillVersion, SkillActionUpsertBinding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryStore()
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID},
+		AssignedAgentID: deploymentID, Goal: "Enable Slack conversations", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := map[string]interface{}{
+		"bindingId": "slack", "expectedRevision": 0,
+		"skillId": "slack", "skillVersion": "1.0.0",
+		"allowedActions": []interface{}{}, "enablePrompt": false,
+		"enabledConversationAdapters": []interface{}{"conversations"}, "maximumRisk": "read",
+		"accessReferences": map[string]interface{}{"SLACK_CONNECTION": map[string]interface{}{
+			"kind": "slack-oauth", "id": "connection://tenant-a/slack",
+		}},
+	}
+	validator, err := NewSkillBindingActionValidator(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		Run: run, Bound: bound, Arguments: arguments,
+	})
+	if err != nil || preview["resourceType"] != "skill_binding" {
+		t.Fatalf("adapter binding preview = %#v, %v", preview, err)
+	}
+	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{
+		Call: &ActionCall{Scope: scope, RunID: run.ID, DeploymentID: deploymentID}, Bound: bound, Arguments: arguments,
+	})
+	if err != nil || result["operation"] != SkillActionUpsertBinding {
+		t.Fatalf("adapter binding dispatch = %#v, %v", result, err)
+	}
+	binding, err := catalog.GetBinding(ctx, skillScope, deploymentID, "slack")
+	if err != nil || binding == nil || len(binding.EnabledConversationAdapters) != 1 ||
+		binding.EnabledConversationAdapters[0] != "conversations" || len(binding.AllowedActions) != 0 {
+		t.Fatalf("adapter-only binding = %#v, %v", binding, err)
+	}
 }
 
 func skillActionCatalog(t *testing.T, ctx context.Context, scope Scope, deploymentID string) *skill.Catalog {
@@ -350,6 +426,35 @@ func redditSkillDefinition() *skill.Definition {
 				InputSchema: map[string]interface{}{"type": "object"}, OutputSchema: map[string]interface{}{"type": "object"},
 			},
 		},
+	}
+}
+
+func slackConversationSkillDefinition() *skill.Definition {
+	return &skill.Definition{
+		ID: "slack", Version: "1.0.0", Name: "Slack",
+		Actions: map[string]skill.Action{},
+		ConversationAdapters: map[string]skill.ConversationAdapter{"conversations": {
+			ProtocolVersion: skill.ConversationAdapterProtocolV1,
+			Name:            "Slack conversations", Description: "Receive and deliver Slack conversations.", Provider: "slack",
+			EndpointModes:     []skill.ConversationEndpointMode{skill.ConversationEndpointChannel},
+			InboundEventTypes: []string{skill.ConversationEventMessageReceived},
+			Features:          []skill.ConversationAdapterFeature{skill.ConversationFeatureMentions, skill.ConversationFeatureThreads},
+			Credentials: []skill.CredentialRequirement{{
+				Name: "SLACK_CONNECTION", Kind: "slack-oauth",
+				OAuth2: &skill.OAuth2Requirement{
+					Provider: "slack", Subject: skill.OAuth2SubjectInstallation,
+					Scopes: []string{"channels:history", "chat:write"},
+				},
+			}},
+			Delivery: skill.ConversationDeliveryCapabilities{
+				Operations: []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend},
+				Ordering:   skill.ConversationDeliveryOrderThread, Idempotency: skill.IdempotencyRequired,
+				SupportsAcknowledgementLookup: true, SupportsRetryAfter: true,
+			},
+			Transport: skill.ConversationAdapterTransport{
+				Kind: "plugin", IngressEndpoint: "slack.conversation.ingress", DeliveryEndpoint: "slack.conversation.deliver",
+			},
+		}},
 	}
 }
 

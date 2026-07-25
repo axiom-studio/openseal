@@ -117,6 +117,92 @@ type PromptModule struct {
 	Credentials            []CredentialRequirement `json:"credentials,omitempty"`
 }
 
+type ConversationEndpointMode string
+
+const (
+	ConversationEndpointChannel ConversationEndpointMode = "channel"
+	ConversationEndpointDirect  ConversationEndpointMode = "direct"
+)
+
+type ConversationAdapterFeature string
+
+const (
+	ConversationFeatureThreads     ConversationAdapterFeature = "threads"
+	ConversationFeatureMentions    ConversationAdapterFeature = "mentions"
+	ConversationFeatureAttachments ConversationAdapterFeature = "attachments"
+	ConversationFeatureReactions   ConversationAdapterFeature = "reactions"
+	ConversationFeatureEdits       ConversationAdapterFeature = "edits"
+	ConversationFeatureDeletes     ConversationAdapterFeature = "deletes"
+	ConversationFeatureTyping      ConversationAdapterFeature = "typing"
+)
+
+const ConversationAdapterProtocolV1 = "openseal.conversation.adapter/v1"
+
+const (
+	ConversationEventMessageReceived   = "conversation.message.received"
+	ConversationEventMessageUpdated    = "conversation.message.updated"
+	ConversationEventMessageDeleted    = "conversation.message.deleted"
+	ConversationEventReactionAdded     = "conversation.reaction.added"
+	ConversationEventReactionRemoved   = "conversation.reaction.removed"
+	ConversationEventParticipantJoined = "conversation.participant.joined"
+	ConversationEventParticipantLeft   = "conversation.participant.left"
+)
+
+type ConversationDeliveryOperation string
+
+const (
+	ConversationDeliveryMessageSend     ConversationDeliveryOperation = "message.send"
+	ConversationDeliveryMessageUpdate   ConversationDeliveryOperation = "message.update"
+	ConversationDeliveryMessageDelete   ConversationDeliveryOperation = "message.delete"
+	ConversationDeliveryReactionAdd     ConversationDeliveryOperation = "reaction.add"
+	ConversationDeliveryReactionRemove  ConversationDeliveryOperation = "reaction.remove"
+	ConversationDeliveryTypingIndicator ConversationDeliveryOperation = "typing.set"
+)
+
+type ConversationDeliveryOrdering string
+
+const (
+	ConversationDeliveryOrderEndpoint     ConversationDeliveryOrdering = "endpoint"
+	ConversationDeliveryOrderConversation ConversationDeliveryOrdering = "conversation"
+	ConversationDeliveryOrderThread       ConversationDeliveryOrdering = "thread"
+)
+
+// ConversationDeliveryCapabilities declares the guarantees supplied by the
+// Skill-owned delivery implementation. OpenSeal uses these facts to choose a
+// safe outbox strategy instead of inferring provider behavior.
+type ConversationDeliveryCapabilities struct {
+	Operations                    []ConversationDeliveryOperation `json:"operations"`
+	Ordering                      ConversationDeliveryOrdering    `json:"ordering"`
+	Idempotency                   IdempotencyMode                 `json:"idempotency"`
+	SupportsAcknowledgementLookup bool                            `json:"supportsAcknowledgementLookup,omitempty"`
+	SupportsRetryAfter            bool                            `json:"supportsRetryAfter,omitempty"`
+}
+
+// ConversationAdapterTransport identifies Skill-owned executable adapter
+// entrypoints. A generic host invokes these entrypoints; provider-specific code
+// remains part of the Skill package rather than the host or kernel.
+type ConversationAdapterTransport struct {
+	Kind             string `json:"kind"`
+	IngressEndpoint  string `json:"ingressEndpoint"`
+	DeliveryEndpoint string `json:"deliveryEndpoint"`
+}
+
+// ConversationAdapter declares one provider adapter supplied by a Skill.
+// Inbound payload normalization and outbound delivery are not model tools.
+// Credentials are resolved out of band from the exact Skill binding.
+type ConversationAdapter struct {
+	ProtocolVersion   string                           `json:"protocolVersion"`
+	Name              string                           `json:"name"`
+	Description       string                           `json:"description"`
+	Provider          string                           `json:"provider"`
+	EndpointModes     []ConversationEndpointMode       `json:"endpointModes"`
+	InboundEventTypes []string                         `json:"inboundEventTypes"`
+	Features          []ConversationAdapterFeature     `json:"features,omitempty"`
+	Credentials       []CredentialRequirement          `json:"credentials,omitempty"`
+	Delivery          ConversationDeliveryCapabilities `json:"delivery"`
+	Transport         ConversationAdapterTransport     `json:"transport"`
+}
+
 type Requirements struct {
 	OperatingSystems []string `json:"operatingSystems,omitempty"`
 	Executables      []string `json:"executables,omitempty"`
@@ -185,14 +271,15 @@ type Definition struct {
 	// BindingConfigSchema defines non-secret, host-owned configuration that is
 	// fixed when a Skill is bound. It is never part of model-visible action
 	// input and is delivered to tool hosts separately from action arguments.
-	BindingConfigSchema map[string]interface{} `json:"bindingConfigSchema,omitempty"`
-	Actions             map[string]Action      `json:"actions"`
-	Transport           TransportReference     `json:"transport"`
-	Prompt              *PromptModule          `json:"prompt,omitempty"`
-	Requirements        Requirements           `json:"requirements,omitempty"`
-	Installers          []Installer            `json:"installers,omitempty"`
-	Resources           []Resource             `json:"resources,omitempty"`
-	Source              *SourceProvenance      `json:"source,omitempty"`
+	BindingConfigSchema  map[string]interface{}         `json:"bindingConfigSchema,omitempty"`
+	Actions              map[string]Action              `json:"actions"`
+	Transport            TransportReference             `json:"transport"`
+	Prompt               *PromptModule                  `json:"prompt,omitempty"`
+	ConversationAdapters map[string]ConversationAdapter `json:"conversationAdapters,omitempty"`
+	Requirements         Requirements                   `json:"requirements,omitempty"`
+	Installers           []Installer                    `json:"installers,omitempty"`
+	Resources            []Resource                     `json:"resources,omitempty"`
+	Source               *SourceProvenance              `json:"source,omitempty"`
 }
 
 type ArgumentRule struct {
@@ -206,23 +293,24 @@ type ScopeReference struct {
 }
 
 type Binding struct {
-	ID                   string                             `json:"id"`
-	Scope                ScopeReference                     `json:"scope"`
-	DeploymentID         string                             `json:"deploymentId"`
-	SkillID              string                             `json:"skillId"`
-	SkillVersion         string                             `json:"skillVersion"`
-	SourceIdentity       string                             `json:"sourceIdentity,omitempty"`
-	Disabled             bool                               `json:"disabled,omitempty"`
-	AllowedActions       []string                           `json:"allowedActions"`
-	EnablePrompt         bool                               `json:"enablePrompt,omitempty"`
-	MaximumRisk          RiskLevel                          `json:"maximumRisk"`
-	ArgumentRestrictions map[string]map[string]ArgumentRule `json:"argumentRestrictions,omitempty"`
-	Credentials          map[string]CredentialReference     `json:"credentials,omitempty"`
-	Config               map[string]interface{}             `json:"config,omitempty"`
-	Revision             int64                              `json:"revision"`
-	CreatedAt            time.Time                          `json:"createdAt,omitempty"`
-	UpdatedAt            time.Time                          `json:"updatedAt,omitempty"`
-	Lifecycle            []BindingLifecycleEntry            `json:"lifecycle,omitempty"`
+	ID                          string                             `json:"id"`
+	Scope                       ScopeReference                     `json:"scope"`
+	DeploymentID                string                             `json:"deploymentId"`
+	SkillID                     string                             `json:"skillId"`
+	SkillVersion                string                             `json:"skillVersion"`
+	SourceIdentity              string                             `json:"sourceIdentity,omitempty"`
+	Disabled                    bool                               `json:"disabled,omitempty"`
+	AllowedActions              []string                           `json:"allowedActions"`
+	EnablePrompt                bool                               `json:"enablePrompt,omitempty"`
+	EnabledConversationAdapters []string                           `json:"enabledConversationAdapters,omitempty"`
+	MaximumRisk                 RiskLevel                          `json:"maximumRisk"`
+	ArgumentRestrictions        map[string]map[string]ArgumentRule `json:"argumentRestrictions,omitempty"`
+	Credentials                 map[string]CredentialReference     `json:"credentials,omitempty"`
+	Config                      map[string]interface{}             `json:"config,omitempty"`
+	Revision                    int64                              `json:"revision"`
+	CreatedAt                   time.Time                          `json:"createdAt,omitempty"`
+	UpdatedAt                   time.Time                          `json:"updatedAt,omitempty"`
+	Lifecycle                   []BindingLifecycleEntry            `json:"lifecycle,omitempty"`
 }
 
 type BindingLifecycleAction string
@@ -291,5 +379,12 @@ type ModelPrompt struct {
 type BoundAction struct {
 	Definition *Definition
 	Action     Action
+	Binding    *Binding
+}
+
+type BoundConversationAdapter struct {
+	Definition *Definition
+	AdapterID  string
+	Adapter    ConversationAdapter
 	Binding    *Binding
 }

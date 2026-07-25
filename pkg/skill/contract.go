@@ -20,6 +20,14 @@ type CredentialReference = capability.CredentialReference
 type OAuth2Subject = capability.OAuth2Subject
 type OAuth2Requirement = capability.OAuth2Requirement
 type OAuth2GrantSummary = capability.OAuth2GrantSummary
+type ConversationEndpointMode = capability.ConversationEndpointMode
+type ConversationAdapterFeature = capability.ConversationAdapterFeature
+type ConversationDeliveryOperation = capability.ConversationDeliveryOperation
+type ConversationDeliveryOrdering = capability.ConversationDeliveryOrdering
+type ConversationDeliveryCapabilities = capability.ConversationDeliveryCapabilities
+type ConversationAdapterTransport = capability.ConversationAdapterTransport
+type ConversationAdapter = capability.ConversationAdapter
+type BoundConversationAdapter = capability.BoundConversationAdapter
 type ActionRetryPolicy = capability.ActionRetryPolicy
 type Duration = capability.Duration
 type Action = capability.Action
@@ -56,6 +64,38 @@ const (
 
 	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
 	OAuth2SubjectUser         = capability.OAuth2SubjectUser
+
+	ConversationEndpointChannel = capability.ConversationEndpointChannel
+	ConversationEndpointDirect  = capability.ConversationEndpointDirect
+
+	ConversationAdapterProtocolV1 = capability.ConversationAdapterProtocolV1
+
+	ConversationFeatureThreads     = capability.ConversationFeatureThreads
+	ConversationFeatureMentions    = capability.ConversationFeatureMentions
+	ConversationFeatureAttachments = capability.ConversationFeatureAttachments
+	ConversationFeatureReactions   = capability.ConversationFeatureReactions
+	ConversationFeatureEdits       = capability.ConversationFeatureEdits
+	ConversationFeatureDeletes     = capability.ConversationFeatureDeletes
+	ConversationFeatureTyping      = capability.ConversationFeatureTyping
+
+	ConversationDeliveryMessageSend     = capability.ConversationDeliveryMessageSend
+	ConversationDeliveryMessageUpdate   = capability.ConversationDeliveryMessageUpdate
+	ConversationDeliveryMessageDelete   = capability.ConversationDeliveryMessageDelete
+	ConversationDeliveryReactionAdd     = capability.ConversationDeliveryReactionAdd
+	ConversationDeliveryReactionRemove  = capability.ConversationDeliveryReactionRemove
+	ConversationDeliveryTypingIndicator = capability.ConversationDeliveryTypingIndicator
+
+	ConversationDeliveryOrderEndpoint     = capability.ConversationDeliveryOrderEndpoint
+	ConversationDeliveryOrderConversation = capability.ConversationDeliveryOrderConversation
+	ConversationDeliveryOrderThread       = capability.ConversationDeliveryOrderThread
+
+	ConversationEventMessageReceived   = capability.ConversationEventMessageReceived
+	ConversationEventMessageUpdated    = capability.ConversationEventMessageUpdated
+	ConversationEventMessageDeleted    = capability.ConversationEventMessageDeleted
+	ConversationEventReactionAdded     = capability.ConversationEventReactionAdded
+	ConversationEventReactionRemoved   = capability.ConversationEventReactionRemoved
+	ConversationEventParticipantJoined = capability.ConversationEventParticipantJoined
+	ConversationEventParticipantLeft   = capability.ConversationEventParticipantLeft
 
 	BindingLifecycleCreated  = capability.BindingLifecycleCreated
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
@@ -432,6 +472,60 @@ func (c *Catalog) resolvePrompt(ctx context.Context, scope ScopeReference, deplo
 	return nil, errors.New("bound skill prompt not found")
 }
 
+// ResolveConversationAdapter resolves one exact Skill-owned provider adapter.
+// The result contains only immutable adapter metadata and opaque credential
+// references; a generic host resolves credential values out of band.
+func (c *Catalog) ResolveConversationAdapter(ctx context.Context, scope ScopeReference, deploymentID, skillID, version, adapterID string, selected ...BindingReference) (*BoundConversationAdapter, error) {
+	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
+		return nil, err
+	}
+	adapterID = strings.TrimSpace(adapterID)
+	if adapterID == "" || len(selected) > 1 || (len(selected) == 1 && (strings.TrimSpace(selected[0].ID) == "" || selected[0].Revision < 1)) {
+		return nil, errors.New("conversation adapter and at most one exact binding reference are required")
+	}
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	var resolved *BoundConversationAdapter
+	for _, binding := range bindings {
+		if binding.Disabled || binding.SkillID != skillID || binding.SkillVersion != version ||
+			!containsString(binding.EnabledConversationAdapters, adapterID) {
+			continue
+		}
+		if len(selected) == 1 && (binding.ID != selected[0].ID || binding.Revision != selected[0].Revision) {
+			continue
+		}
+		definition, err := c.definitionFor(ctx, skillID, version, binding.SourceIdentity)
+		if err != nil {
+			return nil, err
+		}
+		if definition == nil {
+			continue
+		}
+		_, ok := definition.ConversationAdapters[adapterID]
+		if !ok || validateBindingAgainstDefinition(binding, definition) != nil {
+			continue
+		}
+		copy := cloneDefinition(definition)
+		candidate := &BoundConversationAdapter{
+			Definition: copy, AdapterID: adapterID,
+			Adapter: copy.ConversationAdapters[adapterID], Binding: cloneBinding(binding),
+		}
+		if resolved != nil && len(selected) == 0 {
+			return nil, ErrBindingAmbiguous
+		}
+		resolved = candidate
+	}
+	if resolved != nil {
+		return resolved, nil
+	}
+	if len(selected) == 1 {
+		return nil, errors.New("selected conversation adapter binding is unavailable or stale")
+	}
+	return nil, errors.New("bound conversation adapter not found")
+}
+
 // NeedsActionAdapter reports whether an imported OpenClaw instruction module
 // declares access to tools or credentials without defining any governed action
 // that could consume them. Such a module remains inspectable and exportable,
@@ -712,8 +806,8 @@ func validateDefinition(definition *Definition) error {
 	if definition == nil || strings.TrimSpace(definition.ID) == "" || strings.TrimSpace(definition.Version) == "" || strings.TrimSpace(definition.Name) == "" {
 		return errors.New("skill id, version, and name are required")
 	}
-	if len(definition.Actions) == 0 && definition.Prompt == nil {
-		return errors.New("skill must declare at least one action or prompt module")
+	if len(definition.Actions) == 0 && definition.Prompt == nil && len(definition.ConversationAdapters) == 0 {
+		return errors.New("skill must declare at least one action, prompt module, or conversation adapter")
 	}
 	if definition.Category != strings.TrimSpace(definition.Category) || len(definition.Tags) > 32 {
 		return errors.New("skill category or tags are invalid")
@@ -741,6 +835,18 @@ func validateDefinition(definition *Definition) error {
 	if definition.Prompt != nil {
 		if err := validateCredentialRequirements(definition.Prompt.Credentials); err != nil {
 			return fmt.Errorf("skill prompt has an invalid credential requirement: %w", err)
+		}
+	}
+	for id, adapter := range definition.ConversationAdapters {
+		if id == "" || id != strings.TrimSpace(id) || len(id) > 128 {
+			return fmt.Errorf("skill conversation adapter id %q is invalid", id)
+		}
+		normalized, err := capability.NormalizeConversationAdapter(adapter)
+		if err != nil {
+			return fmt.Errorf("skill conversation adapter %s is invalid: %w", id, err)
+		}
+		if !reflect.DeepEqual(normalized, adapter) {
+			return fmt.Errorf("skill conversation adapter %s must use canonical ordering and values", id)
 		}
 	}
 	for name, action := range definition.Actions {
@@ -802,8 +908,15 @@ func validateBindingShape(binding *Binding) error {
 	if err := validateBindingManagementShape(binding); err != nil {
 		return err
 	}
-	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt) || !validRisk(binding.MaximumRisk) {
-		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions and set maximum risk", ErrBindingInvalid)
+	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt && len(binding.EnabledConversationAdapters) == 0) || !validRisk(binding.MaximumRisk) {
+		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions or conversation adapters and set maximum risk", ErrBindingInvalid)
+	}
+	seenAdapters := make(map[string]bool, len(binding.EnabledConversationAdapters))
+	for _, adapterID := range binding.EnabledConversationAdapters {
+		if adapterID == "" || adapterID != strings.TrimSpace(adapterID) || len(adapterID) > 128 || seenAdapters[adapterID] {
+			return fmt.Errorf("%w: enabled conversation adapter ids must be unique and non-empty", ErrBindingInvalid)
+		}
+		seenAdapters[adapterID] = true
 	}
 	return nil
 }
@@ -907,6 +1020,21 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 			}
 			if strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
 				return fmt.Errorf("binding prompt credential %s must use an opaque reference of kind %s", requirement.Name, requirement.Kind)
+			}
+		}
+	}
+	for _, adapterID := range binding.EnabledConversationAdapters {
+		adapter, ok := definition.ConversationAdapters[adapterID]
+		if !ok {
+			return fmt.Errorf("binding conversation adapter %s does not exist", adapterID)
+		}
+		for _, requirement := range adapter.Credentials {
+			ref, exists := binding.Credentials[requirement.Name]
+			if requirement.Optional && !exists {
+				continue
+			}
+			if !exists || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
+				return fmt.Errorf("binding conversation adapter %s is missing credential %s of kind %s", adapterID, requirement.Name, requirement.Kind)
 			}
 		}
 	}

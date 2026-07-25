@@ -14,7 +14,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.2.0"
+	SkillManagementSkillVersion = "1.3.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -46,6 +46,11 @@ func SkillManagementSkill() *skill.Definition {
 			"uniqueItems": true,
 		},
 		"enablePrompt": map[string]interface{}{"type": "boolean"},
+		"enabledConversationAdapters": map[string]interface{}{
+			"type": "array", "description": "Exact provider adapter ids from the selected Skill definition.",
+			"items":       map[string]interface{}{"type": "string", "minLength": 1, "pattern": `^[^*]+$`},
+			"uniqueItems": true,
+		},
 		"maximumRisk": map[string]interface{}{"type": "string", "enum": []interface{}{
 			string(skill.RiskLevelRead), string(skill.RiskLevelWrite), string(skill.RiskLevelExternal), string(skill.RiskLevelProduction), string(skill.RiskLevelDestructive),
 		}},
@@ -84,6 +89,16 @@ func SkillManagementSkill() *skill.Definition {
 
 func skillDiscoveryAction() skill.Action {
 	riskValues := []interface{}{string(skill.RiskLevelRead), string(skill.RiskLevelWrite), string(skill.RiskLevelExternal), string(skill.RiskLevelProduction), string(skill.RiskLevelDestructive)}
+	oauth2Schema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"provider": map[string]interface{}{"type": "string"},
+			"subject":  map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.OAuth2SubjectInstallation), string(skill.OAuth2SubjectUser)}},
+			"scopes":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "uniqueItems": true},
+			"resource": map[string]interface{}{"type": "string"},
+		},
+		"required": []interface{}{"provider", "subject"},
+	}
 	actionSchema := map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
@@ -97,8 +112,46 @@ func skillDiscoveryAction() skill.Action {
 		"properties": map[string]interface{}{
 			"name": map[string]interface{}{"type": "string"}, "kind": map[string]interface{}{"type": "string"},
 			"optional": map[string]interface{}{"type": "boolean"}, "configured": map[string]interface{}{"type": "boolean"},
+			"oauth2": oauth2Schema,
 		},
 		"required": []interface{}{"name", "kind", "configured"},
+	}
+	conversationDeliverySchema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"operations": map[string]interface{}{
+				"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string", "enum": []interface{}{
+					string(skill.ConversationDeliveryMessageSend), string(skill.ConversationDeliveryMessageUpdate),
+					string(skill.ConversationDeliveryMessageDelete), string(skill.ConversationDeliveryReactionAdd),
+					string(skill.ConversationDeliveryReactionRemove), string(skill.ConversationDeliveryTypingIndicator),
+				}},
+			},
+			"ordering": map[string]interface{}{"type": "string", "enum": []interface{}{
+				string(skill.ConversationDeliveryOrderEndpoint), string(skill.ConversationDeliveryOrderConversation), string(skill.ConversationDeliveryOrderThread),
+			}},
+			"idempotency":                   map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.IdempotencySupported), string(skill.IdempotencyRequired)}},
+			"supportsAcknowledgementLookup": map[string]interface{}{"type": "boolean"},
+			"supportsRetryAfter":            map[string]interface{}{"type": "boolean"},
+		},
+		"required": []interface{}{"operations", "ordering", "idempotency"},
+	}
+	conversationAdapterSchema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"id":              map[string]interface{}{"type": "string"},
+			"protocolVersion": map[string]interface{}{"type": "string", "const": skill.ConversationAdapterProtocolV1},
+			"provider":        map[string]interface{}{"type": "string"},
+			"endpointModes": map[string]interface{}{
+				"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string", "enum": []interface{}{
+					string(skill.ConversationEndpointChannel), string(skill.ConversationEndpointDirect),
+				}},
+			},
+			"inboundEventTypes": map[string]interface{}{"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"}},
+			"features":          map[string]interface{}{"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"}},
+			"delivery":          conversationDeliverySchema,
+			"credentials":       map[string]interface{}{"type": "array", "items": credentialSchema},
+		},
+		"required": []interface{}{"id", "protocolVersion", "provider", "endpointModes", "inboundEventTypes", "delivery"},
 	}
 	compatibilitySchema := map[string]interface{}{
 		"type": "object", "additionalProperties": false,
@@ -115,10 +168,11 @@ func skillDiscoveryAction() skill.Action {
 			"sourceIdentity": map[string]interface{}{"type": "string"}, "name": map[string]interface{}{"type": "string"},
 			"description": map[string]interface{}{"type": "string"}, "actions": map[string]interface{}{"type": "array", "items": actionSchema},
 			"credentials": map[string]interface{}{"type": "array", "items": credentialSchema}, "promptAvailable": map[string]interface{}{"type": "boolean"},
-			"bindingConfigSchema": map[string]interface{}{"type": "object"},
-			"maximumRisk":         map[string]interface{}{"type": "string", "enum": riskValues},
-			"readiness":           map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.DiscoveryReadinessBindable), string(skill.DiscoveryReadinessNeedsInstallation), string(skill.DiscoveryReadinessUnavailable)}},
-			"compatibility":       map[string]interface{}{"type": "array", "items": compatibilitySchema},
+			"conversationAdapters": map[string]interface{}{"type": "array", "items": conversationAdapterSchema},
+			"bindingConfigSchema":  map[string]interface{}{"type": "object"},
+			"maximumRisk":          map[string]interface{}{"type": "string", "enum": riskValues},
+			"readiness":            map[string]interface{}{"type": "string", "enum": []interface{}{string(skill.DiscoveryReadinessBindable), string(skill.DiscoveryReadinessNeedsInstallation), string(skill.DiscoveryReadinessUnavailable)}},
+			"compatibility":        map[string]interface{}{"type": "array", "items": compatibilitySchema},
 		},
 		"required": []interface{}{"id", "version", "name", "readiness"},
 	}
@@ -168,17 +222,18 @@ func skillManagementAction(name, description string, properties map[string]inter
 }
 
 type skillBindingUpsertArguments struct {
-	BindingID            string                                   `json:"bindingId"`
-	ExpectedRevision     int64                                    `json:"expectedRevision"`
-	SkillID              string                                   `json:"skillId"`
-	SkillVersion         string                                   `json:"skillVersion"`
-	SourceIdentity       string                                   `json:"sourceIdentity,omitempty"`
-	AllowedActions       []string                                 `json:"allowedActions"`
-	EnablePrompt         bool                                     `json:"enablePrompt"`
-	MaximumRisk          skill.RiskLevel                          `json:"maximumRisk"`
-	ArgumentRestrictions map[string]map[string]skill.ArgumentRule `json:"argumentRestrictions,omitempty"`
-	AccessReferences     map[string]skill.CredentialReference     `json:"accessReferences,omitempty"`
-	Config               map[string]interface{}                   `json:"config,omitempty"`
+	BindingID                   string                                   `json:"bindingId"`
+	ExpectedRevision            int64                                    `json:"expectedRevision"`
+	SkillID                     string                                   `json:"skillId"`
+	SkillVersion                string                                   `json:"skillVersion"`
+	SourceIdentity              string                                   `json:"sourceIdentity,omitempty"`
+	AllowedActions              []string                                 `json:"allowedActions"`
+	EnablePrompt                bool                                     `json:"enablePrompt"`
+	EnabledConversationAdapters []string                                 `json:"enabledConversationAdapters"`
+	MaximumRisk                 skill.RiskLevel                          `json:"maximumRisk"`
+	ArgumentRestrictions        map[string]map[string]skill.ArgumentRule `json:"argumentRestrictions,omitempty"`
+	AccessReferences            map[string]skill.CredentialReference     `json:"accessReferences,omitempty"`
+	Config                      map[string]interface{}                   `json:"config,omitempty"`
 }
 
 type skillBindingDisableArguments struct {
@@ -452,8 +507,8 @@ func resolveSkillBindingDisable(ctx context.Context, catalog *skill.Catalog, sco
 }
 
 func validateSkillBindingArguments(definition *skill.Definition, args skillBindingUpsertArguments) error {
-	if len(args.AllowedActions) == 0 && !args.EnablePrompt {
-		return errors.New("binding must enable a prompt or explicitly allow actions")
+	if len(args.AllowedActions) == 0 && !args.EnablePrompt && len(args.EnabledConversationAdapters) == 0 {
+		return errors.New("binding must enable a prompt or explicitly allow actions or conversation adapters")
 	}
 	if args.EnablePrompt && definition.Prompt == nil {
 		return errors.New("binding enables a prompt that the Skill does not define")
@@ -487,6 +542,24 @@ func validateSkillBindingArguments(definition *skill.Definition, args skillBindi
 			}
 			if !exists || strings.TrimSpace(reference.Kind) != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
 				return fmt.Errorf("binding action %s requires opaque credential %s of kind %s", name, requirement.Name, requirement.Kind)
+			}
+		}
+	}
+	seenAdapters := map[string]bool{}
+	for _, adapterID := range args.EnabledConversationAdapters {
+		adapterID = strings.TrimSpace(adapterID)
+		adapter, ok := definition.ConversationAdapters[adapterID]
+		if adapterID == "" || !ok || seenAdapters[adapterID] {
+			return fmt.Errorf("binding conversation adapter %q is not unique on the exact Skill definition", adapterID)
+		}
+		seenAdapters[adapterID] = true
+		for _, requirement := range adapter.Credentials {
+			reference, exists := args.AccessReferences[requirement.Name]
+			if requirement.Optional && !exists {
+				continue
+			}
+			if !exists || strings.TrimSpace(reference.Kind) != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
+				return fmt.Errorf("binding conversation adapter %s requires opaque credential %s of kind %s", adapterID, requirement.Name, requirement.Kind)
 			}
 		}
 	}
@@ -545,10 +618,12 @@ func exactSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, versi
 func skillBindingCandidate(scope skill.ScopeReference, deploymentID string, args skillBindingUpsertArguments) *skill.Binding {
 	allowed := append([]string(nil), args.AllowedActions...)
 	sort.Strings(allowed)
+	adapters := append([]string(nil), args.EnabledConversationAdapters...)
+	sort.Strings(adapters)
 	return &skill.Binding{
 		ID: args.BindingID, Scope: scope, DeploymentID: deploymentID,
 		SkillID: args.SkillID, SkillVersion: args.SkillVersion, SourceIdentity: args.SourceIdentity,
-		AllowedActions: allowed, EnablePrompt: args.EnablePrompt, MaximumRisk: args.MaximumRisk,
+		AllowedActions: allowed, EnablePrompt: args.EnablePrompt, EnabledConversationAdapters: adapters, MaximumRisk: args.MaximumRisk,
 		ArgumentRestrictions: args.ArgumentRestrictions, Credentials: args.AccessReferences, Config: args.Config,
 	}
 }
@@ -590,7 +665,8 @@ func secretSafeBindingPreview(binding *skill.Binding) interface{} {
 	return map[string]interface{}{
 		"id": binding.ID, "skillId": binding.SkillID, "skillVersion": binding.SkillVersion, "sourceIdentity": binding.SourceIdentity,
 		"disabled": binding.Disabled, "allowedActions": append([]string(nil), binding.AllowedActions...), "enablePrompt": binding.EnablePrompt,
-		"maximumRisk": binding.MaximumRisk, "argumentRestrictions": binding.ArgumentRestrictions, "config": binding.Config,
+		"enabledConversationAdapters": append([]string(nil), binding.EnabledConversationAdapters...),
+		"maximumRisk":                 binding.MaximumRisk, "argumentRestrictions": binding.ArgumentRestrictions, "config": binding.Config,
 		"credentials": credentials, "revision": binding.Revision,
 	}
 }
@@ -620,7 +696,8 @@ func (d *SkillBindingActionDispatcher) replayedDisable(ctx context.Context, scop
 
 func sameManagedSkillBinding(left, right *skill.Binding) bool {
 	return left.SkillID == right.SkillID && left.SkillVersion == right.SkillVersion && left.SourceIdentity == right.SourceIdentity &&
-		reflect.DeepEqual(left.AllowedActions, right.AllowedActions) && left.EnablePrompt == right.EnablePrompt && left.MaximumRisk == right.MaximumRisk &&
+		reflect.DeepEqual(left.AllowedActions, right.AllowedActions) && left.EnablePrompt == right.EnablePrompt &&
+		reflect.DeepEqual(left.EnabledConversationAdapters, right.EnabledConversationAdapters) && left.MaximumRisk == right.MaximumRisk &&
 		reflect.DeepEqual(left.ArgumentRestrictions, right.ArgumentRestrictions) && reflect.DeepEqual(left.Credentials, right.Credentials) && reflect.DeepEqual(left.Config, right.Config)
 }
 
