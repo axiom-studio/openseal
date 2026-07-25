@@ -58,6 +58,8 @@ const (
 	ActivityCapabilityVersion                  = "1"
 	EventRoutingCapabilityID                   = "event-routing"
 	EventRoutingCapabilityVersion              = "1"
+	ConversationGatewaysCapabilityID           = "conversation-gateways"
+	ConversationGatewaysCapabilityVersion      = "1"
 	SourcePoliciesCapabilityID                 = "source-policies"
 	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
 )
@@ -441,6 +443,20 @@ func EventSourceSubscriptionsCapability() Capability {
 	}
 }
 
+// ConversationGatewaysCapability describes lifecycle management for durable,
+// shared provider webhooks. Provider ingress itself is intentionally absent:
+// it is an opaque-route transport boundary rather than an operator command.
+func ConversationGatewaysCapability(management bool) Capability {
+	operations := []string{OperationGet, OperationList}
+	if management {
+		operations = append(operations, OperationCreate, OperationUpdate)
+	}
+	return Capability{
+		ID: ConversationGatewaysCapabilityID, Version: ConversationGatewaysCapabilityVersion,
+		Available: true, Operations: operations,
+	}
+}
+
 func ActionCallsCapability() Capability {
 	return Capability{
 		ID: ActionCallsCapabilityID, Version: ActionCallsCapabilityVersion, Available: true,
@@ -771,6 +787,20 @@ type CreateEventSourceSubscriptionRequest struct {
 	EventTypes          []string                              `json:"eventTypes"`
 	Parameters          map[string]interface{}                `json:"parameters,omitempty"`
 	PollIntervalSeconds int64                                 `json:"pollIntervalSeconds,omitempty"`
+}
+
+type CreateExternalConversationGatewayRequest struct {
+	ID      string                                     `json:"id,omitempty"`
+	Name    string                                     `json:"name"`
+	Gateway runtime.ExternalConversationIngressGateway `json:"gateway"`
+	Status  runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
+}
+
+type UpdateExternalConversationGatewayRequest struct {
+	ExpectedRevision int64                                       `json:"expectedRevision"`
+	Name             *string                                     `json:"name,omitempty"`
+	Gateway          *runtime.ExternalConversationIngressGateway `json:"gateway,omitempty"`
+	Status           *runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
 }
 
 type UpdateEventSourceSubscriptionRequest struct {

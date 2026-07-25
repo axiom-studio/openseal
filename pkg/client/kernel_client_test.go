@@ -230,6 +230,72 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 }
 
+func TestKernelHTTPClientUsesConversationGatewayLifecyclePaths(t *testing.T) {
+	scope := runtime.Scope{Kind: "tenant", ID: "operations"}
+	gateway := runtime.ExternalConversationIngressGateway{
+		Scope: scope, DeploymentID: "research-agent", Provider: "synthetic",
+		Adapter: runtime.ExternalConversationAdapterReference{
+			SkillID: "synthetic-conversations", SkillVersion: "1.0.0",
+			BindingID: "binding-1", BindingRevision: 1, AdapterID: "conversations",
+		},
+	}
+	requests := 0
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		switch requests {
+		case 1:
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/conversation-gateways" {
+				t.Fatalf("create request = %s %s", r.Method, r.URL.String())
+			}
+		case 2:
+			if r.Method != http.MethodGet || r.URL.Path != "/api/v1/conversation-gateways" ||
+				r.URL.Query().Get("scopeKind") != scope.Kind || r.URL.Query().Get("scopeId") != scope.ID ||
+				r.URL.Query().Get("provider") != "synthetic" || r.URL.Query().Get("status") != "paused" {
+				t.Fatalf("list request = %s %s", r.Method, r.URL.String())
+			}
+			_, _ = io.WriteString(w, `[]`)
+			return
+		case 3:
+			if r.Method != http.MethodGet || r.URL.Path != "/api/v1/conversation-gateways/gateway-1" ||
+				r.URL.Query().Get("scopeId") != scope.ID {
+				t.Fatalf("get request = %s %s", r.Method, r.URL.String())
+			}
+		case 4:
+			if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/conversation-gateways/gateway-1" ||
+				r.URL.Query().Get("scopeId") != scope.ID {
+				t.Fatalf("update request = %s %s", r.Method, r.URL.String())
+			}
+		default:
+			t.Fatalf("unexpected request %d", requests)
+		}
+		_, _ = io.WriteString(w, `{"id":"gateway-1","ingressRoute":"opaque","name":"Synthetic","gateway":{"scope":{"kind":"tenant","id":"operations"},"deploymentId":"research-agent","adapter":{"skillId":"synthetic-conversations","skillVersion":"1.0.0","bindingId":"binding-1","bindingRevision":1,"adapterId":"conversations"},"provider":"synthetic"},"status":"paused","revision":1,"createdAt":"2026-07-26T00:00:00Z","updatedAt":"2026-07-26T00:00:00Z"}`)
+	}))
+	defer httpServer.Close()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	created, err := client.CreateExternalConversationGateway(t.Context(), kernelapi.CreateExternalConversationGatewayRequest{
+		ID: "gateway-1", Name: "Synthetic", Gateway: gateway,
+	})
+	if err != nil || created.ID != "gateway-1" {
+		t.Fatalf("create = %#v, %v", created, err)
+	}
+	listed, err := client.ListExternalConversationGateways(t.Context(), runtime.ExternalConversationGatewayFilter{
+		Scope: scope, Provider: "synthetic", Statuses: []runtime.ExternalConversationGatewayStatus{runtime.ExternalConversationGatewayPaused},
+	})
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("list = %#v, %v", listed, err)
+	}
+	if _, err := client.GetExternalConversationGateway(t.Context(), scope, "gateway-1"); err != nil {
+		t.Fatal(err)
+	}
+	name := "Updated"
+	if _, err := client.UpdateExternalConversationGateway(t.Context(), scope, "gateway-1", kernelapi.UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: 1, Name: &name,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-update.db"))
 	if err != nil {
