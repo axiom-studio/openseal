@@ -1605,6 +1605,11 @@ func validateApplyPlacement(value *ChangeSet) error {
 		if !ok || strings.TrimSpace(placement.ID) == "" || placement.ExpectedRevision < 0 {
 			return fmt.Errorf("conversation endpoint %s placement is invalid", endpoint.ID)
 		}
+		for _, identity := range []string{placement.InstallationID, placement.ApplicationID, placement.Address} {
+			if len(identity) > 1024 || strings.ContainsAny(identity, "\r\n") {
+				return fmt.Errorf("conversation endpoint %s routing placement is invalid", endpoint.ID)
+			}
+		}
 		if placedEndpointIDs[placement.ID] {
 			return fmt.Errorf("conversation endpoint placement id %s is duplicated", placement.ID)
 		}
@@ -2010,6 +2015,8 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	for _, endpoint := range candidate.ConversationEndpoints {
 		current := placement.ConversationEndpoints[endpoint.ID]
 		current.ID = strings.TrimSpace(current.ID)
+		current.InstallationID = strings.TrimSpace(current.InstallationID)
+		current.ApplicationID = strings.TrimSpace(current.ApplicationID)
 		current.Address = strings.TrimSpace(current.Address)
 		current.Configuration = cloneAuthoringMap(current.Configuration)
 		if current.ID == "" {
@@ -2112,6 +2119,12 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		}
 		if current.Address == "" {
 			current.Address = inherited.Address
+		}
+		if current.InstallationID == "" {
+			current.InstallationID = inherited.InstallationID
+		}
+		if current.ApplicationID == "" {
+			current.ApplicationID = inherited.ApplicationID
 		}
 		if current.Configuration == nil {
 			current.Configuration = cloneAuthoringMap(inherited.Configuration)
