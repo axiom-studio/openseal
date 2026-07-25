@@ -196,6 +196,23 @@ func candidateSatisfiesCapabilityNeed(candidate *WorkforceCandidate, need Capabi
 		return false
 	}
 	allowed := stringSet(need.SkillIDs)
+	for _, endpoint := range candidate.ConversationEndpoints {
+		if !allowed[endpoint.SkillID] {
+			continue
+		}
+		skill, exists := catalog.Skills[endpoint.SkillID]
+		if !exists || strings.TrimSpace(endpoint.SkillVersion) != strings.TrimSpace(skill.Version) {
+			continue
+		}
+		for _, adapter := range skill.ConversationAdapters {
+			if adapter.ID == endpoint.AdapterID &&
+				containsConversationMode(adapter.EndpointModes, endpoint.Mode) &&
+				containsExactString(adapter.InboundEventTypes, capability.ConversationEventMessageReceived) &&
+				containsDeliveryOperation(adapter.Delivery.Operations, capability.ConversationDeliveryMessageSend) {
+				return true
+			}
+		}
+	}
 	for _, definition := range candidate.Agents {
 		if definition == nil {
 			continue
