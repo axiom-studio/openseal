@@ -186,6 +186,7 @@ type (
 	WorkforceChangeSetStatus                  = authoring.ChangeSetStatus
 	WorkforceChangeSetActor                   = authoring.ChangeSetActor
 	WorkforceChangeSetPlacement               = authoring.ChangeSetPlacement
+	WorkforceSkillInstallationIntent          = authoring.SkillInstallationIntent
 	WorkforceObjectivePlacement               = authoring.ObjectivePlacement
 	WorkforceChangeSetPolicyFinding           = authoring.ChangeSetPolicyFinding
 	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
