@@ -41,6 +41,8 @@ type (
 	ExecutionGraph           = executor.ExecutionGraph
 	RunbookDefinition        = runbook.Definition
 	RunbookInterface         = runbook.Interface
+	RunbookTrigger           = runbook.Trigger
+	RunbookTriggerKind       = runbook.TriggerKind
 	RunbookStep              = runbook.Step
 	RunbookStepKind          = runbook.StepKind
 	RunbookActionStep        = runbook.ActionStep
@@ -156,6 +158,17 @@ type (
 	WorkforceSkillCapability                  = authoring.SkillCapability
 	WorkforceSkillCredential                  = authoring.SkillCredential
 	WorkforceConversationAdapterCapability    = authoring.ConversationAdapterCapability
+	WorkforceRuntimeCompositionCapability     = authoring.RuntimeCompositionCapability
+	WorkforceConversationRuntimeCapability    = authoring.ConversationRuntimeCapability
+	WorkforceRunbookRuntimeCapability         = authoring.RunbookRuntimeCapability
+	WorkforceConversationEndpointBlueprint    = authoring.ConversationEndpointBlueprint
+	WorkforceConversationEndpointOwner        = authoring.ConversationEndpointOwner
+	WorkforceConversationEndpointOwnerType    = authoring.ConversationEndpointOwnerType
+	WorkforceConversationHandlerBlueprint     = authoring.ConversationHandlerBlueprint
+	WorkforceConversationHandlerKind          = authoring.ConversationHandlerKind
+	WorkforceConversationEndpointPolicy       = authoring.ConversationEndpointPolicyBlueprint
+	WorkforceConversationMessageSelection     = authoring.ConversationMessageSelection
+	WorkforceConversationReplyMode            = authoring.ConversationReplyMode
 	WorkforceCredentialBindingRequirement     = authoring.CredentialBindingRequirement
 	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
@@ -711,6 +724,9 @@ type (
 	ExternalConversationAdapterHost             = runtime.ExternalConversationAdapterHost
 	ExternalConversationDeliveryWorkerConfig    = runtime.ExternalConversationDeliveryWorkerConfig
 	ExternalConversationDeliveryWorker          = runtime.ExternalConversationDeliveryWorker
+	ResolvedExternalConversationRunbook         = runtime.ResolvedExternalConversationRunbook
+	ExternalConversationRunbookResolver         = runtime.ExternalConversationRunbookResolver
+	ExternalConversationRunbookEventDispatcher  = runtime.ExternalConversationRunbookEventDispatcher
 )
 
 // Credential lease aliases are kept in their own group so extending the
@@ -899,6 +915,7 @@ const (
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
 	RunbookAPIVersion                       = runbook.APIVersion
+	RunbookTriggerEvent                     = runbook.TriggerEvent
 	RunbookStepAction                       = runbook.StepAction
 	RunbookStepDelegate                     = runbook.StepDelegate
 	RunbookDelegateBehavior                 = runbook.DelegateBehavior
@@ -925,6 +942,21 @@ const (
 	RunbookPredicateAll                     = runbook.PredicateAll
 	RunbookPredicateAny                     = runbook.PredicateAny
 	RunbookPredicateNot                     = runbook.PredicateNot
+)
+
+const (
+	WorkforceRuntimeCompositionProtocolV1      = authoring.RuntimeCompositionProtocolV1
+	WorkforceConversationEndpointOwnerAgent    = authoring.ConversationEndpointOwnerAgent
+	WorkforceConversationEndpointOwnerTeam     = authoring.ConversationEndpointOwnerTeam
+	WorkforceConversationHandlerAgent          = authoring.ConversationHandlerAgent
+	WorkforceConversationHandlerTeam           = authoring.ConversationHandlerTeam
+	WorkforceConversationHandlerRunbook        = authoring.ConversationHandlerRunbook
+	WorkforceConversationSelectAllMessages     = authoring.ConversationSelectAllMessages
+	WorkforceConversationSelectMentions        = authoring.ConversationSelectMentions
+	WorkforceConversationSelectDirectOrMention = authoring.ConversationSelectDirectOrMention
+	WorkforceConversationReplyProviderDefault  = authoring.ConversationReplyProviderDefault
+	WorkforceConversationReplyThread           = authoring.ConversationReplyThread
+	WorkforceConversationReplyChannel          = authoring.ConversationReplyChannel
 )
 
 const (
@@ -1063,6 +1095,14 @@ func RequiredWorkforceCredentialBindings(candidate WorkforceCandidate, catalog W
 	return authoring.RequiredCredentialBindings(candidate, catalog)
 }
 
+func CanonicalWorkforceRuntimeCompositionCapability() *WorkforceRuntimeCompositionCapability {
+	return authoring.CanonicalRuntimeCompositionCapability()
+}
+
+func ValidateWorkforceCapabilityCatalog(catalog WorkforceCapabilityCatalog) error {
+	return authoring.ValidateCapabilityCatalog(catalog)
+}
+
 var (
 	NormalizeOAuth2Requirement   = capability.NormalizeOAuth2Requirement
 	NormalizeOAuth2GrantSummary  = capability.NormalizeOAuth2GrantSummary
@@ -1113,6 +1153,7 @@ var NewExternalConversationTransportService = runtime.NewExternalConversationTra
 var NewCanonicalExternalConversationDispatcher = runtime.NewCanonicalExternalConversationDispatcher
 var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWorker
 var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
+var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.

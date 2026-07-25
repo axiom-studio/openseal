@@ -117,6 +117,33 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 }
 
+func TestPinnedRunbookPlanPreventsDefinitionAndTriggerDrift(t *testing.T) {
+	definition := &runbook.Definition{
+		ID: "chat", Version: "2",
+		Triggers: map[string]runbook.Trigger{"on-message": {
+			Kind: runbook.TriggerEvent, EventType: externalConversationEventType, Entrypoint: "respond",
+		}},
+	}
+	run := &AgentRun{
+		Entrypoint: "respond",
+		Plan: map[string]interface{}{"runbook": map[string]interface{}{
+			"id": "chat", "version": "2", "trigger": "on-message",
+		}},
+	}
+	if err := validatePinnedRunbookPlan(definition, run); err != nil {
+		t.Fatal(err)
+	}
+	run.Plan["runbook"].(map[string]interface{})["version"] = "3"
+	if err := validatePinnedRunbookPlan(definition, run); err == nil {
+		t.Fatal("Runbook version drift was accepted")
+	}
+	run.Plan["runbook"].(map[string]interface{})["version"] = "2"
+	run.Entrypoint = "other"
+	if err := validatePinnedRunbookPlan(definition, run); err == nil {
+		t.Fatal("Runbook trigger drift was accepted")
+	}
+}
+
 func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "42"}
 	catalog := &resolverCatalog{

@@ -51,6 +51,7 @@ type ExternalConversationHandler struct {
 	Kind    ExternalConversationHandlerKind `json:"kind"`
 	ID      string                          `json:"id"`
 	Version string                          `json:"version,omitempty"`
+	Trigger string                          `json:"trigger,omitempty"`
 }
 
 func (h ExternalConversationHandler) Validate(owner ObjectiveOwner) error {
@@ -59,16 +60,17 @@ func (h ExternalConversationHandler) Validate(owner ObjectiveOwner) error {
 	}
 	switch h.Kind {
 	case ExternalConversationHandlerAgent:
-		if h.Version != "" || owner.Type != OwnerTypeAgent || h.ID != owner.ID {
+		if h.Version != "" || h.Trigger != "" || owner.Type != OwnerTypeAgent || h.ID != owner.ID {
 			return fmt.Errorf("%w: Agent handler must identify the endpoint owner", ErrInvalidExternalConversation)
 		}
 	case ExternalConversationHandlerTeam:
-		if h.Version != "" || owner.Type != OwnerTypeTeam || h.ID != owner.ID {
+		if h.Version != "" || h.Trigger != "" || owner.Type != OwnerTypeTeam || h.ID != owner.ID {
 			return fmt.Errorf("%w: Team handler must identify the endpoint owner", ErrInvalidExternalConversation)
 		}
 	case ExternalConversationHandlerRunbook:
-		if strings.TrimSpace(h.Version) == "" || len(h.Version) > 128 {
-			return fmt.Errorf("%w: Runbook handler requires an exact version", ErrInvalidExternalConversation)
+		if strings.TrimSpace(h.Version) == "" || len(h.Version) > 128 ||
+			!validOpaqueIdentifier(strings.TrimSpace(h.Trigger), 128) {
+			return fmt.Errorf("%w: Runbook handler requires an exact version and trigger", ErrInvalidExternalConversation)
 		}
 	default:
 		return fmt.Errorf("%w: handler kind is invalid", ErrInvalidExternalConversation)
@@ -768,6 +770,7 @@ func normalizeExternalConversationAdapterReference(value ExternalConversationAda
 func normalizeExternalConversationHandler(value ExternalConversationHandler) ExternalConversationHandler {
 	value.ID = strings.TrimSpace(value.ID)
 	value.Version = strings.TrimSpace(value.Version)
+	value.Trigger = strings.TrimSpace(value.Trigger)
 	return value
 }
 

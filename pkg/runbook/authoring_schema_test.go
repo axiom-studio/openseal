@@ -19,6 +19,11 @@ func TestAuthoringSchemaProjectionKeepsActionFieldsInsideActionPayload(t *testin
 	if containsField(projection.StepFields, "resultPath") {
 		t.Fatalf("Runbook Step root incorrectly advertises resultPath: %#v", projection.StepFields)
 	}
+	if !containsField(projection.DefinitionFields, "triggers") ||
+		!containsField(projection.TriggerFields, "eventType") ||
+		!containsField(projection.TriggerFields, "entrypoint") {
+		t.Fatalf("Runbook trigger projection = %#v", projection)
+	}
 	action := projection.StepKinds[StepAction]
 	if action.PayloadField != "action" ||
 		!containsField(action.PayloadFields, "resultPath") ||

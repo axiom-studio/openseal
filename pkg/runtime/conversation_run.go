@@ -500,13 +500,16 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	if err := validateConversationRun(run); err != nil {
 		return nil, err
 	}
-	if run.Owner.Type == OwnerTypeAgent && r.agentTurns == nil {
+	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
+	if (run.Owner.Type == OwnerTypeAgent || pinnedRunbook) && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
-	if run.Owner.Type == OwnerTypeAgent {
+	if run.Owner.Type == OwnerTypeAgent || pinnedRunbook {
 		hostedRun := cloneAgentRun(run)
 		hostedRun.Kind = RunKindAgentWork
-		hostedRun.AssignedAgentID = run.Owner.ID
+		if !pinnedRunbook {
+			hostedRun.AssignedAgentID = run.Owner.ID
+		}
 		agentBinding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
 		if err != nil {
 			return nil, err
@@ -768,8 +771,12 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	// that will be supplied to its turn. Persist that shared workplace fact
 	// before model execution so receipts remain truthful even if generation
 	// later retries or fails.
+	participantID := strings.TrimSpace(input.Run.AssignedAgentID)
+	if participantID == "" {
+		participantID = conversation.Owner.ID
+	}
 	if err := r.coordinator.markObserved(ctx, conversation, ConversationParticipant{
-		Type: ConversationParticipantAgent, ID: conversation.Owner.ID,
+		Type: ConversationParticipantAgent, ID: participantID,
 	}, latestConversationSequence(recent)); err != nil {
 		return nil, err
 	}
@@ -795,7 +802,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	hostedRun := cloneAgentRun(input.Run)
 	hostedRun.Kind = RunKindAgentWork
 	hostedRun.Goal = goal
-	hostedRun.AssignedAgentID = conversation.Owner.ID
+	hostedRun.AssignedAgentID = participantID
 	if boundAgentRunner == nil {
 		binding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
 		if err != nil {
@@ -929,9 +936,13 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		if err != nil {
 			return nil, false, err
 		}
+		participantID := strings.TrimSpace(run.AssignedAgentID)
+		if participantID == "" {
+			participantID = current.Owner.ID
+		}
 		result, err := r.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: current.Owner.ID},
+			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID},
 			Intent: MessageIntentAnswer, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 			BroadcastToChannel: broadcastToChannel,

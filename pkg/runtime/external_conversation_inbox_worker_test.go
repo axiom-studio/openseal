@@ -140,7 +140,9 @@ func TestCanonicalExternalConversationDispatcherRoutesExactRunbook(t *testing.T)
 	dispatcher := NewCanonicalExternalConversationDispatcher(nil, runbooks)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	endpoint := &ExternalConversationEndpoint{
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerRunbook, ID: "support", Version: "2.4.1"},
+		Handler: ExternalConversationHandler{
+			Kind: ExternalConversationHandlerRunbook, ID: "support", Version: "2.4.1", Trigger: "on-message",
+		},
 	}
 	conversation := &Conversation{ID: "conversation"}
 	message := &ChannelMessage{ID: "message"}

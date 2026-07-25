@@ -168,6 +168,9 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	delegationMode, _ := run.Context[DelegationModeContextKey].(string)
 	if definition.Runbook != nil && strings.TrimSpace(run.Entrypoint) != "" && delegationMode != string(runbook.DelegateReason) {
+		if err := validatePinnedRunbookPlan(definition.Runbook, run); err != nil {
+			return nil, fmt.Errorf("resolve governed runbook for Agent %s: %w", deployment.ID, err)
+		}
 		entrypoint := catalogRunbookEntrypoint(definition, run)
 		runner, resolveErr := NewRunbookTurnRunner(definition.Runbook, entrypoint)
 		if resolveErr != nil {
@@ -199,6 +202,32 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	base.Runner = runner
 	return &base, nil
+}
+
+func validatePinnedRunbookPlan(definition *runbook.Definition, run *AgentRun) error {
+	if definition == nil || run == nil || len(run.Plan) == 0 {
+		return nil
+	}
+	raw, present := run.Plan["runbook"]
+	if !present {
+		return nil
+	}
+	pin, ok := raw.(map[string]interface{})
+	if !ok {
+		return errors.New("pinned Runbook plan is malformed")
+	}
+	id, idOK := pin["id"].(string)
+	version, versionOK := pin["version"].(string)
+	triggerID, triggerOK := pin["trigger"].(string)
+	if !idOK || !versionOK || !triggerOK || strings.TrimSpace(triggerID) == "" ||
+		id != definition.ID || version != definition.Version {
+		return errors.New("pinned Runbook identity is unavailable or stale")
+	}
+	trigger, ok := definition.Triggers[triggerID]
+	if !ok || trigger.Entrypoint != strings.TrimSpace(run.Entrypoint) {
+		return errors.New("pinned Runbook trigger is unavailable or stale")
+	}
+	return nil
 }
 
 func projectCallableRunbookOperations(definition *runbook.Definition) []HostedRunbookOperation {

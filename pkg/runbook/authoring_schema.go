@@ -14,6 +14,7 @@ type authoringStepKindProjection struct {
 type authoringSchemaProjection struct {
 	DefinitionFields []string                                 `json:"definitionFields"`
 	InterfaceFields  []string                                 `json:"interfaceFields"`
+	TriggerFields    []string                                 `json:"triggerFields"`
 	StepFields       []string                                 `json:"stepFields"`
 	StepKinds        map[StepKind]authoringStepKindProjection `json:"stepKinds"`
 	Value            authoringValueProjection                 `json:"value"`
@@ -82,6 +83,7 @@ func buildAuthoringSchemaProjection() string {
 	projection := authoringSchemaProjection{
 		DefinitionFields: jsonFieldNames(reflect.TypeOf(Definition{})),
 		InterfaceFields:  jsonFieldNames(reflect.TypeOf(Interface{})),
+		TriggerFields:    jsonFieldNames(reflect.TypeOf(Trigger{})),
 		StepFields:       jsonFieldNames(reflect.TypeOf(Step{})),
 		StepKinds:        make(map[StepKind]authoringStepKindProjection, len(stepPayloadTypes)),
 		Value: authoringValueProjection{

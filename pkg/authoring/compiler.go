@@ -141,6 +141,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		applyActivationCommitment(&generated.Candidate, commitments)
 		deferInactiveCredentialRefinements(&generated)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+		validation = append(validation, validateConversationComposition(&generated.Candidate, request)...)
 		validation = append(validation, materializationIssues...)
 		validation = append(validation, scheduleIntentIssues...)
 		validation = append(validation, validateAnsweredCapabilityNeeds(&generated.Candidate, request)...)
@@ -206,6 +207,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
+	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, request)...)
 	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, scheduleIntentIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, request)...)
@@ -1212,6 +1214,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		issues = append(issues, validateObjectiveTemplateEventRules(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
 	issues = append(issues, validateSourceActionProjection(candidate)...)
+	issues = append(issues, validateConversationEndpointBlueprints(candidate)...)
 	if candidate.Team == nil {
 		if len(candidate.Agents) == 0 {
 			issues = append(issues, issue("workforce", "required", "At least one Agent or Team definition is required"))
@@ -1346,6 +1349,64 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 							OAuth2:     binding.OAuth2,
 						}
 					}
+				}
+			}
+		}
+	}
+	for _, endpoint := range candidate.ConversationEndpoints {
+		requiredBy := "conversation_endpoint:" + endpoint.ID
+		skillCapability, ok := catalog.Skills[endpoint.SkillID]
+		if !ok {
+			key := "skill:" + endpoint.SkillID + ":" + requiredBy
+			missing[key] = MissingRequirement{Kind: "skill", ID: endpoint.SkillID, RequiredBy: requiredBy}
+			continue
+		}
+		if skillCapability.Version != endpoint.SkillVersion {
+			key := "version:" + endpoint.SkillID + "@" + endpoint.SkillVersion + ":" + requiredBy
+			missing[key] = MissingRequirement{
+				Kind: "version", ID: endpoint.SkillID + "@" + endpoint.SkillVersion, RequiredBy: requiredBy,
+			}
+			continue
+		}
+		var adapter *ConversationAdapterCapability
+		for index := range skillCapability.ConversationAdapters {
+			if skillCapability.ConversationAdapters[index].ID == endpoint.AdapterID {
+				adapter = &skillCapability.ConversationAdapters[index]
+				break
+			}
+		}
+		if adapter == nil {
+			key := "conversation_adapter:" + endpoint.SkillID + "/" + endpoint.AdapterID + ":" + requiredBy
+			missing[key] = MissingRequirement{
+				Kind: "conversation_adapter", ID: endpoint.SkillID + "/" + endpoint.AdapterID, RequiredBy: requiredBy,
+			}
+			continue
+		}
+		if skillCapability.Readiness == SkillReadinessNeedsInstallation || skillCapability.Readiness == SkillReadinessUnavailable {
+			kind := "skill_installation"
+			if skillCapability.Readiness == SkillReadinessUnavailable {
+				kind = "skill_unavailable"
+			}
+			key := kind + ":" + endpoint.SkillID + ":" + requiredBy
+			missing[key] = MissingRequirement{Kind: kind, ID: endpoint.SkillID, RequiredBy: requiredBy}
+		}
+		if candidate.Activation != WorkforceActivationInactive && skillCapability.Readiness == SkillReadinessNeedsBinding {
+			key := "skill_binding:" + endpoint.SkillID + ":" + requiredBy
+			missing[key] = MissingRequirement{Kind: "skill_binding", ID: endpoint.SkillID, RequiredBy: requiredBy}
+		}
+		if candidate.Activation != WorkforceActivationInactive {
+			for _, credential := range adapter.Credentials {
+				if credential.Optional {
+					continue
+				}
+				binding := skillCredentialBinding{Key: credential.Name, Kind: credential.Kind, OAuth2: credential.OAuth2}
+				if credentialRequirementAvailable(catalog, binding) {
+					continue
+				}
+				key := "credential:" + binding.Key + ":" + requiredBy
+				missing[key] = MissingRequirement{
+					Kind: "credential", ID: binding.Key, RequiredBy: requiredBy + "/skill:" + endpoint.SkillID,
+					OAuth2: binding.OAuth2,
 				}
 			}
 		}

@@ -3,11 +3,14 @@ package runbook
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
 
 const maximumIterations = 10000
+
+var concreteEventTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`)
 
 func Validate(definition *Definition) []Diagnostic {
 	v := validator{definition: definition}
@@ -74,6 +77,21 @@ func (v *validator) validate() {
 			} else if _, err := compileInterfaceSchema(contract.OutputSchema); err != nil {
 				v.add("interfaces."+name+".outputSchema", "interface.output_schema_invalid", "callable output schema is invalid: %v", err)
 			}
+		}
+	}
+	for id, trigger := range v.definition.Triggers {
+		path := "triggers." + id
+		if strings.TrimSpace(id) == "" || len(id) > 128 {
+			v.add(path, "trigger.id_invalid", "trigger id must be 1-128 characters")
+		}
+		if trigger.Kind != TriggerEvent {
+			v.add(path+".kind", "trigger.kind_unsupported", "trigger kind must be %q", TriggerEvent)
+		}
+		if !concreteEventTypePattern.MatchString(trigger.EventType) || len(trigger.EventType) > 160 {
+			v.add(path+".eventType", "trigger.event_type_invalid", "trigger eventType must be a concrete portable event type")
+		}
+		if _, ok := v.definition.Entrypoints[trigger.Entrypoint]; !ok {
+			v.add(path+".entrypoint", "trigger.entrypoint_unknown", "trigger must name an exact entrypoint")
 		}
 	}
 	for id, step := range v.definition.Steps {
