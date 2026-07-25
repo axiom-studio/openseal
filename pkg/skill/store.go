@@ -9,6 +9,7 @@ var (
 	ErrDefinitionImmutable     = errors.New("skill definition versions are immutable")
 	ErrDefinitionAmbiguous     = errors.New("skill definition source is ambiguous")
 	ErrBindingAmbiguous        = errors.New("skill binding selection is ambiguous")
+	ErrBindingInvalid          = errors.New("skill binding is invalid")
 	ErrBindingRevisionConflict = errors.New("skill binding revision conflict")
 	ErrBindingNotFound         = errors.New("skill binding not found")
 	ErrBindingAlreadyDisabled  = errors.New("skill binding is already disabled")

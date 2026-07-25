@@ -1649,6 +1649,7 @@ var (
 	ErrSkillDefinitionImmutable         = skill.ErrDefinitionImmutable
 	ErrSkillDefinitionAmbiguous         = skill.ErrDefinitionAmbiguous
 	ErrSkillBindingAmbiguous            = skill.ErrBindingAmbiguous
+	ErrSkillBindingInvalid              = skill.ErrBindingInvalid
 	ErrSkillBindingRevisionConflict     = skill.ErrBindingRevisionConflict
 	ErrSkillBindingNotFound             = skill.ErrBindingNotFound
 	ErrSkillBindingAlreadyDisabled      = skill.ErrBindingAlreadyDisabled

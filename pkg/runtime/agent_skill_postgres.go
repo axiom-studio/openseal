@@ -504,6 +504,9 @@ func (s *PostgresStore) ListSkillDefinitionVariants(ctx context.Context, id, ver
 }
 
 func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
+	if err := skill.ValidateBindingShape(binding); err != nil {
+		return err
+	}
 	payload, err := json.Marshal(binding)
 	if err != nil {
 		return err

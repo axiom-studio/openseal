@@ -145,6 +145,9 @@ func (s *SQLiteStore) ListSkillDefinitionVariants(ctx context.Context, id, versi
 }
 
 func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
+	if err := skill.ValidateBindingShape(binding); err != nil {
+		return err
+	}
 	payload, err := json.Marshal(binding)
 	if err != nil {
 		return err
