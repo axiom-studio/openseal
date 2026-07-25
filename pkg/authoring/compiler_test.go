@@ -889,6 +889,44 @@ func TestCompilerPerformsOneDeterministicContractRepair(t *testing.T) {
 	}
 }
 
+func TestCompilerRepairsAgentAuthorityToSelectedActionRisk(t *testing.T) {
+	underAuthorized := marketingCandidate("1", capability.RiskLevelWrite)
+	generated, _ := json.Marshal(GenerationResponse{Candidate: underAuthorized})
+	corrected := marketingCandidate("1", capability.RiskLevelExternal)
+	repaired, _ := json.Marshal(GenerationResponse{Candidate: corrected})
+	generator := &repairingGenerator{generated: generated, repaired: repaired}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a researcher that searches public communities.",
+		Catalog: CapabilityCatalog{
+			Skills: map[string]SkillCapability{
+				"reddit-research": {
+					ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"},
+					ActionRisks: map[string]capability.RiskLevel{
+						"read": capability.RiskLevelRead, "search": capability.RiskLevelExternal,
+					},
+					MaximumRisk: capability.RiskLevelDestructive,
+				},
+			},
+			AuthorityConstraint: &AuthorityConstraint{
+				ID: "tenant-authority", Version: "1", MaximumRisk: capability.RiskLevelDestructive,
+				RequireApprovalAt: capability.RiskLevelWrite,
+			},
+		},
+	})
+	if err != nil || result == nil || !result.Valid || generator.repairs != 1 {
+		t.Fatalf("action-risk repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	if result.Candidate.Agents[0].Authority.MaximumRisk != capability.RiskLevelExternal ||
+		result.Candidate.Agents[0].Authority.RequireApprovalAt != capability.RiskLevelWrite {
+		t.Fatalf("repaired authority = %#v", result.Candidate.Agents[0].Authority)
+	}
+	if diagnostic := generator.repairErrors[0].Error(); !strings.Contains(diagnostic, "skill_action_risk_exceeded") ||
+		!strings.Contains(diagnostic, "action search requires external risk") {
+		t.Fatalf("action-risk repair diagnostic = %q", diagnostic)
+	}
+}
+
 func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testing.T) {
 	candidate := researchInitiativeCandidate()
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
