@@ -41,10 +41,11 @@ func TestPostgresStartupRedactsLegacySensitiveAuthoringPrompt(t *testing.T) {
 	}
 	definition := &agent.AgentDefinition{
 		ID: "legacy-agent", Version: "1", DisplayName: "Legacy Agent", Purpose: "Work safely",
-		SystemPrompt: "Authenticate with password: erase-definition-secret",
+		SystemPrompt: "Sign in with the supplied username and password erase-definition-secret.",
 		Authority:    agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
 		Digest:       "legacy-definition-digest", CreatedAt: now,
 	}
+	value.Result.Candidate.Agents = []*agent.AgentDefinition{definition}
 	definitionPayload, _ := json.Marshal(definition)
 	if _, err := primary.db.ExecContext(ctx, `INSERT INTO `+primary.table("agent_definitions")+` (id,version,digest,created_at,payload) VALUES($1,$2,$3,$4,$5::jsonb)`, definition.ID, definition.Version, definition.Digest, now, string(definitionPayload)); err != nil {
 		t.Fatal(err)
@@ -59,7 +60,7 @@ func TestPostgresStartupRedactsLegacySensitiveAuthoringPrompt(t *testing.T) {
 		"tenant", "1", value.ID, "", value.Status, 1, "legacy-key", "request", "candidate", now, now, string(payload)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("schema_migrations")+` WHERE version=$1`, sensitiveAuthoringPromptMigrationVersion); err != nil {
+	if _, err := primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("schema_migrations")+` WHERE version IN ($1,$2)`, sensitiveAuthoringPromptMigrationVersion, legacySensitiveAgentDefinitionMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,6 +73,9 @@ func TestPostgresStartupRedactsLegacySensitiveAuthoringPrompt(t *testing.T) {
 	if err != nil || strings.Contains(restored.Prompt, "erase-me-now") || !strings.Contains(restored.Prompt, "[REDACTED]") {
 		t.Fatalf("restored prompt was not redacted: prompt=%q err=%v", restored.Prompt, err)
 	}
+	if got := restored.Result.Candidate.Agents[0].SystemPrompt; strings.Contains(got, "erase-definition-secret") || got == definition.SystemPrompt {
+		t.Fatalf("ChangeSet candidate Agent was not hardened: %q", got)
+	}
 	var stored string
 	if err := restarted.db.QueryRowContext(ctx, `SELECT payload::text FROM `+restarted.table("workforce_change_sets")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, "tenant", "1", value.ID).Scan(&stored); err != nil {
 		t.Fatal(err)
@@ -80,7 +84,7 @@ func TestPostgresStartupRedactsLegacySensitiveAuthoringPrompt(t *testing.T) {
 		t.Fatal("durable PostgreSQL payload still contains the credential value")
 	}
 	restoredDefinition, err := restarted.GetDefinition(ctx, definition.ID, definition.Version)
-	if err != nil || strings.Contains(restoredDefinition.SystemPrompt, "erase-definition-secret") || restoredDefinition.Digest == definition.Digest {
+	if err != nil || strings.Contains(restoredDefinition.SystemPrompt, "erase-definition-secret") || restoredDefinition.SystemPrompt == definition.SystemPrompt || restoredDefinition.Digest == definition.Digest {
 		t.Fatalf("durable Agent definition was not safely migrated: definition=%#v err=%v", restoredDefinition, err)
 	}
 }

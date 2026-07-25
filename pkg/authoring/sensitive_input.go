@@ -87,6 +87,10 @@ var nonSecretPlaceholder = map[string]struct{}{
 	"credential": {}, "credentials": {}, "secret": {}, "unknown": {}, "missing": {}, "none": {}, "true": {}, "false": {},
 }
 
+var credentialVocabulary = regexp.MustCompile(`(?i)\b(password|passwd|passcode|api[\s_-]*key|secret[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|bearer[\s_-]*token|private[\s_-]*key|username|login[\s_-]*credential)\b`)
+
+const hardenedLegacyAgentPrompt = "Follow the Agent's purpose, objectives, authority, and installed Skills. Use only authorized credential bindings; never request, store, or reveal raw credential values."
+
 func sensitiveInputMatches(value string) []sensitiveInputMatch {
 	matches := make([]sensitiveInputMatch, 0)
 	for _, pattern := range sensitiveInputPatterns {
@@ -277,6 +281,28 @@ func RedactSensitiveAgentDefinition(value *agent.AgentDefinition) (bool, error) 
 	return true, nil
 }
 
+// HardenLegacySensitiveAgentDefinition handles provider paraphrases from
+// ChangeSets already known to have contained a credential. Exact extraction is
+// intentionally not attempted: replacing the affected behavior instruction is
+// safer than retaining an unknown raw value or returning it to a caller.
+func HardenLegacySensitiveAgentDefinition(value *agent.AgentDefinition) (bool, error) {
+	if value == nil {
+		return false, nil
+	}
+	changed, err := RedactSensitiveAgentDefinition(value)
+	if err != nil {
+		return false, err
+	}
+	if credentialVocabulary.MatchString(value.SystemPrompt) && value.SystemPrompt != hardenedLegacyAgentPrompt {
+		value.SystemPrompt = hardenedLegacyAgentPrompt
+		changed = true
+	}
+	if changed {
+		value.Digest = agent.DefinitionDigest(value)
+	}
+	return changed, nil
+}
+
 // RedactSensitiveChangeSetPrompts removes legacy credentials from every
 // user-authored or provider-produced text location that can later enter model
 // context, refreshing every affected immutable content identity atomically.
@@ -285,32 +311,50 @@ func RedactSensitiveChangeSetPrompts(value *ChangeSet) bool {
 		return false
 	}
 	changed := false
+	sensitiveSource := strings.Contains(value.Prompt, "[REDACTED]")
 	if prompt, redacted := RedactSensitiveAuthoringPrompt(value.Prompt); redacted {
 		value.Prompt = prompt
 		value.PromptDigest = digestString(prompt)
 		changed = true
+		sensitiveSource = true
 	}
 	if value.Generation != nil {
+		sensitiveSource = sensitiveSource || strings.Contains(value.Generation.Request.Prompt, "[REDACTED]")
 		if prompt, redacted := RedactSensitiveAuthoringPrompt(value.Generation.Request.Prompt); redacted {
 			value.Generation.Request.Prompt = prompt
 			changed = true
+			sensitiveSource = true
 		}
 	}
 	for index := range value.Refinement.Answers {
 		answer := &value.Refinement.Answers[index].Value
+		sensitiveSource = sensitiveSource || strings.Contains(answer.Text, "[REDACTED]")
 		if text, redacted := RedactSensitiveAuthoringPrompt(answer.Text); redacted {
 			answer.Text = text
 			changed = true
+			sensitiveSource = true
 		}
 		for item := range answer.Items {
+			sensitiveSource = sensitiveSource || strings.Contains(answer.Items[item], "[REDACTED]")
 			if text, redacted := RedactSensitiveAuthoringPrompt(answer.Items[item]); redacted {
 				answer.Items[item] = text
 				changed = true
+				sensitiveSource = true
 			}
 		}
 	}
 	oldCandidateDigest := value.CandidateDigest
 	candidateChanged, err := redactSensitiveStructuredValue(&value.Result.Candidate)
+	if err == nil && sensitiveSource {
+		for _, definition := range value.Result.Candidate.Agents {
+			hardened, hardenErr := HardenLegacySensitiveAgentDefinition(definition)
+			if hardenErr != nil {
+				err = hardenErr
+				break
+			}
+			candidateChanged = candidateChanged || hardened
+		}
+	}
 	if err == nil && candidateChanged {
 		for _, definition := range value.Result.Candidate.Agents {
 			if definition != nil {
