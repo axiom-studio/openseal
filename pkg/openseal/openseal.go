@@ -210,6 +210,16 @@ type (
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
 	WorkforceChangeSetReadinessValidator      = authoring.ChangeSetReadinessValidator
 	WorkforceChangeSetReadinessError          = authoring.ChangeSetReadinessError
+	SkillReferenceUpgradePlan                 = runtime.SkillReferenceUpgradePlan
+	SkillReferenceUpgradeFinding              = runtime.SkillReferenceUpgradeFinding
+	SkillReferenceIdentity                    = runtime.SkillReferenceIdentity
+	SkillReferenceObjectiveReference          = runtime.SkillReferenceObjectiveReference
+	SkillReferenceObjectiveImpact             = runtime.SkillReferenceObjectiveImpact
+	SkillReferenceInitiativeImpact            = runtime.SkillReferenceInitiativeImpact
+	PlanSkillReferenceUpgradeRequest          = runtime.PlanSkillReferenceUpgradeRequest
+	ApplySkillReferenceUpgradeRequest         = runtime.ApplySkillReferenceUpgradeRequest
+	SkillReferenceUpgradeApproval             = runtime.SkillReferenceUpgradeApproval
+	SkillReferenceUpgradeReceipt              = runtime.SkillReferenceUpgradeReceipt
 	WorkforceAuthoringRunStore                = runtime.WorkforceAuthoringRunStore
 	WorkforceAuthoringRunService              = runtime.WorkforceAuthoringRunService
 	WorkforceAuthoringCatalogResolver         = runtime.WorkforceAuthoringCatalogResolver
@@ -1029,6 +1039,7 @@ type PersistentKernelStore interface {
 	runtime.ArtifactStore
 	runtime.InitiativeStore
 	runtime.SourceMonitorStore
+	runtime.SkillReferenceUpgradeStore
 	kernelagent.Store
 	kernelteam.Store
 	skill.CatalogStore
@@ -1630,29 +1641,33 @@ const (
 var ErrWorkforceChangeSetPlacementConflict = authoring.ErrChangeSetPlacementConflict
 
 var (
-	ErrWorkforceChangeSetNotFound    = authoring.ErrChangeSetNotFound
-	ErrWorkforceChangeSetIdempotency = authoring.ErrChangeSetIdempotency
-	ErrWorkforceChangeSetRevision    = authoring.ErrChangeSetRevision
-	ErrWorkforceChangeSetTransition  = authoring.ErrChangeSetTransition
-	ErrSkillDefinitionImmutable      = skill.ErrDefinitionImmutable
-	ErrSkillDefinitionAmbiguous      = skill.ErrDefinitionAmbiguous
-	ErrSkillBindingAmbiguous         = skill.ErrBindingAmbiguous
-	ErrSkillBindingRevisionConflict  = skill.ErrBindingRevisionConflict
-	ErrSkillBindingNotFound          = skill.ErrBindingNotFound
-	ErrSkillBindingAlreadyDisabled   = skill.ErrBindingAlreadyDisabled
-	ErrSkillSourceArtifactNotFound   = sourceartifact.ErrNotFound
-	ErrSkillSourceArtifactImmutable  = sourceartifact.ErrImmutable
-	ErrSkillSourceReferenceConflict  = sourceartifact.ErrReferenceConflict
-	ErrSkillSourceOriginAmbiguous    = sourceartifact.ErrAmbiguousOrigin
-	ErrOutreachThreadNotFound        = runtime.ErrOutreachThreadNotFound
-	ErrOutreachThreadConflict        = runtime.ErrOutreachThreadConflict
-	ErrOutreachThreadIdempotency     = runtime.ErrOutreachThreadIdempotency
-	ErrInvalidOutreachThread         = runtime.ErrInvalidOutreachThread
-	ErrInvalidObjectiveEventRules    = runtime.ErrInvalidObjectiveEventRules
-	ErrInvalidAuthorityEvaluation    = progression.ErrInvalidEvaluation
-	ErrAuthorityPolicyCeiling        = progression.ErrPolicyCeiling
-	ErrAuthorityRecommendationStale  = progression.ErrRecommendationStale
-	ErrAuthorityProgressionNoChange  = progression.ErrNoChange
+	ErrWorkforceChangeSetNotFound       = authoring.ErrChangeSetNotFound
+	ErrWorkforceChangeSetIdempotency    = authoring.ErrChangeSetIdempotency
+	ErrWorkforceChangeSetRevision       = authoring.ErrChangeSetRevision
+	ErrWorkforceChangeSetTransition     = authoring.ErrChangeSetTransition
+	ErrSkillDefinitionImmutable         = skill.ErrDefinitionImmutable
+	ErrSkillDefinitionAmbiguous         = skill.ErrDefinitionAmbiguous
+	ErrSkillBindingAmbiguous            = skill.ErrBindingAmbiguous
+	ErrSkillBindingRevisionConflict     = skill.ErrBindingRevisionConflict
+	ErrSkillBindingNotFound             = skill.ErrBindingNotFound
+	ErrSkillBindingAlreadyDisabled      = skill.ErrBindingAlreadyDisabled
+	ErrSkillSourceArtifactNotFound      = sourceartifact.ErrNotFound
+	ErrSkillSourceArtifactImmutable     = sourceartifact.ErrImmutable
+	ErrSkillSourceReferenceConflict     = sourceartifact.ErrReferenceConflict
+	ErrSkillSourceOriginAmbiguous       = sourceartifact.ErrAmbiguousOrigin
+	ErrOutreachThreadNotFound           = runtime.ErrOutreachThreadNotFound
+	ErrOutreachThreadConflict           = runtime.ErrOutreachThreadConflict
+	ErrOutreachThreadIdempotency        = runtime.ErrOutreachThreadIdempotency
+	ErrInvalidOutreachThread            = runtime.ErrInvalidOutreachThread
+	ErrInvalidObjectiveEventRules       = runtime.ErrInvalidObjectiveEventRules
+	ErrInvalidAuthorityEvaluation       = progression.ErrInvalidEvaluation
+	ErrAuthorityPolicyCeiling           = progression.ErrPolicyCeiling
+	ErrAuthorityRecommendationStale     = progression.ErrRecommendationStale
+	ErrAuthorityProgressionNoChange     = progression.ErrNoChange
+	ErrSkillReferenceUpgradeUnavailable = runtime.ErrSkillReferenceUpgradeUnavailable
+	ErrSkillReferenceUpgradeConflict    = runtime.ErrSkillReferenceUpgradeConflict
+	ErrSkillReferenceUpgradeApproval    = runtime.ErrSkillReferenceUpgradeApproval
+	ErrSkillReferenceUpgradeInvalid     = runtime.ErrSkillReferenceUpgradeInvalid
 )
 
 // Engine is the primary entry point for OpenSeal. It composes the durable
@@ -1706,6 +1721,7 @@ type Engine struct {
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
 	actionSupervisors             []*runtime.ActionWorkerSupervisor
 	skills                        *skill.Catalog
+	skillReferenceUpgrades        *runtime.SkillReferenceUpgradeService
 	agents                        *kernelagent.Registry
 	teams                         *kernelteam.Registry
 	progression                   *progression.Service
@@ -1784,13 +1800,14 @@ func New(opts ...Option) (*Engine, error) {
 		runQueue:                 runtime.NewAgentRunScheduler(store),
 		wake:                     runtime.NewAgentRunWakeService(store, store),
 		artifacts:                runtime.NewArtifactCatalog(store),
-		skills:                   skill.NewCatalog(),
+		skills:                   skill.NewCatalogWithStore(store),
 		agents:                   agentRegistry,
 		teams:                    kernelteam.NewRegistry(agentRegistry),
 		actionPolicy:             runtime.NewDefaultActionPolicy(),
 		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
 		logger:                   sugar,
 	}
+	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills)
 	e.progression = progression.NewService(e.agents, e.teams)
 
 	for _, opt := range opts {
@@ -1981,6 +1998,11 @@ func WithStore(store runtime.KernelStore) Option {
 		e.progression = progression.NewService(e.agents, e.teams)
 		if skillStore, ok := store.(skill.CatalogStore); ok {
 			e.skills = skill.NewCatalogWithStore(skillStore)
+		}
+		if upgradeStore, ok := store.(runtime.SkillReferenceUpgradeStore); ok && e.skills != nil {
+			e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills)
+		} else {
+			e.skillReferenceUpgrades = nil
 		}
 		if sourceStore, ok := store.(sourceartifact.Store); ok {
 			e.skillSources, _ = sourceartifact.NewService(sourceStore)
@@ -3425,6 +3447,20 @@ func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBin
 
 func (e *Engine) DisableSkillBinding(ctx context.Context, request skill.DisableBindingRequest) (*skill.Binding, error) {
 	return e.skills.DisableBinding(ctx, request)
+}
+
+func (e *Engine) PlanSkillReferenceUpgrade(ctx context.Context, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
+	if e == nil || e.skillReferenceUpgrades == nil {
+		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+	}
+	return e.skillReferenceUpgrades.Plan(ctx, request)
+}
+
+func (e *Engine) ApplySkillReferenceUpgrade(ctx context.Context, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+	if e == nil || e.skillReferenceUpgrades == nil {
+		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+	}
+	return e.skillReferenceUpgrades.Apply(ctx, request)
 }
 
 // ListTeamSkillBindings exposes the first-class Team-owned binding portfolio.

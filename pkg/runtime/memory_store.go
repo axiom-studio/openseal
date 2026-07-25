@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"sync"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // MemoryStore holds canonical kernel state in memory.
@@ -38,6 +40,8 @@ type MemoryStore struct {
 	participationKeys        map[string]string
 	conversationCursors      map[string]*ConversationCursor
 	conversationPresence     map[string]*ConversationPresence
+	skillDefinitions         map[string]*skill.Definition
+	skillBindings            map[string]*skill.Binding
 }
 
 // NewMemoryStore creates an in-memory canonical kernel store.
@@ -74,6 +78,8 @@ func NewMemoryStore() *MemoryStore {
 		participationKeys:        make(map[string]string),
 		conversationCursors:      make(map[string]*ConversationCursor),
 		conversationPresence:     make(map[string]*ConversationPresence),
+		skillDefinitions:         make(map[string]*skill.Definition),
+		skillBindings:            make(map[string]*skill.Binding),
 	}
 }
 
