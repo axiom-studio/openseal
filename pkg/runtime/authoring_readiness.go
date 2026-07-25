@@ -79,6 +79,13 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceCha
 				return nil, resolveErr
 			}
 			if resolveErr != nil || definition == nil {
+				if workforceBindingHasReviewedInstallation(value, agentDefinition.ID, catalogID, binding) {
+					// The host installs this exact source-qualified definition
+					// only after the plan is approved and reaches apply. Apply
+					// revalidates the installed runtime identity before any
+					// Agent or binding is persisted.
+					continue
+				}
 				identity := binding.SkillID + "@" + binding.SkillVersion
 				if binding.SourceIdentity != "" {
 					identity += " from " + binding.SourceIdentity
@@ -96,6 +103,46 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceCha
 		}
 	}
 	return issues, nil
+}
+
+func workforceBindingHasReviewedInstallation(value *authoring.ChangeSet, agentID, catalogID string, binding *capability.Binding) bool {
+	if value == nil || binding == nil {
+		return false
+	}
+	available, exists := value.Catalog.Skills[catalogID]
+	if !exists || available.Readiness != authoring.SkillReadinessNeedsInstallation {
+		return false
+	}
+	selected := value.Placement.SkillRuntimeIdentities[agentID][catalogID].Normalized()
+	bindingIdentity := capability.NewSkillIdentity(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+	if !selected.Valid() || !selected.Equal(bindingIdentity) ||
+		strings.TrimSpace(value.Placement.SkillSourceIdentities[agentID][catalogID]) != selected.SourceIdentity ||
+		strings.TrimSpace(value.Placement.SkillSourceVersions[agentID][catalogID]) != selected.Version {
+		return false
+	}
+	for _, planned := range value.Placement.PlannedSkillInstallations {
+		if strings.TrimSpace(planned.SkillID) != catalogID ||
+			strings.TrimSpace(planned.Version) != strings.TrimSpace(available.Version) ||
+			strings.TrimSpace(planned.SourceIdentity) != selected.SourceIdentity ||
+			!runtimeVersionMatchesReviewedInstallation(selected.Version, planned.Version) {
+			continue
+		}
+		for _, compatibility := range available.Compatibility {
+			if compatibility.Requirement == "installation" && !compatibility.Compatible &&
+				strings.TrimSpace(compatibility.Reference) != "" &&
+				strings.TrimSpace(compatibility.Reference) == strings.TrimSpace(planned.Reference) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeVersionMatchesReviewedInstallation(runtimeVersion, plannedVersion string) bool {
+	runtimeVersion = strings.TrimSpace(runtimeVersion)
+	plannedVersion = strings.TrimSpace(plannedVersion)
+	return runtimeVersion == plannedVersion ||
+		(plannedVersion != "" && strings.HasPrefix(runtimeVersion, plannedVersion+"+"))
 }
 
 func resolveReadinessSkillDefinition(ctx context.Context, catalog *skill.Catalog, binding *capability.Binding) (*skill.Definition, error) {
