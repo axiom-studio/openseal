@@ -16,6 +16,7 @@ import (
 func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[string][]string, placement ChangeSetPlacement, choices []capability.CredentialBindingChoice) error {
 	authorized := make(map[string]map[string]bool)
 	declaredBindings := make(map[string]bool)
+	deploymentBindings := make(map[string]bool)
 	for _, choice := range choices {
 		kind := strings.TrimSpace(choice.Reference.Kind)
 		id := strings.TrimSpace(choice.Reference.ID)
@@ -23,6 +24,7 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 			return fmt.Errorf("credential binding choices require an opaque kind and reference")
 		}
 		bindingKeys := append([]string(nil), choice.BindingKeys...)
+		explicitBindingKeys := len(bindingKeys) > 0
 		if len(bindingKeys) == 0 {
 			bindingKeys = []string{kind}
 		}
@@ -34,6 +36,9 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 			}
 			seenKeys[bindingKey] = true
 			declaredBindings[bindingKey] = true
+			if explicitBindingKeys {
+				deploymentBindings[bindingKey] = true
+			}
 			if authorized[bindingKey] == nil {
 				authorized[bindingKey] = make(map[string]bool)
 			}
@@ -76,7 +81,12 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 			if key != kind && !declaredBindings[key] {
 				return fmt.Errorf("Agent %s credential placement key %s must match credential kind %s", agentID, key, kind)
 			}
-			if candidate != nil && !allowedKinds[key] {
+			// Explicit BindingKeys are host-advertised deployment slots rather
+			// than Skill credential kinds. They may be configured before they
+			// become required (for example, an inactive Agent may already have
+			// its model provider selected). Skill credentials remain restricted
+			// to the exact requirements declared by the candidate.
+			if candidate != nil && !allowedKinds[key] && !deploymentBindings[key] {
 				expected := sortedCredentialKinds(allowedKinds)
 				if len(expected) == 0 {
 					return fmt.Errorf("Agent %s does not require credential kind %s", agentID, key)

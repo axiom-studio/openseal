@@ -78,6 +78,41 @@ func TestValidateCredentialPlacementAcceptsAuthorizedDeploymentBinding(t *testin
 	}
 }
 
+func TestValidateCredentialPlacementKeepsOptionalDeploymentBindingSeparateFromSkillCredential(t *testing.T) {
+	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "slack-agent"}}}
+	required := map[string][]string{"slack-agent": {"slack_bot_token"}}
+	choices := []capability.CredentialBindingChoice{
+		{
+			Reference:   capability.CredentialReference{Kind: "vault", ID: "36"},
+			DisplayName: "Primary model",
+			BindingKeys: []string{agent.ModelProviderCredentialBinding},
+		},
+		{
+			Reference:   capability.CredentialReference{Kind: "slack_bot_token", ID: "vault://007.token"},
+			DisplayName: "Slack workspace",
+		},
+	}
+	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"slack-agent": {
+			agent.ModelProviderCredentialBinding: {Kind: "vault", ID: "36"},
+			"slack_bot_token":                    {Kind: "slack_bot_token", ID: "vault://007.token"},
+		},
+	}}
+	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err != nil {
+		t.Fatalf("separate deployment and Skill credentials = %v", err)
+	}
+
+	placement.CredentialReferences["slack-agent"]["unrequired_skill_token"] =
+		capability.CredentialReference{Kind: "unrequired_skill_token", ID: "credential"}
+	choices = append(choices, capability.CredentialBindingChoice{
+		Reference: capability.CredentialReference{Kind: "unrequired_skill_token", ID: "credential"},
+	})
+	if err := ValidateCredentialPlacement(candidate, required, placement, choices); err == nil ||
+		!strings.Contains(err.Error(), "not a required kind") {
+		t.Fatalf("unrequired Skill credential error = %v", err)
+	}
+}
+
 func TestRequiredCredentialsIncludesRuntimeBindingOnlyForActiveCandidates(t *testing.T) {
 	catalog := CapabilityCatalog{AgentCredentialRequirements: []AgentCredentialRequirement{{
 		BindingKey: agent.ModelProviderCredentialBinding, DisplayName: "Model provider",
