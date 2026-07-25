@@ -221,6 +221,65 @@ func TestRefinementAtomicallyAddsHostVerifiedDiscoveredSkill(t *testing.T) {
 	}
 }
 
+func TestTrustedRefinementSkillRefreshesSameIdentityAcquisitionReference(t *testing.T) {
+	question := RefinementQuestion{
+		ID: CapabilityNeedQuestionID("analysis"), Category: RefinementCategorySkill,
+		Prompt: "Which Skill should analyze the evidence?", WhyNeeded: "Analysis requires one exact Skill.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Minimum: 1, Maximum: 1},
+		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	const (
+		skillID = "marketplace.summarize"
+		version = "1.2.3"
+		source  = "registry.example::publisher/summarize"
+		listing = "listing:7"
+		generic = "needs_installation"
+	)
+	changeSet := &ChangeSet{
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			skillID: {
+				ID: skillID, Version: version, SourceIdentity: source,
+				Readiness: SkillReadinessNeedsInstallation,
+				Compatibility: []SkillCompatibility{{
+					Requirement: "installation", Compatible: false,
+					Evidence: "Installation is required.", Reference: generic,
+				}, {
+					Requirement: "source_digest", Compatible: true,
+					Evidence: "The exact source was verified.", Reference: "sha256:verified",
+				}},
+			},
+		}},
+		Refinement: ChangeSetRefinement{Questions: []RefinementQuestion{question}},
+	}
+	candidate := SkillSearchCandidate{
+		SkillCapability: SkillCapability{
+			ID: skillID, Version: version, SourceIdentity: source, Name: "Summarize",
+			Readiness: SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{{
+				Requirement: "installation", Compatible: false,
+				Evidence: "Installation is required.", Reference: generic,
+			}, {
+				Requirement: "source_digest", Compatible: true,
+				Evidence: "The exact source was verified.", Reference: "sha256:verified",
+			}},
+		},
+		Origin: SkillSearchOriginCatalog, Verification: SkillSearchVerificationVerified,
+		Provenance: SkillSearchProvenance{Registry: "registry.example", Reference: listing},
+	}
+	if err := addTrustedRefinementSkill(
+		changeSet,
+		question.ID,
+		RefinementAnswerValue{SkillIDs: []string{skillID}},
+		candidate,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if reference := plannedInstallationReference(changeSet.Catalog.Skills[skillID]); reference != listing {
+		t.Fatalf("refreshed acquisition reference = %q", reference)
+	}
+}
+
 func TestRefinementSequenceCanGateSkillsAndScopeOnCredentialConfiguration(t *testing.T) {
 	credential := RefinementQuestion{
 		ID: "reddit-credential", Category: RefinementCategoryCredential, Prompt: "Which authorized Reddit credential should be used?", WhyNeeded: "Reddit access requires an authorized credential.",

@@ -961,9 +961,10 @@ func addTrustedRefinementSkill(changeSet *ChangeSet, questionID string, value Re
 	if changeSet.Catalog.Skills == nil {
 		changeSet.Catalog.Skills = make(map[string]SkillCapability)
 	}
-	if _, exists := changeSet.Catalog.Skills[candidate.ID]; !exists {
-		changeSet.Catalog.Skills[candidate.ID] = candidate.SkillCapability
-	}
+	// The host has just re-resolved this exact candidate. Replace a same-
+	// identity snapshot as well as inserting a new result so a revised answer
+	// can refresh its verified acquisition handle and current lifecycle facts.
+	changeSet.Catalog.Skills[candidate.ID] = candidate.SkillCapability
 	found := false
 	for _, option := range question.Answer.Options {
 		if option.ID == candidate.ID {
