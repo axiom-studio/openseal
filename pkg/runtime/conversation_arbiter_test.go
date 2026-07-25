@@ -149,6 +149,111 @@ func TestConversationArbiterSuppressesRecentAndAcknowledgmentPileOn(t *testing.T
 	}
 }
 
+func TestConversationArbiterAppliesExplicitParticipationPolicy(t *testing.T) {
+	t.Parallel()
+	roundID := "round-explicit-participation"
+	channel := ConversationAudience{Kind: ConversationAudienceChannel}
+	proposals := []ParticipationProposal{
+		{
+			ID: "acknowledgment", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "observer"},
+			WantsToSpeak: true, Intent: MessageIntentAcknowledgment, Content: "Thanks, I have seen the update.", Audience: channel,
+		},
+		{
+			ID: "first", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "first"},
+			WantsToSpeak: true, Intent: MessageIntentUpdate, Content: "The release is ready for review.", Audience: channel,
+			Signals: ParticipationSignals{HasNewInformation: true},
+		},
+		{
+			ID: "second", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "second"},
+			WantsToSpeak: true, Intent: MessageIntentUpdate, Content: "The release is ready for review.", Audience: channel,
+			Signals: ParticipationSignals{HasNewInformation: true},
+		},
+	}
+	policy := DefaultConversationArbitrationPolicy()
+	policy.Participation = &ConversationParticipationPolicy{
+		QuietByDefault:           false,
+		RequireRoleRelevance:     false,
+		SuppressDuplicateContent: false,
+	}
+	result, err := ArbitrateParticipation(roundID, proposals, nil, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Speakers, []string{"first", "second", "acknowledgment"}) {
+		t.Fatalf("explicit open participation speakers = %#v", result.Speakers)
+	}
+}
+
+func TestConversationArbiterRequiresRoleRelevanceUnlessPolicyOptsOut(t *testing.T) {
+	t.Parallel()
+	roundID := "round-role-policy"
+	proposal := ParticipationProposal{
+		ID: "specialist", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "specialist"},
+		WantsToSpeak: true, Intent: MessageIntentUpdate, Content: "I found a new affected workload.", Priority: 25,
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Signals:  ParticipationSignals{HasNewInformation: true},
+	}
+	required, err := ArbitrateParticipation(roundID, []ParticipationProposal{proposal}, nil, DefaultConversationArbitrationPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requiredDecision := decisionsByProposal(required.Decisions)["specialist"]
+	if requiredDecision.Disposition != ParticipationSilent ||
+		!containsParticipationReason(requiredDecision.Reasons, ParticipationReasonRoleNotRelevant) {
+		t.Fatalf("role-irrelevant proposal was not suppressed: %#v", requiredDecision)
+	}
+
+	preferredPolicy := DefaultConversationArbitrationPolicy()
+	preferred := *preferredPolicy.Participation
+	preferred.RequireRoleRelevance = false
+	preferredPolicy.Participation = &preferred
+	allowed, err := ArbitrateParticipation(roundID, []ParticipationProposal{proposal}, nil, preferredPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(allowed.Speakers, []string{"specialist"}) {
+		t.Fatalf("role-relevance opt-out speakers = %#v", allowed.Speakers)
+	}
+}
+
+func TestConversationArbiterDefaultsOmittedParticipationPolicyToSafeBehavior(t *testing.T) {
+	t.Parallel()
+	roundID := "round-omitted-participation"
+	channel := ConversationAudience{Kind: ConversationAudienceChannel}
+	recent := []*ChannelMessage{{
+		ID: "existing", Scope: Scope{Kind: "tenant", ID: "one"}, ConversationID: "conversation-1", Sequence: 1,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "first"}, Intent: MessageIntentUpdate,
+		Content: "The production rollout completed successfully.", Audience: channel, CreatedAt: time.Now(),
+	}}
+	proposals := []ParticipationProposal{
+		{
+			ID: "duplicate", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "second"},
+			WantsToSpeak: true, Intent: MessageIntentUpdate, Content: "The production rollout completed successfully.", Audience: channel,
+			Signals: ParticipationSignals{HasNewInformation: true, RoleRelevant: true},
+		},
+		{
+			ID: "acknowledgment", RoundID: roundID, Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "third"},
+			WantsToSpeak: true, Intent: MessageIntentAcknowledgment, Content: "Thanks, everyone.", Audience: channel,
+			Signals: ParticipationSignals{RoleRelevant: true},
+		},
+	}
+	policy := ConversationArbitrationPolicy{
+		MinimumScore: 30, MaximumSpeakers: 3, DuplicateThreshold: 0.72, MinimumAvailableParticipants: 1,
+	}
+	result, err := ArbitrateParticipation(roundID, proposals, recent, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Speakers) != 0 {
+		t.Fatalf("omitted participation policy did not use safe defaults: %#v", result.Speakers)
+	}
+	decisions := decisionsByProposal(result.Decisions)
+	if decisions["duplicate"].DuplicateOfID != "existing" ||
+		!containsParticipationReason(decisions["acknowledgment"].Reasons, ParticipationReasonQuietByDefault) {
+		t.Fatalf("safe default decisions = %#v", decisions)
+	}
+}
+
 func TestConversationArbiterSuppressesSemanticClaimPileOn(t *testing.T) {
 	t.Parallel()
 	roundID := "round-semantic-duplicate"

@@ -688,7 +688,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 func sameParticipationRoundIntent(existing *ParticipationRound, req CoordinateParticipationRequest, roundID string, proposals []ParticipationProposal, policy ConversationArbitrationPolicy) bool {
 	return existing != nil && existing.ID == roundID && existing.Scope == req.Scope &&
 		existing.ConversationID == strings.TrimSpace(req.ConversationID) && existing.TriggerMessageID == strings.TrimSpace(req.TriggerMessageID) &&
-		existing.Policy == policy && reflect.DeepEqual(existing.Proposals, proposals)
+		sameConversationArbitrationPolicy(existing.Policy, policy) && reflect.DeepEqual(existing.Proposals, proposals)
 }
 
 func cloneConversation(in *Conversation) *Conversation {
@@ -752,6 +752,10 @@ func cloneParticipationRound(in *ParticipationRound) *ParticipationRound {
 		return nil
 	}
 	out := *in
+	if in.Policy.Participation != nil {
+		participation := *in.Policy.Participation
+		out.Policy.Participation = &participation
+	}
 	out.Proposals = cloneParticipationProposals(in.Proposals)
 	out.Arbitration.Decisions = append([]ParticipationDecision(nil), in.Arbitration.Decisions...)
 	for index := range out.Arbitration.Decisions {

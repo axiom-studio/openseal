@@ -37,6 +37,8 @@ const (
 	ParticipationReasonBackpressure         ParticipationReason = "backpressure"
 	ParticipationReasonAcknowledgmentOnly   ParticipationReason = "acknowledgment_only"
 	ParticipationReasonNotAddressed         ParticipationReason = "not_addressed"
+	ParticipationReasonQuietByDefault       ParticipationReason = "quiet_by_default"
+	ParticipationReasonRoleNotRelevant      ParticipationReason = "role_not_relevant"
 )
 
 type ParticipationSignals struct {
@@ -234,24 +236,60 @@ func (r *ParticipationRound) Validate() error {
 	return nil
 }
 
+// ConversationParticipationPolicy controls the human-facing behavior of a
+// channel independently from its numeric scoring and backpressure limits.
+// Keeping it optional on ConversationArbitrationPolicy lets older callers
+// inherit the safe defaults while preserving deliberate false values from an
+// authored Team definition.
+type ConversationParticipationPolicy struct {
+	QuietByDefault           bool `json:"quietByDefault"`
+	RequireRoleRelevance     bool `json:"requireRoleRelevance"`
+	SuppressDuplicateContent bool `json:"suppressDuplicateContent"`
+}
+
+func DefaultConversationParticipationPolicy() ConversationParticipationPolicy {
+	return ConversationParticipationPolicy{
+		QuietByDefault:           true,
+		RequireRoleRelevance:     true,
+		SuppressDuplicateContent: true,
+	}
+}
+
 type ConversationArbitrationPolicy struct {
-	MinimumScore                 int     `json:"minimumScore"`
-	MaximumSpeakers              int     `json:"maximumSpeakers"`
-	DuplicateThreshold           float64 `json:"duplicateThreshold"`
-	MinimumAvailableParticipants int     `json:"minimumAvailableParticipants"`
-	RequiredAvailableRole        string  `json:"requiredAvailableRole,omitempty"`
+	MinimumScore                 int                              `json:"minimumScore"`
+	MaximumSpeakers              int                              `json:"maximumSpeakers"`
+	DuplicateThreshold           float64                          `json:"duplicateThreshold"`
+	MinimumAvailableParticipants int                              `json:"minimumAvailableParticipants"`
+	RequiredAvailableRole        string                           `json:"requiredAvailableRole,omitempty"`
+	Participation                *ConversationParticipationPolicy `json:"participation,omitempty"`
 }
 
 func DefaultConversationArbitrationPolicy() ConversationArbitrationPolicy {
-	return ConversationArbitrationPolicy{MinimumScore: 30, MaximumSpeakers: 3, DuplicateThreshold: 0.72, MinimumAvailableParticipants: 1}
+	participation := DefaultConversationParticipationPolicy()
+	return ConversationArbitrationPolicy{
+		MinimumScore: 30, MaximumSpeakers: 3, DuplicateThreshold: 0.72, MinimumAvailableParticipants: 1,
+		Participation: &participation,
+	}
 }
 
 func (p ConversationArbitrationPolicy) normalize() (ConversationArbitrationPolicy, error) {
-	if p.MinimumScore == 0 && p.MaximumSpeakers == 0 && p.DuplicateThreshold == 0 && p.MinimumAvailableParticipants == 0 && strings.TrimSpace(p.RequiredAvailableRole) == "" {
-		return DefaultConversationArbitrationPolicy(), nil
+	if p.MinimumScore == 0 && p.MaximumSpeakers == 0 && p.DuplicateThreshold == 0 &&
+		p.MinimumAvailableParticipants == 0 && strings.TrimSpace(p.RequiredAvailableRole) == "" {
+		defaults := DefaultConversationArbitrationPolicy()
+		p.MinimumScore = defaults.MinimumScore
+		p.MaximumSpeakers = defaults.MaximumSpeakers
+		p.DuplicateThreshold = defaults.DuplicateThreshold
+		p.MinimumAvailableParticipants = defaults.MinimumAvailableParticipants
 	}
 	if p.MinimumAvailableParticipants == 0 {
 		p.MinimumAvailableParticipants = 1
+	}
+	if p.Participation == nil {
+		participation := DefaultConversationParticipationPolicy()
+		p.Participation = &participation
+	} else {
+		participation := *p.Participation
+		p.Participation = &participation
 	}
 	p.RequiredAvailableRole = strings.TrimSpace(p.RequiredAvailableRole)
 	if p.MinimumScore < 1 || p.MinimumScore > 100 || p.MaximumSpeakers < 1 || p.MaximumSpeakers > 20 ||
@@ -260,6 +298,20 @@ func (p ConversationArbitrationPolicy) normalize() (ConversationArbitrationPolic
 		return ConversationArbitrationPolicy{}, errors.New("invalid conversation arbitration policy")
 	}
 	return p, nil
+}
+
+func sameConversationArbitrationPolicy(left, right ConversationArbitrationPolicy) bool {
+	if left.MinimumScore != right.MinimumScore ||
+		left.MaximumSpeakers != right.MaximumSpeakers ||
+		left.DuplicateThreshold != right.DuplicateThreshold ||
+		left.MinimumAvailableParticipants != right.MinimumAvailableParticipants ||
+		left.RequiredAvailableRole != right.RequiredAvailableRole {
+		return false
+	}
+	if left.Participation == nil || right.Participation == nil {
+		return left.Participation == nil && right.Participation == nil
+	}
+	return *left.Participation == *right.Participation
 }
 
 type ParticipationDecision struct {
@@ -343,7 +395,17 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 		if decision.Disposition == ParticipationSilent {
 			continue
 		}
-		if decision.Score < normalizedPolicy.MinimumScore {
+		if normalizedPolicy.Participation.RequireRoleRelevance && !proposalMeetsRequiredRoleRelevance(proposal) {
+			decision.Disposition = ParticipationSilent
+			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonRoleNotRelevant)
+			continue
+		}
+		if normalizedPolicy.Participation.QuietByDefault && !proposalHasMaterialContribution(proposal) {
+			decision.Disposition = ParticipationSilent
+			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonQuietByDefault)
+			continue
+		}
+		if normalizedPolicy.Participation.QuietByDefault && decision.Score < normalizedPolicy.MinimumScore {
 			decision.Disposition = ParticipationSilent
 			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonLowRelevance)
 			continue
@@ -362,11 +424,13 @@ func ArbitrateParticipation(roundID string, proposals []ParticipationProposal, r
 				decision.Reasons = appendReason(decision.Reasons, ParticipationReasonDuplicate)
 				continue
 			}
-		} else if duplicateID := findDuplicateConversationMessage(proposal.Content, proposal.ContributionKey, recentComparable, normalizedPolicy.DuplicateThreshold); duplicateID != "" {
-			decision.Disposition = ParticipationSilent
-			decision.DuplicateOfID = duplicateID
-			decision.Reasons = appendReason(decision.Reasons, ParticipationReasonDuplicate)
-			continue
+		} else if normalizedPolicy.Participation.SuppressDuplicateContent {
+			if duplicateID := findDuplicateConversationMessage(proposal.Content, proposal.ContributionKey, recentComparable, normalizedPolicy.DuplicateThreshold); duplicateID != "" {
+				decision.Disposition = ParticipationSilent
+				decision.DuplicateOfID = duplicateID
+				decision.Reasons = appendReason(decision.Reasons, ParticipationReasonDuplicate)
+				continue
+			}
 		}
 		if len(speakers) >= normalizedPolicy.MaximumSpeakers {
 			decision.Disposition = ParticipationDeferred
@@ -450,6 +514,24 @@ func proposalCoordinatesWork(proposal ParticipationProposal) bool {
 	default:
 		return false
 	}
+}
+
+func proposalHasMaterialContribution(proposal ParticipationProposal) bool {
+	return proposal.ProposedAction != nil ||
+		proposal.Signals.DirectlyMentioned ||
+		proposal.Signals.AnswersOpenQuestion ||
+		proposal.Signals.HasNewInformation ||
+		proposalHasVerifiedEvidence(proposal) ||
+		proposal.Signals.ResolvesOpenWork ||
+		proposalCoordinatesWork(proposal) ||
+		proposalIsSubstantiveObjection(proposal)
+}
+
+func proposalMeetsRequiredRoleRelevance(proposal ParticipationProposal) bool {
+	return proposal.Signals.RoleRelevant ||
+		proposal.Signals.DirectlyMentioned ||
+		proposalHasVerifiedEvidence(proposal) ||
+		proposalIsSubstantiveObjection(proposal)
 }
 
 type comparableMessage struct {

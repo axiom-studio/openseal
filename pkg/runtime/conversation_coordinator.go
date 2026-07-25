@@ -191,7 +191,8 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	if existing, err := c.conversations.FindParticipationRoundByIdempotencyKey(ctx, req.Scope, req.ConversationID, key); err != nil {
 		return nil, err
 	} else if existing != nil {
-		if existing.Round.TriggerMessageID != strings.TrimSpace(req.TriggerMessageID) || existing.Round.Policy != policy {
+		if existing.Round.TriggerMessageID != strings.TrimSpace(req.TriggerMessageID) ||
+			!sameConversationArbitrationPolicy(existing.Round.Policy, policy) {
 			return nil, ErrMessageConflict
 		}
 		existing.Replayed = true

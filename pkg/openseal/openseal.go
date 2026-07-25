@@ -352,6 +352,7 @@ type (
 	ParticipationDisposition           = runtime.ParticipationDisposition
 	ParticipationReason                = runtime.ParticipationReason
 	ParticipationDecision              = runtime.ParticipationDecision
+	ConversationParticipationPolicy    = runtime.ConversationParticipationPolicy
 	ConversationArbitrationPolicy      = runtime.ConversationArbitrationPolicy
 	ConversationArbitration            = runtime.ConversationArbitration
 	ParticipationRoundStatus           = runtime.ParticipationRoundStatus
@@ -1162,6 +1163,10 @@ func DefaultConversationArbitrationPolicy() runtime.ConversationArbitrationPolic
 	return runtime.DefaultConversationArbitrationPolicy()
 }
 
+func DefaultConversationParticipationPolicy() runtime.ConversationParticipationPolicy {
+	return runtime.DefaultConversationParticipationPolicy()
+}
+
 func DefaultConversationCoordinatorConfig() runtime.ConversationCoordinatorConfig {
 	return runtime.DefaultConversationCoordinatorConfig()
 }
@@ -1493,6 +1498,9 @@ const (
 	ParticipationReasonDuplicate            = runtime.ParticipationReasonDuplicate
 	ParticipationReasonBackpressure         = runtime.ParticipationReasonBackpressure
 	ParticipationReasonAcknowledgmentOnly   = runtime.ParticipationReasonAcknowledgmentOnly
+	ParticipationReasonNotAddressed         = runtime.ParticipationReasonNotAddressed
+	ParticipationReasonQuietByDefault       = runtime.ParticipationReasonQuietByDefault
+	ParticipationReasonRoleNotRelevant      = runtime.ParticipationReasonRoleNotRelevant
 
 	ParticipationRoundCommitted = runtime.ParticipationRoundCommitted
 
