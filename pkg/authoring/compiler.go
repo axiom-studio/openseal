@@ -147,6 +147,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		if len(materializationIssues) == 0 && !hasScheduleIntentQuestion(generated.UnresolvedQuestions) {
 			validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
 		}
+		validation = append(validation, validateSelectedSkillActionRisks(&generated.Candidate, request.Catalog)...)
 		validation = append(validation, ValidateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
@@ -211,6 +212,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	if len(materializationIssues) == 0 && !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
 	}
+	result.Validation = append(result.Validation, validateSelectedSkillActionRisks(&result.Candidate, request.Catalog)...)
 	result.Validation = append(result.Validation, ValidateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
 	refinementValidation := make([]ValidationIssue, 0, 2)
@@ -292,6 +294,42 @@ func validateAgentSkillAuthority(path string, definition *agent.AgentDefinition)
 			"required_skill_not_authorized",
 			fmt.Sprintf("Required Skill %s must be present in authority.allowedSkillIds", requirement.SkillID),
 		))
+	}
+	return issues
+}
+
+// validateSelectedSkillActionRisks keeps an Agent's authority aligned with the
+// exact catalog actions it selected. Skill MaximumRisk describes the broadest
+// operation the Skill exposes and must not force an Agent to receive unrelated
+// destructive authority; ActionRisks provides the narrower deterministic fact
+// needed for contract repair before policy review and binding.
+func validateSelectedSkillActionRisks(candidate *WorkforceCandidate, catalog CapabilityCatalog) []ValidationIssue {
+	if candidate == nil {
+		return nil
+	}
+	issues := make([]ValidationIssue, 0)
+	for agentIndex, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		authorityRank := riskRank(definition.Authority.MaximumRisk)
+		for requirementIndex, requirement := range definition.SkillRequirements {
+			skill, exists := catalog.Skills[requirement.SkillID]
+			if !exists {
+				continue
+			}
+			for _, action := range requirement.RequiredActions {
+				actionRisk, known := skill.ActionRisks[action]
+				if !known || riskRank(actionRisk) <= authorityRank {
+					continue
+				}
+				issues = append(issues, issue(
+					fmt.Sprintf("agents[%d].authority.maximumRisk", agentIndex),
+					"skill_action_risk_exceeded",
+					fmt.Sprintf("Skill requirement %d action %s requires %s risk, but Agent %s permits at most %s; widen Agent authority to %s and preserve the configured approval threshold", requirementIndex, action, actionRisk, definition.ID, definition.Authority.MaximumRisk, actionRisk),
+				))
+			}
+		}
 	}
 	return issues
 }

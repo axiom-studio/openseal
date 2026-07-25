@@ -788,6 +788,21 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(skill.ID) == "" || id != skill.ID {
 			return errors.New("Skill catalog keys must match non-empty Skill ids")
 		}
+		if skill.MaximumRisk != "" && riskRank(skill.MaximumRisk) < 0 {
+			return fmt.Errorf("Skill %s maximum risk is invalid", id)
+		}
+		actions := stringSet(skill.Actions)
+		for action, risk := range skill.ActionRisks {
+			if action != strings.TrimSpace(action) || action == "" || !actions[action] {
+				return fmt.Errorf("Skill %s action risk references an undeclared action", id)
+			}
+			if riskRank(risk) < 0 {
+				return fmt.Errorf("Skill %s action %s risk is invalid", id, action)
+			}
+			if skill.MaximumRisk != "" && riskRank(risk) > riskRank(skill.MaximumRisk) {
+				return fmt.Errorf("Skill %s action %s risk exceeds the Skill maximum", id, action)
+			}
+		}
 		if len(strings.TrimSpace(skill.SourceIdentity)) > 1024 {
 			return fmt.Errorf("Skill %s source identity is too long", id)
 		}

@@ -116,6 +116,19 @@ func TestValidateCapabilityCatalogRejectsMalformedAuthorityConstraint(t *testing
 	}
 }
 
+func TestValidateCapabilityCatalogRejectsMalformedActionRisks(t *testing.T) {
+	tests := []SkillCapability{
+		{ID: "slack", Actions: []string{"send"}, ActionRisks: map[string]capability.RiskLevel{"delete": capability.RiskLevelDestructive}, MaximumRisk: capability.RiskLevelDestructive},
+		{ID: "slack", Actions: []string{"send"}, ActionRisks: map[string]capability.RiskLevel{"send": capability.RiskLevel("sometimes")}, MaximumRisk: capability.RiskLevelDestructive},
+		{ID: "slack", Actions: []string{"send"}, ActionRisks: map[string]capability.RiskLevel{"send": capability.RiskLevelExternal}, MaximumRisk: capability.RiskLevelWrite},
+	}
+	for _, skill := range tests {
+		if err := ValidateCapabilityCatalog(CapabilityCatalog{Skills: map[string]SkillCapability{skill.ID: skill}}); err == nil {
+			t.Fatalf("Skill %#v unexpectedly validated", skill)
+		}
+	}
+}
+
 func marketingCatalog() CapabilityCatalog {
 	return CapabilityCatalog{Skills: map[string]SkillCapability{
 		"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
