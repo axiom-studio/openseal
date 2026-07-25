@@ -134,6 +134,53 @@ func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
 	}
 }
 
+func TestPostgresLaterMigrationDoesNotReplayActivityProjectionBackfill(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	schema := "openseal_migration_activity_gate_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+	if _, err = primary.db.ExecContext(ctx, `INSERT INTO `+primary.table("run_activity")+`
+		(scope_kind,scope_id,run_id,sequence,id,event_type,created_at,payload)
+		VALUES ('tenant','1','migration-proof',1,'migration-proof','proof',CURRENT_TIMESTAMP,'{}'::jsonb)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = primary.db.ExecContext(ctx, `
+		CREATE FUNCTION `+primary.quotedSchema()+`.reject_activity_backfill() RETURNS trigger
+		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'activity projection backfill replayed'; END $$;
+		CREATE TRIGGER reject_activity_backfill BEFORE UPDATE ON `+primary.table("run_activity")+`
+		FOR EACH STATEMENT EXECUTE FUNCTION `+primary.quotedSchema()+`.reject_activity_backfill()
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = primary.db.ExecContext(ctx, `DELETE FROM `+primary.table("schema_migrations")+` WHERE version = $1`, currentPostgresSchemaVersion); err != nil {
+		t.Fatal(err)
+	}
+
+	startedAt := time.Now()
+	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatalf("later migration replayed an applied activity backfill: %v", err)
+	}
+	defer reopened.Close()
+	if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
+		t.Fatalf("later migration startup took %s, want under 2s", elapsed)
+	}
+	if version, versionErr := reopened.PostgresSchemaVersion(ctx); versionErr != nil || version != currentPostgresSchemaVersion {
+		t.Fatalf("schema version after later migration = %d, err = %v", version, versionErr)
+	}
+}
+
 func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
 	if dsn == "" {
