@@ -25,6 +25,8 @@ var (
 	ErrScopeMismatch      = errors.New("OAuth grant does not cover the requested authorization")
 	ErrRevisionConflict   = errors.New("OAuth connection revision conflict")
 	ErrConnectionNotFound = errors.New("OAuth connection not found")
+	ErrRefreshInProgress  = errors.New("OAuth connection refresh is already in progress")
+	ErrUnsupported        = errors.New("OAuth provider operation is unsupported")
 )
 
 type ConnectionStatus string
@@ -71,22 +73,24 @@ type ExternalIdentity struct {
 
 // Connection is the secret-free durable view of an encrypted host grant.
 type Connection struct {
-	APIVersion          string                         `json:"apiVersion"`
-	Scope               capability.ScopeReference      `json:"scope"`
-	ID                  string                         `json:"id"`
-	Kind                string                         `json:"kind"`
-	Owner               Owner                          `json:"owner"`
-	Grant               capability.OAuth2GrantSummary  `json:"grant"`
-	ExternalIdentity    ExternalIdentity               `json:"externalIdentity,omitempty"`
-	CredentialReference capability.CredentialReference `json:"credentialReference"`
-	Status              ConnectionStatus               `json:"status"`
-	TokenVersion        int64                          `json:"tokenVersion"`
-	ExpiresAt           *time.Time                     `json:"expiresAt,omitempty"`
-	LastRefreshedAt     *time.Time                     `json:"lastRefreshedAt,omitempty"`
-	LastErrorCode       string                         `json:"lastErrorCode,omitempty"`
-	Revision            int64                          `json:"revision"`
-	CreatedAt           time.Time                      `json:"createdAt"`
-	UpdatedAt           time.Time                      `json:"updatedAt"`
+	APIVersion            string                         `json:"apiVersion"`
+	Scope                 capability.ScopeReference      `json:"scope"`
+	ID                    string                         `json:"id"`
+	Kind                  string                         `json:"kind"`
+	Owner                 Owner                          `json:"owner"`
+	Grant                 capability.OAuth2GrantSummary  `json:"grant"`
+	ExternalIdentity      ExternalIdentity               `json:"externalIdentity,omitempty"`
+	CredentialReference   capability.CredentialReference `json:"credentialReference"`
+	Status                ConnectionStatus               `json:"status"`
+	TokenVersion          int64                          `json:"tokenVersion"`
+	ExpiresAt             *time.Time                     `json:"expiresAt,omitempty"`
+	LastRefreshedAt       *time.Time                     `json:"lastRefreshedAt,omitempty"`
+	LastErrorCode         string                         `json:"lastErrorCode,omitempty"`
+	Revision              int64                          `json:"revision"`
+	CreatedAt             time.Time                      `json:"createdAt"`
+	UpdatedAt             time.Time                      `json:"updatedAt"`
+	RefreshLeaseID        string                         `json:"-"`
+	RefreshLeaseExpiresAt *time.Time                     `json:"-"`
 }
 
 // AuthorizationSession is durable callback authority. StateDigest and
@@ -161,6 +165,15 @@ type ProviderCodeExchangeRequest struct {
 	Requirement  capability.OAuth2Requirement
 }
 
+type ProviderRefreshRequest struct {
+	Current     TokenGrant
+	Requirement capability.OAuth2Requirement
+}
+
+type ProviderRevocationRequest struct {
+	Current TokenGrant
+}
+
 // TokenGrant is passed directly from a provider adapter to the host credential
 // store.
 // Token fields cannot be JSON serialized.
@@ -180,6 +193,14 @@ type Provider interface {
 	ExchangeCode(context.Context, ProviderCodeExchangeRequest) (TokenGrant, error)
 }
 
+type RefreshProvider interface {
+	RefreshToken(context.Context, ProviderRefreshRequest) (TokenGrant, error)
+}
+
+type RevocationProvider interface {
+	RevokeToken(context.Context, ProviderRevocationRequest) error
+}
+
 type CredentialStoreRequest struct {
 	Scope        capability.ScopeReference
 	ConnectionID string
@@ -194,6 +215,8 @@ type CredentialStore interface {
 	PutTransient(context.Context, capability.ScopeReference, string, time.Time) (capability.CredentialReference, error)
 	TakeTransient(context.Context, capability.ScopeReference, capability.CredentialReference) (string, error)
 	PutConnection(context.Context, CredentialStoreRequest) (capability.CredentialReference, int64, error)
+	GetConnection(context.Context, capability.ScopeReference, capability.CredentialReference) (TokenGrant, error)
+	DeleteConnection(context.Context, capability.ScopeReference, capability.CredentialReference) error
 }
 
 type Store interface {
@@ -201,7 +224,20 @@ type Store interface {
 	GetAuthorizationSession(context.Context, capability.ScopeReference, string) (*AuthorizationSession, error)
 	UpdateAuthorizationSession(context.Context, *AuthorizationSession, int64) error
 	GetConnection(context.Context, capability.ScopeReference, string) (*Connection, error)
+	ClaimConnectionRefresh(context.Context, capability.ScopeReference, string, int64, string, time.Time, time.Time) (*Connection, error)
 	UpsertConnection(context.Context, *Connection, int64) error
+}
+
+type RefreshConnectionRequest struct {
+	Scope            capability.ScopeReference
+	ConnectionID     string
+	ExpectedRevision int64
+}
+
+type RevokeConnectionRequest struct {
+	Scope            capability.ScopeReference
+	ConnectionID     string
+	ExpectedRevision int64
 }
 
 func normalizeGrant(requirement capability.OAuth2Requirement, grant TokenGrant) (capability.OAuth2GrantSummary, error) {
