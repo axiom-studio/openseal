@@ -95,11 +95,11 @@ func TestSourcePoliciesAdvertiseExactGovernedLifecycle(t *testing.T) {
 
 func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
 	readOnly := SkillBindingsCapability(false)
-	if readOnly.ID != SkillBindingsCapabilityID || readOnly.Version != "1" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationUpsert) {
+	if readOnly.ID != SkillBindingsCapabilityID || readOnly.Version != "2" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationUpsert) {
 		t.Fatalf("read-only binding capability = %#v", readOnly)
 	}
 	managed := SkillBindingsCapability(true)
-	for _, operation := range []string{OperationGet, OperationList, OperationUpsert, OperationDisable} {
+	for _, operation := range []string{OperationGet, OperationList, OperationUpsert, OperationDisable, OperationPlanUpgrade, OperationApplyUpgrade} {
 		if !managed.Supports(operation) {
 			t.Fatalf("binding operation %q not advertised: %#v", operation, managed.Operations)
 		}

@@ -31,7 +31,7 @@ const (
 	SkillActionsCapabilityID                   = "skill-actions"
 	SkillActionsCapabilityVersion              = "1"
 	SkillBindingsCapabilityID                  = "skill-bindings"
-	SkillBindingsCapabilityVersion             = "1"
+	SkillBindingsCapabilityVersion             = "2"
 	ArtifactsCapabilityID                      = "artifacts"
 	ArtifactsCapabilityVersion                 = "1"
 	ChannelsCapabilityID                       = "channels"
@@ -121,6 +121,8 @@ const (
 	OperationAdvanceCheckpoint    = "advance-checkpoint"
 	OperationUpsert               = "upsert"
 	OperationDisable              = "disable"
+	OperationPlanUpgrade          = "plan-upgrade"
+	OperationApplyUpgrade         = "apply-upgrade"
 	OperationRefine               = "refine"
 	OperationRevoke               = "revoke"
 	OperationListVersions         = "list-versions"
@@ -522,7 +524,7 @@ func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) C
 func SkillBindingsCapability(management bool) Capability {
 	result := Capability{ID: SkillBindingsCapabilityID, Version: SkillBindingsCapabilityVersion, Available: true, Operations: []string{OperationGet, OperationList}}
 	if management {
-		result.Operations = append(result.Operations, OperationUpsert, OperationDisable)
+		result.Operations = append(result.Operations, OperationUpsert, OperationDisable, OperationPlanUpgrade, OperationApplyUpgrade)
 	}
 	return result
 }
