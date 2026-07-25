@@ -63,10 +63,11 @@ func TestSQLiteStartupRedactsLegacySensitiveAuthoringPrompt(t *testing.T) {
 	}
 	definition := &agent.AgentDefinition{
 		ID: "legacy-agent", Version: "1", DisplayName: "Legacy Agent", Purpose: "Work safely",
-		SystemPrompt: "Authenticate with password: erase-definition-secret",
+		SystemPrompt: "Sign in with the supplied username and password erase-definition-secret.",
 		Authority:    agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
 		Digest:       "legacy-definition-digest", CreatedAt: now,
 	}
+	value.Result.Candidate.Agents = []*agent.AgentDefinition{definition}
 	definitionPayload, _ := json.Marshal(definition)
 	if _, err := store.db.Exec(`INSERT INTO agent_definitions(id,version,digest,created_at,payload) VALUES(?,?,?,?,?)`, definition.ID, definition.Version, definition.Digest, now, string(definitionPayload)); err != nil {
 		t.Fatal(err)
@@ -89,12 +90,15 @@ func TestSQLiteStartupRedactsLegacySensitiveAuthoringPrompt(t *testing.T) {
 	if err != nil || strings.Contains(restored.Prompt, "erase-me-now") || !strings.Contains(restored.Prompt, "[REDACTED]") {
 		t.Fatalf("restored=%#v err=%v", restored, err)
 	}
+	if got := restored.Result.Candidate.Agents[0].SystemPrompt; strings.Contains(got, "erase-definition-secret") || got == definition.SystemPrompt {
+		t.Fatalf("ChangeSet candidate Agent was not hardened: %q", got)
+	}
 	var stored string
 	if err := restarted.db.QueryRow(`SELECT payload FROM workforce_change_sets WHERE scope_kind=? AND scope_id=? AND id=?`, "tenant", "1", value.ID).Scan(&stored); err != nil || strings.Contains(stored, "erase-me-now") {
 		t.Fatalf("durable payload still sensitive: err=%v payload=%s", err, stored)
 	}
 	restoredDefinition, err := restarted.GetDefinition(t.Context(), definition.ID, definition.Version)
-	if err != nil || strings.Contains(restoredDefinition.SystemPrompt, "erase-definition-secret") || restoredDefinition.Digest == definition.Digest {
+	if err != nil || strings.Contains(restoredDefinition.SystemPrompt, "erase-definition-secret") || restoredDefinition.SystemPrompt == definition.SystemPrompt || restoredDefinition.Digest == definition.Digest {
 		t.Fatalf("durable Agent definition was not safely migrated: definition=%#v err=%v", restoredDefinition, err)
 	}
 }
