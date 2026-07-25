@@ -92,6 +92,16 @@ type KernelClient interface {
 	ApplyWorkforceChangeSet(context.Context, authoring.ApplyChangeSetRequest, string) (*authoring.ChangeSet, error)
 }
 
+// ExternalConversationGatewayClient is the narrow lifecycle surface used by
+// hosts that advertise conversation-gateways/v1. Keeping it separate from the
+// base KernelClient lets older or read-only embedding surfaces remain honest.
+type ExternalConversationGatewayClient interface {
+	CreateExternalConversationGateway(context.Context, kernelapi.CreateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error)
+	ListExternalConversationGateways(context.Context, runtime.ExternalConversationGatewayFilter) ([]*runtime.ExternalConversationGatewayRegistration, error)
+	GetExternalConversationGateway(context.Context, runtime.Scope, string) (*runtime.ExternalConversationGatewayRegistration, error)
+	UpdateExternalConversationGateway(context.Context, runtime.Scope, string, kernelapi.UpdateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error)
+}
+
 // AgentDefinitionCapabilityClient discovers the operations authorized for one
 // exact Agent deployment. Hosts may expose read-only Agent definition
 // capabilities globally and add governed mutations only after applying the
@@ -786,6 +796,68 @@ func (c *KernelHTTPClient) AdvanceEventSourceCheckpoint(ctx context.Context, sco
 	var value runtime.EventSourceCheckpoint
 	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "/checkpoint-advancements?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func (c *KernelHTTPClient) CreateExternalConversationGateway(
+	ctx context.Context,
+	request kernelapi.CreateExternalConversationGatewayRequest,
+) (*runtime.ExternalConversationGatewayRegistration, error) {
+	var value runtime.ExternalConversationGatewayRegistration
+	if err := c.do(ctx, http.MethodPost, "/api/v1/conversation-gateways", request, "", &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func (c *KernelHTTPClient) ListExternalConversationGateways(
+	ctx context.Context,
+	filter runtime.ExternalConversationGatewayFilter,
+) ([]*runtime.ExternalConversationGatewayRegistration, error) {
+	query := scopeQuery(filter.Scope)
+	if filter.Provider != "" {
+		query.Set("provider", filter.Provider)
+	}
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
+	var values []*runtime.ExternalConversationGatewayRegistration
+	if err := c.do(ctx, http.MethodGet, "/api/v1/conversation-gateways?"+query.Encode(), nil, "", &values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func (c *KernelHTTPClient) GetExternalConversationGateway(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+) (*runtime.ExternalConversationGatewayRegistration, error) {
+	var value runtime.ExternalConversationGatewayRegistration
+	path := "/api/v1/conversation-gateways/" + url.PathEscape(strings.TrimSpace(id)) + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func (c *KernelHTTPClient) UpdateExternalConversationGateway(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+	request kernelapi.UpdateExternalConversationGatewayRequest,
+) (*runtime.ExternalConversationGatewayRegistration, error) {
+	var value runtime.ExternalConversationGatewayRegistration
+	path := "/api/v1/conversation-gateways/" + url.PathEscape(strings.TrimSpace(id)) + "?" + scopeQuery(scope).Encode()
+	if err := c.do(ctx, http.MethodPatch, path, request, "", &value); err != nil {
 		return nil, err
 	}
 	return &value, nil

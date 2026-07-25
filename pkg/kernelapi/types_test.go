@@ -106,6 +106,24 @@ func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
 	}
 }
 
+func TestConversationGatewaysAdvertiseOnlyLifecycleCommands(t *testing.T) {
+	readOnly := ConversationGatewaysCapability(false)
+	if readOnly.ID != ConversationGatewaysCapabilityID || readOnly.Version != "1" ||
+		!readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) ||
+		readOnly.Supports(OperationCreate) || readOnly.Supports(OperationUpdate) {
+		t.Fatalf("read-only gateway capability = %#v", readOnly)
+	}
+	managed := ConversationGatewaysCapability(true)
+	for _, operation := range []string{OperationCreate, OperationGet, OperationList, OperationUpdate} {
+		if !managed.Supports(operation) {
+			t.Fatalf("gateway operation %q not advertised: %#v", operation, managed.Operations)
+		}
+	}
+	if managed.Supports(OperationPost) {
+		t.Fatalf("provider ingress was exposed as an operator command: %#v", managed.Operations)
+	}
+}
+
 func TestActivityCapabilityIsReadOnlyAndSelectorBounded(t *testing.T) {
 	capability := ActivityCapability()
 	if capability.ID != ActivityCapabilityID || capability.Version != ActivityCapabilityVersion || !capability.Supports(OperationList) {
