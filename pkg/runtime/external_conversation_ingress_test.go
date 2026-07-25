@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -72,5 +73,36 @@ func TestExternalConversationIngressRejectsSensitiveForwardedHeaders(t *testing.
 	}
 	if err := request.Validate(); err == nil {
 		t.Fatal("provider ingress accepted a forwarded authorization header")
+	}
+}
+
+func TestExternalConversationPublicIngressResolvesAuthoritativeScopeFromOpaqueRoute(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	host := &externalConversationIngressHostStub{result: &ExternalConversationIngressHostResult{
+		StatusCode: http.StatusOK,
+		Events: []NormalizedExternalConversationEvent{{
+			ID: "Ev-public-route", Type: capability.ConversationEventMessageReceived,
+			ExternalConversationID: "C123", ExternalMessageID: "171.002",
+			ExternalParticipantID: "U123", Text: "Hello from the public route",
+			OrderingKey: "C123:171.002", OccurredAt: time.Now().UTC(),
+		}},
+	}}
+	service := NewExternalConversationTransportService(store, catalog)
+
+	result, err := service.NormalizeExternalConversationPublicIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: endpoint.IngressRoute, Method: http.MethodPost,
+		Headers: map[string][]string{"X-Slack-Signature": {"v0=signature"}},
+		Body:    []byte(`{"type":"event_callback"}`),
+	}, host)
+
+	if err != nil || len(result.Received) != 1 || host.request.Request.Scope != endpoint.Scope ||
+		host.request.Request.EndpointID != endpoint.ID {
+		t.Fatalf("public ingress = %#v, host = %#v, err = %v", result, host.request, err)
+	}
+	if _, err := service.NormalizeExternalConversationPublicIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: "unknown-route", Method: http.MethodPost, Body: []byte(`{}`),
+	}, host); !errors.Is(err, ErrExternalConversationEndpointNotFound) {
+		t.Fatalf("unknown route error = %v", err)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/google/uuid"
 )
 
 type workforceApplication struct {
@@ -316,7 +317,8 @@ func materializeConversationEndpoints(
 		}
 		now := value.ApplyReceipt.AppliedAt
 		endpoint := &ExternalConversationEndpoint{
-			ID: strings.TrimSpace(placement.ID), Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID},
+			ID: strings.TrimSpace(placement.ID), IngressRoute: uuid.NewString(),
+			Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID},
 			Owner: ObjectiveOwner{Type: ownerType, ID: ownerDeploymentID}, DeploymentID: ownerDeploymentID,
 			Name: blueprint.Name,
 			Adapter: ExternalConversationAdapterReference{

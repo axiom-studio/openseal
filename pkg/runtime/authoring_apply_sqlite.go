@@ -262,16 +262,18 @@ func applySQLiteWorkforceConversationEndpoints(
 				return authoring.ErrChangeSetRevision
 			}
 			endpoint.CreatedAt = current.CreatedAt
+			endpoint.IngressRoute = current.IngressRoute
 		}
 		payload, _ := json.Marshal(endpoint)
 		if desired.expectedRevision == 0 {
 			if _, err := tx.ExecContext(
 				ctx,
 				`INSERT INTO external_conversation_endpoints
-				 (scope_kind,scope_id,id,owner_type,owner_id,provider,status,revision,updated_at,payload)
-				 VALUES(?,?,?,?,?,?,?,?,?,?)`,
-				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.Owner.Type, endpoint.Owner.ID,
-				endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+				 (scope_kind,scope_id,id,ingress_route,owner_type,owner_id,provider,status,revision,updated_at,payload)
+				 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.IngressRoute,
+				endpoint.Owner.Type, endpoint.Owner.ID, endpoint.Provider, endpoint.Status,
+				endpoint.Revision, endpoint.UpdatedAt, string(payload),
 			); err != nil {
 				if sqliteUniqueConstraint(err) {
 					return authoring.ErrChangeSetRevision
