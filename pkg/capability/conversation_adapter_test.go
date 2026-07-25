@@ -26,6 +26,7 @@ func TestNormalizeConversationAdapterProducesStableProviderNeutralContract(t *te
 		},
 		Transport: ConversationAdapterTransport{
 			Kind: "plugin", IngressEndpoint: "slack.conversation.ingress", DeliveryEndpoint: "slack.conversation.deliver",
+			DeliveryCredentials: []string{"SLACK_CONNECTION"},
 		},
 	})
 	if err != nil {
@@ -59,6 +60,9 @@ func TestNormalizeConversationAdapterRejectsUnknownPortableSemantics(t *testing.
 		"transport": func(value *ConversationAdapter) { value.Transport.DeliveryEndpoint = "" },
 		"protocol":  func(value *ConversationAdapter) { value.ProtocolVersion = "v0" },
 		"delivery":  func(value *ConversationAdapter) { value.Delivery.Idempotency = IdempotencyNone },
+		"unknown credential use": func(value *ConversationAdapter) {
+			value.Transport.IngressCredentials = []string{"UNKNOWN"}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := valid
@@ -67,5 +71,11 @@ func TestNormalizeConversationAdapterRejectsUnknownPortableSemantics(t *testing.
 				t.Fatalf("invalid %s was accepted", name)
 			}
 		})
+	}
+
+	unusedCredential := valid
+	unusedCredential.Credentials = []CredentialRequirement{{Name: "TOKEN", Kind: "secret"}}
+	if _, err := NormalizeConversationAdapter(unusedCredential); err == nil {
+		t.Fatal("credential without an ingress or delivery purpose was accepted")
 	}
 }

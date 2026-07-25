@@ -84,7 +84,7 @@ func TestSlackIngressAnswersChallengeAndRejectsReplaysOrWrongEndpoint(t *testing
 
 func TestSlackGatewayIngressReturnsVerifiedInstallationRoute(t *testing.T) {
 	now := time.Unix(1_720_000_000, 0).UTC()
-	adapter := newSlackAdapter("signing-secret", "", nil)
+	adapter := newSlackAdapter("", "", nil)
 	adapter.now = func() time.Time { return now }
 	body := []byte(`{
 		"type":"event_callback","team_id":"T123","api_app_id":"A123","event_id":"Ev123",
@@ -92,6 +92,7 @@ func TestSlackGatewayIngressReturnsVerifiedInstallationRoute(t *testing.T) {
 			"channel_type":"channel","ts":"1720000000.123456"}
 	}`)
 	config := ingressConfig(now, body, &openseal.ExternalConversationEndpoint{ID: "placeholder"})
+	config[slackSigningSecretKey] = "signing-secret"
 	envelope := config[adapterEnvelopeKey].(map[string]interface{})
 	envelope["operation"] = "gateway_ingress"
 	delete(envelope, "endpoint")

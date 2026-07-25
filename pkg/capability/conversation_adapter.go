@@ -65,7 +65,57 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 	}
 	sort.Slice(credentials, func(i, j int) bool { return credentials[i].Name < credentials[j].Name })
 	value.Credentials = credentials
+	value.Transport.IngressCredentials, err = normalizeConversationCredentialSelection(
+		value.Transport.IngressCredentials, seenCredentials, "ingress",
+	)
+	if err != nil {
+		return ConversationAdapter{}, err
+	}
+	value.Transport.DeliveryCredentials, err = normalizeConversationCredentialSelection(
+		value.Transport.DeliveryCredentials, seenCredentials, "delivery",
+	)
+	if err != nil {
+		return ConversationAdapter{}, err
+	}
+	usedCredentials := make(map[string]struct{}, len(credentials))
+	for _, name := range value.Transport.IngressCredentials {
+		usedCredentials[name] = struct{}{}
+	}
+	for _, name := range value.Transport.DeliveryCredentials {
+		usedCredentials[name] = struct{}{}
+	}
+	if len(usedCredentials) != len(credentials) {
+		return ConversationAdapter{}, errors.New("conversation adapter credentials must declare ingress or delivery use")
+	}
 	return value, nil
+}
+
+func normalizeConversationCredentialSelection(
+	values []string,
+	available map[string]struct{},
+	purpose string,
+) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > len(available) {
+		return nil, errors.New("conversation adapter " + purpose + " credential selection is invalid")
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if _, exists := available[value]; !exists || value == "" {
+			return nil, errors.New("conversation adapter " + purpose + " credential is not declared")
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 func normalizeConversationDeliveryCapabilities(value ConversationDeliveryCapabilities) (ConversationDeliveryCapabilities, error) {
