@@ -5,6 +5,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func externalConversationGatewayFixture(scope Scope) ExternalConversationIngressGateway {
@@ -84,9 +86,10 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 	}
-	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
+	created, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
 		ID: "exact-slack", Name: "Exact Slack", Gateway: gateway,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	gateway.Adapter.BindingRevision++
@@ -94,5 +97,19 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 		ID: "stale-slack", Name: "Stale Slack", Gateway: gateway,
 	}); !errors.Is(err, ErrInvalidExternalConversation) {
 		t.Fatalf("stale exact adapter error = %v", err)
+	}
+	if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
+		Scope:        skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID},
+		DeploymentID: endpoint.DeploymentID, BindingID: endpoint.Adapter.BindingID,
+		ExpectedRevision: endpoint.Adapter.BindingRevision,
+		Actor:            skill.BindingActor{Type: "test", ID: "operator"}, Reason: "prove safe shutdown",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	retired := ExternalConversationGatewayRetired
+	if result, err := service.Update(ctx, created.Gateway.Scope, created.ID, UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: created.Revision, Status: &retired,
+	}); err != nil || result.Status != ExternalConversationGatewayRetired {
+		t.Fatalf("stale gateway safety shutdown = %#v, %v", result, err)
 	}
 }

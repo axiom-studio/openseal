@@ -229,8 +229,13 @@ func (s *ExternalConversationGatewayService) Update(
 	if err := current.Validate(); err != nil {
 		return nil, err
 	}
-	if err := s.resolveGateway(ctx, current.Gateway); err != nil {
-		return nil, err
+	// A stale adapter must never prevent a safety shutdown. Re-resolve when
+	// desired adapter state changes or when the resulting gateway is active;
+	// pausing/retiring an unchanged stale gateway remains available.
+	if request.Gateway != nil || current.Status == ExternalConversationGatewayActive {
+		if err := s.resolveGateway(ctx, current.Gateway); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.store.UpdateExternalConversationGateway(ctx, current, request.ExpectedRevision); err != nil {
 		return nil, err
