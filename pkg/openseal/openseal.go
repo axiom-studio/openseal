@@ -1192,6 +1192,19 @@ var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalCo
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 
+var (
+	ErrOAuthInvalid            = kerneloauth.ErrInvalid
+	ErrOAuthSessionNotFound    = kerneloauth.ErrSessionNotFound
+	ErrOAuthSessionConsumed    = kerneloauth.ErrSessionConsumed
+	ErrOAuthSessionExpired     = kerneloauth.ErrSessionExpired
+	ErrOAuthStateMismatch      = kerneloauth.ErrStateMismatch
+	ErrOAuthScopeMismatch      = kerneloauth.ErrScopeMismatch
+	ErrOAuthRevisionConflict   = kerneloauth.ErrRevisionConflict
+	ErrOAuthConnectionNotFound = kerneloauth.ErrConnectionNotFound
+	ErrOAuthRefreshInProgress  = kerneloauth.ErrRefreshInProgress
+	ErrOAuthUnsupported        = kerneloauth.ErrUnsupported
+)
+
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.
 func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
