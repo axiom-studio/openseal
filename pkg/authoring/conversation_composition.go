@@ -3,6 +3,7 @@ package authoring
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"unicode"
@@ -34,8 +35,38 @@ func CanonicalRuntimeCompositionCapability() *RuntimeCompositionCapability {
 				runbook.StepForEach, runbook.StepFork, runbook.StepJoin, runbook.StepLoopReturn,
 				runbook.StepTransform, runbook.StepWait,
 			},
-			CanInvokeAgents: true,
+			CanInvokeAgents:                true,
+			ConversationTriggerInputSchema: CanonicalConversationTriggerInputSchema(),
 		},
+	}
+}
+
+// CanonicalConversationTriggerInputSchema is the stable credential-free
+// Runbook boundary emitted by the external conversation dispatcher.
+func CanonicalConversationTriggerInputSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]interface{}{
+			"conversationId":   map[string]interface{}{"type": "string"},
+			"triggerMessageId": map[string]interface{}{"type": "string"},
+			"endpointId":       map[string]interface{}{"type": "string"},
+			"event": map[string]interface{}{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]interface{}{
+					"id":         map[string]interface{}{"type": "string"},
+					"type":       map[string]interface{}{"type": "string"},
+					"source":     map[string]interface{}{"type": "string"},
+					"subject":    map[string]interface{}{"type": "string"},
+					"occurredAt": map[string]interface{}{"type": "string"},
+					"attributes": map[string]interface{}{"type": "object"},
+					"payload":    map[string]interface{}{"type": "object"},
+				},
+				"required": []interface{}{"id", "type", "source", "subject", "occurredAt", "attributes", "payload"},
+			},
+		},
+		"required": []interface{}{"conversationId", "triggerMessageId", "endpointId", "event"},
 	}
 }
 
@@ -51,7 +82,8 @@ func ValidateRuntimeCompositionCapability(value *RuntimeCompositionCapability) e
 		!uniqueConversationHandlerKinds(value.Conversation.HandlerKinds) ||
 		!uniqueConversationReplyModes(value.Conversation.ReplyModes) ||
 		!uniqueRunbookTriggerKinds(value.Runbook.TriggerKinds) ||
-		!uniqueRunbookStepKinds(value.Runbook.StepKinds) {
+		!uniqueRunbookStepKinds(value.Runbook.StepKinds) ||
+		!reflect.DeepEqual(value.Runbook.ConversationTriggerInputSchema, CanonicalConversationTriggerInputSchema()) {
 		return errors.New("runtime composition capability is invalid or non-canonical")
 	}
 	return nil
@@ -184,6 +216,24 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 			!containsConversationFeature(adapter.Features, capability.ConversationFeatureThreads) {
 			issues = append(issues, issue(path+".policy.replyMode", "conversation_threads_unsupported", "Selected Skill adapter does not support threaded replies"))
 		}
+		if endpoint.Handler.Kind == ConversationHandlerRunbook && request.Catalog.RuntimeComposition != nil {
+			definition := candidateAgentsByID(candidate)[endpoint.Handler.AgentDefinitionID]
+			trigger := runbook.Trigger{}
+			if definition != nil && definition.Runbook != nil {
+				trigger = definition.Runbook.Triggers[endpoint.Handler.Trigger]
+			}
+			contract, ok := definitionRunbookInterface(definition, trigger.Entrypoint)
+			if !ok || !reflect.DeepEqual(
+				contract.InputSchema,
+				request.Catalog.RuntimeComposition.Runbook.ConversationTriggerInputSchema,
+			) {
+				issues = append(issues, issue(
+					path+".handler",
+					"conversation_trigger_input_contract_mismatch",
+					"Conversation Runbook interface must use the exact authorized canonical trigger input schema",
+				))
+			}
+		}
 	}
 	if !explicitReactiveConversationIntent(request.Prompt) {
 		return issues
@@ -206,6 +256,14 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 		}
 	}
 	return issues
+}
+
+func definitionRunbookInterface(definition *agent.AgentDefinition, entrypoint string) (runbook.Interface, bool) {
+	if definition == nil || definition.Runbook == nil {
+		return runbook.Interface{}, false
+	}
+	contract, ok := definition.Runbook.Interfaces[entrypoint]
+	return contract, ok
 }
 
 func explicitReactiveConversationIntent(prompt string) bool {

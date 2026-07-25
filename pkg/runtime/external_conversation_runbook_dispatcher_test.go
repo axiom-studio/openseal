@@ -26,6 +26,7 @@ func TestExternalConversationRunbookEventDispatcherCreatesOneExactEventRun(t *te
 	scope := Scope{Kind: "tenant", ID: "one"}
 	handler := ExternalConversationHandler{
 		Kind: ExternalConversationHandlerRunbook, ID: "support-chat", Version: "2.0.0", Trigger: "on-message",
+		AssignedAgentID: "support-agent",
 	}
 	definition := &runbook.Definition{
 		APIVersion: runbook.APIVersion, ID: handler.ID, Version: handler.Version, Name: "Support chat",
@@ -95,6 +96,7 @@ func TestExternalConversationRunbookEventDispatcherRejectsTriggerDrift(t *testin
 	store := NewMemoryStore()
 	handler := ExternalConversationHandler{
 		Kind: ExternalConversationHandlerRunbook, ID: "support-chat", Version: "1", Trigger: "on-message",
+		AssignedAgentID: "support-agent",
 	}
 	definition := &runbook.Definition{
 		APIVersion: runbook.APIVersion, ID: handler.ID, Version: handler.Version, Name: "Support",

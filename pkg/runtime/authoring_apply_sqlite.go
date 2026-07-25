@@ -212,7 +212,14 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 	if err = applySQLiteWorkforceInitiative(ctx, tx, application.initiative, application.initiativeExpectedRevision); err != nil {
 		return nil, err
 	}
+	if err = synchronizeWorkforceConversationEndpointBindings(application); err != nil {
+		return nil, err
+	}
+	if err = applySQLiteWorkforceConversationEndpoints(ctx, tx, value, application); err != nil {
+		return nil, err
+	}
 	synchronizeWorkforceSkillBindingResources(application)
+	sortWorkforceApplicationResources(application)
 	value.ApplyReceipt.Resources = application.resources
 	payload, _ := json.Marshal(value)
 	result, err := tx.ExecContext(ctx, `UPDATE workforce_change_sets SET status=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=? AND status=? AND candidate_digest=?`, value.Status, value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetReady, value.CandidateDigest)
@@ -226,6 +233,127 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		return nil, err
 	}
 	return decodeChangeSet(string(payload))
+}
+
+func applySQLiteWorkforceConversationEndpoints(
+	ctx context.Context,
+	tx *sql.Tx,
+	value *authoring.ChangeSet,
+	application *workforceApplication,
+) error {
+	desiredIDs := make(map[string]bool, len(application.conversationEndpoints))
+	for index := range application.conversationEndpoints {
+		desired := application.conversationEndpoints[index]
+		endpoint := desired.value
+		desiredIDs[endpoint.ID] = true
+		if desired.expectedRevision > 0 {
+			var payload string
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT payload FROM external_conversation_endpoints
+				 WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
+				value.Scope.Kind, value.Scope.ID, endpoint.ID, desired.expectedRevision,
+			).Scan(&payload); err != nil {
+				return authoring.ErrChangeSetRevision
+			}
+			var current ExternalConversationEndpoint
+			if json.Unmarshal([]byte(payload), &current) != nil ||
+				current.Owner != endpoint.Owner || current.DeploymentID != endpoint.DeploymentID {
+				return authoring.ErrChangeSetRevision
+			}
+			endpoint.CreatedAt = current.CreatedAt
+		}
+		payload, _ := json.Marshal(endpoint)
+		if desired.expectedRevision == 0 {
+			if _, err := tx.ExecContext(
+				ctx,
+				`INSERT INTO external_conversation_endpoints
+				 (scope_kind,scope_id,id,owner_type,owner_id,provider,status,revision,updated_at,payload)
+				 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.Owner.Type, endpoint.Owner.ID,
+				endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+			); err != nil {
+				if sqliteUniqueConstraint(err) {
+					return authoring.ErrChangeSetRevision
+				}
+				return err
+			}
+		} else {
+			result, err := tx.ExecContext(
+				ctx,
+				`UPDATE external_conversation_endpoints
+				 SET provider=?,status=?,revision=?,updated_at=?,payload=?
+				 WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
+				endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, desired.expectedRevision,
+			)
+			if err != nil {
+				return err
+			}
+			if rows, _ := result.RowsAffected(); rows != 1 {
+				return authoring.ErrChangeSetRevision
+			}
+		}
+	}
+	reconciled := workforceBindingReconciliationDeployments(value)
+	if len(reconciled) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT payload FROM external_conversation_endpoints WHERE scope_kind=? AND scope_id=?`,
+		value.Scope.Kind, value.Scope.ID,
+	)
+	if err != nil {
+		return err
+	}
+	current := make([]*ExternalConversationEndpoint, 0)
+	for rows.Next() {
+		var payload string
+		var endpoint ExternalConversationEndpoint
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return err
+		}
+		if json.Unmarshal([]byte(payload), &endpoint) == nil &&
+			reconciled[endpoint.DeploymentID] && !desiredIDs[endpoint.ID] &&
+			endpoint.Status != ExternalConversationEndpointRetired {
+			current = append(current, &endpoint)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, endpoint := range current {
+		expectedRevision := endpoint.Revision
+		now := value.ApplyReceipt.AppliedAt
+		endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, endpoint.RetiredAt =
+			ExternalConversationEndpointRetired, expectedRevision+1, now, &now
+		if err := endpoint.Validate(); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(endpoint)
+		result, err := tx.ExecContext(
+			ctx,
+			`UPDATE external_conversation_endpoints
+			 SET status=?,revision=?,updated_at=?,payload=?
+			 WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
+			endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+			endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, expectedRevision,
+		)
+		if err != nil {
+			return err
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			return authoring.ErrChangeSetRevision
+		}
+		application.resources = append(application.resources, authoring.AppliedResourceReference{
+			Kind: "conversation_endpoint", ID: endpoint.ID, Revision: endpoint.Revision,
+		})
+	}
+	return nil
 }
 
 func sqliteUniqueConstraint(err error) bool {

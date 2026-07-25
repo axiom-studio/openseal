@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -129,6 +130,213 @@ func TestSQLiteAtomicWorkforceApplyPersistsWholeAggregateAcrossRestart(t *testin
 	restored, err := restarted.GetChangeSet(context.Background(), value.Scope, value.ID)
 	if err != nil || restored.ApplyReceipt == nil || restored.ApplyReceipt.ID != "receipt" {
 		t.Fatalf("restored=%#v err=%v", restored, err)
+	}
+}
+
+func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBinding(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := skill.NewCatalogWithStore(store).Register(ctx, slackConversationSkillDefinition()); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	self, _ := json.Marshal("slack-agent")
+	goal, _ := json.Marshal("Respond to the triggering message.")
+	definition := &agent.AgentDefinition{
+		ID: "slack-agent", Version: "1.0.0", DisplayName: "Slack agent",
+		Purpose: "Respond to Slack messages", SystemPrompt: "Respond helpfully.",
+		Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "respond", Version: "1.0.0", Name: "Respond",
+			Entrypoints: map[string]string{"respond": "delegate"},
+			Interfaces: map[string]runbook.Interface{"respond": {
+				Description: "Respond to a canonical message.",
+				InputSchema: authoring.CanonicalConversationTriggerInputSchema(),
+			}},
+			Triggers: map[string]runbook.Trigger{"on-message": {
+				Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived, Entrypoint: "respond",
+			}},
+			Steps: map[string]runbook.Step{
+				"delegate": {
+					Kind: runbook.StepDelegate,
+					Delegate: &runbook.DelegateStep{
+						AgentID: runbook.Value{Literal: self}, Goal: runbook.Value{Literal: goal},
+						Mode: runbook.DelegateReason, ResultPath: "/results/response",
+						Budget: &runbook.BudgetAllocation{MaxTurns: 4, MaxTotalTokens: 26000}, Next: "done",
+					},
+				},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{
+					"summary": {Ref: "/results/response/summary"},
+				}}},
+			},
+		},
+	}
+	oauth := &capability.OAuth2Requirement{
+		Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
+		Scopes: []string{"channels:history", "chat:write"},
+	}
+	value := &authoring.ChangeSet{
+		ID: "slack-chatbot", Scope: scope, Mode: authoring.ModeCreate,
+		Prompt: "Create a Slack chatbot", PromptDigest: "prompt", CandidateDigest: "candidate",
+		Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{
+			Activation: authoring.WorkforceActivationActive,
+			Agents:     []*agent.AgentDefinition{definition},
+			ConversationEndpoints: []authoring.ConversationEndpointBlueprint{{
+				ID: "channel", Name: "Installed Slack channel",
+				Owner:   authoring.ConversationEndpointOwner{Type: authoring.ConversationEndpointOwnerAgent, ID: definition.ID},
+				SkillID: "slack", SkillVersion: "1.0.0", AdapterID: "conversations",
+				Mode: capability.ConversationEndpointChannel,
+				Handler: authoring.ConversationHandlerBlueprint{
+					Kind: authoring.ConversationHandlerRunbook, AgentDefinitionID: definition.ID,
+					RunbookID: "respond", RunbookVersion: "1.0.0", Trigger: "on-message",
+				},
+				Policy: authoring.ConversationEndpointPolicyBlueprint{
+					MessageSelection: authoring.ConversationSelectDirectOrMention,
+					ReplyMode:        authoring.ConversationReplyThread, IgnoreBots: true,
+				},
+				CanonicalReply: true, ArchitectureReason: "Use a durable event Runbook and canonical delivery.",
+			}},
+		}},
+		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+			"slack": {
+				ID: "slack", Version: "1.0.0", Readiness: authoring.SkillReadinessReady,
+				ConversationAdapters: []authoring.ConversationAdapterCapability{{
+					ID: "conversations", ProtocolVersion: capability.ConversationAdapterProtocolV1,
+					Provider: "slack", EndpointModes: []capability.ConversationEndpointMode{capability.ConversationEndpointChannel},
+					InboundEventTypes: []string{capability.ConversationEventMessageReceived},
+					Features: []capability.ConversationAdapterFeature{
+						capability.ConversationFeatureMentions, capability.ConversationFeatureThreads,
+					},
+					Delivery: capability.ConversationDeliveryCapabilities{
+						Operations: []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend},
+						Ordering:   capability.ConversationDeliveryOrderThread, Idempotency: capability.IdempotencyRequired,
+						SupportsAcknowledgementLookup: true, SupportsRetryAfter: true,
+					},
+					Credentials: []authoring.SkillCredential{{
+						Name: "SLACK_CONNECTION", Kind: "slack-oauth", OAuth2: oauth,
+					}},
+				}},
+			},
+		}},
+		Placement: authoring.ChangeSetPlacement{
+			AgentDeploymentIDs: map[string]string{"slack-agent": "slack-agent-live"},
+			CredentialReferences: map[string]map[string]capability.CredentialReference{
+				"slack-agent": {"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/one/slack"}},
+			},
+			ConversationEndpoints: map[string]authoring.ConversationEndpointPlacement{
+				"channel": {ID: "conversation-endpoint:slack-channel", Address: "C012345"},
+			},
+			Environment: "test",
+		},
+		Status: authoring.ChangeSetReady, Actor: authoring.ChangeSetActor{Type: "user", ID: "7"},
+		Revision: 2, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err = store.CreateChangeSet(ctx, value, "create-chatbot", "create-chatbot"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(value)
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{
+		ID: "receipt-chatbot", IdempotencyKey: "apply-chatbot", CandidateDigest: value.CandidateDigest,
+		Activation: authoring.WorkforceActivationActive, Actor: value.Actor, AppliedAt: now.Add(time.Minute),
+	}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	result, err := store.ApplyChangeSet(ctx, applied, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := store.GetExternalConversationEndpoint(
+		ctx, Scope{Kind: scope.Kind, ID: scope.ID}, "conversation-endpoint:slack-channel",
+	)
+	if err != nil || endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
+		endpoint.DeploymentID != "slack-agent-live" || endpoint.Adapter.BindingRevision != 1 ||
+		endpoint.Handler.Kind != ExternalConversationHandlerRunbook || endpoint.Handler.Trigger != "on-message" ||
+		endpoint.Handler.AssignedAgentID != "slack-agent-live" {
+		t.Fatalf("materialized endpoint=%#v err=%v", endpoint, err)
+	}
+	resolver, err := NewCatalogExternalConversationRunbookResolver(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := NewExternalConversationRunbookEventDispatcher(store, resolver)
+	conversation := &Conversation{ID: "conversation-one"}
+	message := &ChannelMessage{ID: "message-one"}
+	event := EventEnvelope{
+		ID: "event-one", Scope: endpoint.Scope, Type: capability.ConversationEventMessageReceived,
+		Source: "conversation-adapter:slack", Subject: conversation.ID, OccurredAt: now.Add(2 * time.Minute),
+		Attributes: map[string]interface{}{"endpointId": endpoint.ID}, Payload: map[string]interface{}{},
+	}
+	dispatched, err := dispatcher.DispatchExternalConversationRunbook(
+		ctx, endpoint.Handler, ExternalConversationDispatchRequest{
+			Endpoint: endpoint, Conversation: conversation, Message: message, Event: event,
+			IdempotencyKey: "dispatch-materialized-chatbot",
+		},
+	)
+	if err != nil || dispatched == nil {
+		t.Fatalf("dispatch materialized endpoint=%#v err=%v", dispatched, err)
+	}
+	run, err := store.GetAgentRun(ctx, endpoint.Scope, dispatched.RunID)
+	if err != nil || run.AssignedAgentID != "slack-agent-live" || run.Entrypoint != "respond" ||
+		run.Context["endpointId"] != endpoint.ID || run.Context["triggerMessageId"] != message.ID {
+		t.Fatalf("materialized conversation Run=%#v err=%v", run, err)
+	}
+	bindings, err := store.ListSkillBindings(ctx, scope, "slack-agent-live")
+	if err != nil || len(bindings) != 1 || len(bindings[0].AllowedActions) != 0 ||
+		len(bindings[0].EnabledConversationAdapters) != 1 ||
+		bindings[0].EnabledConversationAdapters[0] != "conversations" ||
+		bindings[0].Credentials["SLACK_CONNECTION"].ID != "connection://tenant/one/slack" {
+		t.Fatalf("adapter-only binding=%#v err=%v", bindings, err)
+	}
+	stored, err := store.GetDefinition(ctx, "slack-agent", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delegatedDeployment string
+	if err := json.Unmarshal(stored.Runbook.Steps["delegate"].Delegate.AgentID.Literal, &delegatedDeployment); err != nil ||
+		delegatedDeployment != "slack-agent-live" {
+		t.Fatalf("delegated deployment=%q err=%v", delegatedDeployment, err)
+	}
+	if len(result.ApplyReceipt.Resources) != 4 {
+		t.Fatalf("applied resources=%#v", result.ApplyReceipt.Resources)
+	}
+
+	amend := cloneRuntimeChangeSet(value)
+	amend.ID, amend.ParentID, amend.Mode, amend.CandidateDigest =
+		"slack-chatbot-remove-endpoint", value.ID, authoring.ModeAmend, "candidate-remove-endpoint"
+	amend.Result.Candidate.Agents[0].Version = "2.0.0"
+	amend.Result.Candidate.ConversationEndpoints = nil
+	amend.Placement.AgentExpectedRevisions = map[string]int64{"slack-agent": 1}
+	amend.Placement.ConversationEndpoints = map[string]authoring.ConversationEndpointPlacement{}
+	amend.Status, amend.Revision, amend.ApplyReceipt = authoring.ChangeSetReady, 2, nil
+	amend.UpdatedAt = applied.UpdatedAt.Add(time.Minute)
+	if _, _, err = store.CreateChangeSet(ctx, amend, "remove-chatbot-endpoint", "remove-chatbot-endpoint"); err != nil {
+		t.Fatal(err)
+	}
+	removed := cloneRuntimeChangeSet(amend)
+	removed.Status, removed.Revision = authoring.ChangeSetApplied, 3
+	removed.ApplyReceipt = &authoring.ChangeSetApplyReceipt{
+		ID: "receipt-remove-chatbot-endpoint", IdempotencyKey: "apply-remove-chatbot-endpoint",
+		CandidateDigest: amend.CandidateDigest, Activation: authoring.WorkforceActivationActive,
+		Actor: amend.Actor, AppliedAt: amend.UpdatedAt.Add(time.Minute),
+	}
+	removed.UpdatedAt = removed.ApplyReceipt.AppliedAt
+	if _, err = store.ApplyChangeSet(ctx, removed, 2); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err = store.GetExternalConversationEndpoint(
+		ctx, Scope{Kind: scope.Kind, ID: scope.ID}, "conversation-endpoint:slack-channel",
+	)
+	if err != nil || endpoint.Status != ExternalConversationEndpointRetired || endpoint.Revision != 2 {
+		t.Fatalf("retired endpoint=%#v err=%v", endpoint, err)
+	}
+	bindings, err = store.ListSkillBindings(ctx, scope, "slack-agent-live")
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("removed adapter binding=%#v err=%v", bindings, err)
 	}
 }
 

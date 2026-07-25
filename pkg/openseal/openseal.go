@@ -202,6 +202,7 @@ type (
 	WorkforceChangeSetPlacement               = authoring.ChangeSetPlacement
 	WorkforceSkillInstallationIntent          = authoring.SkillInstallationIntent
 	WorkforceObjectivePlacement               = authoring.ObjectivePlacement
+	WorkforceConversationEndpointPlacement    = authoring.ConversationEndpointPlacement
 	WorkforceChangeSetPolicyFinding           = authoring.ChangeSetPolicyFinding
 	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
 	WorkforceChangeSetEvaluation              = authoring.ChangeSetEvaluation
@@ -727,6 +728,8 @@ type (
 	ResolvedExternalConversationRunbook         = runtime.ResolvedExternalConversationRunbook
 	ExternalConversationRunbookResolver         = runtime.ExternalConversationRunbookResolver
 	ExternalConversationRunbookEventDispatcher  = runtime.ExternalConversationRunbookEventDispatcher
+	ExternalConversationWorkforceCatalog        = runtime.ExternalConversationWorkforceCatalog
+	CatalogExternalConversationRunbookResolver  = runtime.CatalogExternalConversationRunbookResolver
 )
 
 // Credential lease aliases are kept in their own group so extending the
@@ -1099,6 +1102,10 @@ func CanonicalWorkforceRuntimeCompositionCapability() *WorkforceRuntimeCompositi
 	return authoring.CanonicalRuntimeCompositionCapability()
 }
 
+func CanonicalConversationTriggerInputSchema() map[string]interface{} {
+	return authoring.CanonicalConversationTriggerInputSchema()
+}
+
 func ValidateWorkforceCapabilityCatalog(catalog WorkforceCapabilityCatalog) error {
 	return authoring.ValidateCapabilityCatalog(catalog)
 }
@@ -1154,6 +1161,7 @@ var NewCanonicalExternalConversationDispatcher = runtime.NewCanonicalExternalCon
 var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWorker
 var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
 var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
+var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.

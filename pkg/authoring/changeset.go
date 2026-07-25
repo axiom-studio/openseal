@@ -128,9 +128,10 @@ type ChangeSetPlacement struct {
 	// governed apply boundary. The reference is opaque to OpenSeal (for
 	// example, a registry receipt or listing reference); it never grants
 	// runtime authority by itself.
-	PlannedSkillInstallations []SkillInstallationIntent     `json:"plannedSkillInstallations,omitempty"`
-	Objectives                map[string]ObjectivePlacement `json:"objectives,omitempty"`
-	Environment               string                        `json:"environment,omitempty"`
+	PlannedSkillInstallations []SkillInstallationIntent                `json:"plannedSkillInstallations,omitempty"`
+	Objectives                map[string]ObjectivePlacement            `json:"objectives,omitempty"`
+	ConversationEndpoints     map[string]ConversationEndpointPlacement `json:"conversationEndpoints,omitempty"`
+	Environment               string                                   `json:"environment,omitempty"`
 }
 
 type SkillInstallationIntent struct {
@@ -143,6 +144,16 @@ type SkillInstallationIntent struct {
 type ObjectivePlacement struct {
 	ID               string `json:"id"`
 	ExpectedRevision int64  `json:"expectedRevision,omitempty"`
+}
+
+// ConversationEndpointPlacement is host-owned deployment state for one
+// reviewed endpoint blueprint. Provider addresses and non-secret adapter
+// configuration never pass through the authoring model.
+type ConversationEndpointPlacement struct {
+	ID               string                 `json:"id"`
+	ExpectedRevision int64                  `json:"expectedRevision,omitempty"`
+	Address          string                 `json:"address,omitempty"`
+	Configuration    map[string]interface{} `json:"configuration,omitempty"`
 }
 
 type AppliedResourceReference struct {
@@ -462,6 +473,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
 	result.Validation = validateCandidate(&result.Candidate, existing)
+	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, compileRequest)...)
 	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, compileRequest)...)
 	if len(materializationIssues) == 0 {
@@ -748,6 +760,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
 	result.Validation = validateCandidate(&result.Candidate, existing)
+	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, changeSet.Generation.Request)...)
 	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, changeSet.Generation.Request)...)
 	if len(materializationIssues) == 0 {
@@ -1314,6 +1327,7 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 		{"Agent deployments", requested.AgentDeploymentIDs, current.AgentDeploymentIDs, requested.AgentDeploymentIDs != nil},
 		{"Agent revisions", requested.AgentExpectedRevisions, current.AgentExpectedRevisions, requested.AgentExpectedRevisions != nil},
 		{"objectives", requested.Objectives, current.Objectives, requested.Objectives != nil},
+		{"conversation endpoints", requested.ConversationEndpoints, current.ConversationEndpoints, requested.ConversationEndpoints != nil},
 		{"Skill sources", requested.SkillSourceIdentities, current.SkillSourceIdentities, requested.SkillSourceIdentities != nil},
 		{"Skill source versions", requested.SkillSourceVersions, current.SkillSourceVersions, requested.SkillSourceVersions != nil},
 		{"Skill runtime identities", requested.SkillRuntimeIdentities, current.SkillRuntimeIdentities, requested.SkillRuntimeIdentities != nil},
@@ -1383,18 +1397,31 @@ func validatePlacementReferences(placement ChangeSetPlacement, candidate *Workfo
 			agents[definition.ID] = definition
 		}
 	}
+	requiredSkills := func(ownerID string) map[string]struct{} {
+		required := map[string]struct{}{}
+		if definition := agents[ownerID]; definition != nil {
+			for _, requirement := range definition.SkillRequirements {
+				required[strings.TrimSpace(requirement.SkillID)] = struct{}{}
+			}
+		}
+		for _, endpoint := range candidate.ConversationEndpoints {
+			if endpoint.Owner.ID == ownerID {
+				required[strings.TrimSpace(endpoint.SkillID)] = struct{}{}
+			}
+		}
+		return required
+	}
+	knownOwner := func(ownerID string) bool {
+		return agents[ownerID] != nil || candidate.Team != nil && candidate.Team.ID == ownerID
+	}
 	for agentID, sources := range placement.SkillSourceIdentities {
-		definition := agents[agentID]
-		if definition == nil {
-			return fmt.Errorf("Skill source placement references unknown Agent %s", agentID)
+		if !knownOwner(agentID) {
+			return fmt.Errorf("Skill source placement references unknown workforce owner %s", agentID)
 		}
-		required := make(map[string]struct{}, len(definition.SkillRequirements))
-		for _, requirement := range definition.SkillRequirements {
-			required[strings.TrimSpace(requirement.SkillID)] = struct{}{}
-		}
+		required := requiredSkills(agentID)
 		for skillID, identity := range sources {
 			if _, ok := required[strings.TrimSpace(skillID)]; !ok {
-				return fmt.Errorf("Skill source placement references undeclared Skill %s for Agent %s", skillID, agentID)
+				return fmt.Errorf("Skill source placement references undeclared Skill %s for workforce owner %s", skillID, agentID)
 			}
 			if strings.TrimSpace(identity) == "" {
 				return fmt.Errorf("Skill source placement for Agent %s Skill %s is empty", agentID, skillID)
@@ -1412,14 +1439,10 @@ func validatePlacementReferences(placement ChangeSetPlacement, candidate *Workfo
 		}
 	}
 	for agentID, identities := range placement.SkillRuntimeIdentities {
-		definition := agents[agentID]
-		if definition == nil {
-			return fmt.Errorf("Skill runtime identity placement references unknown Agent %s", agentID)
+		if !knownOwner(agentID) {
+			return fmt.Errorf("Skill runtime identity placement references unknown workforce owner %s", agentID)
 		}
-		required := make(map[string]struct{}, len(definition.SkillRequirements))
-		for _, requirement := range definition.SkillRequirements {
-			required[strings.TrimSpace(requirement.SkillID)] = struct{}{}
-		}
+		required := requiredSkills(agentID)
 		for catalogID, identity := range identities {
 			catalogID = strings.TrimSpace(catalogID)
 			if _, ok := required[catalogID]; !ok {
@@ -1548,6 +1571,14 @@ func validateApplyPlacement(value *ChangeSet) error {
 			}
 		}
 	}
+	if value.Result.Candidate.Team != nil {
+		for _, kind := range requiredCredentials[value.Result.Candidate.Team.ID] {
+			reference := value.Placement.CredentialReferences[value.Result.Candidate.Team.ID][kind]
+			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+				return fmt.Errorf("Team %s requires an opaque %s credential reference", value.Result.Candidate.Team.ID, kind)
+			}
+		}
+	}
 	if value.Placement.TeamExpectedRevision < 0 {
 		return errors.New("Team placement expected revision cannot be negative")
 	}
@@ -1562,6 +1593,24 @@ func validateApplyPlacement(value *ChangeSet) error {
 	for key, objective := range value.Placement.Objectives {
 		if strings.TrimSpace(objective.ID) == "" || objective.ExpectedRevision < 0 {
 			return fmt.Errorf("objective %s placement is invalid", key)
+		}
+	}
+	endpointIDs := make(map[string]bool, len(value.Result.Candidate.ConversationEndpoints))
+	placedEndpointIDs := make(map[string]bool, len(value.Result.Candidate.ConversationEndpoints))
+	for _, endpoint := range value.Result.Candidate.ConversationEndpoints {
+		endpointIDs[endpoint.ID] = true
+		placement, ok := value.Placement.ConversationEndpoints[endpoint.ID]
+		if !ok || strings.TrimSpace(placement.ID) == "" || placement.ExpectedRevision < 0 {
+			return fmt.Errorf("conversation endpoint %s placement is invalid", endpoint.ID)
+		}
+		if placedEndpointIDs[placement.ID] {
+			return fmt.Errorf("conversation endpoint placement id %s is duplicated", placement.ID)
+		}
+		placedEndpointIDs[placement.ID] = true
+	}
+	for key := range value.Placement.ConversationEndpoints {
+		if !endpointIDs[key] {
+			return fmt.Errorf("conversation endpoint placement %s is not part of the candidate", key)
 		}
 	}
 	return nil
@@ -1655,6 +1704,41 @@ func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement Mis
 	if !exists {
 		return false
 	}
+	if endpointID := strings.TrimPrefix(requirement.RequiredBy, "conversation_endpoint:"); endpointID != requirement.RequiredBy {
+		for _, endpoint := range candidate.ConversationEndpoints {
+			if endpoint.ID != endpointID || endpoint.SkillID != requirement.ID {
+				continue
+			}
+			hasPlacementGap := false
+			if skill.BindingConfigSchema != nil {
+				hasPlacementGap = true
+				config := placement.BindingConfigs[endpoint.Owner.ID][requirement.ID]
+				if err := skillcontract.ValidateBindingConfiguration(skill.BindingConfigSchema, config); err != nil {
+					return false
+				}
+			}
+			for _, adapter := range skill.ConversationAdapters {
+				if adapter.ID != endpoint.AdapterID {
+					continue
+				}
+				if len(adapter.Credentials) > 0 {
+					hasPlacementGap = true
+				}
+				for _, credential := range adapter.Credentials {
+					if credential.Optional {
+						continue
+					}
+					reference := placement.CredentialReferences[endpoint.Owner.ID][credential.Name]
+					if strings.TrimSpace(reference.Kind) != credential.Kind || strings.TrimSpace(reference.ID) == "" {
+						return false
+					}
+				}
+				return hasPlacementGap
+			}
+			return false
+		}
+		return false
+	}
 	agentID := strings.TrimPrefix(requirement.RequiredBy, "agent:")
 	if agentID == requirement.RequiredBy || strings.TrimSpace(agentID) == "" {
 		return false
@@ -1726,6 +1810,7 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 		if definition == nil {
 			continue
 		}
+		canonicalizeRunbookAgentReferences(definition, ids)
 		definition.ID = ids[definition.ID]
 		canonicalizeObjectiveTemplateAgents(definition.ObjectiveTemplates, ids)
 	}
@@ -1744,6 +1829,20 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 			}
 		}
 		canonicalizeObjectiveTemplateAgents(candidate.Team.ObjectiveTemplates, ids)
+	}
+	for index := range candidate.ConversationEndpoints {
+		endpoint := &candidate.ConversationEndpoints[index]
+		if endpoint.Owner.Type == ConversationEndpointOwnerAgent {
+			if qualified := ids[endpoint.Owner.ID]; qualified != "" {
+				endpoint.Owner.ID = qualified
+			}
+		} else if endpoint.Owner.Type == ConversationEndpointOwnerTeam &&
+			candidate.Team != nil && endpoint.Owner.ID == teamID {
+			endpoint.Owner.ID = candidate.Team.ID
+		}
+		if qualified := ids[endpoint.Handler.AgentDefinitionID]; qualified != "" {
+			endpoint.Handler.AgentDefinitionID = qualified
+		}
 	}
 	if candidate.Initiative != nil {
 		blueprint := candidate.Initiative
@@ -1773,6 +1872,28 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 				monitor.AssignedAgentDefinitionID = qualified
 			}
 		}
+	}
+}
+
+func canonicalizeRunbookAgentReferences(definition *agent.AgentDefinition, ids map[string]string) {
+	if definition == nil || definition.Runbook == nil {
+		return
+	}
+	for stepID, step := range definition.Runbook.Steps {
+		if step.Delegate == nil || len(step.Delegate.AgentID.Literal) == 0 {
+			continue
+		}
+		var agentID string
+		if json.Unmarshal(step.Delegate.AgentID.Literal, &agentID) != nil {
+			continue
+		}
+		qualified := ids[strings.TrimSpace(agentID)]
+		if qualified == "" {
+			continue
+		}
+		encoded, _ := json.Marshal(qualified)
+		step.Delegate.AgentID.Literal = encoded
+		definition.Runbook.Steps[stepID] = step
 	}
 }
 
@@ -1881,6 +2002,19 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 			placement.InitiativeID = "initiative:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Initiative.ID)[:32]
 		}
 	}
+	if placement.ConversationEndpoints == nil {
+		placement.ConversationEndpoints = map[string]ConversationEndpointPlacement{}
+	}
+	for _, endpoint := range candidate.ConversationEndpoints {
+		current := placement.ConversationEndpoints[endpoint.ID]
+		current.ID = strings.TrimSpace(current.ID)
+		current.Address = strings.TrimSpace(current.Address)
+		current.Configuration = cloneAuthoringMap(current.Configuration)
+		if current.ID == "" {
+			current.ID = "conversation-endpoint:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + endpoint.ID)[:32]
+		}
+		placement.ConversationEndpoints[endpoint.ID] = current
+	}
 	if placement.Objectives == nil {
 		placement.Objectives = map[string]ObjectivePlacement{}
 	}
@@ -1962,6 +2096,25 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 			current.ExpectedRevision = inherited.ExpectedRevision
 		}
 		placement.Objectives[key] = current
+	}
+	if placement.ConversationEndpoints == nil {
+		placement.ConversationEndpoints = map[string]ConversationEndpointPlacement{}
+	}
+	for key, inherited := range parentPlacement.ConversationEndpoints {
+		current := placement.ConversationEndpoints[key]
+		if strings.TrimSpace(current.ID) == "" {
+			current.ID = inherited.ID
+		}
+		if current.ID == inherited.ID && inherited.ExpectedRevision > 0 {
+			current.ExpectedRevision = inherited.ExpectedRevision
+		}
+		if current.Address == "" {
+			current.Address = inherited.Address
+		}
+		if current.Configuration == nil {
+			current.Configuration = cloneAuthoringMap(inherited.Configuration)
+		}
+		placement.ConversationEndpoints[key] = current
 	}
 	if placement.CredentialReferences == nil {
 		placement.CredentialReferences = map[string]map[string]capability.CredentialReference{}
@@ -2058,6 +2211,12 @@ func inheritAppliedRevisions(placement *ChangeSetPlacement, parent *ChangeSet) {
 		if revision := resources["objective\x00"+objective.ID]; revision > 0 {
 			objective.ExpectedRevision = revision
 			placement.Objectives[key] = objective
+		}
+	}
+	for key, endpoint := range placement.ConversationEndpoints {
+		if revision := resources["conversation_endpoint\x00"+endpoint.ID]; revision > 0 {
+			endpoint.ExpectedRevision = revision
+			placement.ConversationEndpoints[key] = endpoint
 		}
 	}
 }
@@ -2454,6 +2613,13 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 		copy.Objectives = make(map[string]ObjectivePlacement, len(value.Objectives))
 		for key, placement := range value.Objectives {
 			copy.Objectives[key] = placement
+		}
+	}
+	if value.ConversationEndpoints != nil {
+		copy.ConversationEndpoints = make(map[string]ConversationEndpointPlacement, len(value.ConversationEndpoints))
+		for key, placement := range value.ConversationEndpoints {
+			placement.Configuration = cloneAuthoringMap(placement.Configuration)
+			copy.ConversationEndpoints[key] = placement
 		}
 	}
 	return copy

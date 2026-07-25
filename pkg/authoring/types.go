@@ -128,9 +128,10 @@ type ConversationRuntimeCapability struct {
 }
 
 type RunbookRuntimeCapability struct {
-	TriggerKinds    []runbook.TriggerKind `json:"triggerKinds"`
-	StepKinds       []runbook.StepKind    `json:"stepKinds"`
-	CanInvokeAgents bool                  `json:"canInvokeAgents"`
+	TriggerKinds                   []runbook.TriggerKind  `json:"triggerKinds"`
+	StepKinds                      []runbook.StepKind     `json:"stepKinds"`
+	CanInvokeAgents                bool                   `json:"canInvokeAgents"`
+	ConversationTriggerInputSchema map[string]interface{} `json:"conversationTriggerInputSchema"`
 }
 
 // AgentCredentialRequirement describes a deployment credential slot required
