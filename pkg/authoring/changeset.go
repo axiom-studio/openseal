@@ -1429,6 +1429,7 @@ func validateApplyPlacement(value *ChangeSet) error {
 	if value.Result.Candidate.Team != nil && strings.TrimSpace(value.Placement.TeamDeploymentID) == "" {
 		return errors.New("Team deployment placement is required")
 	}
+	requiredCredentials := requiredCredentials(value.Result.Candidate, value.Catalog)
 	for _, definition := range value.Result.Candidate.Agents {
 		if definition == nil || strings.TrimSpace(value.Placement.AgentDeploymentIDs[definition.ID]) == "" {
 			return errors.New("every Agent requires a deployment placement")
@@ -1436,7 +1437,7 @@ func validateApplyPlacement(value *ChangeSet) error {
 		if value.Placement.AgentExpectedRevisions[definition.ID] < 0 {
 			return errors.New("Agent placement expected revisions cannot be negative")
 		}
-		for _, kind := range value.RequiredCredentials[definition.ID] {
+		for _, kind := range requiredCredentials[definition.ID] {
 			reference := value.Placement.CredentialReferences[definition.ID][kind]
 			if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
 				return fmt.Errorf("Agent %s requires an opaque %s credential reference", definition.ID, kind)

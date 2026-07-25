@@ -246,8 +246,10 @@ func TestActiveChangeSetCannotApplyWithoutRuntimeCredentialPlacement(t *testing.
 			Agents:     []*agent.AgentDefinition{{ID: "operator"}},
 			Activation: WorkforceActivationActive,
 		}},
-		RequiredCredentials: map[string][]string{
-			"operator": {agent.ModelProviderCredentialBinding},
+		Catalog: CapabilityCatalog{
+			AgentCredentialRequirements: []AgentCredentialRequirement{{
+				BindingKey: agent.ModelProviderCredentialBinding, RequiredForActivation: true,
+			}},
 		},
 		Placement: ChangeSetPlacement{
 			Environment:        "production",
@@ -265,5 +267,51 @@ func TestActiveChangeSetCannotApplyWithoutRuntimeCredentialPlacement(t *testing.
 	}
 	if err := validateApplyPlacement(changeSet); err != nil {
 		t.Fatalf("placed active runtime credential = %v", err)
+	}
+}
+
+func TestInactiveChangeSetApplyIgnoresStaleExecutionCredentialProjection(t *testing.T) {
+	changeSet := &ChangeSet{
+		Result: CompileResult{Valid: true, Candidate: WorkforceCandidate{
+			Agents: []*agent.AgentDefinition{{
+				ID: "operator",
+				SkillRequirements: []agent.SkillRequirement{{
+					SkillID: "posture", RequiredActions: []string{"execute"},
+				}},
+			}},
+			Activation: WorkforceActivationInactive,
+		}},
+		Catalog: CapabilityCatalog{
+			AgentCredentialRequirements: []AgentCredentialRequirement{{
+				BindingKey: agent.ModelProviderCredentialBinding, RequiredForActivation: true,
+			}},
+			Skills: map[string]SkillCapability{"posture": {
+				ID: "posture", Actions: []string{"execute"},
+				Credentials: []SkillCredential{{
+					Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"execute"},
+				}},
+			}},
+		},
+		// Older persisted ChangeSets may retain the credential projection they
+		// received before explicit inactive intent deferred execution secrets.
+		// Atomic apply derives current requirements from the reviewed candidate
+		// and catalog instead of allowing that stale projection to override the
+		// digest-bound lifecycle commitment.
+		RequiredCredentials: map[string][]string{
+			"operator": {agent.ModelProviderCredentialBinding, "TOOLWEB_API_KEY"},
+		},
+		Placement: ChangeSetPlacement{
+			Environment:        "production",
+			AgentDeploymentIDs: map[string]string{"operator": "operator-inactive"},
+		},
+	}
+	if err := validateApplyPlacement(changeSet); err != nil {
+		t.Fatalf("inactive apply with stale execution credentials = %v", err)
+	}
+
+	changeSet.Result.Candidate.Activation = WorkforceActivationActive
+	if err := validateApplyPlacement(changeSet); err == nil ||
+		!strings.Contains(err.Error(), "requires an opaque MODEL_PROVIDER credential reference") {
+		t.Fatalf("active candidate bypassed current credential readiness: %v", err)
 	}
 }
