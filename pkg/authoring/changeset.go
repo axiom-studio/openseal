@@ -1499,14 +1499,17 @@ func skillInstallationPlanned(requirement MissingRequirement, catalog Capability
 		if strings.TrimSpace(planned.SkillID) == requirement.ID &&
 			strings.TrimSpace(planned.Version) == strings.TrimSpace(skill.Version) &&
 			strings.TrimSpace(planned.SourceIdentity) == strings.TrimSpace(skill.SourceIdentity) {
-			if strings.TrimSpace(placement.SkillSourceIdentities[agentID][requirement.ID]) != strings.TrimSpace(planned.SourceIdentity) ||
-				strings.TrimSpace(placement.SkillSourceVersions[agentID][requirement.ID]) != strings.TrimSpace(planned.Version) {
+			selectedSource := strings.TrimSpace(placement.SkillSourceIdentities[agentID][requirement.ID])
+			selectedVersion := strings.TrimSpace(placement.SkillSourceVersions[agentID][requirement.ID])
+			if selectedSource != strings.TrimSpace(planned.SourceIdentity) ||
+				!runtimeSkillVersionMatchesPlanned(selectedVersion, planned.Version) {
 				continue
 			}
 			runtimeIdentity := placement.SkillRuntimeIdentities[agentID][requirement.ID].Normalized()
 			if !runtimeIdentity.Valid() ||
-				runtimeIdentity.Version != strings.TrimSpace(planned.Version) ||
-				runtimeIdentity.SourceIdentity != strings.TrimSpace(planned.SourceIdentity) {
+				runtimeIdentity.ID != strings.TrimSpace(planned.SkillID) ||
+				runtimeIdentity.Version != selectedVersion ||
+				runtimeIdentity.SourceIdentity != selectedSource {
 				continue
 			}
 			for _, compatibility := range skill.Compatibility {
@@ -1518,6 +1521,27 @@ func skillInstallationPlanned(requirement MissingRequirement, catalog Capability
 		}
 	}
 	return false
+}
+
+// runtimeSkillVersionMatchesPlanned distinguishes the publisher-facing version
+// selected in a reviewed installation intent from the immutable compiled
+// runtime variant produced for those exact source bytes. Native Skills use the
+// publisher version directly. Imported Skills append canonical source
+// provenance as SemVer build metadata; a pre-existing build component uses the
+// equivalent dot suffix. No other version widening is accepted.
+func runtimeSkillVersionMatchesPlanned(runtimeVersion, plannedVersion string) bool {
+	runtimeVersion, plannedVersion = strings.TrimSpace(runtimeVersion), strings.TrimSpace(plannedVersion)
+	if runtimeVersion == "" || plannedVersion == "" {
+		return false
+	}
+	if runtimeVersion == plannedVersion {
+		return true
+	}
+	separator := "+source."
+	if strings.Contains(plannedVersion, "+") {
+		separator = ".source."
+	}
+	return strings.HasPrefix(runtimeVersion, plannedVersion+separator)
 }
 
 func skillBindingPlacementPresent(requirement MissingRequirement, catalog CapabilityCatalog, placement ChangeSetPlacement) bool {
