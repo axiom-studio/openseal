@@ -2439,7 +2439,7 @@ func TestWorkforceCredentialPlacementUsesDeploymentBindingKeys(t *testing.T) {
 	capabilityDocument.Context = &kernelapi.CapabilityContext{
 		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
 		CredentialBindings: []capability.CredentialBindingChoice{{
-			Reference: capability.CredentialReference{Kind: "host-vault", ID: "29"}, DisplayName: "Primary model",
+			Reference: capability.CredentialReference{Kind: "managed-secret", ID: "29"}, DisplayName: "Primary model",
 			BindingKeys: []string{kernelagent.ModelProviderCredentialBinding},
 		}},
 	}
@@ -2449,10 +2449,10 @@ func TestWorkforceCredentialPlacementUsesDeploymentBindingKeys(t *testing.T) {
 	rows := model.workforceCredentialRows()
 	if len(rows) != 1 || rows[0].Kind != kernelagent.ModelProviderCredentialBinding ||
 		rows[0].Label != "Model provider" || len(rows[0].Choices) != 1 ||
-		rows[0].Choices[0].Reference.Kind != "host-vault" {
+		rows[0].Choices[0].Reference.Kind != "managed-secret" {
 		t.Fatalf("deployment credential rows = %#v", rows)
 	}
-	if view := model.View(); !strings.Contains(view, "Model provider") || !strings.Contains(view, "Primary model") || strings.Contains(view, "host-vault") {
+	if view := model.View(); !strings.Contains(view, "Model provider") || !strings.Contains(view, "Primary model") || strings.Contains(view, "managed-secret") {
 		t.Fatalf("deployment credential choice was not rendered safely:\n%s", view)
 	}
 }

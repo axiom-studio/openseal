@@ -117,10 +117,10 @@ func TestPreparedCatalogRefreshIsCASBoundAndAuditable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := CapabilityCatalog{AvailableCredentials: map[string]bool{"vault": true}}
+	catalog := CapabilityCatalog{AvailableCredentials: map[string]bool{"managed-secret": true}}
 	refreshed, err := service.RefreshPreparedCatalog(context.Background(), prepared.Scope, prepared.ID, prepared.Revision, catalog)
-	if err != nil || refreshed.Revision != prepared.Revision+1 || !refreshed.Catalog.AvailableCredentials["vault"] ||
-		!refreshed.Generation.Request.Catalog.AvailableCredentials["vault"] ||
+	if err != nil || refreshed.Revision != prepared.Revision+1 || !refreshed.Catalog.AvailableCredentials["managed-secret"] ||
+		!refreshed.Generation.Request.Catalog.AvailableCredentials["managed-secret"] ||
 		refreshed.Lifecycle[len(refreshed.Lifecycle)-1].Reason != "capability_catalog_resolved" {
 		t.Fatalf("refreshed=%#v err=%v", refreshed, err)
 	}
@@ -489,7 +489,7 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 
 	placed := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		"tenant/one/community-researcher": {
-			"MODEL_PROVIDER": {Kind: "vault", ID: "29"},
+			"MODEL_PROVIDER": {Kind: "managed-secret", ID: "29"},
 		},
 	}}
 	updated, _, err := service.UpdatePlacement(context.Background(), UpdateChangeSetPlacementRequest{
@@ -610,7 +610,7 @@ func TestPlacementAwareMissingRequirementsRequiresExactNamedSkillCredential(t *t
 	}
 	wrongPlacement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		"tenant/one/security-reviewer": {
-			"environment-secret": {Kind: "environment-secret", ID: "vault://toolweb"},
+			"environment-secret": {Kind: "environment-secret", ID: "credential://toolweb"},
 		},
 	}}
 	if missing := placementAwareMissingRequirements(&candidate, catalog, wrongPlacement); len(missing) != 1 ||
@@ -619,7 +619,7 @@ func TestPlacementAwareMissingRequirementsRequiresExactNamedSkillCredential(t *t
 	}
 	exactPlacement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		"tenant/one/security-reviewer": {
-			"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "vault://toolweb"},
+			"TOOLWEB_API_KEY": {Kind: "environment-secret", ID: "credential://toolweb"},
 		},
 	}}
 	if missing := placementAwareMissingRequirements(&candidate, catalog, exactPlacement); len(missing) != 0 {

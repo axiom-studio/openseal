@@ -157,7 +157,7 @@ func TestWorkforceAuthoringWorkerResolvesCatalogInsideDurableRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := &staticWorkforceCatalogResolver{catalog: request.Catalog}
-	resolver.catalog.AvailableCredentials = map[string]bool{"vault": true}
+	resolver.catalog.AvailableCredentials = map[string]bool{"managed-secret": true}
 	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
 		Scope: Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, WorkerID: "catalog-worker",
 		LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second, CatalogResolver: resolver,
@@ -166,8 +166,8 @@ func TestWorkforceAuthoringWorkerResolvesCatalogInsideDurableRun(t *testing.T) {
 		t.Fatalf("worked=%t err=%v", worked, err)
 	}
 	generated, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
-	if err != nil || resolver.calls.Load() != 1 || !generated.Catalog.AvailableCredentials["vault"] ||
-		!generated.Generation.Request.Catalog.AvailableCredentials["vault"] {
+	if err != nil || resolver.calls.Load() != 1 || !generated.Catalog.AvailableCredentials["managed-secret"] ||
+		!generated.Generation.Request.Catalog.AvailableCredentials["managed-secret"] {
 		t.Fatalf("generated=%#v calls=%d err=%v", generated, resolver.calls.Load(), err)
 	}
 	events, err := store.ListActivity(context.Background(), ActivityFilter{
