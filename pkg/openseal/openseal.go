@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/httpaction"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	kerneloauth "github.com/axiom-studio/openseal/pkg/oauth"
 	"github.com/axiom-studio/openseal/pkg/progression"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -523,6 +524,26 @@ type (
 	OAuth2Subject                      = capability.OAuth2Subject
 	OAuth2Requirement                  = capability.OAuth2Requirement
 	OAuth2GrantSummary                 = capability.OAuth2GrantSummary
+	OAuthConnectionStatus              = kerneloauth.ConnectionStatus
+	OAuthAuthorizationSessionStatus    = kerneloauth.SessionStatus
+	OAuthConnectionOwnerKind           = kerneloauth.OwnerKind
+	OAuthConnectionOwner               = kerneloauth.Owner
+	OAuthExternalIdentity              = kerneloauth.ExternalIdentity
+	OAuthConnection                    = kerneloauth.Connection
+	OAuthAuthorizationSession          = kerneloauth.AuthorizationSession
+	BeginOAuthAuthorizationRequest     = kerneloauth.BeginAuthorizationRequest
+	BeginOAuthAuthorizationResult      = kerneloauth.BeginAuthorizationResult
+	CompleteOAuthAuthorizationRequest  = kerneloauth.CompleteAuthorizationRequest
+	CompleteOAuthAuthorizationResult   = kerneloauth.CompleteAuthorizationResult
+	OAuthProviderAuthorizationRequest  = kerneloauth.ProviderAuthorizationRequest
+	OAuthProviderCodeExchangeRequest   = kerneloauth.ProviderCodeExchangeRequest
+	OAuthTokenGrant                    = kerneloauth.TokenGrant
+	OAuthProvider                      = kerneloauth.Provider
+	OAuthCredentialStoreRequest        = kerneloauth.CredentialStoreRequest
+	OAuthCredentialStore               = kerneloauth.CredentialStore
+	OAuthStore                         = kerneloauth.Store
+	OAuthService                       = kerneloauth.Service
+	OAuthMemoryStore                   = kerneloauth.MemoryStore
 	ConversationEndpointMode           = capability.ConversationEndpointMode
 	ConversationAdapterFeature         = capability.ConversationAdapterFeature
 	ConversationDeliveryOperation      = capability.ConversationDeliveryOperation
@@ -1162,6 +1183,8 @@ var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWor
 var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
 var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
 var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
+var NewOAuthService = kerneloauth.NewService
+var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.
@@ -1678,6 +1701,21 @@ const (
 
 	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
 	OAuth2SubjectUser         = capability.OAuth2SubjectUser
+	OAuthConnectionAPIVersion = kerneloauth.APIVersion
+
+	OAuthConnectionPending  = kerneloauth.ConnectionPending
+	OAuthConnectionActive   = kerneloauth.ConnectionActive
+	OAuthConnectionDegraded = kerneloauth.ConnectionDegraded
+	OAuthConnectionRevoked  = kerneloauth.ConnectionRevoked
+
+	OAuthAuthorizationPending    = kerneloauth.SessionPending
+	OAuthAuthorizationExchanging = kerneloauth.SessionExchanging
+	OAuthAuthorizationCompleted  = kerneloauth.SessionCompleted
+	OAuthAuthorizationDenied     = kerneloauth.SessionDenied
+	OAuthAuthorizationFailed     = kerneloauth.SessionFailed
+
+	OAuthConnectionOwnerTenant = kerneloauth.OwnerTenant
+	OAuthConnectionOwnerUser   = kerneloauth.OwnerUser
 
 	SkillDiscoveryBindable          = skill.DiscoveryReadinessBindable
 	SkillDiscoveryNeedsInstallation = skill.DiscoveryReadinessNeedsInstallation

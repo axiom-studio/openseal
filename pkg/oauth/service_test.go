@@ -1,0 +1,204 @@
+package oauth
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/url"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+)
+
+type fixtureProvider struct {
+	id        string
+	exchanges int
+	grant     TokenGrant
+}
+
+func (p *fixtureProvider) ID() string { return p.id }
+
+func (p *fixtureProvider) AuthorizationURL(_ context.Context, request ProviderAuthorizationRequest) (string, error) {
+	query := url.Values{
+		"state": {request.State}, "code_challenge": {request.PKCEChallenge},
+		"redirect_uri": {request.RedirectURI}, "scope": {strings.Join(request.Requirement.Scopes, " ")},
+	}
+	return "https://provider.example/authorize?" + query.Encode(), nil
+}
+
+func (p *fixtureProvider) ExchangeCode(_ context.Context, request ProviderCodeExchangeRequest) (TokenGrant, error) {
+	p.exchanges++
+	if request.Code != "valid-code" || request.PKCEVerifier == "" {
+		return TokenGrant{}, errors.New("invalid exchange")
+	}
+	return p.grant, nil
+}
+
+type memoryCredentialStore struct {
+	mu         sync.Mutex
+	transient  map[string]string
+	connection TokenGrant
+}
+
+func newMemoryCredentialStore() *memoryCredentialStore {
+	return &memoryCredentialStore{transient: make(map[string]string)}
+}
+
+func (v *memoryCredentialStore) PutTransient(_ context.Context, _ capability.ScopeReference, value string, _ time.Time) (capability.CredentialReference, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	reference := capability.CredentialReference{Kind: "oauth-transient", ID: "secret-store://transient/one"}
+	v.transient[reference.ID] = value
+	return reference, nil
+}
+
+func (v *memoryCredentialStore) TakeTransient(_ context.Context, _ capability.ScopeReference, reference capability.CredentialReference) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	value := v.transient[reference.ID]
+	if value == "" {
+		return "", errors.New("transient secret not found")
+	}
+	delete(v.transient, reference.ID)
+	return value, nil
+}
+
+func (v *memoryCredentialStore) PutConnection(_ context.Context, request CredentialStoreRequest) (capability.CredentialReference, int64, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.connection = request.Grant
+	return capability.CredentialReference{Kind: request.Kind, ID: "connection://tenant/slack/one"}, 1, nil
+}
+
+func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	provider := &fixtureProvider{id: "slack", grant: TokenGrant{
+		AccessToken: "secret-access-token", RefreshToken: "secret-refresh-token",
+		GrantedScopes:    []string{"chat:write", "channels:history"},
+		ExternalIdentity: ExternalIdentity{InstallationID: "T123", DisplayName: "Acme"},
+	}}
+	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
+	service, err := NewService(store, credentials, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	service.newID = func() string { return "session-one" }
+	randomValues := []string{"callback-state-secret", "pkce-verifier-secret"}
+	service.random = func(_ int) (string, error) {
+		value := randomValues[0]
+		randomValues = randomValues[1:]
+		return value, nil
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "tenant-1"}
+	begin, err := service.BeginAuthorization(context.Background(), BeginAuthorizationRequest{
+		Scope: scope, ConnectionID: "slack-primary", Kind: "slack-oauth",
+		Owner: Owner{Kind: OwnerTenant, ID: "tenant-1"},
+		Requirement: capability.OAuth2Requirement{
+			Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
+			Scopes: []string{"chat:write", "channels:history"},
+		},
+		RedirectURI:     "https://studio.example/oauth/callback",
+		ResumeReference: "changeset://tenant-1/candidate-7",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(begin.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("state") != "callback-state-secret" ||
+		parsed.Query().Get("code_challenge") != pkceChallenge("pkce-verifier-secret") {
+		t.Fatalf("authorization URL does not contain bound state and S256 challenge: %s", begin.AuthorizationURL)
+	}
+	session, err := store.GetAuthorizationSession(context.Background(), scope, begin.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedSession, _ := json.Marshal(session)
+	if strings.Contains(string(encodedSession), "callback-state-secret") ||
+		strings.Contains(string(encodedSession), "pkce-verifier-secret") ||
+		strings.Contains(string(encodedSession), "secret-store://transient") {
+		t.Fatalf("session JSON exposed callback authority: %s", encodedSession)
+	}
+	result, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
+		Scope: scope, SessionID: begin.SessionID, State: "callback-state-secret", Code: "valid-code",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResumeReference != "changeset://tenant-1/candidate-7" ||
+		result.Connection.Status != ConnectionActive ||
+		result.Connection.CredentialReference.ID != "connection://tenant/slack/one" ||
+		result.Connection.Grant.Provider != "slack" ||
+		strings.Join(result.Connection.Grant.Scopes, ",") != "channels:history,chat:write" {
+		t.Fatalf("completed OAuth result = %#v", result)
+	}
+	encodedResult, _ := json.Marshal(result)
+	for _, secret := range []string{"secret-access-token", "secret-refresh-token", "pkce-verifier-secret", "callback-state-secret"} {
+		if strings.Contains(string(encodedResult), secret) {
+			t.Fatalf("completed result exposed %s: %s", secret, encodedResult)
+		}
+	}
+	if credentials.connection.AccessToken != "secret-access-token" || credentials.connection.RefreshToken != "secret-refresh-token" {
+		t.Fatal("encrypted credential store did not receive provider token material")
+	}
+}
+
+func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	provider := &fixtureProvider{id: "provider", grant: TokenGrant{
+		AccessToken: "token", GrantedScopes: []string{"read"},
+	}}
+	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
+	service, _ := NewService(store, credentials, provider)
+	service.now = func() time.Time { return now }
+	service.newID = func() string { return "session-one" }
+	values := []string{"state-value", "verifier-value"}
+	service.random = func(_ int) (string, error) {
+		value := values[0]
+		values = values[1:]
+		return value, nil
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "tenant-1"}
+	begin, err := service.BeginAuthorization(context.Background(), BeginAuthorizationRequest{
+		Scope: scope, ConnectionID: "connection-one", Kind: "provider-oauth",
+		Owner: Owner{Kind: OwnerTenant, ID: "tenant-1"},
+		Requirement: capability.OAuth2Requirement{
+			Provider: "provider", Subject: capability.OAuth2SubjectInstallation,
+			Scopes: []string{"read", "write"},
+		},
+		RedirectURI: "https://studio.example/oauth/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
+		Scope:     capability.ScopeReference{Kind: "tenant", ID: "tenant-2"},
+		SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
+	}); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("cross-tenant callback error = %v", err)
+	}
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
+		Scope: scope, SessionID: begin.SessionID, State: "wrong-state", Code: "valid-code",
+	}); !errors.Is(err, ErrStateMismatch) {
+		t.Fatalf("wrong-state callback error = %v", err)
+	}
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
+		Scope: scope, SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
+	}); !errors.Is(err, ErrScopeMismatch) {
+		t.Fatalf("under-scoped callback error = %v", err)
+	}
+	if provider.exchanges != 1 {
+		t.Fatalf("provider exchanges = %d", provider.exchanges)
+	}
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{
+		Scope: scope, SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
+	}); !errors.Is(err, ErrSessionConsumed) {
+		t.Fatalf("callback replay error = %v", err)
+	}
+}
