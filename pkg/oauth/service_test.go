@@ -14,9 +14,12 @@ import (
 )
 
 type fixtureProvider struct {
-	id        string
-	exchanges int
-	grant     TokenGrant
+	id           string
+	exchanges    int
+	refreshes    int
+	revokes      int
+	grant        TokenGrant
+	refreshGrant TokenGrant
 }
 
 func (p *fixtureProvider) ID() string { return p.id }
@@ -37,10 +40,28 @@ func (p *fixtureProvider) ExchangeCode(_ context.Context, request ProviderCodeEx
 	return p.grant, nil
 }
 
+func (p *fixtureProvider) RefreshToken(_ context.Context, request ProviderRefreshRequest) (TokenGrant, error) {
+	p.refreshes++
+	if request.Current.RefreshToken == "" {
+		return TokenGrant{}, errors.New("refresh token missing")
+	}
+	return p.refreshGrant, nil
+}
+
+func (p *fixtureProvider) RevokeToken(_ context.Context, request ProviderRevocationRequest) error {
+	p.revokes++
+	if request.Current.AccessToken == "" {
+		return errors.New("access token missing")
+	}
+	return nil
+}
+
 type memoryCredentialStore struct {
 	mu         sync.Mutex
 	transient  map[string]string
 	connection TokenGrant
+	version    int64
+	deleted    bool
 }
 
 func newMemoryCredentialStore() *memoryCredentialStore {
@@ -70,15 +91,37 @@ func (v *memoryCredentialStore) PutConnection(_ context.Context, request Credent
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.connection = request.Grant
-	return capability.CredentialReference{Kind: request.Kind, ID: "connection://tenant/slack/one"}, 1, nil
+	v.version++
+	v.deleted = false
+	return capability.CredentialReference{Kind: request.Kind, ID: "connection://tenant/slack/one"}, v.version, nil
+}
+
+func (v *memoryCredentialStore) GetConnection(_ context.Context, _ capability.ScopeReference, _ capability.CredentialReference) (TokenGrant, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.deleted || v.connection.AccessToken == "" {
+		return TokenGrant{}, errors.New("connection not found")
+	}
+	return v.connection, nil
+}
+
+func (v *memoryCredentialStore) DeleteConnection(_ context.Context, _ capability.ScopeReference, _ capability.CredentialReference) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.connection = TokenGrant{}
+	v.deleted = true
+	return nil
 }
 
 func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	refreshExpiry := now.Add(2 * time.Hour)
 	provider := &fixtureProvider{id: "slack", grant: TokenGrant{
 		AccessToken: "secret-access-token", RefreshToken: "secret-refresh-token",
 		GrantedScopes:    []string{"chat:write", "channels:history"},
 		ExternalIdentity: ExternalIdentity{InstallationID: "T123", DisplayName: "Acme"},
+	}, refreshGrant: TokenGrant{
+		AccessToken: "rotated-access-token", ExpiresAt: &refreshExpiry,
 	}}
 	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
 	service, err := NewService(store, credentials, provider)
@@ -147,6 +190,34 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 	if credentials.connection.AccessToken != "secret-access-token" || credentials.connection.RefreshToken != "secret-refresh-token" {
 		t.Fatal("encrypted credential store did not receive provider token material")
 	}
+
+	now = now.Add(time.Hour)
+	refreshed, err := service.RefreshConnection(context.Background(), RefreshConnectionRequest{
+		Scope: scope, ConnectionID: result.Connection.ID, ExpectedRevision: result.Connection.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Status != ConnectionActive || refreshed.Revision != 3 || refreshed.TokenVersion != 2 ||
+		refreshed.LastRefreshedAt == nil || refreshed.ExpiresAt == nil ||
+		provider.refreshes != 1 || credentials.connection.AccessToken != "rotated-access-token" ||
+		credentials.connection.RefreshToken != "secret-refresh-token" {
+		t.Fatalf("refreshed connection = %#v; refreshes=%d; credentials=%#v", refreshed, provider.refreshes, credentials.connection)
+	}
+	if _, err := service.RefreshConnection(context.Background(), RefreshConnectionRequest{
+		Scope: scope, ConnectionID: result.Connection.ID, ExpectedRevision: result.Connection.Revision,
+	}); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("concurrent stale refresh error = %v", err)
+	}
+	revoked, err := service.RevokeConnection(context.Background(), RevokeConnectionRequest{
+		Scope: scope, ConnectionID: refreshed.ID, ExpectedRevision: refreshed.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Status != ConnectionRevoked || revoked.Revision != 4 || provider.revokes != 1 || !credentials.deleted {
+		t.Fatalf("revoked connection = %#v; provider revokes=%d; deleted=%t", revoked, provider.revokes, credentials.deleted)
+	}
 }
 
 func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
@@ -200,5 +271,20 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 		Scope: scope, SessionID: begin.SessionID, State: "state-value", Code: "valid-code",
 	}); !errors.Is(err, ErrSessionConsumed) {
 		t.Fatalf("callback replay error = %v", err)
+	}
+}
+
+func TestTokenGrantJSONNeverSerializesTokenMaterial(t *testing.T) {
+	encoded, err := json.Marshal(TokenGrant{
+		AccessToken: "access-secret", RefreshToken: "refresh-secret", TokenType: "Bearer",
+		GrantedScopes: []string{"read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"access-secret", "refresh-secret", "Bearer"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("token grant JSON exposed %s: %s", secret, encoded)
+		}
 	}
 }

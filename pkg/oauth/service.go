@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -18,6 +19,7 @@ import (
 
 const (
 	authorizationTTL  = 10 * time.Minute
+	refreshLeaseTTL   = time.Minute
 	pkceVerifierBytes = 48
 	stateBytes        = 32
 )
@@ -49,6 +51,139 @@ func NewService(store Store, credentials CredentialStore, providers ...Provider)
 		store: store, credentials: credentials, providers: registered,
 		now: time.Now, newID: uuid.NewString, random: randomURLToken,
 	}, nil
+}
+
+func (s *Service) RefreshConnection(ctx context.Context, request RefreshConnectionRequest) (*Connection, error) {
+	if !validScope(request.Scope) || !validIdentifier(request.ConnectionID, 512) || request.ExpectedRevision < 1 {
+		return nil, ErrInvalid
+	}
+	now, leaseID := s.now().UTC(), s.newID()
+	claimed, err := s.store.ClaimConnectionRefresh(
+		ctx, request.Scope, request.ConnectionID, request.ExpectedRevision,
+		leaseID, now, now.Add(refreshLeaseTTL),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if claimed.Status != ConnectionActive && claimed.Status != ConnectionDegraded {
+		s.releaseRefreshFailure(ctx, claimed, "connection_inactive")
+		return nil, fmt.Errorf("%w: only active or degraded connections can refresh", ErrInvalid)
+	}
+	provider := s.providers[claimed.Grant.Provider]
+	refreshProvider, ok := provider.(RefreshProvider)
+	if !ok {
+		s.releaseRefreshFailure(ctx, claimed, "refresh_unsupported")
+		return nil, ErrUnsupported
+	}
+	current, err := s.credentials.GetConnection(ctx, claimed.Scope, claimed.CredentialReference)
+	if err != nil {
+		s.releaseRefreshFailure(ctx, claimed, "credential_unavailable")
+		return nil, errors.New("OAuth connection credentials are unavailable")
+	}
+	requirement := capability.OAuth2Requirement{
+		Provider: claimed.Grant.Provider, Subject: claimed.Grant.Subject,
+		Scopes: append([]string(nil), claimed.Grant.Scopes...), Resource: claimed.Grant.Resource,
+	}
+	refreshed, err := refreshProvider.RefreshToken(ctx, ProviderRefreshRequest{Current: current, Requirement: requirement})
+	if err != nil {
+		s.releaseRefreshFailure(ctx, claimed, "refresh_failed")
+		return nil, errors.New("OAuth provider token refresh failed")
+	}
+	if strings.TrimSpace(refreshed.AccessToken) == "" {
+		s.releaseRefreshFailure(ctx, claimed, "missing_access_token")
+		return nil, fmt.Errorf("%w: refreshed grant has no access token", ErrInvalid)
+	}
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = current.RefreshToken
+	}
+	if len(refreshed.GrantedScopes) == 0 {
+		refreshed.GrantedScopes = append([]string(nil), claimed.Grant.Scopes...)
+	}
+	if refreshed.Resource == "" {
+		refreshed.Resource = claimed.Grant.Resource
+	}
+	if externalIdentityEmpty(refreshed.ExternalIdentity) {
+		refreshed.ExternalIdentity = claimed.ExternalIdentity
+	}
+	grantSummary, err := normalizeGrant(requirement, refreshed)
+	if err != nil {
+		s.releaseRefreshFailure(ctx, claimed, "scope_mismatch")
+		return nil, err
+	}
+	externalIdentity, err := normalizeExternalIdentity(refreshed.ExternalIdentity)
+	if err != nil {
+		s.releaseRefreshFailure(ctx, claimed, "identity_invalid")
+		return nil, err
+	}
+	reference, tokenVersion, err := s.credentials.PutConnection(ctx, CredentialStoreRequest{
+		Scope: claimed.Scope, ConnectionID: claimed.ID, Kind: claimed.Kind,
+		Provider: claimed.Grant.Provider, Grant: refreshed,
+	})
+	if err != nil {
+		s.releaseRefreshFailure(ctx, claimed, "credential_store_failed")
+		return nil, errors.New("store refreshed OAuth connection failed")
+	}
+	if reference.Kind != claimed.Kind || !validIdentifier(reference.ID, 1024) || tokenVersion <= claimed.TokenVersion {
+		s.releaseRefreshFailure(ctx, claimed, "credential_reference_invalid")
+		return nil, fmt.Errorf("%w: refreshed credential version is invalid", ErrInvalid)
+	}
+	updated := cloneConnection(claimed)
+	updated.Grant, updated.ExternalIdentity = grantSummary, externalIdentity
+	updated.CredentialReference, updated.TokenVersion = reference, tokenVersion
+	updated.Status, updated.ExpiresAt, updated.LastRefreshedAt = ConnectionActive, refreshed.ExpiresAt, &now
+	updated.LastErrorCode, updated.RefreshLeaseID, updated.RefreshLeaseExpiresAt = "", "", nil
+	updated.Revision, updated.UpdatedAt = claimed.Revision+1, now
+	if err := s.store.UpsertConnection(ctx, updated, claimed.Revision); err != nil {
+		return nil, err
+	}
+	return cloneConnection(updated), nil
+}
+
+func (s *Service) RevokeConnection(ctx context.Context, request RevokeConnectionRequest) (*Connection, error) {
+	if !validScope(request.Scope) || !validIdentifier(request.ConnectionID, 512) || request.ExpectedRevision < 1 {
+		return nil, ErrInvalid
+	}
+	connection, err := s.store.GetConnection(ctx, request.Scope, request.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	if connection.Revision != request.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	if connection.Status == ConnectionRevoked {
+		return cloneConnection(connection), nil
+	}
+	current, err := s.credentials.GetConnection(ctx, connection.Scope, connection.CredentialReference)
+	if err != nil {
+		return nil, errors.New("OAuth connection credentials are unavailable")
+	}
+	if provider, ok := s.providers[connection.Grant.Provider].(RevocationProvider); ok {
+		if err := provider.RevokeToken(ctx, ProviderRevocationRequest{Current: current}); err != nil {
+			return nil, errors.New("OAuth provider token revocation failed")
+		}
+	}
+	if err := s.credentials.DeleteConnection(ctx, connection.Scope, connection.CredentialReference); err != nil {
+		return nil, errors.New("delete encrypted OAuth connection failed")
+	}
+	now := s.now().UTC()
+	updated := cloneConnection(connection)
+	updated.Status, updated.ExpiresAt, updated.RefreshLeaseID, updated.RefreshLeaseExpiresAt = ConnectionRevoked, nil, "", nil
+	updated.LastErrorCode, updated.Revision, updated.UpdatedAt = "", connection.Revision+1, now
+	if err := s.store.UpsertConnection(ctx, updated, connection.Revision); err != nil {
+		return nil, err
+	}
+	return cloneConnection(updated), nil
+}
+
+func (s *Service) releaseRefreshFailure(ctx context.Context, claimed *Connection, code string) {
+	if claimed == nil {
+		return
+	}
+	failed := cloneConnection(claimed)
+	failed.Status, failed.LastErrorCode = ConnectionDegraded, code
+	failed.RefreshLeaseID, failed.RefreshLeaseExpiresAt = "", nil
+	failed.Revision, failed.UpdatedAt = claimed.Revision+1, s.now().UTC()
+	_ = s.store.UpsertConnection(ctx, failed, claimed.Revision)
 }
 
 func (s *Service) BeginAuthorization(ctx context.Context, request BeginAuthorizationRequest) (*BeginAuthorizationResult, error) {
@@ -242,14 +377,7 @@ func digest(value string) string {
 
 func subtleDigestMismatch(expectedDigest, value string) bool {
 	actual := digest(strings.TrimSpace(value))
-	if len(actual) != len(expectedDigest) {
-		return true
-	}
-	var difference byte
-	for index := range actual {
-		difference |= actual[index] ^ expectedDigest[index]
-	}
-	return difference != 0
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(expectedDigest)) != 1
 }
 
 func pkceChallenge(verifier string) string {
@@ -304,6 +432,18 @@ func cloneConnection(value *Connection) *Connection {
 		return nil
 	}
 	result := *value
+	if value.ExpiresAt != nil {
+		expiresAt := *value.ExpiresAt
+		result.ExpiresAt = &expiresAt
+	}
+	if value.LastRefreshedAt != nil {
+		lastRefreshedAt := *value.LastRefreshedAt
+		result.LastRefreshedAt = &lastRefreshedAt
+	}
+	if value.RefreshLeaseExpiresAt != nil {
+		refreshLeaseExpiresAt := *value.RefreshLeaseExpiresAt
+		result.RefreshLeaseExpiresAt = &refreshLeaseExpiresAt
+	}
 	result.Grant.Scopes = append([]string(nil), value.Grant.Scopes...)
 	if value.ExternalIdentity.Attributes != nil {
 		result.ExternalIdentity.Attributes = make(map[string]string, len(value.ExternalIdentity.Attributes))
@@ -312,4 +452,8 @@ func cloneConnection(value *Connection) *Connection {
 		}
 	}
 	return &result
+}
+
+func externalIdentityEmpty(value ExternalIdentity) bool {
+	return value.InstallationID == "" && value.AccountID == "" && value.DisplayName == "" && len(value.Attributes) == 0
 }
