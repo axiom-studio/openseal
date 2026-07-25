@@ -279,10 +279,18 @@ func (s *SQLiteStore) ClaimExternalConversationInbox(ctx context.Context, scope 
 		WHERE i.scope_kind=? AND i.scope_id=? AND i.available_at<=?
 		  AND (i.status IN (?,?) OR (i.status=? AND i.lease_expires_at<=?))
 		  AND e.status=? AND e.revision=i.endpoint_revision
+		  AND NOT EXISTS (
+		    SELECT 1 FROM external_conversation_inbox active
+		    WHERE active.scope_kind=i.scope_kind AND active.scope_id=i.scope_id
+		      AND active.endpoint_id=i.endpoint_id AND active.id<>i.id
+		      AND active.status=? AND active.lease_expires_at>?
+		      AND json_extract(active.payload,'$.event.orderingKey')=json_extract(i.payload,'$.event.orderingKey')
+		  )
 		ORDER BY i.available_at ASC,i.created_at ASC,i.id ASC LIMIT 1`,
 		scope.Kind, scope.ID, now,
 		ExternalConversationInboxPending, ExternalConversationInboxRetry,
-		ExternalConversationInboxLeased, now, ExternalConversationEndpointActive))
+		ExternalConversationInboxLeased, now, ExternalConversationEndpointActive,
+		ExternalConversationInboxLeased, now))
 	if err != nil || item == nil {
 		return nil, err
 	}
@@ -595,10 +603,18 @@ func (s *SQLiteStore) ClaimExternalConversationDelivery(ctx context.Context, sco
 		WHERE d.scope_kind=? AND d.scope_id=? AND d.available_at<=?
 		  AND (d.status IN (?,?) OR (d.status=? AND d.lease_expires_at<=?))
 		  AND e.status=? AND e.revision=d.endpoint_revision
+		  AND NOT EXISTS (
+		    SELECT 1 FROM external_conversation_deliveries active
+		    WHERE active.scope_kind=d.scope_kind AND active.scope_id=d.scope_id
+		      AND active.endpoint_id=d.endpoint_id AND active.id<>d.id
+		      AND active.status=? AND active.lease_expires_at>?
+		      AND json_extract(active.payload,'$.orderingKey')=json_extract(d.payload,'$.orderingKey')
+		  )
 		ORDER BY d.available_at ASC,d.created_at ASC,d.id ASC LIMIT 1`,
 		scope.Kind, scope.ID, now,
 		ExternalConversationDeliveryPending, ExternalConversationDeliveryRetry,
-		ExternalConversationDeliveryLeased, now, ExternalConversationEndpointActive))
+		ExternalConversationDeliveryLeased, now, ExternalConversationEndpointActive,
+		ExternalConversationDeliveryLeased, now))
 	if err != nil || delivery == nil {
 		return nil, err
 	}

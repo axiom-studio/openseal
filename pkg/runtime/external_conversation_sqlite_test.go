@@ -71,7 +71,7 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 	delivery := &ExternalConversationDelivery{
 		ID: "delivery-1", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
-		ExternalThreadID: "171.001", IdempotencyKey: "reply:message-out",
+		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
 		Status: ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -163,5 +163,65 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 	}
 	if got, _ := restarted.GetExternalMessageMapping(ctx, scope, endpoint.ID, ExternalMessageInbound, "M/one"); got == nil || got.ChannelMessageID != "message-in" {
 		t.Fatalf("durable message mapping = %#v", got)
+	}
+}
+
+func TestSQLiteExternalConversationClaimsPreserveOrderingPartitions(t *testing.T) {
+	ctx := context.Background()
+	_, endpoint := activeExternalConversationTestEndpoint(t, ctx)
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "ordering.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for index, order := range []string{"same", "same", "independent"} {
+		item := &ExternalConversationInboxItem{
+			ID: "inbox-order-" + order + string(rune('a'+index)), Scope: endpoint.Scope,
+			EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+			Event: NormalizedExternalConversationEvent{
+				ID: "event-" + order + string(rune('a'+index)), Type: capability.ConversationEventMessageReceived,
+				ExternalConversationID: "channel", ExternalMessageID: "message-" + order + string(rune('a'+index)),
+				ExternalParticipantID: "user", Text: "hello", OrderingKey: order, OccurredAt: now,
+			},
+			Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
+			Revision: 1, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}
+		if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		delivery := &ExternalConversationDelivery{
+			ID: "delivery-" + order + string(rune('a'+index)), Scope: endpoint.Scope,
+			EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+			Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation",
+			ChannelMessageID: "out-" + order + string(rune('a'+index)), OrderingKey: order,
+			IdempotencyKey: "key-" + order + string(rune('a'+index)),
+			Status:         ExternalConversationDeliveryPending, MaximumAttempts: 3, AvailableAt: now,
+			Revision: 1, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}
+		if _, _, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "inbox-one", now.Add(time.Second), time.Minute)
+	second, secondErr := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "inbox-two", now.Add(time.Second), time.Minute)
+	blocked, blockedErr := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "inbox-three", now.Add(time.Second), time.Minute)
+	if err != nil || secondErr != nil || blockedErr != nil || first == nil || first.Event.OrderingKey != "same" ||
+		second == nil || second.Event.OrderingKey != "independent" || blocked != nil {
+		t.Fatalf("SQLite inbox ordering: first=%#v second=%#v blocked=%#v errors=%v/%v/%v",
+			first, second, blocked, err, secondErr, blockedErr)
+	}
+	firstDelivery, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-one", now.Add(time.Second), time.Minute)
+	secondDelivery, secondErr := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-two", now.Add(time.Second), time.Minute)
+	blockedDelivery, blockedErr := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-three", now.Add(time.Second), time.Minute)
+	if err != nil || secondErr != nil || blockedErr != nil || firstDelivery == nil || firstDelivery.OrderingKey != "same" ||
+		secondDelivery == nil || secondDelivery.OrderingKey != "independent" || blockedDelivery != nil {
+		t.Fatalf("SQLite delivery ordering: first=%#v second=%#v blocked=%#v errors=%v/%v/%v",
+			firstDelivery, secondDelivery, blockedDelivery, err, secondErr, blockedErr)
 	}
 }

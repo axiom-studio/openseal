@@ -652,6 +652,7 @@ type ExternalConversationDelivery struct {
 	ConversationID    string                                   `json:"conversationId"`
 	ChannelMessageID  string                                   `json:"channelMessageId"`
 	ExternalThreadID  string                                   `json:"externalThreadId,omitempty"`
+	OrderingKey       string                                   `json:"orderingKey"`
 	Parameters        map[string]interface{}                   `json:"parameters,omitempty"`
 	IdempotencyKey    string                                   `json:"idempotencyKey"`
 	Status            ExternalConversationDeliveryStatus       `json:"status"`
@@ -674,7 +675,7 @@ func (d *ExternalConversationDelivery) Validate() error {
 		!validOpaqueIdentifier(d.EndpointID, 256) || d.EndpointRevision < 1 ||
 		d.Adapter.Validate() != nil || !validConversationDeliveryOperation(d.Operation) ||
 		!validOpaqueIdentifier(d.ConversationID, 256) || !validOpaqueIdentifier(d.ChannelMessageID, 256) ||
-		!validOpaqueIdentifier(d.IdempotencyKey, 512) || d.Attempt < 0 ||
+		!validOpaqueIdentifier(d.OrderingKey, 256) || !validOpaqueIdentifier(d.IdempotencyKey, 512) || d.Attempt < 0 ||
 		d.MaximumAttempts < 1 || d.MaximumAttempts > MaximumExternalConversationDeliveryAttempts ||
 		d.AvailableAt.IsZero() || d.Revision < 1 || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() ||
 		d.UpdatedAt.Before(d.CreatedAt) || len(d.ErrorCode) > 128 || len(d.Summary) > 1024 {
@@ -703,6 +704,9 @@ func (d *ExternalConversationDelivery) Validate() error {
 		}
 	case ExternalConversationDeliveryFailed, ExternalConversationDeliveryCanceled:
 		if d.LeaseOwner != "" || !d.LeaseExpiresAt.IsZero() || !d.DeliveredAt.IsZero() {
+			return ErrInvalidExternalConversation
+		}
+		if d.Status == ExternalConversationDeliveryFailed && d.ErrorCode == "" {
 			return ErrInvalidExternalConversation
 		}
 	default:

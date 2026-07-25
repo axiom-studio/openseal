@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -93,7 +94,8 @@ func (s *PostgresStore) CreateConversation(ctx context.Context, conversation *Co
 		return nil, false, err
 	}
 	if existing != nil {
-		if existing.Owner != conversation.Owner || existing.Title != conversation.Title {
+		if existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) {
 			return nil, false, ErrMessageConflict
 		}
 		if err := tx.Commit(); err != nil {

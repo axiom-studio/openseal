@@ -37,7 +37,8 @@ func (s *MemoryStore) CreateConversation(_ context.Context, conversation *Conver
 	identityKey := conversationIdempotencyKey(conversation.Scope, key)
 	if existingID := s.conversationKeys[identityKey]; existingID != "" {
 		existing := s.conversations[conversationStoreKey(conversation.Scope, existingID)]
-		if existing == nil || existing.Owner != conversation.Owner || existing.Title != conversation.Title {
+		if existing == nil || existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) {
 			return nil, false, ErrMessageConflict
 		}
 		return cloneConversation(existing), true, nil

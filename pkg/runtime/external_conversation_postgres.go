@@ -283,6 +283,9 @@ func (s *PostgresStore) ClaimExternalConversationInbox(ctx context.Context, scop
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := postgresConversationAdvisoryLock(ctx, tx, scope, "external-conversation-inbox-claim"); err != nil {
+		return nil, err
+	}
 	item, err := scanSQLiteExternalConversationInbox(tx.QueryRowContext(ctx, `
 		SELECT i.payload FROM `+s.table("external_conversation_inbox")+` i
 		JOIN `+s.table("external_conversation_endpoints")+` e
@@ -290,6 +293,13 @@ func (s *PostgresStore) ClaimExternalConversationInbox(ctx context.Context, scop
 		WHERE i.scope_kind=$1 AND i.scope_id=$2 AND i.available_at<=$3
 		  AND (i.status=ANY($4) OR (i.status=$5 AND i.lease_expires_at<=$3))
 		  AND e.status=$6 AND e.revision=i.endpoint_revision
+		  AND NOT EXISTS (
+		    SELECT 1 FROM `+s.table("external_conversation_inbox")+` active
+		    WHERE active.scope_kind=i.scope_kind AND active.scope_id=i.scope_id
+		      AND active.endpoint_id=i.endpoint_id AND active.id<>i.id
+		      AND active.status=$5 AND active.lease_expires_at>$3
+		      AND active.payload->'event'->>'orderingKey'=i.payload->'event'->>'orderingKey'
+		  )
 		ORDER BY i.available_at ASC,i.created_at ASC,i.id ASC
 		FOR UPDATE OF i SKIP LOCKED LIMIT 1`,
 		scope.Kind, scope.ID, now, pq.Array([]string{
@@ -610,6 +620,9 @@ func (s *PostgresStore) ClaimExternalConversationDelivery(ctx context.Context, s
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := postgresConversationAdvisoryLock(ctx, tx, scope, "external-conversation-delivery-claim"); err != nil {
+		return nil, err
+	}
 	delivery, err := scanSQLiteExternalConversationDelivery(tx.QueryRowContext(ctx, `
 		SELECT d.payload FROM `+s.table("external_conversation_deliveries")+` d
 		JOIN `+s.table("external_conversation_endpoints")+` e
@@ -617,6 +630,13 @@ func (s *PostgresStore) ClaimExternalConversationDelivery(ctx context.Context, s
 		WHERE d.scope_kind=$1 AND d.scope_id=$2 AND d.available_at<=$3
 		  AND (d.status=ANY($4) OR (d.status=$5 AND d.lease_expires_at<=$3))
 		  AND e.status=$6 AND e.revision=d.endpoint_revision
+		  AND NOT EXISTS (
+		    SELECT 1 FROM `+s.table("external_conversation_deliveries")+` active
+		    WHERE active.scope_kind=d.scope_kind AND active.scope_id=d.scope_id
+		      AND active.endpoint_id=d.endpoint_id AND active.id<>d.id
+		      AND active.status=$5 AND active.lease_expires_at>$3
+		      AND active.payload->>'orderingKey'=d.payload->>'orderingKey'
+		  )
 		ORDER BY d.available_at ASC,d.created_at ASC,d.id ASC
 		FOR UPDATE OF d SKIP LOCKED LIMIT 1`,
 		scope.Kind, scope.ID, now, pq.Array([]string{

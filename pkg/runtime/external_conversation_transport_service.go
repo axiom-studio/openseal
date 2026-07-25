@@ -153,11 +153,15 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		return nil, ErrInvalidExternalConversation
 	}
 	now := s.now().UTC()
+	orderingKey := externalConversationDeliveryOrderingKey(
+		req.Scope, endpoint.ID, resolved.Adapter.Delivery.Ordering, message.ConversationID, req.ExternalThreadID,
+	)
 	delivery := &ExternalConversationDelivery{
 		ID:    stableExternalConversationID(req.Scope, endpoint.ID, "delivery", idempotencyKey),
 		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: req.Operation, ConversationID: message.ConversationID, ChannelMessageID: message.ID,
-		ExternalThreadID: strings.TrimSpace(req.ExternalThreadID), Parameters: cloneMap(req.Parameters), IdempotencyKey: idempotencyKey,
+		ExternalThreadID: strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
+		Parameters: cloneMap(req.Parameters), IdempotencyKey: idempotencyKey,
 		Status: ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -166,6 +170,22 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		return nil, err
 	}
 	return &EnqueueExternalConversationDeliveryResult{Delivery: stored, Replayed: replayed}, nil
+}
+
+func externalConversationDeliveryOrderingKey(
+	scope Scope,
+	endpointID string,
+	ordering capability.ConversationDeliveryOrdering,
+	conversationID, externalThreadID string,
+) string {
+	key := endpointID
+	switch ordering {
+	case capability.ConversationDeliveryOrderConversation:
+		key += "\x00" + conversationID
+	case capability.ConversationDeliveryOrderThread:
+		key += "\x00" + conversationID + "\x00" + strings.TrimSpace(externalThreadID)
+	}
+	return stableExternalConversationID(scope, endpointID, "delivery-order", key)
 }
 
 func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context.Context, scope Scope, endpointID string) (*ExternalConversationEndpoint, *skill.BoundConversationAdapter, error) {

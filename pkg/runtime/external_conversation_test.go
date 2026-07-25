@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -175,7 +176,7 @@ func TestExternalConversationMemoryMappingsAndOutboxSurviveRetry(t *testing.T) {
 	delivery := &ExternalConversationDelivery{
 		ID: "delivery-1", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
-		ExternalThreadID: "171.001", IdempotencyKey: "reply:message-out",
+		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
 		Status: ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -216,6 +217,69 @@ func TestExternalConversationMemoryMappingsAndOutboxSurviveRetry(t *testing.T) {
 	stored, err := store.GetExternalConversationDelivery(ctx, endpoint.Scope, delivery.ID)
 	if err != nil || stored.Status != ExternalConversationDeliveryDelivered || stored.Attempt != 2 {
 		t.Fatalf("delivered outbox = %#v, %v", stored, err)
+	}
+}
+
+func TestExternalConversationClaimsSerializeOrderingKeysAndParallelizeIndependentWork(t *testing.T) {
+	ctx := context.Background()
+	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for index, orderingKey := range []string{"thread-one", "thread-one", "thread-two"} {
+		eventID := fmt.Sprintf("event-%d", index+1)
+		item := &ExternalConversationInboxItem{
+			ID: eventID, Scope: endpoint.Scope, EndpointID: endpoint.ID,
+			EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+			Event: NormalizedExternalConversationEvent{
+				ID: eventID, Type: capability.ConversationEventMessageReceived,
+				ExternalConversationID: "channel", ExternalMessageID: "message-" + eventID,
+				ExternalParticipantID: "user", Text: "hello", OrderingKey: orderingKey, OccurredAt: now,
+			},
+			Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
+			Revision: 1, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}
+		if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "worker-one", now.Add(time.Second), time.Minute)
+	if err != nil || first == nil || first.Event.OrderingKey != "thread-one" {
+		t.Fatalf("first inbox claim = %#v, %v", first, err)
+	}
+	second, err := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "worker-two", now.Add(time.Second), time.Minute)
+	if err != nil || second == nil || second.Event.OrderingKey != "thread-two" {
+		t.Fatalf("independent inbox claim = %#v, %v", second, err)
+	}
+	if blocked, err := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "worker-three", now.Add(time.Second), time.Minute); err != nil || blocked != nil {
+		t.Fatalf("same-order inbox item escaped serialization: %#v, %v", blocked, err)
+	}
+
+	for index, orderingKey := range []string{"delivery-thread-one", "delivery-thread-one", "delivery-thread-two"} {
+		id := fmt.Sprintf("delivery-order-%d", index+1)
+		delivery := &ExternalConversationDelivery{
+			ID: id, Scope: endpoint.Scope, EndpointID: endpoint.ID,
+			EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+			Operation:      capability.ConversationDeliveryMessageSend,
+			ConversationID: "conversation", ChannelMessageID: "message-" + id,
+			OrderingKey: orderingKey, IdempotencyKey: "idempotency-" + id,
+			Status: ExternalConversationDeliveryPending, MaximumAttempts: 3, AvailableAt: now,
+			Revision: 1, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
+			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
+		}
+		if _, _, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstDelivery, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-one", now.Add(time.Second), time.Minute)
+	if err != nil || firstDelivery == nil || firstDelivery.OrderingKey != "delivery-thread-one" {
+		t.Fatalf("first delivery claim = %#v, %v", firstDelivery, err)
+	}
+	secondDelivery, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-two", now.Add(time.Second), time.Minute)
+	if err != nil || secondDelivery == nil || secondDelivery.OrderingKey != "delivery-thread-two" {
+		t.Fatalf("independent delivery claim = %#v, %v", secondDelivery, err)
+	}
+	if blocked, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-three", now.Add(time.Second), time.Minute); err != nil || blocked != nil {
+		t.Fatalf("same-order delivery escaped serialization: %#v, %v", blocked, err)
 	}
 }
 

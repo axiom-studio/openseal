@@ -96,7 +96,7 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	delivery := &ExternalConversationDelivery{
 		ID: "delivery-1", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
-		ExternalThreadID: "171.001", IdempotencyKey: "reply:message-out",
+		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
 		Status: ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}

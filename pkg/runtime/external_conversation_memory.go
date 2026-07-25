@@ -148,6 +148,9 @@ func (s *MemoryStore) ClaimExternalConversationInbox(_ context.Context, scope Sc
 		if item.Scope != scope || item.AvailableAt.After(now) || !externalConversationInboxClaimable(item, now) {
 			continue
 		}
+		if externalConversationInboxOrderingLeased(s.externalInbox, item, now) {
+			continue
+		}
 		endpoint := s.externalEndpoints[externalConversationEndpointKey(scope, item.EndpointID)]
 		if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision {
 			continue
@@ -353,6 +356,9 @@ func (s *MemoryStore) ClaimExternalConversationDelivery(_ context.Context, scope
 		if delivery.Scope != scope || delivery.AvailableAt.After(now) || !externalConversationDeliveryClaimable(delivery, now) {
 			continue
 		}
+		if externalConversationDeliveryOrderingLeased(s.externalDeliveries, delivery, now) {
+			continue
+		}
 		endpoint := s.externalEndpoints[externalConversationEndpointKey(scope, delivery.EndpointID)]
 		if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != delivery.EndpointRevision {
 			continue
@@ -391,7 +397,8 @@ func (s *MemoryStore) SaveExternalConversationDelivery(_ context.Context, delive
 		current.EndpointID != delivery.EndpointID || current.EndpointRevision != delivery.EndpointRevision ||
 		current.Adapter != delivery.Adapter || current.Operation != delivery.Operation ||
 		current.ConversationID != delivery.ConversationID || current.ChannelMessageID != delivery.ChannelMessageID ||
-		current.IdempotencyKey != delivery.IdempotencyKey || !current.CreatedAt.Equal(delivery.CreatedAt) {
+		current.OrderingKey != delivery.OrderingKey || current.IdempotencyKey != delivery.IdempotencyKey ||
+		!current.CreatedAt.Equal(delivery.CreatedAt) {
 		return ErrExternalConversationLeaseLost
 	}
 	s.externalDeliveries[externalConversationDeliveryKey(delivery.Scope, delivery.ID)] = cloneExternalConversationDelivery(delivery)
@@ -441,8 +448,38 @@ func sameExternalConversationDeliveryIntent(existing, candidate *ExternalConvers
 		existing.EndpointID == candidate.EndpointID && existing.EndpointRevision == candidate.EndpointRevision &&
 		existing.Adapter == candidate.Adapter && existing.Operation == candidate.Operation &&
 		existing.ConversationID == candidate.ConversationID && existing.ChannelMessageID == candidate.ChannelMessageID &&
-		existing.ExternalThreadID == candidate.ExternalThreadID &&
+		existing.ExternalThreadID == candidate.ExternalThreadID && existing.OrderingKey == candidate.OrderingKey &&
 		reflect.DeepEqual(existing.Parameters, candidate.Parameters) && existing.IdempotencyKey == candidate.IdempotencyKey
+}
+
+func externalConversationInboxOrderingLeased(
+	items map[string]*ExternalConversationInboxItem,
+	candidate *ExternalConversationInboxItem,
+	now time.Time,
+) bool {
+	for _, item := range items {
+		if item.ID != candidate.ID && item.Scope == candidate.Scope && item.EndpointID == candidate.EndpointID &&
+			item.Event.OrderingKey == candidate.Event.OrderingKey && item.Status == ExternalConversationInboxLeased &&
+			item.LeaseExpiresAt.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
+func externalConversationDeliveryOrderingLeased(
+	items map[string]*ExternalConversationDelivery,
+	candidate *ExternalConversationDelivery,
+	now time.Time,
+) bool {
+	for _, item := range items {
+		if item.ID != candidate.ID && item.Scope == candidate.Scope && item.EndpointID == candidate.EndpointID &&
+			item.OrderingKey == candidate.OrderingKey && item.Status == ExternalConversationDeliveryLeased &&
+			item.LeaseExpiresAt.After(now) {
+			return true
+		}
+	}
+	return false
 }
 
 func externalConversationInboxClaimable(item *ExternalConversationInboxItem, now time.Time) bool {
