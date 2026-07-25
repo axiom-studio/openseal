@@ -1015,7 +1015,13 @@ func (m *Model) renderAuthoringContent(width int) string {
 		}
 	}
 	for _, missing := range result.MissingRequirements {
-		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("Connect %s %s for %s", missing.Kind, missing.ID, missing.RequiredBy)))
+		lines = append(
+			lines,
+			"",
+			lipgloss.NewStyle().Foreground(accentSoft).Render(
+				"Setup needed · "+authoringRequirementAction(missing, &result.Candidate),
+			),
+		)
 	}
 	for _, issue := range result.Validation {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
@@ -1030,6 +1036,94 @@ func (m *Model) renderAuthoringContent(width int) string {
 		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func authoringRequirementAction(missing authoring.MissingRequirement, candidate *authoring.WorkforceCandidate) string {
+	resource := authoringRequirementResource(missing)
+	owner := authoringRequirementOwner(missing.RequiredBy, candidate)
+	switch missing.Kind {
+	case "skill_installation":
+		return fmt.Sprintf("Install %s for %s", resource, owner)
+	case "skill_binding":
+		return fmt.Sprintf("Configure %s for %s", resource, owner)
+	case "credential":
+		return fmt.Sprintf("Choose an authorized %s credential for %s", resource, owner)
+	case "source_policy":
+		return fmt.Sprintf("Approve source access for %s", owner)
+	case "source_scope":
+		return fmt.Sprintf("Choose allowed sources for %s", owner)
+	case "version":
+		return fmt.Sprintf("Choose a compatible %s version for %s", resource, owner)
+	case "action":
+		return fmt.Sprintf("Choose a %s version with the required action for %s", resource, owner)
+	case "prompt":
+		return fmt.Sprintf("Add the required %s instructions for %s", resource, owner)
+	case "skill":
+		return fmt.Sprintf("Add %s for %s", resource, owner)
+	default:
+		return fmt.Sprintf("Review %s setup for %s", resource, owner)
+	}
+}
+
+func authoringRequirementResource(missing authoring.MissingRequirement) string {
+	value := strings.TrimSpace(missing.ID)
+	switch missing.Kind {
+	case "version":
+		value, _, _ = strings.Cut(value, "@")
+	case "action":
+		value, _, _ = strings.Cut(value, "/")
+	}
+	if value == "" {
+		return "required capability"
+	}
+	return humanIdentifier(value)
+}
+
+func authoringRequirementOwner(requiredBy string, candidate *authoring.WorkforceCandidate) string {
+	ownerRef, _, _ := strings.Cut(strings.TrimSpace(requiredBy), "/")
+	kind, id, found := strings.Cut(ownerRef, ":")
+	if found && candidate != nil {
+		switch kind {
+		case "agent":
+			for _, definition := range candidate.Agents {
+				if definition != nil && definition.ID == id && strings.TrimSpace(definition.DisplayName) != "" {
+					return definition.DisplayName
+				}
+			}
+		case "team":
+			if candidate.Team != nil && candidate.Team.ID == id && strings.TrimSpace(candidate.Team.DisplayName) != "" {
+				return candidate.Team.DisplayName
+			}
+		}
+	}
+	if found && id != "" {
+		return humanIdentifier(id)
+	}
+	return "this workforce"
+}
+
+func humanIdentifier(value string) string {
+	replacer := strings.NewReplacer("-", " ", "_", " ", ".", " ", "/", " ", ":", " ")
+	fields := strings.Fields(replacer.Replace(strings.TrimSpace(value)))
+	for index, field := range fields {
+		lower := strings.ToLower(field)
+		switch lower {
+		case "api":
+			fields[index] = "API"
+		case "oauth":
+			fields[index] = "OAuth"
+		case "openseal":
+			fields[index] = "OpenSeal"
+		case "pdf":
+			fields[index] = "PDF"
+		default:
+			fields[index] = strings.ToUpper(lower[:1]) + lower[1:]
+		}
+	}
+	if len(fields) == 0 {
+		return "Required capability"
+	}
+	return strings.Join(fields, " ")
 }
 
 func (m *Model) renderAuthoringAutomations(width int) []string {
