@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,9 @@ type SideEffect = capability.SideEffect
 type IdempotencyMode = capability.IdempotencyMode
 type CredentialRequirement = capability.CredentialRequirement
 type CredentialReference = capability.CredentialReference
+type OAuth2Subject = capability.OAuth2Subject
+type OAuth2Requirement = capability.OAuth2Requirement
+type OAuth2GrantSummary = capability.OAuth2GrantSummary
 type ActionRetryPolicy = capability.ActionRetryPolicy
 type Duration = capability.Duration
 type Action = capability.Action
@@ -49,6 +53,9 @@ const (
 	IdempotencyNone      = capability.IdempotencyNone
 	IdempotencySupported = capability.IdempotencySupported
 	IdempotencyRequired  = capability.IdempotencyRequired
+
+	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
+	OAuth2SubjectUser         = capability.OAuth2SubjectUser
 
 	BindingLifecycleCreated  = capability.BindingLifecycleCreated
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
@@ -960,6 +967,13 @@ func validateCredentialRequirements(requirements []CredentialRequirement) error 
 		name := strings.TrimSpace(requirement.Name)
 		if name == "" || strings.TrimSpace(requirement.Kind) == "" || seen[name] {
 			return errors.New("credential name and kind must be unique and non-empty")
+		}
+		normalized, err := capability.NormalizeOAuth2Requirement(requirement.OAuth2)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(normalized, requirement.OAuth2) {
+			return errors.New("OAuth 2 credential requirements must use canonical provider, resource, and scope values")
 		}
 		seen[name] = true
 	}

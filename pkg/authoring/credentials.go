@@ -2,6 +2,7 @@ package authoring
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -10,8 +11,63 @@ import (
 )
 
 type skillCredentialBinding struct {
-	Key  string
-	Kind string
+	Key    string
+	Kind   string
+	OAuth2 *capability.OAuth2Requirement
+}
+
+// CredentialBindingRequirement is the complete, secret-free deployment slot
+// contract derived from a selected Skill. OAuth2 is nil for ordinary static or
+// host-managed secret references.
+type CredentialBindingRequirement struct {
+	Key    string                        `json:"key"`
+	Kind   string                        `json:"kind"`
+	OAuth2 *capability.OAuth2Requirement `json:"oauth2,omitempty"`
+}
+
+// RequiredCredentialBindings derives exact active deployment requirements
+// from a candidate and its authorized catalog. Hosts use the result when
+// validating a selected opaque connection; no credential reference or value is
+// included.
+func RequiredCredentialBindings(candidate WorkforceCandidate, catalog CapabilityCatalog) map[string][]CredentialBindingRequirement {
+	result := make(map[string][]CredentialBindingRequirement)
+	activation, activationErr := EffectiveWorkforceActivationIntent(candidate.Activation)
+	if activationErr != nil || activation != WorkforceActivationActive {
+		return result
+	}
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		byKey := make(map[string]CredentialBindingRequirement)
+		for _, selected := range definition.SkillRequirements {
+			for _, binding := range requiredSkillCredentialBindings(catalog.Skills[selected.SkillID], selected.RequiredActions) {
+				if binding.Key == "" {
+					continue
+				}
+				byKey[binding.Key] = CredentialBindingRequirement{
+					Key: binding.Key, Kind: binding.Kind, OAuth2: binding.OAuth2,
+				}
+			}
+		}
+		for _, requirement := range catalog.AgentCredentialRequirements {
+			if requirement.RequiredForActivation {
+				key := strings.TrimSpace(requirement.BindingKey)
+				if key != "" {
+					if _, exists := byKey[key]; !exists {
+						byKey[key] = CredentialBindingRequirement{Key: key}
+					}
+				}
+			}
+		}
+		for _, requirement := range byKey {
+			result[definition.ID] = append(result[definition.ID], requirement)
+		}
+		sort.Slice(result[definition.ID], func(i, j int) bool {
+			return result[definition.ID][i].Key < result[definition.ID][j].Key
+		})
+	}
+	return result
 }
 
 // requiredSkillCredentialBindings returns the exact deployment slots consumed
@@ -27,8 +83,8 @@ func requiredSkillCredentialBindings(skill SkillCapability, requiredActions []st
 		}
 	}
 	result := make([]skillCredentialBinding, 0, len(skill.Credentials)+len(skill.CredentialKinds))
-	seen := make(map[string]bool, cap(result))
 	if len(skill.Credentials) > 0 {
+		byKey := make(map[string]skillCredentialBinding)
 		for _, credential := range skill.Credentials {
 			if credential.Optional {
 				continue
@@ -47,13 +103,22 @@ func requiredSkillCredentialBindings(skill SkillCapability, requiredActions []st
 			if key == "" {
 				key = kind
 			}
-			if key == "" || kind == "" || seen[key] {
+			if key == "" || kind == "" {
 				continue
 			}
-			seen[key] = true
-			result = append(result, skillCredentialBinding{Key: key, Kind: kind})
+			current, exists := byKey[key]
+			if !exists {
+				byKey[key] = skillCredentialBinding{Key: key, Kind: kind, OAuth2: credential.OAuth2}
+				continue
+			}
+			current.OAuth2 = mergeOAuth2Requirements(current.OAuth2, credential.OAuth2)
+			byKey[key] = current
+		}
+		for _, binding := range byKey {
+			result = append(result, binding)
 		}
 	} else {
+		seen := make(map[string]bool, len(skill.CredentialKinds))
 		for _, value := range skill.CredentialKinds {
 			kind := strings.TrimSpace(value)
 			if kind == "" || seen[kind] {
@@ -67,13 +132,48 @@ func requiredSkillCredentialBindings(skill SkillCapability, requiredActions []st
 	return result
 }
 
+func mergeOAuth2Requirements(left, right *capability.OAuth2Requirement) *capability.OAuth2Requirement {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+	scopes := append(append([]string(nil), left.Scopes...), right.Scopes...)
+	normalized, err := capability.NormalizeOAuth2Requirement(&capability.OAuth2Requirement{
+		Provider: left.Provider, Subject: left.Subject, Resource: left.Resource, Scopes: scopes,
+	})
+	if err != nil {
+		// Catalog validation rejects incompatible declarations before this
+		// helper is used. Returning the left contract remains fail-closed for
+		// malformed direct callers because placement catalog validation fails.
+		return left
+	}
+	return normalized
+}
+
 // ValidateCredentialPlacement verifies that every supplied placement uses a
 // canonical credential kind and one currently authorized opaque reference.
 // When a generated candidate is supplied, references are also restricted to
 // the exact binding slots required by that Agent. Resolved credential values
 // never cross this boundary.
 func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[string][]string, placement ChangeSetPlacement, choices []capability.CredentialBindingChoice) error {
-	authorized := make(map[string]map[string]bool)
+	requirements := make(map[string][]CredentialBindingRequirement, len(required))
+	for agentID, keys := range required {
+		for _, key := range keys {
+			requirements[agentID] = append(requirements[agentID], CredentialBindingRequirement{Key: key})
+		}
+	}
+	return ValidateCredentialPlacementWithRequirements(candidate, requirements, placement, choices)
+}
+
+// ValidateCredentialPlacementWithRequirements validates exact credential kinds
+// and OAuth 2 grant coverage in addition to opaque reference authorization.
+// It is the canonical host boundary for new authoring integrations; the legacy
+// kind-only function remains for callers that have not yet projected typed
+// requirements.
+func ValidateCredentialPlacementWithRequirements(candidate *WorkforceCandidate, required map[string][]CredentialBindingRequirement, placement ChangeSetPlacement, choices []capability.CredentialBindingChoice) error {
+	authorized := make(map[string]map[string]*capability.OAuth2GrantSummary)
 	declaredBindings := make(map[string]bool)
 	deploymentBindings := make(map[string]bool)
 	for _, choice := range choices {
@@ -81,6 +181,10 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 		id := strings.TrimSpace(choice.Reference.ID)
 		if kind == "" || id == "" {
 			return fmt.Errorf("credential binding choices require an opaque kind and reference")
+		}
+		grant, err := capability.NormalizeOAuth2GrantSummary(choice.OAuth2)
+		if err != nil || !reflect.DeepEqual(grant, choice.OAuth2) {
+			return fmt.Errorf("credential binding choice %s has an invalid or non-canonical OAuth 2 grant summary", choice.DisplayName)
 		}
 		bindingKeys := append([]string(nil), choice.BindingKeys...)
 		explicitBindingKeys := len(bindingKeys) > 0
@@ -99,25 +203,27 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 				deploymentBindings[bindingKey] = true
 			}
 			if authorized[bindingKey] == nil {
-				authorized[bindingKey] = make(map[string]bool)
+				authorized[bindingKey] = make(map[string]*capability.OAuth2GrantSummary)
 			}
-			authorized[bindingKey][kind+"\x00"+id] = true
+			identity := kind + "\x00" + id
+			authorized[bindingKey][identity] = grant
 		}
 	}
 
-	requiredByAgent := make(map[string]map[string]bool)
+	requiredByAgent := make(map[string]map[string]CredentialBindingRequirement)
 	if candidate != nil {
 		for _, definition := range candidate.Agents {
 			if definition == nil {
 				continue
 			}
-			kinds := make(map[string]bool)
-			for _, kind := range required[definition.ID] {
-				if kind = strings.TrimSpace(kind); kind != "" {
-					kinds[kind] = true
+			bindings := make(map[string]CredentialBindingRequirement)
+			for _, requirement := range required[definition.ID] {
+				requirement.Key, requirement.Kind = strings.TrimSpace(requirement.Key), strings.TrimSpace(requirement.Kind)
+				if requirement.Key != "" {
+					bindings[requirement.Key] = requirement
 				}
 			}
-			requiredByAgent[definition.ID] = kinds
+			requiredByAgent[definition.ID] = bindings
 		}
 	}
 
@@ -145,22 +251,30 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 			// become required (for example, an inactive Agent may already have
 			// its model provider selected). Skill credentials remain restricted
 			// to the exact requirements declared by the candidate.
-			if candidate != nil && !allowedBindings[key] && !deploymentBindings[key] {
-				expected := sortedCredentialBindings(allowedBindings)
+			requirement, requiredBinding := allowedBindings[key]
+			if candidate != nil && !requiredBinding && !deploymentBindings[key] {
+				expected := sortedCredentialRequirements(allowedBindings)
 				if len(expected) == 0 {
 					return fmt.Errorf("Agent %s does not require credential kind %s", agentID, key)
 				}
 				return fmt.Errorf("Agent %s credential key %s is not a required kind; expected %s", agentID, key, strings.Join(expected, ", "))
 			}
-			if !authorized[key][kind+"\x00"+id] {
+			grant, available := authorized[key][kind+"\x00"+id]
+			if !available {
 				return fmt.Errorf("Agent %s credential reference for binding %s is unavailable or no longer authorized", agentID, key)
+			}
+			if requirement.Kind != "" && requirement.Kind != kind {
+				return fmt.Errorf("Agent %s credential reference for binding %s must use kind %s", agentID, key, requirement.Kind)
+			}
+			if requirement.OAuth2 != nil && !capability.OAuth2GrantSatisfies(requirement.OAuth2, grant) {
+				return fmt.Errorf("Agent %s OAuth 2 connection for binding %s does not grant the required provider, subject, resource, and scopes", agentID, key)
 			}
 		}
 	}
 	return nil
 }
 
-func sortedCredentialBindings(values map[string]bool) []string {
+func sortedCredentialRequirements(values map[string]CredentialBindingRequirement) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {
 		result = append(result, value)

@@ -1338,9 +1338,13 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 			}
 			if candidate.Activation != WorkforceActivationInactive {
 				for _, binding := range requiredSkillCredentialBindings(capability, requirement.RequiredActions) {
-					if !catalog.AvailableCredentials[binding.Key] {
+					if !credentialRequirementAvailable(catalog, binding) {
 						key := "credential:" + binding.Key + ":" + definition.ID
-						missing[key] = MissingRequirement{Kind: "credential", ID: binding.Key, RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID}
+						missing[key] = MissingRequirement{
+							Kind: "credential", ID: binding.Key,
+							RequiredBy: "agent:" + definition.ID + "/skill:" + requirement.SkillID,
+							OAuth2:     binding.OAuth2,
+						}
 					}
 				}
 			}
@@ -1432,6 +1436,19 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 		return result[i].Kind < result[j].Kind
 	})
 	return result
+}
+
+func credentialRequirementAvailable(catalog CapabilityCatalog, requirement skillCredentialBinding) bool {
+	if requirement.OAuth2 == nil {
+		return catalog.AvailableCredentials[requirement.Key]
+	}
+	for index := range catalog.AvailableCredentialGrants[requirement.Key] {
+		grant := &catalog.AvailableCredentialGrants[requirement.Key][index]
+		if capability.OAuth2GrantSatisfies(requirement.OAuth2, grant) {
+			return true
+		}
+	}
+	return false
 }
 
 func sourceMonitorWithinPolicy(template *workforce.ObjectiveTemplate, policy SourcePolicyCapability) bool {

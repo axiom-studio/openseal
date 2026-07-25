@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -816,6 +817,65 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				return fmt.Errorf("Skill %s compatibility requires a requirement and evidence", id)
 			}
 		}
+		type credentialContract struct {
+			kind    string
+			oauth2  *capability.OAuth2Requirement
+			actions map[string]bool
+			all     bool
+		}
+		credentialNames := make(map[string]credentialContract, len(skill.Credentials))
+		for index, credential := range skill.Credentials {
+			if credential.Name != strings.TrimSpace(credential.Name) || credential.Kind != strings.TrimSpace(credential.Kind) ||
+				credential.Name == "" || credential.Kind == "" || len(credential.Name) > 128 || len(credential.Kind) > 128 {
+				return fmt.Errorf("Skill %s credential %d is invalid", id, index)
+			}
+			normalized, err := capability.NormalizeOAuth2Requirement(credential.OAuth2)
+			if err != nil || !reflect.DeepEqual(normalized, credential.OAuth2) {
+				return fmt.Errorf("Skill %s credential %d OAuth 2 requirement is invalid or non-canonical", id, index)
+			}
+			selectedActions := make(map[string]bool, len(credential.Actions))
+			for _, action := range credential.Actions {
+				if action != strings.TrimSpace(action) || !actions[action] || selectedActions[action] {
+					return fmt.Errorf("Skill %s credential %d references an undeclared action", id, index)
+				}
+				selectedActions[action] = true
+			}
+			if existing, ok := credentialNames[credential.Name]; ok {
+				if existing.kind != credential.Kind || !sameOAuth2Authorization(existing.oauth2, credential.OAuth2) ||
+					existing.all || len(selectedActions) == 0 {
+					return fmt.Errorf("Skill %s credential %s has conflicting action-scoped declarations", id, credential.Name)
+				}
+				for action := range selectedActions {
+					if existing.actions[action] {
+						return fmt.Errorf("Skill %s credential %s repeats action %s", id, credential.Name, action)
+					}
+					existing.actions[action] = true
+				}
+				credentialNames[credential.Name] = existing
+			} else {
+				credentialNames[credential.Name] = credentialContract{
+					kind: credential.Kind, oauth2: credential.OAuth2,
+					actions: selectedActions, all: len(selectedActions) == 0,
+				}
+			}
+		}
+	}
+	for bindingKey, grants := range catalog.AvailableCredentialGrants {
+		if bindingKey != strings.TrimSpace(bindingKey) || bindingKey == "" || len(bindingKey) > 128 || len(grants) > 32 {
+			return fmt.Errorf("available OAuth 2 grants for credential %q are invalid", bindingKey)
+		}
+		seen := make(map[string]bool, len(grants))
+		for index := range grants {
+			normalized, err := capability.NormalizeOAuth2GrantSummary(&grants[index])
+			if err != nil || !reflect.DeepEqual(normalized, &grants[index]) {
+				return fmt.Errorf("available OAuth 2 grant %d for credential %s is invalid or non-canonical", index, bindingKey)
+			}
+			encoded, _ := json.Marshal(normalized)
+			if seen[string(encoded)] {
+				return fmt.Errorf("available OAuth 2 grants for credential %s contain a duplicate", bindingKey)
+			}
+			seen[string(encoded)] = true
+		}
 	}
 	credentialKeys := make(map[string]bool, len(catalog.AgentCredentialRequirements))
 	for index, requirement := range catalog.AgentCredentialRequirements {
@@ -921,6 +981,13 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		seenDiagnostics[identity] = true
 	}
 	return nil
+}
+
+func sameOAuth2Authorization(left, right *capability.OAuth2Requirement) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Provider == right.Provider && left.Subject == right.Subject && left.Resource == right.Resource
 }
 
 func refinementSkillChoiceViable(skill SkillCapability) bool {

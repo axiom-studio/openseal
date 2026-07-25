@@ -146,6 +146,7 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 	compact := cloneCapabilityCatalog(catalog)
 	compact.CapabilityNeeds = nil
 	compact.AgentCredentialRequirements = nil
+	compact.AvailableCredentialGrants = nil
 	for id, skill := range compact.Skills {
 		constraints := make([]SkillCompatibility, 0, len(skill.Compatibility))
 		for _, compatibility := range skill.Compatibility {

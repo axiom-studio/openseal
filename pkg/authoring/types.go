@@ -58,10 +58,11 @@ type SkillCompatibility struct {
 }
 
 type SkillCredential struct {
-	Name     string   `json:"name"`
-	Kind     string   `json:"kind"`
-	Actions  []string `json:"actions,omitempty"`
-	Optional bool     `json:"optional,omitempty"`
+	Name     string                        `json:"name"`
+	Kind     string                        `json:"kind"`
+	Actions  []string                      `json:"actions,omitempty"`
+	Optional bool                          `json:"optional,omitempty"`
+	OAuth2   *capability.OAuth2Requirement `json:"oauth2,omitempty"`
 }
 
 // SourcePolicyCapability is the credential-free authoring projection of a
@@ -81,13 +82,17 @@ type SourcePolicySourceCapability struct {
 }
 
 type CapabilityCatalog struct {
-	Skills                      map[string]SkillCapability        `json:"skills,omitempty"`
-	CapabilityNeeds             []CapabilityNeed                  `json:"capabilityNeeds,omitempty"`
-	AgentCredentialRequirements []AgentCredentialRequirement      `json:"agentCredentialRequirements,omitempty"`
-	AvailableCredentials        map[string]bool                   `json:"availableCredentials,omitempty"`
-	SourcePolicies              map[string]SourcePolicyCapability `json:"sourcePolicies,omitempty"`
-	AuthorityConstraint         *AuthorityConstraint              `json:"authorityConstraint,omitempty"`
-	Diagnostics                 []CatalogDiagnostic               `json:"diagnostics,omitempty"`
+	Skills                      map[string]SkillCapability   `json:"skills,omitempty"`
+	CapabilityNeeds             []CapabilityNeed             `json:"capabilityNeeds,omitempty"`
+	AgentCredentialRequirements []AgentCredentialRequirement `json:"agentCredentialRequirements,omitempty"`
+	AvailableCredentials        map[string]bool              `json:"availableCredentials,omitempty"`
+	// AvailableCredentialGrants contains credential-free host attestations
+	// used only for deterministic OAuth 2 readiness. Opaque references and
+	// external account identifiers remain outside the model-visible catalog.
+	AvailableCredentialGrants map[string][]capability.OAuth2GrantSummary `json:"availableCredentialGrants,omitempty"`
+	SourcePolicies            map[string]SourcePolicyCapability          `json:"sourcePolicies,omitempty"`
+	AuthorityConstraint       *AuthorityConstraint                       `json:"authorityConstraint,omitempty"`
+	Diagnostics               []CatalogDiagnostic                        `json:"diagnostics,omitempty"`
 }
 
 // AgentCredentialRequirement describes a deployment credential slot required
@@ -316,9 +321,10 @@ type ValidationIssue struct {
 }
 
 type MissingRequirement struct {
-	Kind       string `json:"kind"`
-	ID         string `json:"id"`
-	RequiredBy string `json:"requiredBy"`
+	Kind       string                        `json:"kind"`
+	ID         string                        `json:"id"`
+	RequiredBy string                        `json:"requiredBy"`
+	OAuth2     *capability.OAuth2Requirement `json:"oauth2,omitempty"`
 }
 
 type RiskChange struct {

@@ -78,6 +78,114 @@ func TestValidateCredentialPlacementAcceptsAuthorizedDeploymentBinding(t *testin
 	}
 }
 
+func TestValidateCredentialPlacementRequiresOAuth2GrantCoverage(t *testing.T) {
+	requirement := CredentialBindingRequirement{
+		Key: "SLACK_CONNECTION", Kind: "slack-oauth",
+		OAuth2: &capability.OAuth2Requirement{
+			Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
+			Scopes: []string{"channels:history", "chat:write"},
+		},
+	}
+	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "slack-agent"}}}
+	required := map[string][]CredentialBindingRequirement{"slack-agent": {requirement}}
+	reference := capability.CredentialReference{Kind: "slack-oauth", ID: "connection://slack/7"}
+	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"slack-agent": {"SLACK_CONNECTION": reference},
+	}}
+	choice := capability.CredentialBindingChoice{
+		Reference: reference, DisplayName: "Axiom workspace", BindingKeys: []string{"SLACK_CONNECTION"},
+		OAuth2: &capability.OAuth2GrantSummary{
+			Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
+			Scopes: []string{"app_mentions:read", "channels:history", "chat:write"},
+		},
+	}
+	if err := ValidateCredentialPlacementWithRequirements(candidate, required, placement, []capability.CredentialBindingChoice{choice}); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]func(*capability.OAuth2GrantSummary){
+		"wrong provider": func(grant *capability.OAuth2GrantSummary) { grant.Provider = "microsoft" },
+		"wrong subject":  func(grant *capability.OAuth2GrantSummary) { grant.Subject = capability.OAuth2SubjectUser },
+		"missing scope":  func(grant *capability.OAuth2GrantSummary) { grant.Scopes = []string{"chat:write"} },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			candidateChoice := choice
+			grant := *choice.OAuth2
+			grant.Scopes = append([]string(nil), choice.OAuth2.Scopes...)
+			mutate(&grant)
+			candidateChoice.OAuth2 = &grant
+			if err := ValidateCredentialPlacementWithRequirements(candidate, required, placement, []capability.CredentialBindingChoice{candidateChoice}); err == nil ||
+				!strings.Contains(err.Error(), "does not grant") {
+				t.Fatalf("coverage error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRequiredCredentialBindingsDeriveActionScopedOAuth2Scopes(t *testing.T) {
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{"slack": {
+		ID: "slack", Actions: []string{"read", "reply"},
+		Credentials: []SkillCredential{
+			{Name: "SLACK_CONNECTION", Kind: "slack-oauth", Actions: []string{"read"}, OAuth2: &capability.OAuth2Requirement{
+				Provider: "slack", Subject: capability.OAuth2SubjectInstallation, Scopes: []string{"channels:history"},
+			}},
+			{Name: "SLACK_CONNECTION", Kind: "slack-oauth", Actions: []string{"reply"}, OAuth2: &capability.OAuth2Requirement{
+				Provider: "slack", Subject: capability.OAuth2SubjectInstallation, Scopes: []string{"chat:write"},
+			}},
+		},
+	}}}
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "slack-agent", SkillRequirements: []agent.SkillRequirement{{
+			SkillID: "slack", RequiredActions: []string{"read", "reply"},
+		}},
+	}}}
+	required := RequiredCredentialBindings(candidate, catalog)["slack-agent"]
+	if len(required) != 1 || strings.Join(required[0].OAuth2.Scopes, ",") != "channels:history,chat:write" {
+		t.Fatalf("action-scoped OAuth 2 requirement = %#v", required)
+	}
+}
+
+func TestMissingCredentialRequirementPreservesOAuth2SetupContract(t *testing.T) {
+	oauth2 := &capability.OAuth2Requirement{
+		Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
+		Scopes: []string{"channels:history", "chat:write"},
+	}
+	candidate := WorkforceCandidate{
+		Activation: WorkforceActivationActive,
+		Agents: []*agent.AgentDefinition{{
+			ID: "slack-agent", SkillRequirements: []agent.SkillRequirement{{
+				SkillID: "slack", RequiredActions: []string{"reply"},
+			}},
+		}},
+	}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{"slack": {
+		ID: "slack", Actions: []string{"reply"}, Readiness: SkillReadinessReady,
+		Credentials: []SkillCredential{{
+			Name: "SLACK_CONNECTION", Kind: "slack-oauth", Actions: []string{"reply"}, OAuth2: oauth2,
+		}},
+	}}}
+	missing := missingRequirements(&candidate, catalog)
+	if len(missing) != 1 || missing[0].Kind != "credential" || missing[0].ID != "SLACK_CONNECTION" ||
+		missing[0].OAuth2 == nil || strings.Join(missing[0].OAuth2.Scopes, ",") != "channels:history,chat:write" {
+		t.Fatalf("missing OAuth 2 setup requirement = %#v", missing)
+	}
+
+	catalog.AvailableCredentials = map[string]bool{"SLACK_CONNECTION": true}
+	if missing = missingRequirements(&candidate, catalog); len(missing) != 1 {
+		t.Fatalf("legacy configured boolean incorrectly satisfied OAuth 2 requirement: %#v", missing)
+	}
+	catalog.AvailableCredentialGrants = map[string][]capability.OAuth2GrantSummary{
+		"SLACK_CONNECTION": {{
+			Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
+			Scopes: []string{"app_mentions:read", "channels:history", "chat:write"},
+		}},
+	}
+	if missing = missingRequirements(&candidate, catalog); len(missing) != 0 {
+		t.Fatalf("authorized OAuth 2 scope superset did not satisfy setup: %#v", missing)
+	}
+}
+
 func TestValidateCredentialPlacementKeepsOptionalDeploymentBindingSeparateFromSkillCredential(t *testing.T) {
 	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "slack-agent"}}}
 	required := map[string][]string{"slack-agent": {"slack_bot_token"}}
