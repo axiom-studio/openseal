@@ -182,9 +182,11 @@ type ConversationDeliveryCapabilities struct {
 // entrypoints. A generic host invokes these entrypoints; provider-specific code
 // remains part of the Skill package rather than the host or kernel.
 type ConversationAdapterTransport struct {
-	Kind             string `json:"kind"`
-	IngressEndpoint  string `json:"ingressEndpoint"`
-	DeliveryEndpoint string `json:"deliveryEndpoint"`
+	Kind                string   `json:"kind"`
+	IngressEndpoint     string   `json:"ingressEndpoint"`
+	DeliveryEndpoint    string   `json:"deliveryEndpoint"`
+	IngressCredentials  []string `json:"ingressCredentials,omitempty"`
+	DeliveryCredentials []string `json:"deliveryCredentials,omitempty"`
 }
 
 // ConversationAdapter declares one provider adapter supplied by a Skill.

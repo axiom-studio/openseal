@@ -453,6 +453,7 @@ func slackConversationSkillDefinition() *skill.Definition {
 			},
 			Transport: skill.ConversationAdapterTransport{
 				Kind: "plugin", IngressEndpoint: "slack.conversation.ingress", DeliveryEndpoint: "slack.conversation.deliver",
+				DeliveryCredentials: []string{"SLACK_CONNECTION"},
 			},
 		}},
 	}

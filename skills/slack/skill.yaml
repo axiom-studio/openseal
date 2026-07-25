@@ -33,6 +33,8 @@ definition:
       inboundEventTypes: [conversation.message.received]
       features: [mentions, threads]
       credentials:
+        - name: SLACK_SIGNING_SECRET
+          kind: slack-signing-secret
         - name: SLACK_CONNECTION
           kind: slack-oauth
           oauth2:
@@ -55,3 +57,5 @@ definition:
         kind: plugin
         ingressEndpoint: slack.conversation.ingress
         deliveryEndpoint: slack.conversation.deliver
+        ingressCredentials: [SLACK_SIGNING_SECRET]
+        deliveryCredentials: [SLACK_CONNECTION]

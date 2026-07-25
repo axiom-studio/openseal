@@ -24,6 +24,7 @@ const (
 	slackDeliveryNodeType = "slack.conversation.deliver"
 	adapterEnvelopeKey    = "_opensealConversationAdapterRequest"
 	slackConnectionKey    = "SLACK_CONNECTION"
+	slackSigningSecretKey = "SLACK_SIGNING_SECRET"
 	maxSlackResponseBytes = 1 << 20
 )
 
@@ -143,7 +144,11 @@ func (a *slackAdapter) ingress(_ context.Context, config map[string]interface{})
 		(envelope.Operation == "gateway_ingress" && envelope.Gateway == nil) {
 		return nil, errors.New("Slack ingress request is invalid")
 	}
-	if !a.verifySlackRequest(envelope.Request) {
+	signingSecret := a.signingSecret
+	if resolved, ok := config[slackSigningSecretKey].(string); ok && strings.TrimSpace(resolved) != "" {
+		signingSecret = strings.TrimSpace(resolved)
+	}
+	if !a.verifySlackRequest(envelope.Request, signingSecret) {
 		return map[string]interface{}{
 			"statusCode": http.StatusUnauthorized, "contentType": "text/plain",
 			"body": "invalid Slack signature",
@@ -202,8 +207,8 @@ func (a *slackAdapter) ingress(_ context.Context, config map[string]interface{})
 	}, nil
 }
 
-func (a *slackAdapter) verifySlackRequest(request *openseal.ExternalConversationIngressRequest) bool {
-	if request == nil || a.signingSecret == "" {
+func (a *slackAdapter) verifySlackRequest(request *openseal.ExternalConversationIngressRequest, signingSecret string) bool {
+	if request == nil || signingSecret == "" {
 		return false
 	}
 	timestamp := firstHeader(request.Headers, "X-Slack-Request-Timestamp")
@@ -216,7 +221,7 @@ func (a *slackAdapter) verifySlackRequest(request *openseal.ExternalConversation
 	if delta := a.now().UTC().Sub(occurred); delta > 5*time.Minute || delta < -5*time.Minute {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(a.signingSecret))
+	mac := hmac.New(sha256.New, []byte(signingSecret))
 	_, _ = mac.Write([]byte("v0:" + timestamp + ":"))
 	_, _ = mac.Write(request.Body)
 	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
