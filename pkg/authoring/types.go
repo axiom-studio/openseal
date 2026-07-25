@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/source"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
@@ -108,6 +109,28 @@ type CapabilityCatalog struct {
 	SourcePolicies            map[string]SourcePolicyCapability          `json:"sourcePolicies,omitempty"`
 	AuthorityConstraint       *AuthorityConstraint                       `json:"authorityConstraint,omitempty"`
 	Diagnostics               []CatalogDiagnostic                        `json:"diagnostics,omitempty"`
+	RuntimeComposition        *RuntimeCompositionCapability              `json:"runtimeComposition,omitempty"`
+}
+
+const RuntimeCompositionProtocolV1 = "openseal.runtime-composition/v1"
+
+type RuntimeCompositionCapability struct {
+	ProtocolVersion string                        `json:"protocolVersion"`
+	Conversation    ConversationRuntimeCapability `json:"conversation"`
+	Runbook         RunbookRuntimeCapability      `json:"runbook"`
+}
+
+type ConversationRuntimeCapability struct {
+	EventTypes     []string                  `json:"eventTypes"`
+	HandlerKinds   []ConversationHandlerKind `json:"handlerKinds"`
+	ReplyModes     []ConversationReplyMode   `json:"replyModes"`
+	CanonicalReply bool                      `json:"canonicalReply"`
+}
+
+type RunbookRuntimeCapability struct {
+	TriggerKinds    []runbook.TriggerKind `json:"triggerKinds"`
+	StepKinds       []runbook.StepKind    `json:"stepKinds"`
+	CanInvokeAgents bool                  `json:"canInvokeAgents"`
 }
 
 // AgentCredentialRequirement describes a deployment credential slot required
@@ -209,14 +232,83 @@ type Assignment struct {
 }
 
 type WorkforceCandidate struct {
-	Agents      []*agent.AgentDefinition `json:"agents"`
-	Team        *team.Definition         `json:"team,omitempty"`
-	Assignments []Assignment             `json:"assignments,omitempty"`
-	Initiative  *InitiativeBlueprint     `json:"initiative,omitempty"`
+	Agents                []*agent.AgentDefinition        `json:"agents"`
+	Team                  *team.Definition                `json:"team,omitempty"`
+	Assignments           []Assignment                    `json:"assignments,omitempty"`
+	Initiative            *InitiativeBlueprint            `json:"initiative,omitempty"`
+	ConversationEndpoints []ConversationEndpointBlueprint `json:"conversationEndpoints,omitempty"`
 	// Activation is the reviewed, digest-bound operating state that atomic
 	// apply must materialize. The Compiler derives it from typed commitments;
 	// apply never infers it from prompt prose.
 	Activation WorkforceActivationIntent `json:"activation"`
+}
+
+type ConversationEndpointOwnerType string
+
+const (
+	ConversationEndpointOwnerAgent ConversationEndpointOwnerType = "agent"
+	ConversationEndpointOwnerTeam  ConversationEndpointOwnerType = "team"
+)
+
+type ConversationHandlerKind string
+
+const (
+	ConversationHandlerAgent   ConversationHandlerKind = "agent"
+	ConversationHandlerTeam    ConversationHandlerKind = "team"
+	ConversationHandlerRunbook ConversationHandlerKind = "runbook"
+)
+
+type ConversationMessageSelection string
+
+const (
+	ConversationSelectAllMessages     ConversationMessageSelection = "all_messages"
+	ConversationSelectMentions        ConversationMessageSelection = "mentions"
+	ConversationSelectDirectOrMention ConversationMessageSelection = "direct_or_mentions"
+)
+
+type ConversationReplyMode string
+
+const (
+	ConversationReplyProviderDefault ConversationReplyMode = "provider_default"
+	ConversationReplyThread          ConversationReplyMode = "thread"
+	ConversationReplyChannel         ConversationReplyMode = "channel"
+)
+
+type ConversationEndpointOwner struct {
+	Type ConversationEndpointOwnerType `json:"type"`
+	ID   string                        `json:"id"`
+}
+
+type ConversationHandlerBlueprint struct {
+	Kind              ConversationHandlerKind `json:"kind"`
+	AgentDefinitionID string                  `json:"agentDefinitionId,omitempty"`
+	RunbookID         string                  `json:"runbookId,omitempty"`
+	RunbookVersion    string                  `json:"runbookVersion,omitempty"`
+	Trigger           string                  `json:"trigger,omitempty"`
+}
+
+type ConversationEndpointPolicyBlueprint struct {
+	MessageSelection ConversationMessageSelection `json:"messageSelection"`
+	ReplyMode        ConversationReplyMode        `json:"replyMode"`
+	IgnoreBots       bool                         `json:"ignoreBots"`
+}
+
+// ConversationEndpointBlueprint is reviewable authoring intent. Exact Skill
+// bindings, OAuth connections, provider installation identities, and external
+// addresses are resolved later through governed placement.
+type ConversationEndpointBlueprint struct {
+	ID                 string                              `json:"id"`
+	Name               string                              `json:"name"`
+	Owner              ConversationEndpointOwner           `json:"owner"`
+	SkillID            string                              `json:"skillId"`
+	SkillVersion       string                              `json:"skillVersion"`
+	AdapterID          string                              `json:"adapterId"`
+	Mode               capability.ConversationEndpointMode `json:"mode"`
+	Address            string                              `json:"address,omitempty"`
+	Handler            ConversationHandlerBlueprint        `json:"handler"`
+	Policy             ConversationEndpointPolicyBlueprint `json:"policy"`
+	CanonicalReply     bool                                `json:"canonicalReply"`
+	ArchitectureReason string                              `json:"architectureReason"`
 }
 
 type WorkforceActivationIntent string

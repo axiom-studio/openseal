@@ -67,6 +67,42 @@ func RequiredCredentialBindings(candidate WorkforceCandidate, catalog Capability
 			return result[definition.ID][i].Key < result[definition.ID][j].Key
 		})
 	}
+	for _, endpoint := range candidate.ConversationEndpoints {
+		skillCapability, ok := catalog.Skills[endpoint.SkillID]
+		if !ok || skillCapability.Version != endpoint.SkillVersion {
+			continue
+		}
+		var adapter *ConversationAdapterCapability
+		for index := range skillCapability.ConversationAdapters {
+			if skillCapability.ConversationAdapters[index].ID == endpoint.AdapterID {
+				adapter = &skillCapability.ConversationAdapters[index]
+				break
+			}
+		}
+		if adapter == nil {
+			continue
+		}
+		target := endpoint.Owner.ID
+		byKey := make(map[string]CredentialBindingRequirement, len(result[target])+len(adapter.Credentials))
+		for _, requirement := range result[target] {
+			byKey[requirement.Key] = requirement
+		}
+		for _, credential := range adapter.Credentials {
+			if credential.Optional {
+				continue
+			}
+			byKey[credential.Name] = CredentialBindingRequirement{
+				Key: credential.Name, Kind: credential.Kind, OAuth2: credential.OAuth2,
+			}
+		}
+		result[target] = result[target][:0]
+		for _, requirement := range byKey {
+			result[target] = append(result[target], requirement)
+		}
+		sort.Slice(result[target], func(i, j int) bool {
+			return result[target][i].Key < result[target][j].Key
+		})
+	}
 	return result
 }
 

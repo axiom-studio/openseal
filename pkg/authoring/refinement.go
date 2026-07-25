@@ -770,6 +770,9 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 // ValidateCapabilityCatalog rejects malformed host projections before they are
 // persisted or placed in model context.
 func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
+	if err := ValidateRuntimeCompositionCapability(catalog.RuntimeComposition); err != nil {
+		return fmt.Errorf("runtime composition capability: %w", err)
+	}
 	if constraint := catalog.AuthorityConstraint; constraint != nil {
 		if constraint.ID != strings.TrimSpace(constraint.ID) || constraint.Version != strings.TrimSpace(constraint.Version) ||
 			!catalogDiagnosticReferencePattern.MatchString(constraint.ID) || !authorityConstraintVersionPattern.MatchString(constraint.Version) {

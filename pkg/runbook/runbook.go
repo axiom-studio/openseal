@@ -19,6 +19,7 @@ type Definition struct {
 	Description string               `json:"description,omitempty"`
 	Entrypoints map[string]string    `json:"entrypoints"`
 	Interfaces  map[string]Interface `json:"interfaces,omitempty"`
+	Triggers    map[string]Trigger   `json:"triggers,omitempty"`
 	Steps       map[string]Step      `json:"steps"`
 }
 
@@ -29,6 +30,19 @@ type Interface struct {
 	Description  string                 `json:"description"`
 	InputSchema  map[string]interface{} `json:"inputSchema"`
 	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"`
+}
+
+type TriggerKind string
+
+const TriggerEvent TriggerKind = "event"
+
+// Trigger declares how an external normalized wake enters a deterministic
+// Runbook. Transport configuration and credentials stay in provider Skills;
+// the Runbook consumes only a canonical event type and entrypoint.
+type Trigger struct {
+	Kind       TriggerKind `json:"kind"`
+	EventType  string      `json:"eventType"`
+	Entrypoint string      `json:"entrypoint"`
 }
 
 type StepKind string
