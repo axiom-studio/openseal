@@ -334,13 +334,35 @@ func EffectiveWorkforceActivationIntent(value WorkforceActivationIntent) (Workfo
 }
 
 type GenerateRequest struct {
-	Mode          Mode                `json:"mode"`
-	Prompt        string              `json:"prompt"`
-	Existing      *WorkforceCandidate `json:"existing,omitempty"`
-	Catalog       CapabilityCatalog   `json:"catalog"`
-	Refinement    *RefinementContext  `json:"refinement,omitempty"`
-	InvocationKey string              `json:"invocationKey,omitempty"`
+	Mode                    Mode                            `json:"mode"`
+	Prompt                  string                          `json:"prompt"`
+	Existing                *WorkforceCandidate             `json:"existing,omitempty"`
+	Catalog                 CapabilityCatalog               `json:"catalog"`
+	CompositionRequirements *RuntimeCompositionRequirements `json:"compositionRequirements,omitempty"`
+	Refinement              *RefinementContext              `json:"refinement,omitempty"`
+	InvocationKey           string                          `json:"invocationKey,omitempty"`
 }
+
+// RuntimeCompositionRequirements are deterministic, server-owned obligations
+// derived from user intent and the authorized runtime catalog before the
+// probabilistic planner runs. They prevent a provider from replacing an
+// executable event path with prose and tell it which smallest handler patterns
+// are valid without exposing host implementation details.
+type RuntimeCompositionRequirements struct {
+	Conversation *ConversationCompositionRequirement `json:"conversation,omitempty"`
+}
+
+type ConversationCompositionRequirement struct {
+	EventType        string                    `json:"eventType"`
+	HandlerKinds     []ConversationHandlerKind `json:"handlerKinds"`
+	CanonicalReply   bool                      `json:"canonicalReply"`
+	ArchitectureRule string                    `json:"architectureRule"`
+}
+
+const (
+	ConversationArchitectureDirect       = "smallest_direct_handler"
+	ConversationArchitectureOrchestrated = "durable_runbook_orchestration"
+)
 
 // Generator is the only probabilistic boundary. Implementations may use an
 // LLM, a test fixture, or another planner, but must return one strict JSON

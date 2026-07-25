@@ -343,6 +343,7 @@ func TestCompilerReportsCredentialFreeGenerationAndSchemaRepairPhases(t *testing
 		t.Fatal(err)
 	}
 	want := []CompileProgress{
+		{Phase: CompilePhaseCapabilityResolve, Attempt: 1, MaximumAttempts: 1},
 		{Phase: CompilePhaseProviderRequest, Attempt: 1, MaximumAttempts: 1},
 		{Phase: CompilePhaseCandidateValidate, Attempt: 1, MaximumAttempts: 1},
 		{Phase: CompilePhaseSchemaRepair, Attempt: 1, MaximumAttempts: maximumSchemaRepairAttempts},

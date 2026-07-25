@@ -93,6 +93,8 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
 		return nil, fmt.Errorf("authoring capability catalog: %w", err)
 	}
+	reportCompileProgress(observe, CompilePhaseCapabilityResolve, 1, 1)
+	request.CompositionRequirements = deriveRuntimeCompositionRequirements(request.Prompt, request.Catalog)
 	reportCompileProgress(observe, CompilePhaseProviderRequest, 1, 1)
 	payload, err := c.generator.Generate(ctx, request)
 	if err != nil {

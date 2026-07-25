@@ -214,6 +214,7 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 	if candidate == nil {
 		return nil
 	}
+	requirements := deriveRuntimeCompositionRequirements(request.Prompt, request.Catalog)
 	issues := make([]ValidationIssue, 0)
 	for index, endpoint := range candidate.ConversationEndpoints {
 		path := fmt.Sprintf("conversationEndpoints[%d]", index)
@@ -257,8 +258,16 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 				))
 			}
 		}
+		if requirements != nil && requirements.Conversation != nil &&
+			!containsConversationHandlerKind(requirements.Conversation.HandlerKinds, endpoint.Handler.Kind) {
+			issues = append(issues, issue(
+				path+".handler.kind",
+				"conversation_architecture_mismatch",
+				fmt.Sprintf("Conversation handler must follow the derived %s architecture", requirements.Conversation.ArchitectureRule),
+			))
+		}
 	}
-	if !explicitReactiveConversationIntent(request.Prompt) {
+	if requirements == nil || requirements.Conversation == nil {
 		return issues
 	}
 	if request.Catalog.RuntimeComposition == nil {
@@ -269,16 +278,63 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 		issues = append(issues, issue("conversationEndpoints", "reactive_conversation_endpoint_missing", "Prompt requires an executable external conversation endpoint, not a prose-only Objective"))
 		return issues
 	}
-	if runtimeSupportsRunbookConversation(request.Catalog.RuntimeComposition) {
-		hasRunbook := false
-		for _, endpoint := range candidate.ConversationEndpoints {
-			hasRunbook = hasRunbook || endpoint.Handler.Kind == ConversationHandlerRunbook
+	return issues
+}
+
+// deriveRuntimeCompositionRequirements turns prompt intent into a bounded,
+// model-visible executable obligation before generation. A normal one-turn
+// chatbot uses the smallest direct Agent or Team handler. Runbooks are required
+// only when the user asks for deterministic orchestration such as approvals,
+// waits, handoffs, routing, retries, or an explicit workflow.
+func deriveRuntimeCompositionRequirements(prompt string, catalog CapabilityCatalog) *RuntimeCompositionRequirements {
+	if !explicitReactiveConversationIntent(prompt) {
+		return nil
+	}
+	requirement := &ConversationCompositionRequirement{
+		EventType:      conversationMessageReceivedEvent,
+		CanonicalReply: true,
+	}
+	wantsOrchestration := explicitConversationOrchestrationIntent(prompt)
+	if wantsOrchestration {
+		requirement.ArchitectureRule = ConversationArchitectureOrchestrated
+		if runtimeSupportsConversationHandler(catalog.RuntimeComposition, ConversationHandlerRunbook) {
+			requirement.HandlerKinds = []ConversationHandlerKind{ConversationHandlerRunbook}
 		}
-		if !hasRunbook {
-			issues = append(issues, issue("conversationEndpoints", "reactive_conversation_runbook_missing", "Reactive chatbot intent should use a conversation event Runbook with bounded Agent invocation"))
+	} else {
+		requirement.ArchitectureRule = ConversationArchitectureDirect
+		for _, kind := range []ConversationHandlerKind{ConversationHandlerAgent, ConversationHandlerTeam} {
+			if runtimeSupportsConversationHandler(catalog.RuntimeComposition, kind) {
+				requirement.HandlerKinds = append(requirement.HandlerKinds, kind)
+			}
+		}
+		// A catalog may expose only the orchestration handler. It remains the
+		// smallest executable option in that environment and must not be hidden.
+		if len(requirement.HandlerKinds) == 0 && runtimeSupportsRunbookConversation(catalog.RuntimeComposition) {
+			requirement.HandlerKinds = []ConversationHandlerKind{ConversationHandlerRunbook}
+			requirement.ArchitectureRule = ConversationArchitectureOrchestrated
 		}
 	}
-	return issues
+	return &RuntimeCompositionRequirements{Conversation: requirement}
+}
+
+func explicitConversationOrchestrationIntent(prompt string) bool {
+	tokens := compositionTokens(prompt)
+	return containsAnyToken(tokens,
+		"approval", "approvals", "approve", "approved",
+		"delegate", "delegates", "delegation",
+		"escalate", "escalates", "escalation",
+		"handoff", "handoffs",
+		"retry", "retries",
+		"route", "routes", "routing",
+		"runbook", "triage", "triages",
+		"wait", "waits", "workflow", "workflows",
+	)
+}
+
+func runtimeSupportsConversationHandler(value *RuntimeCompositionCapability, wanted ConversationHandlerKind) bool {
+	return value != nil &&
+		containsExactString(value.Conversation.EventTypes, conversationMessageReceivedEvent) &&
+		containsConversationHandlerKind(value.Conversation.HandlerKinds, wanted)
 }
 
 func definitionRunbookInterface(definition *agent.AgentDefinition, entrypoint string) (runbook.Interface, bool) {
