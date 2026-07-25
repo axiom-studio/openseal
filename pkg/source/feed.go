@@ -27,6 +27,14 @@ const (
 	MaximumItems = 100
 )
 
+// IsFeedObservationAction identifies the stable source-observation capability.
+// Version availability and compatibility belong to the Skill binding registry;
+// policy authorization subsequently verifies the invocation's exact version
+// against its durable monitor provenance.
+func IsFeedObservationAction(skillID, action string) bool {
+	return strings.TrimSpace(skillID) == SkillID && strings.TrimSpace(action) == ObserveFeed
+}
+
 type FeedObservation struct {
 	StableSourceID string                 `json:"stableSourceId"`
 	SourceURI      string                 `json:"sourceUri"`

@@ -9,6 +9,25 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+func TestFeedObservationCapabilityIdentityIsStableAcrossVersions(t *testing.T) {
+	if !IsFeedObservationAction(SkillID, ObserveFeed) {
+		t.Fatal("canonical feed observation action was not recognized")
+	}
+	for _, test := range []struct {
+		skillID string
+		action  string
+	}{
+		{skillID: "other.source", action: ObserveFeed},
+		{skillID: SkillID, action: "post_reply"},
+		{skillID: "", action: ObserveFeed},
+		{skillID: SkillID, action: ""},
+	} {
+		if IsFeedObservationAction(test.skillID, test.action) {
+			t.Fatalf("unexpected source observation capability: %#v", test)
+		}
+	}
+}
+
 func TestParseRSSAndAtomDeterministically(t *testing.T) {
 	rss := `<rss><channel><title>Operator forum</title><item><guid>thread-7</guid><link>https://forum.example/thread/7</link><title>Restart recovery</title><description><![CDATA[<p>Runs should resume after a pod restart.</p>]]></description><pubDate>Sun, 13 Jul 2026 02:00:00 +0000</pubDate></item></channel></rss>`
 	first, err := ParseFeed([]byte(rss), "https://forum.example/feed.xml", 10)
