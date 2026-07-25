@@ -12,6 +12,18 @@ import (
 
 const slackChatbotPrompt = "I want a Slack agent that listens to my message in the channel that it is installed in and then responds back to them."
 
+const orchestratedSlackChatbotPrompt = "Create a Slack chatbot that listens for messages, triages them, asks for approval when needed, and then responds."
+
+type compositionCaptureGenerator struct {
+	request GenerateRequest
+	payload []byte
+}
+
+func (g *compositionCaptureGenerator) Generate(_ context.Context, request GenerateRequest) ([]byte, error) {
+	g.request = request
+	return g.payload, nil
+}
+
 func slackChatbotCandidate() WorkforceCandidate {
 	agentID := "slack-response-agent"
 	return WorkforceCandidate{
@@ -131,13 +143,51 @@ func slackChatbotCatalog() CapabilityCatalog {
 	}
 }
 
+func directChatbotCandidate(skillID string, mode capability.ConversationEndpointMode, replyMode ConversationReplyMode) WorkforceCandidate {
+	candidate := slackChatbotCandidate()
+	candidate.Agents[0].Runbook = nil
+	candidate.ConversationEndpoints[0].SkillID = skillID
+	candidate.ConversationEndpoints[0].Mode = mode
+	candidate.ConversationEndpoints[0].Handler = ConversationHandlerBlueprint{
+		Kind:              ConversationHandlerAgent,
+		AgentDefinitionID: candidate.Agents[0].ID,
+	}
+	candidate.ConversationEndpoints[0].Policy.ReplyMode = replyMode
+	candidate.ConversationEndpoints[0].ArchitectureReason = "A direct Agent handler is the smallest executable pattern for one-turn replies."
+	return candidate
+}
+
+func webChatbotCatalog() CapabilityCatalog {
+	return CapabilityCatalog{
+		RuntimeComposition: CanonicalRuntimeCompositionCapability(),
+		Skills: map[string]SkillCapability{
+			"webchat": {
+				ID: "webchat", Version: "1.0.0", Name: "Web chat", Readiness: SkillReadinessReady,
+				ConversationAdapters: []ConversationAdapterCapability{{
+					ID: "conversations", ProtocolVersion: capability.ConversationAdapterProtocolV1,
+					Provider: "webchat", EndpointModes: []capability.ConversationEndpointMode{
+						capability.ConversationEndpointDirect,
+					},
+					InboundEventTypes: []string{capability.ConversationEventMessageReceived},
+					Features:          []capability.ConversationAdapterFeature{capability.ConversationFeatureAttachments},
+					Delivery: capability.ConversationDeliveryCapabilities{
+						Operations:  []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend},
+						Ordering:    capability.ConversationDeliveryOrderConversation,
+						Idempotency: capability.IdempotencyRequired,
+					},
+				}},
+			},
+		},
+	}
+}
+
 func literalRunbookValue(value string) runbook.Value {
 	raw, _ := json.Marshal(value)
 	return runbook.Value{Literal: raw}
 }
 
 func TestCompilerCreatesExecutableSlackChatbotComposition(t *testing.T) {
-	candidate := slackChatbotCandidate()
+	candidate := directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
 	catalog := slackChatbotCatalog()
 	if err := ValidateCapabilityCatalog(catalog); err != nil {
 		t.Fatalf("catalog = %v", err)
@@ -160,7 +210,7 @@ func TestCompilerCreatesExecutableSlackChatbotComposition(t *testing.T) {
 		t.Fatalf("Slack chatbot compile = %#v", result)
 	}
 	if len(result.Candidate.ConversationEndpoints) != 1 ||
-		result.Candidate.ConversationEndpoints[0].Handler.Kind != ConversationHandlerRunbook {
+		result.Candidate.ConversationEndpoints[0].Handler.Kind != ConversationHandlerAgent {
 		t.Fatalf("conversation endpoints = %#v", result.Candidate.ConversationEndpoints)
 	}
 	for _, requirement := range result.Candidate.Agents[0].SkillRequirements {
@@ -178,7 +228,39 @@ func TestCompilerCreatesExecutableSlackChatbotComposition(t *testing.T) {
 	}
 }
 
-func TestReactiveConversationIntentRejectsProseOnlyAndDirectHandlerSubstitutes(t *testing.T) {
+func TestCompilerDerivesConversationRequirementsBeforeProviderGeneration(t *testing.T) {
+	candidate := directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
+	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &compositionCaptureGenerator{payload: payload}
+	compiler, err := NewCompiler(generator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: slackChatbotCatalog(),
+		CompositionRequirements: &RuntimeCompositionRequirements{Conversation: &ConversationCompositionRequirement{
+			EventType: "caller.injected", HandlerKinds: []ConversationHandlerKind{ConversationHandlerRunbook},
+			ArchitectureRule: ConversationArchitectureOrchestrated,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requirement := generator.request.CompositionRequirements
+	if requirement == nil || requirement.Conversation == nil ||
+		requirement.Conversation.EventType != capability.ConversationEventMessageReceived ||
+		!requirement.Conversation.CanonicalReply ||
+		requirement.Conversation.ArchitectureRule != ConversationArchitectureDirect ||
+		len(requirement.Conversation.HandlerKinds) != 2 ||
+		requirement.Conversation.HandlerKinds[0] != ConversationHandlerAgent ||
+		requirement.Conversation.HandlerKinds[1] != ConversationHandlerTeam {
+		t.Fatalf("derived composition requirement = %#v", requirement)
+	}
+}
+
+func TestReactiveConversationIntentRejectsProseOnlyAndWrongArchitecture(t *testing.T) {
 	candidate := slackChatbotCandidate()
 	candidate.ConversationEndpoints = nil
 	issues := validateConversationComposition(&candidate, GenerateRequest{
@@ -188,15 +270,27 @@ func TestReactiveConversationIntentRejectsProseOnlyAndDirectHandlerSubstitutes(t
 		t.Fatalf("prose-only issues = %#v", issues)
 	}
 
-	candidate = slackChatbotCandidate()
-	candidate.ConversationEndpoints[0].Handler = ConversationHandlerBlueprint{
-		Kind: ConversationHandlerAgent, AgentDefinitionID: candidate.Agents[0].ID,
-	}
+	candidate = directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
 	issues = validateConversationComposition(&candidate, GenerateRequest{
 		Prompt: slackChatbotPrompt, Catalog: slackChatbotCatalog(),
 	})
-	if !hasValidationCode(issues, "reactive_conversation_runbook_missing") {
-		t.Fatalf("direct-handler issues = %#v", issues)
+	if hasValidationCode(issues, "conversation_architecture_mismatch") {
+		t.Fatalf("simple direct-handler issues = %#v", issues)
+	}
+
+	issues = validateConversationComposition(&candidate, GenerateRequest{
+		Prompt: orchestratedSlackChatbotPrompt, Catalog: slackChatbotCatalog(),
+	})
+	if !hasValidationCode(issues, "conversation_architecture_mismatch") {
+		t.Fatalf("orchestrated direct-handler issues = %#v", issues)
+	}
+
+	candidate = slackChatbotCandidate()
+	issues = validateConversationComposition(&candidate, GenerateRequest{
+		Prompt: orchestratedSlackChatbotPrompt, Catalog: slackChatbotCatalog(),
+	})
+	if hasValidationCode(issues, "conversation_architecture_mismatch") {
+		t.Fatalf("orchestrated Runbook issues = %#v", issues)
 	}
 
 	candidate = slackChatbotCandidate()
@@ -219,6 +313,60 @@ func TestReactiveConversationIntentRejectsProseOnlyAndDirectHandlerSubstitutes(t
 	}
 }
 
+func TestCompilerComposesEquivalentWebChatAdapterWithoutProviderLogic(t *testing.T) {
+	candidate := directChatbotCandidate("webchat", capability.ConversationEndpointDirect, ConversationReplyProviderDefault)
+	candidate.ConversationEndpoints[0].Name = "Embedded web chat"
+	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(staticGenerator{payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode:    ModeCreate,
+		Prompt:  "Create a web chatbot that listens for customer messages and responds.",
+		Catalog: webChatbotCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := result.Candidate.ConversationEndpoints[0]
+	if !result.Valid || endpoint.SkillID != "webchat" || endpoint.Mode != capability.ConversationEndpointDirect ||
+		endpoint.Handler.Kind != ConversationHandlerAgent || endpoint.Policy.ReplyMode != ConversationReplyProviderDefault {
+		t.Fatalf("web-chat composition = %#v, result=%#v", endpoint, result)
+	}
+}
+
+func TestCompilerRepairsConversationArchitectureToDerivedRequirement(t *testing.T) {
+	directPayload, err := json.Marshal(GenerationResponse{Candidate: directChatbotCandidate(
+		"slack", capability.ConversationEndpointChannel, ConversationReplyThread,
+	)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runbookPayload, err := json.Marshal(GenerationResponse{Candidate: slackChatbotCandidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &repairingGenerator{generated: directPayload, repaired: runbookPayload}
+	compiler, err := NewCompiler(generator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: orchestratedSlackChatbotPrompt, Catalog: slackChatbotCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || generator.repairs != 1 ||
+		result.Candidate.ConversationEndpoints[0].Handler.Kind != ConversationHandlerRunbook {
+		t.Fatalf("repaired composition = %#v, repairs=%d", result, generator.repairs)
+	}
+}
+
 func TestChangeSetPreservesReactiveCompositionAndCreatesEndpointPlacement(t *testing.T) {
 	payload, err := json.Marshal(GenerationResponse{Candidate: slackChatbotCandidate()})
 	if err != nil {
@@ -234,7 +382,7 @@ func TestChangeSetPreservesReactiveCompositionAndCreatesEndpointPlacement(t *tes
 	}
 	changeSet, replayed, err := service.Create(context.Background(), CreateChangeSetRequest{
 		Scope:  capability.ScopeReference{Kind: "tenant", ID: "one"},
-		Prompt: slackChatbotPrompt, Catalog: slackChatbotCatalog(),
+		Prompt: orchestratedSlackChatbotPrompt, Catalog: slackChatbotCatalog(),
 		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "slack-chatbot",
 	})
 	if err != nil || replayed {
