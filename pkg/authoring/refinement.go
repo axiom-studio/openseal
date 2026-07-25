@@ -231,7 +231,15 @@ func validateAnsweredCapabilityNeeds(candidate *WorkforceCandidate, request Gene
 			selected.SkillIDs = append([]string(nil), answer.SkillIDs...)
 		}
 		if !candidateSatisfiesCapabilityNeed(candidate, selected, request.Catalog) {
-			issues = append(issues, issue("agents.skillRequirements", "capability_need_not_materialized", fmt.Sprintf("Answered capability need %s must be bound as an exact Agent Skill requirement", need.ID)))
+			issues = append(issues, issue(
+				"agents.skillRequirements",
+				"capability_need_not_materialized",
+				fmt.Sprintf(
+					"Answered capability need %s selected exact Skill %s; bind that exact catalog Skill and do not substitute another option",
+					need.ID,
+					capabilityNeedSkillIdentities(selected.SkillIDs, request.Catalog),
+				),
+			))
 			continue
 		}
 		// Source capability choices are operational, not descriptive. Merely
@@ -244,6 +252,22 @@ func validateAnsweredCapabilityNeeds(candidate *WorkforceCandidate, request Gene
 		}
 	}
 	return issues
+}
+
+func capabilityNeedSkillIdentities(skillIDs []string, catalog CapabilityCatalog) string {
+	identities := make([]string, 0, len(skillIDs))
+	for _, skillID := range nonEmptyUnique(skillIDs) {
+		version := strings.TrimSpace(catalog.Skills[skillID].Version)
+		if version == "" {
+			identities = append(identities, skillID)
+			continue
+		}
+		identities = append(identities, skillID+"@"+version)
+	}
+	if len(identities) == 0 {
+		return "(none)"
+	}
+	return strings.Join(identities, ", ")
 }
 
 func capabilityNeedsHaveSourceScope(needs []CapabilityNeed) bool {

@@ -203,6 +203,18 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 	}
 }
 
+func TestAuthoringRepairPromptTreatsSkillSelectionAsAuthoritative(t *testing.T) {
+	for _, expected := range []string{
+		"An answered server-skill-choice-* refinement is an authoritative operator decision",
+		"never retain or substitute another option from that question",
+		"Never invent an action absent from the selected catalog Skill",
+	} {
+		if !strings.Contains(authoringRepairPrompt, expected) {
+			t.Fatalf("authoring repair prompt is missing %q", expected)
+		}
+	}
+}
+
 func TestOpenAICompatibleGeneratorRedactsProviderErrorsAndRejectsMultipleChoices(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

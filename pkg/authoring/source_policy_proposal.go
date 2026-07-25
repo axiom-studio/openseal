@@ -89,24 +89,64 @@ func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationI
 	return issues
 }
 
-// sourcePolicyProposalRepairableMissing excludes only source-policy gaps for
-// which the trusted catalog supplies the exact requested draft. Asking the
-// provider to "repair" such a gap could make it silently remove the requested
-// monitor; the correct next step is governed human review and activation.
-func sourcePolicyProposalRepairableMissing(candidate *WorkforceCandidate, missing []MissingRequirement, catalog CapabilityCatalog) []MissingRequirement {
+// providerRepairableMissingRequirements excludes host-owned readiness work and
+// exact operator choices from probabilistic repair. Asking the provider to
+// "fix" one of these gaps can make it silently discard an approved policy or
+// substitute an installed Skill for the exact Skill the operator selected.
+func providerRepairableMissingRequirements(candidate *WorkforceCandidate, missing []MissingRequirement, request GenerateRequest) []MissingRequirement {
 	proposed := make(map[string]bool)
-	for _, need := range catalog.CapabilityNeeds {
+	for _, need := range request.Catalog.CapabilityNeeds {
 		if draft := need.SourcePolicyProposal; draft != nil {
 			reference := draft.Policy.ID + "@" + draft.Policy.Version
 			proposed[reference] = candidateUsesProposedSourcePolicy(candidate, reference, draft.SkillIDs)
 		}
 	}
+	selectedSkills := answeredCapabilityNeedSkills(request)
 	result := make([]MissingRequirement, 0, len(missing))
 	for _, requirement := range missing {
 		if requirement.Kind == "source_policy" && proposed[strings.TrimSpace(requirement.ID)] {
 			continue
 		}
+		if selectedCapabilityReadinessRequirement(requirement, selectedSkills) {
+			continue
+		}
 		result = append(result, requirement)
 	}
 	return result
+}
+
+func answeredCapabilityNeedSkills(request GenerateRequest) map[string]bool {
+	selected := make(map[string]bool)
+	if request.Refinement == nil {
+		return selected
+	}
+	needs := make(map[string]bool, len(request.Catalog.CapabilityNeeds))
+	for _, need := range request.Catalog.CapabilityNeeds {
+		needs[CapabilityNeedQuestionID(need.ID)] = true
+	}
+	for _, answer := range request.Refinement.Answers {
+		if !needs[strings.TrimSpace(answer.QuestionID)] {
+			continue
+		}
+		for _, skillID := range answer.Value.SkillIDs {
+			if skillID = strings.TrimSpace(skillID); skillID != "" {
+				selected[skillID] = true
+			}
+		}
+	}
+	return selected
+}
+
+func selectedCapabilityReadinessRequirement(requirement MissingRequirement, selected map[string]bool) bool {
+	switch requirement.Kind {
+	case "skill_installation", "skill_binding":
+		return selected[strings.TrimSpace(requirement.ID)]
+	case "credential":
+		for skillID := range selected {
+			if strings.HasSuffix(strings.TrimSpace(requirement.RequiredBy), "/skill:"+skillID) {
+				return true
+			}
+		}
+	}
+	return false
 }

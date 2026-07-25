@@ -3,6 +3,7 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -213,6 +214,48 @@ func TestAnsweredCapabilityNeedRequiresTheSelectedSkill(t *testing.T) {
 	}
 	if !found || result.Valid {
 		t.Fatalf("a different need Skill was accepted instead of the selected Skill: valid=%v validation=%#v", result.Valid, result.Validation)
+	}
+}
+
+func TestAnsweredCapabilityNeedRepairNamesAndBindsTheExactSelectedSkill(t *testing.T) {
+	catalog := capabilityNeedCatalog(false, "openseal.source", "reddit-post-search")
+	wrong := capabilityNeedCandidate()
+	wrong.Agents[0].SkillRequirements = []agent.SkillRequirement{{
+		SkillID: "openseal.source", VersionConstraint: "1.0.0", RequiredActions: []string{"observe_feed"},
+	}}
+	wrong.Agents[0].Authority.AllowedSkillIDs = []string{"openseal.source"}
+	corrected := capabilityNeedCandidate()
+	corrected.Agents[0].SkillRequirements = []agent.SkillRequirement{{
+		SkillID: "reddit-post-search", VersionConstraint: "2.1.0", RequiredActions: []string{"search"},
+	}}
+	corrected.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-post-search"}
+	generated, _ := json.Marshal(GenerationResponse{Candidate: wrong})
+	repaired, _ := json.Marshal(GenerationResponse{Candidate: corrected})
+	generator := &repairingGenerator{generated: generated, repaired: repaired}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Analyze Reddit", Catalog: catalog,
+		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: CapabilityNeedQuestionID("reddit-access"),
+			Value:      RefinementProviderAnswerValue{SkillIDs: []string{"reddit-post-search"}},
+			Source:     RefinementAnswerSourceUser,
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generator.repairs != 1 || generator.lastError == nil ||
+		!strings.Contains(generator.lastError.Error(), "reddit-post-search@2.1.0") ||
+		!strings.Contains(generator.lastError.Error(), "do not substitute another option") {
+		t.Fatalf("exact Skill repair diagnostic = %v (repairs=%d)", generator.lastError, generator.repairs)
+	}
+	requirements := result.Candidate.Agents[0].SkillRequirements
+	if len(requirements) != 1 || requirements[0].SkillID != "reddit-post-search" ||
+		requirements[0].VersionConstraint != "2.1.0" ||
+		len(result.Candidate.Agents[0].Authority.AllowedSkillIDs) != 1 ||
+		result.Candidate.Agents[0].Authority.AllowedSkillIDs[0] != "reddit-post-search" ||
+		hasValidationCode(result.Validation, "capability_need_not_materialized") {
+		t.Fatalf("repaired exact Skill candidate = %#v validation=%#v", result.Candidate, result.Validation)
 	}
 }
 
