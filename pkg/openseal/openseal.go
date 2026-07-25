@@ -227,6 +227,9 @@ type (
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
 	WorkforceChangeSetReadinessValidator      = authoring.ChangeSetReadinessValidator
 	WorkforceChangeSetReadinessError          = authoring.ChangeSetReadinessError
+	WorkforceSensitiveInputKind               = authoring.SensitiveInputKind
+	WorkforceSensitiveInputFinding            = authoring.SensitiveInputFinding
+	WorkforceSensitiveInputError              = authoring.SensitiveInputError
 	SkillReferenceUpgradePlan                 = runtime.SkillReferenceUpgradePlan
 	SkillReferenceUpgradeFinding              = runtime.SkillReferenceUpgradeFinding
 	SkillReferenceIdentity                    = runtime.SkillReferenceIdentity
@@ -1970,6 +1973,7 @@ var (
 	ErrWorkforceChangeSetIdempotency    = authoring.ErrChangeSetIdempotency
 	ErrWorkforceChangeSetRevision       = authoring.ErrChangeSetRevision
 	ErrWorkforceChangeSetTransition     = authoring.ErrChangeSetTransition
+	ErrWorkforceSensitiveAuthoringInput = authoring.ErrSensitiveAuthoringInput
 	ErrSkillDefinitionImmutable         = skill.ErrDefinitionImmutable
 	ErrSkillDefinitionAmbiguous         = skill.ErrDefinitionAmbiguous
 	ErrSkillBindingAmbiguous            = skill.ErrBindingAmbiguous
@@ -1995,6 +1999,10 @@ var (
 	ErrSkillReferenceUpgradeApproval    = runtime.ErrSkillReferenceUpgradeApproval
 	ErrSkillReferenceUpgradeInvalid     = runtime.ErrSkillReferenceUpgradeInvalid
 )
+
+func ValidateWorkforceAuthoringPrompt(prompt string) error {
+	return authoring.ValidateAuthoringPrompt(prompt)
+}
 
 // Engine is the primary entry point for OpenSeal. It composes the durable
 // Agent, Team, objective, collaboration, action, approval, and Skill services.

@@ -106,6 +106,57 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	}
 }
 
+func TestSensitivePromptIsRejectedBeforePersistenceOrModelWork(t *testing.T) {
+	generator := &sequenceChangeSetGenerator{payloads: [][]byte{[]byte(`{"must":"remain unused"}`)}}
+	compiler, _ := NewCompiler(generator)
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	request := CreateChangeSetRequest{
+		Scope:  capability.ScopeReference{Kind: "tenant", ID: "one"},
+		Prompt: "Create an Agent with password: never-persist-this",
+		Actor:  ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "sensitive-create",
+	}
+	if _, _, err := service.Prepare(context.Background(), request); !errors.Is(err, ErrSensitiveAuthoringInput) {
+		t.Fatalf("prepare error = %v", err)
+	}
+	if len(store.changeSets) != 0 || len(store.idempotency) != 0 || len(generator.payloads) != 1 {
+		t.Fatalf("sensitive prepare mutated state: changes=%d idempotency=%d provider payloads=%d", len(store.changeSets), len(store.idempotency), len(generator.payloads))
+	}
+	if _, _, err := service.Create(context.Background(), request); !errors.Is(err, ErrSensitiveAuthoringInput) {
+		t.Fatalf("create error = %v", err)
+	}
+	if len(store.changeSets) != 0 || len(generator.payloads) != 1 {
+		t.Fatalf("sensitive create mutated state: changes=%d provider payloads=%d", len(store.changeSets), len(generator.payloads))
+	}
+	if _, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: request.Prompt}); !errors.Is(err, ErrSensitiveAuthoringInput) {
+		t.Fatalf("compiler error = %v", err)
+	}
+	if len(generator.payloads) != 1 {
+		t.Fatal("compiler invoked the provider with a sensitive prompt")
+	}
+}
+
+func TestSensitiveProviderCandidateIsRejectedBeforePersistence(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].SystemPrompt = "Authenticate with password: provider-must-not-persist"
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	generator := &sequenceChangeSetGenerator{payloads: [][]byte{payload}}
+	compiler, _ := NewCompiler(generator)
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	request := CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create a market research Agent",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}}}},
+		Actor:   ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "sensitive-provider-output",
+	}
+	if _, _, err := service.Create(context.Background(), request); !errors.Is(err, ErrSensitiveAuthoringInput) {
+		t.Fatalf("create error = %v", err)
+	}
+	if len(store.changeSets) != 0 || len(store.idempotency) != 0 {
+		t.Fatalf("sensitive provider output persisted: changes=%d idempotency=%d", len(store.changeSets), len(store.idempotency))
+	}
+}
+
 func TestPreparedCatalogRefreshIsCASBoundAndAuditable(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()

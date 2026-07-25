@@ -651,6 +651,13 @@ func definitionDigest(value *AgentDefinition) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// DefinitionDigest returns the immutable content identity used by the Agent
+// registry. Storage migrations may use it after removing legacy sensitive
+// text so the persisted digest never claims to identify pre-redaction content.
+func DefinitionDigest(value *AgentDefinition) string {
+	return definitionDigest(value)
+}
+
 func definitionKey(id, version string) string {
 	return strings.TrimSpace(id) + "@" + strings.TrimSpace(version)
 }
