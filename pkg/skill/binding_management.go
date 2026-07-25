@@ -165,7 +165,7 @@ func (c *Catalog) listBindingsWithoutDefinitions(ctx context.Context, scope Scop
 	}
 	result := make([]*Binding, 0, len(values))
 	for _, binding := range values {
-		if err := validateBindingShape(binding); err != nil {
+		if err := validateBindingManagementShape(binding); err != nil {
 			return nil, err
 		}
 		result = append(result, cloneBinding(binding))
