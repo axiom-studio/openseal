@@ -1603,7 +1603,6 @@ func skillInstallationPlanned(requirement MissingRequirement, catalog Capability
 			}
 			runtimeIdentity := placement.SkillRuntimeIdentities[agentID][requirement.ID].Normalized()
 			if !runtimeIdentity.Valid() ||
-				runtimeIdentity.ID != strings.TrimSpace(planned.SkillID) ||
 				runtimeIdentity.Version != selectedVersion ||
 				runtimeIdentity.SourceIdentity != selectedSource {
 				continue

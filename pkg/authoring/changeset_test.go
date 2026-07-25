@@ -758,7 +758,7 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 	placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{
 		"tenant/one/researcher": {
 			"community.research": capability.NewSkillIdentity(
-				"community.research", "2.1.0", "registry.example::community/research",
+				"community-research-runtime", "2.1.0", "registry.example::community/research",
 			),
 		},
 	}
@@ -768,21 +768,21 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 	compiledVersion := "2.1.0+source.0123456789ab.origin.abcdef012345.trust.9876543210ab"
 	placement.SkillSourceVersions["tenant/one/researcher"]["community.research"] = compiledVersion
 	placement.SkillRuntimeIdentities["tenant/one/researcher"]["community.research"] = capability.NewSkillIdentity(
-		"community.research", compiledVersion, "registry.example::community/research",
+		"community-research-runtime", compiledVersion, "registry.example::community/research",
 	)
 	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 0 {
 		t.Fatalf("reviewed compiled installation remained missing = %#v", missing)
 	}
 	placement.SkillSourceVersions["tenant/one/researcher"]["community.research"] = "2.2.0+source.0123456789ab"
 	placement.SkillRuntimeIdentities["tenant/one/researcher"]["community.research"] = capability.NewSkillIdentity(
-		"community.research", "2.2.0+source.0123456789ab", "registry.example::community/research",
+		"community-research-runtime", "2.2.0+source.0123456789ab", "registry.example::community/research",
 	)
 	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 1 || missing[0].Kind != "skill_installation" {
 		t.Fatalf("unreviewed compiled version resolved requirements = %#v", missing)
 	}
 	placement.SkillSourceVersions["tenant/one/researcher"]["community.research"] = compiledVersion
 	placement.SkillRuntimeIdentities["tenant/one/researcher"]["community.research"] = capability.NewSkillIdentity(
-		"community.research", compiledVersion, "registry.example::community/research",
+		"community-research-runtime", compiledVersion, "registry.example::community/research",
 	)
 	placement.PlannedSkillInstallations[0].Reference = "listing:forged"
 	if err := validatePlannedSkillInstallations(placement, catalog); err == nil {

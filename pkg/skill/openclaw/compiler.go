@@ -25,6 +25,8 @@ const httpCompilationRevision = "http.1"
 
 const NeedsActionAdapterDiagnostic = "needs_action_adapter"
 
+const PromptCompiledDiagnostic = "prompt.compiled"
+
 type Source struct {
 	Registry     string
 	Publisher    string
@@ -173,7 +175,7 @@ func Compile(bundle Bundle) (*Compilation, error) {
 				Message: "this Skill declares external tools or credentials but no governed action; add deterministic command dispatch, a declared executable, or a host action adapter before activation",
 			})
 		} else {
-			diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: "prompt.compiled", Path: "SKILL.md", Message: "local instruction skill compiled as a native prompt module"})
+			diagnostics = append(diagnostics, Diagnostic{Severity: "info", Code: PromptCompiledDiagnostic, Path: "SKILL.md", Message: "local instruction skill compiled as a native prompt module"})
 		}
 	}
 	if len(bundle.Files) > 0 {
