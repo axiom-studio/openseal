@@ -576,6 +576,13 @@ func (s *ChangeSetService) RefreshPreparedCatalog(ctx context.Context, scope cap
 	if changeSet.Revision != expectedRevision || changeSet.Status != ChangeSetEvaluating || changeSet.Generation == nil {
 		return nil, ErrChangeSetRevision
 	}
+	catalog = cloneCapabilityCatalog(catalog)
+	if err := retainAnsweredSkillSelections(changeSet, &catalog); err != nil {
+		return nil, fmt.Errorf("refresh authoring capability catalog: %w", err)
+	}
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		return nil, fmt.Errorf("refreshed authoring capability catalog: %w", err)
+	}
 	currentDigest, err := digestJSON(changeSet.Catalog)
 	if err != nil {
 		return nil, err
@@ -597,6 +604,46 @@ func (s *ChangeSetService) RefreshPreparedCatalog(ctx context.Context, scope cap
 		Reason: "capability_catalog_resolved", Actor: next.Actor, At: next.UpdatedAt,
 	})
 	return s.store.UpdateChangeSet(ctx, next, expectedRevision)
+}
+
+// retainAnsweredSkillSelections carries host-verified Skill facts across the
+// pre-provider catalog refresh. A discovered, not-yet-installed Skill may not
+// appear in the ordinary installed catalog, but an audited operator selection
+// must still compile against the exact reviewed identity. Fresh host facts win
+// only when they describe that same immutable source and version; a conflicting
+// identity fails closed instead of silently changing the answer.
+func retainAnsweredSkillSelections(changeSet *ChangeSet, catalog *CapabilityCatalog) error {
+	if changeSet == nil || catalog == nil {
+		return errors.New("change set and capability catalog are required")
+	}
+	if catalog.Skills == nil {
+		catalog.Skills = make(map[string]SkillCapability)
+	}
+	for _, question := range changeSet.Refinement.Questions {
+		if question.Answer.Kind != RefinementAnswerSkillSelection {
+			continue
+		}
+		answer := changeSet.Refinement.CurrentAnswer(question.ID)
+		if answer == nil {
+			continue
+		}
+		for _, selectedID := range nonEmptyUnique(answer.Value.SkillIDs) {
+			reviewed, exists := changeSet.Catalog.Skills[selectedID]
+			if !exists {
+				return fmt.Errorf("answered Skill %s is missing from the reviewed catalog", selectedID)
+			}
+			fresh, exists := catalog.Skills[selectedID]
+			if !exists {
+				catalog.Skills[selectedID] = reviewed
+				continue
+			}
+			if strings.TrimSpace(fresh.Version) != strings.TrimSpace(reviewed.Version) ||
+				strings.TrimSpace(fresh.SourceIdentity) != strings.TrimSpace(reviewed.SourceIdentity) {
+				return fmt.Errorf("answered Skill %s changed immutable source or version", selectedID)
+			}
+		}
+	}
+	return nil
 }
 
 // FailPreparedGeneration terminally records a pre-provider failure such as a
