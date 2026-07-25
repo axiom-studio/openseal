@@ -77,6 +77,45 @@ func (s *MemoryStore) ListExternalConversationEndpoints(_ context.Context, filte
 	return paginateExternalConversationEndpoints(items, filter.Limit, filter.Offset), nil
 }
 
+func (s *MemoryStore) ListExternalConversationEndpointsByVerifiedRoute(
+	_ context.Context,
+	route ExternalConversationVerifiedRoute,
+) ([]*ExternalConversationEndpoint, error) {
+	if err := route.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]*ExternalConversationEndpoint, 0)
+	for _, endpoint := range s.externalEndpoints {
+		if externalConversationEndpointMatchesVerifiedRoute(endpoint, route) {
+			items = append(items, cloneExternalConversationEndpoint(endpoint))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Scope.key() != items[j].Scope.key() {
+			return items[i].Scope.key() < items[j].Scope.key()
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items, nil
+}
+
+func externalConversationEndpointMatchesVerifiedRoute(
+	endpoint *ExternalConversationEndpoint,
+	route ExternalConversationVerifiedRoute,
+) bool {
+	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
+		endpoint.Provider != route.Provider || endpoint.InstallationID != route.InstallationID ||
+		endpoint.Address != route.Address || endpoint.Adapter.SkillID != route.SkillID ||
+		endpoint.Adapter.SkillVersion != route.SkillVersion ||
+		endpoint.Adapter.SourceIdentity != route.SourceIdentity ||
+		endpoint.Adapter.AdapterID != route.AdapterID {
+		return false
+	}
+	return route.ApplicationID == "" || endpoint.ApplicationID == route.ApplicationID
+}
+
 func (s *MemoryStore) UpdateExternalConversationEndpoint(_ context.Context, endpoint *ExternalConversationEndpoint, expectedRevision int64) error {
 	if err := endpoint.Validate(); err != nil {
 		return err

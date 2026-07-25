@@ -84,6 +84,7 @@ func (e *slackDeliveryExecutor) Execute(
 type adapterEnvelope struct {
 	Operation string                                       `json:"operation"`
 	Endpoint  *openseal.ExternalConversationEndpoint       `json:"endpoint"`
+	Gateway   *openseal.ExternalConversationIngressGateway `json:"gateway,omitempty"`
 	Request   *openseal.ExternalConversationIngressRequest `json:"request,omitempty"`
 	Delivery  *openseal.ExternalConversationDelivery       `json:"delivery,omitempty"`
 	Message   *openseal.ChannelMessage                     `json:"message,omitempty"`
@@ -99,7 +100,7 @@ func decodeAdapterEnvelope(config map[string]interface{}) (*adapterEnvelope, err
 		return nil, errors.New("conversation adapter request is invalid")
 	}
 	var envelope adapterEnvelope
-	if err := json.Unmarshal(encoded, &envelope); err != nil || envelope.Endpoint == nil {
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
 		return nil, errors.New("conversation adapter request is invalid")
 	}
 	return &envelope, nil
@@ -136,7 +137,10 @@ type slackEvent struct {
 
 func (a *slackAdapter) ingress(_ context.Context, config map[string]interface{}) (map[string]interface{}, error) {
 	envelope, err := decodeAdapterEnvelope(config)
-	if err != nil || envelope.Request == nil || envelope.Operation != "ingress" {
+	if err != nil || envelope.Request == nil ||
+		(envelope.Operation != "ingress" && envelope.Operation != "gateway_ingress") ||
+		(envelope.Operation == "ingress" && envelope.Endpoint == nil) ||
+		(envelope.Operation == "gateway_ingress" && envelope.Gateway == nil) {
 		return nil, errors.New("Slack ingress request is invalid")
 	}
 	if !a.verifySlackRequest(envelope.Request) {
@@ -164,12 +168,33 @@ func (a *slackAdapter) ingress(_ context.Context, config map[string]interface{})
 	if payload.Type != "event_callback" || strings.TrimSpace(payload.EventID) == "" {
 		return map[string]interface{}{"statusCode": http.StatusOK, "events": []interface{}{}}, nil
 	}
-	if !slackEndpointMatches(envelope.Endpoint, payload) {
+	if envelope.Operation == "ingress" && !slackEndpointMatches(envelope.Endpoint, payload) {
 		return map[string]interface{}{"statusCode": http.StatusOK, "events": []interface{}{}}, nil
 	}
 	event, accepted := normalizeSlackEvent(payload)
 	if !accepted {
 		return map[string]interface{}{"statusCode": http.StatusOK, "events": []interface{}{}}, nil
+	}
+	if envelope.Operation == "gateway_ingress" {
+		teamID := strings.TrimSpace(payload.TeamID)
+		if teamID == "" {
+			for _, authorization := range payload.Authorizations {
+				if strings.TrimSpace(authorization.TeamID) != "" {
+					teamID = strings.TrimSpace(authorization.TeamID)
+					break
+				}
+			}
+		}
+		if teamID == "" {
+			return map[string]interface{}{"statusCode": http.StatusBadRequest}, nil
+		}
+		return map[string]interface{}{
+			"statusCode": http.StatusOK, "contentType": "application/json", "body": `{"ok":true}`,
+			"events": []openseal.ExternalConversationGatewayEvent{{
+				InstallationID: teamID, ApplicationID: strings.TrimSpace(payload.APIAppID),
+				Address: strings.TrimSpace(payload.Event.Channel), Event: event,
+			}},
+		}, nil
 	}
 	return map[string]interface{}{
 		"statusCode": http.StatusOK, "contentType": "application/json", "body": `{"ok":true}`,

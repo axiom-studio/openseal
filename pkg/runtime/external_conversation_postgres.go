@@ -66,6 +66,7 @@ func (s *PostgresStore) migrateExternalConversations(ctx context.Context, tx *sq
 	for _, statement := range []string{
 		`CREATE INDEX IF NOT EXISTS external_conversation_endpoints_owner_idx ON ` + s.table("external_conversation_endpoints") + ` (scope_kind,scope_id,owner_type,owner_id,status,updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS external_conversation_endpoints_provider_idx ON ` + s.table("external_conversation_endpoints") + ` (scope_kind,scope_id,provider,status,updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS external_conversation_endpoints_gateway_idx ON ` + s.table("external_conversation_endpoints") + ` (provider,status)`,
 		`CREATE INDEX IF NOT EXISTS external_conversation_inbox_claim_idx ON ` + s.table("external_conversation_inbox") + ` (scope_kind,scope_id,status,available_at,lease_expires_at,created_at)`,
 		`CREATE INDEX IF NOT EXISTS external_conversation_inbox_endpoint_idx ON ` + s.table("external_conversation_inbox") + ` (scope_kind,scope_id,endpoint_id,created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS external_conversation_deliveries_claim_idx ON ` + s.table("external_conversation_deliveries") + ` (scope_kind,scope_id,status,available_at,lease_expires_at,created_at)`,
@@ -146,6 +147,40 @@ func (s *PostgresStore) ListExternalConversationEndpoints(ctx context.Context, f
 	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*ExternalConversationEndpoint, 0)
+	for rows.Next() {
+		endpoint, scanErr := scanSQLiteExternalConversationEndpoint(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, endpoint)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) ListExternalConversationEndpointsByVerifiedRoute(
+	ctx context.Context,
+	route ExternalConversationVerifiedRoute,
+) ([]*ExternalConversationEndpoint, error) {
+	if err := route.Validate(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("external_conversation_endpoints")+`
+		WHERE provider=$1 AND status=$2
+		  AND payload->>'installationId'=$3
+		  AND payload->>'address'=$4
+		  AND payload->'adapter'->>'skillId'=$5
+		  AND payload->'adapter'->>'skillVersion'=$6
+		  AND COALESCE(payload->'adapter'->>'sourceIdentity','')=$7
+		  AND payload->'adapter'->>'adapterId'=$8
+		  AND ($9='' OR payload->>'applicationId'=$9)
+		ORDER BY scope_kind,scope_id,id`,
+		route.Provider, ExternalConversationEndpointActive, route.InstallationID, route.Address,
+		route.SkillID, route.SkillVersion, route.SourceIdentity, route.AdapterID, route.ApplicationID)
 	if err != nil {
 		return nil, err
 	}

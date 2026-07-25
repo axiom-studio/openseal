@@ -325,7 +325,10 @@ func materializeConversationEndpoints(
 				SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
 				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: blueprint.AdapterID,
 			},
-			Provider: adapter.Provider, Mode: blueprint.Mode, Address: address, Handler: handler,
+			Provider: adapter.Provider, Mode: blueprint.Mode,
+			InstallationID: strings.TrimSpace(placement.InstallationID),
+			ApplicationID:  strings.TrimSpace(placement.ApplicationID),
+			Address:        address, Handler: handler,
 			Policy: ExternalConversationPolicy{
 				MessageSelection: ExternalConversationMessageSelection(blueprint.Policy.MessageSelection),
 				ReplyMode:        ExternalConversationReplyMode(blueprint.Policy.ReplyMode),

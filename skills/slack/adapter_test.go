@@ -82,6 +82,38 @@ func TestSlackIngressAnswersChallengeAndRejectsReplaysOrWrongEndpoint(t *testing
 	}
 }
 
+func TestSlackGatewayIngressReturnsVerifiedInstallationRoute(t *testing.T) {
+	now := time.Unix(1_720_000_000, 0).UTC()
+	adapter := newSlackAdapter("signing-secret", "", nil)
+	adapter.now = func() time.Time { return now }
+	body := []byte(`{
+		"type":"event_callback","team_id":"T123","api_app_id":"A123","event_id":"Ev123",
+		"event":{"type":"message","user":"U123","text":"hello","channel":"C123",
+			"channel_type":"channel","ts":"1720000000.123456"}
+	}`)
+	config := ingressConfig(now, body, &openseal.ExternalConversationEndpoint{ID: "placeholder"})
+	envelope := config[adapterEnvelopeKey].(map[string]interface{})
+	envelope["operation"] = "gateway_ingress"
+	delete(envelope, "endpoint")
+	envelope["gateway"] = &openseal.ExternalConversationIngressGateway{
+		Scope:        openseal.Scope{Kind: "platform", ID: "default"},
+		DeploymentID: "slack-gateway", Provider: "slack",
+	}
+
+	output, err := adapter.ingress(context.Background(), config)
+
+	if err != nil || output["statusCode"] != http.StatusOK {
+		t.Fatalf("gateway ingress = %#v, %v", output, err)
+	}
+	encoded, _ := json.Marshal(output["events"])
+	var events []openseal.ExternalConversationGatewayEvent
+	if err := json.Unmarshal(encoded, &events); err != nil || len(events) != 1 ||
+		events[0].InstallationID != "T123" || events[0].ApplicationID != "A123" ||
+		events[0].Address != "C123" || events[0].Event.Text != "hello" {
+		t.Fatalf("gateway events = %s, %v", encoded, err)
+	}
+}
+
 func TestSlackDeliveryUsesOAuthMetadataAndAcknowledgementLookup(t *testing.T) {
 	var posted map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

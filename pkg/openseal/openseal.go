@@ -743,6 +743,13 @@ type (
 	ExternalConversationIngressHostRequest      = runtime.ExternalConversationIngressHostRequest
 	ExternalConversationIngressAdapterHost      = runtime.ExternalConversationIngressAdapterHost
 	ExternalConversationIngressResult           = runtime.ExternalConversationIngressResult
+	ExternalConversationIngressGateway          = runtime.ExternalConversationIngressGateway
+	ExternalConversationVerifiedRoute           = runtime.ExternalConversationVerifiedRoute
+	ExternalConversationGatewayEvent            = runtime.ExternalConversationGatewayEvent
+	ExternalConversationGatewayHostRequest      = runtime.ExternalConversationGatewayHostRequest
+	ExternalConversationGatewayHostResult       = runtime.ExternalConversationGatewayHostResult
+	ExternalConversationGatewayAdapterHost      = runtime.ExternalConversationGatewayAdapterHost
+	ExternalConversationGatewayIngressResult    = runtime.ExternalConversationGatewayIngressResult
 	ExternalConversationDispatchRequest         = runtime.ExternalConversationDispatchRequest
 	ExternalConversationDispatchResult          = runtime.ExternalConversationDispatchResult
 	ExternalConversationDispatcher              = runtime.ExternalConversationDispatcher
@@ -3628,6 +3635,24 @@ func (e *Engine) NormalizeExternalConversationPublicIngress(
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
 	result, err := e.externalConversations.transport.NormalizeExternalConversationPublicIngress(ctx, request, host)
+	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Wake()
+	}
+	return result, err
+}
+
+func (e *Engine) NormalizeExternalConversationGatewayIngress(
+	ctx context.Context,
+	gateway runtime.ExternalConversationIngressGateway,
+	request runtime.ExternalConversationPublicIngressRequest,
+	host runtime.ExternalConversationGatewayAdapterHost,
+) (*runtime.ExternalConversationGatewayIngressResult, error) {
+	if e == nil || e.externalConversations.transport == nil {
+		return nil, fmt.Errorf("external conversation transport is not configured")
+	}
+	result, err := e.externalConversations.transport.NormalizeExternalConversationGatewayIngress(
+		ctx, gateway, request, host,
+	)
 	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
 		e.externalConversations.supervisor.Wake()
 	}
