@@ -93,7 +93,7 @@ func TestExternalConversationMemoryInboxIsIdempotentAndLeaseRecoverable(t *testi
 			ParticipantDisplayName: "External User", Text: "Can you help?", MentionsEndpoint: true,
 			OrderingKey: "workspace/channel:171.001", OccurredAt: now,
 		},
-		Status: ExternalConversationInboxPending, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: ExternalConversationInboxPending, MaximumAttempts: 8, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	first, replayed, err := store.ReceiveExternalConversationEvent(ctx, item)
 	if err != nil || replayed {
@@ -216,6 +216,101 @@ func TestExternalConversationMemoryMappingsAndOutboxSurviveRetry(t *testing.T) {
 	stored, err := store.GetExternalConversationDelivery(ctx, endpoint.Scope, delivery.ID)
 	if err != nil || stored.Status != ExternalConversationDeliveryDelivered || stored.Attempt != 2 {
 		t.Fatalf("delivered outbox = %#v, %v", stored, err)
+	}
+}
+
+func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalReplies(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
+	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{
+		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
+		Mode: capability.ConversationEndpointChannel, Address: "C012345",
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: ExternalConversationPolicy{
+			MessageSelection: ExternalConversationSelectMentions,
+			ReplyMode:        ExternalConversationReplyThread,
+			IgnoreBots:       true,
+		},
+		Status: ExternalConversationEndpointActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	transport := NewExternalConversationTransportService(store, catalog)
+	transport.now = func() time.Time { return now }
+	event := NormalizedExternalConversationEvent{
+		ID: "event/non-mention", Type: capability.ConversationEventMessageReceived,
+		ExternalConversationID: "C/one", ExternalThreadID: "171.001",
+		ExternalMessageID: "M/one", ExternalParticipantID: "U/one", Text: "hello",
+		OrderingKey: "C/one:171.001", OccurredAt: now,
+	}
+	ignored, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{
+		Scope: scope, EndpointID: endpoint.ID, Event: event,
+	})
+	if err != nil || ignored.Accepted || ignored.Item.Status != ExternalConversationInboxIgnored || ignored.Item.AppliedAt.IsZero() {
+		t.Fatalf("ignored ingress = %#v, %v", ignored, err)
+	}
+	replayed, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{
+		Scope: scope, EndpointID: endpoint.ID, Event: event,
+	})
+	if err != nil || !replayed.Replayed || replayed.Accepted {
+		t.Fatalf("ignored replay = %#v, %v", replayed, err)
+	}
+	event.ID, event.ExternalMessageID, event.MentionsEndpoint = "event/mention", "M/two", true
+	accepted, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{
+		Scope: scope, EndpointID: endpoint.ID, Event: event,
+	})
+	if err != nil || !accepted.Accepted || accepted.Item.Status != ExternalConversationInboxPending {
+		t.Fatalf("accepted ingress = %#v, %v", accepted, err)
+	}
+	reaction := event
+	reaction.ID, reaction.Type, reaction.Text = "event/reaction", capability.ConversationEventReactionAdded, ""
+	if _, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{
+		Scope: scope, EndpointID: endpoint.ID, Event: reaction,
+	}); !errors.Is(err, ErrInvalidExternalConversation) {
+		t.Fatalf("undeclared event error = %v", err)
+	}
+
+	conversations := NewConversationService(store)
+	conversations.now = func() time.Time { return now }
+	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		Title: "Slack C012345", IdempotencyKey: "external:" + endpoint.ID + ":C/one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "slack-agent"},
+		Intent: MessageIntentAnswer, Content: "How can I help?",
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "reply-one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueued, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
+		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
+	})
+	if err != nil || enqueued.Replayed || enqueued.Delivery.Status != ExternalConversationDeliveryPending {
+		t.Fatalf("enqueued reply = %#v, %v", enqueued, err)
+	}
+	replayedDelivery, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
+		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
+	})
+	if err != nil || !replayedDelivery.Replayed || replayedDelivery.Delivery.ID != enqueued.Delivery.ID {
+		t.Fatalf("replayed delivery = %#v, %v", replayedDelivery, err)
+	}
+	if _, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageUpdate,
+		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
+		Parameters: map[string]interface{}{"text": "updated"},
+	}); !errors.Is(err, ErrInvalidExternalConversation) {
+		t.Fatalf("undeclared delivery operation error = %v", err)
 	}
 }
 

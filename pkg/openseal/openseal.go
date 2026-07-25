@@ -664,32 +664,38 @@ type (
 // External conversation aliases are isolated so their intentionally explicit
 // names do not reformat the facade's larger compatibility catalog.
 type (
-	ExternalConversationEndpointStatus        = runtime.ExternalConversationEndpointStatus
-	ExternalConversationHandlerKind           = runtime.ExternalConversationHandlerKind
-	ExternalConversationHandler               = runtime.ExternalConversationHandler
-	ExternalConversationMessageSelection      = runtime.ExternalConversationMessageSelection
-	ExternalConversationReplyMode             = runtime.ExternalConversationReplyMode
-	ExternalConversationPolicy                = runtime.ExternalConversationPolicy
-	ExternalConversationAdapterReference      = runtime.ExternalConversationAdapterReference
-	ExternalConversationEndpoint              = runtime.ExternalConversationEndpoint
-	ExternalConversationEndpointFilter        = runtime.ExternalConversationEndpointFilter
-	CreateExternalConversationEndpointRequest = runtime.CreateExternalConversationEndpointRequest
-	UpdateExternalConversationEndpointRequest = runtime.UpdateExternalConversationEndpointRequest
-	ExternalConversationEndpointStore         = runtime.ExternalConversationEndpointStore
-	ExternalConversationAdapterResolver       = runtime.ExternalConversationAdapterResolver
-	ExternalConversationEndpointService       = runtime.ExternalConversationEndpointService
-	NormalizedExternalConversationEvent       = runtime.NormalizedExternalConversationEvent
-	ExternalConversationInboxStatus           = runtime.ExternalConversationInboxStatus
-	ExternalConversationInboxItem             = runtime.ExternalConversationInboxItem
-	ExternalConversationMapping               = runtime.ExternalConversationMapping
-	ExternalParticipantMapping                = runtime.ExternalParticipantMapping
-	ExternalMessageDirection                  = runtime.ExternalMessageDirection
-	ExternalMessageMapping                    = runtime.ExternalMessageMapping
-	ExternalConversationDeliveryStatus        = runtime.ExternalConversationDeliveryStatus
-	ExternalConversationDelivery              = runtime.ExternalConversationDelivery
-	ExternalConversationInboxFilter           = runtime.ExternalConversationInboxFilter
-	ExternalConversationDeliveryFilter        = runtime.ExternalConversationDeliveryFilter
-	ExternalConversationTransportStore        = runtime.ExternalConversationTransportStore
+	ExternalConversationEndpointStatus         = runtime.ExternalConversationEndpointStatus
+	ExternalConversationHandlerKind            = runtime.ExternalConversationHandlerKind
+	ExternalConversationHandler                = runtime.ExternalConversationHandler
+	ExternalConversationMessageSelection       = runtime.ExternalConversationMessageSelection
+	ExternalConversationReplyMode              = runtime.ExternalConversationReplyMode
+	ExternalConversationPolicy                 = runtime.ExternalConversationPolicy
+	ExternalConversationAdapterReference       = runtime.ExternalConversationAdapterReference
+	ExternalConversationEndpoint               = runtime.ExternalConversationEndpoint
+	ExternalConversationEndpointFilter         = runtime.ExternalConversationEndpointFilter
+	CreateExternalConversationEndpointRequest  = runtime.CreateExternalConversationEndpointRequest
+	UpdateExternalConversationEndpointRequest  = runtime.UpdateExternalConversationEndpointRequest
+	ExternalConversationEndpointStore          = runtime.ExternalConversationEndpointStore
+	ExternalConversationAdapterResolver        = runtime.ExternalConversationAdapterResolver
+	ExternalConversationEndpointService        = runtime.ExternalConversationEndpointService
+	NormalizedExternalConversationEvent        = runtime.NormalizedExternalConversationEvent
+	ExternalConversationInboxStatus            = runtime.ExternalConversationInboxStatus
+	ExternalConversationInboxItem              = runtime.ExternalConversationInboxItem
+	ExternalConversationMapping                = runtime.ExternalConversationMapping
+	ExternalParticipantMapping                 = runtime.ExternalParticipantMapping
+	ExternalMessageDirection                   = runtime.ExternalMessageDirection
+	ExternalMessageMapping                     = runtime.ExternalMessageMapping
+	ExternalConversationDeliveryStatus         = runtime.ExternalConversationDeliveryStatus
+	ExternalConversationDelivery               = runtime.ExternalConversationDelivery
+	ExternalConversationInboxFilter            = runtime.ExternalConversationInboxFilter
+	ExternalConversationDeliveryFilter         = runtime.ExternalConversationDeliveryFilter
+	ExternalConversationTransportStore         = runtime.ExternalConversationTransportStore
+	ExternalConversationStore                  = runtime.ExternalConversationStore
+	ReceiveExternalConversationEventRequest    = runtime.ReceiveExternalConversationEventRequest
+	ReceiveExternalConversationEventResult     = runtime.ReceiveExternalConversationEventResult
+	EnqueueExternalConversationDeliveryRequest = runtime.EnqueueExternalConversationDeliveryRequest
+	EnqueueExternalConversationDeliveryResult  = runtime.EnqueueExternalConversationDeliveryResult
+	ExternalConversationTransportService       = runtime.ExternalConversationTransportService
 )
 
 // Credential lease aliases are kept in their own group so extending the
@@ -1088,6 +1094,7 @@ var (
 )
 
 var NewExternalConversationEndpointService = runtime.NewExternalConversationEndpointService
+var NewExternalConversationTransportService = runtime.NewExternalConversationTransportService
 
 // WorkforceObjectiveKey returns the canonical placement key for an objective
 // template owned by an agent or team definition.
@@ -1687,6 +1694,7 @@ const (
 	ExternalConversationInboxLeased     = runtime.ExternalConversationInboxLeased
 	ExternalConversationInboxRetry      = runtime.ExternalConversationInboxRetry
 	ExternalConversationInboxApplied    = runtime.ExternalConversationInboxApplied
+	ExternalConversationInboxIgnored    = runtime.ExternalConversationInboxIgnored
 	ExternalConversationInboxDeadLetter = runtime.ExternalConversationInboxDeadLetter
 
 	ExternalMessageInbound  = runtime.ExternalMessageInbound

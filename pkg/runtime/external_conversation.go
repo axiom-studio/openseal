@@ -479,6 +479,7 @@ const (
 	ExternalConversationInboxLeased     ExternalConversationInboxStatus = "leased"
 	ExternalConversationInboxRetry      ExternalConversationInboxStatus = "retry"
 	ExternalConversationInboxApplied    ExternalConversationInboxStatus = "applied"
+	ExternalConversationInboxIgnored    ExternalConversationInboxStatus = "ignored"
 	ExternalConversationInboxDeadLetter ExternalConversationInboxStatus = "dead_letter"
 )
 
@@ -491,6 +492,7 @@ type ExternalConversationInboxItem struct {
 	Event            NormalizedExternalConversationEvent  `json:"event"`
 	Status           ExternalConversationInboxStatus      `json:"status"`
 	Attempt          int                                  `json:"attempt"`
+	MaximumAttempts  int                                  `json:"maximumAttempts"`
 	AvailableAt      time.Time                            `json:"availableAt"`
 	LeaseOwner       string                               `json:"leaseOwner,omitempty"`
 	LeaseExpiresAt   time.Time                            `json:"leaseExpiresAt,omitempty"`
@@ -509,7 +511,8 @@ func (i *ExternalConversationInboxItem) Validate() error {
 	if i == nil || i.Scope.Validate() != nil || !validOpaqueIdentifier(i.ID, 256) ||
 		!validOpaqueIdentifier(i.EndpointID, 256) || i.EndpointRevision < 1 ||
 		i.Adapter.Validate() != nil || i.Event.Validate() != nil ||
-		i.Attempt < 0 || i.AvailableAt.IsZero() || i.Revision < 1 ||
+		i.Attempt < 0 || i.MaximumAttempts < 1 || i.MaximumAttempts > MaximumExternalConversationDeliveryAttempts ||
+		i.AvailableAt.IsZero() || i.Revision < 1 ||
 		i.CreatedAt.IsZero() || i.UpdatedAt.IsZero() || i.UpdatedAt.Before(i.CreatedAt) ||
 		len(i.ErrorCode) > 128 || len(i.Summary) > 1024 {
 		return ErrInvalidExternalConversation
@@ -528,8 +531,11 @@ func (i *ExternalConversationInboxItem) Validate() error {
 		if !validOpaqueIdentifier(i.LeaseOwner, 256) || i.LeaseExpiresAt.IsZero() || !i.AppliedAt.IsZero() {
 			return ErrInvalidExternalConversation
 		}
-	case ExternalConversationInboxApplied:
+	case ExternalConversationInboxApplied, ExternalConversationInboxIgnored:
 		if i.LeaseOwner != "" || !i.LeaseExpiresAt.IsZero() || i.AppliedAt.IsZero() {
+			return ErrInvalidExternalConversation
+		}
+		if i.Status == ExternalConversationInboxIgnored && i.Summary == "" {
 			return ErrInvalidExternalConversation
 		}
 	case ExternalConversationInboxDeadLetter:

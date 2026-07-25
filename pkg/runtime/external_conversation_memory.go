@@ -214,6 +214,7 @@ func (s *MemoryStore) SaveExternalConversationMapping(_ context.Context, mapping
 	}
 	if current != nil && (current.Scope != mapping.Scope || current.EndpointID != mapping.EndpointID ||
 		current.ExternalConversationID != mapping.ExternalConversationID || current.ExternalThreadID != mapping.ExternalThreadID ||
+		current.ConversationID != mapping.ConversationID ||
 		!current.CreatedAt.Equal(mapping.CreatedAt)) {
 		return ErrExternalConversationConflict
 	}
@@ -242,7 +243,8 @@ func (s *MemoryStore) SaveExternalParticipantMapping(_ context.Context, mapping 
 		return ErrExternalConversationConflict
 	}
 	if current != nil && (current.Scope != mapping.Scope || current.EndpointID != mapping.EndpointID ||
-		current.ExternalParticipantID != mapping.ExternalParticipantID || !current.CreatedAt.Equal(mapping.CreatedAt)) {
+		current.ExternalParticipantID != mapping.ExternalParticipantID || current.Participant != mapping.Participant ||
+		!current.CreatedAt.Equal(mapping.CreatedAt)) {
 		return ErrExternalConversationConflict
 	}
 	s.externalParticipants[key] = cloneExternalParticipantMapping(mapping)
@@ -271,6 +273,7 @@ func (s *MemoryStore) SaveExternalMessageMapping(_ context.Context, mapping *Ext
 	}
 	if current != nil && (current.Scope != mapping.Scope || current.EndpointID != mapping.EndpointID ||
 		current.Direction != mapping.Direction || current.ExternalMessageID != mapping.ExternalMessageID ||
+		current.ConversationID != mapping.ConversationID || current.ChannelMessageID != mapping.ChannelMessageID ||
 		!current.CreatedAt.Equal(mapping.CreatedAt)) {
 		return ErrExternalConversationConflict
 	}
