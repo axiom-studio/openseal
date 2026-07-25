@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *testing.T) {
@@ -114,6 +116,11 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 			BindingKey: "MODEL_PROVIDER", DisplayName: "Model provider",
 			Prompt: "Choose a model provider.", RequiredForActivation: true,
 		}},
+		AvailableCredentialGrants: map[string][]capability.OAuth2GrantSummary{
+			"SOURCE_CONNECTION": {{
+				Provider: "source", Subject: capability.OAuth2SubjectUser, Scopes: []string{"read"},
+			}},
+		},
 	}
 	generator, _ := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
 	if _, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a source Agent", Catalog: catalog}); err != nil {
@@ -131,7 +138,11 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	if len(modelRequest.Catalog.AgentCredentialRequirements) != 0 {
 		t.Fatalf("model-visible Agent credential requirements = %#v", modelRequest.Catalog.AgentCredentialRequirements)
 	}
-	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.CapabilityNeeds) != 1 || len(catalog.AgentCredentialRequirements) != 1 {
+	if len(modelRequest.Catalog.AvailableCredentialGrants) != 0 {
+		t.Fatalf("model-visible OAuth 2 grants = %#v", modelRequest.Catalog.AvailableCredentialGrants)
+	}
+	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.CapabilityNeeds) != 1 || len(catalog.AgentCredentialRequirements) != 1 ||
+		len(catalog.AvailableCredentialGrants["SOURCE_CONNECTION"]) != 1 {
 		t.Fatalf("canonical catalog was mutated = %#v", catalog)
 	}
 	canonicalBytes, _ := json.Marshal(catalog)

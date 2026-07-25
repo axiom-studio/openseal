@@ -32,9 +32,10 @@ const (
 )
 
 type CredentialRequirement struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	Optional bool   `json:"optional,omitempty"`
+	Name     string             `json:"name"`
+	Kind     string             `json:"kind"`
+	Optional bool               `json:"optional,omitempty"`
+	OAuth2   *OAuth2Requirement `json:"oauth2,omitempty"`
 }
 
 // CredentialReference is an opaque binding identifier. Resolved values must
@@ -54,6 +55,10 @@ type CredentialBindingChoice struct {
 	// An empty list preserves the canonical Skill behavior where the reference
 	// kind itself is the binding key.
 	BindingKeys []string `json:"bindingKeys,omitempty"`
+	// OAuth2 is a non-secret host attestation about the connection identified
+	// by Reference. Tokens, client credentials, external subject identifiers,
+	// and provider payloads never cross this contract.
+	OAuth2 *OAuth2GrantSummary `json:"oauth2,omitempty"`
 }
 
 type ActionRetryPolicy struct {

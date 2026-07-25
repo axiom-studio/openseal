@@ -167,29 +167,33 @@ type ChangeSetApplyReceipt struct {
 // lifecycle. Apply is deliberately a later transition, never a side effect of
 // compilation or refinement.
 type ChangeSet struct {
-	ID                  string                      `json:"id"`
-	Scope               capability.ScopeReference   `json:"scope"`
-	ParentID            string                      `json:"parentId,omitempty"`
-	Mode                Mode                        `json:"mode"`
-	Prompt              string                      `json:"prompt"`
-	PromptDigest        string                      `json:"promptDigest"`
-	CandidateDigest     string                      `json:"candidateDigest"`
-	Result              CompileResult               `json:"result"`
-	Catalog             CapabilityCatalog           `json:"catalog"`
-	Placement           ChangeSetPlacement          `json:"placement"`
-	RequiredCredentials map[string][]string         `json:"requiredCredentials,omitempty"`
-	Status              ChangeSetStatus             `json:"status"`
-	Actor               ChangeSetActor              `json:"actor"`
-	Generation          *ChangeSetGeneration        `json:"generation,omitempty"`
-	Refinement          ChangeSetRefinement         `json:"refinement,omitempty"`
-	Evaluations         []ChangeSetEvaluation       `json:"evaluations,omitempty"`
-	ApprovalDecisions   []ChangeSetApprovalDecision `json:"approvalDecisions,omitempty"`
-	PlacementUpdates    []ChangeSetPlacementUpdate  `json:"placementUpdates,omitempty"`
-	ApplyReceipt        *ChangeSetApplyReceipt      `json:"applyReceipt,omitempty"`
-	Lifecycle           []ChangeSetLifecycleEvent   `json:"lifecycle"`
-	Revision            int64                       `json:"revision"`
-	CreatedAt           time.Time                   `json:"createdAt"`
-	UpdatedAt           time.Time                   `json:"updatedAt"`
+	ID                  string                    `json:"id"`
+	Scope               capability.ScopeReference `json:"scope"`
+	ParentID            string                    `json:"parentId,omitempty"`
+	Mode                Mode                      `json:"mode"`
+	Prompt              string                    `json:"prompt"`
+	PromptDigest        string                    `json:"promptDigest"`
+	CandidateDigest     string                    `json:"candidateDigest"`
+	Result              CompileResult             `json:"result"`
+	Catalog             CapabilityCatalog         `json:"catalog"`
+	Placement           ChangeSetPlacement        `json:"placement"`
+	RequiredCredentials map[string][]string       `json:"requiredCredentials,omitempty"`
+	// RequiredCredentialBindings is the typed successor to the legacy
+	// key-only list. It preserves secret-free OAuth 2 authorization semantics
+	// across durable authoring, review, and placement updates.
+	RequiredCredentialBindings map[string][]CredentialBindingRequirement `json:"requiredCredentialBindings,omitempty"`
+	Status                     ChangeSetStatus                           `json:"status"`
+	Actor                      ChangeSetActor                            `json:"actor"`
+	Generation                 *ChangeSetGeneration                      `json:"generation,omitempty"`
+	Refinement                 ChangeSetRefinement                       `json:"refinement,omitempty"`
+	Evaluations                []ChangeSetEvaluation                     `json:"evaluations,omitempty"`
+	ApprovalDecisions          []ChangeSetApprovalDecision               `json:"approvalDecisions,omitempty"`
+	PlacementUpdates           []ChangeSetPlacementUpdate                `json:"placementUpdates,omitempty"`
+	ApplyReceipt               *ChangeSetApplyReceipt                    `json:"applyReceipt,omitempty"`
+	Lifecycle                  []ChangeSetLifecycleEvent                 `json:"lifecycle"`
+	Revision                   int64                                     `json:"revision"`
+	CreatedAt                  time.Time                                 `json:"createdAt"`
+	UpdatedAt                  time.Time                                 `json:"updatedAt"`
 }
 
 // EffectiveChangeSetActivationIntent reads the digest-bound candidate field
@@ -485,7 +489,10 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	changeSet := &ChangeSet{
 		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), CandidateDigest: candidateDigest,
-		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement), RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog), Status: status, Actor: request.Actor,
+		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement),
+		RequiredCredentials:        requiredCredentials(result.Candidate, request.Catalog),
+		RequiredCredentialBindings: RequiredCredentialBindings(result.Candidate, request.Catalog),
+		Status:                     status, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	changeSet.Refinement = reconcileRefinement(inheritedRefinement, result)
@@ -769,6 +776,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	changeSet.Result = *result
 	changeSet.Refinement = reconcileRefinement(changeSet.Refinement, result)
 	changeSet.RequiredCredentials = requiredCredentials(result.Candidate, changeSet.Catalog)
+	changeSet.RequiredCredentialBindings = RequiredCredentialBindings(result.Candidate, changeSet.Catalog)
 	changeSet.Status = status
 	changeSet.Revision++
 	changeSet.UpdatedAt = now
@@ -1171,8 +1179,9 @@ func (s *ChangeSetService) PrepareActivation(ctx context.Context, request Prepar
 		ID: uuid.NewString(), Scope: request.Scope, ParentID: parent.ID, Mode: ModeAmend,
 		Prompt: parent.Prompt, PromptDigest: parent.PromptDigest, CandidateDigest: candidateDigest,
 		Result: result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: placement,
-		RequiredCredentials: requiredCredentials(result.Candidate, request.Catalog),
-		Status:              status, Actor: request.Actor, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		RequiredCredentials:        requiredCredentials(result.Candidate, request.Catalog),
+		RequiredCredentialBindings: RequiredCredentialBindings(result.Candidate, request.Catalog),
+		Status:                     status, Actor: request.Actor, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	child.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: request.Reason, Actor: request.Actor, At: now}}
 	return s.store.CreateChangeSet(ctx, child, request.IdempotencyKey, requestDigest)
@@ -2055,37 +2064,10 @@ func inheritAppliedRevisions(placement *ChangeSetPlacement, parent *ChangeSet) {
 
 func requiredCredentials(candidate WorkforceCandidate, catalog CapabilityCatalog) map[string][]string {
 	result := map[string][]string{}
-	activation, activationErr := EffectiveWorkforceActivationIntent(candidate.Activation)
-	for _, definition := range candidate.Agents {
-		if definition == nil {
-			continue
+	for agentID, requirements := range RequiredCredentialBindings(candidate, catalog) {
+		for _, requirement := range requirements {
+			result[agentID] = append(result[agentID], requirement.Key)
 		}
-		seen := map[string]bool{}
-		if activationErr == nil && activation == WorkforceActivationActive {
-			for _, requirement := range catalog.AgentCredentialRequirements {
-				if requirement.RequiredForActivation {
-					if key := strings.TrimSpace(requirement.BindingKey); key != "" {
-						seen[key] = true
-					}
-				}
-			}
-		}
-		if activationErr == nil && activation == WorkforceActivationActive {
-			for _, requirement := range definition.SkillRequirements {
-				for _, binding := range requiredSkillCredentialBindings(
-					catalog.Skills[requirement.SkillID],
-					requirement.RequiredActions,
-				) {
-					if binding.Key != "" {
-						seen[binding.Key] = true
-					}
-				}
-			}
-		}
-		for kind := range seen {
-			result[definition.ID] = append(result[definition.ID], kind)
-		}
-		sort.Strings(result[definition.ID])
 	}
 	return result
 }

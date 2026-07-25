@@ -155,6 +155,7 @@ type (
 	WorkforceAuthoringMode                    = authoring.Mode
 	WorkforceSkillCapability                  = authoring.SkillCapability
 	WorkforceSkillCredential                  = authoring.SkillCredential
+	WorkforceCredentialBindingRequirement     = authoring.CredentialBindingRequirement
 	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
 	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
 	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
@@ -504,6 +505,9 @@ type (
 	SkillIdempotencyMode               = skill.IdempotencyMode
 	SkillCredentialRequirement         = skill.CredentialRequirement
 	SkillCredentialReference           = skill.CredentialReference
+	OAuth2Subject                      = capability.OAuth2Subject
+	OAuth2Requirement                  = capability.OAuth2Requirement
+	OAuth2GrantSummary                 = capability.OAuth2GrantSummary
 	SkillTransportReference            = skill.TransportReference
 	SkillTransportArgument             = skill.TransportArgument
 	SkillArgumentRule                  = skill.ArgumentRule
@@ -984,6 +988,23 @@ func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabil
 func ValidateWorkforceCredentialPlacement(candidate *WorkforceCandidate, required map[string][]string, placement WorkforceChangeSetPlacement, choices []CredentialBindingChoice) error {
 	return authoring.ValidateCredentialPlacement(candidate, required, placement, choices)
 }
+
+// ValidateWorkforceCredentialPlacementWithRequirements verifies opaque
+// references plus exact OAuth 2 provider, subject, resource, and scope
+// coverage. New embedding hosts should use this typed boundary.
+func ValidateWorkforceCredentialPlacementWithRequirements(candidate *WorkforceCandidate, required map[string][]WorkforceCredentialBindingRequirement, placement WorkforceChangeSetPlacement, choices []CredentialBindingChoice) error {
+	return authoring.ValidateCredentialPlacementWithRequirements(candidate, required, placement, choices)
+}
+
+func RequiredWorkforceCredentialBindings(candidate WorkforceCandidate, catalog WorkforceCapabilityCatalog) map[string][]WorkforceCredentialBindingRequirement {
+	return authoring.RequiredCredentialBindings(candidate, catalog)
+}
+
+var (
+	NormalizeOAuth2Requirement  = capability.NormalizeOAuth2Requirement
+	NormalizeOAuth2GrantSummary = capability.NormalizeOAuth2GrantSummary
+	OAuth2GrantSatisfies        = capability.OAuth2GrantSatisfies
+)
 
 var (
 	NewHostedTurnRunner                = runtime.NewHostedTurnRunner
@@ -1535,6 +1556,9 @@ const (
 	SkillRiskExternal    = skill.RiskLevelExternal
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
+
+	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
+	OAuth2SubjectUser         = capability.OAuth2SubjectUser
 
 	SkillDiscoveryBindable          = skill.DiscoveryReadinessBindable
 	SkillDiscoveryNeedsInstallation = skill.DiscoveryReadinessNeedsInstallation

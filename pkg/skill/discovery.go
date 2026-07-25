@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 const (
@@ -50,10 +52,11 @@ type DiscoveryAction struct {
 // at least one authorized choice. It deliberately excludes credential names,
 // opaque references, metadata, and values. Selection remains a host/user step.
 type DiscoveryCredential struct {
-	Name       string `json:"name"`
-	Kind       string `json:"kind"`
-	Optional   bool   `json:"optional,omitempty"`
-	Configured bool   `json:"configured"`
+	Name       string             `json:"name"`
+	Kind       string             `json:"kind"`
+	Optional   bool               `json:"optional,omitempty"`
+	Configured bool               `json:"configured"`
+	OAuth2     *OAuth2Requirement `json:"oauth2,omitempty"`
 }
 
 // DiscoveryCompatibility is host-supplied evidence. Consumers may rank this
@@ -189,6 +192,11 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 			if credential.Name == "" || credential.Kind == "" || len(credential.Name) > 128 || len(credential.Kind) > 128 {
 				return nil, fmt.Errorf("discovery candidate %d credential %d is invalid", index, credentialIndex)
 			}
+			normalizedOAuth2, err := capability.NormalizeOAuth2Requirement(credential.OAuth2)
+			if err != nil {
+				return nil, fmt.Errorf("discovery candidate %d credential %d OAuth 2 requirement is invalid: %w", index, credentialIndex, err)
+			}
+			credential.OAuth2 = normalizedOAuth2
 			if _, ok := credentialNames[credential.Name]; ok {
 				return nil, fmt.Errorf("discovery candidate %d repeats credential %q", index, credential.Name)
 			}
