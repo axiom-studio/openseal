@@ -38,6 +38,7 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 	start := make(chan struct{})
 	stores := make(chan *PostgresStore, replicas)
 	errorsFound := make(chan error, replicas)
+	events := make(chan PostgresMigrationEvent, replicas*3)
 	var wait sync.WaitGroup
 	for range replicas {
 		wait.Add(1)
@@ -47,6 +48,7 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 			store, openErr := NewPostgresStore(ctx, dsn,
 				WithPostgresSchema(schema),
 				WithPostgresMigrationLock(30*time.Second, 10*time.Millisecond),
+				WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { events <- event }),
 			)
 			if openErr != nil {
 				errorsFound <- openErr
@@ -59,6 +61,7 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 	wait.Wait()
 	close(stores)
 	close(errorsFound)
+	close(events)
 	for openErr := range errorsFound {
 		t.Errorf("concurrent startup: %v", openErr)
 	}
@@ -75,6 +78,59 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 	}
 	if opened != replicas {
 		t.Fatalf("opened replicas = %d, want %d", opened, replicas)
+	}
+	completed, current := 0, 0
+	for event := range events {
+		switch event.Phase {
+		case PostgresMigrationComplete:
+			completed++
+		case PostgresMigrationCurrent:
+			current++
+		}
+	}
+	if completed != 1 || current != replicas-1 {
+		t.Fatalf("migration outcomes: completed=%d current=%d, want 1 and %d", completed, current, replicas-1)
+	}
+}
+
+func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	schema := "openseal_migration_current_" + uuid.NewString()[:8]
+	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
+		_ = primary.Close()
+	})
+
+	events := make(chan PostgresMigrationEvent, 4)
+	startedAt := time.Now()
+	reopened, err := NewPostgresStore(ctx, dsn,
+		WithPostgresSchema(schema),
+		WithPostgresMigrationLock(5*time.Second, 10*time.Millisecond),
+		WithPostgresMigrationObserver(func(event PostgresMigrationEvent) { events <- event }),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if elapsed := time.Since(startedAt); elapsed >= 2*time.Second {
+		t.Fatalf("current-schema startup took %s, want under 2s", elapsed)
+	}
+	if acquired, outcome := <-events, <-events; acquired.Phase != PostgresMigrationAcquired ||
+		outcome.Phase != PostgresMigrationCurrent || outcome.SchemaVersion != currentPostgresSchemaVersion {
+		t.Fatalf("current-schema events = %#v, %#v", acquired, outcome)
+	}
+	if stats := reopened.MigrationStats(); stats.SchemaVersion != currentPostgresSchemaVersion ||
+		stats.TotalDuration <= 0 || stats.TotalDuration >= 2*time.Second {
+		t.Fatalf("current-schema stats = %#v", stats)
 	}
 }
 

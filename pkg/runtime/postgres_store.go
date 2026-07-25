@@ -33,6 +33,7 @@ type PostgresMigrationPhase string
 const (
 	PostgresMigrationWaiting  PostgresMigrationPhase = "waiting"
 	PostgresMigrationAcquired PostgresMigrationPhase = "acquired"
+	PostgresMigrationCurrent  PostgresMigrationPhase = "current"
 	PostgresMigrationComplete PostgresMigrationPhase = "complete"
 	PostgresMigrationTimeout  PostgresMigrationPhase = "timeout"
 )
@@ -255,6 +256,19 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	current, currentSchemaVersion, err := s.postgresSchemaCurrent(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if current {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		s.recordMigrationOutcome(PostgresMigrationCurrent, PostgresMigrationStats{
+			WaitDuration: waitDuration, TotalDuration: time.Since(startedAt), SchemaVersion: currentSchemaVersion,
+		})
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+s.quotedSchema()); err != nil {
 		return err
 	}
@@ -339,12 +353,45 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	stats := PostgresMigrationStats{WaitDuration: waitDuration, TotalDuration: time.Since(startedAt), SchemaVersion: schemaVersion}
+	s.recordMigrationOutcome(PostgresMigrationComplete, PostgresMigrationStats{
+		WaitDuration: waitDuration, TotalDuration: time.Since(startedAt), SchemaVersion: schemaVersion,
+	})
+	return nil
+}
+
+type postgresMigrationQuerier interface {
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+// postgresSchemaCurrent verifies the complete contiguous migration ledger
+// while the caller holds migration leadership. A highest-version-only check
+// could hide a partially restored or manually damaged ledger.
+func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgresMigrationQuerier) (bool, int64, error) {
+	var relation sql.NullString
+	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.schema+".schema_migrations").Scan(&relation); err != nil {
+		return false, 0, err
+	}
+	if !relation.Valid {
+		return false, 0, nil
+	}
+	var knownVersions, schemaVersion int64
+	if err := query.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1),
+			COALESCE(MAX(version), 0)
+		FROM `+s.table("schema_migrations"), currentPostgresSchemaVersion).Scan(&knownVersions, &schemaVersion); err != nil {
+		return false, 0, err
+	}
+	return knownVersions == currentPostgresSchemaVersion, schemaVersion, nil
+}
+
+func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {
 	s.migrationMu.Lock()
 	s.migrationStats = stats
 	s.migrationMu.Unlock()
-	s.observeMigration(PostgresMigrationEvent{Phase: PostgresMigrationComplete, WaitDuration: stats.WaitDuration, TotalDuration: stats.TotalDuration, SchemaVersion: stats.SchemaVersion})
-	return nil
+	s.observeMigration(PostgresMigrationEvent{
+		Phase: phase, WaitDuration: stats.WaitDuration, TotalDuration: stats.TotalDuration, SchemaVersion: stats.SchemaVersion,
+	})
 }
 
 func (s *PostgresStore) acquireMigrationLock(ctx context.Context, tx *sql.Tx) (time.Duration, error) {
