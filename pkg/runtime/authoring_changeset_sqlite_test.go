@@ -299,6 +299,7 @@ func TestWorkforceAuthoringRejectsSkillRequirementsWithoutAuthorityBeforeApply(t
 
 func TestInactiveWorkforceBindingDefersExactExecutionCredentialUntilActivation(t *testing.T) {
 	value := testApplicableWorkforceChangeSet()
+	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
 	definition := value.Result.Candidate.Agents[0]
 	definition.SkillRequirements = []agent.SkillRequirement{{
 		SkillID: "posture", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"},
@@ -389,6 +390,63 @@ func TestWorkforceReadinessAcceptsOnlyExactReviewedSkillInstallation(t *testing.
 	issues, err = store.ValidateChangeSetReadiness(context.Background(), value)
 	if err != nil || len(issues) != 1 || issues[0].Code != "skill_binding_definition_unavailable" {
 		t.Fatalf("forged installation readiness=%#v error=%v", issues, err)
+	}
+}
+
+func TestWorkforceReadinessDefersInstalledSkillCredentialUntilActivation(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const source = "https://clawhub.ai::posture"
+	installed := &skill.Definition{
+		ID: "posture", Version: "1.0.0", Name: "Posture",
+		Source:    &skill.SourceProvenance{Identity: source, Format: "openclaw.skill.v1"},
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: "execute"},
+		Actions: map[string]skill.Action{"execute": {
+			Name: "execute", Description: "Inspect posture", Risk: skill.RiskLevelExternal,
+			SideEffect: skill.SideEffectExternal, InputSchema: map[string]interface{}{"type": "object"},
+			Credentials: []skill.CredentialRequirement{{Name: "TOOLWEB_API_KEY", Kind: "environment-secret"}},
+			Retry:       skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported,
+		}},
+	}
+	if err := skill.NewCatalogWithStore(store).Register(ctx, installed); err != nil {
+		t.Fatal(err)
+	}
+
+	value := testApplicableWorkforceChangeSet()
+	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
+	definition := value.Result.Candidate.Agents[0]
+	definition.SkillRequirements = []agent.SkillRequirement{{
+		SkillID: "posture", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"},
+	}}
+	definition.Authority.AllowedSkillIDs = []string{"posture"}
+	definition.Authority.MaximumRisk = capability.RiskLevelExternal
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		"posture": {
+			ID: "posture", Version: "1.0.0", SourceIdentity: source,
+			Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelExternal,
+			Credentials: []authoring.SkillCredential{{
+				Name: "TOOLWEB_API_KEY", Kind: "environment-secret", Actions: []string{"execute"},
+			}},
+		},
+	}}
+	identity := capability.NewSkillIdentity(installed.ID, installed.Version, source)
+	value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{
+		definition.ID: {"posture": identity},
+	}
+
+	issues, err := store.ValidateChangeSetReadiness(ctx, value)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("inactive deferred readiness=%#v error=%v", issues, err)
+	}
+	value.Result.Candidate.Activation = authoring.WorkforceActivationActive
+	issues, err = store.ValidateChangeSetReadiness(ctx, value)
+	if err != nil || len(issues) != 1 || issues[0].Code != "skill_binding_materialization_failed" ||
+		!strings.Contains(issues[0].Message, "TOOLWEB_API_KEY") {
+		t.Fatalf("active exact credential readiness=%#v error=%v", issues, err)
 	}
 }
 
