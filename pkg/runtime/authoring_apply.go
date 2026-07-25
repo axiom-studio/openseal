@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -236,12 +237,16 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 			maximumRisk = definition.Authority.MaximumRisk
 		}
 		identity := workforceSkillRuntimeIdentity(value, definition.ID, requirement.SkillID, skillCapability.Version)
-		bindings = append(bindings, &capability.Binding{
+		binding := &capability.Binding{
 			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
 			SkillID: identity.ID, SkillVersion: identity.Version, SourceIdentity: identity.SourceIdentity, AllowedActions: allowed,
 			Disabled: !activate, EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials,
 			Config: cloneMap(value.Placement.BindingConfigs[definition.ID][requirement.SkillID]), Revision: 1,
-		})
+		}
+		if err := skill.ValidateBindingShape(binding); err != nil {
+			return nil, fmt.Errorf("Agent %s Skill %s authority is invalid: %w", definition.ID, requirement.SkillID, err)
+		}
+		bindings = append(bindings, binding)
 	}
 	return bindings, nil
 }

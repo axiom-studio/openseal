@@ -794,24 +794,32 @@ func validateDefinition(definition *Definition) error {
 func validateBindingShape(binding *Binding) error {
 	if binding == nil || strings.TrimSpace(binding.ID) == "" || strings.TrimSpace(binding.SkillID) == "" ||
 		strings.TrimSpace(binding.SkillVersion) == "" || binding.Revision < 1 {
-		return errors.New("binding id, skill id, version, and revision are required")
+		return fmt.Errorf("%w: binding id, skill id, version, and revision are required", ErrBindingInvalid)
 	}
 	if err := validateScopeAndDeployment(binding.Scope, binding.DeploymentID); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrBindingInvalid, err)
 	}
 	if err := validateSourceIdentity(binding.SourceIdentity); err != nil {
-		return fmt.Errorf("binding source identity is invalid: %w", err)
+		return fmt.Errorf("%w: binding source identity is invalid: %v", ErrBindingInvalid, err)
 	}
 	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt) || !validRisk(binding.MaximumRisk) {
-		return errors.New("binding must enable a prompt or explicitly allow actions and set maximum risk")
+		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions and set maximum risk", ErrBindingInvalid)
 	}
 	if err := validateNonSecretConfiguration(binding.Config, ""); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrBindingInvalid, err)
 	}
 	if err := validateBindingLifecycle(binding); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrBindingInvalid, err)
 	}
 	return nil
+}
+
+// ValidateBindingShape validates the durable, definition-independent shape of
+// a Skill binding. Persistence implementations and transactional compilers use
+// it to prevent malformed authority from entering storage before an immutable
+// Skill definition is resolved.
+func ValidateBindingShape(binding *Binding) error {
+	return validateBindingShape(binding)
 }
 
 func validateBindingLifecycle(binding *Binding) error {

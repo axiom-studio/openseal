@@ -39,7 +39,8 @@ func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgra
 	bindingScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	binding := &skill.Binding{
 		ID: "source", Scope: bindingScope, DeploymentID: "researcher", SkillID: "source",
-		SkillVersion: "1.0.0", AllowedActions: []string{"observe"}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		SkillVersion: "1.0.0", AllowedActions: []string{"observe"}, MaximumRisk: skill.RiskLevelRead,
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.SaveSkillBinding(ctx, binding, 0); err != nil {
 		t.Fatal(err)

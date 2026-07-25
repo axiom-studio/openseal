@@ -66,6 +66,9 @@ func (s *MemoryStore) ListSkillDefinitionVariants(_ context.Context, id, version
 }
 
 func (s *MemoryStore) SaveSkillBinding(_ context.Context, binding *skill.Binding, expectedRevision int64) error {
+	if err := skill.ValidateBindingShape(binding); err != nil {
+		return err
+	}
 	key := memorySkillBindingKey(binding.Scope, binding.DeploymentID, binding.ID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
