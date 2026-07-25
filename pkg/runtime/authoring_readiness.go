@@ -178,6 +178,12 @@ func workforceBindingDefinitionIssue(path, agentID, catalogID string, binding *c
 		if workforceRiskRank(action.Risk) > workforceRiskRank(binding.MaximumRisk) {
 			return &authoring.ValidationIssue{Path: path, Code: "skill_binding_action_risk_exceeded", Message: fmt.Sprintf("Action %s requires %s risk, but Agent %s permits at most %s; choose a compatible read-only action or widen Agent authority through review and approval", actionName, action.Risk, agentID, binding.MaximumRisk)}
 		}
+		if binding.Disabled {
+			// Inactive candidates persist non-executable authority without
+			// requiring execution secrets. Activation rematerializes an enabled
+			// binding and must satisfy every exact credential requirement.
+			continue
+		}
 		for _, requirement := range action.Credentials {
 			reference, exists := binding.Credentials[requirement.Name]
 			if requirement.Optional && !exists {
