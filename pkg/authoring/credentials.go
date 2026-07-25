@@ -248,29 +248,35 @@ func ValidateCredentialPlacementWithRequirements(candidate *WorkforceCandidate, 
 
 	requiredByAgent := make(map[string]map[string]CredentialBindingRequirement)
 	if candidate != nil {
-		for _, definition := range candidate.Agents {
-			if definition == nil {
-				continue
-			}
+		addOwner := func(ownerID string) {
 			bindings := make(map[string]CredentialBindingRequirement)
-			for _, requirement := range required[definition.ID] {
+			for _, requirement := range required[ownerID] {
 				requirement.Key, requirement.Kind = strings.TrimSpace(requirement.Key), strings.TrimSpace(requirement.Kind)
 				if requirement.Key != "" {
 					bindings[requirement.Key] = requirement
 				}
 			}
-			requiredByAgent[definition.ID] = bindings
+			requiredByAgent[ownerID] = bindings
+		}
+		for _, definition := range candidate.Agents {
+			if definition == nil {
+				continue
+			}
+			addOwner(definition.ID)
+		}
+		if candidate.Team != nil {
+			addOwner(candidate.Team.ID)
 		}
 	}
 
 	for agentID, references := range placement.CredentialReferences {
 		agentID = strings.TrimSpace(agentID)
 		if agentID == "" {
-			return fmt.Errorf("credential placement requires an Agent definition ID")
+			return fmt.Errorf("credential placement requires a workforce owner definition ID")
 		}
 		allowedBindings, knownAgent := requiredByAgent[agentID]
 		if candidate != nil && !knownAgent {
-			return fmt.Errorf("credential placement Agent %s is not part of this workforce candidate", agentID)
+			return fmt.Errorf("credential placement owner %s is not part of this workforce candidate", agentID)
 		}
 		for key, reference := range references {
 			key = strings.TrimSpace(key)

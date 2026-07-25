@@ -142,6 +142,7 @@ func TestCanonicalExternalConversationDispatcherRoutesExactRunbook(t *testing.T)
 	endpoint := &ExternalConversationEndpoint{
 		Handler: ExternalConversationHandler{
 			Kind: ExternalConversationHandlerRunbook, ID: "support", Version: "2.4.1", Trigger: "on-message",
+			AssignedAgentID: "support-agent",
 		},
 	}
 	conversation := &Conversation{ID: "conversation"}

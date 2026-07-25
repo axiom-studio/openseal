@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -29,11 +30,17 @@ type workforceApplication struct {
 	objectives                 []workforceObjectiveApplication
 	initiative                 *Initiative
 	initiativeExpectedRevision int64
+	conversationEndpoints      []workforceConversationEndpointApplication
 	resources                  []authoring.AppliedResourceReference
 }
 
 type workforceObjectiveApplication struct {
 	value            *Objective
+	expectedRevision int64
+}
+
+type workforceConversationEndpointApplication struct {
+	value            *ExternalConversationEndpoint
 	expectedRevision int64
 }
 
@@ -76,6 +83,11 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 	application := &workforceApplication{activation: activation}
 	activate := activation == authoring.WorkforceActivationActive
 	deploymentByDefinition := map[string]string{}
+	for _, definition := range value.Result.Candidate.Agents {
+		if definition != nil {
+			deploymentByDefinition[definition.ID] = value.Placement.AgentDeploymentIDs[definition.ID]
+		}
+	}
 	for index, source := range value.Result.Candidate.Agents {
 		if source == nil {
 			return nil, fmt.Errorf("Agent definition is required")
@@ -89,10 +101,12 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		if err := resolveAgentDefinitionSkillIdentities(value, definition); err != nil {
 			return nil, err
 		}
+		if err := resolveRunbookAgentDeploymentIDs(definition.Runbook, deploymentByDefinition); err != nil {
+			return nil, err
+		}
 		definition.CreatedAt = now
 		definition.Digest = ""
 		definition.Digest = portableDigest(definition)
-		deploymentByDefinition[definition.ID] = deploymentID
 		expectedRevision := value.Placement.AgentExpectedRevisions[definition.ID]
 		revision := expectedRevision + 1
 		previous := ""
@@ -189,9 +203,230 @@ func finishWorkforceApplication(value *authoring.ChangeSet, application *workfor
 		application.initiativeExpectedRevision = value.Placement.InitiativeExpectedRevision
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "initiative", ID: initiative.ID, Revision: initiative.Revision})
 	}
+	if err := materializeConversationEndpoints(value, application, deploymentByDefinition); err != nil {
+		return err
+	}
+	recordedBindings := map[string]bool{}
+	for _, resource := range application.resources {
+		if resource.Kind == "skill_binding" {
+			recordedBindings[resource.ID] = true
+		}
+	}
+	for _, binding := range application.skillBindings {
+		if binding != nil && !recordedBindings[binding.ID] {
+			application.resources = append(application.resources, authoring.AppliedResourceReference{
+				Kind: "skill_binding", ID: binding.ID, Version: binding.SkillVersion, Revision: binding.Revision,
+			})
+			recordedBindings[binding.ID] = true
+		}
+	}
+	for _, endpoint := range application.conversationEndpoints {
+		application.resources = append(application.resources, authoring.AppliedResourceReference{
+			Kind: "conversation_endpoint", ID: endpoint.value.ID, Revision: endpoint.value.Revision,
+		})
+	}
+	sortWorkforceApplicationResources(application)
+	return nil
+}
+
+func sortWorkforceApplicationResources(application *workforceApplication) {
+	if application == nil {
+		return
+	}
 	sort.Slice(application.resources, func(i, j int) bool {
 		return application.resources[i].Kind+application.resources[i].ID < application.resources[j].Kind+application.resources[j].ID
 	})
+}
+
+func materializeConversationEndpoints(
+	value *authoring.ChangeSet,
+	application *workforceApplication,
+	deploymentByDefinition map[string]string,
+) error {
+	if value == nil || application == nil {
+		return nil
+	}
+	activate := application.activation == authoring.WorkforceActivationActive
+	for _, blueprint := range value.Result.Candidate.ConversationEndpoints {
+		placement, ok := value.Placement.ConversationEndpoints[blueprint.ID]
+		if !ok {
+			return fmt.Errorf("conversation endpoint %s has no reviewed placement", blueprint.ID)
+		}
+		ownerDeploymentID := ""
+		ownerType := OwnerTypeAgent
+		switch blueprint.Owner.Type {
+		case authoring.ConversationEndpointOwnerAgent:
+			ownerDeploymentID = deploymentByDefinition[blueprint.Owner.ID]
+		case authoring.ConversationEndpointOwnerTeam:
+			ownerType = OwnerTypeTeam
+			if application.teamDeployment != nil && value.Result.Candidate.Team != nil &&
+				value.Result.Candidate.Team.ID == blueprint.Owner.ID {
+				ownerDeploymentID = application.teamDeployment.ID
+			}
+		}
+		if strings.TrimSpace(ownerDeploymentID) == "" {
+			return fmt.Errorf("conversation endpoint %s owner has no deployment", blueprint.ID)
+		}
+		skillCapability, ok := value.Catalog.Skills[blueprint.SkillID]
+		if !ok || skillCapability.Version != blueprint.SkillVersion {
+			return fmt.Errorf("conversation endpoint %s Skill adapter is unavailable", blueprint.ID)
+		}
+		var adapter *authoring.ConversationAdapterCapability
+		for index := range skillCapability.ConversationAdapters {
+			if skillCapability.ConversationAdapters[index].ID == blueprint.AdapterID {
+				adapter = &skillCapability.ConversationAdapters[index]
+				break
+			}
+		}
+		if adapter == nil {
+			return fmt.Errorf("conversation endpoint %s adapter is unavailable", blueprint.ID)
+		}
+		binding, err := materializeConversationAdapterBinding(
+			value, application, blueprint, ownerDeploymentID, adapter, activate,
+		)
+		if err != nil {
+			return err
+		}
+		handler := ExternalConversationHandler{}
+		switch blueprint.Handler.Kind {
+		case authoring.ConversationHandlerAgent:
+			handler = ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: ownerDeploymentID}
+		case authoring.ConversationHandlerTeam:
+			handler = ExternalConversationHandler{Kind: ExternalConversationHandlerTeam, ID: ownerDeploymentID}
+		case authoring.ConversationHandlerRunbook:
+			assignedAgentID := deploymentByDefinition[blueprint.Handler.AgentDefinitionID]
+			if strings.TrimSpace(assignedAgentID) == "" {
+				return fmt.Errorf("conversation endpoint %s Runbook Agent has no deployment", blueprint.ID)
+			}
+			handler = ExternalConversationHandler{
+				Kind: ExternalConversationHandlerRunbook, ID: blueprint.Handler.RunbookID,
+				Version: blueprint.Handler.RunbookVersion, Trigger: blueprint.Handler.Trigger,
+				AssignedAgentID: assignedAgentID,
+			}
+		default:
+			return fmt.Errorf("conversation endpoint %s handler is invalid", blueprint.ID)
+		}
+		status := ExternalConversationEndpointPaused
+		if activate {
+			status = ExternalConversationEndpointActive
+		}
+		address := strings.TrimSpace(placement.Address)
+		if address == "" {
+			address = strings.TrimSpace(blueprint.Address)
+		}
+		now := value.ApplyReceipt.AppliedAt
+		endpoint := &ExternalConversationEndpoint{
+			ID: strings.TrimSpace(placement.ID), Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID},
+			Owner: ObjectiveOwner{Type: ownerType, ID: ownerDeploymentID}, DeploymentID: ownerDeploymentID,
+			Name: blueprint.Name,
+			Adapter: ExternalConversationAdapterReference{
+				SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
+				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: blueprint.AdapterID,
+			},
+			Provider: adapter.Provider, Mode: blueprint.Mode, Address: address, Handler: handler,
+			Policy: ExternalConversationPolicy{
+				MessageSelection: ExternalConversationMessageSelection(blueprint.Policy.MessageSelection),
+				ReplyMode:        ExternalConversationReplyMode(blueprint.Policy.ReplyMode),
+				IgnoreBots:       blueprint.Policy.IgnoreBots,
+			},
+			Configuration: cloneMap(placement.Configuration), Status: status,
+			Revision: placement.ExpectedRevision + 1, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := endpoint.Policy.Validate(endpoint.Mode, adapter.Features); err != nil {
+			return err
+		}
+		if err := endpoint.Validate(); err != nil {
+			return fmt.Errorf("conversation endpoint %s is invalid: %w", blueprint.ID, err)
+		}
+		application.conversationEndpoints = append(application.conversationEndpoints, workforceConversationEndpointApplication{
+			value: endpoint, expectedRevision: placement.ExpectedRevision,
+		})
+	}
+	return nil
+}
+
+func materializeConversationAdapterBinding(
+	value *authoring.ChangeSet,
+	application *workforceApplication,
+	blueprint authoring.ConversationEndpointBlueprint,
+	deploymentID string,
+	adapter *authoring.ConversationAdapterCapability,
+	activate bool,
+) (*capability.Binding, error) {
+	identity := workforceSkillRuntimeIdentity(
+		value, blueprint.Owner.ID, blueprint.SkillID, blueprint.SkillVersion,
+	)
+	bindingID := "workforce:" + deploymentID + ":" + blueprint.SkillID
+	var binding *capability.Binding
+	for _, candidate := range application.skillBindings {
+		if candidate.ID == bindingID {
+			binding = candidate
+			break
+		}
+	}
+	if binding == nil {
+		binding = &capability.Binding{
+			ID: bindingID, Scope: value.Scope, DeploymentID: deploymentID,
+			SkillID: identity.ID, SkillVersion: identity.Version, SourceIdentity: identity.SourceIdentity,
+			AllowedActions: []string{}, MaximumRisk: capability.RiskLevelRead,
+			Credentials: map[string]capability.CredentialReference{},
+			Config:      cloneMap(value.Placement.BindingConfigs[blueprint.Owner.ID][blueprint.SkillID]),
+			Disabled:    !activate, Revision: 1,
+		}
+		application.skillBindings = append(application.skillBindings, binding)
+	} else if binding.SkillID != identity.ID || binding.SkillVersion != identity.Version ||
+		binding.SourceIdentity != identity.SourceIdentity {
+		return nil, fmt.Errorf("conversation endpoint %s conflicts with the owner's exact Skill binding", blueprint.ID)
+	}
+	if !containsExactRuntimeString(binding.EnabledConversationAdapters, blueprint.AdapterID) {
+		binding.EnabledConversationAdapters = append(binding.EnabledConversationAdapters, blueprint.AdapterID)
+		sort.Strings(binding.EnabledConversationAdapters)
+	}
+	for _, credential := range adapter.Credentials {
+		reference := value.Placement.CredentialReferences[blueprint.Owner.ID][credential.Name]
+		if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+			if credential.Optional || !activate {
+				continue
+			}
+			return nil, fmt.Errorf(
+				"conversation endpoint %s requires opaque credential %s of kind %s",
+				blueprint.ID, credential.Name, credential.Kind,
+			)
+		}
+		if reference.Kind != credential.Kind {
+			return nil, fmt.Errorf(
+				"conversation endpoint %s credential %s must use kind %s",
+				blueprint.ID, credential.Name, credential.Kind,
+			)
+		}
+		binding.Credentials[credential.Name] = reference
+	}
+	if err := skill.ValidateBindingShape(binding); err != nil {
+		return nil, fmt.Errorf("conversation endpoint %s Skill binding is invalid: %w", blueprint.ID, err)
+	}
+	return binding, nil
+}
+
+func resolveRunbookAgentDeploymentIDs(definition *runbook.Definition, deployments map[string]string) error {
+	if definition == nil {
+		return nil
+	}
+	for stepID, step := range definition.Steps {
+		if step.Delegate == nil || len(step.Delegate.AgentID.Literal) == 0 {
+			continue
+		}
+		var agentID string
+		if err := json.Unmarshal(step.Delegate.AgentID.Literal, &agentID); err != nil || strings.TrimSpace(agentID) == "" {
+			continue
+		}
+		deploymentID := strings.TrimSpace(deployments[agentID])
+		if deploymentID == "" {
+			continue
+		}
+		encoded, _ := json.Marshal(deploymentID)
+		step.Delegate.AgentID.Literal = encoded
+		definition.Steps[stepID] = step
+	}
 	return nil
 }
 
@@ -578,6 +813,43 @@ func synchronizeWorkforceSkillBindingResources(application *workforceApplication
 			resource.Revision = bindings[resource.ID].Revision
 		}
 	}
+}
+
+func synchronizeWorkforceConversationEndpointBindings(application *workforceApplication) error {
+	if application == nil {
+		return nil
+	}
+	bindings := make(map[string]*capability.Binding, len(application.skillBindings))
+	for _, binding := range application.skillBindings {
+		if binding != nil {
+			bindings[binding.ID] = binding
+		}
+	}
+	for index := range application.conversationEndpoints {
+		endpoint := application.conversationEndpoints[index].value
+		binding := bindings[endpoint.Adapter.BindingID]
+		if binding == nil || binding.Revision < 1 ||
+			binding.SkillID != endpoint.Adapter.SkillID ||
+			binding.SkillVersion != endpoint.Adapter.SkillVersion ||
+			binding.SourceIdentity != endpoint.Adapter.SourceIdentity ||
+			!containsExactRuntimeString(binding.EnabledConversationAdapters, endpoint.Adapter.AdapterID) {
+			return fmt.Errorf("conversation endpoint %s lost its exact Skill adapter binding", endpoint.ID)
+		}
+		endpoint.Adapter.BindingRevision = binding.Revision
+		if err := endpoint.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func containsExactRuntimeString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, ownerID string, templates []workforce.ObjectiveTemplate, deploymentByDefinition map[string]string) ([]workforceObjectiveApplication, error) {

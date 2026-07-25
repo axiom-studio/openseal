@@ -34,15 +34,7 @@ func slackChatbotCandidate() WorkforceCandidate {
 				Interfaces: map[string]runbook.Interface{
 					"respond": {
 						Description: "Respond to one canonical conversation message.",
-						InputSchema: map[string]interface{}{
-							"type":                 "object",
-							"additionalProperties": false,
-							"properties": map[string]interface{}{
-								"conversationId":   map[string]interface{}{"type": "string"},
-								"triggerMessageId": map[string]interface{}{"type": "string"},
-							},
-							"required": []interface{}{"conversationId", "triggerMessageId"},
-						},
+						InputSchema: CanonicalConversationTriggerInputSchema(),
 					},
 				},
 				Triggers: map[string]runbook.Trigger{
@@ -204,5 +196,64 @@ func TestReactiveConversationIntentRejectsProseOnlyAndDirectHandlerSubstitutes(t
 	})
 	if !hasValidationCode(issues, "reactive_conversation_runbook_missing") {
 		t.Fatalf("direct-handler issues = %#v", issues)
+	}
+
+	candidate = slackChatbotCandidate()
+	candidate.Agents[0].Runbook.Interfaces["respond"] = runbook.Interface{
+		Description: "An incomplete trigger contract.",
+		InputSchema: map[string]interface{}{"type": "object"},
+	}
+	issues = validateConversationComposition(&candidate, GenerateRequest{
+		Prompt: slackChatbotPrompt, Catalog: slackChatbotCatalog(),
+	})
+	if !hasValidationCode(issues, "conversation_trigger_input_contract_mismatch") {
+		t.Fatalf("trigger-contract issues = %#v", issues)
+	}
+}
+
+func TestChangeSetPreservesReactiveCompositionAndCreatesEndpointPlacement(t *testing.T) {
+	payload, err := json.Marshal(GenerationResponse{Candidate: slackChatbotCandidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(staticGenerator{payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewChangeSetService(compiler, NewMemoryChangeSetStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeSet, replayed, err := service.Create(context.Background(), CreateChangeSetRequest{
+		Scope:  capability.ScopeReference{Kind: "tenant", ID: "one"},
+		Prompt: slackChatbotPrompt, Catalog: slackChatbotCatalog(),
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "slack-chatbot",
+	})
+	if err != nil || replayed {
+		t.Fatalf("create replayed=%t err=%v", replayed, err)
+	}
+	endpoint := changeSet.Result.Candidate.ConversationEndpoints[0]
+	if endpoint.Owner.ID != "tenant/one/slack-response-agent" ||
+		endpoint.Handler.AgentDefinitionID != "tenant/one/slack-response-agent" {
+		t.Fatalf("canonical endpoint owner/handler = %#v", endpoint)
+	}
+	var delegatedAgentID string
+	if err := json.Unmarshal(
+		changeSet.Result.Candidate.Agents[0].Runbook.Steps["reason"].Delegate.AgentID.Literal,
+		&delegatedAgentID,
+	); err != nil || delegatedAgentID != "tenant/one/slack-response-agent" {
+		t.Fatalf("canonical delegated Agent id = %q, %v", delegatedAgentID, err)
+	}
+	placement := changeSet.Placement.ConversationEndpoints[endpoint.ID]
+	if placement.ID == "" || placement.ExpectedRevision != 0 {
+		t.Fatalf("endpoint placement = %#v", placement)
+	}
+	required := changeSet.RequiredCredentialBindings[endpoint.Owner.ID]
+	if len(required) != 1 || required[0].Key != "SLACK_CONNECTION" || required[0].OAuth2 == nil {
+		t.Fatalf("endpoint credential contract = %#v", changeSet.RequiredCredentialBindings)
+	}
+	if !changeSet.Result.Valid || len(changeSet.Result.Validation) != 0 ||
+		len(changeSet.Result.MissingRequirements) != 0 {
+		t.Fatalf("durable chatbot candidate = %#v", changeSet.Result)
 	}
 }

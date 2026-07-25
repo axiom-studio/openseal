@@ -195,7 +195,16 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	if err = applyPostgresWorkforceInitiative(ctx, tx, s.table("initiatives"), a.initiative, a.initiativeExpectedRevision); err != nil {
 		return nil, err
 	}
+	if err = synchronizeWorkforceConversationEndpointBindings(a); err != nil {
+		return nil, err
+	}
+	if err = applyPostgresWorkforceConversationEndpoints(
+		ctx, tx, s.table("external_conversation_endpoints"), value, a,
+	); err != nil {
+		return nil, err
+	}
 	synchronizeWorkforceSkillBindingResources(a)
+	sortWorkforceApplicationResources(a)
 	value.ApplyReceipt.Resources = a.resources
 	p, _ := json.Marshal(value)
 	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("workforce_change_sets")+` SET status=$1,revision=$2,updated_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8 AND status=$9 AND candidate_digest=$10`, value.Status, value.Revision, value.UpdatedAt, string(p), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, authoring.ChangeSetReady, value.CandidateDigest)
@@ -209,6 +218,128 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		return nil, err
 	}
 	return decodeChangeSet(string(p))
+}
+
+func applyPostgresWorkforceConversationEndpoints(
+	ctx context.Context,
+	tx *sql.Tx,
+	table string,
+	value *authoring.ChangeSet,
+	application *workforceApplication,
+) error {
+	desiredIDs := make(map[string]bool, len(application.conversationEndpoints))
+	for index := range application.conversationEndpoints {
+		desired := application.conversationEndpoints[index]
+		endpoint := desired.value
+		desiredIDs[endpoint.ID] = true
+		if desired.expectedRevision > 0 {
+			var payload string
+			if err := tx.QueryRowContext(
+				ctx,
+				`SELECT payload FROM `+table+`
+				 WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`,
+				value.Scope.Kind, value.Scope.ID, endpoint.ID, desired.expectedRevision,
+			).Scan(&payload); err != nil {
+				return authoring.ErrChangeSetRevision
+			}
+			var current ExternalConversationEndpoint
+			if json.Unmarshal([]byte(payload), &current) != nil ||
+				current.Owner != endpoint.Owner || current.DeploymentID != endpoint.DeploymentID {
+				return authoring.ErrChangeSetRevision
+			}
+			endpoint.CreatedAt = current.CreatedAt
+		}
+		payload, _ := json.Marshal(endpoint)
+		if desired.expectedRevision == 0 {
+			if _, err := tx.ExecContext(
+				ctx,
+				`INSERT INTO `+table+`
+				 (scope_kind,scope_id,id,owner_type,owner_id,provider,status,revision,updated_at,payload)
+				 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, endpoint.Owner.Type, endpoint.Owner.ID,
+				endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+			); err != nil {
+				if postgresUniqueViolation(err) {
+					return authoring.ErrChangeSetRevision
+				}
+				return err
+			}
+		} else {
+			result, err := tx.ExecContext(
+				ctx,
+				`UPDATE `+table+`
+				 SET provider=$1,status=$2,revision=$3,updated_at=$4,payload=$5::jsonb
+				 WHERE scope_kind=$6 AND scope_id=$7 AND id=$8 AND revision=$9`,
+				endpoint.Provider, endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+				endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, desired.expectedRevision,
+			)
+			if err != nil {
+				return err
+			}
+			if rows, _ := result.RowsAffected(); rows != 1 {
+				return authoring.ErrChangeSetRevision
+			}
+		}
+	}
+	reconciled := workforceBindingReconciliationDeployments(value)
+	if len(reconciled) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT payload FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`,
+		value.Scope.Kind, value.Scope.ID,
+	)
+	if err != nil {
+		return err
+	}
+	current := make([]*ExternalConversationEndpoint, 0)
+	for rows.Next() {
+		var payload string
+		var endpoint ExternalConversationEndpoint
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return err
+		}
+		if json.Unmarshal([]byte(payload), &endpoint) == nil &&
+			reconciled[endpoint.DeploymentID] && !desiredIDs[endpoint.ID] &&
+			endpoint.Status != ExternalConversationEndpointRetired {
+			current = append(current, &endpoint)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, endpoint := range current {
+		expectedRevision := endpoint.Revision
+		now := value.ApplyReceipt.AppliedAt
+		endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, endpoint.RetiredAt =
+			ExternalConversationEndpointRetired, expectedRevision+1, now, &now
+		if err := endpoint.Validate(); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(endpoint)
+		result, err := tx.ExecContext(
+			ctx,
+			`UPDATE `+table+`
+			 SET status=$1,revision=$2,updated_at=$3,payload=$4::jsonb
+			 WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`,
+			endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
+			endpoint.Scope.Kind, endpoint.Scope.ID, endpoint.ID, expectedRevision,
+		)
+		if err != nil {
+			return err
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			return authoring.ErrChangeSetRevision
+		}
+		application.resources = append(application.resources, authoring.AppliedResourceReference{
+			Kind: "conversation_endpoint", ID: endpoint.ID, Revision: endpoint.Revision,
+		})
+	}
+	return nil
 }
 
 func applyPostgresWorkforceInitiative(ctx context.Context, tx *sql.Tx, table string, initiative *Initiative, expectedRevision int64) error {

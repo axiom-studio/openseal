@@ -48,10 +48,11 @@ const (
 // Runbook may deterministically orchestrate one or more bounded Agent or Team
 // runs; provider-specific behavior never belongs in the handler.
 type ExternalConversationHandler struct {
-	Kind    ExternalConversationHandlerKind `json:"kind"`
-	ID      string                          `json:"id"`
-	Version string                          `json:"version,omitempty"`
-	Trigger string                          `json:"trigger,omitempty"`
+	Kind            ExternalConversationHandlerKind `json:"kind"`
+	ID              string                          `json:"id"`
+	Version         string                          `json:"version,omitempty"`
+	Trigger         string                          `json:"trigger,omitempty"`
+	AssignedAgentID string                          `json:"assignedAgentId,omitempty"`
 }
 
 func (h ExternalConversationHandler) Validate(owner ObjectiveOwner) error {
@@ -60,17 +61,20 @@ func (h ExternalConversationHandler) Validate(owner ObjectiveOwner) error {
 	}
 	switch h.Kind {
 	case ExternalConversationHandlerAgent:
-		if h.Version != "" || h.Trigger != "" || owner.Type != OwnerTypeAgent || h.ID != owner.ID {
+		if h.Version != "" || h.Trigger != "" || h.AssignedAgentID != "" ||
+			owner.Type != OwnerTypeAgent || h.ID != owner.ID {
 			return fmt.Errorf("%w: Agent handler must identify the endpoint owner", ErrInvalidExternalConversation)
 		}
 	case ExternalConversationHandlerTeam:
-		if h.Version != "" || h.Trigger != "" || owner.Type != OwnerTypeTeam || h.ID != owner.ID {
+		if h.Version != "" || h.Trigger != "" || h.AssignedAgentID != "" ||
+			owner.Type != OwnerTypeTeam || h.ID != owner.ID {
 			return fmt.Errorf("%w: Team handler must identify the endpoint owner", ErrInvalidExternalConversation)
 		}
 	case ExternalConversationHandlerRunbook:
 		if strings.TrimSpace(h.Version) == "" || len(h.Version) > 128 ||
-			!validOpaqueIdentifier(strings.TrimSpace(h.Trigger), 128) {
-			return fmt.Errorf("%w: Runbook handler requires an exact version and trigger", ErrInvalidExternalConversation)
+			!validOpaqueIdentifier(strings.TrimSpace(h.Trigger), 128) ||
+			!validAgentReference(strings.TrimSpace(h.AssignedAgentID), 256) {
+			return fmt.Errorf("%w: Runbook handler requires an exact version, trigger, and assigned Agent deployment", ErrInvalidExternalConversation)
 		}
 	default:
 		return fmt.Errorf("%w: handler kind is invalid", ErrInvalidExternalConversation)
@@ -771,6 +775,7 @@ func normalizeExternalConversationHandler(value ExternalConversationHandler) Ext
 	value.ID = strings.TrimSpace(value.ID)
 	value.Version = strings.TrimSpace(value.Version)
 	value.Trigger = strings.TrimSpace(value.Trigger)
+	value.AssignedAgentID = strings.TrimSpace(value.AssignedAgentID)
 	return value
 }
 
