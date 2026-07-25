@@ -10,6 +10,8 @@ definition:
   source:
     format: axiom.skill/v1
     publisher: OpenSeal
+    identity: https://github.com/axiom-studio/openseal::openseal.slack-conversations
+    registry: https://github.com/axiom-studio/openseal
     reference: openseal.slack-conversations
     resolvedVersion: 1.0.0
     license: MIT
