@@ -890,6 +890,29 @@ func addTrustedRefinementSkill(changeSet *ChangeSet, questionID string, value Re
 	if candidate.Verification != SkillSearchVerificationVerified || candidate.Readiness == SkillReadinessUnavailable {
 		return errors.New("trusted Skill candidate is not verified and selectable")
 	}
+	if candidate.Readiness == SkillReadinessNeedsInstallation {
+		reference := strings.TrimSpace(candidate.Provenance.Reference)
+		if reference == "" {
+			return errors.New("trusted installable Skill candidate has no verified acquisition reference")
+		}
+		found := false
+		for index := range candidate.Compatibility {
+			compatibility := &candidate.Compatibility[index]
+			if compatibility.Requirement != "installation" || compatibility.Compatible {
+				continue
+			}
+			compatibility.Reference = reference
+			found = true
+		}
+		if !found {
+			candidate.Compatibility = append(candidate.Compatibility, SkillCompatibility{
+				Requirement: "installation",
+				Compatible:  false,
+				Evidence:    "The verified Skill must be acquired before it can execute.",
+				Reference:   reference,
+			})
+		}
+	}
 	for _, fact := range candidate.Compatibility {
 		if fact.Compatible || fact.Requirement == "installation" || strings.HasPrefix(fact.Requirement, "credential:") {
 			continue
