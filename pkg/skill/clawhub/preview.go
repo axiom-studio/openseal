@@ -53,6 +53,7 @@ type CompilationPreview struct {
 	Name                   string                             `json:"name"`
 	Description            string                             `json:"description,omitempty"`
 	Compatible             bool                               `json:"compatible"`
+	PromptAvailable        bool                               `json:"promptAvailable,omitempty"`
 	Actions                map[string]capability.Action       `json:"actions"`
 	CredentialRequirements []capability.CredentialRequirement `json:"credentialRequirements,omitempty"`
 	Requirements           capability.Requirements            `json:"requirements,omitempty"`
@@ -164,7 +165,8 @@ func (m *InstallManager) preview(ctx context.Context, request PreviewRequest, va
 	return &CompilationPreview{
 		APIVersion: CompilationPreviewAPIVersion, Receipt: receipt,
 		DefinitionID: definition.ID, DefinitionVersion: definition.Version, Name: definition.Name, Description: definition.Description,
-		Compatible: compatible, Actions: clonePreviewActions(definition.Actions), CredentialRequirements: previewCredentialRequirements(definition),
+		Compatible: compatible, PromptAvailable: definition.Prompt != nil,
+		Actions: clonePreviewActions(definition.Actions), CredentialRequirements: previewCredentialRequirements(definition),
 		Requirements: definition.Requirements, Diagnostics: diagnostics,
 	}, nil
 }
