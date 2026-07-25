@@ -33,12 +33,16 @@ type cancellationBoundaryWorkforceGenerator struct {
 }
 
 type staticWorkforceCatalogResolver struct {
-	catalog authoring.CapabilityCatalog
-	calls   atomic.Int32
+	catalog   authoring.CapabilityCatalog
+	calls     atomic.Int32
+	onResolve func()
 }
 
 func (r *staticWorkforceCatalogResolver) ResolveWorkforceAuthoringCatalog(context.Context, *authoring.ChangeSet) (authoring.CapabilityCatalog, error) {
 	r.calls.Add(1)
+	if r.onResolve != nil {
+		r.onResolve()
+	}
 	return r.catalog, nil
 }
 
@@ -175,6 +179,52 @@ func TestWorkforceAuthoringWorkerResolvesCatalogInsideDurableRun(t *testing.T) {
 	})
 	if err != nil || !hasWorkforceAuthoringEvent(events, "workforce.generation.phase", string(authoring.CompilePhaseCapabilityResolve)) {
 		t.Fatalf("capability resolution events=%#v err=%v", events, err)
+	}
+}
+
+func TestWorkforceAuthoringWorkerCatalogRefreshConflictDoesNotPanic(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	generator := testAuthoringGenerator(t)
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &staticWorkforceCatalogResolver{catalog: request.Catalog}
+	resolver.onResolve = func() {
+		current, getErr := store.GetChangeSet(context.Background(), request.Scope, changeSet.ID)
+		if getErr != nil {
+			t.Errorf("load concurrent ChangeSet: %v", getErr)
+			return
+		}
+		concurrent := cloneRuntimeChangeSetForAuthoring(current)
+		concurrent.Revision++
+		concurrent.UpdatedAt = time.Now().UTC()
+		if _, updateErr := store.UpdateChangeSet(context.Background(), concurrent, current.Revision); updateErr != nil {
+			t.Errorf("write concurrent ChangeSet: %v", updateErr)
+		}
+	}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, WorkerID: "catalog-conflict-worker",
+		LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second, CatalogResolver: resolver,
+	})
+	if worked, runErr := worker.RunOnce(context.Background()); runErr == nil || !worked ||
+		!errors.Is(runErr, authoring.ErrChangeSetRevision) {
+		t.Fatalf("catalog conflict worked=%t err=%v", worked, runErr)
+	}
+	finished, err := store.GetAgentRun(context.Background(), Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, run.ID)
+	if err != nil || finished.Status != AgentRunStatusFailed {
+		t.Fatalf("catalog conflict Run = %#v, err = %v", finished, err)
+	}
+	current, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || current.Status != authoring.ChangeSetEvaluating || current.Revision <= changeSet.Revision {
+		t.Fatalf("concurrently revised ChangeSet = %#v, err = %v", current, err)
 	}
 }
 

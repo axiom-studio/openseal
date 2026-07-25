@@ -352,14 +352,18 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 			finishErr := w.finishRun(ctx, run, AgentRunStatusFailed, nil, "Workforce capability discovery failed", "workforce.generation.failed")
 			return errors.Join(resolveErr, finishErr)
 		}
-		changeSet, err = w.service.changeSets.RefreshPreparedCatalog(generationCtx, scope, changeSet.ID, changeSet.Revision, catalog)
-		if err != nil {
-			if _, failErr := w.service.changeSets.FailPreparedGeneration(ctx, scope, changeSet.ID, changeSet.Revision, "capability_discovery_failed", "Workforce capability discovery failed"); failErr != nil && !errors.Is(err, authoring.ErrChangeSetRevision) {
-				err = errors.Join(err, failErr)
+		expectedRevision := changeSet.Revision
+		refreshed, refreshErr := w.service.changeSets.RefreshPreparedCatalog(
+			generationCtx, scope, changeSet.ID, expectedRevision, catalog,
+		)
+		if refreshErr != nil {
+			if _, failErr := w.service.changeSets.FailPreparedGeneration(ctx, scope, changeSet.ID, expectedRevision, "capability_discovery_failed", "Workforce capability discovery failed"); failErr != nil && !errors.Is(failErr, authoring.ErrChangeSetRevision) {
+				refreshErr = errors.Join(refreshErr, failErr)
 			}
 			finishErr := w.finishRun(ctx, run, AgentRunStatusFailed, nil, "Workforce capability discovery failed", "workforce.generation.failed")
-			return errors.Join(err, finishErr)
+			return errors.Join(refreshErr, finishErr)
 		}
+		changeSet = refreshed
 	}
 	generated, generateErr := w.service.changeSets.GeneratePreparedWithProgress(generationCtx, scope, changeSet.ID, changeSet.Revision, func(progress authoring.CompileProgress) {
 		if progressErr := w.recordGenerationProgress(generationCtx, run, changeSet, progress); progressErr != nil && generationCtx.Err() == nil {
