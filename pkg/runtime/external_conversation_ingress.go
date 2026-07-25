@@ -351,3 +351,36 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	}
 	return &ExternalConversationGatewayIngressResult{Response: result, Received: received}, nil
 }
+
+// NormalizeExternalConversationRegisteredGatewayIngress resolves a durable
+// gateway registration by its public route before invoking the exact pinned
+// Skill verifier. Hosts therefore do not need a parallel environment-backed
+// provider routing table.
+func (s *ExternalConversationTransportService) NormalizeExternalConversationRegisteredGatewayIngress(
+	ctx context.Context,
+	request ExternalConversationPublicIngressRequest,
+	host ExternalConversationGatewayAdapterHost,
+) (*ExternalConversationGatewayIngressResult, error) {
+	if s == nil || s.store == nil || host == nil {
+		return nil, errors.New("external conversation gateway ingress is not configured")
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	registration, err := s.store.GetExternalConversationGatewayByIngressRoute(
+		ctx, strings.TrimSpace(request.Route),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if registration == nil {
+		return nil, ErrExternalConversationGatewayNotFound
+	}
+	if err := registration.Validate(); err != nil {
+		return nil, err
+	}
+	if registration.Status != ExternalConversationGatewayActive {
+		return nil, fmt.Errorf("%w: gateway is not active", ErrExternalConversationConflict)
+	}
+	return s.NormalizeExternalConversationGatewayIngress(ctx, registration.Gateway, request, host)
+}

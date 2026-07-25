@@ -744,6 +744,13 @@ type (
 	ExternalConversationIngressAdapterHost      = runtime.ExternalConversationIngressAdapterHost
 	ExternalConversationIngressResult           = runtime.ExternalConversationIngressResult
 	ExternalConversationIngressGateway          = runtime.ExternalConversationIngressGateway
+	ExternalConversationGatewayStatus           = runtime.ExternalConversationGatewayStatus
+	ExternalConversationGatewayRegistration     = runtime.ExternalConversationGatewayRegistration
+	ExternalConversationGatewayFilter           = runtime.ExternalConversationGatewayFilter
+	CreateExternalConversationGatewayRequest    = runtime.CreateExternalConversationGatewayRequest
+	UpdateExternalConversationGatewayRequest    = runtime.UpdateExternalConversationGatewayRequest
+	ExternalConversationGatewayStore            = runtime.ExternalConversationGatewayStore
+	ExternalConversationGatewayService          = runtime.ExternalConversationGatewayService
 	ExternalConversationVerifiedRoute           = runtime.ExternalConversationVerifiedRoute
 	ExternalConversationGatewayEvent            = runtime.ExternalConversationGatewayEvent
 	ExternalConversationGatewayHostRequest      = runtime.ExternalConversationGatewayHostRequest
@@ -1199,6 +1206,7 @@ var (
 )
 
 var NewExternalConversationEndpointService = runtime.NewExternalConversationEndpointService
+var NewExternalConversationGatewayService = runtime.NewExternalConversationGatewayService
 var NewExternalConversationTransportService = runtime.NewExternalConversationTransportService
 var NewCanonicalExternalConversationDispatcher = runtime.NewCanonicalExternalConversationDispatcher
 var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWorker
@@ -1823,6 +1831,9 @@ const (
 	ExternalConversationEndpointActive  = runtime.ExternalConversationEndpointActive
 	ExternalConversationEndpointPaused  = runtime.ExternalConversationEndpointPaused
 	ExternalConversationEndpointRetired = runtime.ExternalConversationEndpointRetired
+	ExternalConversationGatewayActive   = runtime.ExternalConversationGatewayActive
+	ExternalConversationGatewayPaused   = runtime.ExternalConversationGatewayPaused
+	ExternalConversationGatewayRetired  = runtime.ExternalConversationGatewayRetired
 
 	ExternalConversationHandlerAgent   = runtime.ExternalConversationHandlerAgent
 	ExternalConversationHandlerTeam    = runtime.ExternalConversationHandlerTeam
@@ -1864,6 +1875,7 @@ const (
 
 var (
 	ErrExternalConversationEndpointNotFound = runtime.ErrExternalConversationEndpointNotFound
+	ErrExternalConversationGatewayNotFound  = runtime.ErrExternalConversationGatewayNotFound
 	ErrExternalConversationConflict         = runtime.ErrExternalConversationConflict
 	ErrInvalidExternalConversation          = runtime.ErrInvalidExternalConversation
 )
@@ -2073,6 +2085,7 @@ type ExternalConversationSupervisorConfig = runtime.ExternalConversationSupervis
 
 type externalConversationRuntime struct {
 	transport  *runtime.ExternalConversationTransportService
+	gateways   *runtime.ExternalConversationGatewayService
 	supervisor *runtime.ExternalConversationSupervisor
 	config     *runtime.ExternalConversationSupervisorConfig
 	scopes     runtime.WorkerScopeSource
@@ -2494,6 +2507,7 @@ func (e *Engine) rebuildConversationRuns() error {
 
 func (e *Engine) rebuildExternalConversations() error {
 	e.externalConversations.transport = nil
+	e.externalConversations.gateways = nil
 	e.externalConversations.supervisor = nil
 	store, ok := e.store.(runtime.ExternalConversationReplyStore)
 	if !ok || e.skills == nil {
@@ -2503,6 +2517,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		return nil
 	}
 	e.externalConversations.transport = runtime.NewExternalConversationTransportService(store, e.skills)
+	e.externalConversations.gateways = runtime.NewExternalConversationGatewayService(store)
 	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
 		return nil
 	}
@@ -3657,6 +3672,66 @@ func (e *Engine) NormalizeExternalConversationGatewayIngress(
 		e.externalConversations.supervisor.Wake()
 	}
 	return result, err
+}
+
+func (e *Engine) NormalizeExternalConversationRegisteredGatewayIngress(
+	ctx context.Context,
+	request runtime.ExternalConversationPublicIngressRequest,
+	host runtime.ExternalConversationGatewayAdapterHost,
+) (*runtime.ExternalConversationGatewayIngressResult, error) {
+	if e == nil || e.externalConversations.transport == nil {
+		return nil, fmt.Errorf("external conversation transport is not configured")
+	}
+	result, err := e.externalConversations.transport.NormalizeExternalConversationRegisteredGatewayIngress(
+		ctx, request, host,
+	)
+	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
+		e.externalConversations.supervisor.Wake()
+	}
+	return result, err
+}
+
+func (e *Engine) CreateExternalConversationGateway(
+	ctx context.Context,
+	request runtime.CreateExternalConversationGatewayRequest,
+) (*runtime.ExternalConversationGatewayRegistration, error) {
+	if e == nil || e.externalConversations.gateways == nil {
+		return nil, fmt.Errorf("external conversation gateways are not configured")
+	}
+	return e.externalConversations.gateways.Create(ctx, request)
+}
+
+func (e *Engine) GetExternalConversationGateway(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+) (*runtime.ExternalConversationGatewayRegistration, error) {
+	if e == nil || e.externalConversations.gateways == nil {
+		return nil, fmt.Errorf("external conversation gateways are not configured")
+	}
+	return e.externalConversations.gateways.Get(ctx, scope, id)
+}
+
+func (e *Engine) ListExternalConversationGateways(
+	ctx context.Context,
+	filter runtime.ExternalConversationGatewayFilter,
+) ([]*runtime.ExternalConversationGatewayRegistration, error) {
+	if e == nil || e.externalConversations.gateways == nil {
+		return nil, fmt.Errorf("external conversation gateways are not configured")
+	}
+	return e.externalConversations.gateways.List(ctx, filter)
+}
+
+func (e *Engine) UpdateExternalConversationGateway(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+	request runtime.UpdateExternalConversationGatewayRequest,
+) (*runtime.ExternalConversationGatewayRegistration, error) {
+	if e == nil || e.externalConversations.gateways == nil {
+		return nil, fmt.Errorf("external conversation gateways are not configured")
+	}
+	return e.externalConversations.gateways.Update(ctx, scope, id, request)
 }
 
 func (e *Engine) EnqueueExternalConversationDelivery(

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = externalConversationIngressRouteMigrationVersion
+const currentPostgresSchemaVersion int64 = externalConversationGatewayMigrationVersion
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,6 +39,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		28: {"external_conversation_gateways"},
 		26: {"external_conversation_deliveries", "external_message_mappings", "external_participant_mappings", "external_conversation_mappings", "external_conversation_inbox", "external_conversation_endpoints"},
 		22: {"source_policy_lifecycle_events", "source_policy_lifecycles", "source_policy_versions"},
 		21: {"action_credential_lease_redemptions"},

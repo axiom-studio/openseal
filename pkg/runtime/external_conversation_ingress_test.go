@@ -149,9 +149,17 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 	}
 	service := NewExternalConversationTransportService(store, catalog)
+	gateways := NewExternalConversationGatewayService(store)
+	registration, err := gateways.Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "shared-slack", Name: "Shared Slack events", Gateway: gateway,
+		Status: ExternalConversationGatewayActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	first, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, ExternalConversationPublicIngressRequest{
-		Route: "shared-slack", Method: http.MethodPost,
+	first, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: registration.IngressRoute, Method: http.MethodPost,
 		Headers: map[string][]string{"X-Slack-Signature": {"v0=verified-by-skill"}},
 		Body:    []byte(`{"team_id":"T123","event":{"channel":"C123"}}`),
 	}, host)
@@ -159,8 +167,8 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 		host.request.Adapter.Adapter.Provider != "slack" {
 		t.Fatalf("shared ingress = %#v host=%#v err=%v", first, host.request, err)
 	}
-	replayed, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, ExternalConversationPublicIngressRequest{
-		Route: "shared-slack", Method: http.MethodPost,
+	replayed, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: registration.IngressRoute, Method: http.MethodPost,
 		Headers: map[string][]string{"X-Slack-Signature": {"v0=verified-by-skill"}},
 		Body:    []byte(`{"team_id":"T123","event":{"channel":"C123"}}`),
 	}, host)
@@ -169,11 +177,24 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	}
 
 	host.result.Events[0].ApplicationID = "wrong-app"
-	unmatched, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, ExternalConversationPublicIngressRequest{
-		Route: "shared-slack", Method: http.MethodPost,
+	unmatched, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: registration.IngressRoute, Method: http.MethodPost,
 		Body: []byte(`{"team_id":"T123","event":{"channel":"C123"}}`),
 	}, host)
 	if err != nil || len(unmatched.Received) != 0 {
 		t.Fatalf("wrong app shared ingress = %#v err=%v", unmatched, err)
+	}
+
+	paused := ExternalConversationGatewayPaused
+	registration, err = gateways.Update(ctx, registration.Gateway.Scope, registration.ID, UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: registration.Revision, Status: &paused,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`),
+	}, host); !errors.Is(err, ErrExternalConversationConflict) {
+		t.Fatalf("paused gateway error = %v", err)
 	}
 }

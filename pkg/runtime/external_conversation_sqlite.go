@@ -27,6 +27,15 @@ func migrateExternalConversations(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_external_conversation_endpoints_gateway
 			ON external_conversation_endpoints(provider, status);
 
+		CREATE TABLE IF NOT EXISTS external_conversation_gateways (
+			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
+			ingress_route TEXT NOT NULL UNIQUE, provider TEXT NOT NULL,
+			status TEXT NOT NULL, revision INTEGER NOT NULL, updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_external_conversation_gateways_scope
+			ON external_conversation_gateways(scope_kind, scope_id, provider, status, updated_at DESC);
+
 		CREATE TABLE IF NOT EXISTS external_conversation_inbox (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
 			endpoint_id TEXT NOT NULL, endpoint_revision INTEGER NOT NULL, provider_event_id TEXT NOT NULL,
