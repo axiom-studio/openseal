@@ -201,6 +201,15 @@ func TestRefinementAtomicallyAddsHostVerifiedDiscoveredSkill(t *testing.T) {
 	if !exists || added.Version != candidate.Version || added.SourceIdentity != candidate.SourceIdentity {
 		t.Fatalf("durable discovered Skill = %#v", added)
 	}
+	acquisitionReference := ""
+	for _, compatibility := range added.Compatibility {
+		if compatibility.Requirement == "installation" && !compatibility.Compatible {
+			acquisitionReference = compatibility.Reference
+		}
+	}
+	if acquisitionReference != candidate.Provenance.Reference {
+		t.Fatalf("durable discovered Skill acquisition reference = %q", acquisitionReference)
+	}
 	if got := answered.Generation.Request.Catalog.Skills[candidate.ID]; got.Version != candidate.Version {
 		t.Fatalf("generation catalog Skill = %#v", got)
 	}
