@@ -338,6 +338,60 @@ func TestInactiveWorkforceBindingDefersExactExecutionCredentialUntilActivation(t
 	}
 }
 
+func TestWorkforceReadinessAcceptsOnlyExactReviewedSkillInstallation(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	value := testApplicableWorkforceChangeSet()
+	definition := value.Result.Candidate.Agents[0]
+	definition.SkillRequirements = []agent.SkillRequirement{{
+		SkillID: "posture", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"},
+	}}
+	definition.Authority.AllowedSkillIDs = []string{"posture"}
+	definition.Authority.MaximumRisk = capability.RiskLevelExternal
+	const (
+		source         = "https://clawhub.ai::posture"
+		runtimeVersion = "1.0.0+source.abc"
+		reference      = "listing:42"
+	)
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		"posture": {
+			ID: "posture", Version: "1.0.0", SourceIdentity: source,
+			Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelExternal,
+			Readiness: authoring.SkillReadinessNeedsInstallation,
+			Compatibility: []authoring.SkillCompatibility{{
+				Requirement: "installation", Compatible: false, Reference: reference,
+			}},
+		},
+	}}
+	identity := capability.NewSkillIdentity("posture", runtimeVersion, source)
+	value.Placement.SkillSourceIdentities = map[string]map[string]string{
+		definition.ID: {"posture": source},
+	}
+	value.Placement.SkillSourceVersions = map[string]map[string]string{
+		definition.ID: {"posture": runtimeVersion},
+	}
+	value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{
+		definition.ID: {"posture": identity},
+	}
+	value.Placement.PlannedSkillInstallations = []authoring.SkillInstallationIntent{{
+		SkillID: "posture", Version: "1.0.0", SourceIdentity: source, Reference: reference,
+	}}
+
+	issues, err := store.ValidateChangeSetReadiness(context.Background(), value)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("exact reviewed installation readiness=%#v error=%v", issues, err)
+	}
+	value.Placement.PlannedSkillInstallations[0].Reference = "listing:forged"
+	issues, err = store.ValidateChangeSetReadiness(context.Background(), value)
+	if err != nil || len(issues) != 1 || issues[0].Code != "skill_binding_definition_unavailable" {
+		t.Fatalf("forged installation readiness=%#v error=%v", issues, err)
+	}
+}
+
 func TestSkillBindingStoresRejectMalformedAuthority(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
