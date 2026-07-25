@@ -200,6 +200,9 @@ func (s *ExternalConversationGatewayService) Update(
 	if err != nil {
 		return nil, err
 	}
+	if current.Status == ExternalConversationGatewayRetired {
+		return nil, fmt.Errorf("%w: retired gateway is immutable", ErrExternalConversationConflict)
+	}
 	if request.ExpectedRevision != current.Revision {
 		return nil, ErrExternalConversationConflict
 	}
