@@ -1018,6 +1018,8 @@ const (
 const (
 	EventSourceSubscriptionsCapabilityID      = kernelapi.EventSourceSubscriptionsCapabilityID
 	EventSourceSubscriptionsCapabilityVersion = kernelapi.EventSourceSubscriptionsCapabilityVersion
+	ConversationGatewaysCapabilityID          = kernelapi.ConversationGatewaysCapabilityID
+	ConversationGatewaysCapabilityVersion     = kernelapi.ConversationGatewaysCapabilityVersion
 	KernelOperationReportHealth               = kernelapi.OperationReportHealth
 	KernelOperationGetCheckpoint              = kernelapi.OperationGetCheckpoint
 	KernelOperationAdvanceCheckpoint          = kernelapi.OperationAdvanceCheckpoint
@@ -1052,6 +1054,10 @@ func ObjectiveSchedulesCapability() KernelCapability {
 
 func EventSourceSubscriptionsCapability() KernelCapability {
 	return kernelapi.EventSourceSubscriptionsCapability()
+}
+
+func ConversationGatewaysCapability(management bool) KernelCapability {
+	return kernelapi.ConversationGatewaysCapability(management)
 }
 
 func EventRoutingCapability() KernelCapability {
