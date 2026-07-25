@@ -299,7 +299,8 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	for _, initiative := range initiatives {
 		monitorIDs := make([]string, 0)
 		for _, monitor := range initiative.SourceMonitors {
-			if monitor.AssignedAgentID != req.DeploymentID || monitor.SkillID != current.SkillID || monitor.SkillVersion != current.SkillVersion {
+			if !referenceOwnedOrAssigned(initiative.Owner, monitor.AssignedAgentID, req.DeploymentID) ||
+				monitor.SkillID != current.SkillID || monitor.SkillVersion != current.SkillVersion {
 				continue
 			}
 			if !objectiveIDs[monitor.ObjectiveID] {
@@ -457,7 +458,7 @@ func objectiveSkillReferences(objective *Objective, deploymentID string, binding
 		return nil, nil
 	}
 	result := make([]objectiveSkillReference, 0)
-	if objective.Cadence != nil && objective.Cadence.AssignedAgentID == deploymentID &&
+	if objective.Cadence != nil && referenceOwnedOrAssigned(objective.Owner, objective.Cadence.AssignedAgentID, deploymentID) &&
 		objective.Cadence.RunTemplate != nil && matchesObjectiveSkillReference(objective.Cadence.RunTemplate.Capability, binding.SkillID, binding.SkillVersion) {
 		result = append(result, objectiveSkillReference{Kind: "cadence", Invocation: objective.Cadence.RunTemplate.Capability})
 	}
@@ -470,7 +471,7 @@ func objectiveSkillReferences(objective *Objective, deploymentID string, binding
 	}
 	for index := range rules.Rules {
 		rule := &rules.Rules[index]
-		if rule.AssignedAgentID == deploymentID && rule.RunTemplate != nil &&
+		if referenceOwnedOrAssigned(objective.Owner, rule.AssignedAgentID, deploymentID) && rule.RunTemplate != nil &&
 			matchesObjectiveSkillReference(rule.RunTemplate.Capability, binding.SkillID, binding.SkillVersion) {
 			result = append(result, objectiveSkillReference{Kind: "event_rule", ID: rule.ID, Invocation: rule.RunTemplate.Capability})
 		}
@@ -480,6 +481,10 @@ func objectiveSkillReferences(objective *Objective, deploymentID string, binding
 
 func matchesObjectiveSkillReference(invocation *ObjectiveCapabilityInvocation, skillID, version string) bool {
 	return invocation != nil && invocation.SkillID == skillID && invocation.SkillVersion == version
+}
+
+func referenceOwnedOrAssigned(owner ObjectiveOwner, assignedID, deploymentID string) bool {
+	return owner.ID == deploymentID || assignedID == deploymentID
 }
 
 func replaceObjectiveSkillReferences(objective *Objective, deploymentID string, from, to SkillReferenceIdentity, expected []SkillReferenceObjectiveReference) error {
@@ -497,7 +502,7 @@ func replaceObjectiveSkillReferences(objective *Objective, deploymentID string, 
 	if !reflect.DeepEqual(projected, expected) {
 		return errors.New("reviewed references changed")
 	}
-	if objective.Cadence != nil && objective.Cadence.AssignedAgentID == deploymentID &&
+	if objective.Cadence != nil && referenceOwnedOrAssigned(objective.Owner, objective.Cadence.AssignedAgentID, deploymentID) &&
 		objective.Cadence.RunTemplate != nil &&
 		matchesObjectiveSkillReference(objective.Cadence.RunTemplate.Capability, from.ID, from.Version) {
 		objective.Cadence.RunTemplate.Capability.SkillID = to.ID
@@ -510,7 +515,7 @@ func replaceObjectiveSkillReferences(objective *Objective, deploymentID string, 
 	changed := false
 	for index := range rules.Rules {
 		rule := &rules.Rules[index]
-		if rule.AssignedAgentID == deploymentID && rule.RunTemplate != nil &&
+		if referenceOwnedOrAssigned(objective.Owner, rule.AssignedAgentID, deploymentID) && rule.RunTemplate != nil &&
 			matchesObjectiveSkillReference(rule.RunTemplate.Capability, from.ID, from.Version) {
 			rule.RunTemplate.Capability.SkillID = to.ID
 			rule.RunTemplate.Capability.SkillVersion = to.Version

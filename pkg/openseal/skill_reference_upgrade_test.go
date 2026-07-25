@@ -216,7 +216,7 @@ func TestSkillReferenceUpgradeIncludesEventDrivenObjectivesAndRejectsStalePlans(
 	scope := openseal.Scope{Kind: "tenant", ID: "events"}
 	binding, err := engine.UpsertSkillBinding(ctx, openseal.UpsertSkillBindingRequest{
 		Binding: &openseal.SkillBinding{
-			ID: "source", Scope: openseal.SkillScope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "watcher",
+			ID: "source", Scope: openseal.SkillScope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research-team",
 			SkillID: source.SkillID, SkillVersion: from.Version, AllowedActions: []string{source.ObserveFeed},
 			MaximumRisk: openseal.SkillRiskRead,
 		},
@@ -241,7 +241,7 @@ func TestSkillReferenceUpgradeIncludesEventDrivenObjectivesAndRejectsStalePlans(
 		t.Fatal(err)
 	}
 	objective, err := engine.CreateObjective(ctx, openseal.CreateObjectiveRequest{
-		Scope: scope, Owner: openseal.ObjectiveOwner{Type: openseal.OwnerTypeAgent, ID: "watcher"},
+		Scope: scope, Owner: openseal.ObjectiveOwner{Type: openseal.OwnerTypeTeam, ID: "research-team"},
 		Title: "Observe releases", Goal: "React to release events", Status: openseal.ObjectiveStatusActive,
 		Priority: 1, EventRules: eventRules, Actor: openseal.ActivityActor{Type: "user", ID: "operator"},
 		Visibility: openseal.ActivityVisibilityScope,
@@ -250,7 +250,7 @@ func TestSkillReferenceUpgradeIncludesEventDrivenObjectivesAndRejectsStalePlans(
 		t.Fatal(err)
 	}
 	plan, err := engine.PlanSkillReferenceUpgrade(ctx, openseal.PlanSkillReferenceUpgradeRequest{
-		Scope: scope, DeploymentID: "watcher", BindingID: binding.ID, ToVersion: to.Version,
+		Scope: scope, DeploymentID: "research-team", BindingID: binding.ID, ToVersion: to.Version,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func TestSkillReferenceUpgradeIncludesEventDrivenObjectivesAndRejectsStalePlans(
 		t.Fatalf("expected stale plan conflict, got %v", err)
 	}
 	plan, err = engine.PlanSkillReferenceUpgrade(ctx, openseal.PlanSkillReferenceUpgradeRequest{
-		Scope: scope, DeploymentID: "watcher", BindingID: binding.ID, ToVersion: to.Version,
+		Scope: scope, DeploymentID: "research-team", BindingID: binding.ID, ToVersion: to.Version,
 	})
 	if err != nil {
 		t.Fatal(err)
