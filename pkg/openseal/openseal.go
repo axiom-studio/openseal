@@ -1811,6 +1811,8 @@ const (
 )
 
 const (
+	MaximumExternalConversationIngressBytes = runtime.MaximumExternalConversationIngressBytes
+
 	ExternalConversationEndpointActive  = runtime.ExternalConversationEndpointActive
 	ExternalConversationEndpointPaused  = runtime.ExternalConversationEndpointPaused
 	ExternalConversationEndpointRetired = runtime.ExternalConversationEndpointRetired
@@ -1851,6 +1853,12 @@ const (
 	ExternalConversationDeliveryOutcomeDelivered = runtime.ExternalConversationDeliveryOutcomeDelivered
 	ExternalConversationDeliveryOutcomeRetry     = runtime.ExternalConversationDeliveryOutcomeRetry
 	ExternalConversationDeliveryOutcomeFailed    = runtime.ExternalConversationDeliveryOutcomeFailed
+)
+
+var (
+	ErrExternalConversationEndpointNotFound = runtime.ErrExternalConversationEndpointNotFound
+	ErrExternalConversationConflict         = runtime.ErrExternalConversationConflict
+	ErrInvalidExternalConversation          = runtime.ErrInvalidExternalConversation
 )
 
 const (
