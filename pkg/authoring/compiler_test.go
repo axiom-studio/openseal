@@ -872,6 +872,24 @@ func TestCompilerDerivesOpaqueCredentialQuestionProvenance(t *testing.T) {
 	}
 }
 
+func TestCompilerNormalizesDefinitionProvenanceKindAlias(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidate.Agents[0].Provenance.Source = "prompt"
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	payload = bytes.Replace(payload, []byte(`"provenance":{"source":"prompt"`), []byte(`"provenance":{"kind":"prompt"`), 1)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."})
+	if err != nil || result.Candidate.Agents[0].Provenance.Source != "prompt" {
+		t.Fatalf("definition provenance result=%#v err=%v", result, err)
+	}
+
+	ambiguous := bytes.Replace(payload, []byte(`"kind":"prompt"`), []byte(`"kind":"prompt","source":"catalog"`), 1)
+	strict, _ := NewCompiler(staticGenerator{payload: ambiguous})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."}); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("ambiguous definition provenance must remain strict, got %v", err)
+	}
+}
+
 func TestCompilerDoesNotDiscardOptionsForOtherInvalidAnswerKinds(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	payload, _ := json.Marshal(GenerationResponse{
