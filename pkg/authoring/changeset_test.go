@@ -669,6 +669,57 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 	}
 }
 
+func TestActivationConversationRoutingIsTypedAndResourceIdentityStaysImmutable(t *testing.T) {
+	candidate := WorkforceCandidate{
+		Activation: WorkforceActivationActive,
+		ConversationEndpoints: []ConversationEndpointBlueprint{{
+			ID: "support", Name: "Support channel", Address: "C-support",
+		}},
+	}
+	current := ChangeSetPlacement{ConversationEndpoints: map[string]ConversationEndpointPlacement{
+		"support": {ID: "conversation-endpoint:support", ExpectedRevision: 3},
+	}}
+	issues := conversationRoutingValidation(&candidate, current)
+	if len(issues) != 1 || issues[0].Code != "conversation_routing_installation_required" {
+		t.Fatalf("routing issues = %#v", issues)
+	}
+	service := &ChangeSetService{}
+	readiness, err := service.validateReadiness(context.Background(), &ChangeSet{
+		Result: CompileResult{Candidate: candidate}, Placement: current,
+	}, true)
+	if err != nil || len(readiness) != 1 || readiness[0].Code != "conversation_routing_installation_required" {
+		t.Fatalf("final readiness = %#v err=%v", readiness, err)
+	}
+
+	requested := ChangeSetPlacement{ConversationEndpoints: map[string]ConversationEndpointPlacement{
+		"support": {
+			ID: "conversation-endpoint:support", ExpectedRevision: 3,
+			InstallationID: "T-support", ApplicationID: "A-support", Address: "C-support",
+			Configuration: map[string]interface{}{"threading": "thread"},
+		},
+	}}
+	updated, err := activationPlacementUpdate(current, requested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placed := updated.ConversationEndpoints["support"]
+	if placed.ID != "conversation-endpoint:support" || placed.ExpectedRevision != 3 ||
+		placed.InstallationID != "T-support" || placed.ApplicationID != "A-support" || placed.Address != "C-support" {
+		t.Fatalf("updated routing placement = %#v", placed)
+	}
+	if issues = conversationRoutingValidation(&candidate, updated); len(issues) != 0 {
+		t.Fatalf("configured routing issues = %#v", issues)
+	}
+
+	retargeted := clonePlacement(requested)
+	value := retargeted.ConversationEndpoints["support"]
+	value.ID = "conversation-endpoint:other"
+	retargeted.ConversationEndpoints["support"] = value
+	if _, err = activationPlacementUpdate(current, retargeted); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("retargeted endpoint err = %v", err)
+	}
+}
+
 func TestEffectiveChangeSetActivationIntentMigratesTypedCommitmentWithoutPromptParsing(t *testing.T) {
 	legacy := &ChangeSet{Result: CompileResult{Commitments: PromptCommitments{Activation: ActivationCommitmentInactive}}}
 	if intent, err := EffectiveChangeSetActivationIntent(legacy); err != nil || intent != WorkforceActivationInactive {
