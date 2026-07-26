@@ -908,6 +908,20 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				!reflect.DeepEqual(normalized.Features, adapter.Features) {
 				return fmt.Errorf("Skill %s conversation adapter %d is invalid or non-canonical", id, index)
 			}
+			endpointModes := make(map[capability.ConversationEndpointMode]bool, len(adapter.EndpointModes))
+			for _, mode := range adapter.EndpointModes {
+				endpointModes[mode] = true
+			}
+			seenDiscoverableModes := make(map[capability.ConversationEndpointMode]bool, len(adapter.DiscoverableDestinationModes))
+			for modeIndex, mode := range adapter.DiscoverableDestinationModes {
+				if !endpointModes[mode] || seenDiscoverableModes[mode] {
+					return fmt.Errorf("Skill %s conversation adapter %d has invalid discoverable destination modes", id, index)
+				}
+				if modeIndex > 0 && adapter.DiscoverableDestinationModes[modeIndex-1] > mode {
+					return fmt.Errorf("Skill %s conversation adapter %d discoverable destination modes are not canonical", id, index)
+				}
+				seenDiscoverableModes[mode] = true
+			}
 			seenAdapterCredentials := make(map[string]bool, len(adapter.Credentials))
 			for credentialIndex, credential := range adapter.Credentials {
 				if credential.Name == "" || credential.Name != strings.TrimSpace(credential.Name) ||

@@ -47,14 +47,15 @@ type SkillCapability struct {
 // reactive conversation endpoints. It contains no executable entrypoint,
 // opaque connection reference, or external account identity.
 type ConversationAdapterCapability struct {
-	ID                string                                      `json:"id"`
-	ProtocolVersion   string                                      `json:"protocolVersion"`
-	Provider          string                                      `json:"provider"`
-	EndpointModes     []capability.ConversationEndpointMode       `json:"endpointModes"`
-	InboundEventTypes []string                                    `json:"inboundEventTypes"`
-	Features          []capability.ConversationAdapterFeature     `json:"features,omitempty"`
-	Delivery          capability.ConversationDeliveryCapabilities `json:"delivery"`
-	Credentials       []SkillCredential                           `json:"credentials,omitempty"`
+	ID                           string                                      `json:"id"`
+	ProtocolVersion              string                                      `json:"protocolVersion"`
+	Provider                     string                                      `json:"provider"`
+	EndpointModes                []capability.ConversationEndpointMode       `json:"endpointModes"`
+	InboundEventTypes            []string                                    `json:"inboundEventTypes"`
+	Features                     []capability.ConversationAdapterFeature     `json:"features,omitempty"`
+	DiscoverableDestinationModes []capability.ConversationEndpointMode       `json:"discoverableDestinationModes,omitempty"`
+	Delivery                     capability.ConversationDeliveryCapabilities `json:"delivery"`
+	Credentials                  []SkillCredential                           `json:"credentials,omitempty"`
 }
 
 type SkillReadiness string
