@@ -134,6 +134,18 @@ func (s *WorkforceAuthoringRunService) RecoverPending(ctx context.Context, scope
 		if enqueueErr != nil {
 			return runs, enqueueErr
 		}
+		if isTerminalAgentRunStatus(run.Status) {
+			if _, failErr := s.changeSets.FailPreparedGeneration(
+				ctx,
+				value.Scope,
+				value.ID,
+				value.Revision,
+				"generation_run_terminal",
+				"Workforce proposal generation stopped before a reviewable result was saved",
+			); failErr != nil && !errors.Is(failErr, authoring.ErrChangeSetRevision) {
+				return runs, failErr
+			}
+		}
 		runs = append(runs, run)
 	}
 	return runs, nil

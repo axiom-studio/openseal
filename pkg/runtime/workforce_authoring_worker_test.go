@@ -36,6 +36,7 @@ type staticWorkforceCatalogResolver struct {
 	catalog   authoring.CapabilityCatalog
 	calls     atomic.Int32
 	onResolve func()
+	err       error
 }
 
 func (r *staticWorkforceCatalogResolver) ResolveWorkforceAuthoringCatalog(context.Context, *authoring.ChangeSet) (authoring.CapabilityCatalog, error) {
@@ -43,7 +44,7 @@ func (r *staticWorkforceCatalogResolver) ResolveWorkforceAuthoringCatalog(contex
 	if r.onResolve != nil {
 		r.onResolve()
 	}
-	return r.catalog, nil
+	return r.catalog, r.err
 }
 
 func (g *cancellationBoundaryWorkforceGenerator) Generate(ctx context.Context, _ authoring.GenerateRequest) ([]byte, error) {
@@ -225,6 +226,83 @@ func TestWorkforceAuthoringWorkerCatalogRefreshConflictDoesNotPanic(t *testing.T
 	current, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
 	if err != nil || current.Status != authoring.ChangeSetEvaluating || current.Revision <= changeSet.Revision {
 		t.Fatalf("concurrently revised ChangeSet = %#v, err = %v", current, err)
+	}
+}
+
+func TestWorkforceAuthoringCatalogFailureRetryCreatesNewRun(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	generator := testAuthoringGenerator(t)
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, firstRun, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "catalog-failure-worker", LeaseDuration: time.Minute,
+		GenerationTimeout: 10 * time.Second,
+		CatalogResolver:   &staticWorkforceCatalogResolver{err: errors.New("catalog unavailable")},
+	})
+	if worked, runErr := worker.RunOnce(context.Background()); runErr == nil || !worked {
+		t.Fatalf("catalog failure worked=%t err=%v", worked, runErr)
+	}
+	failed, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || failed.Status != authoring.ChangeSetFailed || failed.Generation.Attempt != 1 {
+		t.Fatalf("failed ChangeSet=%#v err=%v", failed, err)
+	}
+	retried, retryRun, replayed, err := service.Retry(context.Background(), authoring.RetryChangeSetGenerationRequest{
+		Scope: request.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
+		Reason: "retry capability discovery", Actor: request.Actor, IdempotencyKey: "retry-catalog-1",
+	})
+	if err != nil || replayed || retryRun.ID == firstRun.ID || retried.Generation.RunID != retryRun.ID {
+		t.Fatalf("retried=%#v run=%#v replayed=%t err=%v", retried, retryRun, replayed, err)
+	}
+	if retried.Generation.Request.InvocationKey != "workforce-change-set:"+changeSet.ID+":1" {
+		t.Fatalf("retry invocation key=%q", retried.Generation.Request.InvocationKey)
+	}
+}
+
+func TestWorkforceAuthoringRecoveryFailsEvaluatingChangeSetLinkedToTerminalRun(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	compiler, _ := authoring.NewCompiler(testAuthoringGenerator(t))
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	activity := NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(context.Background(), scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, _, err := activity.TransitionRun(context.Background(), scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "catalog failed before ChangeSet persistence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := service.RecoverPending(context.Background(), scope, 100)
+	if err != nil || len(recovered) != 1 || recovered[0].ID != terminal.ID {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	failed, err := service.changeSets.Get(context.Background(), request.Scope, changeSet.ID)
+	if err != nil || failed.Status != authoring.ChangeSetFailed || failed.Generation.Attempt != 1 ||
+		failed.Generation.FailureCode != "generation_run_terminal" {
+		t.Fatalf("reconciled ChangeSet=%#v err=%v", failed, err)
 	}
 }
 

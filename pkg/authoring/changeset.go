@@ -727,6 +727,11 @@ func (s *ChangeSetService) FailPreparedGeneration(ctx context.Context, scope cap
 	}
 	failed := cloneChangeSet(changeSet)
 	failed.Status = ChangeSetFailed
+	// The canonical generation Run has consumed this attempt even when the
+	// failure happened before the provider request. Advancing here guarantees
+	// that an explicit retry receives a new provider invocation and Run
+	// idempotency identity instead of resolving to the terminal Run again.
+	failed.Generation.Attempt++
 	failed.Generation.FailureCode = failureCode
 	failed.Generation.LastError = publicMessage
 	failed.Revision++
