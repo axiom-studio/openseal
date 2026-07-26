@@ -240,13 +240,56 @@ type ConversationAdapter struct {
 }
 
 type Requirements struct {
-	OperatingSystems []string `json:"operatingSystems,omitempty"`
-	Executables      []string `json:"executables,omitempty"`
-	AnyExecutables   []string `json:"anyExecutables,omitempty"`
-	Environment      []string `json:"environment,omitempty"`
-	Configuration    []string `json:"configuration,omitempty"`
-	Compatibility    string   `json:"compatibility,omitempty"`
-	AlwaysAvailable  bool     `json:"alwaysAvailable,omitempty"`
+	OperatingSystems []string             `json:"operatingSystems,omitempty"`
+	Executables      []string             `json:"executables,omitempty"`
+	AnyExecutables   []string             `json:"anyExecutables,omitempty"`
+	Environment      []string             `json:"environment,omitempty"`
+	Configuration    []string             `json:"configuration,omitempty"`
+	Compatibility    string               `json:"compatibility,omitempty"`
+	AlwaysAvailable  bool                 `json:"alwaysAvailable,omitempty"`
+	Storage          []StorageRequirement `json:"storage,omitempty"`
+	Compute          *ComputeRequirements `json:"compute,omitempty"`
+}
+
+// StorageDurability describes whether a hosted Skill may lose workspace data
+// when its process or host is replaced. It is deliberately host-neutral: a
+// Kubernetes host may materialize persistent storage as a PVC while another
+// host can use an encrypted volume or another durable implementation.
+type StorageDurability string
+
+const (
+	StorageDurabilityEphemeral  StorageDurability = "ephemeral"
+	StorageDurabilityPersistent StorageDurability = "persistent"
+)
+
+// StorageRetention controls what happens to persistent data when the Skill is
+// no longer deployed. Retained data requires an explicit administrative
+// lifecycle action to remove; delete permits the host to garbage-collect it.
+type StorageRetention string
+
+const (
+	StorageRetentionDelete StorageRetention = "delete"
+	StorageRetentionRetain StorageRetention = "retain"
+)
+
+type StorageRequirement struct {
+	Name            string            `json:"name"`
+	MountPath       string            `json:"mountPath"`
+	Durability      StorageDurability `json:"durability"`
+	MinimumCapacity string            `json:"minimumCapacity,omitempty"`
+	Retention       StorageRetention  `json:"retention,omitempty"`
+}
+
+// ComputeRequirements communicate minimum scheduling intent without exposing
+// a host-specific pod, VM, or container contract.
+type ComputeRequirements struct {
+	Requests ComputeResources `json:"requests,omitempty"`
+	Limits   ComputeResources `json:"limits,omitempty"`
+}
+
+type ComputeResources struct {
+	CPU    string `json:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
 }
 
 type Installer struct {

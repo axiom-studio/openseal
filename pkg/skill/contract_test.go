@@ -336,6 +336,53 @@ func TestDefinitionAllowsDistinctPerActionTransports(t *testing.T) {
 	}
 }
 
+func TestDefinitionValidatesPortableHostingRequirements(t *testing.T) {
+	definition := testSkillDefinition()
+	definition.Requirements = Requirements{
+		Storage: []StorageRequirement{{
+			Name: "browser-profile", MountPath: "/var/lib/browser", Durability: StorageDurabilityPersistent,
+			MinimumCapacity: "1Gi", Retention: StorageRetentionRetain,
+		}},
+		Compute: &ComputeRequirements{
+			Requests: ComputeResources{CPU: "100m", Memory: "256Mi"},
+			Limits:   ComputeResources{CPU: "1000m", Memory: "1Gi"},
+		},
+	}
+	if err := validateDefinition(definition); err != nil {
+		t.Fatal(err)
+	}
+	catalog := NewCatalog()
+	if err := catalog.Register(t.Context(), definition); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := catalog.GetDefinition(t.Context(), definition.ID, definition.Version)
+	if err != nil || len(loaded.Requirements.Storage) != 1 || loaded.Requirements.Storage[0].Retention != StorageRetentionRetain {
+		t.Fatalf("portable hosting requirements were not preserved: %#v, %v", loaded.Requirements, err)
+	}
+}
+
+func TestDefinitionRejectsUnsafeHostingRequirements(t *testing.T) {
+	for name, requirements := range map[string]Requirements{
+		"relative mount": {Storage: []StorageRequirement{{Name: "workspace", MountPath: "workspace", Durability: StorageDurabilityEphemeral}}},
+		"duplicate mount": {Storage: []StorageRequirement{
+			{Name: "one", MountPath: "/workspace", Durability: StorageDurabilityEphemeral},
+			{Name: "two", MountPath: "/workspace", Durability: StorageDurabilityEphemeral},
+		}},
+		"persistent without capacity":  {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityPersistent, Retention: StorageRetentionRetain}}},
+		"persistent without retention": {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityPersistent, MinimumCapacity: "1Gi"}}},
+		"retained ephemeral":           {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityEphemeral, Retention: StorageRetentionRetain}}},
+		"invalid compute":              {Compute: &ComputeRequirements{Limits: ComputeResources{Memory: "one-gigabyte"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			definition := testSkillDefinition()
+			definition.Requirements = requirements
+			if err := validateDefinition(definition); err == nil || !strings.Contains(err.Error(), "hosting requirements") {
+				t.Fatalf("unsafe hosting requirements were accepted: %#v, %v", requirements, err)
+			}
+		})
+	}
+}
+
 func TestModelActionsHideKernelResolvedArgumentsWhileExecutionSchemaStaysStrict(t *testing.T) {
 	ctx := context.Background()
 	catalog := NewCatalog()
