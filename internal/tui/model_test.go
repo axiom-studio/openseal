@@ -39,100 +39,103 @@ type fakeKernelClient struct {
 		scope        capability.ScopeReference
 		deploymentID string
 	}
-	agentDeployments     []kernelapi.AgentDeploymentCatalogEntry
-	agentUpdates         []kernelapi.UpdateAgentDeploymentRequest
-	agentAmendments      []*kernelagent.DefinitionAmendment
-	agentProposals       []kernelagent.ProposeAmendmentRequest
-	agentEvaluations     []kernelagent.SubmitAmendmentEvaluationRequest
-	agentDecisions       []kernelagent.ResolveAmendmentRequest
-	agentActivations     []kernelapi.ActivateAgentDefinitionAmendmentRequest
-	teamDeployments      []kernelapi.TeamDeploymentCatalogEntry
-	teamUpdates          []kernelapi.UpdateTeamDeploymentRequest
-	teamAmendments       []*kernelteam.DefinitionAmendment
-	teamProposals        []kernelteam.ProposeAmendmentRequest
-	teamEvaluations      []kernelteam.SubmitAmendmentEvaluationRequest
-	teamDecisions        []kernelteam.ResolveAmendmentRequest
-	teamActivations      []kernelapi.ActivateTeamDefinitionAmendmentRequest
-	runs                 []*runtime.AgentRun
-	agentRequests        []*runtime.AgentRequest
-	agentRequestFilters  []runtime.AgentRequestFilter
-	agentRequestCreates  []kernelapi.CreateAgentRequestRequest
-	agentRequestKeys     []string
-	agentResponses       []kernelapi.RespondAgentRequestRequest
-	agentCompletions     []kernelapi.CompleteAgentRequestRequest
-	agentCompletionKeys  []string
-	actionApprovals      []*runtime.ApprovalCheckpoint
-	approvalFilters      []runtime.ApprovalFilter
-	agentTurns           []*kernelapi.AgentTurnRecord
-	agentTurnFilters     []runtime.AgentTurnFilter
-	actionCalls          []*runtime.ActionCall
-	actionCallFilters    []runtime.ActionFilter
-	actionDecisions      []kernelapi.ResolveActionApprovalRequest
-	actionDecisionKeys   []string
-	compilations         []*kernelagent.DefinitionCompilation
-	compilationErr       error
-	createErrors         []error
-	createKeys           []string
-	createRequests       []kernelapi.CreateAgentRunRequest
-	objectives           []*runtime.Objective
-	objectiveKeys        []string
-	objectiveCreates     []kernelapi.CreateObjectiveRequest
-	objectiveUpdates     []kernelapi.UpdateObjectiveRequest
-	scheduleRequests     []kernelapi.ReconcileObjectiveSchedulesRequest
-	scheduleResult       *kernelapi.ObjectiveScheduleReconciliation
-	eventSources         []*runtime.EventSourceSubscription
-	eventSourceDetails   map[string]*runtime.EventSourceSubscriptionDetail
-	eventSourceCreates   []kernelapi.CreateEventSourceSubscriptionRequest
-	eventSourceError     error
-	eventSourceUpdates   []kernelapi.UpdateEventSourceSubscriptionRequest
-	eventSourceRetires   []kernelapi.RetireEventSourceSubscriptionRequest
-	initiatives          []*runtime.Initiative
-	monitorCheckpoints   map[string]*runtime.SourceMonitorCheckpoint
-	monitorObservations  map[string][]*runtime.SourceObservation
-	activityPages        map[string]*runtime.ActivityFeedPage
-	activityRequests     []runtime.ActivityFeedRequest
-	initiativeKeys       []string
-	initiativeCreates    []kernelapi.CreateInitiativeRequest
-	initiativeUpdates    []kernelapi.UpdateInitiativeRequest
-	outreachThreads      []*runtime.OutreachThread
-	outreachCreates      []kernelapi.CreateOutreachThreadRequest
-	outreachCreateKeys   []string
-	outreachDeliveries   []kernelapi.DeliverOutreachMessageRequest
-	outreachDeliveryKeys []string
-	commands             []kernelapi.AgentRunCommandRequest
-	artifacts            []*runtime.Artifact
-	downloadBody         string
-	downloadCalls        int
-	authoringResult      *authoring.CompileResult
-	authoringRequests    []authoring.GenerateRequest
-	authoringErrors      []error
-	changeSets           []*authoring.ChangeSet
-	changeSetRequests    []authoring.CreateChangeSetRequest
-	changeSetKeys        []string
-	changeSetErrors      []error
-	approvalRequests     []authoring.ResolveChangeSetApprovalRequest
-	approvalKeys         []string
-	applyRequests        []authoring.ApplyChangeSetRequest
-	applyKeys            []string
-	activationRequests   []authoring.PrepareChangeSetActivationRequest
-	activationKeys       []string
-	placementRequests    []authoring.UpdateChangeSetPlacementRequest
-	placementKeys        []string
-	refinementRequests   []authoring.AnswerChangeSetRefinementRequest
-	refinementKeys       []string
-	retryRequests        []authoring.RetryChangeSetGenerationRequest
-	retryKeys            []string
-	governanceResults    []*authoring.ChangeSet
-	governanceErrors     []error
-	skillActions         []capability.ModelAction
-	skillActionCalls     int
-	skillBindings        []*capability.Binding
-	skillBindingUpserts  []skill.UpsertBindingRequest
-	skillBindingDisables []skill.DisableBindingRequest
-	skillUpgradePlans    []runtime.PlanSkillReferenceUpgradeRequest
-	skillUpgradeApplies  []runtime.ApplySkillReferenceUpgradeRequest
-	skillUpgradePlan     *runtime.SkillReferenceUpgradePlan
-	skillBindingError    error
+	agentDeployments           []kernelapi.AgentDeploymentCatalogEntry
+	agentUpdates               []kernelapi.UpdateAgentDeploymentRequest
+	agentAmendments            []*kernelagent.DefinitionAmendment
+	agentProposals             []kernelagent.ProposeAmendmentRequest
+	agentEvaluations           []kernelagent.SubmitAmendmentEvaluationRequest
+	agentDecisions             []kernelagent.ResolveAmendmentRequest
+	agentActivations           []kernelapi.ActivateAgentDefinitionAmendmentRequest
+	teamDeployments            []kernelapi.TeamDeploymentCatalogEntry
+	teamUpdates                []kernelapi.UpdateTeamDeploymentRequest
+	teamAmendments             []*kernelteam.DefinitionAmendment
+	teamProposals              []kernelteam.ProposeAmendmentRequest
+	teamEvaluations            []kernelteam.SubmitAmendmentEvaluationRequest
+	teamDecisions              []kernelteam.ResolveAmendmentRequest
+	teamActivations            []kernelapi.ActivateTeamDefinitionAmendmentRequest
+	runs                       []*runtime.AgentRun
+	agentRequests              []*runtime.AgentRequest
+	agentRequestFilters        []runtime.AgentRequestFilter
+	agentRequestCreates        []kernelapi.CreateAgentRequestRequest
+	agentRequestKeys           []string
+	agentResponses             []kernelapi.RespondAgentRequestRequest
+	agentCompletions           []kernelapi.CompleteAgentRequestRequest
+	agentCompletionKeys        []string
+	actionApprovals            []*runtime.ApprovalCheckpoint
+	approvalFilters            []runtime.ApprovalFilter
+	agentTurns                 []*kernelapi.AgentTurnRecord
+	agentTurnFilters           []runtime.AgentTurnFilter
+	actionCalls                []*runtime.ActionCall
+	actionCallFilters          []runtime.ActionFilter
+	actionDecisions            []kernelapi.ResolveActionApprovalRequest
+	actionDecisionKeys         []string
+	compilations               []*kernelagent.DefinitionCompilation
+	compilationErr             error
+	createErrors               []error
+	createKeys                 []string
+	createRequests             []kernelapi.CreateAgentRunRequest
+	objectives                 []*runtime.Objective
+	objectiveKeys              []string
+	objectiveCreates           []kernelapi.CreateObjectiveRequest
+	objectiveUpdates           []kernelapi.UpdateObjectiveRequest
+	scheduleRequests           []kernelapi.ReconcileObjectiveSchedulesRequest
+	scheduleResult             *kernelapi.ObjectiveScheduleReconciliation
+	eventSources               []*runtime.EventSourceSubscription
+	eventSourceDetails         map[string]*runtime.EventSourceSubscriptionDetail
+	eventSourceCreates         []kernelapi.CreateEventSourceSubscriptionRequest
+	eventSourceError           error
+	eventSourceUpdates         []kernelapi.UpdateEventSourceSubscriptionRequest
+	eventSourceRetires         []kernelapi.RetireEventSourceSubscriptionRequest
+	initiatives                []*runtime.Initiative
+	monitorCheckpoints         map[string]*runtime.SourceMonitorCheckpoint
+	monitorObservations        map[string][]*runtime.SourceObservation
+	activityPages              map[string]*runtime.ActivityFeedPage
+	activityRequests           []runtime.ActivityFeedRequest
+	initiativeKeys             []string
+	initiativeCreates          []kernelapi.CreateInitiativeRequest
+	initiativeUpdates          []kernelapi.UpdateInitiativeRequest
+	outreachThreads            []*runtime.OutreachThread
+	outreachCreates            []kernelapi.CreateOutreachThreadRequest
+	outreachCreateKeys         []string
+	outreachDeliveries         []kernelapi.DeliverOutreachMessageRequest
+	outreachDeliveryKeys       []string
+	commands                   []kernelapi.AgentRunCommandRequest
+	artifacts                  []*runtime.Artifact
+	downloadBody               string
+	downloadCalls              int
+	authoringResult            *authoring.CompileResult
+	authoringRequests          []authoring.GenerateRequest
+	authoringErrors            []error
+	changeSets                 []*authoring.ChangeSet
+	changeSetRequests          []authoring.CreateChangeSetRequest
+	changeSetKeys              []string
+	changeSetErrors            []error
+	approvalRequests           []authoring.ResolveChangeSetApprovalRequest
+	approvalKeys               []string
+	applyRequests              []authoring.ApplyChangeSetRequest
+	applyKeys                  []string
+	activationRequests         []authoring.PrepareChangeSetActivationRequest
+	activationKeys             []string
+	placementRequests          []authoring.UpdateChangeSetPlacementRequest
+	placementKeys              []string
+	refinementRequests         []authoring.AnswerChangeSetRefinementRequest
+	refinementKeys             []string
+	retryRequests              []authoring.RetryChangeSetGenerationRequest
+	retryKeys                  []string
+	governanceResults          []*authoring.ChangeSet
+	governanceErrors           []error
+	skillActions               []capability.ModelAction
+	skillActionCalls           int
+	skillBindings              []*capability.Binding
+	skillBindingUpserts        []skill.UpsertBindingRequest
+	skillBindingDisables       []skill.DisableBindingRequest
+	skillUpgradePlans          []runtime.PlanSkillReferenceUpgradeRequest
+	skillUpgradeApplies        []runtime.ApplySkillReferenceUpgradeRequest
+	skillUpgradePlan           *runtime.SkillReferenceUpgradePlan
+	skillBindingError          error
+	conversationGateways       []*runtime.ExternalConversationGatewayRegistration
+	conversationGatewayCreates []kernelapi.CreateExternalConversationGatewayRequest
+	conversationGatewayUpdates []kernelapi.UpdateExternalConversationGatewayRequest
 }
 
 func TestMatchSearchedSkillRequiresExactSelectableIdentity(t *testing.T) {
@@ -154,13 +157,56 @@ func TestMatchSearchedSkillRequiresExactSelectableIdentity(t *testing.T) {
 }
 
 var (
-	_ client.KernelClient                    = (*fakeKernelClient)(nil)
-	_ client.AgentDefinitionCapabilityClient = (*fakeKernelClient)(nil)
-	_ client.AgentDefinitionLifecycleClient  = (*fakeKernelClient)(nil)
-	_ client.KernelClient                    = (*fakeChannelKernelClient)(nil)
-	_ client.KernelClient                    = (*fakeClawHubKernelClient)(nil)
-	_ client.SkillBindingClient              = (*fakeKernelClient)(nil)
+	_ client.KernelClient                      = (*fakeKernelClient)(nil)
+	_ client.AgentDefinitionCapabilityClient   = (*fakeKernelClient)(nil)
+	_ client.AgentDefinitionLifecycleClient    = (*fakeKernelClient)(nil)
+	_ client.ExternalConversationGatewayClient = (*fakeKernelClient)(nil)
+	_ client.KernelClient                      = (*fakeChannelKernelClient)(nil)
+	_ client.KernelClient                      = (*fakeClawHubKernelClient)(nil)
+	_ client.SkillBindingClient                = (*fakeKernelClient)(nil)
 )
+
+func (f *fakeKernelClient) CreateExternalConversationGateway(_ context.Context, request kernelapi.CreateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error) {
+	f.conversationGatewayCreates = append(f.conversationGatewayCreates, request)
+	now := time.Now().UTC()
+	value := &runtime.ExternalConversationGatewayRegistration{
+		ID: "gateway-created", IngressRoute: "route-created", Name: request.Name, Gateway: request.Gateway,
+		Status: runtime.ExternalConversationGatewayPaused, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	f.conversationGateways = append(f.conversationGateways, value)
+	return value, nil
+}
+
+func (f *fakeKernelClient) ListExternalConversationGateways(context.Context, runtime.ExternalConversationGatewayFilter) ([]*runtime.ExternalConversationGatewayRegistration, error) {
+	return f.conversationGateways, nil
+}
+
+func (f *fakeKernelClient) GetExternalConversationGateway(_ context.Context, _ runtime.Scope, id string) (*runtime.ExternalConversationGatewayRegistration, error) {
+	for _, item := range f.conversationGateways {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return nil, runtime.ErrExternalConversationGatewayNotFound
+}
+
+func (f *fakeKernelClient) UpdateExternalConversationGateway(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error) {
+	f.conversationGatewayUpdates = append(f.conversationGatewayUpdates, request)
+	for _, item := range f.conversationGateways {
+		if item.ID == id {
+			if request.ExpectedRevision != item.Revision {
+				return nil, runtime.ErrExternalConversationConflict
+			}
+			if request.Status != nil {
+				item.Status = *request.Status
+			}
+			item.Revision++
+			item.UpdatedAt = time.Now().UTC()
+			return item, nil
+		}
+	}
+	return nil, runtime.ErrExternalConversationGatewayNotFound
+}
 
 func (f *fakeKernelClient) ListSkillBindings(context.Context, capability.ScopeReference, client.SkillBindingOwner) (*kernelapi.SkillBindingList, error) {
 	return &kernelapi.SkillBindingList{Items: f.skillBindings}, nil
