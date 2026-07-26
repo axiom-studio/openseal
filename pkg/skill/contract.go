@@ -857,6 +857,16 @@ func validateDefinition(definition *Definition) error {
 			if action.Risk != RiskLevelRead || (action.SideEffect != SideEffectRead && action.SideEffect != SideEffectNone) {
 				return fmt.Errorf("skill conversation adapter %s destination discovery action %s must be read-only", id, discovery.Action)
 			}
+			adapterCredentials := make(map[string]CredentialRequirement, len(adapter.Credentials))
+			for _, requirement := range adapter.Credentials {
+				adapterCredentials[requirement.Name] = requirement
+			}
+			for _, requirement := range action.Credentials {
+				declared, exists := adapterCredentials[requirement.Name]
+				if !exists || declared.Kind != requirement.Kind || declared.Optional != requirement.Optional || !reflect.DeepEqual(declared.OAuth2, requirement.OAuth2) {
+					return fmt.Errorf("skill conversation adapter %s destination discovery action %s credential %s is not declared identically by the adapter", id, discovery.Action, requirement.Name)
+				}
+			}
 			if err := validateConversationDestinationDiscoverySchema(action, discovery); err != nil {
 				return fmt.Errorf("skill conversation adapter %s destination discovery action %s is invalid: %w", id, discovery.Action, err)
 			}
