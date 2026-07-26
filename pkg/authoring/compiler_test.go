@@ -890,6 +890,37 @@ func TestCompilerNormalizesDefinitionProvenanceKindAlias(t *testing.T) {
 	}
 }
 
+func TestCompilerLiftsUnambiguousCandidateCommitments(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	agentCount := 1
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate:   candidate,
+		Commitments: PromptCommitments{AgentCount: &agentCount},
+	})
+	payload = bytes.Replace(payload, []byte(`"commitments":`), []byte(`"candidateCommitments":`), 1)
+	var document map[string]interface{}
+	if err := json.Unmarshal(payload, &document); err != nil {
+		t.Fatal(err)
+	}
+	commitments := document["candidateCommitments"]
+	delete(document, "candidateCommitments")
+	document["candidate"].(map[string]interface{})["commitments"] = commitments
+	payload, _ = json.Marshal(document)
+
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create one Agent."})
+	if err != nil || result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 1 {
+		t.Fatalf("lifted commitments result=%#v err=%v", result, err)
+	}
+
+	document["commitments"] = commitments
+	ambiguous, _ := json.Marshal(document)
+	strict, _ := NewCompiler(staticGenerator{payload: ambiguous})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create one Agent."}); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("ambiguous commitments placement must remain strict, got %v", err)
+	}
+}
+
 func TestCompilerNormalizesNonCredentialProvenanceValueAlias(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidateJSON, _ := json.Marshal(candidate)

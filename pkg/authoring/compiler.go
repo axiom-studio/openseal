@@ -484,6 +484,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 }
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
+	payload = normalizeGeneratedCommitmentsPlacement(payload)
 	payload = normalizeGeneratedDefinitionVersions(payload)
 	payload = normalizeGeneratedDurations(payload)
 	payload = normalizeGeneratedDefinitionProvenance(payload)
@@ -507,6 +508,41 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	normalizeCandidateObjectiveRunBudgets(&generated.Candidate)
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
+}
+
+// normalizeGeneratedCommitmentsPlacement lifts the exact response-level
+// commitments object when a provider has placed it under candidate. This is a
+// lossless structural correction: an existing response-level value, a
+// non-object candidate, or any other unknown candidate field remains untouched
+// and is rejected by strict decoding.
+func normalizeGeneratedCommitmentsPlacement(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document map[string]interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	if _, exists := document["commitments"]; exists {
+		return payload
+	}
+	candidate, ok := document["candidate"].(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	commitments, exists := candidate["commitments"]
+	if !exists {
+		return payload
+	}
+	if _, ok := commitments.(map[string]interface{}); !ok {
+		return payload
+	}
+	delete(candidate, "commitments")
+	document["commitments"] = commitments
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
 }
 
 // normalizeGeneratedDefinitionProvenance accepts the common provider alias

@@ -979,7 +979,11 @@ func addTrustedRefinementSkill(changeSet *ChangeSet, questionID string, value Re
 		return fmt.Errorf("trusted Skill candidate is incompatible with %s", fact.Requirement)
 	}
 	if existing, ok := changeSet.Catalog.Skills[candidate.ID]; ok {
-		if existing.Version != candidate.Version || existing.SourceIdentity != candidate.SourceIdentity {
+		// A trusted discovery answer is also the reviewed upgrade path for an
+		// already-enabled Skill. The stable identity is its canonical source;
+		// the exact version is deliberately allowed to change and remains pinned
+		// by the host-resolved candidate and acquisition receipt.
+		if existing.SourceIdentity != candidate.SourceIdentity {
 			return errors.New("trusted Skill conflicts with the authorized catalog identity")
 		}
 	}
