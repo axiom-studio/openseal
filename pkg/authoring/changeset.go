@@ -1180,6 +1180,7 @@ func (s *ChangeSetService) PrepareActivation(ctx context.Context, request Prepar
 	// candidate as a complete standalone definition while still computing its
 	// activation-only diff against the inactive parent.
 	result.Validation = validateCandidate(&result.Candidate, nil)
+	result.Validation = append(result.Validation, conversationRoutingValidation(&result.Candidate, snapshot.Placement)...)
 	// The applied parent already proved its semantic requirements. Activation
 	// refreshes runtime placement requirements separately and must not reinterpret
 	// an immutable candidate against newer planning-only catalog hints.
@@ -1280,6 +1281,9 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	// projection when placement changes; the next governed ready transition
 	// recomputes it against the newly selected immutable resources.
 	next.Result.Validation = replaceReadinessValidation(next.Result.Validation, nil)
+	if isActivationContinuation(next) {
+		next.Result.Validation = append(next.Result.Validation, conversationRoutingValidation(&next.Result.Candidate, next.Placement)...)
+	}
 	next.Result.Valid = len(next.Result.Validation) == 0 && len(next.Result.MissingRequirements) == 0 && len(next.Result.UnresolvedQuestions) == 0
 	next.Status = ChangeSetReview
 	if !next.Result.Valid {
@@ -1338,7 +1342,6 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 		{"Agent deployments", requested.AgentDeploymentIDs, current.AgentDeploymentIDs, requested.AgentDeploymentIDs != nil},
 		{"Agent revisions", requested.AgentExpectedRevisions, current.AgentExpectedRevisions, requested.AgentExpectedRevisions != nil},
 		{"objectives", requested.Objectives, current.Objectives, requested.Objectives != nil},
-		{"conversation endpoints", requested.ConversationEndpoints, current.ConversationEndpoints, requested.ConversationEndpoints != nil},
 		{"Skill sources", requested.SkillSourceIdentities, current.SkillSourceIdentities, requested.SkillSourceIdentities != nil},
 		{"Skill source versions", requested.SkillSourceVersions, current.SkillSourceVersions, requested.SkillSourceVersions != nil},
 		{"Skill runtime identities", requested.SkillRuntimeIdentities, current.SkillRuntimeIdentities, requested.SkillRuntimeIdentities != nil},
@@ -1363,7 +1366,52 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 	next := clonePlacement(current)
 	next.CredentialReferences = clonePlacement(requested).CredentialReferences
 	next.BindingConfigs = clonePlacement(requested).BindingConfigs
+	if requested.ConversationEndpoints != nil {
+		if len(requested.ConversationEndpoints) != len(current.ConversationEndpoints) {
+			return ChangeSetPlacement{}, errors.New("activation target conversation endpoints are immutable")
+		}
+		for key, placed := range requested.ConversationEndpoints {
+			existing, ok := current.ConversationEndpoints[key]
+			if !ok || (placed.ID != "" && placed.ID != existing.ID) ||
+				(placed.ExpectedRevision != 0 && placed.ExpectedRevision != existing.ExpectedRevision) {
+				return ChangeSetPlacement{}, fmt.Errorf("activation target conversation endpoint %s is immutable", key)
+			}
+			existing.InstallationID = strings.TrimSpace(placed.InstallationID)
+			existing.ApplicationID = strings.TrimSpace(placed.ApplicationID)
+			existing.Address = strings.TrimSpace(placed.Address)
+			existing.Configuration = cloneAuthoringMap(placed.Configuration)
+			next.ConversationEndpoints[key] = existing
+		}
+	}
 	return next, nil
+}
+
+// conversationRoutingValidation keeps provider routing host-owned while making
+// an activation plan truthfully actionable. Inactive resources may be created
+// before an external installation is connected; active endpoints must have the
+// exact verified installation and destination that ingress will match.
+func conversationRoutingValidation(candidate *WorkforceCandidate, placement ChangeSetPlacement) []ValidationIssue {
+	if candidate == nil || candidate.Activation != WorkforceActivationActive {
+		return nil
+	}
+	issues := make([]ValidationIssue, 0)
+	for index, endpoint := range candidate.ConversationEndpoints {
+		placed := placement.ConversationEndpoints[endpoint.ID]
+		path := fmt.Sprintf("conversationEndpoints[%d]", index)
+		if strings.TrimSpace(placed.InstallationID) == "" {
+			issues = append(issues, ValidationIssue{
+				Path: path + ".installationId", Code: "conversation_routing_installation_required",
+				Message: fmt.Sprintf("Connect the provider installation for %s before activation", endpoint.Name),
+			})
+		}
+		if strings.TrimSpace(placed.Address) == "" && strings.TrimSpace(endpoint.Address) == "" {
+			issues = append(issues, ValidationIssue{
+				Path: path + ".address", Code: "conversation_routing_address_required",
+				Message: fmt.Sprintf("Choose the destination for %s before activation", endpoint.Name),
+			})
+		}
+	}
+	return issues
 }
 
 func validatePlannedSkillInstallations(placement ChangeSetPlacement, catalog CapabilityCatalog) error {
@@ -2361,10 +2409,7 @@ func (s *ChangeSetService) validateReadiness(ctx context.Context, value *ChangeS
 	if !enabled {
 		return nil, nil
 	}
-	if len(s.readinessValidators) == 0 {
-		return nil, nil
-	}
-	issues := make([]ValidationIssue, 0)
+	issues := conversationRoutingValidation(&value.Result.Candidate, value.Placement)
 	for _, validator := range s.readinessValidators {
 		result, err := validator.ValidateChangeSetReadiness(ctx, value)
 		if err != nil {
@@ -2396,6 +2441,7 @@ func replaceReadinessValidation(existing, readiness []ValidationIssue) []Validat
 
 func isReadinessValidationCode(code string) bool {
 	return strings.HasPrefix(code, readinessValidationCodePrefix) ||
+		strings.HasPrefix(code, "conversation_routing_") ||
 		strings.HasPrefix(code, "execution_target_") ||
 		strings.HasPrefix(code, "agent_deployment_")
 }
