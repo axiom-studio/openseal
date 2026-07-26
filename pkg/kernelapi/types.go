@@ -37,7 +37,7 @@ const (
 	ChannelsCapabilityID                       = "channels"
 	ChannelsCapabilityVersion                  = "4"
 	TeamDefinitionsCapabilityID                = "team-definitions"
-	TeamDefinitionsCapabilityVersion           = "3"
+	TeamDefinitionsCapabilityVersion           = "4"
 	WorkforceAuthoringCapabilityID             = "workforce-authoring"
 	WorkforceAuthoringCapabilityVersion        = "11"
 	WorkforceExecutionTargetsCapabilityID      = "workforce-execution-targets"
@@ -45,7 +45,7 @@ const (
 	ClawHubLifecycleCapabilityID               = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion          = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID               = "agent-definitions"
-	AgentDefinitionsCapabilityVersion          = "6"
+	AgentDefinitionsCapabilityVersion          = "7"
 	AgentRequestsCapabilityID                  = "agent-requests"
 	AgentRequestsCapabilityVersion             = "1"
 	ActionApprovalsCapabilityID                = "action-approvals"

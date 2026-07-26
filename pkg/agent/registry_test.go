@@ -101,6 +101,36 @@ func TestPendingAgentDeploymentActivatesItsReviewedCurrentVersion(t *testing.T) 
 	}
 }
 
+func TestPendingWorkforceAgentMustResumeAggregateActivation(t *testing.T) {
+	registry := NewRegistry()
+	definition := testDefinition("1.0.0", capability.RiskLevelRead, 1)
+	if _, err := registry.RegisterDefinition(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	deployed, _, err := registry.CreateDeployment(context.Background(), &AgentDeployment{
+		ID: "reviewed-workforce", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: RolloutPending, Environment: "development", Capacity: DeploymentCapacity{MaxConcurrentRuns: 1},
+		Activation: &workforce.ActivationContinuation{ChangeSetID: "change-set-one"},
+	}, "user", "admin", "apply reviewed resources without activation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = registry.ActivateDefinition(
+		context.Background(), scope, deployed.ID, definition.Version, deployed.Revision,
+		"user", "admin", "activate only the Agent",
+	); err == nil || !strings.Contains(err.Error(), "resume its Change Set") {
+		t.Fatalf("partial activation error = %v", err)
+	}
+	proposed := cloneDeployment(deployed)
+	proposed.Activation = nil
+	if _, _, err = registry.UpdateDeployment(
+		context.Background(), proposed, deployed.Revision, "user", "admin", "strip activation continuation",
+	); err == nil || !strings.Contains(err.Error(), "identity or definition lineage") {
+		t.Fatalf("continuation removal error = %v", err)
+	}
+}
+
 func TestAgentDefinitionRequiresValidRunbookSkillDeclarations(t *testing.T) {
 	definition := testDefinition("1.0.0", capability.RiskLevelExternal, 1)
 	definition.Runbook = &runbook.Definition{

@@ -169,7 +169,7 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployme
 	}
 	if proposed.ID != current.ID || proposed.Scope != current.Scope || proposed.DefinitionID != current.DefinitionID ||
 		proposed.ActiveVersion != current.ActiveVersion || proposed.PreviousVersion != current.PreviousVersion ||
-		!proposed.CreatedAt.Equal(current.CreatedAt) {
+		!proposed.CreatedAt.Equal(current.CreatedAt) || !activationContinuationEqual(proposed.Activation, current.Activation) {
 		return nil, nil, errors.New("agent deployment update cannot change identity or definition lineage")
 	}
 	if err := validateRolloutTransition(current.RolloutStatus, proposed.RolloutStatus); err != nil {
@@ -254,6 +254,9 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	if current.Revision != expectedRevision {
 		return nil, nil, ErrRevisionConflict
 	}
+	if current.Activation != nil {
+		return nil, nil, errors.New("agent deployment belongs to a pending workforce activation; resume its Change Set")
+	}
 	sameVersion := current.ActiveVersion == version
 	if sameVersion && current.RolloutStatus == RolloutActive {
 		return nil, nil, errors.New("agent deployment already uses the requested definition version")
@@ -286,6 +289,13 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	}
 	copyActivation := activation
 	return cloneDeployment(updated), &copyActivation, nil
+}
+
+func activationContinuationEqual(left, right *workforce.ActivationContinuation) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.ChangeSetID == right.ChangeSetID
 }
 
 func (r *Registry) RollbackDefinition(ctx context.Context, scope capability.ScopeReference, deploymentID string, expectedRevision int64, actorType, actorID, reason string) (*AgentDeployment, *DefinitionActivation, error) {

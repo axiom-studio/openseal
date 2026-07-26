@@ -361,6 +361,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateTeamCoordinationDefaults(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateActivationContinuations(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.migrateSourceQualifiedSkillVariants(ctx, tx); err != nil {
 		return err
 	}

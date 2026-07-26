@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 type DeploymentStatus string
@@ -31,16 +32,17 @@ type DeploymentRestrictions struct {
 }
 
 type Deployment struct {
-	ID            string                    `json:"id"`
-	Scope         capability.ScopeReference `json:"scope"`
-	DefinitionID  string                    `json:"definitionId"`
-	ActiveVersion string                    `json:"activeVersion"`
-	Roster        []RosterAssignment        `json:"roster"`
-	Restrictions  DeploymentRestrictions    `json:"restrictions,omitempty"`
-	Status        DeploymentStatus          `json:"status"`
-	Revision      int64                     `json:"revision"`
-	CreatedAt     time.Time                 `json:"createdAt"`
-	UpdatedAt     time.Time                 `json:"updatedAt"`
+	ID            string                            `json:"id"`
+	Scope         capability.ScopeReference         `json:"scope"`
+	DefinitionID  string                            `json:"definitionId"`
+	ActiveVersion string                            `json:"activeVersion"`
+	Roster        []RosterAssignment                `json:"roster"`
+	Restrictions  DeploymentRestrictions            `json:"restrictions,omitempty"`
+	Status        DeploymentStatus                  `json:"status"`
+	Activation    *workforce.ActivationContinuation `json:"activation,omitempty"`
+	Revision      int64                             `json:"revision"`
+	CreatedAt     time.Time                         `json:"createdAt"`
+	UpdatedAt     time.Time                         `json:"updatedAt"`
 }
 
 func (d *Deployment) Validate(definition *Definition) error {
@@ -74,6 +76,11 @@ func (d *Deployment) Validate(definition *Definition) error {
 	}
 	if d.Restrictions.MaximumConcurrency < 0 || d.Restrictions.MaximumRisk != "" && !validRisk(d.Restrictions.MaximumRisk) {
 		return errors.New("team deployment restrictions are invalid")
+	}
+	if d.Activation != nil {
+		if (d.Status != DeploymentDraft && d.Status != DeploymentPaused) || strings.TrimSpace(d.Activation.ChangeSetID) == "" {
+			return errors.New("team deployment activation continuation requires a draft or paused deployment and Change Set")
+		}
 	}
 	return nil
 }

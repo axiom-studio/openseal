@@ -62,7 +62,7 @@ func TestOutreachAdvertisesReviewedDeliveryLifecycle(t *testing.T) {
 
 func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	capability := AgentDefinitionsCapability()
-	if capability.Version != "6" || !capability.Supports(OperationGet) || !capability.Supports(OperationList) || !capability.Supports(OperationUpdate) ||
+	if capability.Version != "7" || !capability.Supports(OperationGet) || !capability.Supports(OperationList) || !capability.Supports(OperationUpdate) ||
 		!capability.Supports("list-compilations") || capability.Supports("list_compilations") {
 		t.Fatalf("agent definition capability = %#v", capability)
 	}
@@ -241,7 +241,7 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	if capability.Supports("delete") {
 		t.Fatalf("unsupported Team definition operation advertised: %#v", capability.Operations)
 	}
-	if capability.Version != "3" || capability.Supports(OperationProposeAmendment) || capability.Supports(OperationRecoverParticipation) {
+	if capability.Version != "4" || capability.Supports(OperationProposeAmendment) || capability.Supports(OperationRecoverParticipation) {
 		t.Fatalf("portable Team definition capability = %#v", capability)
 	}
 	amendments := TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{Amendments: true})
