@@ -420,7 +420,7 @@ func TestPreparedCatalogFailureTerminatesGenerationIntent(t *testing.T) {
 	}
 	failed, err := service.FailPreparedGeneration(context.Background(), prepared.Scope, prepared.ID, prepared.Revision, "capability_discovery_failed", "Capability discovery failed")
 	if err != nil || failed.Status != ChangeSetFailed || failed.Generation.FailureCode != "capability_discovery_failed" ||
-		failed.Generation.LastError != "Capability discovery failed" {
+		failed.Generation.LastError != "Capability discovery failed" || failed.Generation.Attempt != 1 {
 		t.Fatalf("failed=%#v err=%v", failed, err)
 	}
 }
