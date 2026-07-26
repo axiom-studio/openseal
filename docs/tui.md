@@ -57,6 +57,8 @@ Depending on the connected server, the workspace can expose:
   and exact action decisions
 - **Channels** — durable Team conversations, coordination audit, read cursors,
   and presence
+- **Integrations** — capability-advertised conversation gateway registration,
+  lifecycle, and connection state supplied by the connected host
 - **Skills** — ClawHub lifecycle, deployment bindings, model-visible actions,
   and governed source policy lifecycle
 - **Outreach** — evidence-linked drafts and governed delivery Runs
@@ -98,6 +100,7 @@ Section shortcuts work while the list panel is focused:
 | `S` | Event sources |
 | `i` | Initiatives |
 | `O` | Outreach |
+| `I` | Conversation integrations |
 | `s` | Skills |
 | `w` | Work / Runs |
 | `R` | Agent requests |
@@ -115,10 +118,9 @@ Common controls:
 | `↑` / `↓` or `k` / `j` | Select an item or current requirement |
 | `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
-| `m` | Refine the selected deterministic Workforce operation; elsewhere, open the contextual message/amendment composer |
+| `m` | Open the contextual message, refinement, or amendment composer; in Activity, load the next page |
 | `p` | Pause/resume selected Run, Agent, Team, Initiative, or event source; pin/unpin a Skill |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
-| `m` | Post to a selected channel, propose a Team purpose amendment, or load more activity |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
 | `?` / `M` | Request or provide clarification for an Agent request |
 | `e` / `Enter` | Apply, edit, evaluate, complete, or expand according to current section |
