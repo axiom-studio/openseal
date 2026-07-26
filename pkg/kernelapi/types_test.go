@@ -302,6 +302,9 @@ func TestContextualCredentialBindingsExposeOnlyOpaqueOperatorChoices(t *testing.
 		CredentialBindings: []kernelcapability.CredentialBindingChoice{{
 			Reference:   kernelcapability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"},
 			DisplayName: "Development",
+			ExternalIdentity: &kernelcapability.CredentialExternalIdentity{
+				InstallationID: "workspace-7", ApplicationID: "application-2", DisplayName: "Development workspace",
+			},
 		}},
 		BlockingRequirements: []CapabilityBlockingRequirement{{
 			Code: "requires_credential", CredentialKey: "MODEL_PROVIDER", Message: "Connect a model provider.",
@@ -312,7 +315,7 @@ func TestContextualCredentialBindingsExposeOnlyOpaqueOperatorChoices(t *testing.
 		t.Fatal(err)
 	}
 	value := string(encoded)
-	if !strings.Contains(value, `"displayName":"Development"`) || !strings.Contains(value, `"id":"cluster://7"`) || !strings.Contains(value, `"code":"requires_credential"`) || !strings.Contains(value, `"credentialKey":"MODEL_PROVIDER"`) || strings.Contains(value, "kubeconfig") || strings.Contains(value, "token") {
+	if !strings.Contains(value, `"displayName":"Development"`) || !strings.Contains(value, `"id":"cluster://7"`) || !strings.Contains(value, `"installationId":"workspace-7"`) || !strings.Contains(value, `"applicationId":"application-2"`) || !strings.Contains(value, `"code":"requires_credential"`) || !strings.Contains(value, `"credentialKey":"MODEL_PROVIDER"`) || strings.Contains(value, "kubeconfig") || strings.Contains(value, "token") {
 		t.Fatalf("credential binding context = %s", encoded)
 	}
 }

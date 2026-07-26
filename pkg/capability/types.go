@@ -56,9 +56,22 @@ type CredentialBindingChoice struct {
 	// kind itself is the binding key.
 	BindingKeys []string `json:"bindingKeys,omitempty"`
 	// OAuth2 is a non-secret host attestation about the connection identified
-	// by Reference. Tokens, client credentials, external subject identifiers,
-	// and provider payloads never cross this contract.
+	// by Reference. Tokens, client credentials, and provider payloads never
+	// cross this contract.
 	OAuth2 *OAuth2GrantSummary `json:"oauth2,omitempty"`
+	// ExternalIdentity contains only operator-visible routing identity that a
+	// host has verified for this credential. It lets clients compose placement
+	// without asking people to copy opaque provider identifiers. It is context
+	// data and must never become model catalog or prompt input.
+	ExternalIdentity *CredentialExternalIdentity `json:"externalIdentity,omitempty"`
+}
+
+// CredentialExternalIdentity is the minimal provider-neutral identity needed
+// to place an integration backed by an authorized credential.
+type CredentialExternalIdentity struct {
+	InstallationID string `json:"installationId,omitempty"`
+	ApplicationID  string `json:"applicationId,omitempty"`
+	DisplayName    string `json:"displayName,omitempty"`
 }
 
 type ActionRetryPolicy struct {
