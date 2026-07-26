@@ -476,6 +476,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		return nil, false, err
 	}
 	canonicalizeCandidateScope(&result.Candidate, request.Scope)
+	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, inheritedRefinement)
 	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
 	seedExactCatalogSkillPlacement(&result.Candidate, request.Catalog, &request.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
@@ -782,6 +783,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	}
 	existing := changeSet.Generation.Request.Existing
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
+	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, changeSet.Refinement)
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
 	seedExactCatalogSkillPlacement(&result.Candidate, changeSet.Catalog, &changeSet.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
