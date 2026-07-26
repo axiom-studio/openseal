@@ -142,6 +142,7 @@ const (
 	modeWorkforceApply
 	modeWorkforceActivate
 	modeWorkforceRetry
+	modeWorkforceConversationRouting
 	modeRequestCreate
 	modeRequestAccept
 	modeRequestReject
@@ -214,6 +215,7 @@ type Model struct {
 	authoringCredentialChoices  map[string]int
 	authoringConfigSelected     int
 	authoringConfigChoices      map[string]int
+	authoringRoutingSelected    int
 	authoringAutomationSelected int
 	authoringAutomationFocus    *authoringAutomationFocus
 	activeRunbookSelected       int
@@ -1781,6 +1783,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitWorkforceActivation()
 			case modeWorkforceRetry:
 				return m, m.submitWorkforceRetry()
+			case modeWorkforceConversationRouting:
+				return m, m.submitWorkforceConversationRouting()
 			case modeRequestCreate:
 				return m, m.submitAgentRequestCreation()
 			case modeRequestAccept:
@@ -2196,7 +2200,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.updateAllClawHub()
 			}
 		case "v":
-			if m.section == sectionReadiness && m.canActivateSelectedAgentAmendment() {
+			if m.section == sectionAuthoring && m.canConfigureWorkforceConversationRouting() {
+				m.prepareWorkforceConversationRouting()
+			} else if m.section == sectionReadiness && m.canActivateSelectedAgentAmendment() {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentActivate, "Record why this reviewed Agent definition should become active…")
 			} else if m.section == sectionTeams && m.canActivateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
@@ -2630,6 +2636,88 @@ func (m *Model) submitWorkforceBindingConfigurationPlacement() tea.Cmd {
 		result, err := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
 		return workforceGoverned{changeSet: result, action: "Skill configuration placement", err: err}
 	}
+}
+
+type workforceConversationRoutingInput struct {
+	InstallationID string
+	ApplicationID  string
+	Address        string
+}
+
+func parseWorkforceConversationRouting(value string) (workforceConversationRoutingInput, error) {
+	fields := make(map[string]string)
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, raw, ok := strings.Cut(line, ":")
+		if !ok {
+			return workforceConversationRoutingInput{}, errors.New("use installation, application, and address fields")
+		}
+		key, raw = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(raw)
+		switch key {
+		case "installation", "application", "address":
+		default:
+			return workforceConversationRoutingInput{}, fmt.Errorf("unknown routing field %q; credentials and secrets do not belong here", key)
+		}
+		if _, exists := fields[key]; exists {
+			return workforceConversationRoutingInput{}, fmt.Errorf("routing field %q appears more than once", key)
+		}
+		fields[key] = raw
+	}
+	result := workforceConversationRoutingInput{
+		InstallationID: fields["installation"],
+		ApplicationID:  fields["application"],
+		Address:        fields["address"],
+	}
+	if result.InstallationID == "" || result.Address == "" {
+		return workforceConversationRoutingInput{}, errors.New("installation and address are required")
+	}
+	return result, nil
+}
+
+func (m *Model) submitWorkforceConversationRouting() tea.Cmd {
+	row := m.selectedWorkforceConversationRoutingRow()
+	if row == nil || !m.canConfigureWorkforceConversationRouting() || m.busy {
+		return nil
+	}
+	input, err := parseWorkforceConversationRouting(m.editor.Value())
+	if err != nil {
+		m.err, m.status = err, "Review the non-secret routing fields and try again."
+		return nil
+	}
+	placement := m.authoringChangeSet.Placement
+	placement.ConversationEndpoints = cloneWorkforceConversationEndpointPlacements(placement.ConversationEndpoints)
+	placed := placement.ConversationEndpoints[row.Endpoint.ID]
+	placed.InstallationID = input.InstallationID
+	placed.ApplicationID = input.ApplicationID
+	placed.Address = input.Address
+	placement.ConversationEndpoints[row.Endpoint.ID] = placed
+	label := fmt.Sprintf("%s → installation %s / address %s", row.Endpoint.Name, input.InstallationID, input.Address)
+	intent := fmt.Sprintf("conversation-routing\x00%s\x00%d\x00%s\x00%s\x00%s", m.authoringChangeSet.ID, m.authoringChangeSet.Revision, row.Endpoint.ID, input.InstallationID, input.Address)
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.UpdateChangeSetPlacementRequest{
+		Scope: m.authoringChangeSet.Scope, ChangeSetID: m.authoringChangeSet.ID, ExpectedRevision: m.authoringChangeSet.Revision,
+		Placement: placement, Reason: "Connected reviewed conversation routing: " + label,
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err, m.status = true, nil, "Saving non-secret conversation routing…"
+	return func() tea.Msg {
+		result, updateErr := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Conversation routing placement", err: updateErr}
+	}
+}
+
+func cloneWorkforceConversationEndpointPlacements(value map[string]authoring.ConversationEndpointPlacement) map[string]authoring.ConversationEndpointPlacement {
+	result := make(map[string]authoring.ConversationEndpointPlacement, len(value))
+	for key, placement := range value {
+		placement.Configuration = mapsClone(placement.Configuration)
+		result[key] = placement
+	}
+	return result
 }
 
 func cloneWorkforceBindingConfigs(value map[string]map[string]map[string]interface{}) map[string]map[string]map[string]interface{} {
@@ -4692,6 +4780,77 @@ type workforceBindingConfigurationRow struct {
 	AgentID   string
 	AgentName string
 	Field     capability.BindingConfigurationFieldChoice
+}
+
+type workforceConversationRoutingRow struct {
+	Endpoint authoring.ConversationEndpointBlueprint
+	Placed   authoring.ConversationEndpointPlacement
+}
+
+func (m *Model) workforceConversationRoutingRows() []workforceConversationRoutingRow {
+	if m.authoringChangeSet == nil {
+		return nil
+	}
+	rows := make([]workforceConversationRoutingRow, 0, len(m.authoringChangeSet.Result.Candidate.ConversationEndpoints))
+	for _, endpoint := range m.authoringChangeSet.Result.Candidate.ConversationEndpoints {
+		rows = append(rows, workforceConversationRoutingRow{
+			Endpoint: endpoint,
+			Placed:   m.authoringChangeSet.Placement.ConversationEndpoints[endpoint.ID],
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Endpoint.Name == rows[j].Endpoint.Name {
+			return rows[i].Endpoint.ID < rows[j].Endpoint.ID
+		}
+		return rows[i].Endpoint.Name < rows[j].Endpoint.Name
+	})
+	return rows
+}
+
+func (m *Model) canConfigureWorkforceConversationRouting() bool {
+	return m.authoringChangeSet != nil && m.authoringCapability.Context != nil &&
+		m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
+		m.supportsAuthoring(kernelapi.OperationPatch) && len(m.workforceConversationRoutingRows()) > 0
+}
+
+func (m *Model) selectedWorkforceConversationRoutingRow() *workforceConversationRoutingRow {
+	rows := m.workforceConversationRoutingRows()
+	if len(rows) == 0 {
+		return nil
+	}
+	// Progress through incomplete endpoints first. This keeps multi-endpoint
+	// setup sequential without inventing a second form or exposing placement JSON.
+	for index, row := range rows {
+		address := strings.TrimSpace(row.Placed.Address)
+		if address == "" {
+			address = strings.TrimSpace(row.Endpoint.Address)
+		}
+		if strings.TrimSpace(row.Placed.InstallationID) == "" || address == "" {
+			m.authoringRoutingSelected = index
+			selected := row
+			return &selected
+		}
+	}
+	m.authoringRoutingSelected = min(max(m.authoringRoutingSelected, 0), len(rows)-1)
+	selected := rows[m.authoringRoutingSelected]
+	return &selected
+}
+
+func (m *Model) prepareWorkforceConversationRouting() {
+	row := m.selectedWorkforceConversationRoutingRow()
+	if row == nil || !m.canConfigureWorkforceConversationRouting() {
+		return
+	}
+	address := strings.TrimSpace(row.Placed.Address)
+	if address == "" {
+		address = strings.TrimSpace(row.Endpoint.Address)
+	}
+	m.mode = modeWorkforceConversationRouting
+	m.editor.Reset()
+	m.editor.SetValue(fmt.Sprintf("installation: %s\napplication: %s\naddress: %s", row.Placed.InstallationID, row.Placed.ApplicationID, address))
+	m.editor.Placeholder = "installation: workspace-id\napplication: optional-app-id\naddress: channel-or-destination"
+	m.focusComposerEditor()
 }
 
 func (m *Model) workforceBindingConfigurationRows() []workforceBindingConfigurationRow {
