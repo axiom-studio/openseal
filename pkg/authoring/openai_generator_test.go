@@ -102,10 +102,12 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"candidate\":{\"agents\":[]},\"commitments\":{}}"}}]}`))
 	}))
 	defer server.Close()
+	exact := capability.NewSkillIdentity("compiled-source", "1.2.3+source.abc", "registry::publisher/source")
 	catalog := CapabilityCatalog{
 		Skills: map[string]SkillCapability{"source": {
 			ID: "source", Version: "1.2.3", SourceIdentity: "registry::publisher/source", Actions: []string{"read"},
-			Readiness: SkillReadinessNeedsBinding, CredentialKinds: []string{"oauth"},
+			RuntimeIdentity: &exact,
+			Readiness:       SkillReadinessNeedsBinding, CredentialKinds: []string{"oauth"},
 			Compatibility: []SkillCompatibility{
 				{Requirement: "action:read", Compatible: true, Evidence: "verified declaration", Reference: "receipt"},
 				{Requirement: "credential:oauth", Compatible: false, Evidence: "binding required"},
@@ -128,6 +130,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	}
 	projected := modelRequest.Catalog.Skills["source"]
 	if projected.ID != "source" || projected.Version != "1.2.3" || projected.SourceIdentity != "registry::publisher/source" ||
+		projected.RuntimeIdentity != nil ||
 		len(projected.Actions) != 1 || projected.Actions[0] != "read" || projected.Readiness != SkillReadinessNeedsBinding ||
 		len(projected.CredentialKinds) != 1 || len(projected.Compatibility) != 1 || projected.Compatibility[0].Requirement != "credential:oauth" {
 		t.Fatalf("projected Skill = %#v", projected)

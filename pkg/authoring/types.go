@@ -21,9 +21,14 @@ const (
 )
 
 type SkillCapability struct {
-	ID                   string                          `json:"id"`
-	Version              string                          `json:"version,omitempty"`
-	SourceIdentity       string                          `json:"sourceIdentity,omitempty"`
+	ID             string `json:"id"`
+	Version        string `json:"version,omitempty"`
+	SourceIdentity string `json:"sourceIdentity,omitempty"`
+	// RuntimeIdentity is the exact installed immutable definition selected by
+	// the host for this catalog entry. It is persisted with authoring state but
+	// removed from provider prompts: models select catalog ids, while OpenSeal
+	// deterministically places runtime authority.
+	RuntimeIdentity      *capability.SkillIdentity       `json:"runtimeIdentity,omitempty"`
 	Name                 string                          `json:"name,omitempty"`
 	Description          string                          `json:"description,omitempty"`
 	Actions              []string                        `json:"actions,omitempty"`

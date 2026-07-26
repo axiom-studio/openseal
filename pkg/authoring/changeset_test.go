@@ -106,6 +106,96 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	}
 }
 
+func TestGeneratePreparedAtomicallyPlacesExactConversationSkillIdentity(t *testing.T) {
+	candidate := directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	catalog := slackChatbotCatalog()
+	skillCapability := catalog.Skills["slack"]
+	skillCapability.SourceIdentity = "registry.example::communications/slack"
+	exact := capability.NewSkillIdentity(
+		"openseal.slack-conversations",
+		"1.0.0+source.0123456789ab",
+		skillCapability.SourceIdentity,
+	)
+	skillCapability.RuntimeIdentity = &exact
+	skillCapability.Readiness = SkillReadinessNeedsBinding
+	catalog.Skills["slack"] = skillCapability
+
+	prepared, replayed, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: slackChatbotPrompt,
+		Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "exact-conversation-placement",
+	})
+	if err != nil || replayed {
+		t.Fatalf("prepare replayed=%t err=%v", replayed, err)
+	}
+	completed, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := completed.Result.Candidate.ConversationEndpoints[0].Owner.ID
+	if got := completed.Placement.SkillSourceIdentities[ownerID]["slack"]; got != exact.SourceIdentity {
+		t.Fatalf("source identity = %q", got)
+	}
+	if got := completed.Placement.SkillSourceVersions[ownerID]["slack"]; got != exact.Version {
+		t.Fatalf("source version = %q", got)
+	}
+	if got := completed.Placement.SkillRuntimeIdentities[ownerID]["slack"]; !got.Equal(exact) {
+		t.Fatalf("runtime identity = %#v", got)
+	}
+	persisted, err := store.GetChangeSet(context.Background(), completed.Scope, completed.ID)
+	if err != nil || !persisted.Placement.SkillRuntimeIdentities[ownerID]["slack"].Equal(exact) {
+		t.Fatalf("persisted placement=%#v err=%v", persisted.Placement, err)
+	}
+}
+
+func TestSeedExactCatalogSkillPlacementCoversAgentAndTeamWithoutOverwritingReview(t *testing.T) {
+	candidate := marketingCandidate("1.0.0", capability.RiskLevelRead)
+	candidate.ConversationEndpoints = []ConversationEndpointBlueprint{{
+		ID: "team-chat", Owner: ConversationEndpointOwner{Type: ConversationEndpointOwnerTeam, ID: candidate.Team.ID},
+		SkillID: "team-chat", SkillVersion: "2.0.0",
+	}}
+	candidate.Agents[0].SkillRequirements = append(candidate.Agents[0].SkillRequirements,
+		agent.SkillRequirement{SkillID: "native"},
+		agent.SkillRequirement{SkillID: "install-later"},
+		agent.SkillRequirement{SkillID: "unavailable"},
+	)
+	exactResearch := capability.NewSkillIdentity("compiled-research", "1.2.3+source.abc", "registry.example::research")
+	exactChat := capability.NewSkillIdentity("compiled-chat", "2.0.0+source.def", "registry.example::chat")
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"reddit-research": {ID: "reddit-research", Version: "1.2.3", SourceIdentity: exactResearch.SourceIdentity, RuntimeIdentity: &exactResearch, Readiness: SkillReadinessNeedsBinding},
+		"team-chat":       {ID: "team-chat", Version: "2.0.0", SourceIdentity: exactChat.SourceIdentity, RuntimeIdentity: &exactChat, Readiness: SkillReadinessReady},
+		"native":          {ID: "native-runtime", Version: "3.0.0", Readiness: SkillReadinessReady},
+		"install-later":   {ID: "install-runtime", Version: "1.0.0", Readiness: SkillReadinessNeedsInstallation},
+		"unavailable":     {ID: "unavailable-runtime", Version: "1.0.0", Readiness: SkillReadinessUnavailable},
+	}}
+	reviewed := capability.NewSkillIdentity("reviewed-runtime", "9.0.0", "reviewed::source")
+	placement := ChangeSetPlacement{
+		SkillSourceIdentities:  map[string]map[string]string{candidate.Agents[0].ID: {"reddit-research": reviewed.SourceIdentity}},
+		SkillSourceVersions:    map[string]map[string]string{candidate.Agents[0].ID: {"reddit-research": reviewed.Version}},
+		SkillRuntimeIdentities: map[string]map[string]capability.SkillIdentity{candidate.Agents[0].ID: {"reddit-research": reviewed}},
+	}
+
+	seedExactCatalogSkillPlacement(&candidate, catalog, &placement)
+	if got := placement.SkillRuntimeIdentities[candidate.Agents[0].ID]["reddit-research"]; !got.Equal(reviewed) {
+		t.Fatalf("reviewed identity overwritten: %#v", got)
+	}
+	if got := placement.SkillRuntimeIdentities[candidate.Team.ID]["team-chat"]; !got.Equal(exactChat) {
+		t.Fatalf("Team endpoint identity = %#v", got)
+	}
+	if got := placement.SkillRuntimeIdentities[candidate.Agents[0].ID]["native"]; !got.Equal(capability.NewSkillIdentity("native-runtime", "3.0.0", "")) {
+		t.Fatalf("native identity = %#v", got)
+	}
+	if _, exists := placement.SkillRuntimeIdentities[candidate.Agents[0].ID]["install-later"]; exists {
+		t.Fatal("needs-installation Skill was falsely placed")
+	}
+	if _, exists := placement.SkillRuntimeIdentities[candidate.Agents[0].ID]["unavailable"]; exists {
+		t.Fatal("unavailable Skill was falsely placed")
+	}
+}
+
 func TestSensitivePromptIsRejectedBeforePersistenceOrModelWork(t *testing.T) {
 	generator := &sequenceChangeSetGenerator{payloads: [][]byte{[]byte(`{"must":"remain unused"}`)}}
 	compiler, _ := NewCompiler(generator)
