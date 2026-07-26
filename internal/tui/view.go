@@ -100,6 +100,9 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeWorkforceRefinement && m.readyRefinement() == nil {
 		return m.renderUnavailableComposer(width, "Answer proposal question", "This exact proposal revision does not advertise refinement authority.")
 	}
+	if m.mode == modeWorkforceConversationRouting && !m.canConfigureWorkforceConversationRouting() {
+		return m.renderUnavailableComposer(width, "Connect message routing", "This exact proposal revision does not advertise routing placement authority.")
+	}
 	if m.mode == modeRunbookOperationStart && !m.canStartActiveRunbookOperation() {
 		return m.renderUnavailableComposer(width, "Start deterministic operation", "The active Agent or kernel does not advertise this operation.")
 	}
@@ -148,7 +151,7 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -221,6 +224,11 @@ func (m *Model) renderComposer(width int) string {
 		if guidance := m.renderRefinementGuidance(*question, max(width-8, 24)); guidance != "" {
 			owner += "\n\n" + guidance
 		}
+	case modeWorkforceConversationRouting:
+		row := m.selectedWorkforceConversationRoutingRow()
+		title = "Connect message routing"
+		description = "Choose the provider installation and destination for " + row.Endpoint.Name + "."
+		owner = fmt.Sprintf("%s · %s · non-secret host placement only", row.Endpoint.SkillID, row.Endpoint.Mode)
 	case modeRunbookOperationStart:
 		row := m.selectedActiveRunbookOperation()
 		title = "Start deterministic operation"
@@ -937,6 +945,30 @@ func (m *Model) renderAuthoringContent(width int) string {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter review and start these exact inactive resources"))
 		} else if m.supportsAuthoring(kernelapi.OperationEvaluate) {
 			lines = append(lines, "", mutedStyle.Render("Waiting for the configured policy evaluator to submit its decision."))
+		}
+		if m.canConfigureWorkforceConversationRouting() {
+			rows := m.workforceConversationRoutingRows()
+			lines = append(lines, "", mutedStyle.Render("Message routing · provider credentials stay outside authoring"))
+			for index, row := range rows {
+				address := strings.TrimSpace(row.Placed.Address)
+				if address == "" {
+					address = strings.TrimSpace(row.Endpoint.Address)
+				}
+				state := "setup needed"
+				if strings.TrimSpace(row.Placed.InstallationID) != "" && address != "" {
+					state = "connected"
+				}
+				prefix, style := "  ", mutedStyle
+				if index == m.authoringRoutingSelected {
+					prefix, style = "› ", selectedStyle
+				}
+				destination := address
+				if destination == "" {
+					destination = "choose destination"
+				}
+				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s · %s → %s", prefix, compact(row.Endpoint.Name, max(width-42, 16)), row.Endpoint.SkillID, state, compact(destination, max(width-34, 16)))))
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("v connect or edit the next endpoint"))
 		}
 		if m.canPlaceWorkforceBindingConfigurations() {
 			rows := m.workforceBindingConfigurationRows()

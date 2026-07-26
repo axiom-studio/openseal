@@ -2417,6 +2417,60 @@ func TestWorkforceCredentialPlacementUsesTypedAuthorizedChoices(t *testing.T) {
 	}
 }
 
+func TestWorkforceConversationRoutingUsesTypedNonSecretPlacement(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	endpoint := authoring.ConversationEndpointBlueprint{
+		ID: "support", Name: "Slack support", SkillID: "openseal.slack", SkillVersion: "1.0.0",
+		AdapterID: "slack-events", Mode: capability.ConversationEndpointChannel,
+		Owner:   authoring.ConversationEndpointOwner{Type: authoring.ConversationEndpointOwnerAgent, ID: "support"},
+		Handler: authoring.ConversationHandlerBlueprint{Kind: authoring.ConversationHandlerAgent, AgentDefinitionID: "support"},
+	}
+	changeSet := &authoring.ChangeSet{
+		ID: "routing-change", Scope: scope, Status: authoring.ChangeSetBlocked, Revision: 3, CandidateDigest: "digest",
+		Result: authoring.CompileResult{Candidate: authoring.WorkforceCandidate{
+			Agents:                []*kernelagent.AgentDefinition{{ID: "support", DisplayName: "Support Agent"}},
+			ConversationEndpoints: []authoring.ConversationEndpointBlueprint{endpoint}, Activation: authoring.WorkforceActivationActive,
+		}},
+		Placement: authoring.ChangeSetPlacement{ConversationEndpoints: map[string]authoring.ConversationEndpointPlacement{
+			"support": {ID: "endpoint-live", ExpectedRevision: 7, Configuration: map[string]interface{}{"internal": "must-not-render"}},
+		}},
+	}
+	updated := *changeSet
+	updated.Revision = 4
+	updated.Placement.ConversationEndpoints = cloneWorkforceConversationEndpointPlacements(changeSet.Placement.ConversationEndpoints)
+	placed := updated.Placement.ConversationEndpoints["support"]
+	placed.InstallationID, placed.ApplicationID, placed.Address = "T-123", "A-123", "C-123"
+	updated.Placement.ConversationEndpoints["support"] = placed
+	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
+	capabilityDocument.Context = &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: changeSet.Revision}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument), governanceResults: []*authoring.ChangeSet{&updated}}
+	model := newTestModel(t, fake)
+	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	if !strings.Contains(view, "Message routing") || !strings.Contains(view, "Slack support") || !strings.Contains(view, "setup needed") || strings.Contains(view, "must-not-render") {
+		t.Fatalf("conversation routing was not rendered safely:\n%s", view)
+	}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if model.mode != modeWorkforceConversationRouting || model.focus != focusComposer {
+		t.Fatalf("routing setup did not open: mode=%v focus=%v", model.mode, model.focus)
+	}
+	model.editor.SetValue("installation: T-123\napplication: A-123\naddress: C-123")
+	applyCommand(t, model, model.submitWorkforceConversationRouting())
+	if len(fake.placementRequests) != 1 || fake.placementKeys[0] == "" {
+		t.Fatalf("routing placement calls=%#v keys=%#v", fake.placementRequests, fake.placementKeys)
+	}
+	requestPlacement := fake.placementRequests[0].Placement.ConversationEndpoints["support"]
+	if requestPlacement.ID != "endpoint-live" || requestPlacement.ExpectedRevision != 7 || requestPlacement.InstallationID != "T-123" || requestPlacement.ApplicationID != "A-123" || requestPlacement.Address != "C-123" || requestPlacement.Configuration["internal"] != "must-not-render" {
+		t.Fatalf("typed routing placement = %#v", requestPlacement)
+	}
+	if _, err := parseWorkforceConversationRouting("installation: T-123\naddress: C-123\ntoken: secret"); err == nil || !strings.Contains(err.Error(), "secrets do not belong here") {
+		t.Fatalf("secret-like routing field was accepted: %v", err)
+	}
+}
+
 func TestWorkforceCredentialPlacementUsesDeploymentBindingKeys(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	changeSet := &authoring.ChangeSet{
