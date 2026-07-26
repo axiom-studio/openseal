@@ -186,6 +186,13 @@ func TestSpecificCommitmentDoesNotNarrowAGroupPrompt(t *testing.T) {
 	}
 }
 
+func TestPromptCommitmentsHonorAdjectivalInactiveRequest(t *testing.T) {
+	commitments := extractExplicitPromptCommitments("Create an inactive research team")
+	if commitments.Activation != ActivationCommitmentInactive {
+		t.Fatalf("activation commitment = %q", commitments.Activation)
+	}
+}
+
 func FuzzExplicitPromptCommitmentExtraction(f *testing.F) {
 	for _, seed := range []string{
 		liveReleaseNotesPrompt,

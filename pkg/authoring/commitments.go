@@ -77,7 +77,8 @@ func extractExplicitPromptCommitments(prompt string) PromptCommitments {
 			result.ObjectiveCounts = upsertObjectiveCommitment(result.ObjectiveCounts, ObjectiveCountCommitment{OwnerType: owner, Count: count})
 		}
 	}
-	if containsTokenPhrase(tokens, "do", "not", "activate") || containsTokenPhrase(tokens, "don", "t", "activate") ||
+	if containsTokenPhrase(tokens, "inactive") ||
+		containsTokenPhrase(tokens, "do", "not", "activate") || containsTokenPhrase(tokens, "don", "t", "activate") ||
 		containsTokenPhrase(tokens, "create", "inactive") || containsTokenPhrase(tokens, "start", "inactive") ||
 		containsTokenPhrase(tokens, "keep", "inactive") || containsTokenPhrase(tokens, "keep", "it", "inactive") ||
 		containsTokenPhrase(tokens, "remain", "inactive") || containsTokenPhrase(tokens, "leave", "inactive") ||
