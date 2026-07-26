@@ -851,6 +851,27 @@ func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T)
 	}
 }
 
+func TestCompilerDerivesOpaqueCredentialQuestionProvenance(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, _ := json.Marshal(candidate)
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"slack-credential","category":"credential","prompt":"Which authorized Slack connection should be used?","whyNeeded":"Slack access requires a configured connection.","blocking":["apply"],"answer":{"kind":"credential_reference"},"priority":100}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Slack Agent."})
+	if err != nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("credential refinement result=%#v err=%v", result, err)
+	}
+	provenance := result.UnresolvedQuestions[0].Provenance
+	if len(provenance) != 1 || provenance[0].Kind != RefinementProvenanceCredential || provenance[0].Reference != "" {
+		t.Fatalf("derived opaque credential provenance=%#v", provenance)
+	}
+
+	invalid := bytes.Replace(payload, []byte(`"category":"credential"`), []byte(`"category":"other"`), 1)
+	strict, _ := NewCompiler(staticGenerator{payload: invalid})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."}); err == nil || !strings.Contains(err.Error(), "requires provenance") {
+		t.Fatalf("missing non-credential provenance must remain strict, got %v", err)
+	}
+}
+
 func TestCompilerDoesNotDiscardOptionsForOtherInvalidAnswerKinds(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	payload, _ := json.Marshal(GenerationResponse{

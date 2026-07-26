@@ -920,7 +920,10 @@ func validRefinementBlockingScope(scope RefinementBlockingScope) bool {
 
 // normalizeGeneratedRefinementProvenance accepts unambiguous provider aliases
 // only at the refinement provenance boundary. The shorthand forms "prompt"
-// and ["prompt", "catalog"] map to objects without reference or evidence. An
+// and ["prompt", "catalog"] map to objects without reference or evidence. A
+// credential question with the exact credential_reference answer contract may
+// omit provenance because its category already determines the only safe,
+// opaque provenance kind; no credential identity is inferred or exposed. An
 // object may use "type" instead of canonical "kind" only when it contains no
 // other fields beyond reference and evidence and names a known provenance
 // kind. Unknown or ambiguous shapes remain untouched so strict decoding and
@@ -948,6 +951,11 @@ func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 	for _, rawQuestion := range questions {
 		question, ok := rawQuestion.(map[string]interface{})
 		if !ok {
+			continue
+		}
+		if _, present := question["provenance"]; !present && generatedCredentialReferenceQuestion(question) {
+			question["provenance"] = []interface{}{map[string]interface{}{"kind": string(RefinementProvenanceCredential)}}
+			changed = true
 			continue
 		}
 		normalized, ok := normalizedRefinementProvenanceShorthand(question["provenance"])
@@ -978,6 +986,19 @@ func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 		return payload
 	}
 	return normalized
+}
+
+func generatedCredentialReferenceQuestion(question map[string]interface{}) bool {
+	category, ok := question["category"].(string)
+	if !ok || category != string(RefinementCategoryCredential) {
+		return false
+	}
+	answer, ok := question["answer"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	kind, ok := answer["kind"].(string)
+	return ok && kind == string(RefinementAnswerCredentialReference)
 }
 
 // normalizeRefinementProvenanceSourceAlias handles the exact live provider
