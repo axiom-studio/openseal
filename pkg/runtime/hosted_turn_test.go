@@ -455,9 +455,8 @@ func TestHostedTurnRunnerResolvesUniqueAgentDisplayNameToCanonicalID(t *testing.
 		len(host.request.EligibleAgents) != 2 || host.request.EligibleAgents[0].DisplayName != "Agent 74" {
 		t.Fatalf("request=%#v outcome=%#v", host.request, outcome)
 	}
-	projected, ok := host.request.InputContext["eligibleAgents"].([]HostedAgentTarget)
-	if !ok || len(projected) != 2 || projected[0].ID != "74" {
-		t.Fatalf("inputContext eligible Agents = %#v", host.request.InputContext["eligibleAgents"])
+	if _, duplicated := host.request.InputContext["eligibleAgents"]; duplicated {
+		t.Fatalf("eligible Agents were duplicated into inputContext: %#v", host.request.InputContext)
 	}
 	modelInput, err := MarshalHostedTurnModelInput(host.request)
 	if err != nil || !strings.Contains(string(modelInput), `"eligibleAgents":[{"id":"74","displayName":"Agent 74"`) {

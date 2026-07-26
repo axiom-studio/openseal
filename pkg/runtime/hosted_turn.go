@@ -493,15 +493,6 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		return HostedTurnRequest{}, err
 	}
 	inputContext := cloneMap(input.Run.Context)
-	if len(r.config.EligibleAgents) > 0 {
-		if inputContext == nil {
-			inputContext = make(map[string]interface{})
-		}
-		// Keep the portable typed field authoritative while also projecting it
-		// into inputContext for hosts whose system contract already discovers
-		// delegation targets there.
-		inputContext["eligibleAgents"] = cloneHostedAgentTargets(r.config.EligibleAgents)
-	}
 	request := HostedTurnRequest{
 		APIVersion: HostedTurnAPIVersion, InvocationID: input.Turn.ID,
 		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID,
