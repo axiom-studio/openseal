@@ -2709,10 +2709,15 @@ type OpenAICompatibleWorkforceGeneratorOptions = authoring.OpenAICompatibleGener
 
 type OpenAICompatibleWorkforceThinkingMode = authoring.OpenAICompatibleThinkingMode
 
+type OpenAICompatibleWorkforceStructuredOutputMode = authoring.OpenAICompatibleStructuredOutputMode
+
 const (
 	OpenAICompatibleWorkforceThinkingDefault  = authoring.OpenAICompatibleThinkingDefault
 	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
 	OpenAICompatibleWorkforceThinkingDisabled = authoring.OpenAICompatibleThinkingDisabled
+
+	OpenAICompatibleWorkforceStructuredOutputDefault    = authoring.OpenAICompatibleStructuredOutputDefault
+	OpenAICompatibleWorkforceStructuredOutputJSONSchema = authoring.OpenAICompatibleStructuredOutputJSONSchema
 )
 
 // NewOpenAICompatibleWorkforceGeneratorWithOptions creates the portable

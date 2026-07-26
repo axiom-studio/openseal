@@ -51,11 +51,23 @@ const (
 	OpenAICompatibleThinkingDisabled OpenAICompatibleThinkingMode = "disabled"
 )
 
+// OpenAICompatibleStructuredOutputMode selects a provider-negotiated response
+// format. Generic OpenAI-compatible endpoints remain on JSON mode unless the
+// embedding host has explicit evidence that the selected provider and model
+// support strict JSON Schema responses.
+type OpenAICompatibleStructuredOutputMode string
+
+const (
+	OpenAICompatibleStructuredOutputDefault    OpenAICompatibleStructuredOutputMode = ""
+	OpenAICompatibleStructuredOutputJSONSchema OpenAICompatibleStructuredOutputMode = "json_schema"
+)
+
 // OpenAICompatibleGeneratorOptions contains optional, provider-negotiated
 // transport behavior. Callers must only select a non-default mode after
 // identifying a model family that documents support for it.
 type OpenAICompatibleGeneratorOptions struct {
-	ThinkingMode OpenAICompatibleThinkingMode
+	ThinkingMode         OpenAICompatibleThinkingMode
+	StructuredOutputMode OpenAICompatibleStructuredOutputMode
 }
 
 // ProviderRefusalError reports an explicit provider refusal separately from a
@@ -104,6 +116,11 @@ func NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model string, htt
 	case OpenAICompatibleThinkingDefault, OpenAICompatibleThinkingEnabled, OpenAICompatibleThinkingDisabled:
 	default:
 		return nil, fmt.Errorf("unsupported OpenAI-compatible thinking mode %q", options.ThinkingMode)
+	}
+	switch options.StructuredOutputMode {
+	case OpenAICompatibleStructuredOutputDefault, OpenAICompatibleStructuredOutputJSONSchema:
+	default:
+		return nil, fmt.Errorf("unsupported OpenAI-compatible structured output mode %q", options.StructuredOutputMode)
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 90 * time.Second}
@@ -197,10 +214,15 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 }
 
 func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey string, messages []map[string]string) ([]byte, error) {
+	responseFormat := interface{}(map[string]string{"type": "json_object"})
+	if g.options.StructuredOutputMode == OpenAICompatibleStructuredOutputJSONSchema {
+		messages = append([]map[string]string{{"role": "system", "content": strictAuthoringTransportPrompt}}, messages...)
+		responseFormat = strictAuthoringResponseFormat()
+	}
 	payload := map[string]interface{}{
 		"model":           g.model,
 		"messages":        messages,
-		"response_format": map[string]string{"type": "json_object"},
+		"response_format": responseFormat,
 		"temperature":     0,
 	}
 	if g.options.ThinkingMode != OpenAICompatibleThinkingDefault {
@@ -260,5 +282,100 @@ func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey 
 	if strings.TrimSpace(choice.Message.Content) == "" {
 		return nil, errors.New("authoring provider must return exactly one non-empty choice")
 	}
-	return []byte(strings.TrimSpace(choice.Message.Content)), nil
+	content := []byte(strings.TrimSpace(choice.Message.Content))
+	if g.options.StructuredOutputMode == OpenAICompatibleStructuredOutputJSONSchema {
+		return decodeStrictAuthoringTransport(content)
+	}
+	return content, nil
+}
+
+const strictAuthoringTransportPrompt = `TRANSPORT CONTRACT: Return the authoring response in the strict transport envelope selected by the provider request. candidateJson is the complete candidate JSON object encoded as a JSON string. unresolvedQuestionsJson is the complete unresolvedQuestions JSON array encoded as a JSON string. commitments and assumptions remain structured values. Use null for an unstated nullable commitment and [] for an empty list. Do not omit transport fields.`
+
+func strictAuthoringResponseFormat() map[string]interface{} {
+	nullableInteger := func() map[string]interface{} {
+		return map[string]interface{}{"anyOf": []interface{}{map[string]interface{}{"type": "integer"}, map[string]interface{}{"type": "null"}}}
+	}
+	nullableString := func(enum ...string) map[string]interface{} {
+		variants := []interface{}{map[string]interface{}{"type": "string"}, map[string]interface{}{"type": "null"}}
+		if len(enum) > 0 {
+			variants[0] = map[string]interface{}{"type": "string", "enum": enum}
+		}
+		return map[string]interface{}{"anyOf": variants}
+	}
+	objectiveCount := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"ownerType": map[string]interface{}{"type": "string", "enum": []string{"workforce", "agent", "team"}},
+			"ownerId":   nullableString(),
+			"count":     map[string]interface{}{"type": "integer"},
+		},
+		"required": []string{"ownerType", "ownerId", "count"},
+	}
+	approval := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"ownerType":         map[string]interface{}{"type": "string", "enum": []string{"workforce", "agent", "team"}},
+			"ownerId":           nullableString(),
+			"requireApprovalAt": map[string]interface{}{"type": "string", "enum": []string{"read", "write", "external", "production", "destructive"}},
+		},
+		"required": []string{"ownerType", "ownerId", "requireApprovalAt"},
+	}
+	commitments := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"agentCount":           nullableInteger(),
+			"teamCount":            nullableInteger(),
+			"objectiveCounts":      map[string]interface{}{"type": "array", "items": objectiveCount},
+			"activation":           nullableString(string(ActivationCommitmentInactive)),
+			"approvalRequirements": map[string]interface{}{"type": "array", "items": approval},
+		},
+		"required": []string{"agentCount", "teamCount", "objectiveCounts", "activation", "approvalRequirements"},
+	}
+	schema := map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"candidateJson":           map[string]interface{}{"type": "string"},
+			"commitments":             commitments,
+			"assumptions":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"unresolvedQuestionsJson": map[string]interface{}{"type": "string"},
+		},
+		"required": []string{"candidateJson", "commitments", "assumptions", "unresolvedQuestionsJson"},
+	}
+	return map[string]interface{}{
+		"type": "json_schema",
+		"json_schema": map[string]interface{}{
+			"name": "openseal_workforce_authoring_v1", "strict": true, "schema": schema,
+		},
+	}
+}
+
+func decodeStrictAuthoringTransport(content []byte) ([]byte, error) {
+	var envelope struct {
+		CandidateJSON           string            `json:"candidateJson"`
+		Commitments             PromptCommitments `json:"commitments"`
+		Assumptions             []string          `json:"assumptions"`
+		UnresolvedQuestionsJSON string            `json:"unresolvedQuestionsJson"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("decode strict authoring transport: %w", err)
+	}
+	candidate := json.RawMessage(strings.TrimSpace(envelope.CandidateJSON))
+	questions := json.RawMessage(strings.TrimSpace(envelope.UnresolvedQuestionsJSON))
+	if !json.Valid(candidate) || len(candidate) == 0 || candidate[0] != '{' {
+		return nil, errors.New("strict authoring transport candidateJson must contain one JSON object")
+	}
+	if !json.Valid(questions) || len(questions) == 0 || questions[0] != '[' {
+		return nil, errors.New("strict authoring transport unresolvedQuestionsJson must contain one JSON array")
+	}
+	return json.Marshal(struct {
+		Candidate           json.RawMessage   `json:"candidate"`
+		Commitments         PromptCommitments `json:"commitments"`
+		Assumptions         []string          `json:"assumptions,omitempty"`
+		UnresolvedQuestions json.RawMessage   `json:"unresolvedQuestions,omitempty"`
+	}{
+		Candidate: candidate, Commitments: envelope.Commitments,
+		Assumptions: envelope.Assumptions, UnresolvedQuestions: questions,
+	})
 }

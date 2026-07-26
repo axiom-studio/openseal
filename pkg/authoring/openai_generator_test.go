@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,103 @@ func TestOpenAICompatibleGeneratorEmitsExplicitThinkingMode(t *testing.T) {
 		ThinkingMode: "invented",
 	}); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("invalid thinking mode error = %v", err)
+	}
+	if _, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{
+		StructuredOutputMode: "invented",
+	}); err == nil || !strings.Contains(err.Error(), "structured output mode") {
+		t.Fatalf("invalid structured output mode error = %v", err)
+	}
+}
+
+func TestOpenAICompatibleGeneratorNegotiatesStrictSchemaTransport(t *testing.T) {
+	var observed map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&observed); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"candidateJson\":\"{\\\"agents\\\":[],\\\"assignments\\\":[]}\",\"commitments\":{\"agentCount\":null,\"teamCount\":null,\"objectiveCounts\":[],\"activation\":null,\"approvalRequirements\":[]},\"assumptions\":[\"Conservative defaults\"],\"unresolvedQuestionsJson\":\"[]\"}"}}]}`))
+	}))
+	defer server.Close()
+
+	generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{
+		StructuredOutputMode: OpenAICompatibleStructuredOutputJSONSchema,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	format, ok := observed["response_format"].(map[string]interface{})
+	if !ok || format["type"] != "json_schema" {
+		t.Fatalf("response format = %#v", observed["response_format"])
+	}
+	definition, ok := format["json_schema"].(map[string]interface{})
+	if !ok || definition["strict"] != true || definition["name"] != "openseal_workforce_authoring_v1" {
+		t.Fatalf("JSON schema definition = %#v", format["json_schema"])
+	}
+	schema, ok := definition["schema"].(map[string]interface{})
+	if !ok || schema["additionalProperties"] != false {
+		t.Fatalf("root schema = %#v", definition["schema"])
+	}
+	assertStrictAuthoringSchema(t, schema, "schema")
+	messages := observed["messages"].([]interface{})
+	if len(messages) != 3 || !strings.Contains(messages[0].(map[string]interface{})["content"].(string), "candidateJson") {
+		t.Fatalf("strict transport messages = %#v", messages)
+	}
+	var response GenerationResponse
+	if err := json.Unmarshal(payload, &response); err != nil || len(response.Assumptions) != 1 || response.Candidate.Agents == nil {
+		t.Fatalf("decoded payload = %s, response=%#v, err=%v", payload, response, err)
+	}
+}
+
+func assertStrictAuthoringSchema(t *testing.T, value interface{}, path string) {
+	t.Helper()
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if typed["type"] == "object" {
+			if typed["additionalProperties"] != false {
+				t.Fatalf("%s must set additionalProperties=false: %#v", path, typed)
+			}
+			properties, _ := typed["properties"].(map[string]interface{})
+			required := 0
+			switch values := typed["required"].(type) {
+			case []string:
+				required = len(values)
+			case []interface{}:
+				required = len(values)
+			}
+			if required != len(properties) {
+				t.Fatalf("%s must require every property: properties=%v required=%v", path, properties, typed["required"])
+			}
+		}
+		for key, child := range typed {
+			assertStrictAuthoringSchema(t, child, path+"."+key)
+		}
+	case []interface{}:
+		for index, child := range typed {
+			assertStrictAuthoringSchema(t, child, fmt.Sprintf("%s[%d]", path, index))
+		}
+	}
+}
+
+func TestOpenAICompatibleStrictTransportRejectsInvalidEmbeddedDocument(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"candidateJson\":\"[]\",\"commitments\":{},\"assumptions\":[],\"unresolvedQuestionsJson\":\"[]\"}"}}]}`))
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{
+		StructuredOutputMode: OpenAICompatibleStructuredOutputJSONSchema,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"}); err == nil ||
+		!strings.Contains(err.Error(), "candidateJson must contain one JSON object") {
+		t.Fatalf("invalid embedded candidate error = %v", err)
 	}
 }
 
