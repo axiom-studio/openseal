@@ -198,11 +198,16 @@ type CapabilitySourcePolicyProposal struct {
 // derives this fact from deterministic intent matching; the provider cannot
 // omit it or turn an empty monitoring plan into a ready ChangeSet.
 type CapabilitySourceScopeRequirement struct {
-	Prompt                   string   `json:"prompt"`
-	WhyNeeded                string   `json:"whyNeeded"`
-	Minimum                  int      `json:"minimum"`
-	Maximum                  int      `json:"maximum"`
-	Priority                 int      `json:"priority"`
+	Prompt    string `json:"prompt"`
+	WhyNeeded string `json:"whyNeeded"`
+	Minimum   int    `json:"minimum"`
+	Maximum   int    `json:"maximum"`
+	Priority  int    `json:"priority"`
+	// Targets are exact, non-secret source boundaries deterministically
+	// extracted by the trusted host from the user's prompt. Their presence
+	// satisfies the guided question and lets the compiler materialize the same
+	// audited values into a durable capability invocation.
+	Targets                  []string `json:"targets,omitempty"`
 	MaterializationInputKeys []string `json:"materializationInputKeys,omitempty"`
 }
 

@@ -15,20 +15,26 @@ import (
 // may propose the surrounding Objective, but it is never trusted to reproduce
 // an audited answer in capability inputs.
 func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, request GenerateRequest) []ValidationIssue {
-	if candidate == nil || request.Refinement == nil {
+	if candidate == nil {
 		return nil
 	}
 	if request.Mode == ModeAmend && request.Existing != nil {
 		preserveRefinementObjectives(candidate, request.Existing)
 	}
-	answered := make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
-	for _, answer := range request.Refinement.Answers {
-		answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
+	answered := make(map[string]RefinementProviderAnswerValue)
+	if request.Refinement != nil {
+		answered = make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
+		for _, answer := range request.Refinement.Answers {
+			answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
+		}
 	}
 	issues := make([]ValidationIssue, 0)
 	for _, need := range request.Catalog.CapabilityNeeds {
 		requirement := need.SourceScope
 		answer, exists := answered[CapabilitySourceScopeQuestionID(need.ID)]
+		if !exists && requirement != nil && len(requirement.Targets) > 0 {
+			answer, exists = RefinementProviderAnswerValue{Items: requirement.Targets}, true
+		}
 		if requirement == nil || len(requirement.MaterializationInputKeys) == 0 || !exists {
 			continue
 		}

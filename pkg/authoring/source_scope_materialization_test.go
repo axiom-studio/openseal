@@ -97,6 +97,39 @@ func TestCompilerMaterializesAnsweredSourceScopeAndPreservesDroppedObjective(t *
 	}
 }
 
+func TestCompilerMaterializesHostExtractedSourceScopeWithoutAskingAgain(t *testing.T) {
+	catalog := sourceScopeCatalog()
+	catalog.CapabilityNeeds[0].SourceScope.Targets = []string{"r/vibecoding"}
+	existing := WorkforceCandidate{Agents: []*agent.AgentDefinition{
+		sourceScopeAgent("1.0.0", sourceScopeCadenceObjective("monitor", map[string]interface{}{"limit": float64(1)})),
+	}}
+	generated := GenerationResponse{Candidate: WorkforceCandidate{Agents: []*agent.AgentDefinition{
+		sourceScopeAgent("1.1.0"),
+	}}}
+	payload, err := json.Marshal(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeAmend, Prompt: "Monitor r/vibecoding", Existing: &existing, Catalog: catalog,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.UnresolvedQuestions) != 0 {
+		t.Fatalf("host-extracted scope remained unresolved: valid=%v questions=%#v validation=%#v", result.Valid, result.UnresolvedQuestions, result.Validation)
+	}
+	invocations := candidateObjectiveCapabilityInvocations(&result.Candidate)
+	if len(invocations) != 1 {
+		t.Fatalf("materialized invocations = %#v candidate=%#v", invocations, result.Candidate)
+	}
+	inputs := invocations[0].invocation["inputs"].(map[string]interface{})
+	if inputs["subreddit"] != "r/vibecoding" {
+		t.Fatalf("materialized prompt scope = %#v", inputs)
+	}
+}
+
 func TestCompilerMaterializesAnsweredSourceScopeIntoEventRule(t *testing.T) {
 	objective := workforce.ObjectiveTemplate{
 		ID: "monitor-events", Title: "Monitor events", Goal: "Search after a permitted wake", Priority: 1,
