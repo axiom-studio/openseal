@@ -63,14 +63,15 @@ type DiscoveryCredential struct {
 // a Skill-owned provider adapter. Executable entrypoints and opaque connection
 // references are intentionally absent.
 type DiscoveryConversationAdapter struct {
-	ID                string                           `json:"id"`
-	ProtocolVersion   string                           `json:"protocolVersion"`
-	Provider          string                           `json:"provider"`
-	EndpointModes     []ConversationEndpointMode       `json:"endpointModes"`
-	InboundEventTypes []string                         `json:"inboundEventTypes"`
-	Features          []ConversationAdapterFeature     `json:"features,omitempty"`
-	Delivery          ConversationDeliveryCapabilities `json:"delivery"`
-	Credentials       []DiscoveryCredential            `json:"credentials,omitempty"`
+	ID                           string                           `json:"id"`
+	ProtocolVersion              string                           `json:"protocolVersion"`
+	Provider                     string                           `json:"provider"`
+	EndpointModes                []ConversationEndpointMode       `json:"endpointModes"`
+	InboundEventTypes            []string                         `json:"inboundEventTypes"`
+	Features                     []ConversationAdapterFeature     `json:"features,omitempty"`
+	DiscoverableDestinationModes []ConversationEndpointMode       `json:"discoverableDestinationModes,omitempty"`
+	Delivery                     ConversationDeliveryCapabilities `json:"delivery"`
+	Credentials                  []DiscoveryCredential            `json:"credentials,omitempty"`
 }
 
 // DiscoveryCompatibility is host-supplied evidence. Consumers may rank this
@@ -244,6 +245,10 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 			adapter.ProtocolVersion, adapter.Provider, adapter.EndpointModes = normalized.ProtocolVersion, normalized.Provider, normalized.EndpointModes
 			adapter.InboundEventTypes, adapter.Features = normalized.InboundEventTypes, normalized.Features
 			adapter.Delivery = normalized.Delivery
+			adapter.DiscoverableDestinationModes, err = normalizeDiscoveryDestinationModes(adapter.DiscoverableDestinationModes, adapter.EndpointModes)
+			if err != nil {
+				return nil, fmt.Errorf("discovery candidate %d conversation adapter %d destination discovery is invalid: %w", index, adapterIndex, err)
+			}
 			credentialNames := make(map[string]struct{}, len(adapter.Credentials))
 			for credentialIndex := range adapter.Credentials {
 				credential := &adapter.Credentials[credentialIndex]
@@ -288,6 +293,27 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 		left, right := result.Items[i], result.Items[j]
 		return left.ID+"\x00"+left.Version+"\x00"+left.SourceIdentity < right.ID+"\x00"+right.Version+"\x00"+right.SourceIdentity
 	})
+	return result, nil
+}
+
+func normalizeDiscoveryDestinationModes(values, endpointModes []ConversationEndpointMode) ([]ConversationEndpointMode, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	allowed := make(map[ConversationEndpointMode]bool, len(endpointModes))
+	for _, mode := range endpointModes {
+		allowed[mode] = true
+	}
+	seen := make(map[ConversationEndpointMode]bool, len(values))
+	result := make([]ConversationEndpointMode, 0, len(values))
+	for _, mode := range values {
+		if !allowed[mode] || seen[mode] {
+			return nil, errors.New("discoverable destination mode is not an adapter endpoint mode")
+		}
+		seen[mode] = true
+		result = append(result, mode)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result, nil
 }
 

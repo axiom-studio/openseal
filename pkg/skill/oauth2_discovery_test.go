@@ -27,9 +27,10 @@ func TestDiscoveryProjectsConversationAdapterGuaranteesWithoutEntrypointsOrConne
 		ID: "slack", Version: "1.0.0", Name: "Slack", Readiness: DiscoveryReadinessBindable,
 		ConversationAdapters: []DiscoveryConversationAdapter{{
 			ID: "conversations", ProtocolVersion: ConversationAdapterProtocolV1, Provider: "slack",
-			EndpointModes:     []ConversationEndpointMode{ConversationEndpointDirect, ConversationEndpointChannel},
-			InboundEventTypes: []string{ConversationEventReactionAdded, ConversationEventMessageReceived},
-			Features:          []ConversationAdapterFeature{ConversationFeatureThreads, ConversationFeatureMentions},
+			EndpointModes:                []ConversationEndpointMode{ConversationEndpointDirect, ConversationEndpointChannel},
+			DiscoverableDestinationModes: []ConversationEndpointMode{ConversationEndpointChannel},
+			InboundEventTypes:            []string{ConversationEventReactionAdded, ConversationEventMessageReceived},
+			Features:                     []ConversationAdapterFeature{ConversationFeatureThreads, ConversationFeatureMentions},
 			Delivery: ConversationDeliveryCapabilities{
 				Operations: []ConversationDeliveryOperation{ConversationDeliveryMessageUpdate, ConversationDeliveryMessageSend},
 				Ordering:   ConversationDeliveryOrderThread, Idempotency: IdempotencyRequired,
@@ -50,7 +51,7 @@ func TestDiscoveryProjectsConversationAdapterGuaranteesWithoutEntrypointsOrConne
 	adapter := page.Items[0].ConversationAdapters[0]
 	if adapter.ProtocolVersion != ConversationAdapterProtocolV1 || adapter.Provider != "slack" ||
 		len(adapter.Delivery.Operations) != 2 || adapter.Delivery.Operations[0] != ConversationDeliveryMessageSend ||
-		adapter.Credentials[0].OAuth2.Scopes[0] != "channels:history" {
+		adapter.Credentials[0].OAuth2.Scopes[0] != "channels:history" || len(adapter.DiscoverableDestinationModes) != 1 || adapter.DiscoverableDestinationModes[0] != ConversationEndpointChannel {
 		t.Fatalf("normalized discovery adapter = %#v", adapter)
 	}
 }
