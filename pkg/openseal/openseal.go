@@ -856,6 +856,7 @@ type (
 	KernelCapabilityBlockingRequirement   = kernelapi.CapabilityBlockingRequirement
 	ConversationGatewayAdapterChoice      = kernelapi.ConversationGatewayAdapterChoice
 	CredentialBindingChoice               = capability.CredentialBindingChoice
+	CredentialExternalIdentity            = capability.CredentialExternalIdentity
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	KernelSkillActionList                 = kernelapi.SkillActionList
 	KernelSkillBindingList                = kernelapi.SkillBindingList
