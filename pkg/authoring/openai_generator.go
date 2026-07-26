@@ -149,6 +149,9 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 	compact.AgentCredentialRequirements = nil
 	compact.AvailableCredentialGrants = nil
 	for id, skill := range compact.Skills {
+		// Exact installed authority is server-owned placement input. The model
+		// sees the catalog id and declared contract, never this binding choice.
+		skill.RuntimeIdentity = nil
 		constraints := make([]SkillCompatibility, 0, len(skill.Compatibility))
 		for _, compatibility := range skill.Compatibility {
 			if compatibility.Compatible {

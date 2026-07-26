@@ -827,6 +827,15 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		if len(strings.TrimSpace(skill.SourceIdentity)) > 1024 {
 			return fmt.Errorf("Skill %s source identity is too long", id)
 		}
+		if skill.RuntimeIdentity != nil {
+			identity := skill.RuntimeIdentity.Normalized()
+			if !identity.Valid() || identity != *skill.RuntimeIdentity {
+				return fmt.Errorf("Skill %s runtime identity is invalid or non-canonical", id)
+			}
+			if source := strings.TrimSpace(skill.SourceIdentity); source != "" && identity.SourceIdentity != source {
+				return fmt.Errorf("Skill %s runtime identity conflicts with its source identity", id)
+			}
+		}
 		switch skill.Readiness {
 		case "", SkillReadinessReady, SkillReadinessNeedsBinding, SkillReadinessNeedsInstallation, SkillReadinessUnavailable:
 		default:

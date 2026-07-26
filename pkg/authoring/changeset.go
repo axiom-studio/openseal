@@ -476,6 +476,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	}
 	canonicalizeCandidateScope(&result.Candidate, request.Scope)
 	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
+	seedExactCatalogSkillPlacement(&result.Candidate, request.Catalog, &request.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
 	result.Validation = validateCandidate(&result.Candidate, existing)
 	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, compileRequest)...)
@@ -766,6 +767,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	existing := changeSet.Generation.Request.Existing
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
+	seedExactCatalogSkillPlacement(&result.Candidate, changeSet.Catalog, &changeSet.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
 	result.Validation = validateCandidate(&result.Candidate, existing)
 	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, changeSet.Generation.Request)...)
@@ -1682,6 +1684,100 @@ func validateApplyPlacement(value *ChangeSet) error {
 
 func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
 	return ownerType + ":" + definitionID + ":" + templateID
+}
+
+// seedExactCatalogSkillPlacement atomically records immutable authority for
+// installed Skills selected by the compiled candidate. The provider chooses a
+// catalog capability; it never chooses registry provenance or a runtime
+// definition. Only ready or binding-required capabilities are already
+// installed, so acquisition-required and unavailable entries remain explicit
+// unresolved work.
+func seedExactCatalogSkillPlacement(candidate *WorkforceCandidate, catalog CapabilityCatalog, placement *ChangeSetPlacement) {
+	if candidate == nil || placement == nil {
+		return
+	}
+	selected := map[string]map[string]bool{}
+	selectSkill := func(ownerID, catalogID string) {
+		ownerID, catalogID = strings.TrimSpace(ownerID), strings.TrimSpace(catalogID)
+		if ownerID == "" || catalogID == "" {
+			return
+		}
+		if selected[ownerID] == nil {
+			selected[ownerID] = map[string]bool{}
+		}
+		selected[ownerID][catalogID] = true
+	}
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		for _, requirement := range definition.SkillRequirements {
+			selectSkill(definition.ID, requirement.SkillID)
+		}
+	}
+	for _, endpoint := range candidate.ConversationEndpoints {
+		selectSkill(endpoint.Owner.ID, endpoint.SkillID)
+	}
+
+	for ownerID, skillIDs := range selected {
+		for catalogID := range skillIDs {
+			skillCapability, exists := catalog.Skills[catalogID]
+			if !exists || skillCapability.Readiness != SkillReadinessReady && skillCapability.Readiness != SkillReadinessNeedsBinding {
+				continue
+			}
+			identity := capability.NewSkillIdentity(skillCapability.ID, skillCapability.Version, skillCapability.SourceIdentity)
+			if skillCapability.RuntimeIdentity != nil {
+				identity = skillCapability.RuntimeIdentity.Normalized()
+			}
+			if !identity.Valid() {
+				continue
+			}
+
+			if identity.SourceIdentity != "" {
+				if placement.SkillSourceIdentities == nil {
+					placement.SkillSourceIdentities = map[string]map[string]string{}
+				}
+				if placement.SkillSourceIdentities[ownerID] == nil {
+					placement.SkillSourceIdentities[ownerID] = map[string]string{}
+				}
+				selectedSource := strings.TrimSpace(placement.SkillSourceIdentities[ownerID][catalogID])
+				if selectedSource == "" {
+					placement.SkillSourceIdentities[ownerID][catalogID] = identity.SourceIdentity
+					selectedSource = identity.SourceIdentity
+				}
+				// Preserve every explicit reviewed choice. Conflicting partial
+				// placement remains visible to validation instead of being repaired
+				// silently by this deterministic defaulting pass.
+				if selectedSource != identity.SourceIdentity {
+					continue
+				}
+				if placement.SkillSourceVersions == nil {
+					placement.SkillSourceVersions = map[string]map[string]string{}
+				}
+				if placement.SkillSourceVersions[ownerID] == nil {
+					placement.SkillSourceVersions[ownerID] = map[string]string{}
+				}
+				selectedVersion := strings.TrimSpace(placement.SkillSourceVersions[ownerID][catalogID])
+				if selectedVersion == "" {
+					placement.SkillSourceVersions[ownerID][catalogID] = identity.Version
+					selectedVersion = identity.Version
+				}
+				if selectedVersion != identity.Version {
+					continue
+				}
+			}
+
+			if placement.SkillRuntimeIdentities == nil {
+				placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{}
+			}
+			if placement.SkillRuntimeIdentities[ownerID] == nil {
+				placement.SkillRuntimeIdentities[ownerID] = map[string]capability.SkillIdentity{}
+			}
+			if _, configured := placement.SkillRuntimeIdentities[ownerID][catalogID]; !configured {
+				placement.SkillRuntimeIdentities[ownerID][catalogID] = identity
+			}
+		}
+	}
 }
 
 // placementAwareMissingRequirements keeps installation and semantic gaps from
