@@ -147,7 +147,7 @@ func externalConversationDeliveryFixture(
 	adapter.Transport.IngressEndpoint = provider + ".conversation.ingress"
 	adapter.Transport.DeliveryEndpoint = provider + ".conversation.deliver"
 	if provider == "webchat" {
-		adapter.Credentials = []skill.CredentialRequirement{}
+		adapter.Credentials = nil
 		adapter.Transport.DeliveryCredentials = nil
 	}
 	definition.ConversationAdapters["conversations"] = adapter

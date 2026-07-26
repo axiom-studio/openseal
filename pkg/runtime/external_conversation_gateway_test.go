@@ -3,9 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -111,5 +114,123 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 		ExpectedRevision: created.Revision, Status: &retired,
 	}); err != nil || result.Status != ExternalConversationGatewayRetired {
 		t.Fatalf("stale gateway safety shutdown = %#v, %v", result, err)
+	}
+}
+
+func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-conversation.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := skill.NewCatalogWithStore(store)
+	adapter, err := capability.NormalizeConversationAdapter(capability.ConversationAdapter{
+		ProtocolVersion: capability.ConversationAdapterProtocolV1,
+		Name:            "Synthetic conversations", Description: "Receive and deliver synthetic conversations.", Provider: "synthetic",
+		EndpointModes:     []capability.ConversationEndpointMode{capability.ConversationEndpointChannel},
+		InboundEventTypes: []string{capability.ConversationEventMessageReceived},
+		Delivery: capability.ConversationDeliveryCapabilities{
+			Operations: []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend},
+			Ordering:   capability.ConversationDeliveryOrderConversation, Idempotency: capability.IdempotencyRequired,
+		},
+		Transport: capability.ConversationAdapterTransport{
+			Kind: "plugin", IngressEndpoint: "synthetic.conversation.ingress", DeliveryEndpoint: "synthetic.conversation.deliver",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := &skill.Definition{
+		ID: "synthetic-conversations", Version: "1.0.0", Name: "Synthetic conversations",
+		ConversationAdapters: map[string]skill.ConversationAdapter{"conversations": adapter},
+	}
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: "tenant", ID: "synthetic"}
+	binding := &skill.Binding{
+		ID: "synthetic", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "synthetic-agent",
+		SkillID: definition.ID, SkillVersion: definition.Version,
+		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{
+		ID: "synthetic-endpoint", Scope: scope,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "synthetic-agent"}, DeploymentID: "synthetic-agent",
+		Name: "Synthetic channel",
+		Adapter: ExternalConversationAdapterReference{
+			SkillID: definition.ID, SkillVersion: definition.Version,
+			BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
+		},
+		Mode: capability.ConversationEndpointChannel, Address: "channel-1",
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "synthetic-agent"},
+		Policy: ExternalConversationPolicy{
+			MessageSelection: ExternalConversationSelectAllMessages,
+			ReplyMode:        ExternalConversationReplyChannel,
+		},
+		Status: ExternalConversationEndpointActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRevision := endpoint.Revision
+	endpoint.InstallationID, endpoint.ApplicationID = "installation-1", "application-1"
+	endpoint.Revision++
+	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "synthetic-gateway", Name: "Synthetic gateway",
+		Gateway: ExternalConversationIngressGateway{
+			Scope: scope, DeploymentID: "synthetic-agent", Provider: "synthetic",
+			Adapter: ExternalConversationAdapterReference{
+				SkillID: definition.ID, SkillVersion: definition.Version,
+				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
+			},
+		},
+		Status: ExternalConversationGatewayActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restartedCatalog := skill.NewCatalogWithStore(reopened)
+	resolved, err := restartedCatalog.ResolveConversationAdapter(
+		ctx, binding.Scope, binding.DeploymentID, definition.ID, definition.Version, "conversations",
+		skill.BindingReference{ID: binding.ID, Revision: binding.Revision},
+	)
+	if err != nil || resolved == nil || resolved.Adapter.Features != nil || resolved.Adapter.Credentials != nil {
+		t.Fatalf("restarted adapter = %#v, %v", resolved, err)
+	}
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
+		StatusCode: http.StatusOK,
+		Events: []ExternalConversationGatewayEvent{{
+			InstallationID: "installation-1", ApplicationID: "application-1", Address: "channel-1",
+			Event: NormalizedExternalConversationEvent{
+				ID: "event-1", Type: capability.ConversationEventMessageReceived,
+				ExternalConversationID: "channel-1", ExternalMessageID: "message-1",
+				ExternalParticipantID: "participant-1", Text: "hello after restart",
+				OrderingKey: "channel-1:message-1", OccurredAt: time.Now().UTC(),
+			},
+		}},
+	}}
+	result, err := NewExternalConversationTransportService(reopened, restartedCatalog).
+		NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+			Route: gateway.IngressRoute, Method: http.MethodPost, Body: []byte(`{"message":"hello"}`),
+		}, host)
+	if err != nil || len(result.Received) != 1 || !result.Received[0].Accepted || result.Received[0].Item.EndpointID != endpoint.ID {
+		t.Fatalf("restarted gateway ingress = %#v, %v", result, err)
 	}
 }

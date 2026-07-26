@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -36,6 +37,42 @@ func TestNormalizeConversationAdapterProducesStableProviderNeutralContract(t *te
 		!reflect.DeepEqual(adapter.InboundEventTypes, []string{ConversationEventMessageReceived, ConversationEventReactionAdded}) ||
 		!reflect.DeepEqual(adapter.Credentials[0].OAuth2.Scopes, []string{"channels:history", "chat:write"}) {
 		t.Fatalf("normalized adapter = %#v", adapter)
+	}
+}
+
+func TestNormalizeConversationAdapterIsStableAcrossJSONStorageWithoutOptionalFields(t *testing.T) {
+	normalized, err := NormalizeConversationAdapter(ConversationAdapter{
+		ProtocolVersion: ConversationAdapterProtocolV1,
+		Name:            "Synthetic conversations", Description: "Receive and deliver synthetic conversations.", Provider: "synthetic",
+		EndpointModes:     []ConversationEndpointMode{ConversationEndpointChannel},
+		InboundEventTypes: []string{ConversationEventMessageReceived},
+		Features:          []ConversationAdapterFeature{},
+		Credentials:       []CredentialRequirement{},
+		Delivery: ConversationDeliveryCapabilities{
+			Operations: []ConversationDeliveryOperation{ConversationDeliveryMessageSend},
+			Ordering:   ConversationDeliveryOrderConversation, Idempotency: IdempotencyRequired,
+		},
+		Transport: ConversationAdapterTransport{
+			Kind: "plugin", IngressEndpoint: "synthetic.conversation.ingress", DeliveryEndpoint: "synthetic.conversation.deliver",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Features != nil || normalized.Credentials != nil {
+		t.Fatalf("optional fields are not canonical: %#v", normalized)
+	}
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored ConversationAdapter
+	if err := json.Unmarshal(payload, &restored); err != nil {
+		t.Fatal(err)
+	}
+	restored, err = NormalizeConversationAdapter(restored)
+	if err != nil || !reflect.DeepEqual(restored, normalized) {
+		t.Fatalf("JSON round trip changed canonical adapter: %#v, %v", restored, err)
 	}
 }
 
