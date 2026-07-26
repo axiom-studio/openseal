@@ -951,6 +951,9 @@ func validateHostingRequirements(requirements Requirements) error {
 			return fmt.Errorf("storage mount path %q is invalid or duplicated", storage.MountPath)
 		}
 		seenMounts[storage.MountPath] = true
+		if storage.WritableGroup != nil && *storage.WritableGroup <= 0 {
+			return fmt.Errorf("storage %s writable group must be positive", storage.Name)
+		}
 		if storage.MinimumCapacity != "" && !hostingMemoryPattern.MatchString(storage.MinimumCapacity) {
 			return fmt.Errorf("storage %s minimum capacity %q is invalid", storage.Name, storage.MinimumCapacity)
 		}

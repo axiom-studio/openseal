@@ -341,7 +341,7 @@ func TestDefinitionValidatesPortableHostingRequirements(t *testing.T) {
 	definition.Requirements = Requirements{
 		Storage: []StorageRequirement{{
 			Name: "browser-profile", MountPath: "/var/lib/browser", Durability: StorageDurabilityPersistent,
-			MinimumCapacity: "1Gi", Retention: StorageRetentionRetain,
+			MinimumCapacity: "1Gi", Retention: StorageRetentionRetain, WritableGroup: testInt64Pointer(1001),
 		}},
 		Compute: &ComputeRequirements{
 			Requests: ComputeResources{CPU: "100m", Memory: "256Mi"},
@@ -371,6 +371,7 @@ func TestDefinitionRejectsUnsafeHostingRequirements(t *testing.T) {
 		"persistent without capacity":  {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityPersistent, Retention: StorageRetentionRetain}}},
 		"persistent without retention": {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityPersistent, MinimumCapacity: "1Gi"}}},
 		"retained ephemeral":           {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityEphemeral, Retention: StorageRetentionRetain}}},
+		"invalid writable group":       {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityEphemeral, WritableGroup: testInt64Pointer(0)}}},
 		"invalid compute":              {Compute: &ComputeRequirements{Limits: ComputeResources{Memory: "one-gigabyte"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -382,6 +383,8 @@ func TestDefinitionRejectsUnsafeHostingRequirements(t *testing.T) {
 		})
 	}
 }
+
+func testInt64Pointer(value int64) *int64 { return &value }
 
 func TestModelActionsHideKernelResolvedArgumentsWhileExecutionSchemaStaysStrict(t *testing.T) {
 	ctx := context.Background()

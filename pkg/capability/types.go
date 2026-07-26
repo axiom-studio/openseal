@@ -278,6 +278,10 @@ type StorageRequirement struct {
 	Durability      StorageDurability `json:"durability"`
 	MinimumCapacity string            `json:"minimumCapacity,omitempty"`
 	Retention       StorageRetention  `json:"retention,omitempty"`
+	// WritableGroup is the numeric group that must be able to write the
+	// mounted storage. Hosts may satisfy this with a container group, a volume
+	// ownership policy, or another equivalent mechanism.
+	WritableGroup *int64 `json:"writableGroup,omitempty"`
 }
 
 // ComputeRequirements communicate minimum scheduling intent without exposing
