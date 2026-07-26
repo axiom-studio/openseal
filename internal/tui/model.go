@@ -101,6 +101,7 @@ const (
 	sectionSources
 	sectionInitiatives
 	sectionOutreach
+	sectionIntegrations
 	sectionSkills
 	sectionRuns
 	sectionRequests
@@ -127,6 +128,10 @@ const (
 	modeInitiativeCreate
 	modeInitiativeEdit
 	modeOutreachCreate
+	modeIntegrationCreate
+	modeIntegrationActivate
+	modeIntegrationPause
+	modeIntegrationRetire
 	modeSkillInstall
 	modeSkillPin
 	modeSkillRemove
@@ -164,173 +169,179 @@ const (
 )
 
 type Model struct {
-	ctx                         context.Context
-	client                      client.KernelClient
-	agentCapabilityClient       client.AgentDefinitionCapabilityClient
-	agentLifecycleClient        client.AgentDefinitionLifecycleClient
-	conversationClient          client.ConversationClient
-	clawHubClient               client.ClawHubClient
-	skillBindingClient          client.SkillBindingClient
-	sourcePolicyClient          client.SourcePolicyLifecycleClient
-	workforceSkillSearchClient  client.WorkforceSkillSearchClient
-	config                      Config
-	editor                      textarea.Model
-	focus                       focusArea
-	section                     panelSection
-	mode                        editorMode
-	width                       int
-	height                      int
-	loading                     bool
-	busy                        bool
-	ready                       bool
-	unavailable                 string
-	err                         error
-	status                      string
-	runCapability               kernelapi.Capability
-	agentTurnCapability         kernelapi.Capability
-	actionCallCapability        kernelapi.Capability
-	requestCapability           kernelapi.Capability
-	approvalCapability          kernelapi.Capability
-	objectiveCapability         kernelapi.Capability
-	objectiveScheduleCapability kernelapi.Capability
-	eventSourceCapability       kernelapi.Capability
-	initiativeCapability        kernelapi.Capability
-	outreachCapability          kernelapi.Capability
-	sourceMonitorCapability     kernelapi.Capability
-	activityCapability          kernelapi.Capability
-	clawHubCapability           kernelapi.Capability
-	skillActionCapability       kernelapi.Capability
-	skillBindingCapability      kernelapi.Capability
-	artifactCapability          kernelapi.Capability
-	channelCapability           kernelapi.Capability
-	authoringCapability         kernelapi.Capability
-	agentDefinitionCapability   kernelapi.Capability
-	teamDefinitionCapability    kernelapi.Capability
-	sourcePolicyCapability      kernelapi.Capability
-	authoringResult             *authoring.CompileResult
-	authoringChangeSet          *authoring.ChangeSet
-	authoringAmendment          bool
-	authoringApprovalSelected   int
-	authoringCredentialSelected int
-	authoringCredentialChoices  map[string]int
-	authoringConfigSelected     int
-	authoringConfigChoices      map[string]int
-	authoringRoutingSelected    int
-	authoringAutomationSelected int
-	authoringAutomationFocus    *authoringAutomationFocus
-	activeRunbookSelected       int
-	runs                        []*runtime.AgentRun
-	agentTurns                  []*kernelapi.AgentTurnRecord
-	agentTurnsRunID             string
-	agentTurnsErr               error
-	loadingAgentTurns           bool
-	actionCalls                 []*runtime.ActionCall
-	actionCallsRunID            string
-	actionCallsErr              error
-	loadingActionCalls          bool
-	evidenceExpanded            bool
-	evidenceObservationSelected int
-	groundingExpanded           bool
-	groundingPageSelected       int
-	agentRequests               []*runtime.AgentRequest
-	agentRequestSelected        int
-	selectedAgentRequest        string
-	actionApprovals             []*runtime.ApprovalCheckpoint
-	actionApprovalSelected      int
-	selectedActionApproval      string
-	activity                    []runtime.ActivityProjection
-	activitySelected            int
-	selectedActivity            string
-	activityExpanded            bool
-	activityNextCursor          string
-	activityHasMore             bool
-	compilations                []*kernelagent.DefinitionCompilation
-	agentDeployment             *kernelapi.AgentDeploymentCatalogEntry
-	agentAmendments             []*kernelagent.DefinitionAmendment
-	agentAmendmentSelected      int
-	selectedAgentAmendment      string
-	teamDeployments             []kernelapi.TeamDeploymentCatalogEntry
-	teamDeploymentSelected      int
-	selectedTeamDeployment      string
-	teamAmendments              []*kernelteam.DefinitionAmendment
-	teamAmendmentSelected       int
-	selectedTeamAmendment       string
-	objectives                  []*runtime.Objective
-	objectiveSelected           int
-	selectedObjective           string
-	eventSources                []*runtime.EventSourceSubscription
-	eventSourceSelected         int
-	selectedEventSource         string
-	eventSourceDetail           *runtime.EventSourceSubscriptionDetail
-	initiatives                 []*runtime.Initiative
-	initiativeSelected          int
-	selectedInitiative          string
-	outreachThreads             []*runtime.OutreachThread
-	outreachSelected            int
-	selectedOutreach            string
-	outreachObservations        []*runtime.SourceObservation
-	outreachObservationSelected int
-	outreachActions             []capability.ModelAction
-	outreachActionSelected      int
-	sourceMonitorStatuses       map[string]sourceMonitorStatus
-	initiativeActivity          map[string][]runtime.ActivityProjection
-	initiativeActivityErrors    map[string]error
-	clawHubSkills               []clawhub.InstalledState
-	skillActions                []capability.ModelAction
-	skillBindings               []*capability.Binding
-	skillBindingUpgradePlan     *runtime.SkillReferenceUpgradePlan
-	sourcePolicies              []*source.Lifecycle
-	skillBindingSelected        int
-	selectedSkillBinding        string
-	clawHubSelected             int
-	selectedClawHub             string
-	selected                    int
-	selectedID                  string
-	artifacts                   []*runtime.Artifact
-	artifactSelected            int
-	selectedArtifact            string
-	artifactExpanded            bool
-	conversations               []*runtime.Conversation
-	conversationSelected        int
-	selectedConversation        string
-	channelMessages             []*runtime.ChannelMessage
-	channelRounds               []*runtime.ParticipationRoundResult
-	channelPresence             []*runtime.ConversationPresence
-	channelAuditExpanded        bool
-	pendingKey                  string
-	pendingGoal                 string
-	pendingAuthoringKey         string
-	pendingAuthoringPrompt      string
-	pendingAuthoringParentID    string
-	pendingGovernanceKey        string
-	pendingGovernanceIntent     string
-	pendingRefinementKey        string
-	pendingRefinementIntent     string
-	activeRefinementQuestionID  string
-	refinementSkillQuery        string
-	refinementSkillResults      []authoring.SkillSearchCandidate
-	refinementSkillNextCursor   string
-	pendingObjectiveKey         string
-	pendingObjectivePrompt      string
-	pendingEventSourceID        string
-	pendingEventSourcePrompt    string
-	pendingInitiativeKey        string
-	pendingInitiativePrompt     string
-	pendingOutreachKey          string
-	pendingOutreachPrompt       string
-	pendingClawHubPrompt        string
-	pendingConversationKey      string
-	pendingConversationTitle    string
-	pendingMessageKey           string
-	pendingMessageContent       string
-	pendingMessageChannelID     string
-	pendingAgentRequestKey      string
-	pendingAgentRequestPrompt   string
-	pendingAgentRequestSourceID string
-	pendingRequestCompletionKey string
-	pendingRequestCompletionID  string
-	pendingApprovalKey          string
-	pendingApprovalIntent       string
+	ctx                                context.Context
+	client                             client.KernelClient
+	agentCapabilityClient              client.AgentDefinitionCapabilityClient
+	agentLifecycleClient               client.AgentDefinitionLifecycleClient
+	conversationClient                 client.ConversationClient
+	conversationGatewayClient          client.ExternalConversationGatewayClient
+	clawHubClient                      client.ClawHubClient
+	skillBindingClient                 client.SkillBindingClient
+	sourcePolicyClient                 client.SourcePolicyLifecycleClient
+	workforceSkillSearchClient         client.WorkforceSkillSearchClient
+	config                             Config
+	editor                             textarea.Model
+	focus                              focusArea
+	section                            panelSection
+	mode                               editorMode
+	width                              int
+	height                             int
+	loading                            bool
+	busy                               bool
+	ready                              bool
+	unavailable                        string
+	err                                error
+	status                             string
+	runCapability                      kernelapi.Capability
+	agentTurnCapability                kernelapi.Capability
+	actionCallCapability               kernelapi.Capability
+	requestCapability                  kernelapi.Capability
+	approvalCapability                 kernelapi.Capability
+	objectiveCapability                kernelapi.Capability
+	objectiveScheduleCapability        kernelapi.Capability
+	eventSourceCapability              kernelapi.Capability
+	initiativeCapability               kernelapi.Capability
+	outreachCapability                 kernelapi.Capability
+	conversationGatewayCapability      kernelapi.Capability
+	sourceMonitorCapability            kernelapi.Capability
+	activityCapability                 kernelapi.Capability
+	clawHubCapability                  kernelapi.Capability
+	skillActionCapability              kernelapi.Capability
+	skillBindingCapability             kernelapi.Capability
+	artifactCapability                 kernelapi.Capability
+	channelCapability                  kernelapi.Capability
+	authoringCapability                kernelapi.Capability
+	agentDefinitionCapability          kernelapi.Capability
+	teamDefinitionCapability           kernelapi.Capability
+	sourcePolicyCapability             kernelapi.Capability
+	authoringResult                    *authoring.CompileResult
+	authoringChangeSet                 *authoring.ChangeSet
+	authoringAmendment                 bool
+	authoringApprovalSelected          int
+	authoringCredentialSelected        int
+	authoringCredentialChoices         map[string]int
+	authoringConfigSelected            int
+	authoringConfigChoices             map[string]int
+	authoringRoutingSelected           int
+	authoringAutomationSelected        int
+	authoringAutomationFocus           *authoringAutomationFocus
+	activeRunbookSelected              int
+	runs                               []*runtime.AgentRun
+	agentTurns                         []*kernelapi.AgentTurnRecord
+	agentTurnsRunID                    string
+	agentTurnsErr                      error
+	loadingAgentTurns                  bool
+	actionCalls                        []*runtime.ActionCall
+	actionCallsRunID                   string
+	actionCallsErr                     error
+	loadingActionCalls                 bool
+	evidenceExpanded                   bool
+	evidenceObservationSelected        int
+	groundingExpanded                  bool
+	groundingPageSelected              int
+	agentRequests                      []*runtime.AgentRequest
+	agentRequestSelected               int
+	selectedAgentRequest               string
+	actionApprovals                    []*runtime.ApprovalCheckpoint
+	actionApprovalSelected             int
+	selectedActionApproval             string
+	activity                           []runtime.ActivityProjection
+	activitySelected                   int
+	selectedActivity                   string
+	activityExpanded                   bool
+	activityNextCursor                 string
+	activityHasMore                    bool
+	compilations                       []*kernelagent.DefinitionCompilation
+	agentDeployment                    *kernelapi.AgentDeploymentCatalogEntry
+	agentAmendments                    []*kernelagent.DefinitionAmendment
+	agentAmendmentSelected             int
+	selectedAgentAmendment             string
+	teamDeployments                    []kernelapi.TeamDeploymentCatalogEntry
+	teamDeploymentSelected             int
+	selectedTeamDeployment             string
+	teamAmendments                     []*kernelteam.DefinitionAmendment
+	teamAmendmentSelected              int
+	selectedTeamAmendment              string
+	objectives                         []*runtime.Objective
+	objectiveSelected                  int
+	selectedObjective                  string
+	eventSources                       []*runtime.EventSourceSubscription
+	eventSourceSelected                int
+	selectedEventSource                string
+	eventSourceDetail                  *runtime.EventSourceSubscriptionDetail
+	initiatives                        []*runtime.Initiative
+	initiativeSelected                 int
+	selectedInitiative                 string
+	outreachThreads                    []*runtime.OutreachThread
+	outreachSelected                   int
+	selectedOutreach                   string
+	outreachObservations               []*runtime.SourceObservation
+	outreachObservationSelected        int
+	outreachActions                    []capability.ModelAction
+	outreachActionSelected             int
+	conversationGateways               []*runtime.ExternalConversationGatewayRegistration
+	conversationGatewaySelected        int
+	selectedConversationGateway        string
+	conversationGatewayAdapterSelected int
+	sourceMonitorStatuses              map[string]sourceMonitorStatus
+	initiativeActivity                 map[string][]runtime.ActivityProjection
+	initiativeActivityErrors           map[string]error
+	clawHubSkills                      []clawhub.InstalledState
+	skillActions                       []capability.ModelAction
+	skillBindings                      []*capability.Binding
+	skillBindingUpgradePlan            *runtime.SkillReferenceUpgradePlan
+	sourcePolicies                     []*source.Lifecycle
+	skillBindingSelected               int
+	selectedSkillBinding               string
+	clawHubSelected                    int
+	selectedClawHub                    string
+	selected                           int
+	selectedID                         string
+	artifacts                          []*runtime.Artifact
+	artifactSelected                   int
+	selectedArtifact                   string
+	artifactExpanded                   bool
+	conversations                      []*runtime.Conversation
+	conversationSelected               int
+	selectedConversation               string
+	channelMessages                    []*runtime.ChannelMessage
+	channelRounds                      []*runtime.ParticipationRoundResult
+	channelPresence                    []*runtime.ConversationPresence
+	channelAuditExpanded               bool
+	pendingKey                         string
+	pendingGoal                        string
+	pendingAuthoringKey                string
+	pendingAuthoringPrompt             string
+	pendingAuthoringParentID           string
+	pendingGovernanceKey               string
+	pendingGovernanceIntent            string
+	pendingRefinementKey               string
+	pendingRefinementIntent            string
+	activeRefinementQuestionID         string
+	refinementSkillQuery               string
+	refinementSkillResults             []authoring.SkillSearchCandidate
+	refinementSkillNextCursor          string
+	pendingObjectiveKey                string
+	pendingObjectivePrompt             string
+	pendingEventSourceID               string
+	pendingEventSourcePrompt           string
+	pendingInitiativeKey               string
+	pendingInitiativePrompt            string
+	pendingOutreachKey                 string
+	pendingOutreachPrompt              string
+	pendingClawHubPrompt               string
+	pendingConversationKey             string
+	pendingConversationTitle           string
+	pendingMessageKey                  string
+	pendingMessageContent              string
+	pendingMessageChannelID            string
+	pendingAgentRequestKey             string
+	pendingAgentRequestPrompt          string
+	pendingAgentRequestSourceID        string
+	pendingRequestCompletionKey        string
+	pendingRequestCompletionID         string
+	pendingApprovalKey                 string
+	pendingApprovalIntent              string
 }
 
 type capabilitiesLoaded struct {
@@ -676,6 +687,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		agentLifecycleClient:       agentLifecycleClient(kernelClient),
 		agentCapabilityClient:      agentCapabilityClient(kernelClient),
 		conversationClient:         conversationClient(kernelClient),
+		conversationGatewayClient:  conversationGatewayClient(kernelClient),
 		clawHubClient:              clawHubClient(kernelClient),
 		skillBindingClient:         skillBindingClient(kernelClient),
 		sourcePolicyClient:         sourcePolicyClient(kernelClient),
@@ -727,6 +739,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		eventSourceCapability, hasEventSources := msg.document.Find(kernelapi.EventSourceSubscriptionsCapabilityID, kernelapi.EventSourceSubscriptionsCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
 		outreachCapability, hasOutreach := msg.document.Find(kernelapi.OutreachCapabilityID, kernelapi.OutreachCapabilityVersion)
+		conversationGatewayCapability, hasConversationGateways := msg.document.Find(kernelapi.ConversationGatewaysCapabilityID, kernelapi.ConversationGatewaysCapabilityVersion)
 		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
 		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
@@ -748,6 +761,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.eventSourceCapability = eventSourceCapability
 		m.initiativeCapability = initiativeCapability
 		m.outreachCapability = outreachCapability
+		m.conversationGatewayCapability = conversationGatewayCapability
 		m.sourceMonitorCapability = sourceMonitorCapability
 		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
@@ -799,6 +813,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasOutreach || !outreachCapability.Available || !outreachCapability.Supports(kernelapi.OperationList) || !m.initiativeCapability.Available {
 			m.outreachCapability = kernelapi.Capability{}
 		}
+		if !hasConversationGateways || !conversationGatewayCapability.Available || !conversationGatewayCapability.Supports(kernelapi.OperationList) || m.conversationGatewayClient == nil {
+			m.conversationGatewayCapability = kernelapi.Capability{}
+		}
 		if !hasActivity || !activityCapability.Available {
 			m.activityCapability = kernelapi.Capability{}
 		}
@@ -829,7 +846,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
 			m.sourcePolicyCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -857,6 +874,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionInitiatives
 			m.mode = modeInitiativeCreate
 			m.editor.Placeholder = "Describe the Initiative outcome…"
+		} else if m.conversationGatewayCapability.Available {
+			m.section = sectionIntegrations
+			m.focusPanelList()
 		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
 			m.section = sectionSkills
 			if m.clawHubCapability.Available {
@@ -891,7 +911,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 		}
 		m.activateReadyRefinement()
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadInitiatives(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -1661,6 +1681,31 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.section = sectionRuns
 		m.status = "Inspecting governed outreach Run · " + msg.run.ID + "."
 		return m, m.loadSelectedRunHistory()
+	case conversationGatewaysLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err, m.conversationGateways = nil, msg.items
+		m.restoreConversationGatewaySelection()
+		return m, nil
+	case conversationGatewayChanged:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. Refreshing authoritative integration state."
+			return m, m.loadConversationGateways()
+		}
+		m.err = nil
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		if msg.gateway != nil {
+			m.selectedConversationGateway = msg.gateway.ID
+			m.status = fmt.Sprintf("%s recorded · %s · revision %d.", msg.action, msg.gateway.Status, msg.gateway.Revision)
+		}
+		return m, m.loadConversationGateways()
 	case runCommanded:
 		m.busy = false
 		if msg.err != nil {
@@ -1680,7 +1725,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadInitiatives(), m.loadOutreach(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadInitiatives(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -1749,6 +1794,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitInitiativeAmendment()
 			case modeOutreachCreate:
 				return m, m.submitOutreachDraft()
+			case modeIntegrationCreate:
+				return m, m.submitConversationGatewayCreation()
+			case modeIntegrationActivate:
+				return m, m.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayActive, "activated")
+			case modeIntegrationPause:
+				return m, m.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayPaused, "paused")
+			case modeIntegrationRetire:
+				return m, m.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayRetired, "retired")
 			case modeSkillInstall:
 				return m, m.submitClawHubInstall()
 			case modeSkillPin:
@@ -1929,6 +1982,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.section = sectionOutreach
 				return m, m.loadOutreach()
 			}
+		case "I":
+			if m.conversationGatewayCapability.Available {
+				m.section = sectionIntegrations
+				return m, m.loadConversationGateways()
+			}
 		case "s":
 			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
 				m.section = sectionSkills
@@ -1974,6 +2032,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focusComposerEditor()
 			} else if m.section == sectionOutreach && m.canCreateOutreachDraft() {
 				m.prepareOutreachComposer()
+			} else if m.section == sectionIntegrations && m.canCreateConversationGateway() {
+				m.prepareConversationGatewayCreation()
 			} else if m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall) {
 				m.mode = modeSkillInstall
 				m.editor.Reset()
@@ -2002,6 +2062,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionOutreach {
 				m.moveOutreachObservation(-1)
 				return m, m.loadOutreach()
+			} else if m.section == sectionIntegrations {
+				m.moveConversationGatewayAdapterChoice(-1)
 			} else if m.section == sectionSkills {
 				m.moveClawHubSelection(-1)
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
@@ -2019,6 +2081,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionOutreach {
 				m.moveOutreachObservation(1)
 				return m, m.loadOutreach()
+			} else if m.section == sectionIntegrations {
+				m.moveConversationGatewayAdapterChoice(1)
 			} else if m.section == sectionSkills {
 				m.moveClawHubSelection(1)
 			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
@@ -2070,6 +2134,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pauseOrResumeInitiative()
 			} else if m.section == sectionSources {
 				return m, m.pauseOrResumeEventSource()
+			} else if m.section == sectionIntegrations {
+				if item := m.selectedConversationGatewayRecord(); item != nil {
+					if item.Status == runtime.ExternalConversationGatewayActive {
+						m.prepareConversationGatewayLifecycle(modeIntegrationPause)
+					} else if item.Status == runtime.ExternalConversationGatewayPaused {
+						m.prepareConversationGatewayLifecycle(modeIntegrationActivate)
+					}
+				}
 			} else if m.section == sectionSkills {
 				return m, m.pinOrUnpinClawHub()
 			}
@@ -2097,6 +2169,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.editor.Placeholder = "Type RETIRE to preserve history and stop this source permanently."
 					m.focusComposerEditor()
 				}
+			} else if m.section == sectionIntegrations {
+				m.prepareConversationGatewayLifecycle(modeIntegrationRetire)
 			} else if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && !m.selectedSkillBindingRecord().Disabled && m.supportsSkillBinding(kernelapi.OperationDisable) {
 				m.mode = modeSkillBindingDisable
 				m.editor.Reset()
@@ -3349,6 +3423,9 @@ func (m *Model) loadPanel() tea.Cmd {
 	if m.section == sectionOutreach {
 		return m.loadOutreach()
 	}
+	if m.section == sectionIntegrations {
+		return m.loadConversationGateways()
+	}
 	if m.section == sectionSkills {
 		return tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies())
 	}
@@ -4492,6 +4569,7 @@ func (m *Model) defaultOperationalSection() panelSection {
 		{sectionSources, m.eventSourceCapability.Available},
 		{sectionInitiatives, m.initiativeCapability.Available},
 		{sectionOutreach, m.outreachCapability.Available},
+		{sectionIntegrations, m.conversationGatewayCapability.Available},
 		{sectionRuns, m.runCapability.Available},
 		{sectionActivity, m.activityCapability.Available},
 		{sectionRequests, m.requestCapability.Available},
@@ -5450,6 +5528,10 @@ func (m *Model) movePanelSelection(delta int) {
 		m.moveOutreachSelection(delta)
 		return
 	}
+	if m.section == sectionIntegrations {
+		m.moveConversationGatewaySelection(delta)
+		return
+	}
 	if m.section == sectionSkills {
 		m.moveSkillBindingSelection(delta)
 		return
@@ -6397,6 +6479,8 @@ func (m *Model) prepareComposerForSection() {
 		m.focusComposerEditor()
 	case m.section == sectionOutreach && m.canCreateOutreachDraft():
 		m.prepareOutreachComposer()
+	case m.section == sectionIntegrations && m.canCreateConversationGateway():
+		m.prepareConversationGatewayCreation()
 	case m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall):
 		m.mode = modeSkillInstall
 		m.editor.Placeholder = "Enter @owner/skill to install…"
@@ -6475,6 +6559,11 @@ func (m *Model) resetComposerMode() {
 	if m.section == sectionOutreach {
 		m.mode = modeCreate
 		m.editor.Placeholder = "Select evidence and an authorized action, then press n to draft outreach."
+		return
+	}
+	if m.section == sectionIntegrations {
+		m.mode = modeCreate
+		m.editor.Placeholder = "Select a connection, or press n to add one in a paused state."
 		return
 	}
 	if m.section == sectionSkills {

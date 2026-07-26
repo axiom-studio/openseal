@@ -151,7 +151,10 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeChannelPost && !m.supportsChannel(kernelapi.OperationPost) {
 		return m.renderUnavailableComposer(width, "Message the Team", "This server does not advertise channel messaging.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if isConversationGatewayMode(m.mode) && !m.supportsConversationGateway(mapConversationGatewayModeOperation(m.mode)) {
+		return m.renderUnavailableComposer(width, "Manage message integration", "This server does not advertise the required integration lifecycle operation.")
+	}
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -161,6 +164,22 @@ func (m *Model) renderComposer(width int) string {
 	description := "Describe an outcome. OpenSeal will keep the work safe across restarts."
 	owner := humanOwner(m.config.Owner)
 	switch m.mode {
+	case modeIntegrationCreate:
+		title = "Add message integration"
+		description = "Name this reviewed provider connection. It is created paused so you can configure the callback before activation."
+		owner = "[ ] selects an authorized connection · credentials stay host-side"
+	case modeIntegrationActivate:
+		title = "Activate message integration"
+		description = "Record why this exact provider route is ready to receive events."
+		owner = "Revision-bound activation · audited reason"
+	case modeIntegrationPause:
+		title = "Pause message integration"
+		description = "Stop accepting new provider events while preserving the route and audit history."
+		owner = "Revision-bound pause · audited reason"
+	case modeIntegrationRetire:
+		title = "Retire message integration"
+		description = "Permanently retire this provider route while preserving its audit history."
+		owner = "Type RETIRE · permanent · revision-bound"
 	case modeAgentAmendmentPropose:
 		title = "Propose Agent behavior amendment"
 		description = "Choose an allowed behavior field, record rationale, and provide its new immutable value."
@@ -402,6 +421,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderInitiativesContent(width)
 	} else if m.section == sectionOutreach {
 		content = m.renderOutreachContent(width)
+	} else if m.section == sectionIntegrations {
+		content = m.renderConversationGatewaysContent(width)
 	} else if m.section == sectionSkills {
 		content = m.renderClawHubSkillsContent(width)
 	} else if m.section == sectionChannels {
@@ -479,6 +500,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.outreachCapability.Available {
 		label := "O Outreach"
 		if m.section == sectionOutreach {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.conversationGatewayCapability.Available {
+		label := "I Integrations"
+		if m.section == sectionIntegrations {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
