@@ -93,6 +93,7 @@ func parseScheduleIntent(value string) scheduleIntent {
 	if containsAnySchedulePhrase(lower,
 		"manual objective", "manual execution", "run manually", "only manually", "on demand", "when asked",
 		"do not schedule", "don't schedule", "no schedule", "without a schedule", "not recurring",
+		"no recurring", "without recurring", "non recurring",
 	) {
 		return scheduleIntent{kind: scheduleIntentManual}
 	}
