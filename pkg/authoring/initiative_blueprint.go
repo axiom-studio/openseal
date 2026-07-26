@@ -68,11 +68,14 @@ type InitiativeDeliverableBlueprint struct {
 }
 
 func validateInitiativeBlueprint(candidate *WorkforceCandidate, agents map[string]*agent.AgentDefinition) []ValidationIssue {
-	if candidate == nil || candidate.Initiative == nil {
+	if candidate == nil {
 		return nil
 	}
+	issues := validateSourceMonitorContext(candidate)
+	if candidate.Initiative == nil {
+		return issues
+	}
 	blueprint := candidate.Initiative
-	issues := make([]ValidationIssue, 0)
 	if !validBlueprintID(blueprint.ID) || strings.TrimSpace(blueprint.Title) == "" || strings.TrimSpace(blueprint.Purpose) == "" {
 		issues = append(issues, issue("initiative", "invalid_initiative", "Initiative id, title, and purpose are required and the id must be portable"))
 	}
@@ -141,6 +144,38 @@ func validateInitiativeBlueprint(candidate *WorkforceCandidate, agents map[strin
 		}
 		seen[deliverable.ID] = true
 		issues = append(issues, validateBlueprintRefs(path+".objectiveRefs", deliverable.ObjectiveRefs, initiativeObjectives, false)...)
+	}
+	return issues
+}
+
+// validateSourceMonitorContext prevents a scheduled Objective from claiming
+// provenance that the reviewed Initiative does not define. Runtime placement
+// resolves these symbolic references and the scheduler deliberately rejects
+// drift, so an orphan must be repaired before the candidate can be activated.
+func validateSourceMonitorContext(candidate *WorkforceCandidate) []ValidationIssue {
+	monitors := map[string]InitiativeSourceMonitorBlueprint{}
+	if candidate.Initiative != nil {
+		for _, monitor := range candidate.Initiative.SourceMonitors {
+			monitors[monitor.ID] = monitor
+		}
+	}
+	issues := []ValidationIssue{}
+	for objectiveRef, template := range candidateObjectiveTemplates(candidate) {
+		runTemplate, _ := template.Cadence["runTemplate"].(map[string]interface{})
+		contextValues, _ := runTemplate["context"].(map[string]interface{})
+		monitorID, _ := contextValues["sourceMonitorId"].(string)
+		monitorID = strings.TrimSpace(monitorID)
+		if monitorID == "" {
+			continue
+		}
+		monitor, exists := monitors[monitorID]
+		if !exists || monitor.ObjectiveRef != objectiveRef {
+			issues = append(issues, issue(
+				objectiveRef+".cadence.runTemplate.context.sourceMonitorId",
+				"orphaned_source_monitor_context",
+				"Scheduled Objective source monitor context must reference its reviewed Initiative source monitor",
+			))
+		}
 	}
 	return issues
 }

@@ -1145,6 +1145,28 @@ func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.
 	}
 }
 
+func TestCompilerRejectsOrphanedSourceMonitorContext(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	candidate.Initiative.SourceMonitors = nil
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor a public feed every hour"})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "orphaned_source_monitor_context") {
+		t.Fatalf("orphaned source monitor result = %#v, err = %v", result, err)
+	}
+}
+
+func TestCompilerRejectsSourceMonitorContextWithoutInitiative(t *testing.T) {
+	candidate := researchInitiativeCandidate()
+	candidate.Initiative = nil
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor a public feed every hour"})
+	if err != nil || result.Valid || !hasValidationCode(result.Validation, "orphaned_source_monitor_context") {
+		t.Fatalf("initiative-free source monitor result = %#v, err = %v", result, err)
+	}
+}
+
 func TestCompilerMaterializesCatalogOwnedSourceMonitorWithoutGrantingAuthority(t *testing.T) {
 	candidate := researchInitiativeCandidate()
 	candidate.Initiative.SourceMonitors = nil
