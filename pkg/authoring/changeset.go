@@ -138,6 +138,7 @@ type SkillInstallationIntent struct {
 	SkillID        string `json:"skillId"`
 	Version        string `json:"version"`
 	SourceIdentity string `json:"sourceIdentity"`
+	SourceDigest   string `json:"sourceDigest"`
 	Reference      string `json:"reference"`
 }
 
@@ -1422,11 +1423,12 @@ func validatePlannedSkillInstallations(placement ChangeSetPlacement, catalog Cap
 		skillID := strings.TrimSpace(planned.SkillID)
 		version := strings.TrimSpace(planned.Version)
 		sourceIdentity := strings.TrimSpace(planned.SourceIdentity)
+		sourceDigest := strings.TrimSpace(planned.SourceDigest)
 		reference := strings.TrimSpace(planned.Reference)
-		if skillID == "" || version == "" || sourceIdentity == "" || reference == "" {
-			return errors.New("planned Skill installation requires an exact Skill, version, source identity, and reference")
+		if skillID == "" || version == "" || sourceIdentity == "" || sourceDigest == "" || reference == "" {
+			return errors.New("planned Skill installation requires an exact Skill, version, source identity, source digest, and reference")
 		}
-		key := skillID + "\x00" + version + "\x00" + sourceIdentity + "\x00" + reference
+		key := skillID + "\x00" + version + "\x00" + sourceIdentity + "\x00" + sourceDigest + "\x00" + reference
 		if _, duplicate := seen[key]; duplicate {
 			return fmt.Errorf("planned Skill installation %s is duplicated", skillID)
 		}
@@ -1436,16 +1438,22 @@ func validatePlannedSkillInstallations(placement ChangeSetPlacement, catalog Cap
 			strings.TrimSpace(skill.Version) != version || strings.TrimSpace(skill.SourceIdentity) != sourceIdentity {
 			return fmt.Errorf("planned Skill installation %s does not match an exact installable catalog capability", skillID)
 		}
-		verifiedReference := false
+		verifiedReference, verifiedDigest := false, false
 		for _, compatibility := range skill.Compatibility {
 			if compatibility.Requirement == "installation" && !compatibility.Compatible &&
 				strings.TrimSpace(compatibility.Reference) == reference {
 				verifiedReference = true
-				break
+			}
+			if compatibility.Requirement == "source_digest" && compatibility.Compatible &&
+				strings.EqualFold(strings.TrimSpace(compatibility.Reference), sourceDigest) {
+				verifiedDigest = true
 			}
 		}
 		if !verifiedReference {
 			return fmt.Errorf("planned Skill installation %s lacks its verified catalog reference", skillID)
+		}
+		if !verifiedDigest {
+			return fmt.Errorf("planned Skill installation %s lacks its verified source digest", skillID)
 		}
 	}
 	return nil
@@ -2131,6 +2139,7 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		planned.SkillID = strings.TrimSpace(planned.SkillID)
 		planned.Version = strings.TrimSpace(planned.Version)
 		planned.SourceIdentity = strings.TrimSpace(planned.SourceIdentity)
+		planned.SourceDigest = strings.ToLower(strings.TrimSpace(planned.SourceDigest))
 		planned.Reference = strings.TrimSpace(planned.Reference)
 	}
 	sort.Slice(placement.PlannedSkillInstallations, func(i, j int) bool {
@@ -2143,6 +2152,9 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		}
 		if left.SourceIdentity != right.SourceIdentity {
 			return left.SourceIdentity < right.SourceIdentity
+		}
+		if left.SourceDigest != right.SourceDigest {
+			return left.SourceDigest < right.SourceDigest
 		}
 		return left.Reference < right.Reference
 	})
