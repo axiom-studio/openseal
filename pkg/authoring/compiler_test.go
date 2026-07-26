@@ -890,6 +890,27 @@ func TestCompilerNormalizesDefinitionProvenanceKindAlias(t *testing.T) {
 	}
 }
 
+func TestCompilerNormalizesNonCredentialProvenanceValueAlias(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, _ := json.Marshal(candidate)
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Which channel is allowed?","whyNeeded":"A destination is required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[{"kind":"skill","value":"skill-slack"}],"priority":100}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Slack Agent."})
+	if err != nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("refinement provenance result=%#v err=%v", result, err)
+	}
+	provenance := result.UnresolvedQuestions[0].Provenance
+	if len(provenance) != 1 || provenance[0].Kind != RefinementProvenanceSkill || provenance[0].Reference != "skill-slack" {
+		t.Fatalf("normalized provenance=%#v", provenance)
+	}
+
+	credential := bytes.Replace(payload, []byte(`"kind":"skill"`), []byte(`"kind":"credential"`), 1)
+	strict, _ := NewCompiler(staticGenerator{payload: credential})
+	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."}); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("credential provenance value must remain strict, got %v", err)
+	}
+}
+
 func TestCompilerDoesNotDiscardOptionsForOtherInvalidAnswerKinds(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	payload, _ := json.Marshal(GenerationResponse{

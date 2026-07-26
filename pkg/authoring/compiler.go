@@ -1045,7 +1045,14 @@ func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 			if !ok {
 				continue
 			}
+			entryChanged := false
 			if normalizeRefinementProvenanceSourceAlias(entry) || normalizeRefinementProvenanceTypeAlias(entry) {
+				entryChanged = true
+			}
+			if normalizeRefinementProvenanceValueAlias(entry) {
+				entryChanged = true
+			}
+			if entryChanged {
 				changed = true
 			}
 		}
@@ -1127,6 +1134,39 @@ func normalizeRefinementProvenanceTypeAlias(entry map[string]interface{}) bool {
 	}
 	delete(entry, "type")
 	entry["kind"] = string(kind)
+	return true
+}
+
+// normalizeRefinementProvenanceValueAlias accepts the provider's common
+// `value` spelling for the portable `reference` field only after a known,
+// non-credential provenance kind is present. Credential provenance never
+// accepts model-supplied references because they could contain an opaque host
+// binding identifier.
+func normalizeRefinementProvenanceValueAlias(entry map[string]interface{}) bool {
+	if _, hasReference := entry["reference"]; hasReference {
+		return false
+	}
+	kindText, ok := entry["kind"].(string)
+	if !ok {
+		return false
+	}
+	kind := RefinementProvenanceKind(kindText)
+	if !validRefinementProvenanceKind(kind) || kind == RefinementProvenanceCredential {
+		return false
+	}
+	value, ok := entry["value"].(string)
+	if !ok || value == "" || value != strings.TrimSpace(value) {
+		return false
+	}
+	for key := range entry {
+		switch key {
+		case "kind", "value", "evidence":
+		default:
+			return false
+		}
+	}
+	delete(entry, "value")
+	entry["reference"] = value
 	return true
 }
 
