@@ -235,9 +235,19 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 		teamDeployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: current.Scope, DefinitionID: "release-team", ActiveVersion: "1",
 			Status: kernelteam.DeploymentActive, Roster: []kernelteam.RosterAssignment{
-				{ID: "lead", AgentDeploymentID: current.ID},
-				{ID: "reviewer", AgentDeploymentID: reviewer.ID},
+				{ID: "lead", RoleID: "lead", AgentDeploymentID: current.ID},
+				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: reviewer.ID},
 			},
+		},
+		teamDefinition: &kernelteam.Definition{
+			ID: "release-team", Version: "1", Roles: []kernelteam.RoleSlot{
+				{ID: "lead", DisplayName: "Lead", Purpose: "Coordinate releases"},
+				{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review releases"},
+			},
+		},
+		activations: map[string]*skill.ActivationSnapshot{
+			current.ID:     {SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
+			"release-team": {SnapshotID: "team-snapshot", Scope: current.Scope, DeploymentID: "release-team"},
 		},
 	}
 	run := &AgentRun{

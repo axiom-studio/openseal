@@ -11,9 +11,9 @@ import (
 
 const (
 	// HostedTurnProtocolInputReserveTokens covers the fixed host protocol,
-	// message framing, and provider-tokenizer uncertainty. Dynamic model input
-	// is then charged at one token per UTF-8 byte, a deliberately conservative
-	// upper bound for byte-level OpenAI-compatible tokenizers.
+	// message framing, and provider-tokenizer uncertainty. Dynamic JSON is
+	// estimated separately at two UTF-8 bytes per token. Agent context must use
+	// references rather than embedding opaque binary or encoded artifact data.
 	HostedTurnProtocolInputReserveTokens int64 = 4096
 	// HostedTurnBudgetEnvelopeReserveTokens covers the bounded JSON growth when
 	// the durable reservation is projected into the model-visible budget after
@@ -75,7 +75,7 @@ func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + int64(len(input)), nil
+	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + estimateHostedJSONTokens(input), nil
 }
 
 func EstimateEvidenceGroundingReviewInputTokens(request EvidenceGroundingRequest) (int64, error) {
@@ -85,7 +85,17 @@ func EstimateEvidenceGroundingReviewInputTokens(request EvidenceGroundingRequest
 	if err != nil {
 		return 0, err
 	}
-	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + int64(len(input)), nil
+	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + estimateHostedJSONTokens(input), nil
+}
+
+// estimateHostedJSONTokens intentionally remains provider-neutral. Two UTF-8
+// bytes per token is conservative for the textual goals, schemas, prompts, and
+// structured checkpoints admitted by the hosted contract, while avoiding the
+// false one-byte-per-token exhaustion that made the canonical 16k minimum
+// unusable with built-in management actions. The fixed protocol reserve above
+// absorbs host instructions and ordinary tokenizer variance.
+func estimateHostedJSONTokens(input []byte) int64 {
+	return (int64(len(input)) + 1) / 2
 }
 
 // MarshalEvidenceGroundingModelInput strips host-only credential selection

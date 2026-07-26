@@ -191,6 +191,26 @@ func TestHostedTurnInputEstimateIsStableAfterReservationProjection(t *testing.T)
 	}
 }
 
+func TestHostedTurnInputEstimateKeepsTextualManagementEnvelopeWithinCanonicalMinimum(t *testing.T) {
+	request := HostedTurnRequest{
+		Goal:               "Answer a concise question",
+		SystemInstructions: []string{strings.Repeat("bounded textual management schema ", 500)},
+	}
+	encoded, err := MarshalHostedTurnModelInput(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	estimated, err := EstimateHostedTurnInputTokens(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + (int64(len(encoded))+1)/2
+	const canonicalHostedInputMinimum = int64(16000)
+	if estimated != want || estimated >= canonicalHostedInputMinimum {
+		t.Fatalf("textual envelope bytes=%d estimate=%d want=%d minimum=%d", len(encoded), estimated, want, canonicalHostedInputMinimum)
+	}
+}
+
 func TestGroundedHostedTurnReservationIncludesDraftInstruction(t *testing.T) {
 	_, runContext := groundedSnapshot(t)
 	runner, err := NewHostedTurnRunner(&countedHostedTurnHost{}, HostedTurnRunnerConfig{
