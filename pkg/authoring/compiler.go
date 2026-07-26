@@ -486,6 +486,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	payload = normalizeGeneratedDefinitionVersions(payload)
 	payload = normalizeGeneratedDurations(payload)
+	payload = normalizeGeneratedDefinitionProvenance(payload)
 	payload = normalizeGeneratedRefinementBlocking(payload)
 	payload = normalizeGeneratedRefinementProvenance(payload)
 	payload = normalizeGeneratedRefinementDependencies(payload)
@@ -506,6 +507,77 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	normalizeCandidateObjectiveRunBudgets(&generated.Candidate)
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
+}
+
+// normalizeGeneratedDefinitionProvenance accepts the common provider alias
+// provenance.kind only where the portable Agent/Team definition contract uses
+// provenance.source. The alias is lossless because Source is descriptive
+// provenance rather than authority. Existing source, unknown siblings,
+// whitespace changes, and non-string values remain untouched for strict JSON
+// decoding to reject.
+func normalizeGeneratedDefinitionProvenance(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return payload
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return payload
+	}
+	root, ok := document.(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	candidate, ok := root["candidate"].(map[string]interface{})
+	if !ok {
+		return payload
+	}
+	changed := false
+	if agents, ok := candidate["agents"].([]interface{}); ok {
+		for _, rawAgent := range agents {
+			agent, ok := rawAgent.(map[string]interface{})
+			if ok && normalizeDefinitionProvenanceKindAlias(agent["provenance"]) {
+				changed = true
+			}
+		}
+	}
+	if team, ok := candidate["team"].(map[string]interface{}); ok && normalizeDefinitionProvenanceKindAlias(team["provenance"]) {
+		changed = true
+	}
+	if !changed {
+		return payload
+	}
+	normalized, err := json.Marshal(document)
+	if err != nil {
+		return payload
+	}
+	return normalized
+}
+
+func normalizeDefinitionProvenanceKindAlias(raw interface{}) bool {
+	provenance, ok := raw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if _, exists := provenance["source"]; exists {
+		return false
+	}
+	kind, ok := provenance["kind"].(string)
+	if !ok || kind == "" || kind != strings.TrimSpace(kind) {
+		return false
+	}
+	for key := range provenance {
+		switch key {
+		case "kind", "reference", "createdBy", "derivedFrom":
+		default:
+			return false
+		}
+	}
+	delete(provenance, "kind")
+	provenance["source"] = kind
+	return true
 }
 
 // normalizeGeneratedRunbookValues canonicalizes unambiguous scalar shorthand
