@@ -16,9 +16,9 @@ func externalConversationGatewayFixture(scope Scope) ExternalConversationIngress
 	return ExternalConversationIngressGateway{
 		Scope: scope, DeploymentID: "skill-deployment-1", Provider: "slack",
 		Adapter: ExternalConversationAdapterReference{
-			SkillID: "openseal.slack-conversations", SkillVersion: "1.0.0",
+			SkillID: "skill-slack", SkillVersion: "2.0.0",
 			SourceIdentity: "oci://example/slack@sha256:abc", BindingID: "binding-1",
-			BindingRevision: 1, AdapterID: "slack-conversations",
+			BindingRevision: 1, AdapterID: "conversations",
 		},
 	}
 }

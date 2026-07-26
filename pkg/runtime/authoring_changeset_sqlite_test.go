@@ -140,7 +140,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		t.Fatal(err)
 	}
 	defer store.Close()
-	const slackSourceIdentity = "https://github.com/axiom-studio/openseal::slack-conversations"
+	const slackSourceIdentity = "https://github.com/axiom-studio/skills::skill-slack"
 	installedSlack := slackConversationSkillDefinition()
 	installedSlack.Source = &skill.SourceProvenance{Identity: slackSourceIdentity, Format: "openseal.skill.v1"}
 	if err := skill.NewCatalogWithStore(store).Register(ctx, installedSlack); err != nil {

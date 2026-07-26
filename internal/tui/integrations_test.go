@@ -12,7 +12,7 @@ import (
 func conversationGatewayCapabilityFixture() kernelapi.Capability {
 	return kernelapi.ConversationGatewaysCapability(true, []kernelapi.ConversationGatewayAdapterChoice{{
 		ID: "slack-primary", DisplayName: "Primary Slack workspace", DeploymentID: "research-agent", Provider: "slack",
-		SkillID: "openseal.slack-conversations", SkillVersion: "1.2.0", SourceIdentity: "catalog:trusted-slack",
+		SkillID: "skill-slack", SkillVersion: "2.0.0", SourceIdentity: "https://github.com/axiom-studio/skills::skill-slack",
 		BindingID: "slack-binding", BindingRevision: 7, AdapterID: "events",
 	}})
 }
@@ -24,7 +24,7 @@ func conversationGatewayRecordFixture() *runtime.ExternalConversationGatewayRegi
 		Revision: 4, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
 		Gateway: runtime.ExternalConversationIngressGateway{
 			Scope: runtime.Scope{Kind: "local", ID: "default"}, DeploymentID: "research-agent", Provider: "slack",
-			Adapter: runtime.ExternalConversationAdapterReference{SkillID: "openseal.slack-conversations", SkillVersion: "1.2.0", SourceIdentity: "catalog:trusted-slack", BindingID: "slack-binding", BindingRevision: 7, AdapterID: "events"},
+			Adapter: runtime.ExternalConversationAdapterReference{SkillID: "skill-slack", SkillVersion: "2.0.0", SourceIdentity: "https://github.com/axiom-studio/skills::skill-slack", BindingID: "slack-binding", BindingRevision: 7, AdapterID: "events"},
 		},
 		Lifecycle: []runtime.ExternalConversationGatewayLifecycleEntry{{Revision: 4, Action: runtime.ExternalConversationGatewayCreated, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "forward-ported connection", At: now}},
 	}
@@ -48,11 +48,11 @@ func TestConversationIntegrationUsesTypedChoiceAndCreatesPaused(t *testing.T) {
 	}
 	request := fake.conversationGatewayCreates[0]
 	if request.Status != runtime.ExternalConversationGatewayPaused || request.Name != "Customer feedback Slack" || request.Reason != "receive reviewed customer feedback events" ||
-		request.Gateway.DeploymentID != "research-agent" || request.Gateway.Adapter.BindingID != "slack-binding" || request.Gateway.Adapter.BindingRevision != 7 || request.Gateway.Adapter.SourceIdentity != "catalog:trusted-slack" {
+		request.Gateway.DeploymentID != "research-agent" || request.Gateway.Adapter.BindingID != "slack-binding" || request.Gateway.Adapter.BindingRevision != 7 || request.Gateway.Adapter.SourceIdentity != "https://github.com/axiom-studio/skills::skill-slack" {
 		t.Fatalf("create request = %#v", request)
 	}
 	view := model.renderConversationGatewaysContent(100)
-	if !strings.Contains(view, "Primary Slack workspace") || strings.Contains(view, "slack-binding") || strings.Contains(view, "catalog:trusted-slack") {
+	if !strings.Contains(view, "Primary Slack workspace") || strings.Contains(view, "slack-binding") || strings.Contains(view, "https://github.com/axiom-studio/skills::skill-slack") {
 		t.Fatalf("typed connection was not rendered safely:\n%s", view)
 	}
 }
