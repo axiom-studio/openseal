@@ -116,8 +116,8 @@ func TestGeneratePreparedAtomicallyPlacesExactConversationSkillIdentity(t *testi
 	skillCapability := catalog.Skills["slack"]
 	skillCapability.SourceIdentity = "registry.example::communications/slack"
 	exact := capability.NewSkillIdentity(
-		"openseal.slack-conversations",
-		"1.0.0+source.0123456789ab",
+		"skill-slack",
+		"2.0.0",
 		skillCapability.SourceIdentity,
 	)
 	skillCapability.RuntimeIdentity = &exact
