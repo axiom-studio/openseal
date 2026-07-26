@@ -108,7 +108,7 @@ func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
 
 func TestConversationGatewaysAdvertiseOnlyLifecycleCommands(t *testing.T) {
 	readOnly := ConversationGatewaysCapability(false)
-	if readOnly.ID != ConversationGatewaysCapabilityID || readOnly.Version != "1" ||
+	if readOnly.ID != ConversationGatewaysCapabilityID || readOnly.Version != "2" ||
 		!readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) ||
 		readOnly.Supports(OperationCreate) || readOnly.Supports(OperationUpdate) {
 		t.Fatalf("read-only gateway capability = %#v", readOnly)

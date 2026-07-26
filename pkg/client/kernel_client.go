@@ -93,7 +93,7 @@ type KernelClient interface {
 }
 
 // ExternalConversationGatewayClient is the narrow lifecycle surface used by
-// hosts that advertise conversation-gateways/v1. Keeping it separate from the
+// hosts that advertise conversation-gateways/v2. Keeping it separate from the
 // base KernelClient lets older or read-only embedding surfaces remain honest.
 type ExternalConversationGatewayClient interface {
 	CreateExternalConversationGateway(context.Context, kernelapi.CreateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error)

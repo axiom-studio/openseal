@@ -21,6 +21,24 @@ type externalConversationGatewayHostStub struct {
 	result  *ExternalConversationGatewayHostResult
 }
 
+func createActiveExternalConversationGateway(t *testing.T, ctx context.Context, service *ExternalConversationGatewayService, request CreateExternalConversationGatewayRequest) *ExternalConversationGatewayRegistration {
+	t.Helper()
+	request.Status = ExternalConversationGatewayPaused
+	created, err := service.Create(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := ExternalConversationGatewayActive
+	activated, err := service.Update(ctx, request.Gateway.Scope, created.ID, UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: created.Revision, Status: &active,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "activate reviewed provider route",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return activated
+}
+
 func (h *externalConversationGatewayHostStub) NormalizeExternalConversationGateway(
 	_ context.Context,
 	request ExternalConversationGatewayHostRequest,
@@ -151,13 +169,10 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	}
 	service := NewExternalConversationTransportService(store, catalog)
 	gateways := NewExternalConversationGatewayService(store)
-	registration, err := gateways.Create(ctx, CreateExternalConversationGatewayRequest{
+	registration := createActiveExternalConversationGateway(t, ctx, gateways, CreateExternalConversationGatewayRequest{
 		ID: "shared-slack", Name: "Shared Slack events", Gateway: gateway,
-		Status: ExternalConversationGatewayActive,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create verified route acceptance",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	first, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost,
@@ -220,6 +235,7 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	paused := ExternalConversationGatewayPaused
 	registration, err = gateways.Update(ctx, registration.Gateway.Scope, registration.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: registration.Revision, Status: &paused,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pause ingress acceptance route",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -265,20 +281,16 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 			InstallationID: "T-shared", ApplicationID: "A-shared", Address: "C-shared", Event: event,
 		}},
 	}}
-	registration, err := NewExternalConversationGatewayService(store).Create(
-		ctx,
+	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store),
 		CreateExternalConversationGatewayRequest{
 			ID: "tenant-slack", Name: "Tenant Slack",
 			Gateway: ExternalConversationIngressGateway{
 				Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
 				Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 			},
-			Status: ExternalConversationGatewayActive,
+			Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create tenant isolation route",
 		},
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := NewExternalConversationTransportService(store, catalog).
 		NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
 			Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`),
@@ -351,7 +363,7 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 	if err := catalog.Bind(ctx, platformBinding); err != nil {
 		t.Fatal(err)
 	}
-	registration, err := NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
+	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "platform-slack", Name: "Platform Slack events",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: platformScope, DeploymentID: platformBinding.DeploymentID, Provider: "slack",
@@ -360,11 +372,8 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 				BindingRevision: platformBinding.Revision, AdapterID: "conversations",
 			},
 		},
-		Status: ExternalConversationGatewayActive,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create platform routing acceptance",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
 	service := NewExternalConversationTransportService(store, catalog)
 	invoke := func(eventID, installation string) (*ExternalConversationGatewayIngressResult, error) {
@@ -431,7 +440,7 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	gateway, err := NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
+	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Verification gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: scope, DeploymentID: binding.DeploymentID, Provider: "slack",
@@ -440,11 +449,8 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 				BindingRevision: binding.Revision, AdapterID: "conversations",
 			},
 		},
-		Status: ExternalConversationGatewayActive,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create provider verification route",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
 		StatusCode: http.StatusOK, ContentType: "text/plain", Body: []byte("verify-me"),
 	}}

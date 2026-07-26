@@ -32,9 +32,25 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
 	service := NewExternalConversationGatewayService(store)
+	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "unsafe-active", Name: "Unsafe active", Gateway: externalConversationGatewayFixture(scope),
+		Status: ExternalConversationGatewayActive,
+		Actor:  ActivityActor{Type: "test", ID: "operator"}, Reason: "prove review-first creation",
+	}); !errors.Is(err, ErrInvalidExternalConversation) {
+		t.Fatalf("active creation error = %v", err)
+	}
 	created, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
 		ID: "shared-slack", Name: "Shared Slack", Gateway: externalConversationGatewayFixture(scope),
-		Status: ExternalConversationGatewayActive,
+		Status: ExternalConversationGatewayPaused,
+		Actor:  ActivityActor{Type: "test", ID: "operator"}, Reason: "create shared Slack routing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := ExternalConversationGatewayActive
+	created, err = service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
+		ExpectedRevision: created.Revision, Status: &active,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "activate reviewed shared Slack routing",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,29 +69,42 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 	if err != nil || persisted.ID != created.ID || persisted.Status != ExternalConversationGatewayActive {
 		t.Fatalf("persisted gateway = %#v, err = %v", persisted, err)
 	}
+	if len(persisted.Lifecycle) != 2 || persisted.Lifecycle[0].Action != ExternalConversationGatewayCreated || persisted.Lifecycle[0].Reason != "create shared Slack routing" || persisted.Lifecycle[1].Action != ExternalConversationGatewayActivated {
+		t.Fatalf("persisted lifecycle = %#v", persisted.Lifecycle)
+	}
 
 	name := "Renamed Slack gateway"
 	updated, err := service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: created.Revision, Name: &name,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "use the reviewed display name",
 	})
-	if err != nil || updated.Revision != 2 || updated.Name != name {
+	if err != nil || updated.Revision != 3 || updated.Name != name {
 		t.Fatalf("updated gateway = %#v, err = %v", updated, err)
+	}
+	if len(updated.Lifecycle) != 3 || updated.Lifecycle[2].Action != ExternalConversationGatewayUpdated || updated.Lifecycle[2].Reason != "use the reviewed display name" {
+		t.Fatalf("updated lifecycle = %#v", updated.Lifecycle)
 	}
 	if _, err := service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: created.Revision, Name: &name,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "prove stale revision rejection",
 	}); !errors.Is(err, ErrExternalConversationConflict) {
 		t.Fatalf("stale update error = %v", err)
 	}
 	retired := ExternalConversationGatewayRetired
 	retiredGateway, err := service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: updated.Revision, Status: &retired,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "retire unused routing",
 	})
 	if err != nil || retiredGateway.Status != ExternalConversationGatewayRetired {
 		t.Fatalf("retired gateway = %#v, err = %v", retiredGateway, err)
 	}
+	if retiredGateway.Lifecycle[3].Action != ExternalConversationGatewayRetiredAction || retiredGateway.Lifecycle[3].Actor.ID != "operator" {
+		t.Fatalf("retirement lifecycle = %#v", retiredGateway.Lifecycle)
+	}
 	paused := ExternalConversationGatewayPaused
 	if _, err := service.Update(ctx, scope, created.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: retiredGateway.Revision, Status: &paused,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "prove retired state is immutable",
 	}); !errors.Is(err, ErrExternalConversationConflict) {
 		t.Fatalf("retired gateway mutation error = %v", err)
 	}
@@ -91,6 +120,7 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 	}
 	created, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
 		ID: "exact-slack", Name: "Exact Slack", Gateway: gateway,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create exact adapter routing",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +128,7 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 	gateway.Adapter.BindingRevision++
 	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
 		ID: "stale-slack", Name: "Stale Slack", Gateway: gateway,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "prove stale adapter rejection",
 	}); !errors.Is(err, ErrInvalidExternalConversation) {
 		t.Fatalf("stale exact adapter error = %v", err)
 	}
@@ -112,6 +143,7 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 	retired := ExternalConversationGatewayRetired
 	if result, err := service.Update(ctx, created.Gateway.Scope, created.ID, UpdateExternalConversationGatewayRequest{
 		ExpectedRevision: created.Revision, Status: &retired,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "safely stop stale routing",
 	}); err != nil || result.Status != ExternalConversationGatewayRetired {
 		t.Fatalf("stale gateway safety shutdown = %#v, %v", result, err)
 	}
@@ -183,7 +215,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	gateway, err := NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
+	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "synthetic-gateway", Name: "Synthetic gateway",
 		Gateway: ExternalConversationIngressGateway{
 			Scope: scope, DeploymentID: "synthetic-agent", Provider: "synthetic",
@@ -192,11 +224,8 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 			},
 		},
-		Status: ExternalConversationGatewayActive,
+		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create restart acceptance routing",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}

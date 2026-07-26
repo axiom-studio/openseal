@@ -59,7 +59,7 @@ const (
 	EventRoutingCapabilityID                   = "event-routing"
 	EventRoutingCapabilityVersion              = "1"
 	ConversationGatewaysCapabilityID           = "conversation-gateways"
-	ConversationGatewaysCapabilityVersion      = "1"
+	ConversationGatewaysCapabilityVersion      = "2"
 	SourcePoliciesCapabilityID                 = "source-policies"
 	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
 )
@@ -215,6 +215,22 @@ type WorkforceExecutionTargetList struct {
 	Candidates []WorkforceExecutionTargetCandidate `json:"candidates,omitempty"`
 }
 
+// ConversationGatewayAdapterChoice is a secret-free, exact adapter binding
+// that the current principal may use to create shared message routing. Hosts
+// derive these choices from their active deployment and Skill registries.
+type ConversationGatewayAdapterChoice struct {
+	ID              string `json:"id"`
+	DisplayName     string `json:"displayName"`
+	DeploymentID    string `json:"deploymentId"`
+	Provider        string `json:"provider"`
+	SkillID         string `json:"skillId"`
+	SkillVersion    string `json:"skillVersion"`
+	SourceIdentity  string `json:"sourceIdentity,omitempty"`
+	BindingID       string `json:"bindingId"`
+	BindingRevision int64  `json:"bindingRevision"`
+	AdapterID       string `json:"adapterId"`
+}
+
 type ActionApprovalCapabilityFeatures struct {
 	Resolution bool
 }
@@ -239,6 +255,7 @@ type CapabilityContext struct {
 	CredentialBindings           []capability.CredentialBindingChoice         `json:"credentialBindings,omitempty"`
 	BindingConfigurationFields   []capability.BindingConfigurationFieldChoice `json:"bindingConfigurationFields,omitempty"`
 	BlockingRequirements         []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
+	ConversationGatewayAdapters  []ConversationGatewayAdapterChoice           `json:"conversationGatewayAdapters,omitempty"`
 }
 
 type ClawHubVersionRequest struct {
@@ -446,15 +463,19 @@ func EventSourceSubscriptionsCapability() Capability {
 // ConversationGatewaysCapability describes lifecycle management for durable,
 // shared provider webhooks. Provider ingress itself is intentionally absent:
 // it is an opaque-route transport boundary rather than an operator command.
-func ConversationGatewaysCapability(management bool) Capability {
+func ConversationGatewaysCapability(management bool, choices ...[]ConversationGatewayAdapterChoice) Capability {
 	operations := []string{OperationGet, OperationList}
 	if management {
 		operations = append(operations, OperationCreate, OperationUpdate)
 	}
-	return Capability{
+	result := Capability{
 		ID: ConversationGatewaysCapabilityID, Version: ConversationGatewaysCapabilityVersion,
 		Available: true, Operations: operations,
 	}
+	if len(choices) > 0 && len(choices[0]) > 0 {
+		result.Context = &CapabilityContext{ConversationGatewayAdapters: choices[0]}
+	}
+	return result
 }
 
 func ActionCallsCapability() Capability {
@@ -794,6 +815,7 @@ type CreateExternalConversationGatewayRequest struct {
 	Name    string                                     `json:"name"`
 	Gateway runtime.ExternalConversationIngressGateway `json:"gateway"`
 	Status  runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
+	Reason  string                                     `json:"reason"`
 }
 
 type UpdateExternalConversationGatewayRequest struct {
@@ -801,6 +823,7 @@ type UpdateExternalConversationGatewayRequest struct {
 	Name             *string                                     `json:"name,omitempty"`
 	Gateway          *runtime.ExternalConversationIngressGateway `json:"gateway,omitempty"`
 	Status           *runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
+	Reason           string                                      `json:"reason"`
 }
 
 type UpdateEventSourceSubscriptionRequest struct {
