@@ -51,6 +51,14 @@ func TestPublicFacadeExposesEventSourceSubscriptions(t *testing.T) {
 	}
 }
 
+func TestPublicFacadeExposesConversationGatewayChoices(t *testing.T) {
+	choice := ConversationGatewayAdapterChoice{ID: "slack-primary", DisplayName: "Primary Slack", DeploymentID: "agent-one", Provider: "slack", SkillID: "slack", SkillVersion: "1", BindingID: "binding", BindingRevision: 2, AdapterID: "events"}
+	capability := ConversationGatewaysCapability(true, []ConversationGatewayAdapterChoice{choice})
+	if capability.ID != ConversationGatewaysCapabilityID || capability.Version != ConversationGatewaysCapabilityVersion || capability.Context == nil || len(capability.Context.ConversationGatewayAdapters) != 1 || capability.Context.ConversationGatewayAdapters[0] != choice {
+		t.Fatalf("conversation gateway capability = %#v", capability)
+	}
+}
+
 func TestPublicFacadeDecodesObjectiveEventRulesForHostConnectors(t *testing.T) {
 	rules, err := DecodeObjectiveEventRules(map[string]interface{}{
 		"version": "1",

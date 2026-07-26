@@ -854,6 +854,7 @@ type (
 	KernelCapabilityDocument              = kernelapi.CapabilityDocument
 	KernelCapabilityContext               = kernelapi.CapabilityContext
 	KernelCapabilityBlockingRequirement   = kernelapi.CapabilityBlockingRequirement
+	ConversationGatewayAdapterChoice      = kernelapi.ConversationGatewayAdapterChoice
 	CredentialBindingChoice               = capability.CredentialBindingChoice
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	KernelSkillActionList                 = kernelapi.SkillActionList
@@ -1056,8 +1057,8 @@ func EventSourceSubscriptionsCapability() KernelCapability {
 	return kernelapi.EventSourceSubscriptionsCapability()
 }
 
-func ConversationGatewaysCapability(management bool) KernelCapability {
-	return kernelapi.ConversationGatewaysCapability(management)
+func ConversationGatewaysCapability(management bool, choices ...[]ConversationGatewayAdapterChoice) KernelCapability {
+	return kernelapi.ConversationGatewaysCapability(management, choices...)
 }
 
 func EventRoutingCapability() KernelCapability {
