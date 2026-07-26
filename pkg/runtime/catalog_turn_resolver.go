@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // AgentTurnCatalog is the portable, product-neutral catalog required to bind
@@ -183,7 +184,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if config.Host == nil {
 		return nil, ErrTurnHostUnavailable
 	}
-	eligibleAgents, err := resolveHostedAgentTargets(ctx, catalog, scope, deployment.ID)
+	eligibleAgents, err := resolveHostedAgentTargets(ctx, catalog, scope, run, deployment.ID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve eligible Agent delegation targets: %w", err)
 	}
@@ -254,8 +255,32 @@ func resolveHostedAgentTargets(
 	ctx context.Context,
 	catalog AgentTurnCatalog,
 	scope skill.ScopeReference,
+	run *AgentRun,
 	currentDeploymentID string,
 ) ([]HostedAgentTarget, error) {
+	if run == nil || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" {
+		return nil, nil
+	}
+	teamCatalog, ok := catalog.(TeamSkillAuthorityCatalog)
+	if !ok {
+		return nil, errors.New("Team delegation authority resolution is unavailable")
+	}
+	teamDeployment, err := teamCatalog.GetTeamDeployment(ctx, scope, run.Owner.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Team delegation roster: %w", err)
+	}
+	if teamDeployment == nil || teamDeployment.Status != kernelteam.DeploymentActive {
+		return nil, errors.New("Team delegation roster is not active")
+	}
+	allowed := make(map[string]struct{}, len(teamDeployment.Roster))
+	for _, assignment := range teamDeployment.Roster {
+		if id := strings.TrimSpace(assignment.AgentDeploymentID); id != "" && id != currentDeploymentID {
+			allowed[id] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, nil
+	}
 	deployments, err := catalog.ListAgentDeployments(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -264,6 +289,9 @@ func resolveHostedAgentTargets(
 	for _, candidate := range deployments {
 		if candidate == nil || candidate.ID == currentDeploymentID ||
 			candidate.RolloutStatus != kernelagent.RolloutActive || strings.TrimSpace(candidate.ActiveVersion) == "" {
+			continue
+		}
+		if _, authorized := allowed[candidate.ID]; !authorized {
 			continue
 		}
 		definition, err := catalog.GetAgentDefinition(ctx, candidate.DefinitionID, candidate.ActiveVersion)
@@ -277,6 +305,9 @@ func resolveHostedAgentTargets(
 			ID: strings.TrimSpace(candidate.ID), DisplayName: strings.TrimSpace(definition.DisplayName),
 			Purpose: strings.TrimSpace(definition.Purpose),
 		})
+	}
+	if len(targets) != len(allowed) {
+		return nil, errors.New("Team delegation roster contains an unavailable Agent")
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
 	return targets, nil

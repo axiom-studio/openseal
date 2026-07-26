@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -231,10 +232,17 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 		activation: &skill.ActivationSnapshot{
 			SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID,
 		},
+		teamDeployment: &kernelteam.Deployment{
+			ID: "release-team", Scope: current.Scope, DefinitionID: "release-team", ActiveVersion: "1",
+			Status: kernelteam.DeploymentActive, Roster: []kernelteam.RosterAssignment{
+				{ID: "lead", AgentDeploymentID: current.ID},
+				{ID: "reviewer", AgentDeploymentID: reviewer.ID},
+			},
+		},
 	}
 	run := &AgentRun{
 		ID: "run", Scope: scope, Kind: RunKindAgentWork,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID,
+		Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: current.ID,
 		Goal: "Delegate a release review", Context: map[string]interface{}{},
 	}
 	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
@@ -247,6 +255,44 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 	if len(host.request.EligibleAgents) != 1 ||
 		host.request.EligibleAgents[0] != (HostedAgentTarget{ID: "reviewer-7", DisplayName: "Release Reviewer", Purpose: "Review releases"}) {
 		t.Fatalf("eligible Agents = %#v", host.request.EligibleAgents)
+	}
+}
+
+func TestCatalogTurnResolverDoesNotProjectTenantDirectoryIntoStandaloneAgent(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
+	}}
+	current := &kernelagent.AgentDeployment{ID: "standalone", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "standalone", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
+	deployments := []*kernelagent.AgentDeployment{current}
+	definitions := map[string]*kernelagent.AgentDefinition{
+		"standalone@1": {ID: "standalone", Version: "1", DisplayName: "Standalone", Purpose: "Work independently", SystemPrompt: "Work safely."},
+	}
+	for index := 0; index < 200; index++ {
+		id := fmt.Sprintf("tenant-agent-%03d", index)
+		definitionID := id + "-definition"
+		deployments = append(deployments, &kernelagent.AgentDeployment{ID: id, Scope: current.Scope, DefinitionID: definitionID, ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive})
+		definitions[definitionID+"@1"] = &kernelagent.AgentDefinition{ID: definitionID, Version: "1", DisplayName: id, Purpose: strings.Repeat("unrelated tenant purpose ", 8)}
+	}
+	catalog := &resolverCatalog{
+		deployment: current, deployments: deployments, definitions: definitions,
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
+	}
+	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID, Goal: "Answer concisely", Context: map[string]interface{}{}}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.EligibleAgents) != 0 {
+		t.Fatalf("standalone Agent received tenant directory: %#v", host.request.EligibleAgents)
+	}
+	estimate, err := EstimateHostedTurnInputTokens(host.request)
+	if err != nil || estimate >= HostedTurnMinimumChildInputTokens {
+		t.Fatalf("minimal standalone estimate = %d, %v", estimate, err)
 	}
 }
 
