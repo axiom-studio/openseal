@@ -86,6 +86,42 @@ func TestOpenAICompatibleGeneratorEmitsExplicitThinkingMode(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleGeneratorReportsRefusalWithoutReturningContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"","refusal":"I cannot create that workforce."}}]}`))
+	}))
+	defer server.Close()
+
+	generator, err := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"})
+	var refusal *ProviderRefusalError
+	if !errors.As(err, &refusal) || refusal.Reason != "I cannot create that workforce." {
+		t.Fatalf("refusal error = %#v", err)
+	}
+}
+
+func TestOpenAICompatibleGeneratorRejectsTruncatedCompletion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length","message":{"content":"{\"candidate\":"}}]}`))
+	}))
+	defer server.Close()
+
+	generator, err := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"})
+	var incomplete *ProviderIncompleteError
+	if !errors.As(err, &incomplete) || incomplete.FinishReason != "length" {
+		t.Fatalf("incomplete error = %#v", err)
+	}
+}
+
 func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testing.T) {
 	var modelRequest GenerateRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
