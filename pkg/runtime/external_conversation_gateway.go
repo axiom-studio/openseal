@@ -18,34 +18,64 @@ var (
 
 type ExternalConversationGatewayStatus string
 
+type ExternalConversationGatewayLifecycleAction string
+
 const (
 	ExternalConversationGatewayActive  ExternalConversationGatewayStatus = "active"
 	ExternalConversationGatewayPaused  ExternalConversationGatewayStatus = "paused"
 	ExternalConversationGatewayRetired ExternalConversationGatewayStatus = "retired"
+
+	ExternalConversationGatewayCreated       ExternalConversationGatewayLifecycleAction = "created"
+	ExternalConversationGatewayActivated     ExternalConversationGatewayLifecycleAction = "activated"
+	ExternalConversationGatewayPausedAction  ExternalConversationGatewayLifecycleAction = "paused"
+	ExternalConversationGatewayRetiredAction ExternalConversationGatewayLifecycleAction = "retired"
+	ExternalConversationGatewayUpdated       ExternalConversationGatewayLifecycleAction = "updated"
 )
+
+type ExternalConversationGatewayLifecycleEntry struct {
+	Revision int64                                      `json:"revision"`
+	Action   ExternalConversationGatewayLifecycleAction `json:"action"`
+	Actor    ActivityActor                              `json:"actor"`
+	Reason   string                                     `json:"reason"`
+	At       time.Time                                  `json:"at"`
+}
 
 // ExternalConversationGatewayRegistration is the durable, host-owned binding
 // for one shared provider webhook. IngressRoute is public but unguessable;
 // provider authentication remains the responsibility of the exact Skill
 // adapter pinned by Gateway.
 type ExternalConversationGatewayRegistration struct {
-	ID           string                             `json:"id"`
-	IngressRoute string                             `json:"ingressRoute"`
-	Name         string                             `json:"name"`
-	Gateway      ExternalConversationIngressGateway `json:"gateway"`
-	Status       ExternalConversationGatewayStatus  `json:"status"`
-	Revision     int64                              `json:"revision"`
-	CreatedAt    time.Time                          `json:"createdAt"`
-	UpdatedAt    time.Time                          `json:"updatedAt"`
-	RetiredAt    *time.Time                         `json:"retiredAt,omitempty"`
+	ID           string                                      `json:"id"`
+	IngressRoute string                                      `json:"ingressRoute"`
+	Name         string                                      `json:"name"`
+	Gateway      ExternalConversationIngressGateway          `json:"gateway"`
+	Status       ExternalConversationGatewayStatus           `json:"status"`
+	Revision     int64                                       `json:"revision"`
+	CreatedAt    time.Time                                   `json:"createdAt"`
+	UpdatedAt    time.Time                                   `json:"updatedAt"`
+	RetiredAt    *time.Time                                  `json:"retiredAt,omitempty"`
+	Lifecycle    []ExternalConversationGatewayLifecycleEntry `json:"lifecycle"`
 }
 
 func (g *ExternalConversationGatewayRegistration) Validate() error {
 	if g == nil || !validOpaqueIdentifier(strings.TrimSpace(g.ID), 256) ||
 		!validOpaqueIdentifier(strings.TrimSpace(g.IngressRoute), 128) ||
 		strings.TrimSpace(g.Name) == "" || len(g.Name) > 160 ||
-		g.Revision < 1 || g.CreatedAt.IsZero() || g.UpdatedAt.IsZero() || g.UpdatedAt.Before(g.CreatedAt) {
+		g.Revision < 1 || g.CreatedAt.IsZero() || g.UpdatedAt.IsZero() || g.UpdatedAt.Before(g.CreatedAt) ||
+		len(g.Lifecycle) == 0 {
 		return ErrInvalidExternalConversation
+	}
+	var previousRevision int64
+	for index, entry := range g.Lifecycle {
+		if entry.Revision < 1 || (index > 0 && entry.Revision <= previousRevision) || strings.TrimSpace(entry.Actor.Type) == "" ||
+			strings.TrimSpace(entry.Actor.ID) == "" || strings.TrimSpace(entry.Reason) == "" ||
+			len(entry.Reason) > 2_000 || entry.At.IsZero() {
+			return fmt.Errorf("%w: gateway lifecycle is invalid", ErrInvalidExternalConversation)
+		}
+		previousRevision = entry.Revision
+	}
+	if g.Lifecycle[len(g.Lifecycle)-1].Revision != g.Revision {
+		return fmt.Errorf("%w: gateway lifecycle revision does not match", ErrInvalidExternalConversation)
 	}
 	if err := g.Gateway.Validate(); err != nil {
 		return err
@@ -78,6 +108,8 @@ type CreateExternalConversationGatewayRequest struct {
 	Name    string
 	Gateway ExternalConversationIngressGateway
 	Status  ExternalConversationGatewayStatus
+	Actor   ActivityActor
+	Reason  string
 }
 
 type UpdateExternalConversationGatewayRequest struct {
@@ -85,6 +117,8 @@ type UpdateExternalConversationGatewayRequest struct {
 	Name             *string
 	Gateway          *ExternalConversationIngressGateway
 	Status           *ExternalConversationGatewayStatus
+	Actor            ActivityActor
+	Reason           string
 }
 
 type ExternalConversationGatewayStore interface {
@@ -124,11 +158,21 @@ func (s *ExternalConversationGatewayService) Create(
 	if status == "" {
 		status = ExternalConversationGatewayPaused
 	}
+	if status != ExternalConversationGatewayPaused {
+		return nil, fmt.Errorf("%w: gateway creation must begin paused", ErrInvalidExternalConversation)
+	}
 	now := s.now().UTC()
+	if err := validateExternalConversationGatewayMutation(request.Actor, request.Reason); err != nil {
+		return nil, err
+	}
 	value := &ExternalConversationGatewayRegistration{
 		ID: strings.TrimSpace(request.ID), IngressRoute: s.newID(),
 		Name: strings.TrimSpace(request.Name), Gateway: request.Gateway,
 		Status: status, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Lifecycle: []ExternalConversationGatewayLifecycleEntry{{
+			Revision: 1, Action: ExternalConversationGatewayCreated, Actor: request.Actor,
+			Reason: strings.TrimSpace(request.Reason), At: now,
+		}},
 	}
 	if value.ID == "" {
 		value.ID = s.newID()
@@ -206,6 +250,10 @@ func (s *ExternalConversationGatewayService) Update(
 	if request.ExpectedRevision != current.Revision {
 		return nil, ErrExternalConversationConflict
 	}
+	if err := validateExternalConversationGatewayMutation(request.Actor, request.Reason); err != nil {
+		return nil, err
+	}
+	previousStatus := current.Status
 	if request.Name != nil {
 		current.Name = strings.TrimSpace(*request.Name)
 	}
@@ -226,6 +274,10 @@ func (s *ExternalConversationGatewayService) Update(
 	}
 	current.Revision++
 	current.UpdatedAt = now
+	current.Lifecycle = append(current.Lifecycle, ExternalConversationGatewayLifecycleEntry{
+		Revision: current.Revision, Action: externalConversationGatewayLifecycleAction(previousStatus, request.Status),
+		Actor: request.Actor, Reason: strings.TrimSpace(request.Reason), At: now,
+	})
 	if err := current.Validate(); err != nil {
 		return nil, err
 	}
@@ -241,6 +293,30 @@ func (s *ExternalConversationGatewayService) Update(
 		return nil, err
 	}
 	return cloneExternalConversationGateway(current), nil
+}
+
+func validateExternalConversationGatewayMutation(actor ActivityActor, reason string) error {
+	if strings.TrimSpace(actor.Type) == "" || strings.TrimSpace(actor.ID) == "" ||
+		strings.TrimSpace(reason) == "" || len(strings.TrimSpace(reason)) > 2_000 {
+		return fmt.Errorf("%w: gateway lifecycle requires an actor and concise reason", ErrInvalidExternalConversation)
+	}
+	return nil
+}
+
+func externalConversationGatewayLifecycleAction(previous ExternalConversationGatewayStatus, status *ExternalConversationGatewayStatus) ExternalConversationGatewayLifecycleAction {
+	if status == nil || *status == previous {
+		return ExternalConversationGatewayUpdated
+	}
+	switch *status {
+	case ExternalConversationGatewayActive:
+		return ExternalConversationGatewayActivated
+	case ExternalConversationGatewayPaused:
+		return ExternalConversationGatewayPausedAction
+	case ExternalConversationGatewayRetired:
+		return ExternalConversationGatewayRetiredAction
+	default:
+		return ExternalConversationGatewayUpdated
+	}
 }
 
 // resolveGateway proves that a lifecycle mutation still points at the exact,
@@ -282,6 +358,7 @@ func cloneExternalConversationGateway(value *ExternalConversationGatewayRegistra
 		retired := *value.RetiredAt
 		copy.RetiredAt = &retired
 	}
+	copy.Lifecycle = append([]ExternalConversationGatewayLifecycleEntry(nil), value.Lifecycle...)
 	return &copy
 }
 
