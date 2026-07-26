@@ -130,6 +130,22 @@ func TestScheduleIntentAmbiguousRecurrenceProducesTypedGuidance(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentNaturalOnceDailyLanguageRequestsMissingClockAndTimezone(t *testing.T) {
+	for _, prompt := range []string{
+		"Create one Agent that posts once a day",
+		"Create one Agent that runs every single day",
+		"Create one Agent that posts every single day, once a day",
+	} {
+		t.Run(prompt, func(t *testing.T) {
+			result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), nil, nil)
+			if result.Valid || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 ||
+				len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
+				t.Fatalf("natural once-daily candidate = %#v", result)
+			}
+		})
+	}
+}
+
 func TestScheduleIntentQuestionDefersScheduleBlockedSourceMaterialization(t *testing.T) {
 	candidate := scheduledAuthoringCandidate(map[string]interface{}{
 		"type": "interval", "intervalSeconds": float64(300),

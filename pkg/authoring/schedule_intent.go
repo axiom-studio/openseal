@@ -128,7 +128,10 @@ func parseScheduleIntent(value string) scheduleIntent {
 	}
 
 	frequency := ""
-	if containsWord(lower, "daily") || containsSchedulePhrase(lower, "every day") {
+	if containsWord(lower, "daily") ||
+		containsSchedulePhrase(lower, "every day") ||
+		containsSchedulePhrase(lower, "every single day") ||
+		containsSchedulePhrase(lower, "once a day") {
 		frequency = "daily"
 	} else if containsWord(lower, "weekly") || containsSchedulePhrase(lower, "every week") {
 		frequency = "weekly"
