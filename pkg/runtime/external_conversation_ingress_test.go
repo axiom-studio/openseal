@@ -185,6 +185,37 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	if err != nil || len(unmatched.Received) != 0 {
 		t.Fatalf("wrong app shared ingress = %#v err=%v", unmatched, err)
 	}
+	for _, mutation := range []struct {
+		name         string
+		installation string
+		address      string
+	}{
+		{name: "wrong installation", installation: "wrong-team", address: "C123"},
+		{name: "wrong address", installation: "T123", address: "wrong-channel"},
+	} {
+		host.result.Events[0].InstallationID = mutation.installation
+		host.result.Events[0].ApplicationID = "A123"
+		host.result.Events[0].Address = mutation.address
+		unmatched, err = service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+			Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`),
+		}, host)
+		if err != nil || len(unmatched.Received) != 0 {
+			t.Fatalf("%s shared ingress = %#v err=%v", mutation.name, unmatched, err)
+		}
+	}
+	host.result.Events[0].InstallationID, host.result.Events[0].Address = "T123", "C123"
+	previousRevision = endpoint.Revision
+	endpoint.Status, endpoint.Revision = ExternalConversationEndpointPaused, endpoint.Revision+1
+	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+		t.Fatal(err)
+	}
+	unmatched, err = service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`),
+	}, host)
+	if err != nil || len(unmatched.Received) != 0 {
+		t.Fatalf("paused endpoint shared ingress = %#v err=%v", unmatched, err)
+	}
 
 	paused := ExternalConversationGatewayPaused
 	registration, err = gateways.Update(ctx, registration.Gateway.Scope, registration.ID, UpdateExternalConversationGatewayRequest{
