@@ -1282,6 +1282,22 @@ func validateRefinementAnswer(question RefinementQuestion, value RefinementAnswe
 	return nil
 }
 
+// unansweredRefinementQuestions makes durable answers authoritative even when
+// a provider repeats a stable question during refinement. A question is
+// suppressed only while its stored answer still validates against the current
+// schema; a materially changed question remains visible for review.
+func unansweredRefinementQuestions(questions []RefinementQuestion, refinement ChangeSetRefinement) []RefinementQuestion {
+	result := make([]RefinementQuestion, 0, len(questions))
+	for _, question := range questions {
+		answer := refinement.CurrentAnswer(question.ID)
+		if answer != nil && validateRefinementAnswer(question, answer.Value) == nil {
+			continue
+		}
+		result = append(result, question)
+	}
+	return result
+}
+
 func normalizeRefinementAnswerValue(value RefinementAnswerValue) RefinementAnswerValue {
 	value.Text = strings.TrimSpace(value.Text)
 	value.Items = nonEmptyUnique(value.Items)

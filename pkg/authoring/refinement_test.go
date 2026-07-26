@@ -390,6 +390,27 @@ func TestProviderRefinementProjectionRedactsOpaqueCredentialReference(t *testing
 	}
 }
 
+func TestAnsweredRefinementQuestionsRemainResolvedAcrossProviderRetries(t *testing.T) {
+	credential := RefinementQuestion{
+		ID: "browser-binding", Category: RefinementCategoryCredential, Prompt: "Choose credential", WhyNeeded: "Browser login",
+		Blocking: []RefinementBlockingScope{RefinementBlocksApply},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference}, Priority: 1,
+	}
+	refinement := ChangeSetRefinement{Answers: []RefinementAnswerEvent{{
+		QuestionID: credential.ID,
+		Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{
+			Kind: "http_basic_auth", ID: "vault://reddit-fixture.username",
+		}},
+	}}}
+	if questions := unansweredRefinementQuestions([]RefinementQuestion{credential}, refinement); len(questions) != 0 {
+		t.Fatalf("answered provider question was reopened: %#v", questions)
+	}
+	credential.Answer.Kind = RefinementAnswerBoolean
+	if questions := unansweredRefinementQuestions([]RefinementQuestion{credential}, refinement); len(questions) != 1 {
+		t.Fatalf("materially changed question was hidden: %#v", questions)
+	}
+}
+
 func TestRefinementSkillOptionsMustBeTruthfulAuthorizedCatalogEntries(t *testing.T) {
 	question := RefinementQuestion{ID: "skill", Category: RefinementCategorySkill, Prompt: "Choose Skill", WhyNeeded: "Capability required", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Options: []RefinementQuestionOption{{ID: "invented", Label: "Invented"}}}, Priority: 1, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}}}
 	if err := validateRefinementCatalog([]RefinementQuestion{question}, CapabilityCatalog{}); err == nil {
