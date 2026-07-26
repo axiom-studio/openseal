@@ -890,34 +890,38 @@ func TestCompilerNormalizesDefinitionProvenanceKindAlias(t *testing.T) {
 	}
 }
 
-func TestCompilerLiftsUnambiguousCandidateCommitments(t *testing.T) {
+func TestCompilerLiftsUnambiguousCandidateResponseMetadata(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	agentCount := 1
 	payload, _ := json.Marshal(GenerationResponse{
-		Candidate:   candidate,
-		Commitments: PromptCommitments{AgentCount: &agentCount},
+		Candidate: candidate, Commitments: PromptCommitments{AgentCount: &agentCount},
+		Assumptions: []string{"The operator will review the proposal."},
+		UnresolvedQuestions: []RefinementQuestion{{
+			ID: "scope", Category: RefinementCategoryScope, Prompt: "Which scope?", WhyNeeded: "Execution must be bounded.",
+			Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerText},
+			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}}, Priority: 1,
+		}},
 	})
-	payload = bytes.Replace(payload, []byte(`"commitments":`), []byte(`"candidateCommitments":`), 1)
 	var document map[string]interface{}
 	if err := json.Unmarshal(payload, &document); err != nil {
 		t.Fatal(err)
 	}
-	commitments := document["candidateCommitments"]
-	delete(document, "candidateCommitments")
-	document["candidate"].(map[string]interface{})["commitments"] = commitments
+	for _, field := range []string{"commitments", "assumptions", "unresolvedQuestions"} {
+		document["candidate"].(map[string]interface{})[field] = document[field]
+		delete(document, field)
+	}
 	payload, _ = json.Marshal(document)
 
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create one Agent."})
-	if err != nil || result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 1 {
-		t.Fatalf("lifted commitments result=%#v err=%v", result, err)
+	result, err := decodeGenerationResponse(payload)
+	if err != nil || result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 1 ||
+		len(result.Assumptions) != 1 || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("lifted response metadata result=%#v err=%v", result, err)
 	}
 
-	document["commitments"] = commitments
+	document["unresolvedQuestions"] = document["candidate"].(map[string]interface{})["unresolvedQuestions"]
 	ambiguous, _ := json.Marshal(document)
-	strict, _ := NewCompiler(staticGenerator{payload: ambiguous})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create one Agent."}); err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("ambiguous commitments placement must remain strict, got %v", err)
+	if _, err := decodeGenerationResponse(ambiguous); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("ambiguous response metadata placement must remain strict, got %v", err)
 	}
 }
 
