@@ -488,6 +488,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
 	}
 	result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, request.Catalog, request.Placement)
+	result.UnresolvedQuestions = placementAwareUnresolvedQuestions(result.UnresolvedQuestions, result.MissingRequirements)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
@@ -795,6 +796,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
 	}
 	result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, changeSet.Catalog, changeSet.Placement)
+	result.UnresolvedQuestions = placementAwareUnresolvedQuestions(result.UnresolvedQuestions, result.MissingRequirements)
 	result.RiskChanges = riskChanges(existing, &result.Candidate)
 	result.Diff = workforceDiff(existing, &result.Candidate)
 	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
@@ -1302,6 +1304,7 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	next := cloneChangeSet(current)
 	next.Placement = clonePlacement(request.Placement)
 	next.Result.MissingRequirements = placementAwareMissingRequirements(&next.Result.Candidate, next.Catalog, next.Placement)
+	next.Result.UnresolvedQuestions = placementAwareUnresolvedQuestions(next.Result.UnresolvedQuestions, next.Result.MissingRequirements)
 	// Readiness findings are derived from the exact placement. Clear the stale
 	// projection when placement changes; the next governed ready transition
 	// recomputes it against the newly selected immutable resources.
@@ -1828,6 +1831,34 @@ func placementAwareMissingRequirements(candidate *WorkforceCandidate, catalog Ca
 			continue
 		}
 		resolved = append(resolved, requirement)
+	}
+	return resolved
+}
+
+// placementAwareUnresolvedQuestions removes model-authored credential prompts
+// after the host has already proven that the reviewed placement satisfies every
+// required opaque binding. The model never sees credential references, so it
+// may conservatively ask for one even though the host selected it before or
+// during generation. Keeping that question would make a valid proposal ask the
+// operator to repeat a secret-adjacent decision without changing any durable
+// authority.
+func placementAwareUnresolvedQuestions(questions []RefinementQuestion, missing []MissingRequirement) []RefinementQuestion {
+	credentialBindingMissing := false
+	for _, requirement := range missing {
+		if requirement.Kind == "credential" || requirement.Kind == "skill_binding" {
+			credentialBindingMissing = true
+			break
+		}
+	}
+	if credentialBindingMissing {
+		return questions
+	}
+	resolved := make([]RefinementQuestion, 0, len(questions))
+	for _, question := range questions {
+		if question.Category == RefinementCategoryCredential {
+			continue
+		}
+		resolved = append(resolved, question)
 	}
 	return resolved
 }

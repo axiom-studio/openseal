@@ -952,6 +952,32 @@ func TestPlacementAwareMissingRequirementsRequiresExactNamedSkillCredential(t *t
 	}
 }
 
+func TestPlacementAwareQuestionsDropSatisfiedCredentialPrompt(t *testing.T) {
+	credential := RefinementQuestion{
+		ID: "skill-browser-binding", Category: RefinementCategoryCredential,
+		Prompt: "Select an authorized Browser credential.", WhyNeeded: "Login requires it.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate, RefinementBlocksApply},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference},
+	}
+	policy := RefinementQuestion{
+		ID: "write-policy", Category: RefinementCategoryApproval,
+		Prompt: "Who approves writes?", WhyNeeded: "Writes are governed.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksApply},
+		Answer:   RefinementAnswerSchema{Kind: RefinementAnswerText},
+	}
+
+	questions := placementAwareUnresolvedQuestions([]RefinementQuestion{credential, policy}, nil)
+	if len(questions) != 1 || questions[0].ID != policy.ID {
+		t.Fatalf("satisfied placement questions = %#v", questions)
+	}
+	questions = placementAwareUnresolvedQuestions([]RefinementQuestion{credential, policy}, []MissingRequirement{{
+		Kind: "skill_binding", ID: "skill-browser", RequiredBy: "agent:researcher",
+	}})
+	if len(questions) != 2 {
+		t.Fatalf("missing placement questions = %#v", questions)
+	}
+}
+
 func TestSourceMonitorUsesAssignedAgentSkillBindingPlacement(t *testing.T) {
 	const agentID = "tenant/one/researcher"
 	candidate := WorkforceCandidate{
