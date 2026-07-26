@@ -140,7 +140,10 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := skill.NewCatalogWithStore(store).Register(ctx, slackConversationSkillDefinition()); err != nil {
+	const slackSourceIdentity = "https://github.com/axiom-studio/openseal::slack-conversations"
+	installedSlack := slackConversationSkillDefinition()
+	installedSlack.Source = &skill.SourceProvenance{Identity: slackSourceIdentity, Format: "openseal.skill.v1"}
+	if err := skill.NewCatalogWithStore(store).Register(ctx, installedSlack); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -204,7 +207,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		}},
 		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
 			"slack": {
-				ID: "slack", Version: "1.0.0", Readiness: authoring.SkillReadinessReady,
+				ID: "slack", Version: "1.0.0", SourceIdentity: slackSourceIdentity, Readiness: authoring.SkillReadinessReady,
 				ConversationAdapters: []authoring.ConversationAdapterCapability{{
 					ID: "conversations", ProtocolVersion: capability.ConversationAdapterProtocolV1,
 					Provider: "slack", EndpointModes: []capability.ConversationEndpointMode{capability.ConversationEndpointChannel},
@@ -255,6 +258,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	)
 	if err != nil || endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
 		endpoint.DeploymentID != "slack-agent-live" || endpoint.Adapter.BindingRevision != 1 ||
+		endpoint.Adapter.SourceIdentity != slackSourceIdentity ||
 		endpoint.Handler.Kind != ExternalConversationHandlerRunbook || endpoint.Handler.Trigger != "on-message" ||
 		endpoint.Handler.AssignedAgentID != "slack-agent-live" {
 		t.Fatalf("materialized endpoint=%#v err=%v", endpoint, err)
@@ -287,6 +291,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	}
 	bindings, err := store.ListSkillBindings(ctx, scope, "slack-agent-live")
 	if err != nil || len(bindings) != 1 || len(bindings[0].AllowedActions) != 0 ||
+		bindings[0].SourceIdentity != slackSourceIdentity ||
 		len(bindings[0].EnabledConversationAdapters) != 1 ||
 		bindings[0].EnabledConversationAdapters[0] != "conversations" ||
 		bindings[0].Credentials["SLACK_CONNECTION"].ID != "connection://tenant/one/slack" {
