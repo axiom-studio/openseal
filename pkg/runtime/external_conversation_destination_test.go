@@ -20,7 +20,7 @@ func TestConversationDestinationDiscoveryBuildsBoundedArgumentsAndProjectsOnlyMa
 		Binding: &capability.Binding{Scope: capability.ScopeReference{Kind: "tenant", ID: "7"}, DeploymentID: "agent-1"},
 	}
 	request := ExternalConversationDestinationDiscoveryRequest{
-		Scope: Scope{Kind: "tenant", ID: "7"}, DeploymentID: "agent-1", Adapter: adapter,
+		Scope: Scope{Kind: "tenant", ID: "7"}, DeploymentID: "agent-1", ExecutionDeploymentID: "agent-1", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Cursor: "cursor-1", Query: "product", Limit: 25,
 	}
 	resolved, arguments, err := ConversationDestinationDiscoveryArguments(request)
