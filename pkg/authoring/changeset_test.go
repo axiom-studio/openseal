@@ -952,6 +952,50 @@ func TestPlacementAwareMissingRequirementsRequiresExactNamedSkillCredential(t *t
 	}
 }
 
+func TestSourceMonitorUsesAssignedAgentSkillBindingPlacement(t *testing.T) {
+	const agentID = "tenant/one/researcher"
+	candidate := WorkforceCandidate{
+		Agents: []*agent.AgentDefinition{{
+			ID: agentID,
+			SkillRequirements: []agent.SkillRequirement{{
+				SkillID: "skill-browser", RequiredActions: []string{"browser-open", "browser-fill-secret"},
+			}},
+		}},
+		Initiative: &InitiativeBlueprint{
+			ID: "research",
+			SourceMonitors: []InitiativeSourceMonitorBlueprint{{
+				ID: "reddit", AssignedAgentDefinitionID: agentID, SkillID: "skill-browser",
+			}},
+		},
+	}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"skill-browser": {
+			ID: "skill-browser", Readiness: SkillReadinessNeedsBinding,
+			Actions: []string{"browser-open", "browser-fill-secret"},
+			Credentials: []SkillCredential{
+				{Name: "username", Kind: "http_basic_auth", Actions: []string{"browser-fill-secret"}},
+				{Name: "password", Kind: "http_basic_auth", Actions: []string{"browser-fill-secret"}},
+			},
+		},
+	}}
+	requirement := MissingRequirement{
+		Kind: "skill_binding", ID: "skill-browser", RequiredBy: "initiative:research/monitor:reddit",
+	}
+	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		agentID: {
+			"username": {Kind: "http_basic_auth", ID: "vault://reddit-fixture.username"},
+			"password": {Kind: "http_basic_auth", ID: "vault://reddit-fixture.password"},
+		},
+	}}
+	if !skillBindingPlacementPresent(&candidate, requirement, catalog, placement) {
+		t.Fatal("source monitor ignored its assigned Agent credential placement")
+	}
+	delete(placement.CredentialReferences[agentID], "password")
+	if skillBindingPlacementPresent(&candidate, requirement, catalog, placement) {
+		t.Fatal("source monitor accepted an incomplete assigned Agent credential placement")
+	}
+}
+
 func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallation(t *testing.T) {
 	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
 		ID: "tenant/one/researcher",
