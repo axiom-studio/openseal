@@ -666,9 +666,19 @@ func retainAnsweredSkillSelections(changeSet *ChangeSet, catalog *CapabilityCata
 				catalog.Skills[selectedID] = reviewed
 				continue
 			}
-			if strings.TrimSpace(fresh.Version) != strings.TrimSpace(reviewed.Version) ||
-				strings.TrimSpace(fresh.SourceIdentity) != strings.TrimSpace(reviewed.SourceIdentity) {
+			if strings.TrimSpace(fresh.SourceIdentity) != strings.TrimSpace(reviewed.SourceIdentity) {
 				return fmt.Errorf("answered Skill %s changed immutable source or version", selectedID)
+			}
+			if strings.TrimSpace(fresh.Version) != strings.TrimSpace(reviewed.Version) {
+				// A reviewed installable Skill can intentionally be a newer exact
+				// version than the ordinary enabled catalog, which still describes
+				// the currently installed version until apply. Preserve the
+				// host-verified acquisition snapshot across that expected refresh.
+				if reviewed.Readiness != SkillReadinessNeedsInstallation {
+					return fmt.Errorf("answered Skill %s changed immutable source or version", selectedID)
+				}
+				catalog.Skills[selectedID] = reviewed
+				continue
 			}
 			if fresh.Readiness == SkillReadinessNeedsInstallation &&
 				reviewed.Readiness == SkillReadinessNeedsInstallation {
