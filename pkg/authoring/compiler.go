@@ -484,7 +484,7 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 }
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
-	payload = normalizeGeneratedCommitmentsPlacement(payload)
+	payload = normalizeGeneratedResponseMetadataPlacement(payload)
 	payload = normalizeGeneratedDefinitionVersions(payload)
 	payload = normalizeGeneratedDurations(payload)
 	payload = normalizeGeneratedDefinitionProvenance(payload)
@@ -510,34 +510,57 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 	return generated, nil
 }
 
-// normalizeGeneratedCommitmentsPlacement lifts the exact response-level
-// commitments object when a provider has placed it under candidate. This is a
-// lossless structural correction: an existing response-level value, a
-// non-object candidate, or any other unknown candidate field remains untouched
-// and is rejected by strict decoding.
-func normalizeGeneratedCommitmentsPlacement(payload []byte) []byte {
+// normalizeGeneratedResponseMetadataPlacement lifts exact response-level
+// metadata when a provider has placed it under candidate. This is a lossless
+// structural correction for the three known fields and their exact JSON
+// shapes. Existing response-level values, invalid shapes, a non-object
+// candidate, and every other unknown candidate field remain untouched and are
+// rejected by strict decoding.
+func normalizeGeneratedResponseMetadataPlacement(payload []byte) []byte {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	var document map[string]interface{}
 	if err := decoder.Decode(&document); err != nil {
 		return payload
 	}
-	if _, exists := document["commitments"]; exists {
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return payload
 	}
 	candidate, ok := document["candidate"].(map[string]interface{})
 	if !ok {
 		return payload
 	}
-	commitments, exists := candidate["commitments"]
-	if !exists {
+	validShape := map[string]func(interface{}) bool{
+		"commitments": func(value interface{}) bool {
+			_, valid := value.(map[string]interface{})
+			return valid
+		},
+		"assumptions": func(value interface{}) bool {
+			_, valid := value.([]interface{})
+			return valid
+		},
+		"unresolvedQuestions": func(value interface{}) bool {
+			_, valid := value.([]interface{})
+			return valid
+		},
+	}
+	changed := false
+	for _, field := range []string{"commitments", "assumptions", "unresolvedQuestions"} {
+		if _, exists := document[field]; exists {
+			continue
+		}
+		value, exists := candidate[field]
+		if !exists || !validShape[field](value) {
+			continue
+		}
+		delete(candidate, field)
+		document[field] = value
+		changed = true
+	}
+	if !changed {
 		return payload
 	}
-	if _, ok := commitments.(map[string]interface{}); !ok {
-		return payload
-	}
-	delete(candidate, "commitments")
-	document["commitments"] = commitments
 	normalized, err := json.Marshal(document)
 	if err != nil {
 		return payload
