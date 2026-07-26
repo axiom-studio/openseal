@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -833,6 +835,9 @@ func validateDefinition(definition *Definition) error {
 			return fmt.Errorf("skill binding config schema is invalid: %w", err)
 		}
 	}
+	if err := validateHostingRequirements(definition.Requirements); err != nil {
+		return fmt.Errorf("skill hosting requirements are invalid: %w", err)
+	}
 	if definition.Prompt != nil {
 		if err := validateCredentialRequirements(definition.Prompt.Credentials); err != nil {
 			return fmt.Errorf("skill prompt has an invalid credential requirement: %w", err)
@@ -922,6 +927,64 @@ func validateDefinition(definition *Definition) error {
 					return fmt.Errorf("skill action %s transport references unknown input %s", name, mapping.SourceArgument)
 				}
 			}
+		}
+	}
+	return nil
+}
+
+var (
+	hostingStorageNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	hostingCPUPattern         = regexp.MustCompile(`^[1-9][0-9]*(m)?$`)
+	hostingMemoryPattern      = regexp.MustCompile(`^[1-9][0-9]*(Ki|Mi|Gi|Ti)$`)
+)
+
+func validateHostingRequirements(requirements Requirements) error {
+	seenNames := make(map[string]bool, len(requirements.Storage))
+	seenMounts := make(map[string]bool, len(requirements.Storage))
+	for _, storage := range requirements.Storage {
+		if !hostingStorageNamePattern.MatchString(storage.Name) || seenNames[storage.Name] {
+			return fmt.Errorf("storage name %q is invalid or duplicated", storage.Name)
+		}
+		seenNames[storage.Name] = true
+		if storage.MountPath == "" || storage.MountPath == "/" || !strings.HasPrefix(storage.MountPath, "/") ||
+			path.Clean(storage.MountPath) != storage.MountPath || seenMounts[storage.MountPath] {
+			return fmt.Errorf("storage mount path %q is invalid or duplicated", storage.MountPath)
+		}
+		seenMounts[storage.MountPath] = true
+		if storage.MinimumCapacity != "" && !hostingMemoryPattern.MatchString(storage.MinimumCapacity) {
+			return fmt.Errorf("storage %s minimum capacity %q is invalid", storage.Name, storage.MinimumCapacity)
+		}
+		switch storage.Durability {
+		case StorageDurabilityPersistent:
+			if storage.MinimumCapacity == "" {
+				return fmt.Errorf("persistent storage %s requires minimum capacity", storage.Name)
+			}
+			if storage.Retention != StorageRetentionRetain && storage.Retention != StorageRetentionDelete {
+				return fmt.Errorf("persistent storage %s requires an explicit retention policy", storage.Name)
+			}
+		case StorageDurabilityEphemeral:
+			if storage.Retention != "" && storage.Retention != StorageRetentionDelete {
+				return fmt.Errorf("ephemeral storage %s cannot be retained", storage.Name)
+			}
+		default:
+			return fmt.Errorf("storage %s durability %q is invalid", storage.Name, storage.Durability)
+		}
+	}
+	if requirements.Compute == nil {
+		return nil
+	}
+	compute := requirements.Compute
+	if compute.Requests.CPU == "" && compute.Requests.Memory == "" && compute.Limits.CPU == "" && compute.Limits.Memory == "" {
+		return errors.New("compute requirements are empty")
+	}
+	for label, value := range map[string]string{"requests.cpu": compute.Requests.CPU, "limits.cpu": compute.Limits.CPU} {
+		if value != "" && !hostingCPUPattern.MatchString(value) {
+			return fmt.Errorf("compute %s %q is invalid", label, value)
+		}
+	}
+	for label, value := range map[string]string{"requests.memory": compute.Requests.Memory, "limits.memory": compute.Limits.Memory} {
+		if value != "" && !hostingMemoryPattern.MatchString(value) {
+			return fmt.Errorf("compute %s %q is invalid", label, value)
 		}
 	}
 	return nil
