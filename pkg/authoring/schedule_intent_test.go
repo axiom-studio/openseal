@@ -75,6 +75,21 @@ func TestScheduleIntentManualPromptCannotGainCadence(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentExplicitlyRejectsRecurringObjectives(t *testing.T) {
+	for _, prompt := range []string{
+		"Create one inactive Agent that answers general questions. Give it no recurring objectives.",
+		"Create one Agent without recurring work.",
+		"Create one Agent for non-recurring work.",
+	} {
+		t.Run(prompt, func(t *testing.T) {
+			result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), nil, nil)
+			if !result.Valid || hasScheduleIntentQuestion(result.UnresolvedQuestions) || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 {
+				t.Fatalf("explicit non-recurring candidate = %#v", result)
+			}
+		})
+	}
+}
+
 func TestScheduleIntentExactDailyTimezoneIsPreserved(t *testing.T) {
 	cadence := dailyCadence("09:00", "UTC")
 	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(cadence), nil, nil)
