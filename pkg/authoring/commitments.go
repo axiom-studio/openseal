@@ -21,6 +21,12 @@ func effectivePromptCommitments(prompt string, declared PromptCommitments) (Prom
 	extracted := extractExplicitPromptCommitments(prompt)
 	issues := validateDeclaredCommitmentCoverage(declared, extracted)
 	effective := declared
+	// Activation is a user-owned lifecycle decision, not a conservative model
+	// default. The only activation commitment the portable grammar supports is
+	// an explicit request to remain inactive. Discard a provider-invented
+	// inactive commitment when the prompt does not contain that request so a
+	// reviewed apply can honor the normal active candidate path.
+	effective.Activation = extracted.Activation
 	if extracted.AgentCount != nil {
 		effective.AgentCount = intPointer(*extracted.AgentCount)
 	}
@@ -31,9 +37,6 @@ func effectivePromptCommitments(prompt string, declared PromptCommitments) (Prom
 		if !objectiveCommitmentCovered(effective.ObjectiveCounts, commitment, commitmentOwnerIsSingleton(extracted, commitment.OwnerType)) {
 			effective.ObjectiveCounts = upsertObjectiveCommitment(effective.ObjectiveCounts, commitment)
 		}
-	}
-	if extracted.Activation != "" {
-		effective.Activation = extracted.Activation
 	}
 	for _, commitment := range extracted.ApprovalRequirements {
 		if !approvalCommitmentCovered(effective.ApprovalRequirements, commitment, commitmentOwnerIsSingleton(extracted, commitment.OwnerType)) {
@@ -75,7 +78,10 @@ func extractExplicitPromptCommitments(prompt string) PromptCommitments {
 		}
 	}
 	if containsTokenPhrase(tokens, "do", "not", "activate") || containsTokenPhrase(tokens, "don", "t", "activate") ||
-		containsTokenPhrase(tokens, "keep", "inactive") || containsTokenPhrase(tokens, "without", "activation") {
+		containsTokenPhrase(tokens, "create", "inactive") || containsTokenPhrase(tokens, "start", "inactive") ||
+		containsTokenPhrase(tokens, "keep", "inactive") || containsTokenPhrase(tokens, "keep", "it", "inactive") ||
+		containsTokenPhrase(tokens, "remain", "inactive") || containsTokenPhrase(tokens, "leave", "inactive") ||
+		containsTokenPhrase(tokens, "without", "activation") {
 		result.Activation = ActivationCommitmentInactive
 	}
 	if explicitSideEffectApproval(tokens) {
