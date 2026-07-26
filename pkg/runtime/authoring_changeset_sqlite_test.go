@@ -570,6 +570,7 @@ func TestWorkforceReadinessAcceptsOnlyExactReviewedSkillInstallation(t *testing.
 		source         = "https://clawhub.ai::posture"
 		runtimeVersion = "1.0.0+source.abc"
 		reference      = "listing:42"
+		sourceDigest   = "sha256:posture"
 	)
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
 		"posture": {
@@ -578,6 +579,8 @@ func TestWorkforceReadinessAcceptsOnlyExactReviewedSkillInstallation(t *testing.
 			Readiness: authoring.SkillReadinessNeedsInstallation,
 			Compatibility: []authoring.SkillCompatibility{{
 				Requirement: "installation", Compatible: false, Reference: reference,
+			}, {
+				Requirement: "source_digest", Compatible: true, Reference: sourceDigest,
 			}},
 		},
 	}}
@@ -592,7 +595,7 @@ func TestWorkforceReadinessAcceptsOnlyExactReviewedSkillInstallation(t *testing.
 		definition.ID: {"posture": identity},
 	}
 	value.Placement.PlannedSkillInstallations = []authoring.SkillInstallationIntent{{
-		SkillID: "posture", Version: "1.0.0", SourceIdentity: source, Reference: reference,
+		SkillID: "posture", Version: "1.0.0", SourceIdentity: source, SourceDigest: sourceDigest, Reference: reference,
 	}}
 
 	issues, err := store.ValidateChangeSetReadiness(context.Background(), value)

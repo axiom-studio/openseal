@@ -925,6 +925,9 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 			Compatibility: []SkillCompatibility{{
 				Requirement: "installation", Compatible: false,
 				Evidence: "Verified immutable build is available.", Reference: "listing:42",
+			}, {
+				Requirement: "source_digest", Compatible: true,
+				Evidence: "Pinned source artifact digest.", Reference: "sha256:research",
 			}},
 		},
 	}}
@@ -933,7 +936,7 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 	}
 	placement := ChangeSetPlacement{PlannedSkillInstallations: []SkillInstallationIntent{{
 		SkillID: "community.research", Version: "2.1.0",
-		SourceIdentity: "registry.example::community/research", Reference: "listing:42",
+		SourceIdentity: "registry.example::community/research", SourceDigest: "sha256:research", Reference: "listing:42",
 	}}}
 	if err := validatePlannedSkillInstallations(placement, catalog); err != nil {
 		t.Fatalf("validate exact installation plan: %v", err)
@@ -983,6 +986,11 @@ func TestPlacementAwareMissingRequirementsResolvesOnlyExactPlannedSkillInstallat
 	if missing := placementAwareMissingRequirements(&candidate, catalog, placement); len(missing) != 1 || missing[0].Kind != "skill_installation" {
 		t.Fatalf("forged installation resolved requirements = %#v", missing)
 	}
+	placement.PlannedSkillInstallations[0].Reference = "listing:42"
+	placement.PlannedSkillInstallations[0].SourceDigest = "sha256:forged"
+	if err := validatePlannedSkillInstallations(placement, catalog); err == nil {
+		t.Fatal("forged source digest was accepted")
+	}
 }
 
 func TestPlacementAwareMissingRequirementsResolvesPromptDeliveredByPlannedSkillInstallation(t *testing.T) {
@@ -1000,6 +1008,9 @@ func TestPlacementAwareMissingRequirementsResolvesPromptDeliveredByPlannedSkillI
 			Compatibility: []SkillCompatibility{{
 				Requirement: "installation", Compatible: false,
 				Evidence: "Verified immutable build is available.", Reference: "listing:84",
+			}, {
+				Requirement: "source_digest", Compatible: true,
+				Evidence: "Pinned source artifact digest.", Reference: "sha256:audit",
 			}},
 		},
 	}}
@@ -1019,7 +1030,7 @@ func TestPlacementAwareMissingRequirementsResolvesPromptDeliveredByPlannedSkillI
 		},
 		PlannedSkillInstallations: []SkillInstallationIntent{{
 			SkillID: "community.audit", Version: "1.0.0",
-			SourceIdentity: "registry.example::community/audit", Reference: "listing:84",
+			SourceIdentity: "registry.example::community/audit", SourceDigest: "sha256:audit", Reference: "listing:84",
 		}},
 	}
 	if missing := missingRequirements(&candidate, catalog); len(missing) != 2 {
