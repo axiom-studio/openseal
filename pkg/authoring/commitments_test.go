@@ -123,6 +123,33 @@ func TestCompilerValidatesMultiAgentTeamCountsObjectivePlacementAndInactivity(t 
 	}
 }
 
+func TestCompilerDiscardsProviderInventedInactiveCommitment(t *testing.T) {
+	agentCount, teamCount := 1, 0
+	candidate := releaseNotesCandidate(nil, "")
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		Commitments: PromptCommitments{
+			AgentCount: &agentCount,
+			TeamCount:  &teamCount,
+			Activation: ActivationCommitmentInactive,
+		},
+	})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode:   ModeCreate,
+		Prompt: "Create one active Agent and no Team.",
+	})
+	if err != nil || !result.Valid {
+		t.Fatalf("active candidate = %#v, err = %v", result, err)
+	}
+	if result.Commitments.Activation != "" || result.Candidate.Activation != WorkforceActivationActive {
+		t.Fatalf("provider-invented inactivity survived = commitments %#v, candidate %q", result.Commitments, result.Candidate.Activation)
+	}
+	if containsString(result.Assumptions, "Atomic apply remains inactive by creating non-executing resources; activation requires a separate governed command.") {
+		t.Fatalf("invented inactive assumption survived = %#v", result.Assumptions)
+	}
+}
+
 func TestCommitmentExtractionDoesNotClaimOpenEndedSemanticEquivalence(t *testing.T) {
 	candidate := releaseNotesCandidate(nil, capability.RiskLevelWrite)
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate, Commitments: PromptCommitments{}})
@@ -163,6 +190,8 @@ func FuzzExplicitPromptCommitmentExtraction(f *testing.F) {
 	for _, seed := range []string{
 		liveReleaseNotesPrompt,
 		"Create exactly three Agents and one Team with exactly two Team objectives. Do not activate.",
+		"Create this workforce and keep it inactive.",
+		"Create inactive resources.",
 		"Review a report that mentions three agents and one objective from an earlier system.",
 		"Create 1001 agents; require approval before posting.",
 		"\x00don't ACTIVATE — create two agents 🚀",
