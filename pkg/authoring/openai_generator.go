@@ -58,6 +58,36 @@ type OpenAICompatibleGeneratorOptions struct {
 	ThinkingMode OpenAICompatibleThinkingMode
 }
 
+// ProviderRefusalError reports an explicit provider refusal separately from a
+// malformed or empty completion. Refusals are valid provider outcomes but are
+// never valid authoring candidates, so callers can surface them truthfully
+// without spending bounded schema-repair attempts on non-candidate content.
+type ProviderRefusalError struct {
+	Reason string
+}
+
+func (e *ProviderRefusalError) Error() string {
+	if e == nil || strings.TrimSpace(e.Reason) == "" {
+		return "authoring provider refused the request"
+	}
+	return "authoring provider refused the request: " + strings.TrimSpace(e.Reason)
+}
+
+// ProviderIncompleteError reports a completion that the provider explicitly
+// says did not finish. Partial JSON must never enter deterministic compilation
+// or schema repair as though it were a complete candidate.
+type ProviderIncompleteError struct {
+	FinishReason string
+}
+
+func (e *ProviderIncompleteError) Error() string {
+	reason := "unknown"
+	if e != nil && strings.TrimSpace(e.FinishReason) != "" {
+		reason = strings.TrimSpace(e.FinishReason)
+	}
+	return "authoring provider returned an incomplete completion (finish reason: " + reason + ")"
+}
+
 func NewOpenAICompatibleGenerator(endpoint, apiKey, model string, httpClient *http.Client) (*OpenAICompatibleGenerator, error) {
 	return NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, httpClient, OpenAICompatibleGeneratorOptions{})
 }
@@ -207,16 +237,28 @@ func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey 
 	}
 	var envelope struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
+				Refusal string `json:"refusal"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(responseBody, &envelope); err != nil {
 		return nil, fmt.Errorf("decode authoring provider response: %w", err)
 	}
-	if len(envelope.Choices) != 1 || strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
+	if len(envelope.Choices) != 1 {
+		return nil, errors.New("authoring provider must return exactly one choice")
+	}
+	choice := envelope.Choices[0]
+	if strings.TrimSpace(choice.Message.Refusal) != "" {
+		return nil, &ProviderRefusalError{Reason: choice.Message.Refusal}
+	}
+	if reason := strings.TrimSpace(choice.FinishReason); reason != "" && reason != "stop" {
+		return nil, &ProviderIncompleteError{FinishReason: reason}
+	}
+	if strings.TrimSpace(choice.Message.Content) == "" {
 		return nil, errors.New("authoring provider must return exactly one non-empty choice")
 	}
-	return []byte(strings.TrimSpace(envelope.Choices[0].Message.Content)), nil
+	return []byte(strings.TrimSpace(choice.Message.Content)), nil
 }
