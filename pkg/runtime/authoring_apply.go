@@ -646,7 +646,22 @@ func workforceSkillRuntimeIdentity(value *authoring.ChangeSet, agentID, catalogI
 		if identity := value.Placement.SkillRuntimeIdentities[agentID][catalogID].Normalized(); identity.Valid() {
 			return identity
 		}
-		return capability.NewSkillIdentity(catalogID, workforceSkillBindingVersion(value, agentID, catalogID, catalogVersion), strings.TrimSpace(value.Placement.SkillSourceIdentities[agentID][catalogID]))
+		// The persisted authoring catalog is part of the reviewed ChangeSet and
+		// already names the exact authorized Skill definition. Conversation-only
+		// Skills do not need an Agent prompt/action requirement, so hosts may not
+		// have emitted a separate placement entry for them. Preserve the catalog's
+		// runtime ID and provenance instead of constructing a lossy unqualified
+		// binding that the store would have to repair during apply.
+		catalogSkill := value.Catalog.Skills[catalogID]
+		runtimeID := strings.TrimSpace(catalogSkill.ID)
+		if runtimeID == "" {
+			runtimeID = catalogID
+		}
+		sourceIdentity := strings.TrimSpace(value.Placement.SkillSourceIdentities[agentID][catalogID])
+		if sourceIdentity == "" {
+			sourceIdentity = strings.TrimSpace(catalogSkill.SourceIdentity)
+		}
+		return capability.NewSkillIdentity(runtimeID, workforceSkillBindingVersion(value, agentID, catalogID, catalogVersion), sourceIdentity)
 	}
 	return capability.NewSkillIdentity(catalogID, catalogVersion, "")
 }
