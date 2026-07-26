@@ -280,6 +280,52 @@ func TestTrustedRefinementSkillRefreshesSameIdentityAcquisitionReference(t *test
 	}
 }
 
+func TestTrustedRefinementSkillReplacesReviewedVersionFromSameSource(t *testing.T) {
+	question := RefinementQuestion{
+		ID: CapabilityNeedQuestionID("team-messaging"), Category: RefinementCategorySkill,
+		Prompt: "Which Skill should send messages?", WhyNeeded: "Messaging requires one exact Skill.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer: RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Minimum: 1, Maximum: 1,
+			Options: []RefinementQuestionOption{{ID: "skill-slack", Label: "Slack"}}},
+		Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	const source = "https://github.com/axiom-studio/skills::skill-slack"
+	changeSet := &ChangeSet{
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"skill-slack": {ID: "skill-slack", Version: "1.0.0", SourceIdentity: source, Readiness: SkillReadinessReady},
+		}},
+		Refinement: ChangeSetRefinement{Questions: []RefinementQuestion{question}},
+	}
+	candidate := SkillSearchCandidate{
+		SkillCapability: SkillCapability{
+			ID: "skill-slack", Version: "2.0.0", SourceIdentity: source, Name: "Slack",
+			Readiness: SkillReadinessNeedsInstallation,
+			Compatibility: []SkillCompatibility{
+				{Requirement: "installation", Compatible: false, Evidence: "Upgrade required."},
+				{Requirement: "source_digest", Compatible: true, Evidence: "Verified exact source.", Reference: "sha256:verified"},
+			},
+		},
+		Origin: SkillSearchOriginCatalog, Verification: SkillSearchVerificationVerified,
+		Provenance: SkillSearchProvenance{Registry: "https://catalog.example", Reference: "listing:42"},
+	}
+	if err := addTrustedRefinementSkill(changeSet, question.ID,
+		RefinementAnswerValue{SkillIDs: []string{"skill-slack"}}, candidate); err != nil {
+		t.Fatal(err)
+	}
+	got := changeSet.Catalog.Skills["skill-slack"]
+	if got.Version != "2.0.0" || got.SourceIdentity != source || plannedInstallationReference(got) != "listing:42" {
+		t.Fatalf("reviewed upgrade = %#v", got)
+	}
+
+	conflicting := candidate
+	conflicting.SourceIdentity = "https://catalog.example::different/slack"
+	if err := addTrustedRefinementSkill(changeSet, question.ID,
+		RefinementAnswerValue{SkillIDs: []string{"skill-slack"}}, conflicting); err == nil ||
+		!strings.Contains(err.Error(), "conflicts with the authorized catalog identity") {
+		t.Fatalf("conflicting source error = %v", err)
+	}
+}
+
 func TestRefinementSequenceCanGateSkillsAndScopeOnCredentialConfiguration(t *testing.T) {
 	credential := RefinementQuestion{
 		ID: "reddit-credential", Category: RefinementCategoryCredential, Prompt: "Which authorized Reddit credential should be used?", WhyNeeded: "Reddit access requires an authorized credential.",
