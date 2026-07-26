@@ -365,6 +365,48 @@ func TestPreparedCatalogRefreshRetainsExactAnsweredDiscoveredSkill(t *testing.T)
 	}
 }
 
+func TestPreparedCatalogRefreshRetainsReviewedUpgradeOverInstalledVersion(t *testing.T) {
+	const (
+		skillID = "skill-slack"
+		source  = "https://github.com/axiom-studio/skills::skill-slack"
+	)
+	question := RefinementQuestion{
+		ID: CapabilityNeedQuestionID("team-messaging"), Category: RefinementCategorySkill,
+		Answer: RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection},
+	}
+	reviewed := SkillCapability{
+		ID: skillID, Version: "2.0.0", SourceIdentity: source, Readiness: SkillReadinessNeedsInstallation,
+		Compatibility: []SkillCompatibility{
+			{Requirement: "installation", Compatible: false, Evidence: "Upgrade required.", Reference: "listing:42"},
+			{Requirement: "source_digest", Compatible: true, Evidence: "Verified exact source.", Reference: "sha256:v2"},
+		},
+	}
+	changeSet := &ChangeSet{
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{skillID: reviewed}},
+		Refinement: ChangeSetRefinement{
+			Questions: []RefinementQuestion{question},
+			Answers:   []RefinementAnswerEvent{{QuestionID: question.ID, Value: RefinementAnswerValue{SkillIDs: []string{skillID}}}},
+		},
+	}
+	fresh := CapabilityCatalog{Skills: map[string]SkillCapability{skillID: {
+		ID: skillID, Version: "1.0.0", SourceIdentity: source, Readiness: SkillReadinessReady,
+	}}}
+	if err := retainAnsweredSkillSelections(changeSet, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	got := fresh.Skills[skillID]
+	if got.Version != reviewed.Version || got.Readiness != SkillReadinessNeedsInstallation || plannedInstallationReference(got) != "listing:42" {
+		t.Fatalf("retained reviewed upgrade = %#v", got)
+	}
+
+	conflicting := CapabilityCatalog{Skills: map[string]SkillCapability{skillID: {
+		ID: skillID, Version: "1.0.0", SourceIdentity: "https://catalog.example::different/slack", Readiness: SkillReadinessReady,
+	}}}
+	if err := retainAnsweredSkillSelections(changeSet, &conflicting); err == nil || !strings.Contains(err.Error(), "changed immutable source") {
+		t.Fatalf("source substitution error = %v", err)
+	}
+}
+
 func TestPreparedCatalogFailureTerminatesGenerationIntent(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()
