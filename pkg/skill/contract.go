@@ -26,6 +26,7 @@ type ConversationDeliveryOperation = capability.ConversationDeliveryOperation
 type ConversationDeliveryOrdering = capability.ConversationDeliveryOrdering
 type ConversationDeliveryCapabilities = capability.ConversationDeliveryCapabilities
 type ConversationAdapterTransport = capability.ConversationAdapterTransport
+type ConversationDestinationDiscovery = capability.ConversationDestinationDiscovery
 type ConversationAdapter = capability.ConversationAdapter
 type BoundConversationAdapter = capability.BoundConversationAdapter
 type ActionRetryPolicy = capability.ActionRetryPolicy
@@ -848,6 +849,18 @@ func validateDefinition(definition *Definition) error {
 		if !reflect.DeepEqual(normalized, adapter) {
 			return fmt.Errorf("skill conversation adapter %s must use canonical ordering and values", id)
 		}
+		for _, discovery := range adapter.DestinationDiscovery {
+			action, ok := definition.Actions[discovery.Action]
+			if !ok {
+				return fmt.Errorf("skill conversation adapter %s destination discovery references missing action %s", id, discovery.Action)
+			}
+			if action.Risk != RiskLevelRead || (action.SideEffect != SideEffectRead && action.SideEffect != SideEffectNone) {
+				return fmt.Errorf("skill conversation adapter %s destination discovery action %s must be read-only", id, discovery.Action)
+			}
+			if err := validateConversationDestinationDiscoverySchema(action, discovery); err != nil {
+				return fmt.Errorf("skill conversation adapter %s destination discovery action %s is invalid: %w", id, discovery.Action, err)
+			}
+		}
 	}
 	for name, action := range definition.Actions {
 		if name == "" || action.Name != name || strings.TrimSpace(action.Description) == "" || action.InputSchema == nil {
@@ -902,6 +915,71 @@ func validateDefinition(definition *Definition) error {
 		}
 	}
 	return nil
+}
+
+func validateConversationDestinationDiscoverySchema(action Action, discovery ConversationDestinationDiscovery) error {
+	for name, expectedType := range map[string]string{
+		discovery.CursorArgument: "string",
+		discovery.LimitArgument:  "integer",
+		discovery.QueryArgument:  "string",
+	} {
+		if name == "" {
+			continue
+		}
+		property, ok := topLevelSchemaProperty(action.InputSchema, name)
+		if !ok || property["type"] != expectedType {
+			return fmt.Errorf("input argument %s must be a declared %s property", name, expectedType)
+		}
+	}
+	items, ok := schemaAtPath(action.OutputSchema, discovery.ItemsPath)
+	if !ok || items["type"] != "array" {
+		return errors.New("items path must resolve to an output array")
+	}
+	itemSchema, ok := items["items"].(map[string]interface{})
+	if !ok {
+		return errors.New("destination items must declare an object schema")
+	}
+	for path, label := range map[string]string{
+		discovery.IDPath:          "id",
+		discovery.DisplayNamePath: "display name",
+		discovery.DescriptionPath: "description",
+	} {
+		if path == "" {
+			continue
+		}
+		value, ok := schemaAtPath(itemSchema, path)
+		if !ok || value["type"] != "string" {
+			return fmt.Errorf("destination %s path must resolve to a string", label)
+		}
+	}
+	if discovery.NextCursorPath != "" {
+		value, ok := schemaAtPath(action.OutputSchema, discovery.NextCursorPath)
+		if !ok || value["type"] != "string" {
+			return errors.New("next cursor path must resolve to an output string")
+		}
+	}
+	return nil
+}
+
+func topLevelSchemaProperty(schema map[string]interface{}, name string) (map[string]interface{}, bool) {
+	properties, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	property, ok := properties[name].(map[string]interface{})
+	return property, ok
+}
+
+func schemaAtPath(schema map[string]interface{}, path string) (map[string]interface{}, bool) {
+	current := schema
+	for _, component := range strings.Split(path, ".") {
+		property, ok := topLevelSchemaProperty(current, component)
+		if !ok {
+			return nil, false
+		}
+		current = property
+	}
+	return current, true
 }
 
 func validateBindingShape(binding *Binding) error {

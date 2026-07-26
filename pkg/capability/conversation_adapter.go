@@ -42,6 +42,10 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 	if err != nil {
 		return ConversationAdapter{}, err
 	}
+	value.DestinationDiscovery, err = normalizeConversationDestinationDiscovery(value.DestinationDiscovery, value.EndpointModes)
+	if err != nil {
+		return ConversationAdapter{}, err
+	}
 	value.Delivery, err = normalizeConversationDeliveryCapabilities(value.Delivery)
 	if err != nil {
 		return ConversationAdapter{}, err
@@ -91,6 +95,78 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 		return ConversationAdapter{}, errors.New("conversation adapter credentials must declare ingress or delivery use")
 	}
 	return value, nil
+}
+
+func normalizeConversationDestinationDiscovery(values []ConversationDestinationDiscovery, modes []ConversationEndpointMode) ([]ConversationDestinationDiscovery, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > len(modes) {
+		return nil, errors.New("conversation adapter destination discovery is ambiguous")
+	}
+	availableModes := make(map[ConversationEndpointMode]bool, len(modes))
+	for _, mode := range modes {
+		availableModes[mode] = true
+	}
+	seenModes := make(map[ConversationEndpointMode]bool, len(values))
+	result := make([]ConversationDestinationDiscovery, len(values))
+	for index, value := range values {
+		value.Action = strings.TrimSpace(value.Action)
+		value.ItemsPath = strings.TrimSpace(value.ItemsPath)
+		value.IDPath = strings.TrimSpace(value.IDPath)
+		value.DisplayNamePath = strings.TrimSpace(value.DisplayNamePath)
+		value.DescriptionPath = strings.TrimSpace(value.DescriptionPath)
+		value.CursorArgument = strings.TrimSpace(value.CursorArgument)
+		value.LimitArgument = strings.TrimSpace(value.LimitArgument)
+		value.QueryArgument = strings.TrimSpace(value.QueryArgument)
+		value.NextCursorPath = strings.TrimSpace(value.NextCursorPath)
+		if !availableModes[value.Mode] || seenModes[value.Mode] ||
+			!validConversationAdapterIdentifier(value.Action, 128) ||
+			!validConversationProjectionPath(value.ItemsPath) ||
+			!validConversationProjectionPath(value.IDPath) ||
+			!validConversationProjectionPath(value.DisplayNamePath) ||
+			!validOptionalConversationProjectionPath(value.DescriptionPath) ||
+			!validOptionalConversationProjectionPath(value.NextCursorPath) ||
+			!validOptionalConversationArgument(value.CursorArgument) ||
+			!validOptionalConversationArgument(value.LimitArgument) ||
+			!validOptionalConversationArgument(value.QueryArgument) {
+			return nil, errors.New("conversation adapter destination discovery is invalid")
+		}
+		if (value.CursorArgument == "") != (value.NextCursorPath == "") {
+			return nil, errors.New("conversation adapter destination discovery pagination is incomplete")
+		}
+		seenArguments := map[string]bool{}
+		for _, argument := range []string{value.CursorArgument, value.LimitArgument, value.QueryArgument} {
+			if argument != "" && seenArguments[argument] {
+				return nil, errors.New("conversation adapter destination discovery arguments must be unique")
+			}
+			seenArguments[argument] = argument != ""
+		}
+		seenModes[value.Mode] = true
+		result[index] = value
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Mode < result[j].Mode })
+	return result, nil
+}
+
+func validOptionalConversationArgument(value string) bool {
+	return value == "" || validConversationAdapterIdentifier(value, 128)
+}
+
+func validOptionalConversationProjectionPath(value string) bool {
+	return value == "" || validConversationProjectionPath(value)
+}
+
+func validConversationProjectionPath(value string) bool {
+	if value == "" || len(value) > 256 || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
+		return false
+	}
+	for _, component := range strings.Split(value, ".") {
+		if !validConversationAdapterIdentifier(component, 128) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeConversationCredentialSelection(

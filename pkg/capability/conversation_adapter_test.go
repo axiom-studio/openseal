@@ -13,6 +13,11 @@ func TestNormalizeConversationAdapterProducesStableProviderNeutralContract(t *te
 		EndpointModes:     []ConversationEndpointMode{ConversationEndpointDirect, ConversationEndpointChannel},
 		InboundEventTypes: []string{ConversationEventReactionAdded, ConversationEventMessageReceived},
 		Features:          []ConversationAdapterFeature{ConversationFeatureThreads, ConversationFeatureMentions},
+		DestinationDiscovery: []ConversationDestinationDiscovery{{
+			Action: "list-channels", Mode: ConversationEndpointChannel,
+			ItemsPath: "channels", IDPath: "id", DisplayNamePath: "name", DescriptionPath: "purpose.text",
+			CursorArgument: "cursor", LimitArgument: "limit", QueryArgument: "query", NextCursorPath: "nextCursor",
+		}},
 		Credentials: []CredentialRequirement{{
 			Name: "SLACK_CONNECTION", Kind: "slack-oauth",
 			OAuth2: &OAuth2Requirement{
@@ -35,7 +40,8 @@ func TestNormalizeConversationAdapterProducesStableProviderNeutralContract(t *te
 	}
 	if !reflect.DeepEqual(adapter.EndpointModes, []ConversationEndpointMode{ConversationEndpointChannel, ConversationEndpointDirect}) ||
 		!reflect.DeepEqual(adapter.InboundEventTypes, []string{ConversationEventMessageReceived, ConversationEventReactionAdded}) ||
-		!reflect.DeepEqual(adapter.Credentials[0].OAuth2.Scopes, []string{"channels:history", "chat:write"}) {
+		!reflect.DeepEqual(adapter.Credentials[0].OAuth2.Scopes, []string{"channels:history", "chat:write"}) ||
+		adapter.DestinationDiscovery[0].DescriptionPath != "purpose.text" {
 		t.Fatalf("normalized adapter = %#v", adapter)
 	}
 }
@@ -97,6 +103,12 @@ func TestNormalizeConversationAdapterRejectsUnknownPortableSemantics(t *testing.
 		"transport": func(value *ConversationAdapter) { value.Transport.DeliveryEndpoint = "" },
 		"protocol":  func(value *ConversationAdapter) { value.ProtocolVersion = "v0" },
 		"delivery":  func(value *ConversationAdapter) { value.Delivery.Idempotency = IdempotencyNone },
+		"incomplete discovery pagination": func(value *ConversationAdapter) {
+			value.DestinationDiscovery = []ConversationDestinationDiscovery{{Action: "list", Mode: ConversationEndpointChannel, ItemsPath: "items", IDPath: "id", DisplayNamePath: "name", CursorArgument: "cursor"}}
+		},
+		"unknown discovery mode": func(value *ConversationAdapter) {
+			value.DestinationDiscovery = []ConversationDestinationDiscovery{{Action: "list", Mode: ConversationEndpointDirect, ItemsPath: "items", IDPath: "id", DisplayNamePath: "name"}}
+		},
 		"unknown credential use": func(value *ConversationAdapter) {
 			value.Transport.IngressCredentials = []string{"UNKNOWN"}
 		},

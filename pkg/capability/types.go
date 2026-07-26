@@ -202,20 +202,41 @@ type ConversationAdapterTransport struct {
 	DeliveryCredentials []string `json:"deliveryCredentials,omitempty"`
 }
 
+// ConversationDestinationDiscovery declares how a host can enumerate one
+// class of destinations through a read-only Skill action. The action remains
+// governed by the normal Skill binding and credential contract; this mapping
+// only gives product surfaces a deterministic, provider-neutral projection of
+// its result. Paths use dot-separated object keys and are relative to either
+// the action output (ItemsPath, NextCursorPath) or one item (the remaining
+// paths).
+type ConversationDestinationDiscovery struct {
+	Action          string                   `json:"action"`
+	Mode            ConversationEndpointMode `json:"mode"`
+	ItemsPath       string                   `json:"itemsPath"`
+	IDPath          string                   `json:"idPath"`
+	DisplayNamePath string                   `json:"displayNamePath"`
+	DescriptionPath string                   `json:"descriptionPath,omitempty"`
+	CursorArgument  string                   `json:"cursorArgument,omitempty"`
+	LimitArgument   string                   `json:"limitArgument,omitempty"`
+	QueryArgument   string                   `json:"queryArgument,omitempty"`
+	NextCursorPath  string                   `json:"nextCursorPath,omitempty"`
+}
+
 // ConversationAdapter declares one provider adapter supplied by a Skill.
 // Inbound payload normalization and outbound delivery are not model tools.
 // Credentials are resolved out of band from the exact Skill binding.
 type ConversationAdapter struct {
-	ProtocolVersion   string                           `json:"protocolVersion"`
-	Name              string                           `json:"name"`
-	Description       string                           `json:"description"`
-	Provider          string                           `json:"provider"`
-	EndpointModes     []ConversationEndpointMode       `json:"endpointModes"`
-	InboundEventTypes []string                         `json:"inboundEventTypes"`
-	Features          []ConversationAdapterFeature     `json:"features,omitempty"`
-	Credentials       []CredentialRequirement          `json:"credentials,omitempty"`
-	Delivery          ConversationDeliveryCapabilities `json:"delivery"`
-	Transport         ConversationAdapterTransport     `json:"transport"`
+	ProtocolVersion      string                             `json:"protocolVersion"`
+	Name                 string                             `json:"name"`
+	Description          string                             `json:"description"`
+	Provider             string                             `json:"provider"`
+	EndpointModes        []ConversationEndpointMode         `json:"endpointModes"`
+	InboundEventTypes    []string                           `json:"inboundEventTypes"`
+	Features             []ConversationAdapterFeature       `json:"features,omitempty"`
+	Credentials          []CredentialRequirement            `json:"credentials,omitempty"`
+	DestinationDiscovery []ConversationDestinationDiscovery `json:"destinationDiscovery,omitempty"`
+	Delivery             ConversationDeliveryCapabilities   `json:"delivery"`
+	Transport            ConversationAdapterTransport       `json:"transport"`
 }
 
 type Requirements struct {

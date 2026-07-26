@@ -559,6 +559,7 @@ type (
 	ConversationDeliveryOrdering       = capability.ConversationDeliveryOrdering
 	ConversationDeliveryCapabilities   = capability.ConversationDeliveryCapabilities
 	ConversationAdapterTransport       = capability.ConversationAdapterTransport
+	ConversationDestinationDiscovery   = capability.ConversationDestinationDiscovery
 	ConversationAdapter                = capability.ConversationAdapter
 	BoundConversationAdapter           = capability.BoundConversationAdapter
 	SkillTransportReference            = skill.TransportReference

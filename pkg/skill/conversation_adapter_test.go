@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -118,5 +119,48 @@ func conversationAdapterOnlySkill() *Definition {
 				DeliveryCredentials: []string{"SLACK_CONNECTION"},
 			},
 		}},
+	}
+}
+
+func TestConversationDestinationDiscoveryRequiresAReadOnlySchemaMatchedAction(t *testing.T) {
+	definition := conversationAdapterOnlySkill()
+	definition.Actions["list-destinations"] = Action{
+		Name: "list-destinations", Description: "List destinations", Risk: RiskLevelRead, SideEffect: SideEffectRead,
+		Idempotency: IdempotencySupported, Retry: ActionRetryPolicy{MaxAttempts: 1},
+		Transport: &TransportReference{Kind: "tool", Endpoint: "list-destinations"},
+		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+			"cursor": map[string]interface{}{"type": "string"}, "limit": map[string]interface{}{"type": "integer"},
+		}},
+		OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+			"destinations": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"id": map[string]interface{}{"type": "string"}, "name": map[string]interface{}{"type": "string"},
+			}}},
+			"nextCursor": map[string]interface{}{"type": "string"},
+		}},
+	}
+	adapter := definition.ConversationAdapters["conversations"]
+	adapter.DestinationDiscovery = []ConversationDestinationDiscovery{{
+		Action: "list-destinations", Mode: ConversationEndpointChannel, ItemsPath: "destinations", IDPath: "id", DisplayNamePath: "name",
+		CursorArgument: "cursor", LimitArgument: "limit", NextCursorPath: "nextCursor",
+	}}
+	definition.ConversationAdapters["conversations"] = adapter
+	if err := validateDefinition(definition); err != nil {
+		t.Fatal(err)
+	}
+
+	invalid := cloneDefinition(definition)
+	mutated := invalid.Actions["list-destinations"]
+	mutated.Risk = RiskLevelExternal
+	invalid.Actions["list-destinations"] = mutated
+	if err := validateDefinition(invalid); err == nil || !strings.Contains(err.Error(), "must be read-only") {
+		t.Fatalf("external destination discovery action accepted: %v", err)
+	}
+
+	invalid = cloneDefinition(definition)
+	mutated = invalid.Actions["list-destinations"]
+	mutated.OutputSchema = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+	invalid.Actions["list-destinations"] = mutated
+	if err := validateDefinition(invalid); err == nil || !strings.Contains(err.Error(), "items path") {
+		t.Fatalf("schema-mismatched destination discovery accepted: %v", err)
 	}
 }
