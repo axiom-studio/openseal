@@ -32,17 +32,19 @@ type ExternalConversationDestinationPage struct {
 // adapter and carries only search/pagination input. Credential resolution and
 // action invocation remain host responsibilities.
 type ExternalConversationDestinationDiscoveryRequest struct {
-	Scope        Scope                                `json:"scope"`
-	DeploymentID string                               `json:"deploymentId"`
-	Adapter      *capability.BoundConversationAdapter `json:"-"`
-	Mode         capability.ConversationEndpointMode  `json:"mode"`
-	Cursor       string                               `json:"cursor,omitempty"`
-	Query        string                               `json:"query,omitempty"`
-	Limit        int                                  `json:"limit,omitempty"`
+	Scope                 Scope                                `json:"scope"`
+	DeploymentID          string                               `json:"deploymentId"`
+	ExecutionDeploymentID string                               `json:"executionDeploymentId"`
+	Adapter               *capability.BoundConversationAdapter `json:"-"`
+	Mode                  capability.ConversationEndpointMode  `json:"mode"`
+	Cursor                string                               `json:"cursor,omitempty"`
+	Query                 string                               `json:"query,omitempty"`
+	Limit                 int                                  `json:"limit,omitempty"`
 }
 
 func (r *ExternalConversationDestinationDiscoveryRequest) Validate() error {
 	if r == nil || r.Scope.Validate() != nil || !validAgentReference(strings.TrimSpace(r.DeploymentID), 256) ||
+		!validAgentReference(strings.TrimSpace(r.ExecutionDeploymentID), 256) ||
 		r.Adapter == nil || r.Adapter.Definition == nil || r.Adapter.Binding == nil ||
 		r.Adapter.Binding.Scope != capability.ScopeReference(r.Scope) || r.Adapter.Binding.DeploymentID != r.DeploymentID ||
 		len(r.Cursor) > 4096 || strings.ContainsAny(r.Cursor, "\r\n") || len(r.Query) > 256 || strings.ContainsAny(r.Query, "\r\n") ||
