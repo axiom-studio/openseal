@@ -1927,8 +1927,8 @@ func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement Mis
 		}
 		return false
 	}
-	agentID := strings.TrimPrefix(requirement.RequiredBy, "agent:")
-	if agentID == requirement.RequiredBy || strings.TrimSpace(agentID) == "" {
+	agentID := missingRequirementAgentID(candidate, requirement)
+	if agentID == "" {
 		return false
 	}
 	hasPlacementGap := false
@@ -1963,6 +1963,29 @@ func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement Mis
 		}
 	}
 	return hasPlacementGap
+}
+
+// missingRequirementAgentID maps an Initiative source monitor back to the
+// Agent that executes it. Source monitors do not own credentials or Skill
+// configuration independently; the assigned Agent's reviewed placement is the
+// single authority used by both the scheduled Objective and its monitor.
+func missingRequirementAgentID(candidate *WorkforceCandidate, requirement MissingRequirement) string {
+	if candidate == nil {
+		return ""
+	}
+	if agentID := strings.TrimPrefix(requirement.RequiredBy, "agent:"); agentID != requirement.RequiredBy {
+		return strings.TrimSpace(agentID)
+	}
+	if candidate.Initiative == nil {
+		return ""
+	}
+	for _, monitor := range candidate.Initiative.SourceMonitors {
+		requiredBy := "initiative:" + candidate.Initiative.ID + "/monitor:" + monitor.ID
+		if requirement.RequiredBy == requiredBy && requirement.ID == monitor.SkillID {
+			return strings.TrimSpace(monitor.AssignedAgentDefinitionID)
+		}
+	}
+	return ""
 }
 
 func canonicalIdentity(scope capability.ScopeReference, id string) string {
