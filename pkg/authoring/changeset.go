@@ -1010,6 +1010,7 @@ func addTrustedRefinementSkill(changeSet *ChangeSet, questionID string, value Re
 	if !found {
 		question.Answer.Options = append(question.Answer.Options, RefinementQuestionOption{
 			ID: candidate.ID, Label: candidate.Name, Description: candidate.Description,
+			Actions: append([]string(nil), candidate.Actions...),
 		})
 	}
 	return nil

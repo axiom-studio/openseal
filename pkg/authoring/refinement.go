@@ -93,6 +93,7 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 			}
 			options = append(options, RefinementQuestionOption{
 				ID: skillID, Label: label, Description: strings.TrimSpace(skill.Description),
+				Actions: append([]string(nil), skill.Actions...),
 			})
 		}
 		activeIDs[questionID] = true
@@ -449,6 +450,11 @@ type RefinementQuestionOption struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+	// Actions is trusted only after validateRefinementCatalog proves every
+	// value is an exact action exposed by the selected Skill. Keeping this
+	// metadata in the portable contract lets interactive clients explain what
+	// a Skill choice enables without copying or re-querying host catalogs.
+	Actions []string `json:"actions,omitempty"`
 }
 
 type RefinementAnswerSchema struct {
@@ -758,6 +764,12 @@ func validateRefinementCatalog(questions []RefinementQuestion, catalog Capabilit
 			}
 			if skill.Readiness == SkillReadinessUnavailable {
 				return fmt.Errorf("refinement question %s presents unavailable Skill %s", question.ID, option.ID)
+			}
+			allowedActions := stringSet(skill.Actions)
+			for _, action := range option.Actions {
+				if !allowedActions[action] {
+					return fmt.Errorf("refinement question %s presents action %s not exposed by Skill %s", question.ID, action, option.ID)
+				}
 			}
 			for _, evidence := range skill.Compatibility {
 				if !evidence.Compatible && !refinementLifecycleGap(skill.Readiness, evidence.Requirement) {
@@ -1158,6 +1170,12 @@ func validateAnswerSchema(schema RefinementAnswerSchema) error {
 	for _, option := range schema.Options {
 		if strings.TrimSpace(option.ID) == "" || strings.TrimSpace(option.Label) == "" || seen[option.ID] {
 			return errors.New("answer options require unique ids and labels")
+		}
+		if schema.Kind != RefinementAnswerSkillSelection && len(option.Actions) > 0 {
+			return errors.New("only Skill-selection options may declare actions")
+		}
+		if len(nonEmptyUnique(option.Actions)) != len(option.Actions) {
+			return errors.New("Skill-selection option actions must be non-empty and unique")
 		}
 		seen[option.ID] = true
 	}
