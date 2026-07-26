@@ -158,7 +158,7 @@ func synthesizeCapabilityNeedRefinements(generated *GenerationResponse, request 
 			continue
 		}
 		questionID := CapabilitySourceScopeQuestionID(need.ID)
-		if _, exists := answered[questionID]; exists {
+		if _, exists := answered[questionID]; exists || len(requirement.Targets) > 0 {
 			continue
 		}
 		dependencies := make([]RefinementQuestionDependency, 0, len(questions))
@@ -299,20 +299,23 @@ func capabilityNeedsHaveSourceScope(needs []CapabilityNeed) bool {
 }
 
 func validateCapabilitySourceScopeFulfillment(candidate *WorkforceCandidate, request GenerateRequest) []ValidationIssue {
-	if request.Refinement == nil {
-		return nil
-	}
 	if !sourceCapabilityRequiresDurableAction(request) {
 		return nil
 	}
-	answered := make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
-	for _, answer := range request.Refinement.Answers {
-		answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
+	answered := make(map[string]RefinementProviderAnswerValue)
+	if request.Refinement != nil {
+		answered = make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
+		for _, answer := range request.Refinement.Answers {
+			answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
+		}
 	}
 	issues := make([]ValidationIssue, 0)
 	for _, need := range request.Catalog.CapabilityNeeds {
 		requirement := need.SourceScope
 		answer, exists := answered[CapabilitySourceScopeQuestionID(need.ID)]
+		if !exists && requirement != nil && len(requirement.Targets) > 0 {
+			answer, exists = RefinementProviderAnswerValue{Items: requirement.Targets}, true
+		}
 		if requirement == nil || len(requirement.MaterializationInputKeys) == 0 || !exists {
 			continue
 		}
@@ -999,6 +1002,16 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 				return fmt.Errorf("capability catalog need %d source scope is invalid", index)
 			}
 			seenInputKeys := make(map[string]bool, len(scope.MaterializationInputKeys))
+			seenTargets := make(map[string]bool, len(scope.Targets))
+			for _, target := range scope.Targets {
+				if target != strings.TrimSpace(target) || target == "" || len(target) > 2048 || strings.ContainsAny(target, "\r\n\t") || seenTargets[target] {
+					return fmt.Errorf("capability catalog need %d source scope has invalid targets", index)
+				}
+				seenTargets[target] = true
+			}
+			if len(scope.Targets) > 0 && (len(scope.Targets) < scope.Minimum || len(scope.Targets) > scope.Maximum) {
+				return fmt.Errorf("capability catalog need %d source scope targets are outside its bounds", index)
+			}
 			for _, key := range scope.MaterializationInputKeys {
 				if key != strings.TrimSpace(key) || !catalogDiagnosticCodePattern.MatchString(key) || seenInputKeys[key] {
 					return fmt.Errorf("capability catalog need %d source scope has invalid materialization input keys", index)
