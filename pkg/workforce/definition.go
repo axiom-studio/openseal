@@ -41,6 +41,15 @@ type DefinitionProvenance struct {
 	DerivedFrom string `json:"derivedFrom,omitempty"`
 }
 
+// ActivationContinuation points a non-executing deployment back to the exact
+// reviewed Change Set that created it. Hosts use this opaque, durable reference
+// to resume the aggregate activation workflow after navigation or restart;
+// activating one resource imperatively would leave the rest of the workforce
+// (including Skill bindings, objectives, and conversation endpoints) inactive.
+type ActivationContinuation struct {
+	ChangeSetID string `json:"changeSetId"`
+}
+
 type DeploymentChangeKind string
 
 const (

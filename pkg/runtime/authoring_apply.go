@@ -121,7 +121,11 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 				rolloutStatus = agent.RolloutPaused
 			}
 		}
-		deployment := &agent.AgentDeployment{ID: deploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, PreviousVersion: previous, RolloutStatus: rolloutStatus, Environment: value.Placement.Environment, Credentials: value.Placement.CredentialReferences[definition.ID], Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: definition.Authority.MaxConcurrentRuns}, Revision: revision, CreatedAt: now, UpdatedAt: now}
+		var continuation *workforce.ActivationContinuation
+		if !activate {
+			continuation = &workforce.ActivationContinuation{ChangeSetID: value.ID}
+		}
+		deployment := &agent.AgentDeployment{ID: deploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, PreviousVersion: previous, RolloutStatus: rolloutStatus, Environment: value.Placement.Environment, Credentials: value.Placement.CredentialReferences[definition.ID], Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: definition.Authority.MaxConcurrentRuns}, Activation: continuation, Revision: revision, CreatedAt: now, UpdatedAt: now}
 		if err := deployment.Validate(); err != nil {
 			return nil, err
 		}
@@ -166,7 +170,11 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 			teamStatus = team.DeploymentPaused
 		}
 	}
-	application.teamDeployment = &team.Deployment{ID: value.Placement.TeamDeploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Roster: roster, Status: teamStatus, Revision: revision, CreatedAt: now, UpdatedAt: now}
+	var continuation *workforce.ActivationContinuation
+	if !activate {
+		continuation = &workforce.ActivationContinuation{ChangeSetID: value.ID}
+	}
+	application.teamDeployment = &team.Deployment{ID: value.Placement.TeamDeploymentID, Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, Roster: roster, Status: teamStatus, Activation: continuation, Revision: revision, CreatedAt: now, UpdatedAt: now}
 	if err := application.teamDeployment.Validate(definition); err != nil {
 		return nil, err
 	}

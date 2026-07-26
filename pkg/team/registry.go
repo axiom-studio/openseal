@@ -138,6 +138,9 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *Deployment, e
 	if proposed.DefinitionID != current.DefinitionID {
 		return nil, nil, errors.New("team deployment update cannot change definition identity")
 	}
+	if !activationContinuationEqual(proposed.Activation, current.Activation) {
+		return nil, nil, errors.New("team deployment update cannot change its workforce activation continuation")
+	}
 	updated := cloneDeployment(proposed)
 	updated.CreatedAt = current.CreatedAt
 	updated.UpdatedAt = r.now().UTC()
@@ -181,6 +184,9 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	if current.Revision != expectedRevision {
 		return nil, nil, ErrRevisionConflict
 	}
+	if current.Activation != nil {
+		return nil, nil, errors.New("team deployment belongs to a pending workforce activation; resume its Change Set")
+	}
 	definition, err := r.store.GetTeamDefinition(ctx, current.DefinitionID, version)
 	if err != nil {
 		return nil, nil, err
@@ -209,6 +215,13 @@ func (r *Registry) ActivateDefinition(ctx context.Context, scope capability.Scop
 	}
 	copyActivation := activation
 	return cloneDeployment(updated), &copyActivation, nil
+}
+
+func activationContinuationEqual(left, right *workforce.ActivationContinuation) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.ChangeSetID == right.ChangeSetID
 }
 
 func (r *Registry) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {

@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,6 +139,53 @@ func TestRegistryComposesScopedAgentDeploymentsAndActivatesImmutableVersions(t *
 	activations, err := registry.ListActivations(ctx, scope, deployment.ID)
 	if err != nil || len(activations) != 3 || activations[1].DeploymentRevision != 2 || activations[2].DeploymentRevision != 3 {
 		t.Fatalf("activations = %#v, err = %v", activations, err)
+	}
+}
+
+func TestPendingWorkforceTeamMustResumeAggregateActivation(t *testing.T) {
+	ctx := context.Background()
+	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+	agents := kernelagent.NewRegistry()
+	agentDefinition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Find evidence",
+		SystemPrompt: "Find evidence.",
+		Authority:    kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentDeployment, _, err := agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "researcher-one", Scope: scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "local",
+		Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "operator", "compose Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry(agents)
+	definition, err := registry.RegisterDefinition(ctx, validDefinition())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployed, _, err := registry.CreateDeployment(ctx, &Deployment{
+		ID: "research-team", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		Roster: []RosterAssignment{{ID: "researcher", RoleID: "researcher", AgentDeploymentID: agentDeployment.ID}},
+		Status: DeploymentDraft, Activation: &workforce.ActivationContinuation{ChangeSetID: "change-set-one"},
+	}, "user", "operator", "save reviewed Team without activation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = registry.ActivateDefinition(
+		ctx, scope, deployed.ID, definition.Version, deployed.Revision, "user", "operator", "activate only the Team",
+	); err == nil || !strings.Contains(err.Error(), "resume its Change Set") {
+		t.Fatalf("partial activation error = %v", err)
+	}
+	proposed := cloneDeployment(deployed)
+	proposed.Activation = nil
+	if _, _, err = registry.UpdateDeployment(
+		ctx, proposed, deployed.Revision, "user", "operator", "strip activation continuation",
+	); err == nil || !strings.Contains(err.Error(), "activation continuation") {
+		t.Fatalf("continuation removal error = %v", err)
 	}
 }
 

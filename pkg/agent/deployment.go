@@ -54,6 +54,7 @@ type AgentDeployment struct {
 	Restrictions    DeploymentRestrictions                    `json:"restrictions,omitempty"`
 	Capacity        DeploymentCapacity                        `json:"capacity"`
 	Health          DeploymentHealth                          `json:"health,omitempty"`
+	Activation      *workforce.ActivationContinuation         `json:"activation,omitempty"`
 	Revision        int64                                     `json:"revision"`
 	CreatedAt       time.Time                                 `json:"createdAt"`
 	UpdatedAt       time.Time                                 `json:"updatedAt"`
@@ -73,6 +74,11 @@ func (d *AgentDeployment) Validate() error {
 	}
 	if d.RolloutStatus != RolloutPending && d.RolloutStatus != RolloutActive && d.RolloutStatus != RolloutDegraded && d.RolloutStatus != RolloutPaused && d.RolloutStatus != RolloutRetired {
 		return errors.New("deployment rollout status is invalid")
+	}
+	if d.Activation != nil {
+		if (d.RolloutStatus != RolloutPending && d.RolloutStatus != RolloutPaused) || strings.TrimSpace(d.Activation.ChangeSetID) == "" {
+			return errors.New("deployment activation continuation requires a pending or paused deployment and Change Set")
+		}
 	}
 	for name, reference := range d.Credentials {
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {

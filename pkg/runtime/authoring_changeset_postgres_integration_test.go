@@ -381,12 +381,38 @@ func TestPostgresAtomicWorkforceApplyHonorsInactiveCommitment(t *testing.T) {
 	agents := agent.NewRegistryWithStore(store)
 	teams := team.NewRegistryWithStore(store, agents)
 	agentDeployment, err := agents.GetDeployment(ctx, ready.Scope, "agent-live")
-	if err != nil || agentDeployment.RolloutStatus != agent.RolloutPending {
+	if err != nil || agentDeployment.RolloutStatus != agent.RolloutPending || agentDeployment.Activation == nil ||
+		agentDeployment.Activation.ChangeSetID != ready.ID {
 		t.Fatalf("inactive Agent deployment=%#v err=%v", agentDeployment, err)
 	}
 	teamDeployment, err := teams.GetDeployment(ctx, ready.Scope, "team-live")
-	if err != nil || teamDeployment.Status != team.DeploymentDraft {
+	if err != nil || teamDeployment.Status != team.DeploymentDraft || teamDeployment.Activation == nil ||
+		teamDeployment.Activation.ChangeSetID != ready.ID {
 		t.Fatalf("inactive Team deployment=%#v err=%v", teamDeployment, err)
+	}
+	for _, table := range []string{"agent_deployments", "team_deployments"} {
+		if _, err = store.db.ExecContext(ctx, `UPDATE `+store.table(table)+` SET payload=payload-'activation'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.migrateActivationContinuations(ctx, tx); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	agentDeployment, err = agents.GetDeployment(ctx, ready.Scope, "agent-live")
+	if err != nil || agentDeployment.Activation == nil || agentDeployment.Activation.ChangeSetID != ready.ID {
+		t.Fatalf("migrated Agent continuation=%#v err=%v", agentDeployment, err)
+	}
+	teamDeployment, err = teams.GetDeployment(ctx, ready.Scope, "team-live")
+	if err != nil || teamDeployment.Activation == nil || teamDeployment.Activation.ChangeSetID != ready.ID {
+		t.Fatalf("migrated Team continuation=%#v err=%v", teamDeployment, err)
 	}
 	if activations, err := agents.ListActivations(ctx, ready.Scope, agentDeployment.ID); err != nil || len(activations) != 0 {
 		t.Fatalf("inactive Agent activations=%#v err=%v", activations, err)

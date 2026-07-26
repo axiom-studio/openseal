@@ -1164,11 +1164,13 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	agents := agent.NewRegistryWithStore(store)
 	teams := team.NewRegistryWithStore(store, agents)
 	agentDeployment, err := agents.GetDeployment(ctx, value.Scope, "agent-live")
-	if err != nil || agentDeployment.RolloutStatus != agent.RolloutPending {
+	if err != nil || agentDeployment.RolloutStatus != agent.RolloutPending || agentDeployment.Activation == nil ||
+		agentDeployment.Activation.ChangeSetID != value.ID {
 		t.Fatalf("inactive Agent deployment=%#v err=%v", agentDeployment, err)
 	}
 	teamDeployment, err := teams.GetDeployment(ctx, value.Scope, "team-live")
-	if err != nil || teamDeployment.Status != team.DeploymentDraft {
+	if err != nil || teamDeployment.Status != team.DeploymentDraft || teamDeployment.Activation == nil ||
+		teamDeployment.Activation.ChangeSetID != value.ID {
 		t.Fatalf("inactive Team deployment=%#v err=%v", teamDeployment, err)
 	}
 	if activations, err := agents.ListActivations(ctx, value.Scope, agentDeployment.ID); err != nil || len(activations) != 0 {
@@ -1247,11 +1249,11 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	}
 	agentDeployment, err = agents.GetDeployment(ctx, value.Scope, "agent-live")
 	if err != nil || agentDeployment.RolloutStatus != agent.RolloutActive || agentDeployment.Revision != 2 ||
-		agentDeployment.Credentials["MODEL_PROVIDER"].ID != "model-one" {
+		agentDeployment.Credentials["MODEL_PROVIDER"].ID != "model-one" || agentDeployment.Activation != nil {
 		t.Fatalf("activated Agent=%#v err=%v", agentDeployment, err)
 	}
 	teamDeployment, err = teams.GetDeployment(ctx, value.Scope, "team-live")
-	if err != nil || teamDeployment.Status != team.DeploymentActive || teamDeployment.Revision != 2 {
+	if err != nil || teamDeployment.Status != team.DeploymentActive || teamDeployment.Revision != 2 || teamDeployment.Activation != nil {
 		t.Fatalf("activated Team=%#v err=%v", teamDeployment, err)
 	}
 	bindings, err = store.ListSkillBindings(ctx, value.Scope, agentDeployment.ID)
@@ -1270,6 +1272,57 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	initiative, err = store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
 	if err != nil || initiative.Status != InitiativeStatusActive || initiative.Revision != 2 {
 		t.Fatalf("activated Initiative=%#v err=%v", initiative, err)
+	}
+}
+
+func TestSQLiteStartupRecoversLegacyWorkforceActivationContinuations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	registerInitiativeSourceSkill(t, store)
+	value := testInitiativeWorkforceChangeSet()
+	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
+	value.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
+	if _, _, err = store.CreateChangeSet(ctx, value, "create-legacy-inactive", "digest-legacy-inactive"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(value)
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{
+		ID: "receipt-legacy-inactive", IdempotencyKey: "apply-legacy-inactive",
+		CandidateDigest: value.CandidateDigest, Activation: authoring.WorkforceActivationInactive,
+		Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute),
+	}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	if _, err = store.ApplyChangeSet(ctx, applied, 2); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"agent_deployments", "team_deployments"} {
+		if _, err = store.db.Exec(`UPDATE ` + table + ` SET payload=json_remove(payload, '$.activation')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	agentDeployment, err := agent.NewRegistryWithStore(restarted).GetDeployment(ctx, value.Scope, "agent-live")
+	if err != nil || agentDeployment.Activation == nil || agentDeployment.Activation.ChangeSetID != value.ID {
+		t.Fatalf("recovered Agent continuation=%#v err=%v", agentDeployment, err)
+	}
+	teamDeployment, err := team.NewRegistryWithStore(restarted, agent.NewRegistryWithStore(restarted)).GetDeployment(
+		ctx, value.Scope, "team-live",
+	)
+	if err != nil || teamDeployment.Activation == nil || teamDeployment.Activation.ChangeSetID != value.ID {
+		t.Fatalf("recovered Team continuation=%#v err=%v", teamDeployment, err)
 	}
 }
 
