@@ -20,8 +20,8 @@ func TestCompilerRepairsAliasedSkillQuestionOptionsToExactCatalogKeys(t *testing
 	}
 	repairedQuestion := invalidQuestion
 	repairedQuestion.Answer.Options = []RefinementQuestionOption{
-		{ID: "openseal.document", Label: "Document", Description: "Ready and compatible with PDF generation."},
-		{ID: "openseal.delivery", Label: "Delivery", Description: "Requires a delivery binding; email delivery is compatible."},
+		{ID: "openseal.document", Label: "Document", Description: "Ready and compatible with PDF generation.", Actions: []string{"render_pdf"}},
+		{ID: "openseal.delivery", Label: "Delivery", Description: "Requires a delivery binding; email delivery is compatible.", Actions: []string{"send_email"}},
 	}
 	generated, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{invalidQuestion}})
 	repaired, _ := json.Marshal(GenerationResponse{Candidate: candidate, UnresolvedQuestions: []RefinementQuestion{repairedQuestion}})
@@ -41,7 +41,24 @@ func TestCompilerRepairsAliasedSkillQuestionOptionsToExactCatalogKeys(t *testing
 		t.Fatalf("repair diagnostic=%s", got)
 	}
 	options := result.UnresolvedQuestions[0].Answer.Options
-	if options[0].ID != "openseal.document" || options[1].ID != "openseal.delivery" || options[0].Description == "" || options[1].Description == "" {
+	if options[0].ID != "openseal.document" || options[1].ID != "openseal.delivery" || options[0].Description == "" || options[1].Description == "" || options[0].Actions[0] != "render_pdf" || options[1].Actions[0] != "send_email" {
 		t.Fatalf("repaired Skill options=%#v", options)
+	}
+}
+
+func TestRefinementSkillOptionActionsMustMatchAuthorizedCatalog(t *testing.T) {
+	question := RefinementQuestion{
+		ID: "slack-skill", Category: RefinementCategorySkill, Prompt: "Which Slack Skill should be used?",
+		WhyNeeded: "Slack access requires an exact capability.", Blocking: []RefinementBlockingScope{RefinementBlocksCandidate},
+		Answer: RefinementAnswerSchema{Kind: RefinementAnswerSkillSelection, Minimum: 1, Maximum: 1, Options: []RefinementQuestionOption{{
+			ID: "skill-slack", Label: "Slack", Actions: []string{"slack-channel-list", "invented-action"},
+		}}}, Priority: 100, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
+	}
+	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
+		"skill-slack": {ID: "skill-slack", Version: "2.0.0", Actions: []string{"slack-channel-list"}, Readiness: SkillReadinessReady},
+	}}
+	err := validateRefinementCatalog([]RefinementQuestion{question}, catalog)
+	if err == nil || !strings.Contains(err.Error(), "invented-action") || !strings.Contains(err.Error(), "skill-slack") {
+		t.Fatalf("expected exact action rejection, got %v", err)
 	}
 }
