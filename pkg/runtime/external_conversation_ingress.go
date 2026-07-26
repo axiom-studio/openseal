@@ -321,7 +321,11 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	if err := result.Validate(); err != nil {
 		return nil, err
 	}
-	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
+	type verifiedEventRoute struct {
+		event     ExternalConversationGatewayEvent
+		endpoints []*ExternalConversationEndpoint
+	}
+	routes := make([]verifiedEventRoute, 0, len(result.Events))
 	for index := range result.Events {
 		routed := result.Events[index]
 		route := ExternalConversationVerifiedRoute{
@@ -349,13 +353,37 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 				}
 			}
 			endpoints = scoped
+		} else {
+			// A platform verifier may serve many installations across tenants, but
+			// one verified provider route must have a single ownership boundary.
+			// Fan-out remains valid inside that tenant (for example several
+			// specialized Agents observing one channel); a duplicated installation
+			// mapping across tenants is configuration ambiguity and accepts nothing.
+			var routedScope *Scope
+			for _, endpoint := range endpoints {
+				if endpoint == nil {
+					continue
+				}
+				if routedScope == nil {
+					scope := endpoint.Scope
+					routedScope = &scope
+					continue
+				}
+				if endpoint.Scope != *routedScope {
+					return nil, fmt.Errorf("%w: verified ingress route is ambiguous across ownership scopes", ErrExternalConversationConflict)
+				}
+			}
 		}
 		if len(endpoints) > 100 {
 			return nil, fmt.Errorf("%w: verified ingress route fanout exceeds limit", ErrInvalidExternalConversation)
 		}
-		for _, endpoint := range endpoints {
+		routes = append(routes, verifiedEventRoute{event: routed, endpoints: endpoints})
+	}
+	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
+	for _, route := range routes {
+		for _, endpoint := range route.endpoints {
 			persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
-				Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: routed.Event,
+				Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: route.event.Event,
 			})
 			if receiveErr != nil {
 				return nil, receiveErr

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type externalConversationIngressHostStub struct {
@@ -259,5 +260,168 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 	})
 	if err != nil || len(items) != 0 {
 		t.Fatalf("cross-tenant inbox = %#v, err = %v", items, err)
+	}
+}
+
+func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCrossTenantAmbiguity(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, first := externalConversationDeliveryFixture(t, ctx, "slack")
+	configureRoute := func(endpoint *ExternalConversationEndpoint, installation, application, address string) {
+		t.Helper()
+		previousRevision := endpoint.Revision
+		endpoint.InstallationID, endpoint.ApplicationID, endpoint.Address = installation, application, address
+		endpoint.Revision++
+		endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+		if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configureRoute(first, "T-one", "A-shared", "C-support")
+
+	secondScope := Scope{Kind: "tenant", ID: "second"}
+	secondBinding := &skill.Binding{
+		ID: "slack-second", Scope: skill.ScopeReference{Kind: secondScope.Kind, ID: secondScope.ID}, DeploymentID: "second-agent",
+		SkillID: "slack", SkillVersion: "1.0.0", EnabledConversationAdapters: []string{"conversations"},
+		MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{
+			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/second/slack"},
+		},
+	}
+	if err := catalog.Bind(ctx, secondBinding); err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{
+		ID: "second-endpoint", Scope: secondScope,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "second-agent"}, DeploymentID: "second-agent",
+		Name: "Second support channel",
+		Adapter: ExternalConversationAdapterReference{
+			SkillID: "slack", SkillVersion: "1.0.0", BindingID: secondBinding.ID,
+			BindingRevision: secondBinding.Revision, AdapterID: "conversations",
+		},
+		Mode: capability.ConversationEndpointChannel, Address: "C-support",
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "second-agent"},
+		Policy:  ExternalConversationPolicy{MessageSelection: ExternalConversationSelectAllMessages, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
+		Status:  ExternalConversationEndpointActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureRoute(second, "T-two", "A-shared", "C-support")
+
+	platformScope := Scope{Kind: "platform", ID: "default"}
+	platformBinding := &skill.Binding{
+		ID: "slack-platform", Scope: skill.ScopeReference{Kind: platformScope.Kind, ID: platformScope.ID}, DeploymentID: "slack-platform-verifier",
+		SkillID: "slack", SkillVersion: "1.0.0", EnabledConversationAdapters: []string{"conversations"},
+		MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{
+			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://platform/slack"},
+		},
+	}
+	if err := catalog.Bind(ctx, platformBinding); err != nil {
+		t.Fatal(err)
+	}
+	registration, err := NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "platform-slack", Name: "Platform Slack events",
+		Gateway: ExternalConversationIngressGateway{
+			Scope: platformScope, DeploymentID: platformBinding.DeploymentID, Provider: "slack",
+			Adapter: ExternalConversationAdapterReference{
+				SkillID: "slack", SkillVersion: "1.0.0", BindingID: platformBinding.ID,
+				BindingRevision: platformBinding.Revision, AdapterID: "conversations",
+			},
+		},
+		Status: ExternalConversationGatewayActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
+	service := NewExternalConversationTransportService(store, catalog)
+	invoke := func(eventID, installation string) (*ExternalConversationGatewayIngressResult, error) {
+		host.result.Events = []ExternalConversationGatewayEvent{{
+			InstallationID: installation, ApplicationID: "A-shared", Address: "C-support",
+			Event: NormalizedExternalConversationEvent{
+				ID: eventID, Type: capability.ConversationEventMessageReceived,
+				ExternalConversationID: "C-support", ExternalMessageID: eventID,
+				ExternalParticipantID: "U-support", Text: "hello", OrderingKey: "C-support:" + eventID,
+				OccurredAt: time.Now().UTC(),
+			},
+		}}
+		return service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+			Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{"verified":true}`),
+		}, host)
+	}
+	firstResult, err := invoke("event-one", "T-one")
+	if err != nil || len(firstResult.Received) != 1 || firstResult.Received[0].Item.Scope != first.Scope {
+		t.Fatalf("first tenant route = %#v, %v", firstResult, err)
+	}
+	secondResult, err := invoke("event-two", "T-two")
+	if err != nil || len(secondResult.Received) != 1 || secondResult.Received[0].Item.Scope != second.Scope {
+		t.Fatalf("second tenant route = %#v, %v", secondResult, err)
+	}
+
+	ambiguous := cloneExternalConversationEndpoint(first)
+	ambiguous.ID, ambiguous.IngressRoute = "ambiguous-endpoint", "ambiguous-route"
+	ambiguous.Scope = Scope{Kind: "tenant", ID: "ambiguous"}
+	ambiguous.Owner.ID, ambiguous.DeploymentID = "ambiguous-agent", "ambiguous-agent"
+	ambiguous.Handler.ID = "ambiguous-agent"
+	ambiguous.Revision = 1
+	ambiguous.CreatedAt, ambiguous.UpdatedAt = ambiguous.CreatedAt.Add(2*time.Second), ambiguous.CreatedAt.Add(2*time.Second)
+	if err := store.CreateExternalConversationEndpoint(ctx, ambiguous); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invoke("event-ambiguous", "T-one"); !errors.Is(err, ErrExternalConversationConflict) {
+		t.Fatalf("cross-tenant ambiguous route error = %v", err)
+	}
+	items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
+		Scope: first.Scope, EndpointID: first.ID, Limit: 10,
+	})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("ambiguous callback persisted partial inbox work: %#v, %v", items, err)
+	}
+}
+
+func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpointsExist(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalog()
+	definition := slackConversationSkillDefinition()
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: "platform", ID: "default"}
+	binding := &skill.Binding{
+		ID: "verification-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+		DeploymentID: "verification-host", SkillID: definition.ID, SkillVersion: definition.Version,
+		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{
+			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://platform/slack"},
+		},
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
+		ID: "verification-gateway", Name: "Verification gateway",
+		Gateway: ExternalConversationIngressGateway{
+			Scope: scope, DeploymentID: binding.DeploymentID, Provider: "slack",
+			Adapter: ExternalConversationAdapterReference{
+				SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID,
+				BindingRevision: binding.Revision, AdapterID: "conversations",
+			},
+		},
+		Status: ExternalConversationGatewayActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{
+		StatusCode: http.StatusOK, ContentType: "text/plain", Body: []byte("verify-me"),
+	}}
+	result, err := NewExternalConversationTransportService(store, catalog).
+		NormalizeExternalConversationRegisteredGatewayIngress(ctx, ExternalConversationPublicIngressRequest{
+			Route: gateway.IngressRoute, Method: http.MethodPost, Body: []byte(`{"type":"url_verification"}`),
+		}, host)
+	if err != nil || string(result.Response.Body) != "verify-me" || len(result.Received) != 0 {
+		t.Fatalf("endpoint-free verification response = %#v, %v", result, err)
 	}
 }
