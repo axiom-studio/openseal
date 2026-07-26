@@ -163,4 +163,12 @@ func TestConversationDestinationDiscoveryRequiresAReadOnlySchemaMatchedAction(t 
 	if err := validateDefinition(invalid); err == nil || !strings.Contains(err.Error(), "items path") {
 		t.Fatalf("schema-mismatched destination discovery accepted: %v", err)
 	}
+
+	invalid = cloneDefinition(definition)
+	mutated = invalid.Actions["list-destinations"]
+	mutated.Credentials = []CredentialRequirement{{Name: "OTHER", Kind: "other-oauth"}}
+	invalid.Actions["list-destinations"] = mutated
+	if err := validateDefinition(invalid); err == nil || !strings.Contains(err.Error(), "not declared identically") {
+		t.Fatalf("destination discovery escaped adapter credentials: %v", err)
+	}
 }
