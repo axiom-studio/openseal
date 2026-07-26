@@ -46,7 +46,10 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 	if err != nil {
 		return ConversationAdapter{}, err
 	}
-	credentials := make([]CredentialRequirement, len(value.Credentials))
+	var credentials []CredentialRequirement
+	if len(value.Credentials) > 0 {
+		credentials = make([]CredentialRequirement, len(value.Credentials))
+	}
 	seenCredentials := make(map[string]struct{}, len(value.Credentials))
 	for index, credential := range value.Credentials {
 		credential.Name, credential.Kind = strings.TrimSpace(credential.Name), strings.TrimSpace(credential.Kind)
@@ -205,6 +208,9 @@ func normalizeConversationEventTypes(values []string) ([]string, error) {
 func normalizeConversationFeatures(values []ConversationAdapterFeature) ([]ConversationAdapterFeature, error) {
 	if len(values) > 16 {
 		return nil, errors.New("conversation adapter has too many features")
+	}
+	if len(values) == 0 {
+		return nil, nil
 	}
 	seen := make(map[ConversationAdapterFeature]struct{}, len(values))
 	result := make([]ConversationAdapterFeature, 0, len(values))
