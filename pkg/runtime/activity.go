@@ -112,6 +112,7 @@ type RunTransitionRequest struct {
 	BudgetUsageDelta          *BudgetUsage
 	ActivityUsageDelta        *BudgetUsage
 	BudgetReservation         *BudgetReservation
+	ReplaceBudgetReservation  *BudgetReservation
 	SettleBudgetReservationID string
 }
 
@@ -261,6 +262,37 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 			return nil, nil, errors.New("budget reservation already exists")
 		}
 		run.BudgetReservations[req.BudgetReservation.ID] = *req.BudgetReservation
+		effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+		if err != nil {
+			return nil, nil, err
+		}
+		exceeded, _, err := BudgetWouldExceed(*run.Budget, effective)
+		if err != nil {
+			return nil, nil, err
+		}
+		if exceeded {
+			return nil, nil, ErrBudgetExhausted
+		}
+		state, _, err := EvaluateBudget(*run.Budget, effective)
+		if err != nil {
+			return nil, nil, err
+		}
+		run.BudgetState = state
+	}
+	if req.ReplaceBudgetReservation != nil {
+		if run.Budget == nil {
+			return nil, nil, errors.New("budget reservation cannot be replaced without a budget policy")
+		}
+		if req.BudgetReservation != nil {
+			return nil, nil, errors.New("budget reservation cannot be created and replaced in one transition")
+		}
+		if err := req.ReplaceBudgetReservation.Validate(); err != nil {
+			return nil, nil, err
+		}
+		if _, exists := run.BudgetReservations[req.ReplaceBudgetReservation.ID]; !exists {
+			return nil, nil, errors.New("budget reservation does not exist")
+		}
+		run.BudgetReservations[req.ReplaceBudgetReservation.ID] = *req.ReplaceBudgetReservation
 		effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
 		if err != nil {
 			return nil, nil, err

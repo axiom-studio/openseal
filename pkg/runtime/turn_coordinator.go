@@ -156,32 +156,39 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		return nil, err
 	}
 	if run.Budget != nil {
-		if _, reserved := run.BudgetReservations[turn.ID]; !reserved {
+		existing, reserved := run.BudgetReservations[turn.ID]
+		reservationUsage := req.BudgetReservation
+		if planner, ok := runner.(TurnBudgetPlanner); ok {
+			planned, planErr := planner.PlanTurnBudget(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
+			if planErr != nil {
+				if errors.Is(planErr, ErrBudgetExhausted) {
+					return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, planErr.Error(), map[string]interface{}{
+						"reason": "hosted_input_preflight",
+					})
+				}
+				return nil, planErr
+			}
+			reservationUsage, err = reservationUsage.Add(planned)
+			if err != nil {
+				return nil, err
+			}
+		}
+		reservationUsage.Turns = 1
+		if err := reservationUsage.Validate(); err != nil {
+			return nil, err
+		}
+		if !reserved || existing.Usage != reservationUsage {
 			leaseOwner := ""
 			if run.LeaseOwner != "" {
 				leaseOwner = req.WorkerID
 			}
-			reservationUsage := req.BudgetReservation
-			if planner, ok := runner.(TurnBudgetPlanner); ok {
-				planned, planErr := planner.PlanTurnBudget(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
-				if planErr != nil {
-					if errors.Is(planErr, ErrBudgetExhausted) {
-						return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, planErr.Error(), map[string]interface{}{
-							"reason": "hosted_input_preflight",
-						})
-					}
-					return nil, planErr
-				}
-				reservationUsage, err = reservationUsage.Add(planned)
-				if err != nil {
-					return nil, err
+			otherReservations := make(map[string]BudgetReservation, len(run.BudgetReservations))
+			for id, reservation := range run.BudgetReservations {
+				if id != turn.ID {
+					otherReservations[id] = reservation
 				}
 			}
-			reservationUsage.Turns = 1
-			if err := reservationUsage.Validate(); err != nil {
-				return nil, err
-			}
-			effective, err := EffectiveBudgetUsage(run.BudgetUsage, run.BudgetReservations)
+			effective, err := EffectiveBudgetUsage(run.BudgetUsage, otherReservations)
 			if err != nil {
 				return nil, err
 			}
@@ -198,12 +205,21 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 					"reason": "reservation_exceeds_remaining",
 				})
 			}
-			reservedRun, _, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			reservation := &BudgetReservation{ID: turn.ID, Usage: reservationUsage, CreatedAt: c.activity.now()}
+			transition := RunTransitionRequest{
 				ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
 				Summary: "Reserved capacity for a bounded agent turn", EventType: "budget.reserved",
 				Actor: ActivityActor{Type: "worker", ID: req.WorkerID}, LeaseOwner: leaseOwner,
-				BudgetReservation: &BudgetReservation{ID: turn.ID, Usage: reservationUsage, CreatedAt: c.activity.now()},
-			})
+				BudgetReservation: reservation,
+			}
+			if reserved {
+				reservation.CreatedAt = existing.CreatedAt
+				transition.Summary = "Reconciled capacity for a retrying bounded agent turn"
+				transition.EventType = "budget.reservation_reconciled"
+				transition.BudgetReservation = nil
+				transition.ReplaceBudgetReservation = reservation
+			}
+			reservedRun, _, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, transition)
 			if err != nil {
 				return nil, err
 			}
