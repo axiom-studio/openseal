@@ -233,6 +233,31 @@ type AgentRunIntervention struct {
 	CreatedAt   time.Time     `json:"createdAt"`
 }
 
+type HumanInterventionStatus string
+
+const (
+	HumanInterventionStatusPending  HumanInterventionStatus = "pending"
+	HumanInterventionStatusResolved HumanInterventionStatus = "resolved"
+	HumanInterventionStatusCanceled HumanInterventionStatus = "canceled"
+)
+
+// HumanInterventionRequest is a typed, durable request emitted when a
+// capability cannot safely continue without a person. It deliberately stores
+// only bounded classification and provenance; capability output, page content,
+// credentials, and hidden model state are not copied into the request.
+type HumanInterventionRequest struct {
+	ID           string                  `json:"id"`
+	Kind         string                  `json:"kind"`
+	Status       HumanInterventionStatus `json:"status"`
+	ActionCallID string                  `json:"actionCallId"`
+	Summary      string                  `json:"summary"`
+	Challenge    []string                `json:"challenge,omitempty"`
+	Resolution   string                  `json:"resolution,omitempty"`
+	ResolvedBy   *ActivityActor          `json:"resolvedBy,omitempty"`
+	CreatedAt    time.Time               `json:"createdAt"`
+	ResolvedAt   *time.Time              `json:"resolvedAt,omitempty"`
+}
+
 // AgentRun is the canonical durable workstream. Workflow execution records are
 // subordinate execution details and must not be used as agent-run identity.
 type AgentRun struct {
@@ -265,6 +290,7 @@ type AgentRun struct {
 	PausedFrom           AgentRunStatus               `json:"pausedFrom,omitempty"`
 	PausedWakeCondition  *WakeCondition               `json:"pausedWakeCondition,omitempty"`
 	PendingInterventions []AgentRunIntervention       `json:"pendingInterventions,omitempty"`
+	HumanInterventions   []HumanInterventionRequest   `json:"humanInterventions,omitempty"`
 	Budget               *BudgetPolicy                `json:"budget,omitempty"`
 	BudgetUsage          BudgetUsage                  `json:"budgetUsage,omitempty"`
 	BudgetState          BudgetState                  `json:"budgetState,omitempty"`
@@ -332,6 +358,28 @@ func (r *AgentRun) Validate() error {
 	}
 	if len(r.ConcurrencyKey) > 256 || strings.ContainsAny(r.ConcurrencyKey, "\r\n") {
 		return errors.New("run concurrency key cannot exceed 256 characters or contain line breaks")
+	}
+	seenHumanInterventions := make(map[string]struct{}, len(r.HumanInterventions))
+	for _, request := range r.HumanInterventions {
+		if strings.TrimSpace(request.ID) == "" || strings.TrimSpace(request.Kind) == "" || strings.TrimSpace(request.ActionCallID) == "" || strings.TrimSpace(request.Summary) == "" {
+			return errors.New("human intervention identity, kind, action call, and summary are required")
+		}
+		if _, exists := seenHumanInterventions[request.ID]; exists {
+			return errors.New("human intervention ids must be unique")
+		}
+		seenHumanInterventions[request.ID] = struct{}{}
+		if request.Status != HumanInterventionStatusPending && request.Status != HumanInterventionStatusResolved && request.Status != HumanInterventionStatusCanceled {
+			return errors.New("human intervention status is invalid")
+		}
+		if request.Status == HumanInterventionStatusPending && (request.ResolvedAt != nil || request.ResolvedBy != nil || strings.TrimSpace(request.Resolution) != "") {
+			return errors.New("pending human intervention cannot contain a resolution")
+		}
+		if request.Status != HumanInterventionStatusPending && request.ResolvedAt == nil {
+			return errors.New("terminal human intervention requires a resolution timestamp")
+		}
+		if err := uniqueIDs(request.Challenge, "human intervention challenge"); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -934,12 +934,13 @@ type DeliverOutreachMessageRequest struct {
 }
 
 type AgentRunCommandRequest struct {
-	ExpectedRevision int64                       `json:"expectedRevision"`
-	Kind             runtime.AgentRunCommandKind `json:"kind"`
-	Actor            runtime.ActivityActor       `json:"actor,omitempty"`
-	Summary          string                      `json:"summary,omitempty"`
-	Instruction      string                      `json:"instruction,omitempty"`
-	Visibility       runtime.ActivityVisibility  `json:"visibility,omitempty"`
+	ExpectedRevision    int64                       `json:"expectedRevision"`
+	Kind                runtime.AgentRunCommandKind `json:"kind"`
+	Actor               runtime.ActivityActor       `json:"actor,omitempty"`
+	Summary             string                      `json:"summary,omitempty"`
+	Instruction         string                      `json:"instruction,omitempty"`
+	HumanInterventionID string                      `json:"humanInterventionId,omitempty"`
+	Visibility          runtime.ActivityVisibility  `json:"visibility,omitempty"`
 }
 
 type ResolveArtifactContentRequest struct {

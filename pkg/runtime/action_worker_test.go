@@ -92,6 +92,70 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 	}
 }
 
+func TestActionWorkerPersistsTypedHumanInterventionAcrossStores(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "human-intervention.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, cleanup := testCase.open(t)
+			defer cleanup()
+			now := time.Date(2026, 7, 27, 7, 0, 0, 0, time.UTC)
+			catalog, proposal := createRunnableAction(t, store, now)
+			worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+				return map[string]string{"token": "credential-never-copied"}, nil
+			}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+				return map[string]interface{}{
+					"success": true, "requiresHuman": true,
+					"challenges": []interface{}{"captcha", "captcha"},
+					"currentUrl": "https://example.invalid/challenge?secret=credential-never-copied",
+				}, nil
+			}))
+			worker.now = func() time.Time { return now.Add(2 * time.Second) }
+			ids := []string{"human-request", "human-event"}
+			worker.newID = func() string {
+				id := ids[0]
+				ids = ids[1:]
+				return id
+			}
+			result, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "action-worker", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Run.Status != AgentRunStatusWaitingForEvent || result.Run.WakeCondition == nil || result.Run.WakeCondition.Type != "human_intervention" || result.Run.WakeCondition.Reference != "human-request" {
+				t.Fatalf("waiting run = %#v", result.Run)
+			}
+			if len(result.Run.HumanInterventions) != 1 {
+				t.Fatalf("human interventions = %#v", result.Run.HumanInterventions)
+			}
+			request := result.Run.HumanInterventions[0]
+			if request.Status != HumanInterventionStatusPending || request.ActionCallID != proposal.Call.ID || len(request.Challenge) != 1 || request.Challenge[0] != "captcha" {
+				t.Fatalf("human intervention = %#v", request)
+			}
+			encoded, _ := json.Marshal(request)
+			if strings.Contains(string(encoded), "credential-never-copied") || strings.Contains(string(encoded), "example.invalid") {
+				t.Fatalf("human intervention copied capability output: %s", encoded)
+			}
+			if result.Event.EventType != "action.human_intervention_required" || result.Event.Payload["humanInterventionId"] != request.ID {
+				t.Fatalf("human intervention event = %#v", result.Event)
+			}
+			persisted, err := store.GetAgentRun(t.Context(), proposal.Call.Scope, proposal.Call.RunID)
+			if err != nil || len(persisted.HumanInterventions) != 1 || persisted.HumanInterventions[0].ID != request.ID {
+				t.Fatalf("persisted human intervention = %#v, %v", persisted, err)
+			}
+		})
+	}
+}
+
 func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

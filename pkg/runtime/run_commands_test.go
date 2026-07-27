@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
@@ -111,6 +112,60 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("canceled result = %#v", canceled)
 			}
 		})
+	}
+}
+
+func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewRunCommandService(store)
+	scope := Scope{Kind: "tenant", ID: "human"}
+	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+		Goal: "Continue only after a human completes the challenge", Source: RunSourceSchedule,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 27, 7, 15, 0, 0, time.UTC)
+	request := HumanInterventionRequest{
+		ID: "human-request", Kind: "capability_challenge", Status: HumanInterventionStatusPending,
+		ActionCallID: "browser-click", Summary: "Human intervention required", Challenge: []string{"captcha"}, CreatedAt: now,
+	}
+	waiting, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusWaitingForEvent,
+		WakeCondition: &WakeCondition{Type: "human_intervention", Reference: request.ID}, HumanInterventions: []HumanInterventionRequest{request},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := ActivityActor{Type: "user", ID: "operator"}
+	resolved, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+		HumanInterventionID: request.ID, Instruction: "CAPTCHA completed in the retained Browser session", Actor: actor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Run.Status != AgentRunStatusQueued || resolved.Run.WakeCondition != nil || resolved.Event.EventType != "run.human_intervention_resolved" {
+		t.Fatalf("resolved run = %#v", resolved)
+	}
+	if len(resolved.Run.HumanInterventions) != 1 || resolved.Run.HumanInterventions[0].Status != HumanInterventionStatusResolved || resolved.Run.HumanInterventions[0].ResolvedBy == nil || resolved.Run.HumanInterventions[0].ResolvedBy.ID != actor.ID {
+		t.Fatalf("resolved intervention = %#v", resolved.Run.HumanInterventions)
+	}
+	if len(resolved.Run.PendingInterventions) != 1 || resolved.Run.PendingInterventions[0].Instruction == "" {
+		t.Fatalf("operator context was not queued for the next turn: %#v", resolved.Run.PendingInterventions)
+	}
+	if _, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: resolved.Run.ID, ExpectedRevision: resolved.Run.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+		HumanInterventionID: request.ID, Instruction: "replay", Actor: actor,
+	}); err == nil {
+		t.Fatal("resolved human intervention was accepted twice")
 	}
 }
 

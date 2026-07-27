@@ -87,7 +87,8 @@ func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := runtime.NewRunCommandService(s.store).CommandAgentRun(r.Context(), runtime.AgentRunCommandRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
-		Kind: payload.Kind, Actor: payload.Actor, Summary: payload.Summary, Instruction: payload.Instruction, Visibility: payload.Visibility,
+		Kind: payload.Kind, Actor: payload.Actor, Summary: payload.Summary, Instruction: payload.Instruction,
+		HumanInterventionID: payload.HumanInterventionID, Visibility: payload.Visibility,
 	})
 	if err != nil {
 		s.respondAgentRunError(w, err)
