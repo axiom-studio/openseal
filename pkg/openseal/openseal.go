@@ -305,6 +305,8 @@ type (
 	OutreachActionProposalObserver     = runtime.OutreachActionProposalObserver
 	AgentRun                           = runtime.AgentRun
 	AgentRunIntervention               = runtime.AgentRunIntervention
+	HumanInterventionRequest           = runtime.HumanInterventionRequest
+	HumanInterventionStatus            = runtime.HumanInterventionStatus
 	BudgetPolicy                       = runtime.BudgetPolicy
 	BudgetUsage                        = runtime.BudgetUsage
 	BudgetReservation                  = runtime.BudgetReservation
@@ -1636,10 +1638,15 @@ const (
 	BudgetStateWarning   = runtime.BudgetStateWarning
 	BudgetStateExhausted = runtime.BudgetStateExhausted
 
-	AgentRunCommandPause     = runtime.AgentRunCommandPause
-	AgentRunCommandResume    = runtime.AgentRunCommandResume
-	AgentRunCommandCancel    = runtime.AgentRunCommandCancel
-	AgentRunCommandIntervene = runtime.AgentRunCommandIntervene
+	AgentRunCommandPause                    = runtime.AgentRunCommandPause
+	AgentRunCommandResume                   = runtime.AgentRunCommandResume
+	AgentRunCommandCancel                   = runtime.AgentRunCommandCancel
+	AgentRunCommandIntervene                = runtime.AgentRunCommandIntervene
+	AgentRunCommandResolveHumanIntervention = runtime.AgentRunCommandResolveHumanIntervention
+
+	HumanInterventionStatusPending  = runtime.HumanInterventionStatusPending
+	HumanInterventionStatusResolved = runtime.HumanInterventionStatusResolved
+	HumanInterventionStatusCanceled = runtime.HumanInterventionStatusCanceled
 
 	ActivitySeverityDebug   = runtime.ActivitySeverityDebug
 	ActivitySeverityInfo    = runtime.ActivitySeverityInfo
