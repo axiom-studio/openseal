@@ -29,8 +29,11 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 		}
 		encoded, _ := json.Marshal(body)
 		requestBody = string(encoded)
-		if body["model"] != "deepseek-v4-flash" || body["temperature"].(float64) != 0 || body["response_format"].(map[string]interface{})["type"] != "json_object" {
+		if body["model"] != "deepseek-v4-flash" || body["response_format"].(map[string]interface{})["type"] != "json_object" {
 			t.Fatalf("request body = %#v", body)
+		}
+		if _, exists := body["temperature"]; exists {
+			t.Fatalf("default transport emitted optional sampling parameter: %#v", body["temperature"])
 		}
 		if _, exists := body["thinking"]; exists {
 			t.Fatalf("default transport emitted provider-specific thinking field: %#v", body["thinking"])
