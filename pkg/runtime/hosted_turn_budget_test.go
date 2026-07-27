@@ -167,6 +167,24 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	}
 }
 
+func TestHostedTurnBudgetReservationDoesNotSpendLifetimeOutputBudgetOnOneTurn(t *testing.T) {
+	runner, err := NewHostedTurnRunner(&countedHostedTurnHost{}, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run", AssignedAgentID: "agent", Goal: "Do work", Budget: &BudgetPolicy{
+		MaxInputTokens: 512000, MaxOutputTokens: 512000, MaxTotalTokens: 1100000,
+	}}
+	turn := &AgentTurn{ID: "turn", RunID: run.ID}
+	reservation, err := runner.PlanTurnBudget(t.Context(), TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reservation.OutputTokens != HostedTurnMaximumOutputReservationTokens {
+		t.Fatalf("output reservation = %d, want %d", reservation.OutputTokens, HostedTurnMaximumOutputReservationTokens)
+	}
+}
+
 func TestHostedTurnMinimumChildBudgetCoversAuthorizedEnvelope(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-large-context",
