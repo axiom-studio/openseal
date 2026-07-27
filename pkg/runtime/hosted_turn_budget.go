@@ -22,7 +22,11 @@ const (
 	// preflight. EstimateHostedTurnInputTokens intentionally normalizes that
 	// self-referential field so kernel and host calculate one stable estimate.
 	HostedTurnBudgetEnvelopeReserveTokens int64 = 256
-	HostedTurnMinimumOutputTokens         int64 = 64
+	// HostedTurnInputSettlementToleranceTokens covers bounded provider
+	// tokenizer drift after the kernel reserves its immutable envelope. The
+	// exact usage is still charged and must fit the user's remaining budget.
+	HostedTurnInputSettlementToleranceTokens int64 = 256
+	HostedTurnMinimumOutputTokens            int64 = 64
 	// Hosted child work must be large enough to carry at least one complete
 	// provider-neutral hosted protocol exchange with room for bounded recovery.
 	// These are protocol floors, not domain-specific recommendations; a model
