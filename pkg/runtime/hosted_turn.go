@@ -304,18 +304,24 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, fmt.Errorf("turn host reported %d output tokens beyond the reserved %d", response.Usage.OutputTokens, reserved.OutputTokens)
 		}
 	}
-	allowed := make(map[string]capability.SideEffect, len(request.Actions))
+	allowed := make(map[string]capability.ModelAction, len(request.Actions))
 	for _, action := range request.Actions {
-		allowed[action.Name] = action.SideEffect
+		allowed[action.Name] = action
 	}
 	for index := range response.ProposedActions {
 		proposed := &response.ProposedActions[index]
-		sideEffect, ok := allowed[proposed.Capability]
+		action, ok := allowed[proposed.Capability]
 		if !ok {
 			return nil, errors.New("turn host proposed an unauthorized capability")
 		}
+		if action.ExternalOperationPolicy == capability.ExternalOperationRequired && proposed.ExternalOperation == nil {
+			return nil, errors.New("action requires an external operation identity")
+		}
 		if proposed.ExternalOperation != nil {
-			if sideEffect != capability.SideEffectExternal {
+			if action.ExternalOperationPolicy == capability.ExternalOperationForbidden {
+				return nil, errors.New("action forbids an external operation identity")
+			}
+			if action.SideEffect != capability.SideEffectExternal {
 				return nil, errors.New("external operation identity is only valid for an external side effect")
 			}
 			if err := proposed.ExternalOperation.Validate(); err != nil {

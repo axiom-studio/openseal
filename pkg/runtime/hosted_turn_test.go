@@ -407,6 +407,44 @@ func TestHostedTurnRunnerRefreshesObservationAfterInterveningAction(t *testing.T
 	}
 }
 
+func TestHostedTurnRunnerEnforcesExternalOperationPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		policy   capability.ExternalOperationPolicy
+		external *ExternalOperationIdentity
+		wantErr  string
+	}{
+		{name: "forbidden", policy: capability.ExternalOperationForbidden, external: &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}, wantErr: "forbids an external operation identity"},
+		{name: "required", policy: capability.ExternalOperationRequired, wantErr: "requires an external operation identity"},
+		{name: "required present", policy: capability.ExternalOperationRequired, external: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			action := capability.ModelAction{
+				Name: "browser.action", BindingID: "browser-binding", BindingRevision: 1, SkillID: "skill-browser", Version: "1.0.0",
+				Action: "browser-action", SideEffect: capability.SideEffectExternal, ExternalOperationPolicy: test.policy,
+			}
+			host := &recordingTurnHost{response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "policy-turn", ModelProvider: "test", Model: "test-model",
+				NextRunStatus: AgentRunStatusRunning, OutputSummary: "Act", ProposedActions: []TurnAction{{
+					Type: "skill_action", Capability: action.Name, Summary: "Act", InputRef: "/actionInputs/call", ExternalOperation: test.external,
+				}}, ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"call": map[string]interface{}{}}},
+			}}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1", Actions: []capability.ModelAction{action}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "act"}, Turn: &AgentTurn{ID: "policy-turn"}})
+			if test.wantErr == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
+				t.Fatalf("error=%v want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestHostedTurnRunnerSuppressesSucceededSideEffectAfterLaterObservation(t *testing.T) {
 	action := capability.ModelAction{
 		Name: "browser.submit", BindingID: "browser-binding", BindingRevision: 4,

@@ -32,6 +32,7 @@ type ConversationDestinationDiscovery = capability.ConversationDestinationDiscov
 type ConversationAdapter = capability.ConversationAdapter
 type BoundConversationAdapter = capability.BoundConversationAdapter
 type ActionRetryPolicy = capability.ActionRetryPolicy
+type ExternalOperationPolicy = capability.ExternalOperationPolicy
 type Duration = capability.Duration
 type Action = capability.Action
 type TransportReference = capability.TransportReference
@@ -64,6 +65,10 @@ const (
 	IdempotencyNone      = capability.IdempotencyNone
 	IdempotencySupported = capability.IdempotencySupported
 	IdempotencyRequired  = capability.IdempotencyRequired
+
+	ExternalOperationForbidden = capability.ExternalOperationForbidden
+	ExternalOperationOptional  = capability.ExternalOperationOptional
+	ExternalOperationRequired  = capability.ExternalOperationRequired
 
 	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
 	OAuth2SubjectUser         = capability.OAuth2SubjectUser
@@ -384,7 +389,7 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 				BindingID: binding.ID, BindingRevision: binding.Revision, DeploymentID: binding.DeploymentID,
 				SkillID: definition.ID, Version: definition.Version, Action: name,
 				InputSchema: modelVisibleInputSchema(action.InputSchema), SemanticArguments: cloneStringMap(action.SemanticArguments),
-				Risk: action.Risk, SideEffect: action.SideEffect,
+				Risk: action.Risk, SideEffect: action.SideEffect, ExternalOperationPolicy: action.ExternalOperationPolicy,
 			})
 		}
 	}
@@ -881,8 +886,11 @@ func validateDefinition(definition *Definition) error {
 		if name == "" || action.Name != name || strings.TrimSpace(action.Description) == "" || action.InputSchema == nil {
 			return fmt.Errorf("skill action %s is incomplete", name)
 		}
-		if !validRisk(action.Risk) || !validSideEffect(action.SideEffect) || !validIdempotency(action.Idempotency) {
+		if !validRisk(action.Risk) || !validSideEffect(action.SideEffect) || !validIdempotency(action.Idempotency) || !validExternalOperationPolicy(action.ExternalOperationPolicy) {
 			return fmt.Errorf("skill action %s has invalid policy metadata", name)
+		}
+		if action.ExternalOperationPolicy == ExternalOperationRequired && action.SideEffect != SideEffectExternal {
+			return fmt.Errorf("skill action %s requires external side effects to require an external-operation receipt", name)
 		}
 		if action.SideEffect != SideEffectNone && action.SideEffect != SideEffectRead && action.Idempotency == IdempotencyNone {
 			return fmt.Errorf("skill action %s with side effects must support idempotency", name)
@@ -1309,6 +1317,10 @@ func validSideEffect(value SideEffect) bool {
 
 func validIdempotency(value IdempotencyMode) bool {
 	return value == IdempotencyNone || value == IdempotencySupported || value == IdempotencyRequired
+}
+
+func validExternalOperationPolicy(value ExternalOperationPolicy) bool {
+	return value == "" || value == ExternalOperationForbidden || value == ExternalOperationOptional || value == ExternalOperationRequired
 }
 
 func containsString(values []string, expected string) bool {

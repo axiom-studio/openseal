@@ -190,6 +190,12 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if bound.Action.Idempotency == skill.IdempotencyRequired && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, errors.New("skill action requires an idempotency key")
 	}
+	if bound.Action.ExternalOperationPolicy == skill.ExternalOperationRequired && req.ExternalOperation == nil {
+		return nil, errors.New("skill action requires an external operation identity")
+	}
+	if bound.Action.ExternalOperationPolicy == skill.ExternalOperationForbidden && req.ExternalOperation != nil {
+		return nil, errors.New("skill action forbids an external operation identity")
+	}
 	externalOperationDigest, err := computeExternalOperationDigest(req.Scope, run.Owner, run.ObjectiveID, req.ExternalOperation)
 	if err != nil {
 		return nil, err
