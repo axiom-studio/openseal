@@ -27,6 +27,9 @@ const (
 	// exact usage is still charged and must fit the user's remaining budget.
 	HostedTurnInputSettlementToleranceTokens int64 = 256
 	HostedTurnMinimumOutputTokens            int64 = 64
+	// HostedTurnMaximumOutputReservationTokens bounds one provider exchange;
+	// the Run's output policy remains a lifetime budget shared by many Turns.
+	HostedTurnMaximumOutputReservationTokens int64 = 32768
 	// Hosted child work must be large enough to carry at least one complete
 	// provider-neutral hosted protocol exchange with room for bounded recovery.
 	// These are protocol floors, not domain-specific recommendations; a model
@@ -163,6 +166,9 @@ func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecution
 		if reservation.OutputTokens == 0 || remaining.MaxOutputTokens < reservation.OutputTokens {
 			reservation.OutputTokens = remaining.MaxOutputTokens
 		}
+	}
+	if reservation.OutputTokens > HostedTurnMaximumOutputReservationTokens {
+		reservation.OutputTokens = HostedTurnMaximumOutputReservationTokens
 	}
 	if groundingState != nil && groundingState.Status == evidenceGroundingPendingReview && reservation.OutputTokens > EvidenceGroundingReviewOutputLimit {
 		reservation.OutputTokens = EvidenceGroundingReviewOutputLimit
