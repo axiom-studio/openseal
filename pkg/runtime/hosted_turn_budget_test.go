@@ -24,6 +24,47 @@ func (h *countedHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Hos
 	}, nil
 }
 
+type reservationBoundaryHostedTurnHost struct{ over int64 }
+
+func (h reservationBoundaryHostedTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
+	return &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID,
+		ModelProvider: "test", Model: "test-model", NextRunStatus: AgentRunStatusCompleted,
+		OutputSummary: "done", Usage: TurnUsage{
+			InputTokens: int(request.Budget.TurnReservation.InputTokens + h.over), OutputTokens: 1,
+		},
+	}, nil
+}
+
+func TestHostedTurnProviderUsageCannotExceedConservativeReservation(t *testing.T) {
+	const turnID = "turn-reservation-boundary"
+	run := &AgentRun{
+		ID: "run-reservation-boundary", Scope: Scope{Kind: "tenant", ID: "7"}, AssignedAgentID: "agent", Goal: "Do bounded work",
+		Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 4000, MaxTotalTokens: 36000},
+		BudgetReservations: map[string]BudgetReservation{turnID: {
+			ID: turnID, Usage: BudgetUsage{Turns: 1, InputTokens: 12000, OutputTokens: 1000}, CreatedAt: time.Now(),
+		}},
+	}
+	for _, test := range []struct {
+		name    string
+		over    int64
+		wantErr bool
+	}{{name: "at reservation", over: 0}, {name: "beyond reservation", over: 1, wantErr: true}} {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := NewHostedTurnRunner(reservationBoundaryHostedTurnHost{over: test.over}, HostedTurnRunnerConfig{
+				AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: turnID}})
+			if test.wantErr != (err != nil) || (test.wantErr && !strings.Contains(err.Error(), "beyond the reserved")) {
+				t.Fatalf("error = %v, wantErr=%t", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}

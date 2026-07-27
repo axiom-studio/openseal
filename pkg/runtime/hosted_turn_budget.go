@@ -14,7 +14,9 @@ const (
 	// message framing, and provider-tokenizer uncertainty. Dynamic JSON is
 	// estimated separately at two UTF-8 bytes per token. Agent context must use
 	// references rather than embedding opaque binary or encoded artifact data.
-	HostedTurnProtocolInputReserveTokens int64 = 4096
+	// The reserve includes the host's provider-facing tool framing, which is
+	// deliberately absent from the portable model-input JSON below.
+	HostedTurnProtocolInputReserveTokens int64 = 6144
 	// HostedTurnBudgetEnvelopeReserveTokens covers the bounded JSON growth when
 	// the durable reservation is projected into the model-visible budget after
 	// preflight. EstimateHostedTurnInputTokens intentionally normalizes that
