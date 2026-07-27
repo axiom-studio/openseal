@@ -78,3 +78,28 @@ func TestPreserveKernelActionHistoryRejectsModelRewrite(t *testing.T) {
 		t.Fatalf("model invented kernel action history: %#v", withoutHistory)
 	}
 }
+
+func TestTerminalActionSeparatesModelMediaFromTextEvidence(t *testing.T) {
+	call := &ActionCall{
+		ID: "screenshot-call", SkillID: "browser", SkillVersion: "1", Action: "snapshot",
+		Status: ActionCallStatusSucceeded,
+		Output: map[string]interface{}{
+			"generation": 3,
+			"modelMedia": map[string]interface{}{
+				"mediaType": "image/jpeg", "contentBase64": "c2NyZWVuc2hvdA==", "detail": "low",
+			},
+		},
+	}
+	checkpoint := checkpointTerminalAction(nil, call, nil)
+	last := checkpoint["lastAction"].(map[string]interface{})
+	if last["modelMedia"].(map[string]interface{})["contentBase64"] != "c2NyZWVuc2hvdA==" {
+		t.Fatalf("model media was not preserved separately: %#v", last)
+	}
+	if _, leaked := last["result"].(map[string]interface{})["modelMedia"]; leaked {
+		t.Fatalf("model media leaked into textual action result: %#v", last["result"])
+	}
+	entries := actionHistoryEntries(checkpoint)
+	if _, leaked := entries[0]["result"].(map[string]interface{})["modelMedia"]; leaked {
+		t.Fatalf("model media leaked into durable history: %#v", entries[0])
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -41,6 +42,10 @@ const (
 	HostedTurnMinimumChildTotalTokens  int64 = HostedTurnMinimumChildInputTokens + HostedTurnMinimumChildOutputTokens
 	HostedTurnMinimumChildDurationMS   int64 = 180000
 	HostedTurnMinimumChildActions      int64 = 1
+	// HostedTurnMediaReserveTokens is a conservative provider-neutral reserve
+	// for one bounded browser screenshot. Providers report actual usage, which
+	// is still settled against the Run budget after the Turn.
+	HostedTurnMediaReserveTokens int64 = 4096
 )
 
 // HostedTurnModelInput is the credential-free data envelope presented to the
@@ -68,9 +73,27 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		RunbookOperations: request.RunbookOperations,
 		SkillPrompts:      request.SkillPrompts, Actions: request.Actions, Budget: request.Budget,
 		DependencyResults: request.DependencyResults, CollaborationResults: request.CollaborationResults,
-		ContinuationCheckpoint: request.ContinuationCheckpoint,
+		ContinuationCheckpoint: hostedTurnTextCheckpoint(request.ContinuationCheckpoint),
 		PendingInterventions:   request.PendingInterventions,
 	})
+}
+
+func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {
+	result := cloneMap(checkpoint)
+	last, ok := result["lastAction"].(map[string]interface{})
+	if !ok {
+		return result
+	}
+	media, ok := last["modelMedia"].(map[string]interface{})
+	if !ok {
+		return result
+	}
+	last["modelMedia"] = map[string]interface{}{
+		"attached":  true,
+		"mediaType": strings.TrimSpace(fmt.Sprint(media["mediaType"])),
+		"detail":    strings.TrimSpace(fmt.Sprint(media["detail"])),
+	}
+	return result
 }
 
 func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
@@ -84,7 +107,7 @@ func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + estimateHostedJSONTokens(input), nil
+	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + estimateHostedJSONTokens(input) + int64(len(request.ModelMedia))*HostedTurnMediaReserveTokens, nil
 }
 
 func EstimateEvidenceGroundingReviewInputTokens(request EvidenceGroundingRequest) (int64, error) {
