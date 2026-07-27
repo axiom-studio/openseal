@@ -476,7 +476,20 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 		DeploymentID: actionDeploymentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 	}
-	return succeededActionHistoryEntry(checkpoint, ComputeActionSemanticDigest(call)), nil
+	digest := ComputeActionSemanticDigest(call)
+	if selected.SideEffect == capability.SideEffectRead || selected.SideEffect == capability.SideEffectNone {
+		entries := actionHistoryEntries(checkpoint)
+		if len(entries) == 0 {
+			return nil, nil
+		}
+		latest := entries[len(entries)-1]
+		status := latest["status"]
+		if latest["semanticDigest"] == digest && (status == string(ActionCallStatusSucceeded) || status == ActionCallStatusSucceeded) {
+			return latest, nil
+		}
+		return nil, nil
+	}
+	return succeededActionHistoryEntry(checkpoint, digest), nil
 }
 
 func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnRequest, error) {
