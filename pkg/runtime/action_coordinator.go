@@ -320,7 +320,7 @@ func persistedActionArguments(arguments map[string]interface{}, schema map[strin
 	result := make(map[string]interface{}, len(arguments))
 	for key, value := range arguments {
 		childSchema, _ := properties[key].(map[string]interface{})
-		if sensitiveFieldName(key) || schemaSensitive(childSchema) {
+		if schemaSensitive(childSchema) || (sensitiveFieldName(key) && !schemaPublicEnum(childSchema)) {
 			continue
 		}
 		result[key] = persistedActionValue(value, childSchema)
@@ -379,7 +379,7 @@ func sanitizeApprovalValue(value interface{}, schema map[string]interface{}) int
 		result := make(map[string]interface{}, len(typed))
 		for key, child := range typed {
 			childSchema, _ := properties[key].(map[string]interface{})
-			if sensitiveFieldName(key) || schemaSensitive(childSchema) {
+			if schemaSensitive(childSchema) || (sensitiveFieldName(key) && !schemaPublicEnum(childSchema)) {
 				result[key] = "[REDACTED]"
 			} else {
 				result[key] = sanitizeApprovalValue(child, childSchema)
@@ -406,6 +406,25 @@ func schemaSensitive(schema map[string]interface{}) bool {
 	extension, _ := schema["x-sensitive"].(bool)
 	format, _ := schema["format"].(string)
 	return writeOnly || extension || format == "password"
+}
+
+// schemaPublicEnum identifies a selector whose complete value set is already
+// part of the public Skill contract. A validated value such as
+// credentialField=username selects which opaque binding field the trusted host
+// may resolve; it is not credential material and must survive persistence and
+// approval. Explicit sensitive schema annotations always take precedence.
+func schemaPublicEnum(schema map[string]interface{}) bool {
+	if schema == nil {
+		return false
+	}
+	switch values := schema["enum"].(type) {
+	case []interface{}:
+		return len(values) > 0
+	case []string:
+		return len(values) > 0
+	default:
+		return false
+	}
 }
 
 func sensitiveFieldName(value string) bool {
