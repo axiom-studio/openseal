@@ -308,12 +308,26 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
+		if updatedCall.Status == ActionCallStatusSucceeded {
+			if request := humanInterventionFromAction(updatedCall, now, w.newID); request != nil {
+				updatedRun.Status = AgentRunStatusWaitingForEvent
+				updatedRun.WakeCondition = &WakeCondition{Type: "human_intervention", Reference: request.ID}
+				updatedRun.HumanInterventions = append(updatedRun.HumanInterventions, *request)
+				eventType = "action.human_intervention_required"
+				summary = request.Summary
+			}
+		}
 	}
 	event := &ActivityEvent{
 		ID: w.newID(), Scope: call.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
 		AgentID: call.DeploymentID, ObjectiveID: sourceRun.ObjectiveID, TeamID: teamIDForRun(sourceRun), RunID: call.RunID, TurnID: call.TurnID, Actor: ActivityActor{Type: "worker", ID: workerID},
 		Summary: summary, Visibility: ActivityVisibilityScope, CausationID: call.ID, CreatedAt: now,
 		Payload: map[string]interface{}{"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
+	}
+	if updatedRun != nil && updatedRun.WakeCondition != nil && updatedRun.WakeCondition.Type == "human_intervention" {
+		event.Severity = ActivitySeverityWarning
+		event.Payload["humanInterventionId"] = updatedRun.WakeCondition.Reference
+		event.Payload["challenge"] = append([]string(nil), updatedRun.HumanInterventions[len(updatedRun.HumanInterventions)-1].Challenge...)
 	}
 	if updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed {
 		event.UsageDelta = &BudgetUsage{Actions: 1}
@@ -322,6 +336,53 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		Call: updatedCall, ExpectedCallRevision: call.Revision, Run: updatedRun, ExpectedRunRevision: expectedRunRevision,
 		WorkerID: workerID, Now: now, Event: event,
 	})
+}
+
+func humanInterventionFromAction(call *ActionCall, now time.Time, newID func() string) *HumanInterventionRequest {
+	if call == nil || call.Output == nil {
+		return nil
+	}
+	requiresHuman, _ := call.Output["requiresHuman"].(bool)
+	if !requiresHuman {
+		return nil
+	}
+	challenge := boundedChallengeKinds(call.Output["challenges"])
+	return &HumanInterventionRequest{
+		ID: newID(), Kind: "capability_challenge", Status: HumanInterventionStatusPending,
+		ActionCallID: call.ID, Summary: "Human intervention is required before automation can continue",
+		Challenge: challenge, CreatedAt: now,
+	}
+}
+
+func boundedChallengeKinds(raw interface{}) []string {
+	values := make([]string, 0, 4)
+	appendValue := func(value string) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || len(value) > 64 {
+			return
+		}
+		for _, existing := range values {
+			if existing == value {
+				return
+			}
+		}
+		if len(values) < 4 {
+			values = append(values, value)
+		}
+	}
+	switch typed := raw.(type) {
+	case []string:
+		for _, value := range typed {
+			appendValue(value)
+		}
+	case []interface{}:
+		for _, value := range typed {
+			if text, ok := value.(string); ok {
+				appendValue(text)
+			}
+		}
+	}
+	return values
 }
 
 func actionRetryDelay(policy skill.ActionRetryPolicy, attempt int) time.Duration {

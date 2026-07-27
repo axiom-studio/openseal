@@ -16,21 +16,23 @@ import (
 type AgentRunCommandKind string
 
 const (
-	AgentRunCommandPause     AgentRunCommandKind = "pause"
-	AgentRunCommandResume    AgentRunCommandKind = "resume"
-	AgentRunCommandCancel    AgentRunCommandKind = "cancel"
-	AgentRunCommandIntervene AgentRunCommandKind = "intervene"
+	AgentRunCommandPause                    AgentRunCommandKind = "pause"
+	AgentRunCommandResume                   AgentRunCommandKind = "resume"
+	AgentRunCommandCancel                   AgentRunCommandKind = "cancel"
+	AgentRunCommandIntervene                AgentRunCommandKind = "intervene"
+	AgentRunCommandResolveHumanIntervention AgentRunCommandKind = "resolve_human_intervention"
 )
 
 type AgentRunCommandRequest struct {
-	Scope            Scope
-	RunID            string
-	ExpectedRevision int64
-	Kind             AgentRunCommandKind
-	Actor            ActivityActor
-	Summary          string
-	Instruction      string
-	Visibility       ActivityVisibility
+	Scope               Scope
+	RunID               string
+	ExpectedRevision    int64
+	Kind                AgentRunCommandKind
+	Actor               ActivityActor
+	Summary             string
+	Instruction         string
+	HumanInterventionID string
+	Visibility          ActivityVisibility
 }
 
 type AgentRunCommandResult struct {
@@ -297,6 +299,7 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 			return transition, fmt.Errorf("%w: cannot cancel %s run", ErrInvalidRunTransition, current.Status)
 		}
 		transition.Status = AgentRunStatusCanceled
+		transition.HumanInterventions = resolvePendingHumanInterventions(current.HumanInterventions, HumanInterventionStatusCanceled, req.Actor, "Run canceled", now)
 		transition.EventType = "run.canceled"
 		if transition.Summary == "" {
 			transition.Summary = "Run canceled"
@@ -317,10 +320,65 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 		if transition.Summary == "" {
 			transition.Summary = "Operator steered the run"
 		}
+	case AgentRunCommandResolveHumanIntervention:
+		requestID := strings.TrimSpace(req.HumanInterventionID)
+		instruction := strings.TrimSpace(req.Instruction)
+		if requestID == "" || instruction == "" {
+			return transition, fmt.Errorf("%w: human intervention id and resolution instruction are required", ErrInvalidRunCommand)
+		}
+		if current.Status != AgentRunStatusWaitingForEvent || current.WakeCondition == nil || current.WakeCondition.Type != "human_intervention" || current.WakeCondition.Reference != requestID {
+			return transition, fmt.Errorf("%w: run is not waiting on human intervention %s", ErrInvalidRunTransition, requestID)
+		}
+		resolved, found := resolveHumanIntervention(current.HumanInterventions, requestID, req.Actor, instruction, now)
+		if !found {
+			return transition, fmt.Errorf("%w: human intervention %s is not pending", ErrInvalidRunTransition, requestID)
+		}
+		transition.Status = AgentRunStatusQueued
+		transition.HumanInterventions = resolved
+		transition.Intervention = &AgentRunIntervention{ID: uuid.NewString(), Actor: req.Actor, Instruction: instruction, CreatedAt: now}
+		transition.EventType = "run.human_intervention_resolved"
+		transition.CausationID = requestID
+		transition.Payload = map[string]interface{}{"humanInterventionId": requestID, "status": HumanInterventionStatusResolved}
+		if transition.Summary == "" {
+			transition.Summary = "Human intervention resolved"
+		}
 	default:
-		return transition, fmt.Errorf("%w: kind must be pause, resume, cancel, or intervene", ErrInvalidRunCommand)
+		return transition, fmt.Errorf("%w: kind must be pause, resume, cancel, intervene, or resolve_human_intervention", ErrInvalidRunCommand)
 	}
 	return transition, nil
+}
+
+func resolveHumanIntervention(values []HumanInterventionRequest, requestID string, actor ActivityActor, resolution string, now time.Time) ([]HumanInterventionRequest, bool) {
+	result := append([]HumanInterventionRequest(nil), values...)
+	for index := range result {
+		if result[index].ID != requestID || result[index].Status != HumanInterventionStatusPending {
+			continue
+		}
+		resolvedAt := now
+		resolvedBy := actor
+		result[index].Status = HumanInterventionStatusResolved
+		result[index].Resolution = resolution
+		result[index].ResolvedBy = &resolvedBy
+		result[index].ResolvedAt = &resolvedAt
+		return result, true
+	}
+	return result, false
+}
+
+func resolvePendingHumanInterventions(values []HumanInterventionRequest, status HumanInterventionStatus, actor ActivityActor, resolution string, now time.Time) []HumanInterventionRequest {
+	result := append([]HumanInterventionRequest(nil), values...)
+	for index := range result {
+		if result[index].Status != HumanInterventionStatusPending {
+			continue
+		}
+		resolvedAt := now
+		resolvedBy := actor
+		result[index].Status = status
+		result[index].Resolution = resolution
+		result[index].ResolvedBy = &resolvedBy
+		result[index].ResolvedAt = &resolvedAt
+	}
+	return result
 }
 
 func resumedRunStatus(previous AgentRunStatus) AgentRunStatus {

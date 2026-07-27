@@ -108,6 +108,7 @@ type RunTransitionRequest struct {
 	EventType                 string
 	OccurredAt                *time.Time
 	Intervention              *AgentRunIntervention
+	HumanInterventions        []HumanInterventionRequest
 	BudgetUsageDelta          *BudgetUsage
 	ActivityUsageDelta        *BudgetUsage
 	BudgetReservation         *BudgetReservation
@@ -229,6 +230,9 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	}
 	if req.Intervention != nil {
 		run.PendingInterventions = append(run.PendingInterventions, *req.Intervention)
+	}
+	if req.HumanInterventions != nil {
+		run.HumanInterventions = append([]HumanInterventionRequest(nil), req.HumanInterventions...)
 	}
 	if req.Output != nil {
 		run.Output = req.Output
