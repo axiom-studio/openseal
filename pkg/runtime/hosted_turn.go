@@ -22,7 +22,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v10"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v11"
 
 const maximumHostedTurnMediaBytes = 1 << 20
 
