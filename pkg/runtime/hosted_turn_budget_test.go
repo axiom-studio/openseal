@@ -46,18 +46,30 @@ func TestHostedTurnProviderUsageCannotExceedConservativeReservation(t *testing.T
 		}},
 	}
 	for _, test := range []struct {
-		name    string
-		over    int64
-		wantErr bool
-	}{{name: "at reservation", over: 0}, {name: "beyond reservation", over: 1, wantErr: true}} {
+		name       string
+		over       int64
+		inputLimit int64
+		wantErr    bool
+	}{
+		{name: "at reservation", over: 0},
+		{name: "bounded provider envelope drift", over: 89},
+		{name: "bounded drift beyond user budget", over: 89, inputLimit: 12050, wantErr: true},
+		{name: "beyond settlement tolerance", over: HostedTurnInputSettlementToleranceTokens + 1, wantErr: true},
+	} {
 		t.Run(test.name, func(t *testing.T) {
+			testRun := *run
+			testBudget := *run.Budget
+			if test.inputLimit > 0 {
+				testBudget.MaxInputTokens = test.inputLimit
+			}
+			testRun.Budget = &testBudget
 			runner, err := NewHostedTurnRunner(reservationBoundaryHostedTurnHost{over: test.over}, HostedTurnRunnerConfig{
 				AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: turnID}})
+			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: &testRun, Turn: &AgentTurn{ID: turnID}})
 			if test.wantErr != (err != nil) || (test.wantErr && !strings.Contains(err.Error(), "beyond the reserved")) {
 				t.Fatalf("error = %v, wantErr=%t", err, test.wantErr)
 			}
