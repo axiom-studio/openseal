@@ -404,6 +404,13 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	binding.SkillVersion = current.To.Version
 	binding.SourceIdentity = current.To.SourceIdentity
 	binding.Revision++
+	// Bindings created by an atomic workforce apply predate the management
+	// lifecycle until their first explicit mutation. Establish the lifecycle
+	// clock at that boundary instead of persisting an updated entry alongside a
+	// zero creation timestamp, which would make the binding unreadable.
+	if binding.CreatedAt.IsZero() {
+		binding.CreatedAt = now
+	}
 	binding.UpdatedAt = now
 	binding.Lifecycle = append(binding.Lifecycle, capability.BindingLifecycleEntry{
 		Revision: binding.Revision, Action: capability.BindingLifecycleUpdated,
