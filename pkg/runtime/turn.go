@@ -33,14 +33,15 @@ type TurnDecision struct {
 }
 
 type TurnAction struct {
-	Type            string   `json:"type"`
-	Capability      string   `json:"capability,omitempty"`
-	BindingID       string   `json:"bindingId,omitempty"`
-	BindingRevision int64    `json:"bindingRevision,omitempty"`
-	Summary         string   `json:"summary"`
-	IdempotencyKey  string   `json:"idempotencyKey,omitempty"`
-	InputRef        string   `json:"inputRef,omitempty"`
-	EvidenceRefs    []string `json:"evidenceRefs,omitempty"`
+	Type              string                     `json:"type"`
+	Capability        string                     `json:"capability,omitempty"`
+	BindingID         string                     `json:"bindingId,omitempty"`
+	BindingRevision   int64                      `json:"bindingRevision,omitempty"`
+	Summary           string                     `json:"summary"`
+	IdempotencyKey    string                     `json:"idempotencyKey,omitempty"`
+	InputRef          string                     `json:"inputRef,omitempty"`
+	EvidenceRefs      []string                   `json:"evidenceRefs,omitempty"`
+	ExternalOperation *ExternalOperationIdentity `json:"externalOperation,omitempty"`
 	// PreparedRuntime is assigned by the trusted worker after the model
 	// proposes a capability. Any model-supplied value is discarded before the
 	// Turn is persisted.

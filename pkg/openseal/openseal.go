@@ -610,6 +610,8 @@ type (
 	SkillCatalogStore                  = skill.CatalogStore
 	ActionStore                        = runtime.ActionStore
 	ActionCall                         = runtime.ActionCall
+	ExternalOperationIdentity          = runtime.ExternalOperationIdentity
+	ExternalOperationConflictError     = runtime.ExternalOperationConflictError
 	ActionCallStatus                   = runtime.ActionCallStatus
 	ActionFilter                       = runtime.ActionFilter
 	ActionDisposition                  = runtime.ActionDisposition
@@ -1899,6 +1901,7 @@ const (
 )
 
 var (
+	ErrExternalOperationClaimed             = runtime.ErrExternalOperationClaimed
 	ErrExternalConversationEndpointNotFound = runtime.ErrExternalConversationEndpointNotFound
 	ErrExternalConversationGatewayNotFound  = runtime.ErrExternalConversationGatewayNotFound
 	ErrExternalConversationConflict         = runtime.ErrExternalConversationConflict

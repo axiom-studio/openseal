@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -136,6 +137,54 @@ func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T)
 	}
 	if persisted.Revision != run.Revision || persisted.Status != run.Status {
 		t.Fatalf("run survived partial proposal: %#v", persisted)
+	}
+}
+
+func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "external-receipts.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: "tenant", ID: "one"}
+	firstRun, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, Goal: "comment once", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := hashString("stable external operation")
+	first := sqliteApprovalProposal(firstRun, "first-external-call", "first", "first-external-event")
+	first.Call.ExternalOperationDigest = digest
+	if _, err := store.CreateActionProposal(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	receipt, err := store.GetActionCallByExternalOperation(ctx, scope, digest)
+	if err != nil || receipt.ID != first.Call.ID {
+		t.Fatalf("restarted receipt = %#v, %v", receipt, err)
+	}
+	secondRun, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, Goal: "comment once again", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := sqliteApprovalProposal(secondRun, "second-external-call", "second", "second-external-event")
+	second.Call.ExternalOperationDigest = digest
+	if _, err := store.CreateActionProposal(ctx, second); !errors.Is(err, ErrExternalOperationClaimed) {
+		t.Fatalf("second external claim error = %v", err)
+	}
+	if _, err := store.GetActionCall(ctx, scope, second.Call.ID); err != ErrActionNotFound {
+		t.Fatalf("conflicting external call was persisted: %v", err)
 	}
 }
 

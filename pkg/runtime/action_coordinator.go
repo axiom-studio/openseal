@@ -92,6 +92,7 @@ type ProposeActionRequest struct {
 	Summary                string
 	Actor                  ActivityActor
 	EvidenceRefs           []string
+	ExternalOperation      *ExternalOperationIdentity
 	ContinuationCheckpoint map[string]interface{}
 	CorrelationID          string
 	CausationID            string
@@ -189,6 +190,22 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if bound.Action.Idempotency == skill.IdempotencyRequired && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, errors.New("skill action requires an idempotency key")
 	}
+	externalOperationDigest, err := computeExternalOperationDigest(req.Scope, run.Owner, run.ObjectiveID, req.ExternalOperation)
+	if err != nil {
+		return nil, err
+	}
+	if externalOperationDigest != "" {
+		prior, lookupErr := c.actions.GetActionCallByExternalOperation(ctx, req.Scope, externalOperationDigest)
+		if lookupErr != nil && !errors.Is(lookupErr, ErrActionNotFound) {
+			return nil, lookupErr
+		}
+		if prior != nil && externalOperationReceiptComplete(prior.Status) {
+			return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, prior, lease, now)
+		}
+		if prior != nil {
+			return nil, &ExternalOperationConflictError{Prior: prior}
+		}
+	}
 	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), Actor: req.Actor, Summary: req.Summary})
 	if err != nil {
 		return nil, fmt.Errorf("evaluate action policy: %w", err)
@@ -208,7 +225,8 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(arguments, bound.Action.InputSchema),
 		PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
 		CredentialRefs:  boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
-		MaxAttempts: max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		ExternalOperationDigest: externalOperationDigest,
+		MaxAttempts:             max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	call.SemanticDigest = ComputeActionSemanticDigest(call)
@@ -305,7 +323,52 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if decision.Reason != "" && decision.Disposition != ActionDispositionAllow {
 		event.Payload["policyReason"] = decision.Reason
 	}
-	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event})
+	result, err := c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event})
+	var conflict *ExternalOperationConflictError
+	if errors.As(err, &conflict) && conflict.Prior != nil && externalOperationReceiptComplete(conflict.Prior.Status) {
+		return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, conflict.Prior, lease, now)
+	}
+	return result, err
+}
+
+func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments map[string]interface{}, digest string, prior *ActionCall, lease *AgentRunLeaseGuard, now time.Time) (*ActionProposalResult, error) {
+	call := &ActionCall{
+		ID: c.newID(), Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
+		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision, SkillID: req.SkillID, SkillVersion: req.SkillVersion,
+		Action: req.Action, Status: ActionCallStatusSucceeded, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect,
+		Arguments: persistedActionArguments(arguments, bound.Action.InputSchema), PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
+		EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		ExternalOperationDigest: digest, DuplicateOfActionCallID: prior.ID,
+		Output:      map[string]interface{}{"duplicateSuppressed": true, "priorActionCallId": prior.ID, "priorRunId": prior.RunID},
+		MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
+	}
+	call.InvocationDigest = ComputeActionInvocationDigest(call)
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	updatedRun := cloneAgentRun(run)
+	updatedRun.Status = AgentRunStatusQueued
+	updatedRun.WakeCondition = nil
+	updatedRun.Checkpoint = checkpointTerminalAction(preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint), call, map[string]interface{}{
+		"duplicateSuppressed": true, "priorActionCallId": prior.ID, "priorRunId": prior.RunID,
+	})
+	updatedRun.AvailableAt = now
+	updatedRun.QueueEnteredAt = now
+	updatedRun.LeaseOwner = ""
+	updatedRun.LeaseExpiresAt = nil
+	updatedRun.UpdatedAt = now
+	updatedRun.Revision++
+	actor := req.Actor
+	if actor.Type == "" {
+		actor = ActivityActor{Type: "worker", ID: req.WorkerID}
+	}
+	event := &ActivityEvent{
+		ID: c.newID(), Scope: req.Scope, EventType: "action.duplicate_suppressed", Severity: ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: req.TurnID, TeamID: teamIDForRun(run),
+		ParentRunID: run.ParentRunID, Actor: actor, Summary: "Reused a prior external-operation receipt; no external action was executed",
+		Visibility: ActivityVisibilityScope, CorrelationID: req.CorrelationID, CausationID: req.CausationID, CreatedAt: now,
+		Payload: map[string]interface{}{"actionCallId": call.ID, "priorActionCallId": prior.ID, "priorRunId": prior.RunID,
+			"externalOperationDigest": digest, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action},
+	}
+	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event})
 }
 
 func actionBudgetReservationID(actionID string) string {
