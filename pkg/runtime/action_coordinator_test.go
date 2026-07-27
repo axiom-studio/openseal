@@ -152,6 +152,85 @@ func TestActionCoordinatorPersistsPolicyDenialAndRequeues(t *testing.T) {
 	}
 }
 
+func TestActionCoordinatorSuppressesExternalOperationAcrossRuns(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog, scope := governedActionCatalog(t)
+	now := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	policyEvaluations := 0
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		policyEvaluations++
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	}))
+	coordinator.now = func() time.Time { return now.Add(time.Second) }
+
+	firstRun := claimedActionRun(t, store, scope, now, "worker-one")
+	identity := &ExternalOperationIdentity{Resource: "https://Forum.Example/topics/42?b=2&a=1#reply", Operation: "comment:create"}
+	first, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: firstRun.ID, WorkerID: "worker-one", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
+		IdempotencyKey: "first-run", ExternalOperation: identity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "action-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != first.Call.ID {
+		t.Fatalf("claimed action = %#v, %v", claimed, err)
+	}
+	persistedRun, err := store.GetAgentRun(ctx, scope, firstRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedAt := now.Add(3 * time.Second)
+	completedCall := cloneActionCall(claimed)
+	completedCall.Status = ActionCallStatusSucceeded
+	completedCall.Output = map[string]interface{}{"receipt": "external-42"}
+	completedCall.CompletedAt = &completedAt
+	completedCall.LeaseOwner = ""
+	completedCall.LeaseExpiresAt = nil
+	completedCall.UpdatedAt = completedAt
+	completedCall.Revision++
+	completedRun := cloneAgentRun(persistedRun)
+	completedRun.Status = AgentRunStatusCompleted
+	completedRun.WakeCondition = nil
+	completedRun.CompletedAt = &completedAt
+	completedRun.UpdatedAt = completedAt
+	completedRun.Revision++
+	_, err = store.PersistActionExecution(ctx, ActionExecutionRecord{
+		Call: completedCall, ExpectedCallRevision: claimed.Revision, Run: completedRun, ExpectedRunRevision: persistedRun.Revision,
+		WorkerID: "action-worker", Now: now.Add(2 * time.Second),
+		Event: &ActivityEvent{ID: "first-succeeded", Scope: scope, RunID: firstRun.ID, EventType: "action.succeeded", Summary: "External action succeeded", CreatedAt: completedAt},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondRun := claimedActionRun(t, store, scope, now.Add(4*time.Second), "worker-two")
+	second, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: secondRun.ID, WorkerID: "worker-two", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
+		IdempotencyKey: "second-run", ExternalOperation: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42?a=1&b=2", Operation: "COMMENT:CREATE"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Call.Status != ActionCallStatusSucceeded || second.Call.DuplicateOfActionCallID != first.Call.ID || second.Approval != nil ||
+		second.Event.EventType != "action.duplicate_suppressed" || second.Call.Output["duplicateSuppressed"] != true {
+		t.Fatalf("duplicate suppression result = %#v", second)
+	}
+	if policyEvaluations != 1 {
+		t.Fatalf("policy evaluations = %d, duplicate should be suppressed before a new proposal", policyEvaluations)
+	}
+	if executable, err := store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "action-worker", Now: now.Add(5 * time.Second), LeaseDuration: time.Minute}); err != nil || executable != nil {
+		t.Fatalf("suppressed operation became executable: %#v, %v", executable, err)
+	}
+	receipt, err := store.GetActionCallByExternalOperation(ctx, scope, first.Call.ExternalOperationDigest)
+	if err != nil || receipt.ID != first.Call.ID {
+		t.Fatalf("authoritative receipt = %#v, %v", receipt, err)
+	}
+}
+
 func (d ActionDisposition) String() string { return string(d) }
 
 func TestActionCoordinatorPersistsTrustedTeamConversationAgentAttribution(t *testing.T) {

@@ -21,7 +21,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v9"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v10"
 
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for
 // bounded delegation. ID is the only durable identity; DisplayName and Purpose
@@ -304,13 +304,27 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, fmt.Errorf("turn host reported %d output tokens beyond the reserved %d", response.Usage.OutputTokens, reserved.OutputTokens)
 		}
 	}
-	allowed := make(map[string]struct{}, len(request.Actions))
+	allowed := make(map[string]capability.SideEffect, len(request.Actions))
 	for _, action := range request.Actions {
-		allowed[action.Name] = struct{}{}
+		allowed[action.Name] = action.SideEffect
 	}
-	for _, proposed := range response.ProposedActions {
-		if _, ok := allowed[proposed.Capability]; !ok {
+	for index := range response.ProposedActions {
+		proposed := &response.ProposedActions[index]
+		sideEffect, ok := allowed[proposed.Capability]
+		if !ok {
 			return nil, errors.New("turn host proposed an unauthorized capability")
+		}
+		if proposed.ExternalOperation != nil {
+			if sideEffect != capability.SideEffectExternal {
+				return nil, errors.New("external operation identity is only valid for an external side effect")
+			}
+			if err := proposed.ExternalOperation.Validate(); err != nil {
+				return nil, err
+			}
+			resource, _ := canonicalExternalOperationResource(proposed.ExternalOperation.Resource)
+			proposed.ExternalOperation = &ExternalOperationIdentity{
+				Resource: resource, Operation: strings.ToLower(strings.TrimSpace(proposed.ExternalOperation.Operation)),
+			}
 		}
 	}
 	response.ContinuationCheckpoint = preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint)

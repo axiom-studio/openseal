@@ -20,6 +20,7 @@ func migrateActions(db *sql.DB) error {
 			turn_id TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL,
 			idempotency_key TEXT NOT NULL DEFAULT '',
+			external_operation_digest TEXT NOT NULL DEFAULT '',
 			approval_id TEXT NOT NULL DEFAULT '',
 			available_at DATETIME NOT NULL,
 			lease_owner TEXT NOT NULL DEFAULT '',
@@ -56,6 +57,21 @@ func migrateActions(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_approval_checkpoints_expiry
 			ON approval_checkpoints(scope_kind, scope_id, status, expires_at);
 	`)
+	if err != nil {
+		return err
+	}
+	columns, err := sqliteTableColumns(db, "action_calls")
+	if err != nil {
+		return err
+	}
+	if !columns["external_operation_digest"] {
+		if _, err := db.Exec(`ALTER TABLE action_calls ADD COLUMN external_operation_digest TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_action_calls_external_operation
+		ON action_calls(scope_kind, scope_id, external_operation_digest)
+		WHERE external_operation_digest <> '' AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`)
 	return err
 }
 
@@ -102,6 +118,16 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 			return &ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
 		}
 	}
+	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
+		existing, lookupErr := getActionCallFrom(ctx, conn, call.Scope,
+			`external_operation_digest = ? AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`, call.ExternalOperationDigest)
+		if lookupErr != nil && lookupErr != ErrActionNotFound {
+			return nil, lookupErr
+		}
+		if existing != nil {
+			return nil, &ExternalOperationConflictError{Prior: existing}
+		}
+	}
 
 	var currentRevision int64
 	var currentLeaseOwner string
@@ -127,11 +153,11 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO action_calls
-		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, approval_id, available_at,
+		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, external_operation_digest, approval_id, available_at,
 		 lease_owner, lease_expires_at, revision, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, call.Status, call.IdempotencyKey,
-		call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(callPayload)); err != nil {
+		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(callPayload)); err != nil {
 		return nil, err
 	}
 	if proposal.Approval != nil {
@@ -228,6 +254,17 @@ func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter ActionFilter) 
 		return nil, err
 	}
 	return pageActionCalls(result, filter.Offset, filter.Limit), nil
+}
+
+func (s *SQLiteStore) GetActionCallByExternalOperation(ctx context.Context, scope Scope, digest string) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateSHA256Digest(digest); err != nil {
+		return nil, err
+	}
+	return getActionCallFrom(ctx, s.db, scope,
+		`external_operation_digest = ? AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`, digest)
 }
 
 func (s *SQLiteStore) GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error) {
@@ -681,4 +718,11 @@ func decodeApproval(payload string) (*ApprovalCheckpoint, error) {
 		return nil, err
 	}
 	return &approval, nil
+}
+
+func externalOperationClaimDigest(call *ActionCall) string {
+	if call == nil || call.DuplicateOfActionCallID != "" || !externalOperationProtects(call.Status) {
+		return ""
+	}
+	return call.ExternalOperationDigest
 }

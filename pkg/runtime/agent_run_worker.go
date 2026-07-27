@@ -600,7 +600,8 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 		PreparedRuntime: request.PreparedRuntime,
 		IdempotencyKey:  idempotencyKey, Summary: request.Summary,
-		Actor: ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
+		ExternalOperation: request.ExternalOperation,
+		Actor:             ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		CausationID:            turn.ID,
 	})

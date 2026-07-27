@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = skillBindingLifecycleRepairMigrationVersion
+const currentPostgresSchemaVersion int64 = externalOperationReceiptMigrationVersion
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -61,6 +61,14 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == externalOperationReceiptMigrationVersion {
+			if _, err := tx.ExecContext(ctx, `
+				DROP INDEX IF EXISTS `+s.table("action_calls_external_operation_idx")+`;
+				ALTER TABLE `+s.table("action_calls")+` DROP COLUMN IF EXISTS external_operation_digest
+			`); err != nil {
+				return err
+			}
+		}
 		if version == externalConversationIngressRouteMigrationVersion {
 			if _, err := tx.ExecContext(ctx, `
 				DROP INDEX IF EXISTS `+s.table("external_conversation_endpoints_ingress_route_idx")+`;

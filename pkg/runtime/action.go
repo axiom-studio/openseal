@@ -34,39 +34,41 @@ const (
 )
 
 type ActionCall struct {
-	ID               string                               `json:"id"`
-	Scope            Scope                                `json:"scope"`
-	RunID            string                               `json:"runId"`
-	TurnID           string                               `json:"turnId,omitempty"`
-	DeploymentID     string                               `json:"deploymentId"`
-	BindingID        string                               `json:"bindingId"`
-	BindingRevision  int64                                `json:"bindingRevision"`
-	SkillID          string                               `json:"skillId"`
-	SkillVersion     string                               `json:"skillVersion"`
-	Action           string                               `json:"action"`
-	Status           ActionCallStatus                     `json:"status"`
-	Risk             skill.RiskLevel                      `json:"risk"`
-	SideEffect       skill.SideEffect                     `json:"sideEffect"`
-	Arguments        map[string]interface{}               `json:"arguments,omitempty"`
-	PreparedRuntime  *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
-	CredentialRefs   map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
-	EvidenceRefs     []string                             `json:"evidenceRefs,omitempty"`
-	IdempotencyKey   string                               `json:"idempotencyKey,omitempty"`
-	InvocationDigest string                               `json:"invocationDigest,omitempty"`
-	SemanticDigest   string                               `json:"semanticDigest,omitempty"`
-	ApprovalID       string                               `json:"approvalId,omitempty"`
-	Attempt          int                                  `json:"attempt"`
-	MaxAttempts      int                                  `json:"maxAttempts"`
-	AvailableAt      time.Time                            `json:"availableAt"`
-	LeaseOwner       string                               `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt   *time.Time                           `json:"leaseExpiresAt,omitempty"`
-	Output           map[string]interface{}               `json:"output,omitempty"`
-	Error            string                               `json:"error,omitempty"`
-	Revision         int64                                `json:"revision"`
-	CreatedAt        time.Time                            `json:"createdAt"`
-	UpdatedAt        time.Time                            `json:"updatedAt"`
-	StartedAt        *time.Time                           `json:"startedAt,omitempty"`
-	CompletedAt      *time.Time                           `json:"completedAt,omitempty"`
+	ID                      string                               `json:"id"`
+	Scope                   Scope                                `json:"scope"`
+	RunID                   string                               `json:"runId"`
+	TurnID                  string                               `json:"turnId,omitempty"`
+	DeploymentID            string                               `json:"deploymentId"`
+	BindingID               string                               `json:"bindingId"`
+	BindingRevision         int64                                `json:"bindingRevision"`
+	SkillID                 string                               `json:"skillId"`
+	SkillVersion            string                               `json:"skillVersion"`
+	Action                  string                               `json:"action"`
+	Status                  ActionCallStatus                     `json:"status"`
+	Risk                    skill.RiskLevel                      `json:"risk"`
+	SideEffect              skill.SideEffect                     `json:"sideEffect"`
+	Arguments               map[string]interface{}               `json:"arguments,omitempty"`
+	PreparedRuntime         *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
+	CredentialRefs          map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+	EvidenceRefs            []string                             `json:"evidenceRefs,omitempty"`
+	IdempotencyKey          string                               `json:"idempotencyKey,omitempty"`
+	InvocationDigest        string                               `json:"invocationDigest,omitempty"`
+	SemanticDigest          string                               `json:"semanticDigest,omitempty"`
+	ExternalOperationDigest string                               `json:"externalOperationDigest,omitempty"`
+	DuplicateOfActionCallID string                               `json:"duplicateOfActionCallId,omitempty"`
+	ApprovalID              string                               `json:"approvalId,omitempty"`
+	Attempt                 int                                  `json:"attempt"`
+	MaxAttempts             int                                  `json:"maxAttempts"`
+	AvailableAt             time.Time                            `json:"availableAt"`
+	LeaseOwner              string                               `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt          *time.Time                           `json:"leaseExpiresAt,omitempty"`
+	Output                  map[string]interface{}               `json:"output,omitempty"`
+	Error                   string                               `json:"error,omitempty"`
+	Revision                int64                                `json:"revision"`
+	CreatedAt               time.Time                            `json:"createdAt"`
+	UpdatedAt               time.Time                            `json:"updatedAt"`
+	StartedAt               *time.Time                           `json:"startedAt,omitempty"`
+	CompletedAt             *time.Time                           `json:"completedAt,omitempty"`
 }
 
 func (c *ActionCall) Validate() error {
@@ -91,6 +93,14 @@ func (c *ActionCall) Validate() error {
 	}
 	if c.SemanticDigest != "" && c.SemanticDigest != ComputeActionSemanticDigest(c) {
 		return errors.New("action semantic digest does not match its invocation")
+	}
+	if c.ExternalOperationDigest != "" {
+		if err := validateSHA256Digest(c.ExternalOperationDigest); err != nil {
+			return errors.New("external operation digest is invalid")
+		}
+	}
+	if c.DuplicateOfActionCallID != "" && c.ExternalOperationDigest == "" {
+		return errors.New("duplicate action calls require an external operation digest")
 	}
 	if c.PreparedRuntime != nil {
 		if err := skill.ValidatePreparedRuntimeReference(c.PreparedRuntime); err != nil {
@@ -310,6 +320,7 @@ type ActionStore interface {
 	CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error)
 	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
 	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
+	GetActionCallByExternalOperation(ctx context.Context, scope Scope, digest string) (*ActionCall, error)
 	GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error)
 	ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error)
 	ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error)

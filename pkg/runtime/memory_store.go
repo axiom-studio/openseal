@@ -25,6 +25,7 @@ type MemoryStore struct {
 	actions                  map[string]*ActionCall
 	approvals                map[string]*ApprovalCheckpoint
 	actionKeys               map[string]string
+	externalOperationKeys    map[string]string
 	requests                 map[string]*AgentRequest
 	requestKeys              map[string]string
 	dependencyGroups         map[string]*RunDependencyGroup
@@ -72,6 +73,7 @@ func NewMemoryStore() *MemoryStore {
 		actions:                  make(map[string]*ActionCall),
 		approvals:                make(map[string]*ApprovalCheckpoint),
 		actionKeys:               make(map[string]string),
+		externalOperationKeys:    make(map[string]string),
 		requests:                 make(map[string]*AgentRequest),
 		requestKeys:              make(map[string]string),
 		dependencyGroups:         make(map[string]*RunDependencyGroup),

@@ -29,6 +29,14 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 			}, nil
 		}
 	}
+	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
+		if existingID := s.externalOperationKeys[externalOperationStoreKey(call.Scope, call.ExternalOperationDigest)]; existingID != "" {
+			existing := s.actions[portfolioKey(call.Scope, existingID)]
+			if existing != nil && externalOperationProtects(existing.Status) {
+				return nil, &ExternalOperationConflictError{Prior: cloneActionCall(existing)}
+			}
+		}
+	}
 	runKey := portfolioKey(call.Scope, call.RunID)
 	currentRun := s.agentRuns[runKey]
 	if currentRun == nil {
@@ -51,6 +59,9 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	s.actions[portfolioKey(call.Scope, call.ID)] = cloneActionCall(call)
 	if call.IdempotencyKey != "" {
 		s.actionKeys[actionIdempotencyKey(call.Scope, call.RunID, call.IdempotencyKey)] = call.ID
+	}
+	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
+		s.externalOperationKeys[externalOperationStoreKey(call.Scope, call.ExternalOperationDigest)] = call.ID
 	}
 	if proposal.Approval != nil {
 		s.approvals[portfolioKey(call.Scope, proposal.Approval.ID)] = cloneApprovalCheckpoint(proposal.Approval)
@@ -92,6 +103,23 @@ func (s *MemoryStore) ListActionCalls(_ context.Context, filter ActionFilter) ([
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
 	return pageActionCalls(result, filter.Offset, filter.Limit), nil
+}
+
+func (s *MemoryStore) GetActionCallByExternalOperation(_ context.Context, scope Scope, digest string) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateSHA256Digest(digest); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id := s.externalOperationKeys[externalOperationStoreKey(scope, digest)]
+	call := s.actions[portfolioKey(scope, id)]
+	if call == nil || !externalOperationProtects(call.Status) {
+		return nil, ErrActionNotFound
+	}
+	return cloneActionCall(call), nil
 }
 
 func (s *MemoryStore) GetApproval(_ context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error) {
@@ -171,6 +199,9 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
 	s.approvals[approvalKey] = cloneApprovalCheckpoint(resolution.Approval)
 	s.actions[callKey] = cloneActionCall(resolution.Call)
+	if currentCall.ExternalOperationDigest != "" && externalOperationProtects(currentCall.Status) && !externalOperationProtects(resolution.Call.Status) {
+		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
+	}
 	s.agentRuns[runKey] = cloneAgentRun(resolution.Run)
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: cloneActivityEvent(event), Resolved: true}, nil
@@ -262,6 +293,9 @@ func (s *MemoryStore) PersistActionExecution(_ context.Context, execution Action
 	event := cloneActivityEvent(execution.Event)
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
 	s.actions[callKey] = cloneActionCall(execution.Call)
+	if currentCall.ExternalOperationDigest != "" && externalOperationProtects(currentCall.Status) && !externalOperationProtects(execution.Call.Status) {
+		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
+	}
 	if execution.Run != nil {
 		s.agentRuns[runKey] = cloneAgentRun(execution.Run)
 	}
@@ -363,6 +397,10 @@ func actionSchedulesBefore(left, right *ActionCall) bool {
 
 func actionIdempotencyKey(scope Scope, runID, key string) string {
 	return portfolioKey(scope, runID) + ":" + key
+}
+
+func externalOperationStoreKey(scope Scope, digest string) string {
+	return portfolioKey(scope, strings.TrimSpace(digest))
 }
 
 func cloneActionCall(value *ActionCall) *ActionCall {

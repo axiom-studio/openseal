@@ -15,7 +15,7 @@ func (s *PostgresStore) migrateActions(ctx context.Context, tx *sql.Tx) error {
 		CREATE TABLE IF NOT EXISTS `+s.table("action_calls")+` (
 			id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
 			run_id TEXT NOT NULL, turn_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-			idempotency_key TEXT NOT NULL DEFAULT '', approval_id TEXT NOT NULL DEFAULT '',
+			idempotency_key TEXT NOT NULL DEFAULT '', external_operation_digest TEXT NOT NULL DEFAULT '', approval_id TEXT NOT NULL DEFAULT '',
 			available_at TIMESTAMPTZ NOT NULL, lease_owner TEXT NOT NULL DEFAULT '',
 			lease_expires_at TIMESTAMPTZ, revision BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL,
 			payload JSONB NOT NULL, PRIMARY KEY (scope_kind, scope_id, id), CHECK (revision > 0)
@@ -89,6 +89,19 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 			return &ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
 		}
 	}
+	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
+		if _, lockErr := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+			call.Scope.Kind+"\x00"+call.Scope.ID+"\x00"+call.ExternalOperationDigest); lockErr != nil {
+			return nil, lockErr
+		}
+		existing, lookupErr := s.getActionByExternalOperation(ctx, tx, call.Scope, call.ExternalOperationDigest, true)
+		if lookupErr != nil && !errors.Is(lookupErr, ErrActionNotFound) {
+			return nil, lookupErr
+		}
+		if existing != nil {
+			return nil, &ExternalOperationConflictError{Prior: existing}
+		}
+	}
 	if currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
 	}
@@ -100,10 +113,10 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("action_calls")+`
-		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, approval_id, available_at,
+		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, external_operation_digest, approval_id, available_at,
 		 lease_owner, lease_expires_at, revision, created_at, payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)`, call.ID, call.Scope.Kind, call.Scope.ID,
-		call.RunID, call.TurnID, call.Status, call.IdempotencyKey, call.ApprovalID, call.AvailableAt, call.LeaseOwner,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)`, call.ID, call.Scope.Kind, call.Scope.ID,
+		call.RunID, call.TurnID, call.Status, call.IdempotencyKey, externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner,
 		call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(callPayload)); err != nil {
 		return nil, err
 	}
@@ -164,6 +177,16 @@ func (s *PostgresStore) ListActionCalls(ctx context.Context, filter ActionFilter
 		}
 	}
 	return pageActionCalls(result, filter.Offset, filter.Limit), rows.Err()
+}
+
+func (s *PostgresStore) GetActionCallByExternalOperation(ctx context.Context, scope Scope, digest string) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateSHA256Digest(digest); err != nil {
+		return nil, err
+	}
+	return s.getActionByExternalOperation(ctx, s.db, scope, digest, false)
 }
 
 func (s *PostgresStore) GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error) {
@@ -463,6 +486,23 @@ func (s *PostgresStore) getActionByID(ctx context.Context, queryer postgresQuery
 func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer postgresQueryRower, scope Scope, runID, key string) (*ActionCall, error) {
 	var payload string
 	if err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 AND idempotency_key=$4`, scope.Kind, scope.ID, runID, key).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrActionNotFound
+		}
+		return nil, err
+	}
+	return decodeActionCall(payload)
+}
+
+func (s *PostgresStore) getActionByExternalOperation(ctx context.Context, queryer postgresQueryRower, scope Scope, digest string, lock bool) (*ActionCall, error) {
+	query := `SELECT payload FROM ` + s.table("action_calls") + `
+		WHERE scope_kind=$1 AND scope_id=$2 AND external_operation_digest=$3
+		AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	var payload string
+	if err := queryer.QueryRowContext(ctx, query, scope.Kind, scope.ID, digest).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrActionNotFound
 		}
