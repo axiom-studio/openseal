@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,36 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
+
+func TestHostedTurnRunnerProjectsLatestGovernedScreenshotAsEphemeralMedia(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("jpeg-bytes"))
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "vision-turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "vision-model", OutputSummary: "inspected",
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser", DefinitionID: "browser", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := checkpointTerminalAction(nil, &ActionCall{
+		ID: "snapshot-call", SkillID: "browser", SkillVersion: "1", Action: "snapshot", Status: ActionCallStatusSucceeded,
+		Output: map[string]interface{}{"modelMedia": map[string]interface{}{"mediaType": "image/jpeg", "contentBase64": encoded, "detail": "low"}},
+	}, nil)
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "vision-run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Inspect the page", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "vision-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.ModelMedia) != 1 || host.request.ModelMedia[0].DataBase64 != encoded || host.request.ModelMedia[0].SourceActionCallID != "snapshot-call" {
+		t.Fatalf("model media = %#v", host.request.ModelMedia)
+	}
+	modelInput, err := MarshalHostedTurnModelInput(host.request)
+	if err != nil || strings.Contains(string(modelInput), encoded) || !strings.Contains(string(modelInput), `"attached":true`) {
+		t.Fatalf("text model input leaked media: %s err=%v", modelInput, err)
+	}
+}
 
 type recordingTurnHost struct {
 	request  HostedTurnRequest

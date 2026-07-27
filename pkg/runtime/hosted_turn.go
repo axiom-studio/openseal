@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +23,19 @@ func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
 const HostedTurnAPIVersion = "openseal.hosted-turn/v10"
+
+const maximumHostedTurnMediaBytes = 1 << 20
+
+// HostedTurnMedia is ephemeral model-visible binary context produced by a
+// governed action. It is carried separately from the textual model envelope so
+// base64 never pollutes prompts, checkpoints returned by the model, or token
+// estimation. The Turn host decides how to encode it for its provider.
+type HostedTurnMedia struct {
+	MediaType          string `json:"mediaType"`
+	DataBase64         string `json:"dataBase64"`
+	Detail             string `json:"detail,omitempty"`
+	SourceActionCallID string `json:"sourceActionCallId"`
+}
 
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for
 // bounded delegation. ID is the only durable identity; DisplayName and Purpose
@@ -114,6 +128,7 @@ type HostedTurnRequest struct {
 	CollaborationResults   map[string]interface{}   `json:"collaborationResults,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
 	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
+	ModelMedia             []HostedTurnMedia        `json:"modelMedia,omitempty"`
 	// ModelCredential is an opaque, host-resolved binding. It crosses only the
 	// trusted TurnHost transport boundary and is deliberately excluded from
 	// HostedTurnModelInput, durable checkpoints, and model-visible context.
@@ -548,8 +563,14 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		CollaborationResults:   collaborationResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
+		ModelMedia:             hostedTurnMediaFromCheckpoint(input.Run.Checkpoint),
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
+	}
+	for _, media := range request.ModelMedia {
+		if err := validateHostedTurnMedia(media); err != nil {
+			return HostedTurnRequest{}, err
+		}
 	}
 	for index := range request.SkillPrompts {
 		request.SkillPrompts[index].Reference = hostedSkillPromptReference(request.SkillPrompts[index])
@@ -558,6 +579,40 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		return HostedTurnRequest{}, err
 	}
 	return request, nil
+}
+
+func hostedTurnMediaFromCheckpoint(checkpoint map[string]interface{}) []HostedTurnMedia {
+	last, ok := checkpoint["lastAction"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	raw, ok := last["modelMedia"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return []HostedTurnMedia{{
+		MediaType:          strings.TrimSpace(fmt.Sprint(raw["mediaType"])),
+		DataBase64:         strings.TrimSpace(fmt.Sprint(raw["contentBase64"])),
+		Detail:             strings.TrimSpace(fmt.Sprint(raw["detail"])),
+		SourceActionCallID: strings.TrimSpace(fmt.Sprint(last["actionCallId"])),
+	}}
+}
+
+func validateHostedTurnMedia(media HostedTurnMedia) error {
+	if media.MediaType != "image/png" && media.MediaType != "image/jpeg" && media.MediaType != "image/webp" {
+		return errors.New("hosted Turn media must be a supported image")
+	}
+	if media.Detail != "" && media.Detail != "low" && media.Detail != "high" && media.Detail != "auto" {
+		return errors.New("hosted Turn media detail must be low, high, or auto")
+	}
+	if strings.TrimSpace(media.SourceActionCallID) == "" {
+		return errors.New("hosted Turn media requires its source ActionCall")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(media.DataBase64)
+	if err != nil || len(decoded) == 0 || len(decoded) > maximumHostedTurnMediaBytes {
+		return errors.New("hosted Turn media payload is invalid or exceeds 1 MiB")
+	}
+	return nil
 }
 
 func cloneHostedRunbookOperations(values []HostedRunbookOperation) []HostedRunbookOperation {
