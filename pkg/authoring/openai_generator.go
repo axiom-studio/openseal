@@ -223,7 +223,6 @@ func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey 
 		"model":           g.model,
 		"messages":        messages,
 		"response_format": responseFormat,
-		"temperature":     0,
 	}
 	if g.options.ThinkingMode != OpenAICompatibleThinkingDefault {
 		payload["thinking"] = map[string]string{"type": string(g.options.ThinkingMode)}
