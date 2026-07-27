@@ -37,7 +37,7 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	result, err := coordinator.Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
-		Arguments:      map[string]interface{}{"environment": "production", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
+		Arguments:      map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
 		IdempotencyKey: "deploy-production-v1", Summary: "Deploy release to production",
 		Actor: ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan"},
 		ContinuationCheckpoint: map[string]interface{}{"step": "await-release-approval"},
@@ -52,14 +52,14 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 		t.Fatalf("action did not persist its exact binding: %#v", result.Call)
 	}
 	previewArgs := result.Approval.ProposedAction["arguments"].(map[string]interface{})
-	if previewArgs["apiToken"] != "[REDACTED]" || previewArgs["environment"] != "production" || previewArgs["nested"].(map[string]interface{})["password"] != "[REDACTED]" {
+	if previewArgs["apiToken"] != "[REDACTED]" || previewArgs["credentialField"] != "username" || previewArgs["environment"] != "production" || previewArgs["nested"].(map[string]interface{})["password"] != "[REDACTED]" {
 		t.Fatalf("approval preview was not sanitized: %#v", previewArgs)
 	}
 	if result.Call.CredentialRefs["token"].ID != "release-secret" {
 		t.Fatalf("opaque credential binding missing: %#v", result.Call.CredentialRefs)
 	}
 	callJSON, _ := json.Marshal(result.Call)
-	if strings.Contains(string(callJSON), "raw-secret") || strings.Contains(string(callJSON), "also-secret") || result.Call.Arguments["apiToken"] != nil || result.Call.Arguments["nested"].(map[string]interface{})["password"] != nil {
+	if strings.Contains(string(callJSON), "raw-secret") || strings.Contains(string(callJSON), "also-secret") || result.Call.Arguments["apiToken"] != nil || result.Call.Arguments["credentialField"] != "username" || result.Call.Arguments["nested"].(map[string]interface{})["password"] != nil {
 		t.Fatalf("durable action call leaked sensitive arguments: %s", callJSON)
 	}
 	eventJSON, _ := json.Marshal(result.Event)
@@ -209,9 +209,10 @@ func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 			InputSchema: map[string]interface{}{
 				"type": "object", "additionalProperties": false,
 				"properties": map[string]interface{}{
-					"environment": map[string]interface{}{"type": "string"},
-					"apiToken":    map[string]interface{}{"type": "string", "writeOnly": true},
-					"nested":      map[string]interface{}{"type": "object", "properties": map[string]interface{}{"password": map[string]interface{}{"type": "string"}, "region": map[string]interface{}{"type": "string"}}},
+					"environment":     map[string]interface{}{"type": "string"},
+					"credentialField": map[string]interface{}{"type": "string", "enum": []interface{}{"username", "password"}},
+					"apiToken":        map[string]interface{}{"type": "string", "writeOnly": true},
+					"nested":          map[string]interface{}{"type": "object", "properties": map[string]interface{}{"password": map[string]interface{}{"type": "string"}, "region": map[string]interface{}{"type": "string"}}},
 				}, "required": []interface{}{"environment"},
 			},
 			Credentials: []skill.CredentialRequirement{{Name: "token", Kind: "api-token"}},
