@@ -469,6 +469,7 @@ type (
 	HostedSkillSelection               = runtime.HostedSkillSelection
 	HostedSkillDisposition             = runtime.HostedSkillDisposition
 	HostedRunbookOperation             = runtime.HostedRunbookOperation
+	HostedTurnMedia                    = runtime.HostedTurnMedia
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
 	HostedTurnModelInput               = runtime.HostedTurnModelInput
