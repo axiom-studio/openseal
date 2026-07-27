@@ -36,6 +36,10 @@ type ToolInvocation struct {
 	CredentialLease      *SignedActionCredentialLease
 	CredentialReferences map[string]skill.CredentialReference
 	PreparedRuntime      *skill.PreparedRuntime
+	// EmittedArtifactTypes is copied from the immutable resolved action contract.
+	// Hosts use it to validate transient generated-artifact envelopes before
+	// promoting bytes into their configured durable Artifact content store.
+	EmittedArtifactTypes []string
 }
 
 // ToolInvoker is the product-neutral boundary for a registered typed tool.
@@ -107,6 +111,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		Action: input.Bound.Action.Name, Arguments: arguments, BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
 		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
+		EmittedArtifactTypes: append([]string(nil), input.Bound.Action.EmittedArtifactTypes...),
 	}
 	if input.Call != nil {
 		invocation.ActionCallID = input.Call.ID
