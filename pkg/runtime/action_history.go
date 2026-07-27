@@ -51,7 +51,7 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 		entry["completedAt"] = call.CompletedAt.UTC().Format(time.RFC3339Nano)
 	}
 	if call.Status == ActionCallStatusSucceeded {
-		entry["result"] = compactActionResult(call.Output, maximumActionHistoryResultBytes)
+		entry["result"] = compactActionResult(actionResultWithoutModelMedia(call.Output), maximumActionHistoryResultBytes)
 	} else if call.Error != "" {
 		entry["error"] = call.Error
 	}
@@ -84,7 +84,10 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		lastAction["approvalId"] = call.ApprovalID
 	}
 	if call.Status == ActionCallStatusSucceeded {
-		lastAction["result"] = boundedActionResult(call.Output)
+		lastAction["result"] = boundedActionResult(actionResultWithoutModelMedia(call.Output))
+		if media := actionResultModelMedia(call.Output); media != nil {
+			lastAction["modelMedia"] = media
+		}
 	} else if call.Error != "" {
 		lastAction["error"] = call.Error
 	}
@@ -93,6 +96,23 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 	}
 	result["lastAction"] = lastAction
 	return result
+}
+
+func actionResultWithoutModelMedia(output map[string]interface{}) map[string]interface{} {
+	result := deepCloneCheckpointMap(output)
+	delete(result, "modelMedia")
+	return result
+}
+
+func actionResultModelMedia(output map[string]interface{}) map[string]interface{} {
+	if output == nil {
+		return nil
+	}
+	media, ok := output["modelMedia"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return deepCloneCheckpointMap(media)
 }
 
 func actionHistoryEntries(checkpoint map[string]interface{}) []map[string]interface{} {
