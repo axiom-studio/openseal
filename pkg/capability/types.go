@@ -80,27 +80,39 @@ type ActionRetryPolicy struct {
 	MaxBackoff     Duration `json:"maxBackoff,omitempty"`
 }
 
+// ExternalOperationPolicy controls whether an Action may claim a durable,
+// cross-Run receipt for an externally observable business operation. Empty is
+// the legacy-compatible optional policy for external side effects.
+type ExternalOperationPolicy string
+
+const (
+	ExternalOperationForbidden ExternalOperationPolicy = "forbidden"
+	ExternalOperationOptional  ExternalOperationPolicy = "optional"
+	ExternalOperationRequired  ExternalOperationPolicy = "required"
+)
+
 type Duration time.Duration
 
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
 
 type Action struct {
-	Name                 string                  `json:"name"`
-	Description          string                  `json:"description"`
-	InputSchema          map[string]interface{}  `json:"inputSchema"`
-	OutputSchema         map[string]interface{}  `json:"outputSchema,omitempty"`
-	SideEffect           SideEffect              `json:"sideEffect"`
-	Risk                 RiskLevel               `json:"risk"`
-	Permissions          []string                `json:"permissions,omitempty"`
-	Credentials          []CredentialRequirement `json:"credentials,omitempty"`
-	Timeout              Duration                `json:"timeout,omitempty"`
-	Retry                ActionRetryPolicy       `json:"retry"`
-	Idempotency          IdempotencyMode         `json:"idempotency"`
-	DryRunAction         string                  `json:"dryRunAction,omitempty"`
-	CompensationAction   string                  `json:"compensationAction,omitempty"`
-	EmittedArtifactTypes []string                `json:"emittedArtifactTypes,omitempty"`
-	EmittedEventTypes    []string                `json:"emittedEventTypes,omitempty"`
-	Transport            *TransportReference     `json:"transport,omitempty"`
+	Name                    string                  `json:"name"`
+	Description             string                  `json:"description"`
+	InputSchema             map[string]interface{}  `json:"inputSchema"`
+	OutputSchema            map[string]interface{}  `json:"outputSchema,omitempty"`
+	SideEffect              SideEffect              `json:"sideEffect"`
+	Risk                    RiskLevel               `json:"risk"`
+	Permissions             []string                `json:"permissions,omitempty"`
+	Credentials             []CredentialRequirement `json:"credentials,omitempty"`
+	Timeout                 Duration                `json:"timeout,omitempty"`
+	Retry                   ActionRetryPolicy       `json:"retry"`
+	Idempotency             IdempotencyMode         `json:"idempotency"`
+	ExternalOperationPolicy ExternalOperationPolicy `json:"externalOperationPolicy,omitempty"`
+	DryRunAction            string                  `json:"dryRunAction,omitempty"`
+	CompensationAction      string                  `json:"compensationAction,omitempty"`
+	EmittedArtifactTypes    []string                `json:"emittedArtifactTypes,omitempty"`
+	EmittedEventTypes       []string                `json:"emittedEventTypes,omitempty"`
+	Transport               *TransportReference     `json:"transport,omitempty"`
 	// SemanticArguments maps portable roles such as "target", "body", or
 	// "artifact" to exact input-schema property names. Product surfaces use
 	// these roles to compose actions without guessing connector-specific fields.
@@ -429,14 +441,15 @@ type ModelAction struct {
 	// DeploymentID identifies the Agent or Team binding owner. It is supplied
 	// by the kernel, never by the model, and prevents a mixed Team turn from
 	// resolving an Agent action against Team credentials (or vice versa).
-	DeploymentID      string                 `json:"deploymentId,omitempty"`
-	SkillID           string                 `json:"skillId"`
-	Version           string                 `json:"version"`
-	Action            string                 `json:"action"`
-	InputSchema       map[string]interface{} `json:"inputSchema"`
-	SemanticArguments map[string]string      `json:"semanticArguments,omitempty"`
-	Risk              RiskLevel              `json:"risk"`
-	SideEffect        SideEffect             `json:"sideEffect"`
+	DeploymentID            string                  `json:"deploymentId,omitempty"`
+	SkillID                 string                  `json:"skillId"`
+	Version                 string                  `json:"version"`
+	Action                  string                  `json:"action"`
+	InputSchema             map[string]interface{}  `json:"inputSchema"`
+	SemanticArguments       map[string]string       `json:"semanticArguments,omitempty"`
+	Risk                    RiskLevel               `json:"risk"`
+	SideEffect              SideEffect              `json:"sideEffect"`
+	ExternalOperationPolicy ExternalOperationPolicy `json:"externalOperationPolicy,omitempty"`
 }
 
 // BindingReference selects one exact, versioned binding. Persisting this

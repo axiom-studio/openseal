@@ -231,6 +231,45 @@ func TestActionCoordinatorSuppressesExternalOperationAcrossRuns(t *testing.T) {
 	}
 }
 
+func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog, scope := externalOperationPolicyCatalog(t)
+	run := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	}))
+	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}, IdempotencyKey: "operation-policy"}
+	forbidden := base
+	forbidden.Action = "click"
+	forbidden.ExternalOperation = &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}
+	if _, err := coordinator.Propose(ctx, forbidden); err == nil || !strings.Contains(err.Error(), "forbids an external operation identity") {
+		t.Fatalf("forbidden error=%v", err)
+	}
+	required := base
+	required.Action = "commit"
+	if _, err := coordinator.Propose(ctx, required); err == nil || !strings.Contains(err.Error(), "requires an external operation identity") {
+		t.Fatalf("required error=%v", err)
+	}
+}
+
+func externalOperationPolicyCatalog(t *testing.T) (*skill.Catalog, Scope) {
+	t.Helper()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	catalog := skill.NewCatalog()
+	definition := &skill.Definition{ID: "browser", Version: "1.0.0", Name: "Browser", Transport: skill.TransportReference{Kind: "tool", Endpoint: "browser"}, Actions: map[string]skill.Action{
+		"click":  {Name: "click", Description: "Session-local click", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, ExternalOperationPolicy: skill.ExternalOperationForbidden},
+		"commit": {Name: "commit", Description: "Commit business operation", InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, ExternalOperationPolicy: skill.ExternalOperationRequired},
+	}}
+	if err := catalog.Register(t.Context(), definition); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "browser-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", AllowedActions: []string{"click", "commit"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	return catalog, scope
+}
+
 func (d ActionDisposition) String() string { return string(d) }
 
 func TestActionCoordinatorPersistsTrustedTeamConversationAgentAttribution(t *testing.T) {

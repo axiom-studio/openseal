@@ -261,6 +261,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 				BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
 				Version: definition.Version, Action: name, InputSchema: modelVisibleInputSchema(action.InputSchema),
 				SemanticArguments: cloneStringMap(action.SemanticArguments), Risk: action.Risk, SideEffect: action.SideEffect,
+				ExternalOperationPolicy: action.ExternalOperationPolicy,
 			})
 		}
 		sort.Slice(actions, func(i, j int) bool { return actions[i].Name < actions[j].Name })
