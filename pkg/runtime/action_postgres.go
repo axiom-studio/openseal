@@ -91,7 +91,7 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 	}
 	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
 		if _, lockErr := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-			call.Scope.Kind+"\x00"+call.Scope.ID+"\x00"+call.ExternalOperationDigest); lockErr != nil {
+			externalOperationLockKey(call.Scope, call.ExternalOperationDigest)); lockErr != nil {
 			return nil, lockErr
 		}
 		existing, lookupErr := s.getActionByExternalOperation(ctx, tx, call.Scope, call.ExternalOperationDigest, true)
