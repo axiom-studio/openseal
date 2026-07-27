@@ -318,6 +318,7 @@ func TestHostedTurnRunnerReusesSucceededSemanticActionAcrossRestart(t *testing.T
 	action := capability.ModelAction{
 		Name: "kubernetes.get_resource", BindingID: "cluster-binding", BindingRevision: 3,
 		SkillID: "kubernetes", Version: "1", Action: "get_resource",
+		SideEffect: capability.SideEffectRead,
 	}
 	arguments := map[string]interface{}{"kind": "Deployment", "name": "api", "namespace": "system"}
 	call := &ActionCall{
@@ -358,6 +359,96 @@ func TestHostedTurnRunnerReusesSucceededSemanticActionAcrossRestart(t *testing.T
 	last := outcome.ContinuationCheckpoint["lastAction"].(map[string]interface{})
 	if last["actionCallId"] != "completed-call" || actionHistoryEntries(outcome.ContinuationCheckpoint)[0]["actionCallId"] != "completed-call" {
 		t.Fatalf("authoritative evidence was not restored: %#v", outcome.ContinuationCheckpoint)
+	}
+}
+
+func TestHostedTurnRunnerRefreshesObservationAfterInterveningAction(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "browser.snapshot", BindingID: "browser-binding", BindingRevision: 4,
+		SkillID: "skill-browser", Version: "1.1.3", Action: "browser-snapshot", SideEffect: capability.SideEffectRead,
+	}
+	arguments := map[string]interface{}{"sessionId": "reddit-e2e-daily"}
+	observation := &ActionCall{
+		ID: "snapshot-before-fill", DeploymentID: "browser-agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+		SkillID: action.SkillID, SkillVersion: action.Version, Action: action.Action, Arguments: arguments,
+		Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"generation": 10},
+	}
+	observation.SemanticDigest = ComputeActionSemanticDigest(observation)
+	checkpoint := appendActionHistory(nil, observation)
+	checkpoint = appendActionHistory(checkpoint, &ActionCall{
+		ID: "username-fill", DeploymentID: "browser-agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+		SkillID: action.SkillID, SkillVersion: action.Version, Action: "browser-fill-secret",
+		Arguments: map[string]interface{}{"sessionId": "reddit-e2e-daily", "credentialField": "username"}, Status: ActionCallStatusSucceeded,
+	})
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "refresh-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Refresh the stale snapshot",
+		ProposedActions: []TurnAction{{
+			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+			Summary: "Take a fresh snapshot", InputRef: "/actionInputs/snapshot",
+		}},
+		ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"snapshot": arguments}},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "browser-agent", DefinitionID: "browser", DefinitionVersion: "1", Actions: []capability.ModelAction{action},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "scheduled-run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Comment once", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "refresh-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcome.ProposedActions) != 1 || outcome.ProposedActions[0].Capability != action.Name {
+		t.Fatalf("stale observation was incorrectly reused: %#v", outcome)
+	}
+}
+
+func TestHostedTurnRunnerSuppressesSucceededSideEffectAfterLaterObservation(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "browser.submit", BindingID: "browser-binding", BindingRevision: 4,
+		SkillID: "skill-browser", Version: "1.1.3", Action: "browser-click", SideEffect: capability.SideEffectExternal,
+	}
+	arguments := map[string]interface{}{"sessionId": "reddit-e2e-daily", "target": "s12:e7", "intent": "Submit one comment"}
+	submission := &ActionCall{
+		ID: "submitted-comment", DeploymentID: "browser-agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+		SkillID: action.SkillID, SkillVersion: action.Version, Action: action.Action, Arguments: arguments,
+		Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"success": true},
+	}
+	submission.SemanticDigest = ComputeActionSemanticDigest(submission)
+	checkpoint := appendActionHistory(nil, submission)
+	checkpoint = appendActionHistory(checkpoint, &ActionCall{
+		ID: "verification-snapshot", DeploymentID: "browser-agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+		SkillID: action.SkillID, SkillVersion: action.Version, Action: "browser-snapshot",
+		Arguments: map[string]interface{}{"sessionId": "reddit-e2e-daily"}, Status: ActionCallStatusSucceeded,
+	})
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "duplicate-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Submit the comment again",
+		ProposedActions: []TurnAction{{
+			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+			Summary: "Submit one comment", InputRef: "/actionInputs/submit",
+		}},
+		ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"submit": arguments}},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "browser-agent", DefinitionID: "browser", DefinitionVersion: "1", Actions: []capability.ModelAction{action},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "scheduled-run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Comment once", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "duplicate-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcome.ProposedActions) != 0 || outcome.ContinuationCheckpoint["lastAction"].(map[string]interface{})["actionCallId"] != "submitted-comment" {
+		t.Fatalf("succeeded side effect was not suppressed: %#v", outcome)
 	}
 }
 
