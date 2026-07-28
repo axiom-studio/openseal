@@ -1576,8 +1576,27 @@ func (m *Model) renderObjectivesContent(width int) string {
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		actions := []string{}
+		if selected := m.selectedRunbookRecord(); selected != nil {
+			if m.supportsRunbook(kernelapi.OperationGet) {
+				action := "Enter view method"
+				if m.runbookDetailExpanded {
+					action = "Enter hide method"
+				}
+				actions = append(actions, action)
+			}
+			if selected.Status == runtime.RunbookActivationActive && m.supportsRunbook(kernelapi.OperationExecute) {
+				actions = append(actions, "u run now")
+			}
+			if selected.Status != runtime.RunbookActivationRetired && m.supportsRunbook(kernelapi.OperationUpdate) {
+				action := "p resume"
+				if selected.Status == runtime.RunbookActivationActive {
+					action = "p pause"
+				}
+				actions = append(actions, action)
+			}
+		}
 		if m.supportsObjective(kernelapi.OperationUpdate) {
-			actions = append(actions, "Enter amend")
+			actions = append(actions, "e amend objective")
 		}
 		if m.supportsObjective(kernelapi.OperationCreate) {
 			actions = append(actions, "n add objective")
@@ -1601,11 +1620,20 @@ func (m *Model) renderObjectiveRunbooks(objectiveID string, width int) []string 
 			values = append(values, value)
 		}
 	}
+	sort.SliceStable(values, func(left, right int) bool {
+		if values[left].CreatedAt.Equal(values[right].CreatedAt) {
+			return values[left].ID < values[right].ID
+		}
+		return values[left].CreatedAt.Before(values[right].CreatedAt)
+	})
 	if len(values) == 0 {
 		return nil
 	}
 	lines := []string{"", headerStyle.Render(fmt.Sprintf("Runbooks · %d", len(values)))}
-	for _, value := range values[:min(3, len(values))] {
+	visible := min(3, len(values))
+	start := max(0, min(m.runbookSelected-visible/2, len(values)-visible))
+	for index := start; index < start+visible; index++ {
+		value := values[index]
 		trigger := "Manual"
 		switch value.Trigger.Kind {
 		case runbook.TriggerSchedule:
@@ -1617,15 +1645,135 @@ func (m *Model) renderObjectiveRunbooks(objectiveID string, width int) []string 
 		case runbook.TriggerEvent:
 			trigger = "Event · " + value.Trigger.EventType
 		}
-		lines = append(lines,
-			compact(fmt.Sprintf("  %s · %s@%s", value.Status, value.DefinitionID, value.DefinitionVersion), max(width-8, 24)),
-			mutedStyle.Render(compact("    "+trigger+" · "+value.AssignedAgentID, max(width-12, 20))),
-		)
+		prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
+		if value.ID == m.selectedRunbook {
+			prefix, style = "› ", selectedStyle
+		}
+		lines = append(lines, style.Render(compact(fmt.Sprintf("%s%s · %s@%s", prefix, value.Status, value.DefinitionID, value.DefinitionVersion), max(width-8, 24))))
+		if value.ID == m.selectedRunbook {
+			lines = append(lines, mutedStyle.Render(compact("    "+trigger+" · "+value.AssignedAgentID, max(width-12, 20))))
+		}
 	}
-	if len(values) > 3 {
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  +%d more Runbooks", len(values)-3)))
+	if len(values) > visible {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  Showing %d–%d · use ←/→", start+1, start+visible)))
+	}
+	if m.runbookDetailExpanded && m.runbookDetail != nil && m.runbookDetail.Definition != nil && m.runbookDetail.Activation != nil && m.runbookDetail.Activation.ID == m.selectedRunbook {
+		definition := m.runbookDetail.Definition
+		lines = append(lines, "", headerStyle.Render(compact(definition.Name+" · reviewed "+definition.Version, max(width-8, 24))))
+		if definition.Description != "" {
+			lines = append(lines, mutedStyle.Render(compact(definition.Description, max(width-8, 24))))
+		}
+		stepIDs := orderedRunbookStepIDs(definition, m.runbookDetail.Activation.Trigger.Entrypoint)
+		for index, id := range stepIDs[:min(6, len(stepIDs))] {
+			step := definition.Steps[id]
+			name := step.Name
+			if name == "" {
+				name = id
+			}
+			lines = append(lines, compact(fmt.Sprintf("  %d. %s · %s", index+1, name, runbookStepDescription(step)), max(width-8, 24)))
+		}
+		if len(stepIDs) > 6 {
+			lines = append(lines, mutedStyle.Render(fmt.Sprintf("  +%d more reviewed steps", len(stepIDs)-6)))
+		}
 	}
 	return lines
+}
+
+func runbookStepDescription(step runbook.Step) string {
+	switch step.Kind {
+	case runbook.StepAction:
+		if step.Action != nil {
+			return step.Action.SkillID + "@" + step.Action.SkillVersion + " · " + step.Action.Action
+		}
+	case runbook.StepDelegate:
+		return "delegate bounded work"
+	case runbook.StepDecision:
+		return "governed decision"
+	case runbook.StepTransform:
+		return "deterministic transform"
+	case runbook.StepWait:
+		return "bounded wait"
+	case runbook.StepFork:
+		return "parallel branches"
+	case runbook.StepJoin:
+		return "join branches"
+	case runbook.StepForEach:
+		return "bounded iteration"
+	case runbook.StepLoopReturn:
+		return "continue iteration"
+	case runbook.StepEnd:
+		return "complete"
+	}
+	return string(step.Kind)
+}
+
+func orderedRunbookStepIDs(definition *runbook.Definition, entrypoint string) []string {
+	if definition == nil {
+		return nil
+	}
+	ordered, visited := make([]string, 0, len(definition.Steps)), make(map[string]bool, len(definition.Steps))
+	queue := []string{definition.Entrypoints[entrypoint]}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		step, ok := definition.Steps[id]
+		if id == "" || visited[id] || !ok {
+			continue
+		}
+		visited[id], ordered = true, append(ordered, id)
+		for _, target := range runbookStepTargets(step) {
+			if !visited[target] {
+				queue = append(queue, target)
+			}
+		}
+	}
+	remaining := make([]string, 0, len(definition.Steps)-len(ordered))
+	for id := range definition.Steps {
+		if !visited[id] {
+			remaining = append(remaining, id)
+		}
+	}
+	sort.Strings(remaining)
+	return append(ordered, remaining...)
+}
+
+func runbookStepTargets(step runbook.Step) []string {
+	if step.Action != nil {
+		return []string{step.Action.Next}
+	}
+	if step.Delegate != nil {
+		return []string{step.Delegate.Next}
+	}
+	if step.Decision != nil {
+		values := make([]string, 0, len(step.Decision.Cases)+1)
+		for _, candidate := range step.Decision.Cases {
+			values = append(values, candidate.Next)
+		}
+		return append(values, step.Decision.Default)
+	}
+	if step.Transform != nil {
+		return []string{step.Transform.Next}
+	}
+	if step.Wait != nil {
+		return []string{step.Wait.Next}
+	}
+	if step.Fork != nil {
+		values := make([]string, 0, len(step.Fork.Branches)+1)
+		for _, target := range step.Fork.Branches {
+			values = append(values, target)
+		}
+		return append(values, step.Fork.Join)
+	}
+	if step.Join != nil {
+		return []string{step.Join.Next}
+	}
+	if step.ForEach != nil {
+		return []string{step.ForEach.Body, step.ForEach.Next}
+	}
+	if step.LoopReturn != nil {
+		return []string{step.LoopReturn.ForEach}
+	}
+	return nil
 }
 
 func (m *Model) renderEventSourcesContent(width int) string {

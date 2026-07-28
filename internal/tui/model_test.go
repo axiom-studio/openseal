@@ -76,6 +76,10 @@ type fakeKernelClient struct {
 	createRequests             []kernelapi.CreateAgentRunRequest
 	objectives                 []*runtime.Objective
 	runbooks                   []*runtime.RunbookActivation
+	runbookDefinitions         map[string]*runbook.Definition
+	runbookUpdates             []runtime.UpdateRunbookActivationRequest
+	runbookStarts              []runtime.StartRunbookActivationRequest
+	runbookStartResult         *runtime.AgentRunCommandResult
 	objectiveKeys              []string
 	objectiveCreates           []kernelapi.CreateObjectiveRequest
 	objectiveUpdates           []kernelapi.UpdateObjectiveRequest
@@ -846,13 +850,14 @@ func (f *fakeKernelClient) ListRunbooks(context.Context, runtime.RunbookActivati
 func (f *fakeKernelClient) GetRunbook(_ context.Context, _ runtime.Scope, id string) (*runtime.RunbookDetail, error) {
 	for _, value := range f.runbooks {
 		if value.ID == id {
-			return &runtime.RunbookDetail{Activation: value}, nil
+			return &runtime.RunbookDetail{Activation: value, Definition: f.runbookDefinitions[id]}, nil
 		}
 	}
 	return nil, runtime.ErrRunbookActivationNotFound
 }
 
 func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ runtime.Scope, id string, request runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+	f.runbookUpdates = append(f.runbookUpdates, request)
 	for _, value := range f.runbooks {
 		if value.ID == id {
 			value.Status = request.Status
@@ -863,7 +868,11 @@ func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ runtime.Scope, id 
 	return nil, runtime.ErrRunbookActivationNotFound
 }
 
-func (f *fakeKernelClient) StartRunbook(_ context.Context, _ runtime.Scope, _ string, _ runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) StartRunbook(_ context.Context, _ runtime.Scope, _ string, request runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
+	f.runbookStarts = append(f.runbookStarts, request)
+	if f.runbookStartResult != nil {
+		return f.runbookStartResult, nil
+	}
 	return nil, errors.New("starting Runbooks is not configured in this TUI test")
 }
 
@@ -2687,6 +2696,61 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	if len(fake.objectiveUpdates) != 1 || fake.objectiveUpdates[0].ExpectedRevision != 1 ||
 		fake.objectiveUpdates[0].Goal == nil || !strings.Contains(*fake.objectiveUpdates[0].Goal, "weekly") {
 		t.Fatalf("objective update = %#v", fake.objectiveUpdates)
+	}
+}
+
+func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	now := time.Now().UTC()
+	objective := &runtime.Objective{
+		ID: "objective:research", Scope: scope, Owner: owner, Title: "Research communities", Goal: "Find cited pain points",
+		Status: runtime.ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	activation := &runtime.RunbookActivation{
+		ID: "runbook:daily-scan", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
+		DefinitionID: "community-scan", DefinitionVersion: "1.0.0", TriggerID: "daily",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "scan", Schedule: &runbook.Schedule{Cron: "0 0 9 * * *", Timezone: "UTC"}},
+		Status:  runtime.RunbookActivationActive, Revision: 3, CreatedAt: now, UpdatedAt: now,
+	}
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: activation.DefinitionID, Version: activation.DefinitionVersion,
+		Name: "Daily community scan", Description: "Collect and summarize relevant posts.",
+		Entrypoints: map[string]string{"scan": "search"},
+		Steps: map[string]runbook.Step{
+			"search": {Kind: runbook.StepAction, Name: "Search posts", Action: &runbook.ActionStep{SkillID: "reddit-search", SkillVersion: "1.2.0", Action: "search", ResultPath: "/posts", Next: "done"}},
+			"done":   {Kind: runbook.StepEnd, Name: "Finish", End: &runbook.EndStep{}},
+		},
+	}
+	fake := &fakeKernelClient{
+		document:   kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability()),
+		objectives: []*runtime.Objective{objective}, runbooks: []*runtime.RunbookActivation{activation},
+		runbookDefinitions: map[string]*runbook.Definition{activation.ID: definition},
+		runbookStartResult: &runtime.AgentRunCommandResult{Run: &runtime.AgentRun{ID: "run:manual"}},
+	}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.focusPanelList()
+
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	applyCommand(t, model, command)
+	view := model.View()
+	for _, expected := range []string{"Daily community scan · reviewed 1.0.0", "Search posts · reddit-search@1.2.0 · search", "u run now", "p pause"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Runbook detail missing %q:\n%s", expected, view)
+		}
+	}
+
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	applyCommand(t, model, command)
+	if len(fake.runbookStarts) != 1 || fake.runbookStarts[0].IdempotencyKey == "" || fake.runbookStarts[0].Actor != model.config.Actor || !strings.Contains(model.status, "run:manual") {
+		t.Fatalf("Runbook start = %#v status=%q", fake.runbookStarts, model.status)
+	}
+
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	applyCommand(t, model, command)
+	if len(fake.runbookUpdates) != 1 || fake.runbookUpdates[0].ExpectedRevision != 3 || fake.runbookUpdates[0].Status != runtime.RunbookActivationPaused {
+		t.Fatalf("Runbook lifecycle update = %#v", fake.runbookUpdates)
 	}
 }
 
