@@ -368,10 +368,10 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
 		ModelProvider: "test", Model: "test-model", OutputSummary: "Propose the role change",
-		ProposedActions: []TurnAction{{
+		ProposedAction: &TurnAction{
 			Type: "skill_action", Capability: teamAction.Name, BindingID: teamAction.BindingID,
 			BindingRevision: teamAction.BindingRevision, Summary: "Enable the reviewer", InputRef: "/roleChange",
-		}},
+		},
 		ContinuationCheckpoint: map[string]interface{}{"roleChange": map[string]interface{}{
 			"roleId": "reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
 		}},
