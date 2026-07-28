@@ -162,9 +162,11 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			planned, planErr := planner.PlanTurnBudget(ctx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
 			if planErr != nil {
 				if errors.Is(planErr, ErrBudgetExhausted) {
-					return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, planErr.Error(), map[string]interface{}{
-						"reason": "hosted_input_preflight",
-					})
+					var admissionErr *BudgetAdmissionError
+					if errors.As(planErr, &admissionErr) {
+						return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, planErr.Error(), admissionErr.Admission)
+					}
+					return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, planErr.Error(), BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "unknown"})
 				}
 				return nil, planErr
 			}
@@ -201,9 +203,8 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 				return nil, err
 			}
 			if exceeded {
-				return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, "Run paused before exceeding its autonomous budget", map[string]interface{}{
-					"reason": "reservation_exceeds_remaining",
-				})
+				admission := budgetReservationAdmission(*run.Budget, effective, reservationUsage)
+				return c.pauseBeforeTurnBudget(ctx, run, turn, req.WorkerID, "Run paused before exceeding its autonomous budget", admission)
 			}
 			reservation := &BudgetReservation{ID: turn.ID, Usage: reservationUsage, CreatedAt: c.activity.now()}
 			transition := RunTransitionRequest{
@@ -410,13 +411,15 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	return result, executionErr
 }
 
-func (c *TurnCoordinator) pauseBeforeTurnBudget(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID, summary string, payload map[string]interface{}) (*AdvanceAgentRunResult, error) {
+func (c *TurnCoordinator) pauseBeforeTurnBudget(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID, summary string, admission BudgetAdmission) (*AdvanceAgentRunResult, error) {
 	if summary == "" {
 		summary = "Run paused before exceeding its autonomous budget"
 	}
+	admission.TurnID = turn.ID
+	admission.EvaluatedAt = c.activity.now()
 	finished, err := c.turns.FinishTurn(ctx, run.Scope, turn.ID, FinishAgentTurnRequest{
 		ExpectedRevision: turn.Revision, Status: AgentTurnStatusCanceled, WorkerID: workerID,
-		NextRunStatus: AgentRunStatusPaused, OutputSummary: summary,
+		NextRunStatus: AgentRunStatusPaused, OutputSummary: summary, BudgetAdmission: &admission,
 	})
 	if err != nil {
 		return nil, err
@@ -425,15 +428,6 @@ func (c *TurnCoordinator) pauseBeforeTurnBudget(ctx context.Context, run *AgentR
 	if err != nil {
 		return nil, err
 	}
-	event, err := c.activity.AppendActivity(ctx, &ActivityEvent{
-		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
-		EventType: "budget.exhausted", Summary: summary, Payload: cloneMap(payload),
-		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
-	})
-	if err != nil {
-		return nil, err
-	}
-	result.Event = event
 	return result, ErrBudgetExhausted
 }
 
@@ -541,7 +535,11 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		activityPayload["requestedRunbook"] = turn.RequestedRunbook
 	}
 	eventType := ""
-	if turn.NextRunStatus == AgentRunStatusPaused && turnExhaustsBudget(run, turn) {
+	if turn.BudgetAdmission != nil {
+		eventType = "budget.exhausted"
+		activityPayload["budgetState"] = BudgetStateExhausted
+		activityPayload["admission"] = *turn.BudgetAdmission
+	} else if turn.NextRunStatus == AgentRunStatusPaused && turnExhaustsBudget(run, turn) {
 		eventType = "budget.exhausted"
 		activityPayload["budgetState"] = BudgetStateExhausted
 	}
@@ -552,6 +550,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,
+		BudgetAdmission:           turn.BudgetAdmission,
 		BudgetUsageDelta:          budgetDelta,
 		ActivityUsageDelta:        activityUsageDelta,
 		SettleBudgetReservationID: budgetReservationID(run, turn),
