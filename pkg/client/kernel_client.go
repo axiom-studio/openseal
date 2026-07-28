@@ -38,6 +38,8 @@ type KernelClient interface {
 	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
 	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
 	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
+	ListRunbooks(context.Context, runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error)
+	GetRunbook(context.Context, runtime.Scope, string) (*runtime.RunbookActivation, error)
 	ReconcileRunbookSchedules(context.Context, kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error)
 	CreateEventSourceSubscription(context.Context, kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error)
 	ListEventSourceSubscriptions(context.Context, runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error)
@@ -706,9 +708,44 @@ func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Sc
 	return &objective, nil
 }
 
+func (c *KernelHTTPClient) ListRunbooks(ctx context.Context, filter runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
+	query := scopeQuery(filter.Scope)
+	if filter.Owner != nil {
+		query.Set("ownerType", string(filter.Owner.Type))
+		query.Set("ownerId", filter.Owner.ID)
+	}
+	if strings.TrimSpace(filter.ObjectiveID) != "" {
+		query.Set("objectiveId", strings.TrimSpace(filter.ObjectiveID))
+	}
+	for _, status := range filter.Statuses {
+		query.Add("status", string(status))
+	}
+	for _, kind := range filter.TriggerKinds {
+		query.Add("triggerKind", string(kind))
+	}
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	var values []*runtime.RunbookActivation
+	if err := c.do(ctx, http.MethodGet, "/api/v1/runbooks?"+query.Encode(), nil, "", &values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func (c *KernelHTTPClient) GetRunbook(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookActivation, error) {
+	query := scopeQuery(scope)
+	var value runtime.RunbookActivation
+	path := "/api/v1/runbooks/" + url.PathEscape(strings.TrimSpace(activationID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
 func (c *KernelHTTPClient) ReconcileRunbookSchedules(ctx context.Context, request kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error) {
 	var reconciliation kernelapi.RunbookScheduleReconciliation
-	if err := c.do(ctx, http.MethodPost, "/api/v1/runbook-schedules/reconciliations", request, "", &reconciliation); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/api/v1/runbooks/schedule-reconciliations", request, "", &reconciliation); err != nil {
 		return nil, err
 	}
 	return &reconciliation, nil

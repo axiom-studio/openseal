@@ -198,7 +198,7 @@ type Model struct {
 	requestCapability                  kernelapi.Capability
 	approvalCapability                 kernelapi.Capability
 	objectiveCapability                kernelapi.Capability
-	runbookScheduleCapability          kernelapi.Capability
+	runbookCapability                  kernelapi.Capability
 	eventSourceCapability              kernelapi.Capability
 	initiativeCapability               kernelapi.Capability
 	outreachCapability                 kernelapi.Capability
@@ -263,6 +263,7 @@ type Model struct {
 	teamAmendmentSelected              int
 	selectedTeamAmendment              string
 	objectives                         []*runtime.Objective
+	runbooks                           []*runtime.RunbookActivation
 	objectiveSelected                  int
 	selectedObjective                  string
 	eventSources                       []*runtime.EventSourceSubscription
@@ -478,6 +479,7 @@ type agentAmendmentChanged struct {
 
 type objectivesLoaded struct {
 	objectives []*runtime.Objective
+	runbooks   []*runtime.RunbookActivation
 	err        error
 }
 
@@ -735,7 +737,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		requestCapability, hasRequests := msg.document.Find(kernelapi.AgentRequestsCapabilityID, kernelapi.AgentRequestsCapabilityVersion)
 		approvalCapability, hasApprovals := msg.document.Find(kernelapi.ActionApprovalsCapabilityID, kernelapi.ActionApprovalsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
-		runbookScheduleCapability, hasRunbookSchedules := msg.document.Find(kernelapi.RunbookSchedulesCapabilityID, kernelapi.RunbookSchedulesCapabilityVersion)
+		runbookCapability, hasRunbooks := msg.document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
 		eventSourceCapability, hasEventSources := msg.document.Find(kernelapi.EventSourceSubscriptionsCapabilityID, kernelapi.EventSourceSubscriptionsCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
 		outreachCapability, hasOutreach := msg.document.Find(kernelapi.OutreachCapabilityID, kernelapi.OutreachCapabilityVersion)
@@ -757,7 +759,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.requestCapability = requestCapability
 		m.approvalCapability = approvalCapability
 		m.objectiveCapability = objectiveCapability
-		m.runbookScheduleCapability = runbookScheduleCapability
+		m.runbookCapability = runbookCapability
 		m.eventSourceCapability = eventSourceCapability
 		m.initiativeCapability = initiativeCapability
 		m.outreachCapability = outreachCapability
@@ -801,8 +803,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasObjectives || !objectiveCapability.Available {
 			m.objectiveCapability = kernelapi.Capability{}
 		}
-		if !hasRunbookSchedules || !runbookScheduleCapability.Available || !runbookScheduleCapability.Supports(kernelapi.OperationReconcile) {
-			m.runbookScheduleCapability = kernelapi.Capability{}
+		if !hasRunbooks || !runbookCapability.Available {
+			m.runbookCapability = kernelapi.Capability{}
 		}
 		if !hasEventSources || !eventSourceCapability.Available || !eventSourceCapability.Supports(kernelapi.OperationList) {
 			m.eventSourceCapability = kernelapi.Capability{}
@@ -1056,6 +1058,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.objectives = msg.objectives
+		m.runbooks = msg.runbooks
 		m.restoreObjectiveSelection()
 		return m, nil
 	case runbookSchedulesReconciled:
@@ -3118,12 +3121,19 @@ func (m *Model) loadObjectives() tea.Cmd {
 	m.loading = true
 	return func() tea.Msg {
 		objectives, err := m.client.ListObjectives(m.ctx, runtime.ObjectiveFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
-		return objectivesLoaded{objectives: objectives, err: err}
+		if err != nil {
+			return objectivesLoaded{err: err}
+		}
+		var runbooks []*runtime.RunbookActivation
+		if m.supportsRunbook(kernelapi.OperationList) {
+			runbooks, err = m.client.ListRunbooks(m.ctx, runtime.RunbookActivationFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 500})
+		}
+		return objectivesLoaded{objectives: objectives, runbooks: runbooks, err: err}
 	}
 }
 
 func (m *Model) reconcileRunbookSchedules() tea.Cmd {
-	if !m.supportsRunbookSchedule(kernelapi.OperationReconcile) || m.busy {
+	if !m.supportsRunbook(kernelapi.OperationReconcile) || m.busy {
 		return nil
 	}
 	m.busy, m.err = true, nil
@@ -4604,8 +4614,8 @@ func (m *Model) supportsObjective(operation string) bool {
 	return m.ready && m.objectiveCapability.Supports(operation)
 }
 
-func (m *Model) supportsRunbookSchedule(operation string) bool {
-	return m.ready && m.runbookScheduleCapability.Supports(operation)
+func (m *Model) supportsRunbook(operation string) bool {
+	return m.ready && m.runbookCapability.Supports(operation)
 }
 
 func (m *Model) supportsEventSource(operation string) bool {
