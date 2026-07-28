@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	researchTeamID       = "market-research-team"
+	researchTeamID    = "market-research-team"
 	researchProjectID = "competitor-research"
-	researcherID         = "source-researcher"
-	analystID            = "research-analyst"
-	publisherID          = "report-publisher"
+	researcherID      = "source-researcher"
+	analystID         = "research-analyst"
+	publisherID       = "report-publisher"
 )
 
 func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testing.T) {
@@ -57,7 +57,6 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 			},
 			TeamRefs:      []ProjectResourceReference{{Kind: ProjectResourceTeamDeployment, ID: researchTeamID}},
 			ObjectiveRefs: []string{objectives["monitor"].ID, objectives["report"].ID, objectives["deliver"].ID},
-			RunRefs:       []string{sourceRun.ID},
 			SourceMonitors: []ProjectSourceMonitorReference{{
 				ID: "forums", ObjectiveID: objectives["monitor"].ID, AssignedAgentID: researcherID,
 				SkillID: "public-forum-reader", SkillVersion: "1.0.0", Action: "search",
@@ -194,14 +193,13 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 		t.Fatalf("delivery proposal=%#v", proposal)
 	}
 
-	runRefs := []string{sourceRun.ID, reportRun.ID, deliveryRun.ID}
 	deliverables := []ProjectDeliverable{{
 		ID: "weekly-report", Title: "Cited market-research report", Status: ProjectDeliverableReview,
 		ObjectiveRefs: []string{objectives["report"].ID, objectives["deliver"].ID},
 		ArtifactRefs:  []ProjectResourceReference{{Kind: ProjectResourceArtifact, ID: reportArtifact.Artifact.ID, Revision: 1}},
 	}}
 	project, _, err = engine.UpdateProject(ctx, scope, project.ID, UpdateProjectRequest{
-		ExpectedRevision: project.Revision, RunRefs: &runRefs, Deliverables: &deliverables,
+		ExpectedRevision: project.Revision, Deliverables: &deliverables,
 		Checkpoint: map[string]interface{}{"phase": "awaiting_delivery_approval", "evidenceCount": 2},
 		Actor:      ActivityActor{Type: "agent", ID: analystID},
 	})
@@ -481,7 +479,7 @@ func assertResearchAcceptance(
 ) {
 	t.Helper()
 	project, err := engine.GetProject(ctx, scope, projectID)
-	if err != nil || project.Status != ProjectStatusCompleted || len(project.RunRefs) != 3 ||
+	if err != nil || project.Status != ProjectStatusCompleted ||
 		len(project.Deliverables) != 1 || project.Deliverables[0].Status != ProjectDeliverableDelivered {
 		t.Fatalf("project=%#v err=%v", project, err)
 	}
@@ -490,13 +488,13 @@ func assertResearchAcceptance(
 		artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != project.Owner {
 		t.Fatalf("artifact=%#v err=%v", artifact, err)
 	}
-	approvalValues, err := engine.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: project.RunRefs[2]})
-	if err != nil || len(approvalValues) != 1 || approvalValues[0].Status != ApprovalStatusApproved {
-		t.Fatalf("approvals=%#v err=%v", approvalValues, err)
-	}
 	call, err := engine.GetActionCall(ctx, scope, actionID)
 	if err != nil || call.Status != ActionCallStatusSucceeded || call.Output["receiptId"] != "delivery-receipt-1" {
 		t.Fatalf("delivery call=%#v err=%v", call, err)
+	}
+	approvalValues, err := engine.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: call.RunID})
+	if err != nil || len(approvalValues) != 1 || approvalValues[0].Status != ApprovalStatusApproved {
+		t.Fatalf("approvals=%#v err=%v", approvalValues, err)
 	}
 	observations, err := engine.ListSourceObservations(ctx, SourceObservationFilter{
 		Scope: scope, ProjectID: project.ID, Limit: 10,
@@ -504,10 +502,25 @@ func assertResearchAcceptance(
 	if err != nil || len(observations) != 2 {
 		t.Fatalf("observations=%#v err=%v", observations, err)
 	}
-	for _, runID := range project.RunRefs {
-		run, loadErr := engine.GetAgentRun(ctx, scope, runID)
-		if loadErr != nil || run.Status != AgentRunStatusCompleted || run.Owner != project.Owner {
-			t.Fatalf("run=%#v err=%v", run, loadErr)
+	runs, err := engine.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Owner: &project.Owner, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objectives := make(map[string]bool, len(project.ObjectiveRefs))
+	for _, objectiveID := range project.ObjectiveRefs {
+		objectives[objectiveID] = true
+	}
+	projectRuns := 0
+	for _, run := range runs {
+		if !objectives[run.ObjectiveID] {
+			continue
 		}
+		projectRuns++
+		if run.Status != AgentRunStatusCompleted || run.Owner != project.Owner {
+			t.Fatalf("run=%#v", run)
+		}
+	}
+	if projectRuns != 3 {
+		t.Fatalf("Project-derived Runs=%d, all owner Runs=%#v", projectRuns, runs)
 	}
 }

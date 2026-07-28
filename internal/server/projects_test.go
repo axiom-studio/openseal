@@ -58,4 +58,8 @@ func TestProjectAPIExposesIdempotentMultiObjectiveLifecycle(t *testing.T) {
 	if noOp.Code != http.StatusBadRequest {
 		t.Fatalf("no-op = %d %s", noOp.Code, noOp.Body.String())
 	}
+	legacyCreate := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/projects", strings.TrimSuffix(body, "}")+`,"runRefs":["run-a"]}`, "legacy-run-list")
+	if legacyCreate.Code != http.StatusBadRequest || !strings.Contains(legacyCreate.Body.String(), "unknown field") {
+		t.Fatalf("legacy Project Run list = %d %s", legacyCreate.Code, legacyCreate.Body.String())
+	}
 }

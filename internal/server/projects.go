@@ -37,7 +37,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	project := &runtime.Project{
 		ID: strings.TrimSpace(payload.ID), Scope: payload.Scope, Owner: payload.Owner,
 		Title: strings.TrimSpace(payload.Title), Purpose: strings.TrimSpace(payload.Purpose), Status: payload.Status,
-		AgentRefs: payload.AgentRefs, TeamRefs: payload.TeamRefs, ObjectiveRefs: payload.ObjectiveRefs, RunRefs: payload.RunRefs,
+		AgentRefs: payload.AgentRefs, TeamRefs: payload.TeamRefs, ObjectiveRefs: payload.ObjectiveRefs,
 		Milestones: payload.Milestones, Hypotheses: payload.Hypotheses, SourceMonitors: payload.SourceMonitors,
 		Deliverables: payload.Deliverables, Budget: payload.Budget, Policy: payload.Policy, Checkpoint: payload.Checkpoint,
 	}
@@ -108,7 +108,7 @@ func (s *Server) handlePatchProject(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, _, err := service.Patch(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), runtime.UpdateProjectRequest{
 		ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Purpose: payload.Purpose, Status: payload.Status,
-		AgentRefs: payload.AgentRefs, TeamRefs: payload.TeamRefs, ObjectiveRefs: payload.ObjectiveRefs, RunRefs: payload.RunRefs,
+		AgentRefs: payload.AgentRefs, TeamRefs: payload.TeamRefs, ObjectiveRefs: payload.ObjectiveRefs,
 		Milestones: payload.Milestones, Hypotheses: payload.Hypotheses, SourceMonitors: payload.SourceMonitors,
 		Deliverables: payload.Deliverables, Budget: payload.Budget, ClearBudget: payload.ClearBudget,
 		Policy: payload.Policy, Checkpoint: payload.Checkpoint, Actor: standaloneProjectActor, Visibility: runtime.ActivityVisibilityScope,

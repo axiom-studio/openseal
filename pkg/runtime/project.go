@@ -128,8 +128,10 @@ const (
 	DeliverableCanceled   DeliverableStatus = "canceled"
 )
 
-// Project is a durable coordination envelope. Objectives, Runs, Artifacts,
-// schedules, Agents and Teams remain authoritative in their own stores.
+// Project is an optional durable coordination envelope for related Objectives.
+// Runbooks and Runs are derived through those Objective references and remain
+// authoritative in their own stores; a Project never maintains a parallel
+// execution list or scheduler.
 type Project struct {
 	ID                  string                   `json:"id"`
 	Scope               Scope                    `json:"scope"`
@@ -140,7 +142,6 @@ type Project struct {
 	AgentRefs           []ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs            []ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs       []string                 `json:"objectiveRefs"`
-	RunRefs             []string                 `json:"runRefs,omitempty"`
 	Milestones          []ProjectMilestone       `json:"milestones,omitempty"`
 	Hypotheses          []ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors      []SourceMonitorReference `json:"sourceMonitors,omitempty"`
@@ -180,9 +181,6 @@ func (i *Project) Validate() error {
 		return errors.New("project requires at least one objective reference")
 	}
 	if err := uniqueIDs(i.ObjectiveRefs, "objective"); err != nil {
-		return err
-	}
-	if err := uniqueIDs(i.RunRefs, "run"); err != nil {
 		return err
 	}
 	objectiveSet := map[string]bool{}
@@ -357,7 +355,6 @@ type UpdateProjectRequest struct {
 	AgentRefs        *[]ResourceReference
 	TeamRefs         *[]ResourceReference
 	ObjectiveRefs    *[]string
-	RunRefs          *[]string
 	Milestones       *[]ProjectMilestone
 	Hypotheses       *[]ProjectHypothesis
 	SourceMonitors   *[]SourceMonitorReference
@@ -480,9 +477,6 @@ func (s *ProjectService) Patch(ctx context.Context, scope Scope, id string, req 
 	}
 	if req.ObjectiveRefs != nil {
 		current.ObjectiveRefs = *req.ObjectiveRefs
-	}
-	if req.RunRefs != nil {
-		current.RunRefs = *req.RunRefs
 	}
 	if req.Milestones != nil {
 		current.Milestones = *req.Milestones
