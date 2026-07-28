@@ -163,6 +163,7 @@ type (
 	WorkforceSkillCredential                  = authoring.SkillCredential
 	WorkforceConversationAdapterCapability    = authoring.ConversationAdapterCapability
 	WorkforceRuntimeCompositionCapability     = authoring.RuntimeCompositionCapability
+	WorkforceHostedExecutionCapability        = authoring.HostedExecutionCapability
 	WorkforceConversationRuntimeCapability    = authoring.ConversationRuntimeCapability
 	WorkforceRunbookRuntimeCapability         = authoring.RunbookRuntimeCapability
 	WorkforceConversationEndpointBlueprint    = authoring.ConversationEndpointBlueprint
@@ -1019,6 +1020,7 @@ const (
 
 const (
 	WorkforceRuntimeCompositionProtocolV1      = authoring.RuntimeCompositionProtocolV1
+	WorkforceHostedExecutionProtocolV1         = authoring.HostedExecutionProtocolV1
 	WorkforceConversationEndpointOwnerAgent    = authoring.ConversationEndpointOwnerAgent
 	WorkforceConversationEndpointOwnerTeam     = authoring.ConversationEndpointOwnerTeam
 	WorkforceConversationHandlerAgent          = authoring.ConversationHandlerAgent
@@ -1184,6 +1186,10 @@ func CanonicalConversationTriggerInputSchema() map[string]interface{} {
 
 func ValidateWorkforceCapabilityCatalog(catalog WorkforceCapabilityCatalog) error {
 	return authoring.ValidateCapabilityCatalog(catalog)
+}
+
+func WorkforceHostedSkillModelInputTokenCeiling(definition SkillDefinition) (int64, error) {
+	return authoring.HostedSkillModelInputTokenCeiling(definition)
 }
 
 var (
