@@ -38,7 +38,7 @@ type KernelClient interface {
 	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
 	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
 	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
-	ReconcileObjectiveSchedules(context.Context, kernelapi.ReconcileObjectiveSchedulesRequest) (*kernelapi.ObjectiveScheduleReconciliation, error)
+	ReconcileRunbookSchedules(context.Context, kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error)
 	CreateEventSourceSubscription(context.Context, kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error)
 	ListEventSourceSubscriptions(context.Context, runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error)
 	GetEventSourceSubscription(context.Context, runtime.Scope, string) (*runtime.EventSourceSubscriptionDetail, error)
@@ -706,9 +706,9 @@ func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Sc
 	return &objective, nil
 }
 
-func (c *KernelHTTPClient) ReconcileObjectiveSchedules(ctx context.Context, request kernelapi.ReconcileObjectiveSchedulesRequest) (*kernelapi.ObjectiveScheduleReconciliation, error) {
-	var reconciliation kernelapi.ObjectiveScheduleReconciliation
-	if err := c.do(ctx, http.MethodPost, "/api/v1/objective-schedules/reconciliations", request, "", &reconciliation); err != nil {
+func (c *KernelHTTPClient) ReconcileRunbookSchedules(ctx context.Context, request kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error) {
+	var reconciliation kernelapi.RunbookScheduleReconciliation
+	if err := c.do(ctx, http.MethodPost, "/api/v1/runbook-schedules/reconciliations", request, "", &reconciliation); err != nil {
 		return nil, err
 	}
 	return &reconciliation, nil

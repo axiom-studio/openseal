@@ -73,26 +73,35 @@ func (a *RunbookActivation) Validate() error {
 			return fmt.Errorf("Runbook activation %s is required", field)
 		}
 	}
-	if a.Trigger.Kind != runbook.TriggerSchedule {
-		return errors.New("Runbook activation currently requires a schedule trigger")
-	}
-	if a.Trigger.Schedule == nil {
-		return errors.New("Runbook activation schedule trigger is required")
-	}
-	if err := a.Trigger.Schedule.Validate(); err != nil {
-		return fmt.Errorf("Runbook activation trigger: %w", err)
-	}
 	if strings.TrimSpace(a.Trigger.Entrypoint) == "" {
 		return errors.New("Runbook activation trigger entrypoint is required")
 	}
-	if strings.TrimSpace(a.Trigger.EventType) != "" {
-		return errors.New("scheduled Runbook activation cannot declare an event type")
+	switch a.Trigger.Kind {
+	case runbook.TriggerSchedule:
+		if a.Trigger.Schedule == nil {
+			return errors.New("Runbook activation schedule trigger is required")
+		}
+		if err := a.Trigger.Schedule.Validate(); err != nil {
+			return fmt.Errorf("Runbook activation trigger: %w", err)
+		}
+		if strings.TrimSpace(a.Trigger.EventType) != "" {
+			return errors.New("scheduled Runbook activation cannot declare an event type")
+		}
+	case runbook.TriggerEvent:
+		if a.Trigger.Schedule != nil || !validateEventSelector(a.Trigger.EventType) || a.Trigger.EventType == "*" {
+			return errors.New("event Runbook activation requires one concrete event type and no schedule")
+		}
+	default:
+		return errors.New("Runbook activation trigger kind is invalid")
 	}
 	if err := validateCredentialFreeContext(a.Input); err != nil {
 		return fmt.Errorf("Runbook activation input: %w", err)
 	}
 	if err := validateCredentialFreeContext(a.Policy); err != nil {
 		return fmt.Errorf("Runbook activation policy: %w", err)
+	}
+	if err := a.Trigger.Evidence.Validate(); err != nil {
+		return fmt.Errorf("Runbook activation evidence projection: %w", err)
 	}
 	if a.Budget != nil {
 		if err := a.Budget.Validate(); err != nil {
@@ -110,6 +119,9 @@ func (a *RunbookActivation) Validate() error {
 	if a.Revision < 1 || a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return errors.New("Runbook activation requires valid revision and timestamps")
 	}
+	if a.Trigger.Kind == runbook.TriggerEvent && (a.NextOccurrenceBase != nil || a.NextRunAt != nil) {
+		return errors.New("event Runbook activation cannot have a schedule cursor")
+	}
 	if (a.NextOccurrenceBase == nil) != (a.NextRunAt == nil) {
 		return errors.New("Runbook activation schedule cursor requires both base occurrence and due time")
 	}
@@ -123,11 +135,12 @@ func (a *RunbookActivation) Validate() error {
 }
 
 type RunbookActivationFilter struct {
-	Scope       Scope
-	Owner       *ObjectiveOwner
-	ObjectiveID string
-	Statuses    []RunbookActivationStatus
-	Limit       int
+	Scope        Scope
+	Owner        *ObjectiveOwner
+	ObjectiveID  string
+	Statuses     []RunbookActivationStatus
+	TriggerKinds []runbook.TriggerKind
+	Limit        int
 }
 
 type RunbookActivationStore interface {
@@ -245,6 +258,15 @@ func matchesRunbookActivationFilter(value *RunbookActivation, filter RunbookActi
 		matched := false
 		for _, status := range filter.Statuses {
 			matched = matched || value.Status == status
+		}
+		if !matched {
+			return false
+		}
+	}
+	if len(filter.TriggerKinds) > 0 {
+		matched := false
+		for _, kind := range filter.TriggerKinds {
+			matched = matched || value.Trigger.Kind == kind
 		}
 		if !matched {
 			return false

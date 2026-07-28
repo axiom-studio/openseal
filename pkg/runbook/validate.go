@@ -99,14 +99,6 @@ func (v *validator) validate() {
 			if err := trigger.Schedule.Validate(); err != nil {
 				v.add(path+".schedule", "trigger.schedule_invalid", "%v", err)
 			}
-			if trigger.MaximumConcurrent < 0 {
-				v.add(path+".maximumConcurrent", "trigger.concurrency_invalid", "maximum concurrency cannot be negative")
-			}
-			if trigger.Budget != nil {
-				if err := trigger.Budget.Validate(); err != nil {
-					v.add(path+".budget", "trigger.budget_invalid", "%v", err)
-				}
-			}
 			for name, value := range trigger.Input {
 				inputPath := path + ".input." + name
 				if strings.TrimSpace(name) == "" {
@@ -119,6 +111,17 @@ func (v *validator) validate() {
 			}
 		default:
 			v.add(path+".kind", "trigger.kind_unsupported", "trigger kind must be %q or %q", TriggerEvent, TriggerSchedule)
+		}
+		if trigger.MaximumConcurrent < 0 {
+			v.add(path+".maximumConcurrent", "trigger.concurrency_invalid", "maximum concurrency cannot be negative")
+		}
+		if trigger.Budget != nil {
+			if err := trigger.Budget.Validate(); err != nil {
+				v.add(path+".budget", "trigger.budget_invalid", "%v", err)
+			}
+		}
+		if err := trigger.Evidence.Validate(); err != nil {
+			v.add(path+".evidence", "trigger.evidence_invalid", "%v", err)
 		}
 		if strings.TrimSpace(trigger.ObjectiveID) == "" || len(trigger.ObjectiveID) > 160 {
 			v.add(path+".objectiveId", "trigger.objective_required", "Runbook trigger must belong to one Objective")

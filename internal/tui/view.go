@@ -12,10 +12,10 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -1309,93 +1309,31 @@ func runbookSchemaContract(schema map[string]interface{}, emptyLabel string) str
 	return strings.Join(fields, " · ")
 }
 
-func authoringAutomationTriggers(candidate authoring.WorkforceCandidate, definition *kernelagent.AgentDefinition, entrypoint string) []string {
-	if definition == nil {
+func authoringAutomationTriggers(_ authoring.WorkforceCandidate, definition *kernelagent.AgentDefinition, entrypoint string) []string {
+	if definition == nil || definition.Runbook == nil {
 		return nil
 	}
 	triggers := make([]string, 0)
-	for _, objective := range definition.ObjectiveTemplates {
-		triggers = append(triggers, objectiveAutomationTriggers(objective, definition.ID, entrypoint, false)...)
-	}
-	if candidate.Team != nil {
-		for _, objective := range candidate.Team.ObjectiveTemplates {
-			triggers = append(triggers, objectiveAutomationTriggers(objective, definition.ID, entrypoint, true)...)
+	for triggerID, trigger := range definition.Runbook.Triggers {
+		if trigger.Entrypoint != entrypoint {
+			continue
 		}
-	}
-	return triggers
-}
-
-func objectiveAutomationTriggers(objective workforce.ObjectiveTemplate, agentID, entrypoint string, requiresAssignment bool) []string {
-	triggers := make([]string, 0, 2)
-	if template, ok := objective.Cadence["runTemplate"].(map[string]interface{}); ok {
-		templateEntrypoint, _ := template["entrypoint"].(string)
-		assigned, _ := objective.Cadence["assignedAgentId"].(string)
-		if templateEntrypoint == entrypoint && ((!requiresAssignment && (assigned == "" || assigned == agentID)) || assigned == agentID) {
-			label := cadenceTriggerLabel(objective.Cadence) + " · " + objective.Title
-			if budget := automationBudgetLabel(objective.Cadence["runBudget"]); budget != "" {
-				label += " · " + budget
+		label := triggerID
+		switch trigger.Kind {
+		case runbook.TriggerSchedule:
+			label = "Cron · " + trigger.Schedule.Cron + " · " + trigger.Schedule.Timezone
+			if trigger.Schedule.JitterSeconds > 0 {
+				label += " · varies within " + cadenceJitterLabel(trigger.Schedule.JitterSeconds)
 			}
-			triggers = append(triggers, label)
+		case runbook.TriggerEvent:
+			label = "Event · " + trigger.EventType
 		}
-	}
-	rules, _ := objective.EventRules["rules"].([]interface{})
-	for _, raw := range rules {
-		rule, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		template, _ := rule["runTemplate"].(map[string]interface{})
-		templateEntrypoint, _ := template["entrypoint"].(string)
-		if templateEntrypoint != entrypoint {
-			continue
-		}
-		assigned, _ := rule["assignedAgentId"].(string)
-		if (requiresAssignment && assigned == "") || (assigned != "" && assigned != agentID) {
-			continue
-		}
-		eventType, _ := rule["eventType"].(string)
-		if eventType == "" {
-			eventType = "event"
-		}
-		label := eventType
-		if source, _ := rule["source"].(string); source != "" {
-			label += " from " + source
-		}
-		label += " · " + objective.Title
-		if budget := automationBudgetLabel(rule["runBudget"]); budget != "" {
+		if budget := automationBudgetLabel(trigger.Budget); budget != "" {
 			label += " · " + budget
 		}
 		triggers = append(triggers, label)
 	}
 	return triggers
-}
-
-func cadenceTriggerLabel(cadence map[string]interface{}) string {
-	switch cadenceType, _ := cadence["type"].(string); cadenceType {
-	case "interval":
-		if seconds := positiveJSONNumber(cadence["intervalSeconds"]); seconds > 0 {
-			if seconds%3600 == 0 {
-				return fmt.Sprintf("Every %dh", seconds/3600)
-			}
-			if seconds%60 == 0 {
-				return fmt.Sprintf("Every %dm", seconds/60)
-			}
-			return fmt.Sprintf("Every %ds", seconds)
-		}
-	case "daily":
-		if jitter := positiveJSONNumber(cadence["jitterSeconds"]); jitter > 0 {
-			return fmt.Sprintf("Daily · varies within %s after %v %v", cadenceJitterLabel(jitter), cadence["timeOfDay"], cadence["timezone"])
-		}
-		return "Daily at " + fmt.Sprint(cadence["timeOfDay"])
-	case "weekly":
-		if jitter := positiveJSONNumber(cadence["jitterSeconds"]); jitter > 0 {
-			return fmt.Sprintf("%v · varies within %s after %v %v", cadence["dayOfWeek"], cadenceJitterLabel(jitter), cadence["timeOfDay"], cadence["timezone"])
-		}
-		return fmt.Sprintf("%v at %v", cadence["dayOfWeek"], cadence["timeOfDay"])
-	case "cron":
-		return "Cron · " + fmt.Sprint(cadence["cronExpression"])
-	}
-	return "Scheduled"
 }
 
 func cadenceJitterLabel(seconds int64) string {
@@ -1411,36 +1349,21 @@ func cadenceJitterLabel(seconds int64) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
-func automationBudgetLabel(value interface{}) string {
-	budget, _ := value.(map[string]interface{})
+func automationBudgetLabel(budget *runbook.BudgetAllocation) string {
+	if budget == nil {
+		return ""
+	}
 	parts := make([]string, 0, 3)
-	if attempts := positiveJSONNumber(budget["maxAttempts"]); attempts > 0 {
-		parts = append(parts, fmt.Sprintf("%d attempts", attempts))
+	if budget.MaxAttempts > 0 {
+		parts = append(parts, fmt.Sprintf("%d attempts", budget.MaxAttempts))
 	}
-	if actions := positiveJSONNumber(budget["maxActions"]); actions > 0 {
-		parts = append(parts, fmt.Sprintf("%d actions", actions))
+	if budget.MaxActions > 0 {
+		parts = append(parts, fmt.Sprintf("%d actions", budget.MaxActions))
 	}
-	if duration := positiveJSONNumber(budget["maxDurationMs"]); duration > 0 {
-		parts = append(parts, fmt.Sprintf("%ds", (duration+999)/1000))
+	if budget.MaxDurationMS > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", (budget.MaxDurationMS+999)/1000))
 	}
 	return strings.Join(parts, " · ")
-}
-
-func positiveJSONNumber(value interface{}) int64 {
-	switch number := value.(type) {
-	case int:
-		return int64(max(number, 0))
-	case int64:
-		return max(number, 0)
-	case float64:
-		if number > 0 {
-			return int64(number)
-		}
-	case json.Number:
-		result, _ := number.Int64()
-		return max(result, 0)
-	}
-	return 0
 }
 
 func (m *Model) authoringActivationIntent() authoring.WorkforceActivationIntent {
@@ -1658,13 +1581,13 @@ func (m *Model) renderObjectivesContent(width int) string {
 		if m.supportsObjective(kernelapi.OperationCreate) {
 			actions = append(actions, "n add objective")
 		}
-		if m.supportsObjectiveSchedule(kernelapi.OperationReconcile) {
+		if m.supportsRunbookSchedule(kernelapi.OperationReconcile) {
 			actions = append(actions, "g reconcile schedules")
 		}
 		if len(actions) > 0 {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 		}
-	} else if m.supportsObjectiveSchedule(kernelapi.OperationReconcile) {
+	} else if m.supportsRunbookSchedule(kernelapi.OperationReconcile) {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("g reconcile schedules"))
 	}
 	return strings.Join(lines, "\n")
@@ -1788,19 +1711,6 @@ func (m *Model) renderInitiativesContent(width int) string {
 				lines = append(lines, mutedStyle.Render(compact(details, max(width-6, 24))))
 				if monitor.SourcePolicyRef != "" {
 					lines = append(lines, mutedStyle.Render(compact("Policy · "+monitor.SourcePolicyRef, max(width-6, 24))))
-				}
-				if objective := m.objectiveRecord(monitor.ObjectiveID); objective != nil {
-					if objective.NextEvaluationAt != nil {
-						lines = append(lines, mutedStyle.Render(compact("Next evaluation "+relativeTime(*objective.NextEvaluationAt), max(width-6, 24))))
-					}
-					if condition := objective.ScheduleCondition; condition != nil {
-						conditionLine := compact(fmt.Sprintf("Schedule %s · %s", strings.ReplaceAll(string(condition.State), "_", " "), condition.Reason), max(width-6, 24))
-						style := mutedStyle
-						if condition.State == runtime.ObjectiveScheduleBudgetExhausted {
-							style = lipgloss.NewStyle().Foreground(danger)
-						}
-						lines = append(lines, style.Render(conditionLine))
-					}
 				}
 				if status, ok := m.sourceMonitorStatuses[sourceMonitorStatusKey(initiative.ID, monitor.ID)]; ok {
 					if status.err != nil {

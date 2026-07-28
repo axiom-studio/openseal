@@ -19,6 +19,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
@@ -60,9 +61,9 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !eventCapability.Supports(kernelapi.OperationRoute) {
 		t.Fatalf("event routing capabilities: %#v", document)
 	}
-	scheduleCapability, ok := document.Find(kernelapi.ObjectiveSchedulesCapabilityID, kernelapi.ObjectiveSchedulesCapabilityVersion)
+	scheduleCapability, ok := document.Find(kernelapi.RunbookSchedulesCapabilityID, kernelapi.RunbookSchedulesCapabilityVersion)
 	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) {
-		t.Fatalf("objective schedule capabilities: %#v", document)
+		t.Fatalf("Runbook schedule capabilities: %#v", document)
 	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
@@ -76,16 +77,28 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if objective.Budget == nil || objective.Budget.MaxTurns != 40 {
 		t.Fatalf("objective = %#v", objective)
 	}
-	due := time.Now().UTC().Add(-time.Minute)
 	scheduledObjective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Recurring research", Goal: "Monitor feedback periodically", Status: runtime.ObjectiveStatusActive,
-		Cadence:          &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: owner.ID},
-		NextEvaluationAt: &due,
 	}, "recurring-research-objective")
 	if err != nil {
 		t.Fatal(err)
 	}
-	reconciliation, err := client.ReconcileObjectiveSchedules(ctx, kernelapi.ReconcileObjectiveSchedulesRequest{Scope: scope, Limit: 10})
+	scheduledActivation, err := runtime.NewRunbookActivationService(store).Create(ctx, runtime.CreateRunbookActivationRequest{
+		ID: "recurring-research", Scope: scope, Owner: owner, ObjectiveID: scheduledObjective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "research", DefinitionVersion: "1", TriggerID: "recurring",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "monitor", Schedule: &runbook.Schedule{Cron: "*/1 * * * * *", Timezone: "UTC"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().UTC().Add(-time.Second).Truncate(time.Second)
+	scheduledActivation.NextOccurrenceBase, scheduledActivation.NextRunAt = &due, &due
+	scheduledActivation.Revision++
+	scheduledActivation.UpdatedAt = time.Now().UTC()
+	if err := store.UpdateRunbookActivation(ctx, scheduledActivation, scheduledActivation.Revision-1); err != nil {
+		t.Fatal(err)
+	}
+	reconciliation, err := client.ReconcileRunbookSchedules(ctx, kernelapi.ReconcileRunbookSchedulesRequest{Scope: scope, Limit: 10})
 	if err != nil || reconciliation.Result == nil || reconciliation.Result.Scheduled != 1 {
 		t.Fatalf("schedule reconciliation = %#v, %v", reconciliation, err)
 	}
@@ -160,10 +173,15 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 	eventObjective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Event monitor", Goal: "Investigate warnings", Status: runtime.ObjectiveStatusActive,
-		EventRules: map[string]interface{}{"version": "1", "rules": []interface{}{map[string]interface{}{
-			"id": "warning", "eventType": "service.warning", "assignedAgentId": owner.ID,
-		}}},
 	}, "event-objective")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.NewRunbookActivationService(store).Create(ctx, runtime.CreateRunbookActivationRequest{
+		ID: "warning-monitor", Scope: scope, Owner: owner, ObjectiveID: eventObjective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "warning-monitor", DefinitionVersion: "1", TriggerID: "warning",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent, EventType: "service.warning", Entrypoint: "investigate"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

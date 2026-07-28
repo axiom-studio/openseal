@@ -20,7 +20,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 const (
@@ -509,7 +508,6 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		}
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
-	normalizeCandidateObjectiveRunBudgets(&generated.Candidate)
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
 }
@@ -1397,19 +1395,6 @@ func parseGeneratedDuration(raw string) (time.Duration, error) {
 	return time.Duration(count) * unit, nil
 }
 
-func validateObjectiveTemplatesAreOutcomeOnly(path string, templates []workforce.ObjectiveTemplate) []ValidationIssue {
-	issues := make([]ValidationIssue, 0)
-	for index := range templates {
-		if len(templates[index].Cadence) != 0 {
-			issues = append(issues, issue(fmt.Sprintf("%s[%d].cadence", path, index), "objective_execution_forbidden", "Objectives describe outcomes; put schedules and execution in a Runbook trigger"))
-		}
-		if len(templates[index].EventRules) != 0 {
-			issues = append(issues, issue(fmt.Sprintf("%s[%d].eventRules", path, index), "objective_execution_forbidden", "Objectives describe outcomes; put event wakes and execution in a Runbook trigger"))
-		}
-	}
-	return issues
-}
-
 func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandidate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	if _, err := EffectiveWorkforceActivationIntent(candidate.Activation); err != nil {
@@ -1430,7 +1415,6 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 			issues = append(issues, issue(path, "invalid_agent", err.Error()))
 		}
 		issues = append(issues, validateAgentSkillAuthority(path, definition)...)
-		issues = append(issues, validateObjectiveTemplatesAreOutcomeOnly(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
 	issues = append(issues, validateObjectiveRunbookEntrypoints(candidate, agents)...)
 	issues = append(issues, validateSourceActionProjection(candidate)...)
@@ -1461,7 +1445,6 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 	if !hasSpeakingRole {
 		issues = append(issues, issue("team.roles", "no_speaking_role", "A prompt-created Team requires at least one role with active channel participation"))
 	}
-	issues = append(issues, validateObjectiveTemplatesAreOutcomeOnly("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
 	roles := make(map[string]int, len(candidate.Team.Roles))
 	roleDefinitions := make(map[string]map[string]bool, len(candidate.Team.Roles))
 	for _, role := range candidate.Team.Roles {

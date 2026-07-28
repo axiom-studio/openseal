@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 type RunbookScheduleResult struct {
@@ -27,6 +29,7 @@ type RunbookScheduler struct {
 		RunCommandStore
 		PortfolioStore
 		RunbookActivationStore
+		SourceMonitorStore
 	}
 	now func() time.Time
 }
@@ -35,6 +38,7 @@ func NewRunbookScheduler(store interface {
 	RunCommandStore
 	PortfolioStore
 	RunbookActivationStore
+	SourceMonitorStore
 }) *RunbookScheduler {
 	return &RunbookScheduler{store: store, now: time.Now}
 }
@@ -74,7 +78,7 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		limit = 50
 	}
 	activations, err := s.store.ListRunbookActivations(ctx, RunbookActivationFilter{
-		Scope: scope, Statuses: []RunbookActivationStatus{RunbookActivationActive}, Limit: limit,
+		Scope: scope, Statuses: []RunbookActivationStatus{RunbookActivationActive}, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule}, Limit: limit,
 	})
 	if err != nil {
 		return nil, err
@@ -143,6 +147,24 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		contextValues["runbookDefinitionId"] = activation.DefinitionID
 		contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
 		contextValues["runbookTriggerId"] = activation.TriggerID
+		if activation.Trigger.Evidence != nil {
+			initiativeID, _ := contextValues["initiativeId"].(string)
+			initiativeID = strings.TrimSpace(initiativeID)
+			if initiativeID == "" {
+				return result, fmt.Errorf("Runbook activation %s evidence projection requires initiativeId input", activation.ID)
+			}
+			snapshot, snapshotErr := buildEvidenceSnapshot(ctx, s.store, scope, initiativeID, now, activation.Trigger.Evidence)
+			if snapshotErr != nil {
+				return result, fmt.Errorf("Runbook activation %s evidence projection: %w", activation.ID, snapshotErr)
+			}
+			projected, snapshotErr := evidenceSnapshotContext(snapshot)
+			if snapshotErr != nil {
+				return result, snapshotErr
+			}
+			if projected != nil {
+				contextValues[EvidenceSnapshotContextKey] = projected
+			}
+		}
 		created, err := NewRunCommandService(s.store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 			Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,

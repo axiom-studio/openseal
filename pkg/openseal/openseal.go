@@ -33,39 +33,40 @@ import (
 
 // Re-export key types so consumers only import this package.
 type (
-	NodeDefinition           = executor.NodeDefinition
-	ConnectionDefinition     = executor.ConnectionDefinition
-	ExecutionResult          = executor.ExecutionResult
-	NodeResult               = executor.NodeResult
-	Registry                 = executor.Registry
-	StepExecutor             = executor.StepExecutor
-	ExecutionGraph           = executor.ExecutionGraph
-	RunbookDefinition        = runbook.Definition
-	RunbookInterface         = runbook.Interface
-	RunbookTrigger           = runbook.Trigger
-	RunbookTriggerKind       = runbook.TriggerKind
-	RunbookStep              = runbook.Step
-	RunbookStepKind          = runbook.StepKind
-	RunbookActionStep        = runbook.ActionStep
-	RunbookDelegateStep      = runbook.DelegateStep
-	RunbookBudgetAllocation  = runbook.BudgetAllocation
-	RunbookDelegateMode      = runbook.DelegateMode
-	RunbookDecisionStep      = runbook.DecisionStep
-	RunbookDecisionCase      = runbook.DecisionCase
-	RunbookTransformStep     = runbook.TransformStep
-	RunbookWaitStep          = runbook.WaitStep
-	RunbookForkStep          = runbook.ForkStep
-	RunbookJoinStep          = runbook.JoinStep
-	RunbookJoinMode          = runbook.JoinMode
-	RunbookForEachStep       = runbook.ForEachStep
-	RunbookLoopReturnStep    = runbook.LoopReturnStep
-	RunbookEndStep           = runbook.EndStep
-	RunbookValue             = runbook.Value
-	RunbookTemplateSegment   = runbook.TemplateSegment
-	RunbookPredicate         = runbook.Predicate
-	RunbookPredicateOperator = runbook.PredicateOperator
-	RunbookDiagnostic        = runbook.Diagnostic
-	RunbookTurnRunner        = runtime.RunbookTurnRunner
+	NodeDefinition            = executor.NodeDefinition
+	ConnectionDefinition      = executor.ConnectionDefinition
+	ExecutionResult           = executor.ExecutionResult
+	NodeResult                = executor.NodeResult
+	Registry                  = executor.Registry
+	StepExecutor              = executor.StepExecutor
+	ExecutionGraph            = executor.ExecutionGraph
+	RunbookDefinition         = runbook.Definition
+	RunbookInterface          = runbook.Interface
+	RunbookTrigger            = runbook.Trigger
+	RunbookTriggerKind        = runbook.TriggerKind
+	RunbookEvidenceProjection = runbook.EvidenceProjection
+	RunbookStep               = runbook.Step
+	RunbookStepKind           = runbook.StepKind
+	RunbookActionStep         = runbook.ActionStep
+	RunbookDelegateStep       = runbook.DelegateStep
+	RunbookBudgetAllocation   = runbook.BudgetAllocation
+	RunbookDelegateMode       = runbook.DelegateMode
+	RunbookDecisionStep       = runbook.DecisionStep
+	RunbookDecisionCase       = runbook.DecisionCase
+	RunbookTransformStep      = runbook.TransformStep
+	RunbookWaitStep           = runbook.WaitStep
+	RunbookForkStep           = runbook.ForkStep
+	RunbookJoinStep           = runbook.JoinStep
+	RunbookJoinMode           = runbook.JoinMode
+	RunbookForEachStep        = runbook.ForEachStep
+	RunbookLoopReturnStep     = runbook.LoopReturnStep
+	RunbookEndStep            = runbook.EndStep
+	RunbookValue              = runbook.Value
+	RunbookTemplateSegment    = runbook.TemplateSegment
+	RunbookPredicate          = runbook.Predicate
+	RunbookPredicateOperator  = runbook.PredicateOperator
+	RunbookDiagnostic         = runbook.Diagnostic
+	RunbookTurnRunner         = runtime.RunbookTurnRunner
 
 	AgentDefinition                           = kernelagent.AgentDefinition
 	AgentManifest                             = kernelagent.Manifest
@@ -260,13 +261,11 @@ type (
 	ObjectiveOwner                     = runtime.ObjectiveOwner
 	Objective                          = runtime.Objective
 	ObjectiveStatus                    = runtime.ObjectiveStatus
-	ObjectiveCadence                   = runtime.ObjectiveCadence
-	ObjectiveCadenceType               = runtime.ObjectiveCadenceType
-	ObjectiveRunTemplate               = runtime.ObjectiveRunTemplate
-	ObjectiveCapabilityInvocation      = runtime.ObjectiveCapabilityInvocation
-	ObjectiveScheduleResult            = runtime.ObjectiveScheduleResult
-	ObjectiveScheduleState             = runtime.ObjectiveScheduleState
-	ObjectiveScheduleCondition         = runtime.ObjectiveScheduleCondition
+	RunbookActivation                  = runtime.RunbookActivation
+	RunbookActivationStatus            = runtime.RunbookActivationStatus
+	RunbookActivationFilter            = runtime.RunbookActivationFilter
+	CreateRunbookActivationRequest     = runtime.CreateRunbookActivationRequest
+	RunbookScheduleResult              = runtime.RunbookScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	Initiative                         = runtime.Initiative
 	InitiativeStatus                   = runtime.InitiativeStatus
@@ -506,8 +505,6 @@ type (
 	WakeSignal                         = runtime.WakeSignal
 	WokenRun                           = runtime.WokenRun
 	WakeResult                         = runtime.WakeResult
-	ObjectiveEventRules                = runtime.ObjectiveEventRules
-	ObjectiveEventRule                 = runtime.ObjectiveEventRule
 	EventEnvelope                      = runtime.EventEnvelope
 	EventRoute                         = runtime.EventRoute
 	EventRouteResult                   = runtime.EventRouteResult
@@ -872,8 +869,8 @@ type (
 	KernelSkillActionList                 = kernelapi.SkillActionList
 	KernelSkillBindingList                = kernelapi.SkillBindingList
 	KernelSkillBindingMutationResult      = kernelapi.SkillBindingMutationResult
-	ReconcileObjectiveSchedulesRequest    = kernelapi.ReconcileObjectiveSchedulesRequest
-	ObjectiveScheduleReconciliation       = kernelapi.ObjectiveScheduleReconciliation
+	ReconcileRunbookSchedulesRequest      = kernelapi.ReconcileRunbookSchedulesRequest
+	RunbookScheduleReconciliation         = kernelapi.RunbookScheduleReconciliation
 	KernelTeamDeploymentList              = kernelapi.TeamDeploymentList
 	KernelTeamDeploymentCatalogEntry      = kernelapi.TeamDeploymentCatalogEntry
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
@@ -925,8 +922,8 @@ const (
 	SkillBindingsCapabilityVersion           = kernelapi.SkillBindingsCapabilityVersion
 	EventRoutingCapabilityID                 = kernelapi.EventRoutingCapabilityID
 	EventRoutingCapabilityVersion            = kernelapi.EventRoutingCapabilityVersion
-	ObjectiveSchedulesCapabilityID           = kernelapi.ObjectiveSchedulesCapabilityID
-	ObjectiveSchedulesCapabilityVersion      = kernelapi.ObjectiveSchedulesCapabilityVersion
+	RunbookSchedulesCapabilityID             = kernelapi.RunbookSchedulesCapabilityID
+	RunbookSchedulesCapabilityVersion        = kernelapi.RunbookSchedulesCapabilityVersion
 	SourcePoliciesCapabilityID               = kernelapi.SourcePoliciesCapabilityID
 	SourcePoliciesCapabilityVersion          = kernelapi.SourcePoliciesCapabilityVersion
 	WorkforceAuthoringCapabilityID           = kernelapi.WorkforceAuthoringCapabilityID
@@ -1062,8 +1059,8 @@ func ObjectivesCapability() KernelCapability {
 	return kernelapi.ObjectivesCapability()
 }
 
-func ObjectiveSchedulesCapability() KernelCapability {
-	return kernelapi.ObjectiveSchedulesCapability()
+func RunbookSchedulesCapability() KernelCapability {
+	return kernelapi.RunbookSchedulesCapability()
 }
 
 func EventSourceSubscriptionsCapability() KernelCapability {
@@ -1531,13 +1528,9 @@ const (
 	SkillActionDiscover              = runtime.SkillActionDiscoverBinding
 	SkillActionUpsertBinding         = runtime.SkillActionUpsertBinding
 	SkillActionDisableBinding        = runtime.SkillActionDisableBinding
-	ObjectiveCadenceInterval         = runtime.ObjectiveCadenceInterval
-	ObjectiveCadenceDaily            = runtime.ObjectiveCadenceDaily
-	ObjectiveCadenceWeekly           = runtime.ObjectiveCadenceWeekly
-	ObjectiveCadenceCron             = runtime.ObjectiveCadenceCron
-	ObjectiveScheduleBackpressured   = runtime.ObjectiveScheduleBackpressured
-	ObjectiveScheduleSuspended       = runtime.ObjectiveScheduleSuspended
-	ObjectiveScheduleBudgetExhausted = runtime.ObjectiveScheduleBudgetExhausted
+	RunbookActivationActive          = runtime.RunbookActivationActive
+	RunbookActivationPaused          = runtime.RunbookActivationPaused
+	RunbookActivationRetired         = runtime.RunbookActivationRetired
 
 	InitiativeStatusDraft                             = runtime.InitiativeStatusDraft
 	InitiativeStatusActive                            = runtime.InitiativeStatusActive
@@ -2017,7 +2010,6 @@ var (
 	ErrOutreachThreadConflict           = runtime.ErrOutreachThreadConflict
 	ErrOutreachThreadIdempotency        = runtime.ErrOutreachThreadIdempotency
 	ErrInvalidOutreachThread            = runtime.ErrInvalidOutreachThread
-	ErrInvalidObjectiveEventRules       = runtime.ErrInvalidObjectiveEventRules
 	ErrInvalidAuthorityEvaluation       = progression.ErrInvalidEvaluation
 	ErrAuthorityPolicyCeiling           = progression.ErrPolicyCeiling
 	ErrAuthorityRecommendationStale     = progression.ErrRecommendationStale
@@ -3216,13 +3208,6 @@ func (e *Engine) CreateObjective(ctx context.Context, req runtime.CreateObjectiv
 	return e.portfolio.CreateObjective(ctx, req)
 }
 
-// DecodeObjectiveEventRules validates and decodes the portable Objective event
-// subscription contract for host connectors. Transport configuration and
-// credentials remain the responsibility of the embedding host.
-func DecodeObjectiveEventRules(value map[string]interface{}) (*ObjectiveEventRules, error) {
-	return runtime.DecodeObjectiveEventRules(value)
-}
-
 func (e *Engine) CreateObjectiveIdempotent(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.CreateObjectiveResult, error) {
 	return e.portfolio.CreateObjectiveIdempotent(ctx, req)
 }
@@ -3237,6 +3222,18 @@ func (e *Engine) ListObjectives(ctx context.Context, filter runtime.ObjectiveFil
 
 func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, req runtime.UpdateObjectiveRequest) (*runtime.Objective, error) {
 	return e.portfolio.UpdateObjective(ctx, scope, objectiveID, req)
+}
+
+func (e *Engine) CreateRunbookActivation(ctx context.Context, req runtime.CreateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+	return runtime.NewRunbookActivationService(e.store).Create(ctx, req)
+}
+
+func (e *Engine) GetRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookActivation, error) {
+	return e.store.GetRunbookActivation(ctx, scope, activationID)
+}
+
+func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
+	return e.store.ListRunbookActivations(ctx, filter)
 }
 
 func (e *Engine) CreateInitiative(ctx context.Context, req runtime.CreateInitiativeRequest) (*runtime.Initiative, *runtime.ActivityEvent, error) {
@@ -3429,12 +3426,12 @@ func (e *Engine) ReconcileOutreachAction(ctx context.Context, scope runtime.Scop
 	return e.outreach.ReconcileAction(ctx, scope, id, req)
 }
 
-func (e *Engine) ReconcileObjectiveSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.ObjectiveScheduleResult, error) {
-	return runtime.NewObjectiveScheduler(e.store).ReconcileScope(ctx, scope, limit)
+func (e *Engine) ReconcileRunbookSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.RunbookScheduleResult, error) {
+	return runtime.NewRunbookScheduler(e.store).ReconcileScope(ctx, scope, limit)
 }
 
-func (e *Engine) ReconcileAllObjectiveSchedules(ctx context.Context, limitPerScope int) (*runtime.ObjectiveScheduleResult, error) {
-	return runtime.NewObjectiveScheduler(e.store).ReconcileAll(ctx, limitPerScope)
+func (e *Engine) ReconcileAllRunbookSchedules(ctx context.Context, limitPerScope int) (*runtime.RunbookScheduleResult, error) {
+	return runtime.NewRunbookScheduler(e.store).ReconcileAll(ctx, limitPerScope)
 }
 
 func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
@@ -3968,14 +3965,14 @@ func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at t
 	return e.wake.WakeDueTimers(ctx, scope, at)
 }
 
-// RouteEvent normalizes every event source onto canonical Objective and Run
-// semantics. Embedding hosts own transport watches and authorization; the
-// kernel owns matching, exact idempotency, durable work, and audit.
+// RouteEvent matches a normalized event against active Runbook triggers and
+// creates Objective-attributed Runs. Embedding hosts own transport watches and
+// authorization; the kernel owns matching, idempotency, work, and audit.
 func (e *Engine) RouteEvent(ctx context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
 	if e == nil || e.store == nil {
-		return nil, errors.New("objective event routing is unavailable")
+		return nil, errors.New("Runbook event routing is unavailable")
 	}
-	return runtime.NewObjectiveEventRouter(e.store).Route(ctx, event)
+	return runtime.NewRunbookEventRouter(e.store).Route(ctx, event)
 }
 
 func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition) error {

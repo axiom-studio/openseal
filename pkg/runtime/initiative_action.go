@@ -43,7 +43,7 @@ func InitiativeManagementSkill() *skill.Definition {
 	delete(create, "initiativeId")
 	delete(create, "expectedRevision")
 	// A SourceMonitor requires an already-known Initiative identity in its
-	// Objective cadence. It is attached through update after creation.
+	// Objective-owned Runbook input. It is attached through update after creation.
 	delete(create, "sourceMonitors")
 	return &skill.Definition{
 		ID: InitiativeManagementSkillID, Version: InitiativeManagementSkillVersion,

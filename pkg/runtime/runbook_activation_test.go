@@ -32,7 +32,7 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if activation.ObjectiveID != objective.ID || activation.Trigger.Schedule.JitterSeconds != 86399 || objective.Cadence != nil {
+	if activation.ObjectiveID != objective.ID || activation.Trigger.Schedule.JitterSeconds != 86399 {
 		t.Fatalf("objective=%#v activation=%#v", objective, activation)
 	}
 	listed, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID})

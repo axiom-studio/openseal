@@ -21,9 +21,8 @@ func (s *Server) handleCreateObjective(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := runtime.NewPortfolioService(s.store).CreateObjectiveIdempotent(r.Context(), runtime.CreateObjectiveRequest{
 		Scope: payload.Scope, Owner: payload.Owner, Title: strings.TrimSpace(payload.Title), Goal: strings.TrimSpace(payload.Goal),
-		Status: payload.Status, Priority: payload.Priority, Cadence: payload.Cadence, EventRules: payload.EventRules,
-		Budget: payload.Budget, Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria,
-		NextEvaluationAt: payload.NextEvaluationAt, IdempotencyKey: key,
+		Status: payload.Status, Priority: payload.Priority, Budget: payload.Budget,
+		Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria, IdempotencyKey: key,
 	})
 	if err != nil {
 		s.respondObjectiveError(w, err)
@@ -83,9 +82,8 @@ func (s *Server) handleUpdateObjective(w http.ResponseWriter, r *http.Request) {
 	}
 	objective, err := runtime.NewPortfolioService(s.store).UpdateObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), runtime.UpdateObjectiveRequest{
 		ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Goal: payload.Goal, Status: payload.Status,
-		Priority: payload.Priority, Cadence: payload.Cadence, EventRules: payload.EventRules, Budget: payload.Budget,
+		Priority: payload.Priority, Budget: payload.Budget,
 		Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria, ProgressSummary: payload.ProgressSummary,
-		NextEvaluationAt: payload.NextEvaluationAt,
 	})
 	if err != nil {
 		s.respondObjectiveError(w, err)

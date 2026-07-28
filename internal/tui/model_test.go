@@ -78,8 +78,8 @@ type fakeKernelClient struct {
 	objectiveKeys              []string
 	objectiveCreates           []kernelapi.CreateObjectiveRequest
 	objectiveUpdates           []kernelapi.UpdateObjectiveRequest
-	scheduleRequests           []kernelapi.ReconcileObjectiveSchedulesRequest
-	scheduleResult             *kernelapi.ObjectiveScheduleReconciliation
+	scheduleRequests           []kernelapi.ReconcileRunbookSchedulesRequest
+	scheduleResult             *kernelapi.RunbookScheduleReconciliation
 	eventSources               []*runtime.EventSourceSubscription
 	eventSourceDetails         map[string]*runtime.EventSourceSubscriptionDetail
 	eventSourceCreates         []kernelapi.CreateEventSourceSubscriptionRequest
@@ -268,12 +268,12 @@ func (f *fakeKernelClient) RouteEvent(_ context.Context, event runtime.EventEnve
 	return &runtime.EventRouteResult{}, nil
 }
 
-func (f *fakeKernelClient) ReconcileObjectiveSchedules(_ context.Context, request kernelapi.ReconcileObjectiveSchedulesRequest) (*kernelapi.ObjectiveScheduleReconciliation, error) {
+func (f *fakeKernelClient) ReconcileRunbookSchedules(_ context.Context, request kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error) {
 	f.scheduleRequests = append(f.scheduleRequests, request)
 	if f.scheduleResult != nil {
 		return f.scheduleResult, nil
 	}
-	return &kernelapi.ObjectiveScheduleReconciliation{Scope: request.Scope, Result: &runtime.ObjectiveScheduleResult{}}, nil
+	return &kernelapi.RunbookScheduleReconciliation{Scope: request.Scope, Result: &runtime.RunbookScheduleResult{}}, nil
 }
 
 func (f *fakeKernelClient) CreateEventSourceSubscription(_ context.Context, request kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
@@ -1312,15 +1312,15 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 	}
 }
 
-func TestTUIObjectiveScheduleReconciliationIsCapabilityGated(t *testing.T) {
+func TestTUIRunbookScheduleReconciliationIsCapabilityGated(t *testing.T) {
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	fake := &fakeKernelClient{
-		document:       kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.ObjectiveSchedulesCapability()),
-		scheduleResult: &kernelapi.ObjectiveScheduleReconciliation{Scope: scope, Result: &runtime.ObjectiveScheduleResult{Examined: 3, Scheduled: 2}},
+		document:       kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbookSchedulesCapability()),
+		scheduleResult: &kernelapi.RunbookScheduleReconciliation{Scope: scope, Result: &runtime.RunbookScheduleResult{Examined: 3, Scheduled: 2}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	applyCommand(t, model, model.reconcileObjectiveSchedules())
+	applyCommand(t, model, model.reconcileRunbookSchedules())
 	if len(fake.scheduleRequests) != 1 || fake.scheduleRequests[0].Scope != scope || fake.scheduleRequests[0].Limit != 100 {
 		t.Fatalf("schedule requests = %#v", fake.scheduleRequests)
 	}
@@ -1328,13 +1328,13 @@ func TestTUIObjectiveScheduleReconciliationIsCapabilityGated(t *testing.T) {
 		t.Fatalf("schedule projection missing: status=%q view=%s", model.status, model.View())
 	}
 
-	drifted := kernelapi.ObjectiveSchedulesCapability()
+	drifted := kernelapi.RunbookSchedulesCapability()
 	drifted.Version = "future"
 	closedFake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), drifted)}
 	closed := newTestModel(t, closedFake)
 	applyCommand(t, closed, closed.loadCapabilities())
-	if closed.objectiveScheduleCapability.Available || closed.reconcileObjectiveSchedules() != nil || len(closedFake.scheduleRequests) != 0 || strings.Contains(closed.View(), "reconcile schedules") {
-		t.Fatalf("mismatched schedule capability did not fail closed: %#v", closed.objectiveScheduleCapability)
+	if closed.runbookScheduleCapability.Available || closed.reconcileRunbookSchedules() != nil || len(closedFake.scheduleRequests) != 0 || strings.Contains(closed.View(), "reconcile schedules") {
+		t.Fatalf("mismatched schedule capability did not fail closed: %#v", closed.runbookScheduleCapability)
 	}
 }
 
@@ -2046,15 +2046,15 @@ func TestWorkforceAuthoringShowsAndScopesDeterministicRunbookRefinement(t *testi
 		},
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{
 			ID: "weekly-report", Title: "Publish weekly report", Goal: "Render an approved report", Priority: 1,
-			Cadence: map[string]interface{}{
-				"type": "weekly", "dayOfWeek": "monday", "timeOfDay": "09:00", "assignedAgentId": "publisher",
-				"runBudget":   map[string]interface{}{"maxAttempts": 3, "maxActions": 2, "maxDurationMs": 60000},
-				"runTemplate": map[string]interface{}{"entrypoint": "render_report"},
-			},
 		}},
 		Runbook: &runbook.Definition{
 			APIVersion: runbook.APIVersion, ID: "render-report", Version: "1", Name: "Render report",
 			Entrypoints: map[string]string{"render_report": "render"},
+			Triggers: map[string]runbook.Trigger{"weekly-report": {
+				Kind: runbook.TriggerSchedule, Entrypoint: "render_report", ObjectiveID: "weekly-report",
+				Schedule: &runbook.Schedule{Cron: "0 0 9 * * 1", Timezone: "UTC"},
+				Budget:   &runbook.BudgetAllocation{MaxAttempts: 3, MaxActions: 2, MaxDurationMS: 60000},
+			}},
 			Interfaces: map[string]runbook.Interface{"render_report": {
 				Description: "Render one approved Markdown report.",
 				InputSchema: map[string]interface{}{
@@ -2104,7 +2104,7 @@ func TestWorkforceAuthoringShowsAndScopesDeterministicRunbookRefinement(t *testi
 		"Takes · markdown:string · title:string?", "Returns · pdfArtifact:string",
 		"2 durable steps · approval at write · failure stops at checkpoint",
 		"openseal.document@1.0.2/render_pdf",
-		"monday at 09:00 · Publish weekly report · 3 attempts · 2 actions · 60s",
+		"Cron · 0 0 9 * * 1 · UTC · 3 attempts · 2 actions · 60s",
 	} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("automation review missing %q:\n%s", expected, view)
@@ -2721,12 +2721,8 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 			SourcePolicyRef: "public-reddit-research@2026-07-13", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
 		}},
 	}
-	nextEvaluation := time.Now().Add(5 * time.Minute)
 	objective := &runtime.Objective{
 		ID: "objective-research", Scope: scope, Owner: initiative.Owner, Title: "Monitor sources", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive,
-		NextEvaluationAt: &nextEvaluation, ScheduleCondition: &runtime.ObjectiveScheduleCondition{
-			State: runtime.ObjectiveScheduleBackpressured, Reason: "Maximum concurrent Runs are already active", Since: time.Now().Add(-time.Minute), UpdatedAt: time.Now(),
-		},
 	}
 	key := sourceMonitorStatusKey(initiative.ID, "reddit-kubernetes")
 	fake := &fakeKernelClient{
@@ -2751,7 +2747,7 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 	applyCommand(t, model, model.loadCapabilities())
 	model.section = sectionInitiatives
 	view := model.View()
-	for _, expected := range []string{"Recent activity", "Weekly research brief produced", "reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "Next evaluation", "Schedule backpressured", "Maximum concurrent Runs are", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
+	for _, expected := range []string{"Recent activity", "Weekly research brief produced", "reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
 		}
@@ -2781,11 +2777,16 @@ func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBounda
 	portfolio := runtime.NewPortfolioService(store)
 	objective, err := portfolio.CreateObjective(t.Context(), runtime.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Monitor Kubernetes", Goal: "Collect governed evidence", Status: runtime.ObjectiveStatusActive,
-		Cadence: &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 60, AssignedAgentID: owner.ID, RunTemplate: &runtime.ObjectiveRunTemplate{
-			Context:    map[string]interface{}{"initiativeId": "initiative-policy", "sourceMonitorId": "reddit-kubernetes"},
-			Policy:     map[string]interface{}{"sourcePolicyRef": "public-reddit@1"},
-			Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed"},
-		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.NewRunbookActivationService(store).Create(t.Context(), runtime.CreateRunbookActivationRequest{
+		ID: "reddit-kubernetes-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "source-monitor", DefinitionVersion: "1", TriggerID: "reddit-kubernetes",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
+		Input:   map[string]interface{}{"initiativeId": "initiative-policy", "sourceMonitorId": "reddit-kubernetes"},
+		Policy:  map[string]interface{}{"sourcePolicyRef": "public-reddit@1"}, Status: runtime.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)

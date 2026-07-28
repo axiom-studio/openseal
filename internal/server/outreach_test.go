@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -27,10 +28,16 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research-team"}
 	objective, err := runtime.NewPortfolioService(store).CreateObjective(ctx, runtime.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Collect feedback", Status: runtime.ObjectiveStatusActive,
-		Cadence: &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "research-agent", RunTemplate: &runtime.ObjectiveRunTemplate{
-			Context: map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"},
-			Policy:  map[string]interface{}{"sourcePolicyRef": "public-forum@1"}, Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "source", SkillVersion: "1.0.0", Action: "observe"},
-		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.NewRunbookActivationService(store).Create(ctx, runtime.CreateRunbookActivationRequest{
+		ID: "monitor-1-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "research-agent",
+		DefinitionID: "research", DefinitionVersion: "1.0.0", TriggerID: "monitor-1",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 */5 * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
+		Input:   map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"},
+		Policy:  map[string]interface{}{"sourcePolicyRef": "public-forum@1"}, Status: runtime.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)

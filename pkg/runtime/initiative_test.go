@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestInitiativeStoresAreScopedCASAndRestartSafe(t *testing.T) {
@@ -95,58 +97,26 @@ func TestInitiativeRejectsDuplicatedStateAndSecrets(t *testing.T) {
 	}
 }
 
-func TestInitiativeSourceMonitorRequiresExecutableDriftFreeObjective(t *testing.T) {
-	ctx := context.Background()
-	for name, mutate := range map[string]func(*Initiative, *Objective){
-		"foreign objective": func(i *Initiative, _ *Objective) { i.SourceMonitors[0].ObjectiveID = "objective-b" },
-		"foreign owner":     func(_ *Initiative, o *Objective) { o.Owner.ID = "another-team" },
-		"no cadence":        func(_ *Initiative, o *Objective) { o.Cadence = nil },
-		"agent drift":       func(i *Initiative, _ *Objective) { i.SourceMonitors[0].AssignedAgentID = "other" },
-		"skill drift":       func(_ *Initiative, o *Objective) { o.Cadence.RunTemplate.Capability.SkillID = "another-skill" },
-		"context drift": func(_ *Initiative, o *Objective) {
-			o.Cadence.RunTemplate.Context["sourceMonitorId"] = "another-monitor"
-		},
-		"policy drift": func(_ *Initiative, o *Objective) { o.Cadence.RunTemplate.Policy["sourcePolicyRef"] = "unapproved" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			store := NewMemoryStore()
-			scope := Scope{Kind: "tenant", ID: "a"}
-			seedInitiativeObjectives(t, store, scope)
-			initiative := initiativeFixture(scope)
-			objective, err := store.GetObjective(ctx, scope, "objective-a")
-			if err != nil {
-				t.Fatal(err)
-			}
-			mutate(initiative, objective)
-			objective.Revision = 2
-			objective.UpdatedAt = time.Now().UTC()
-			if err := store.UpdateObjective(ctx, objective, 1); err != nil && name != "foreign objective" && name != "agent drift" {
-				t.Fatal(err)
-			}
-			if _, _, err := NewInitiativeService(store, store).Create(ctx, CreateInitiativeRequest{Initiative: initiative}); err == nil {
-				t.Fatal("invalid executable source monitor was accepted")
-			}
-		})
-	}
-}
-
 func TestInitiativeConcurrentIdempotentCreateHasOneWinner(t *testing.T) {
 	tests := []struct {
 		name string
 		open func(*testing.T) (interface {
 			InitiativeStore
 			PortfolioStore
+			RunbookActivationStore
 		}, func())
 	}{
 		{"memory", func(*testing.T) (interface {
 			InitiativeStore
 			PortfolioStore
+			RunbookActivationStore
 		}, func()) {
 			return NewMemoryStore(), func() {}
 		}},
 		{"sqlite", func(t *testing.T) (interface {
 			InitiativeStore
 			PortfolioStore
+			RunbookActivationStore
 		}, func()) {
 			s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "race.db"))
 			if err != nil {
@@ -326,23 +296,27 @@ func TestInitiativeStoreFiltersAndPaginatesInDeterministicOrder(t *testing.T) {
 	}
 }
 
-func seedInitiativeObjectives(t *testing.T, store PortfolioStore, scope Scope) {
+func seedInitiativeObjectives(t *testing.T, store interface {
+	PortfolioStore
+	RunbookActivationStore
+}, scope Scope) {
 	t.Helper()
 	for _, id := range []string{"objective-a", "objective-b"} {
 		now := time.Now().UTC()
 		objective := &Objective{ID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}, Title: id, Goal: "Verify initiative", Status: ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}
-		if id == "objective-a" {
-			objective.Cadence = &ObjectiveCadence{
-				Type: ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "researcher",
-				RunTemplate: &ObjectiveRunTemplate{
-					Context:    map[string]interface{}{"initiativeId": "initiative-a", "sourceMonitorId": "monitor-a"},
-					Policy:     map[string]interface{}{"sourcePolicyRef": "approved-forums"},
-					Capability: &ObjectiveCapabilityInvocation{SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", Inputs: map[string]interface{}{"query": "customer pain"}},
-				},
-			}
-		}
 		if err := store.CreateObjective(context.Background(), objective); err != nil {
 			t.Fatal(err)
+		}
+		if id == "objective-a" {
+			_, err := NewRunbookActivationService(store).Create(context.Background(), CreateRunbookActivationRequest{
+				ID: "monitor-a", Scope: scope, Owner: objective.Owner, ObjectiveID: id, AssignedAgentID: "researcher",
+				DefinitionID: "research", DefinitionVersion: "1.0.0", TriggerID: "monitor",
+				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "monitor", Schedule: &runbook.Schedule{Cron: "0 */5 * * * *", Timezone: "UTC"}},
+				Input:   map[string]interface{}{"initiativeId": "initiative-a", "sourceMonitorId": "monitor-a"}, Policy: map[string]interface{}{"sourcePolicyRef": "approved-forums"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 }

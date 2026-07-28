@@ -23,8 +23,8 @@ artifact, and Skill paths are resolved from the configuration file's directory.
 
 The daemon starts one HTTP listener. `api.listenAddr` serves the versioned
 kernel API; use `/api/v1/health` for health checks. Durable schedules and
-external events are configured through objective schedules and event-source
-subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
+external events are configured through Objective-owned Runbook triggers and
+event-source subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
 rejected instead of being silently ignored.
 
 ## Model-backed authoring

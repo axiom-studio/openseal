@@ -120,7 +120,7 @@ key prevent stale or duplicate application.
 OpenSeal models continuous autonomy as a sequence of bounded durable Runs and
 turns, not one immortal model request.
 
-1. A prompt, objective cadence, event, conversation command, request, or API
+1. A prompt, Runbook trigger, conversation command, request, or API
    call creates or wakes a Run.
 2. The scheduler selects an eligible Run subject to status, dependencies,
    wake conditions, priority, budget, and concurrency.
@@ -139,11 +139,13 @@ duplicate spend and duplicate side effects across retries.
 
 ## Multi-objective scheduling and events
 
-Each Agent or Team can own a portfolio of objectives. Objective cadence
-reconciliation uses a persisted schedule cursor and deterministic occurrence
-keys. A due cadence creates the configured bounded Run template. Normalized
-event routing matches active objective subscriptions and applies persisted
-deduplication keys before creating or waking Runs.
+Each Agent or Team can own a portfolio of Objectives. An Objective says what
+outcome matters; one or more versioned Runbooks beneath it say how work is
+performed. Activated Runbook schedule triggers own persisted cursors, cron
+jitter, concurrency, inputs, policy, and deterministic occurrence keys. A due
+trigger creates a bounded Run attributed to both the Objective and the exact
+Runbook activation. Normalized event routing matches active Runbook event
+triggers and applies persisted idempotency keys before creating Runs.
 
 Source monitors use the same model: a long-lived monitor definition and
 checkpoint produce bounded observations and Runs. Kubernetes informers, message

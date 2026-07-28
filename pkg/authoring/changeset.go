@@ -2061,7 +2061,6 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 		}
 		canonicalizeRunbookReferences(definition, ids, objectiveIDs)
 		definition.ID = ids[definition.ID]
-		canonicalizeObjectiveTemplateAgents(definition.ObjectiveTemplates, ids)
 	}
 	for i := range candidate.Assignments {
 		if qualified := ids[candidate.Assignments[i].AgentDefinitionID]; qualified != "" {
@@ -2077,7 +2076,6 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 				}
 			}
 		}
-		canonicalizeObjectiveTemplateAgents(candidate.Team.ObjectiveTemplates, ids)
 	}
 	for index := range candidate.ConversationEndpoints {
 		endpoint := &candidate.ConversationEndpoints[index]
@@ -2149,15 +2147,6 @@ func canonicalizeRunbookReferences(definition *agent.AgentDefinition, ids, objec
 		encoded, _ := json.Marshal(qualified)
 		step.Delegate.AgentID.Literal = encoded
 		definition.Runbook.Steps[stepID] = step
-	}
-}
-
-func canonicalizeObjectiveTemplateAgents(templates []workforce.ObjectiveTemplate, ids map[string]string) {
-	for index := range templates {
-		assigned, _ := templates[index].Cadence["assignedAgentId"].(string)
-		if qualified := ids[assigned]; qualified != "" {
-			templates[index].Cadence["assignedAgentId"] = qualified
-		}
 	}
 }
 
