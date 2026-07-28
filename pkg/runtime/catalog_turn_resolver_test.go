@@ -406,6 +406,63 @@ func TestCatalogTurnResolverIsolatesAgentRequestDecisionFromSkillsAndRunbooks(t 
 	}
 }
 
+func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	action := capability.ModelAction{
+		Name: "browser.snapshot", BindingID: "browser", BindingRevision: 1,
+		SkillID: "skill-browser", Version: "1", Action: "snapshot", SideEffect: capability.SideEffectRead,
+	}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Inspect the page",
+		ProposedAction: &TurnAction{
+			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID,
+			BindingRevision: action.BindingRevision, Summary: "Inspect the page",
+		},
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "browser-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "browser-agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+		},
+		definition: &kernelagent.AgentDefinition{ID: "browser-agent", Version: "1", Purpose: "Browse safely", SystemPrompt: "Use evidence."},
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser-agent",
+			Skills: []skill.ActivatedSkill{{BindingID: "browser", BindingRevision: 1, SkillID: "skill-browser", SkillVersion: "1", Actions: []capability.ModelAction{action}}},
+		},
+	}
+	run := &AgentRun{
+		ID: "execution", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequest,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+		Goal: "Perform the accepted request", Context: map[string]interface{}{"collaboration": map[string]interface{}{"requestId": "request"}},
+	}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executionRunner, ok := binding.Runner.(*acceptedAgentRequestExecutionTurnRunner)
+	if !ok || !containsString(executionRunner.inner.(*HostedTurnRunner).config.SystemInstructions, acceptedAgentRequestExecutionSystemInstruction) {
+		t.Fatalf("accepted execution binding = %#v", binding)
+	}
+	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
+	if err != nil || outcome == nil || len(outcome.ProposedActions) != 1 || outcome.ProposedActions[0].Capability != action.Name {
+		t.Fatalf("accepted execution outcome=%#v request=%#v error=%v", outcome, host.request, err)
+	}
+	if containsString(host.request.SystemInstructions, agentRequestDecisionSystemInstruction) {
+		t.Fatalf("intake instruction leaked into accepted execution: %#v", host.request.SystemInstructions)
+	}
+
+	executionRunner.inner = TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{
+			AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "accept"},
+		}}, nil
+	})
+	if _, err := executionRunner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2"}}); err == nil || !strings.Contains(err.Error(), "cannot emit an intake decision") {
+		t.Fatalf("accepted execution decision error = %v", err)
+	}
+}
+
 func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRuns(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "42"}
 	teamAction := capability.ModelAction{
