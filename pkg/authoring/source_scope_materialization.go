@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -45,6 +46,23 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 		}
 		matches := matchingSourceScopeInvocations(candidate, need, request.Catalog)
 		if len(matches) == 0 {
+			routes := matchingSourceScopeRunbooks(candidate, need, request.Catalog)
+			if len(routes) == 1 {
+				materializeRunbookSourceTargets(routes[0], targets, requirement.MaterializationInputKeys)
+				continue
+			}
+			if len(routes) > 1 {
+				paths := make([]string, 0, len(routes))
+				for _, route := range routes {
+					paths = append(paths, route.path)
+				}
+				issues = append(issues, issue(
+					"objectives.cadence.runTemplate.entrypoint",
+					"source_scope_runbook_ambiguous",
+					fmt.Sprintf("Source scope %s matches multiple Objective Runbooks (%s); keep one exact scheduled entrypoint", strings.Join(targets, ", "), strings.Join(paths, ", ")),
+				))
+				continue
+			}
 			if !sourceCapabilityRequiresDurableAction(request) {
 				continue
 			}
@@ -68,7 +86,7 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 			))
 			continue
 		}
-		if !capabilitySourceScopeMaterialized(candidate, need, targets, requirement.MaterializationInputKeys) {
+		if !capabilitySourceScopeMaterialized(candidate, need, targets, requirement.MaterializationInputKeys, request.Catalog) {
 			materializeSourceTargets(matches[0].invocation, targets, requirement.MaterializationInputKeys)
 		}
 		issues = append(issues, materializeCatalogSourceMonitor(candidate, need, matches[0])...)
@@ -148,6 +166,132 @@ func selectedCapabilityNeed(need CapabilityNeed, answered map[string]RefinementP
 type sourceScopeInvocation struct {
 	path       string
 	invocation map[string]interface{}
+}
+
+type sourceScopeRunbook struct {
+	path       string
+	template   map[string]interface{}
+	definition *runbook.Definition
+	entrypoint string
+}
+
+func matchingSourceScopeRunbooks(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) []sourceScopeRunbook {
+	if candidate == nil {
+		return nil
+	}
+	agents := make(map[string]*runbook.Definition, len(candidate.Agents))
+	for _, definition := range candidate.Agents {
+		if definition != nil && definition.Runbook != nil {
+			agents[definition.ID] = definition.Runbook
+		}
+	}
+	allowed := stringSet(need.SkillIDs)
+	result := make([]sourceScopeRunbook, 0)
+	objectives := candidateObjectiveTemplates(candidate)
+	keys := make([]string, 0, len(objectives))
+	for key := range objectives {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		objective := objectives[key]
+		template, _ := objective.Cadence["runTemplate"].(map[string]interface{})
+		entrypoint, _ := template["entrypoint"].(string)
+		assignedAgentID, _ := objective.Cadence["assignedAgentId"].(string)
+		if strings.TrimSpace(assignedAgentID) == "" {
+			assignedAgentID = candidateObjectiveAgentOwner(candidate, objective)
+		}
+		definition := agents[strings.TrimSpace(assignedAgentID)]
+		entrypoint = strings.TrimSpace(entrypoint)
+		if definition == nil || entrypoint == "" || len(definition.Entrypoints) != 1 || definition.Entrypoints[entrypoint] == "" || !runbookUsesSourceSkill(definition, allowed, catalog) {
+			continue
+		}
+		result = append(result, sourceScopeRunbook{path: key + ".cadence", template: template, definition: definition, entrypoint: entrypoint})
+	}
+	return result
+}
+
+func candidateObjectiveAgentOwner(candidate *WorkforceCandidate, objective *workforce.ObjectiveTemplate) string {
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		for index := range definition.ObjectiveTemplates {
+			if &definition.ObjectiveTemplates[index] == objective {
+				return definition.ID
+			}
+		}
+	}
+	return ""
+}
+
+func runbookUsesSourceSkill(definition *runbook.Definition, allowed map[string]bool, catalog CapabilityCatalog) bool {
+	for _, step := range definition.Steps {
+		if step.Kind != runbook.StepAction || step.Action == nil || !allowed[strings.TrimSpace(step.Action.SkillID)] {
+			continue
+		}
+		skill, exists := catalog.Skills[strings.TrimSpace(step.Action.SkillID)]
+		if exists && strings.TrimSpace(skill.Version) == strings.TrimSpace(step.Action.SkillVersion) && stringSet(skill.Actions)[strings.TrimSpace(step.Action.Action)] {
+			return true
+		}
+	}
+	return false
+}
+
+func materializeRunbookSourceTargets(route sourceScopeRunbook, targets, inputKeys []string) {
+	key := sourceScopeMaterializationKey(inputKeys, len(targets))
+	if key == "" {
+		return
+	}
+	contextValues, _ := route.template["context"].(map[string]interface{})
+	if contextValues == nil {
+		contextValues = map[string]interface{}{}
+		route.template["context"] = contextValues
+	}
+	contextValues[key] = append([]string(nil), targets...)
+
+	contract := route.definition.Interfaces[route.entrypoint]
+	if contract.InputSchema == nil {
+		contract.InputSchema = map[string]interface{}{"type": "object", "additionalProperties": false}
+	}
+	properties, _ := contract.InputSchema["properties"].(map[string]interface{})
+	if properties == nil {
+		properties = map[string]interface{}{}
+		contract.InputSchema["properties"] = properties
+	}
+	properties[key] = map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "minItems": 1}
+	required := schemaStringList(contract.InputSchema["required"])
+	if !stringSet(required)[key] {
+		required = append(required, key)
+		sort.Strings(required)
+		contract.InputSchema["required"] = required
+	}
+	route.definition.Interfaces[route.entrypoint] = contract
+
+	for stepID, step := range route.definition.Steps {
+		if step.Kind != runbook.StepDelegate || step.Delegate == nil {
+			continue
+		}
+		if step.Delegate.Context == nil {
+			step.Delegate.Context = map[string]runbook.Value{}
+		}
+		step.Delegate.Context[key] = runbook.Value{Ref: "/input/" + key}
+		route.definition.Steps[stepID] = step
+	}
+}
+
+func sourceScopeMaterializationKey(inputKeys []string, targetCount int) string {
+	if targetCount > 1 {
+		for _, key := range inputKeys {
+			if key == "subreddits" || key == "communities" {
+				return key
+			}
+		}
+	}
+	if len(inputKeys) > 0 {
+		return inputKeys[0]
+	}
+	return ""
 }
 
 func matchingSourceScopeInvocations(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) []sourceScopeInvocation {
