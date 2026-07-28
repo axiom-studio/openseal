@@ -303,6 +303,33 @@ func TestTurnCoordinatorPausesAndAccountsExhaustedBudget(t *testing.T) {
 	}
 }
 
+func TestTurnCoordinatorPreservesActionProposedAtBudgetLimit(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "local", ID: "action-at-budget-limit"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "perform one bounded action",
+		Budget: &BudgetPolicy{MaxTurns: 1, MaxActions: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker",
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusRunning, OutputSummary: "Start the browser",
+			ProposedActions: []TurnAction{{Type: "skill_action", Capability: "browser.start", Summary: "Start the browser"}},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Run.Status != AgentRunStatusRunning || result.Run.BudgetState != BudgetStateExhausted ||
+		result.Turn.NextRunStatus != AgentRunStatusRunning || len(result.Turn.RequestedActions) != 1 {
+		t.Fatalf("action proposal at budget limit = %#v", result)
+	}
+}
+
 func TestTurnCoordinatorAllowsTerminalOutcomeAtExactBudgetLimit(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
