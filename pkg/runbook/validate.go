@@ -84,11 +84,23 @@ func (v *validator) validate() {
 		if strings.TrimSpace(id) == "" || len(id) > 128 {
 			v.add(path, "trigger.id_invalid", "trigger id must be 1-128 characters")
 		}
-		if trigger.Kind != TriggerEvent {
-			v.add(path+".kind", "trigger.kind_unsupported", "trigger kind must be %q", TriggerEvent)
-		}
-		if !concreteEventTypePattern.MatchString(trigger.EventType) || len(trigger.EventType) > 160 {
-			v.add(path+".eventType", "trigger.event_type_invalid", "trigger eventType must be a concrete portable event type")
+		switch trigger.Kind {
+		case TriggerEvent:
+			if !concreteEventTypePattern.MatchString(trigger.EventType) || len(trigger.EventType) > 160 {
+				v.add(path+".eventType", "trigger.event_type_invalid", "event trigger must name a concrete portable event type")
+			}
+			if trigger.Schedule != nil {
+				v.add(path+".schedule", "trigger.schedule_forbidden", "event trigger cannot declare a schedule")
+			}
+		case TriggerSchedule:
+			if strings.TrimSpace(trigger.EventType) != "" {
+				v.add(path+".eventType", "trigger.event_type_forbidden", "schedule trigger cannot declare an event type")
+			}
+			if err := trigger.Schedule.Validate(); err != nil {
+				v.add(path+".schedule", "trigger.schedule_invalid", "%v", err)
+			}
+		default:
+			v.add(path+".kind", "trigger.kind_unsupported", "trigger kind must be %q or %q", TriggerEvent, TriggerSchedule)
 		}
 		if _, ok := v.definition.Entrypoints[trigger.Entrypoint]; !ok {
 			v.add(path+".entrypoint", "trigger.entrypoint_unknown", "trigger must name an exact entrypoint")
