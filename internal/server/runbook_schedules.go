@@ -9,12 +9,12 @@ import (
 )
 
 const (
-	defaultObjectiveScheduleReconcileLimit = 50
-	maximumObjectiveScheduleReconcileLimit = 500
+	defaultRunbookScheduleReconcileLimit = 50
+	maximumRunbookScheduleReconcileLimit = 500
 )
 
-func (s *Server) handleReconcileObjectiveSchedules(w http.ResponseWriter, r *http.Request) {
-	var payload kernelapi.ReconcileObjectiveSchedulesRequest
+func (s *Server) handleReconcileRunbookSchedules(w http.ResponseWriter, r *http.Request) {
+	var payload kernelapi.ReconcileRunbookSchedulesRequest
 	if err := decodeStrictJSON(r, &payload); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -23,20 +23,20 @@ func (s *Server) handleReconcileObjectiveSchedules(w http.ResponseWriter, r *htt
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if payload.Limit < 0 || payload.Limit > maximumObjectiveScheduleReconcileLimit {
+	if payload.Limit < 0 || payload.Limit > maximumRunbookScheduleReconcileLimit {
 		s.respondError(w, http.StatusBadRequest, "limit must be between 1 and 500 when provided")
 		return
 	}
 	limit := payload.Limit
 	if limit == 0 {
-		limit = defaultObjectiveScheduleReconcileLimit
+		limit = defaultRunbookScheduleReconcileLimit
 	}
-	result, err := runtime.NewObjectiveScheduler(s.store).ReconcileScope(r.Context(), payload.Scope, limit)
+	result, err := runtime.NewRunbookScheduler(s.store).ReconcileScope(r.Context(), payload.Scope, limit)
 	if err != nil {
 		s.respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.respondJSON(w, http.StatusOK, kernelapi.ObjectiveScheduleReconciliation{
+	s.respondJSON(w, http.StatusOK, kernelapi.RunbookScheduleReconciliation{
 		Scope: payload.Scope, ReconciledAt: time.Now().UTC(), Result: result,
 	})
 }

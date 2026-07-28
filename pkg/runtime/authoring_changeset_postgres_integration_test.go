@@ -437,7 +437,7 @@ func TestPostgresAtomicWorkforceApplyHonorsInactiveCommitment(t *testing.T) {
 	if err != nil || initiative.Status != InitiativeStatusDraft {
 		t.Fatalf("inactive Initiative=%#v err=%v", initiative, err)
 	}
-	schedule, err := NewObjectiveScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
+	schedule, err := NewRunbookScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
 	if err != nil || schedule.Examined != 0 || schedule.Scheduled != 0 {
 		t.Fatalf("inactive schedule=%#v err=%v", schedule, err)
 	}

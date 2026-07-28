@@ -961,9 +961,6 @@ func materializeRunbookActivations(value *authoring.ChangeSet, definition *agent
 	result := make([]workforceRunbookActivationApplication, 0, len(triggerIDs))
 	for _, triggerID := range triggerIDs {
 		trigger := definition.Runbook.Triggers[triggerID]
-		if trigger.Kind != runbook.TriggerSchedule {
-			continue
-		}
 		placement, ok := value.Placement.Objectives[trigger.ObjectiveID]
 		if !ok || strings.TrimSpace(placement.ID) == "" {
 			return nil, fmt.Errorf("Runbook trigger %s Objective %s has no reviewed placement", triggerID, trigger.ObjectiveID)

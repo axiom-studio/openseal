@@ -24,20 +24,12 @@ func TestPublicFacadeExposesSourcePolicyLifecycleCapability(t *testing.T) {
 	}
 }
 
-func TestPublicFacadeExposesObjectiveScheduleConditions(t *testing.T) {
-	condition := ObjectiveScheduleCondition{State: ObjectiveScheduleBudgetExhausted, Reason: "Objective budget cannot allocate another Run", Since: time.Now(), UpdatedAt: time.Now()}
-	objective := Objective{ScheduleCondition: &condition}
-	if objective.ScheduleCondition.State != ObjectiveScheduleBudgetExhausted {
-		t.Fatalf("schedule condition = %#v", objective.ScheduleCondition)
-	}
-}
-
-func TestPublicFacadeExposesObjectiveScheduleReconciliation(t *testing.T) {
-	capability := ObjectiveSchedulesCapability()
-	if capability.ID != ObjectiveSchedulesCapabilityID || capability.Version != ObjectiveSchedulesCapabilityVersion || !capability.Supports(KernelOperationReconcile) {
+func TestPublicFacadeExposesRunbookScheduleReconciliation(t *testing.T) {
+	capability := RunbookSchedulesCapability()
+	if capability.ID != RunbookSchedulesCapabilityID || capability.Version != RunbookSchedulesCapabilityVersion || !capability.Supports(KernelOperationReconcile) {
 		t.Fatalf("objective schedule capability = %#v", capability)
 	}
-	request := ReconcileObjectiveSchedulesRequest{Scope: Scope{Kind: "tenant", ID: "operations"}, Limit: 50}
+	request := ReconcileRunbookSchedulesRequest{Scope: Scope{Kind: "tenant", ID: "operations"}, Limit: 50}
 	if request.Scope.ID != "operations" || request.Limit != 50 {
 		t.Fatalf("objective schedule request = %#v", request)
 	}
@@ -56,21 +48,6 @@ func TestPublicFacadeExposesConversationGatewayChoices(t *testing.T) {
 	capability := ConversationGatewaysCapability(true, []ConversationGatewayAdapterChoice{choice})
 	if capability.ID != ConversationGatewaysCapabilityID || capability.Version != ConversationGatewaysCapabilityVersion || capability.Context == nil || len(capability.Context.ConversationGatewayAdapters) != 1 || capability.Context.ConversationGatewayAdapters[0] != choice {
 		t.Fatalf("conversation gateway capability = %#v", capability)
-	}
-}
-
-func TestPublicFacadeDecodesObjectiveEventRulesForHostConnectors(t *testing.T) {
-	rules, err := DecodeObjectiveEventRules(map[string]interface{}{
-		"version": "1",
-		"rules": []interface{}{map[string]interface{}{
-			"id": "warning", "eventType": "kubernetes.warning", "source": "kubernetes:cluster:1",
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rules.Rules) != 1 || rules.Rules[0].ID != "warning" {
-		t.Fatalf("rules = %#v", rules)
 	}
 }
 

@@ -76,11 +76,11 @@ const (
 	SourceMonitorDeduplicateStableSourceAndContent SourceMonitorDeduplication = "stable_source_and_content"
 )
 
-// SourceMonitorReference makes recurring source work executable without
-// introducing a parallel scheduler. ObjectiveID points at the canonical
-// recurring Objective; its cadence carries the assigned Agent, bounded Run
-// budget, and governed capability invocation. The duplicated capability
-// identity is an immutable projection used for drift detection and inspection.
+// SourceMonitorReference attributes recurring source work without introducing
+// a parallel scheduler. ObjectiveID points at the outcome; an activated
+// Runbook carries the assigned Agent, trigger, bounded Run policy, and exact
+// governed actions. The capability identity here is an immutable projection
+// used for drift detection and inspection.
 type SourceMonitorReference struct {
 	ID              string                     `json:"id"`
 	ObjectiveID     string                     `json:"objectiveId"`
@@ -373,11 +373,16 @@ type UpdateInitiativeRequest struct {
 type InitiativeService struct {
 	store     InitiativeStore
 	portfolio PortfolioStore
+	runbooks  RunbookActivationStore
 	now       func() time.Time
 }
 
 func NewInitiativeService(store InitiativeStore, portfolio PortfolioStore) *InitiativeService {
-	return &InitiativeService{store: store, portfolio: portfolio, now: time.Now}
+	runbooks, _ := any(store).(RunbookActivationStore)
+	if runbooks == nil {
+		runbooks, _ = any(portfolio).(RunbookActivationStore)
+	}
+	return &InitiativeService{store: store, portfolio: portfolio, runbooks: runbooks, now: time.Now}
 }
 
 func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequest) (*Initiative, *ActivityEvent, error) {
@@ -572,6 +577,9 @@ func (s *InitiativeService) validateObjectives(ctx context.Context, i *Initiativ
 }
 
 func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initiative) error {
+	if len(i.SourceMonitors) > 0 && s.runbooks == nil {
+		return errors.New("initiative Runbook verifier is not configured")
+	}
 	for _, monitor := range i.SourceMonitors {
 		objective, err := s.portfolio.GetObjective(ctx, i.Scope, monitor.ObjectiveID)
 		if err != nil || objective == nil {
@@ -583,20 +591,19 @@ func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initi
 		if objective.Owner != i.Owner {
 			return fmt.Errorf("source monitor %s objective owner must match Initiative owner", monitor.ID)
 		}
-		if objective.Cadence == nil || objective.Cadence.RunTemplate == nil || objective.Cadence.RunTemplate.Capability == nil {
-			return fmt.Errorf("source monitor %s objective requires an executable cadence capability", monitor.ID)
+		runbooks, err := s.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: i.Scope, ObjectiveID: objective.ID, Limit: 500})
+		if err != nil {
+			return err
 		}
-		cadence, capability := objective.Cadence, objective.Cadence.RunTemplate.Capability
-		if cadence.AssignedAgentID != monitor.AssignedAgentID || capability.SkillID != monitor.SkillID ||
-			capability.SkillVersion != monitor.SkillVersion || capability.Action != monitor.Action {
-			return fmt.Errorf("source monitor %s capability projection does not match its Objective cadence", monitor.ID)
+		matched := false
+		for _, activation := range runbooks {
+			if activation.AssignedAgentID == monitor.AssignedAgentID && activation.Input["initiativeId"] == i.ID && activation.Input["sourceMonitorId"] == monitor.ID && activation.Policy["sourcePolicyRef"] == monitor.SourcePolicyRef {
+				matched = true
+				break
+			}
 		}
-		contextValues := objective.Cadence.RunTemplate.Context
-		if contextValues["initiativeId"] != i.ID || contextValues["sourceMonitorId"] != monitor.ID {
-			return fmt.Errorf("source monitor %s Objective run context must identify its Initiative and monitor", monitor.ID)
-		}
-		if objective.Cadence.RunTemplate.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
-			return fmt.Errorf("source monitor %s source policy projection does not match its Objective cadence", monitor.ID)
+		if !matched {
+			return fmt.Errorf("source monitor %s requires a matching Objective-owned Runbook", monitor.ID)
 		}
 	}
 	return nil

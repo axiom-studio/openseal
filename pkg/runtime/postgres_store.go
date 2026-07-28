@@ -373,9 +373,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateExternalOperationReceipts(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.migrateObjectiveRunTemplateExclusivity(ctx, tx); err != nil {
-		return err
-	}
 	if err := s.migrateRunbookActivations(ctx, tx); err != nil {
 		return err
 	}

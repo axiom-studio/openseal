@@ -70,47 +70,24 @@ const (
 	ObjectiveStatusRetired   ObjectiveStatus = "retired"
 )
 
-type ObjectiveScheduleState string
-
-const (
-	ObjectiveScheduleBackpressured   ObjectiveScheduleState = "backpressured"
-	ObjectiveScheduleSuspended       ObjectiveScheduleState = "suspended"
-	ObjectiveScheduleBudgetExhausted ObjectiveScheduleState = "budget_exhausted"
-)
-
-// ObjectiveScheduleCondition is server-authored operational state for a
-// recurring Objective. It explains why a due occurrence was not projected
-// into a Run without changing the user's lifecycle status or overloading the
-// human-authored progress summary.
-type ObjectiveScheduleCondition struct {
-	State     ObjectiveScheduleState `json:"state"`
-	Reason    string                 `json:"reason"`
-	Since     time.Time              `json:"since"`
-	UpdatedAt time.Time              `json:"updatedAt"`
-}
-
 type Objective struct {
-	ID                  string                      `json:"id"`
-	Scope               Scope                       `json:"scope"`
-	Owner               ObjectiveOwner              `json:"owner"`
-	Title               string                      `json:"title"`
-	Goal                string                      `json:"goal"`
-	Status              ObjectiveStatus             `json:"status"`
-	Priority            int                         `json:"priority"`
-	Cadence             *ObjectiveCadence           `json:"cadence,omitempty"`
-	EventRules          map[string]interface{}      `json:"eventRules,omitempty"`
-	Budget              *BudgetPolicy               `json:"budget,omitempty"`
-	BudgetAllocations   map[string]BudgetPolicy     `json:"budgetAllocations,omitempty"`
-	Constraints         map[string]interface{}      `json:"constraints,omitempty"`
-	SuccessCriteria     map[string]interface{}      `json:"successCriteria,omitempty"`
-	ProgressSummary     string                      `json:"progressSummary,omitempty"`
-	NextEvaluationAt    *time.Time                  `json:"nextEvaluationAt,omitempty"`
-	ScheduleCondition   *ObjectiveScheduleCondition `json:"scheduleCondition,omitempty"`
-	Revision            int64                       `json:"revision"`
-	CreatedAt           time.Time                   `json:"createdAt"`
-	UpdatedAt           time.Time                   `json:"updatedAt"`
-	IdempotencyKeyHash  string                      `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint string                      `json:"creationFingerprint,omitempty"`
+	ID                  string                  `json:"id"`
+	Scope               Scope                   `json:"scope"`
+	Owner               ObjectiveOwner          `json:"owner"`
+	Title               string                  `json:"title"`
+	Goal                string                  `json:"goal"`
+	Status              ObjectiveStatus         `json:"status"`
+	Priority            int                     `json:"priority"`
+	Budget              *BudgetPolicy           `json:"budget,omitempty"`
+	BudgetAllocations   map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
+	Constraints         map[string]interface{}  `json:"constraints,omitempty"`
+	SuccessCriteria     map[string]interface{}  `json:"successCriteria,omitempty"`
+	ProgressSummary     string                  `json:"progressSummary,omitempty"`
+	Revision            int64                   `json:"revision"`
+	CreatedAt           time.Time               `json:"createdAt"`
+	UpdatedAt           time.Time               `json:"updatedAt"`
+	IdempotencyKeyHash  string                  `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string                  `json:"creationFingerprint,omitempty"`
 }
 
 func (o *Objective) Validate() error {
@@ -132,40 +109,12 @@ func (o *Objective) Validate() error {
 	if !validObjectiveStatus(o.Status) {
 		return errors.New("objective status is invalid")
 	}
-	if err := o.Cadence.Validate(); err != nil {
-		return err
-	}
-	eventRules, err := DecodeObjectiveEventRules(o.EventRules)
-	if err != nil {
-		return err
-	}
-	if o.Budget != nil && eventRules != nil {
-		for _, rule := range eventRules.Rules {
-			if rule.RunBudget == nil {
-				return errors.New("budgeted event-driven objective requires rule runBudget allocation")
-			}
-		}
-	}
-	if o.ScheduleCondition != nil {
-		if o.Cadence == nil || strings.TrimSpace(o.ScheduleCondition.Reason) == "" || len(o.ScheduleCondition.Reason) > 512 ||
-			o.ScheduleCondition.Since.IsZero() || o.ScheduleCondition.UpdatedAt.IsZero() || o.ScheduleCondition.UpdatedAt.Before(o.ScheduleCondition.Since) {
-			return errors.New("objective schedule condition requires cadence, reason, and valid timestamps")
-		}
-		switch o.ScheduleCondition.State {
-		case ObjectiveScheduleBackpressured, ObjectiveScheduleSuspended, ObjectiveScheduleBudgetExhausted:
-		default:
-			return errors.New("objective schedule condition state is invalid")
-		}
-	}
 	if o.Budget != nil {
 		if err := o.Budget.Validate(); err != nil {
 			return err
 		}
 		if err := validatePolicyAllocations(*o.Budget, o.BudgetAllocations); err != nil {
 			return err
-		}
-		if o.Cadence != nil && o.Cadence.RunBudget == nil {
-			return errors.New("budgeted recurring objective requires cadence runBudget allocation")
 		}
 	} else if len(o.BudgetAllocations) > 0 {
 		return errors.New("objective budget allocations require an objective budget")
@@ -495,6 +444,8 @@ type ObjectiveScopeStore interface {
 // OpenSeal ships memory and SQLite implementations.
 type KernelStore interface {
 	PortfolioStore
+	RunbookActivationStore
+	SourceMonitorStore
 	ObjectiveScopeStore
 	EventSourceCheckpointStore
 	EventSourceSubscriptionStore
@@ -506,41 +457,33 @@ type KernelStore interface {
 }
 
 type CreateObjectiveRequest struct {
-	Scope            Scope
-	Owner            ObjectiveOwner
-	Title            string
-	Goal             string
-	Status           ObjectiveStatus
-	Priority         int
-	Cadence          *ObjectiveCadence
-	EventRules       map[string]interface{}
-	Budget           *BudgetPolicy
-	Constraints      map[string]interface{}
-	SuccessCriteria  map[string]interface{}
-	NextEvaluationAt *time.Time
-	IdempotencyKey   string
-	Actor            ActivityActor
-	Visibility       ActivityVisibility
+	Scope           Scope
+	Owner           ObjectiveOwner
+	Title           string
+	Goal            string
+	Status          ObjectiveStatus
+	Priority        int
+	Budget          *BudgetPolicy
+	Constraints     map[string]interface{}
+	SuccessCriteria map[string]interface{}
+	IdempotencyKey  string
+	Actor           ActivityActor
+	Visibility      ActivityVisibility
 }
 
 type UpdateObjectiveRequest struct {
-	ExpectedRevision       int64
-	Title                  *string
-	Goal                   *string
-	Status                 *ObjectiveStatus
-	Priority               *int
-	Cadence                *ObjectiveCadence
-	EventRules             map[string]interface{}
-	Budget                 *BudgetPolicy
-	Constraints            map[string]interface{}
-	SuccessCriteria        map[string]interface{}
-	ProgressSummary        *string
-	NextEvaluationAt       *time.Time
-	ScheduleCondition      *ObjectiveScheduleCondition
-	ClearScheduleCondition bool
-	Actor                  ActivityActor
-	Visibility             ActivityVisibility
-	Summary                string
+	ExpectedRevision int64
+	Title            *string
+	Goal             *string
+	Status           *ObjectiveStatus
+	Priority         *int
+	Budget           *BudgetPolicy
+	Constraints      map[string]interface{}
+	SuccessCriteria  map[string]interface{}
+	ProgressSummary  *string
+	Actor            ActivityActor
+	Visibility       ActivityVisibility
+	Summary          string
 }
 
 type CreateAgentRunRequest struct {
@@ -621,19 +564,10 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 			return &CreateObjectiveResult{Objective: current, Created: false}, nil
 		}
 	}
-	nextEvaluationAt := req.NextEvaluationAt
-	if nextEvaluationAt == nil && req.Cadence != nil {
-		next, nextErr := req.Cadence.NextFor(objectiveID, now)
-		if nextErr != nil {
-			return nil, nextErr
-		}
-		nextEvaluationAt = &next
-	}
 	objective := &Objective{
 		ID: objectiveID, Scope: req.Scope, Owner: req.Owner, Title: req.Title,
-		Goal: req.Goal, Status: status, Priority: req.Priority, Cadence: req.Cadence,
-		EventRules: req.EventRules, Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints,
-		SuccessCriteria: req.SuccessCriteria, NextEvaluationAt: nextEvaluationAt,
+		Goal: req.Goal, Status: status, Priority: req.Priority,
+		Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints, SuccessCriteria: req.SuccessCriteria,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, CreationFingerprint: fingerprint,
 	}
 	if key != "" {
@@ -932,18 +866,9 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	}
 	if req.Status != nil {
 		objective.Status = *req.Status
-		if *req.Status != ObjectiveStatusActive {
-			objective.ScheduleCondition = nil
-		}
 	}
 	if req.Priority != nil {
 		objective.Priority = *req.Priority
-	}
-	if req.Cadence != nil {
-		objective.Cadence = req.Cadence
-	}
-	if req.EventRules != nil {
-		objective.EventRules = req.EventRules
 	}
 	if req.Budget != nil {
 		objective.Budget = cloneBudgetPolicy(req.Budget)
@@ -956,15 +881,6 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	}
 	if req.ProgressSummary != nil {
 		objective.ProgressSummary = *req.ProgressSummary
-	}
-	if req.NextEvaluationAt != nil {
-		objective.NextEvaluationAt = req.NextEvaluationAt
-	}
-	if req.ClearScheduleCondition {
-		objective.ScheduleCondition = nil
-	} else if req.ScheduleCondition != nil {
-		condition := *req.ScheduleCondition
-		objective.ScheduleCondition = &condition
 	}
 }
 
@@ -989,20 +905,17 @@ func canTransitionObjective(from, to ObjectiveStatus) bool {
 
 func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {
 	payload := struct {
-		Scope            Scope                  `json:"scope"`
-		Owner            ObjectiveOwner         `json:"owner"`
-		Title            string                 `json:"title"`
-		Goal             string                 `json:"goal"`
-		Status           ObjectiveStatus        `json:"status"`
-		Priority         int                    `json:"priority"`
-		Cadence          *ObjectiveCadence      `json:"cadence,omitempty"`
-		EventRules       map[string]interface{} `json:"eventRules,omitempty"`
-		Budget           *BudgetPolicy          `json:"budget,omitempty"`
-		Constraints      map[string]interface{} `json:"constraints,omitempty"`
-		SuccessCriteria  map[string]interface{} `json:"successCriteria,omitempty"`
-		NextEvaluationAt *time.Time             `json:"nextEvaluationAt,omitempty"`
-	}{req.Scope, req.Owner, req.Title, req.Goal, req.Status, req.Priority, req.Cadence, req.EventRules,
-		req.Budget, req.Constraints, req.SuccessCriteria, req.NextEvaluationAt}
+		Scope           Scope                  `json:"scope"`
+		Owner           ObjectiveOwner         `json:"owner"`
+		Title           string                 `json:"title"`
+		Goal            string                 `json:"goal"`
+		Status          ObjectiveStatus        `json:"status"`
+		Priority        int                    `json:"priority"`
+		Budget          *BudgetPolicy          `json:"budget,omitempty"`
+		Constraints     map[string]interface{} `json:"constraints,omitempty"`
+		SuccessCriteria map[string]interface{} `json:"successCriteria,omitempty"`
+	}{req.Scope, req.Owner, req.Title, req.Goal, req.Status, req.Priority,
+		req.Budget, req.Constraints, req.SuccessCriteria}
 	if payload.Status == "" {
 		payload.Status = ObjectiveStatusDraft
 	}

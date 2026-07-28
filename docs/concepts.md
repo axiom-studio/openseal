@@ -53,14 +53,15 @@ so a model cannot mutate a Team by bypassing validation and policy.
 
 An **Objective** is a persistent desired outcome owned by one Agent or Team.
 Owners may hold many active objectives at once. Objectives include priority,
-status, success measures, constraints, budgets, dependencies, and optional
-cadence.
+status, success measures, constraints, budgets, and dependencies. They never
+contain execution machinery.
 
-An executable cadence contains a bounded Run template, not just an interval.
-Schedule reconciliation creates idempotent Runs from due objective occurrences.
-Event routing can also create or wake Runs from normalized events.
+A **Runbook activation** belongs to one Objective and binds a versioned method
+to an Agent, exact trigger, inputs, policy, budget, and concurrency limit.
+Schedule reconciliation creates idempotent Runs from due Runbook occurrences;
+event routing creates Runs from matching active Runbook event triggers.
 
-An **Initiative** groups objectives and delivery context into one durable
+An **Initiative** groups Objectives and delivery context into one durable
 project. Implemented Initiative records can link milestones, hypotheses, source
 monitors, deliverables, and existing objectives. They are composed from shared
 runtime primitives rather than using a separate execution engine.
@@ -199,5 +200,5 @@ external Skill action, approval policy, delivery Run, and provider receipt.
 HCL workflows are optional, process-bounded CLI runbooks. They can be created,
 validated, and run explicitly with the CLI. The daemon does not load, schedule,
 or expose them through hidden APIs. Durable autonomous work uses Agent
-definitions, objectives, Agent Runs, objective schedules, event-source
-subscriptions, and governed Skills.
+definitions, objectives, Objective-owned Runbook activations, Agent Runs,
+event-source subscriptions, and governed Skills.
