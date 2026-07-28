@@ -1436,9 +1436,9 @@ func TestChangeSetCanonicalizesInitiativeSymbolicReferencesWithDefinitions(t *te
 		initiative.Deliverables[0].ObjectiveRefs[0] != WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, "report") {
 		t.Fatalf("canonical Initiative candidate = %#v", candidate)
 	}
-	assigned, _ := candidate.Team.ObjectiveTemplates[0].Cadence["assignedAgentId"].(string)
-	if assigned != agentID {
-		t.Fatalf("canonical monitor cadence assigned Agent = %q", assigned)
+	trigger := candidate.Agents[0].Runbook.Triggers["hourly"]
+	if trigger.ObjectiveID != monitorRef {
+		t.Fatalf("canonical monitor Runbook Objective = %q", trigger.ObjectiveID)
 	}
 	placement := ChangeSetPlacement{}
 	canonicalizePlacement(&placement, scope, &candidate)

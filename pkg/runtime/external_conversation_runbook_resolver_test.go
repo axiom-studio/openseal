@@ -50,7 +50,7 @@ func TestCatalogExternalConversationRunbookResolverProvesTeamRosterAndExactDefin
 		APIVersion: runbook.APIVersion, ID: handler.ID, Version: handler.Version, Name: "Respond",
 		Entrypoints: map[string]string{"respond": "done"},
 		Triggers: map[string]runbook.Trigger{"on-message": {
-			Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived, Entrypoint: "respond",
+			Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived, Entrypoint: "respond", ObjectiveID: "agent:agent:respond",
 		}},
 		Steps: map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
 	}

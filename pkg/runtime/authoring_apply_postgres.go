@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -175,6 +176,9 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 				return nil, authoring.ErrChangeSetRevision
 			}
 			item.CreatedAt = current.CreatedAt
+			if item.UpdatedAt.Before(item.CreatedAt) {
+				item.UpdatedAt = item.CreatedAt
+			}
 		}
 		p, _ := json.Marshal(item)
 		if objective.expectedRevision == 0 {
@@ -191,6 +195,9 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err = applyPostgresWorkforceRunbookActivations(ctx, tx, s.table("runbook_activations"), value, a); err != nil {
+		return nil, err
 	}
 	if err = applyPostgresWorkforceInitiative(ctx, tx, s.table("initiatives"), a.initiative, a.initiativeExpectedRevision); err != nil {
 		return nil, err
@@ -218,6 +225,78 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		return nil, err
 	}
 	return decodeChangeSet(string(p))
+}
+
+func applyPostgresWorkforceRunbookActivations(ctx context.Context, tx *sql.Tx, table string, value *authoring.ChangeSet, application *workforceApplication) error {
+	desiredByAgent := map[string]map[string]bool{}
+	for _, desired := range application.runbookActivations {
+		item := desired.value
+		if desiredByAgent[item.AssignedAgentID] == nil {
+			desiredByAgent[item.AssignedAgentID] = map[string]bool{}
+		}
+		desiredByAgent[item.AssignedAgentID][item.ID] = true
+		var payload string
+		err := tx.QueryRowContext(ctx, `SELECT payload FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, item.ID).Scan(&payload)
+		create := errors.Is(err, sql.ErrNoRows)
+		switch {
+		case create:
+			item.Revision = 1
+		case err != nil:
+			return err
+		default:
+			var current RunbookActivation
+			if json.Unmarshal([]byte(payload), &current) != nil || current.AssignedAgentID != item.AssignedAgentID {
+				return authoring.ErrChangeSetRevision
+			}
+			item.CreatedAt = current.CreatedAt
+			if item.UpdatedAt.Before(item.CreatedAt) {
+				item.UpdatedAt = item.CreatedAt
+			}
+			if reflect.DeepEqual(current.Trigger.Schedule, item.Trigger.Schedule) {
+				item.NextOccurrenceBase, item.NextRunAt = current.NextOccurrenceBase, current.NextRunAt
+			}
+			item.Revision = current.Revision + 1
+		}
+		if err := item.Validate(); err != nil {
+			return fmt.Errorf("materialized Runbook activation %s revision=%d createdAt=%s updatedAt=%s: %w", item.ID, item.Revision, item.CreatedAt, item.UpdatedAt, err)
+		}
+		encoded, _ := json.Marshal(item)
+		if create {
+			_, err = tx.ExecContext(ctx, `INSERT INTO `+table+` (id,scope_kind,scope_id,owner_type,owner_id,objective_id,assigned_agent_id,status,next_run_at,revision,updated_at,idempotency_key_hash,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)`, item.ID, item.Scope.Kind, item.Scope.ID, item.Owner.Type, item.Owner.ID, item.ObjectiveID, item.AssignedAgentID, item.Status, item.NextRunAt, item.Revision, item.UpdatedAt, item.IdempotencyKeyHash, string(encoded))
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE `+table+` SET owner_type=$1,owner_id=$2,objective_id=$3,assigned_agent_id=$4,status=$5,next_run_at=$6,revision=$7,updated_at=$8,payload=$9::jsonb WHERE scope_kind=$10 AND scope_id=$11 AND id=$12`, item.Owner.Type, item.Owner.ID, item.ObjectiveID, item.AssignedAgentID, item.Status, item.NextRunAt, item.Revision, item.UpdatedAt, string(encoded), item.Scope.Kind, item.Scope.ID, item.ID)
+		}
+		if err != nil {
+			return err
+		}
+		synchronizeWorkforceRunbookResource(application, item)
+	}
+	for _, deploymentID := range value.Placement.AgentDeploymentIDs {
+		rows, err := tx.QueryContext(ctx, `SELECT id FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND assigned_agent_id=$3 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, deploymentID)
+		if err != nil {
+			return err
+		}
+		var obsolete []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			if !desiredByAgent[deploymentID][id] {
+				obsolete = append(obsolete, id)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, id := range obsolete {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, value.Scope.Kind, value.Scope.ID, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func applyPostgresWorkforceConversationEndpoints(

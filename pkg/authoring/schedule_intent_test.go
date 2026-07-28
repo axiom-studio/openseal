@@ -3,45 +3,51 @@ package authoring
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func mustAtoi(value string) int {
-	result, err := strconv.Atoi(value)
+func scheduledAuthoringCandidate(schedule *runbook.Schedule) WorkforceCandidate {
+	definition := &agent.AgentDefinition{
+		ID: "operator", Version: "1.0.0", DisplayName: "Operator", Purpose: "Complete requested work", SystemPrompt: "Complete only authorized work.",
+		Authority:          agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "operate", Title: "Operate", Goal: "Complete the requested work", Priority: 1}},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "operate", Version: "1.0.0", Name: "Operate",
+			Entrypoints: map[string]string{"operate": "done"},
+			Steps:       map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
+			Triggers:    map[string]runbook.Trigger{},
+		},
+	}
+	if schedule != nil {
+		definition.Runbook.Triggers["recurring"] = runbook.Trigger{
+			Kind: runbook.TriggerSchedule, Schedule: schedule, Entrypoint: "operate",
+			ObjectiveID: WorkforceObjectiveKey("agent", "operator", "operate"), MaximumConcurrent: 1,
+		}
+	}
+	return WorkforceCandidate{Agents: []*agent.AgentDefinition{definition}}
+}
+
+func dailySchedule(timeOfDay, timezone string) *runbook.Schedule {
+	hour, minute, err := scheduleClockParts(timeOfDay)
 	if err != nil {
 		panic(err)
 	}
-	return result
+	return &runbook.Schedule{Cron: "0 " + strconv.Itoa(minute) + " " + strconv.Itoa(hour) + " * * *", Timezone: timezone}
 }
 
-func scheduledAuthoringCandidate(cadence map[string]interface{}) WorkforceCandidate {
-	return WorkforceCandidate{Agents: []*agent.AgentDefinition{{
-		ID: "operator", Version: "1.0.0", DisplayName: "Operator", Purpose: "Complete requested work", SystemPrompt: "Complete only authorized work.",
-		Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
-		ObjectiveTemplates: []workforce.ObjectiveTemplate{{
-			ID: "operate", Title: "Operate", Goal: "Complete the requested work", Priority: 1, Cadence: cadence,
-		}},
-	}}}
-}
-
-func dailyCadence(timeOfDay, timezone string) map[string]interface{} {
-	return map[string]interface{}{"type": "daily", "timeOfDay": timeOfDay, "timezone": timezone, "assignedAgentId": "operator"}
-}
-
-func weekdayCadence(timeOfDay, timezone string) map[string]interface{} {
-	parts := strings.Split(timeOfDay, ":")
-	return map[string]interface{}{
-		"type": "cron", "cronExpression": fmt.Sprintf("0 %d %d * * 1-5", mustAtoi(parts[1]), mustAtoi(parts[0])),
-		"timezone": timezone, "assignedAgentId": "operator",
+func weekdaySchedule(timeOfDay, timezone string) *runbook.Schedule {
+	hour, minute, err := scheduleClockParts(timeOfDay)
+	if err != nil {
+		panic(err)
 	}
+	return &runbook.Schedule{Cron: "0 " + strconv.Itoa(minute) + " " + strconv.Itoa(hour) + " * * 1-5", Timezone: timezone}
 }
 
 func compileScheduledCandidate(t *testing.T, prompt string, candidate WorkforceCandidate, refinement *RefinementContext, existing *WorkforceCandidate) *CompileResult {
@@ -65,9 +71,20 @@ func compileScheduledCandidate(t *testing.T, prompt string, candidate WorkforceC
 	return result
 }
 
-func TestScheduleIntentManualPromptCannotGainCadence(t *testing.T) {
-	result := compileScheduledCandidate(t, "Create one Agent with one manual objective", scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), nil, nil)
-	if !result.Valid || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 {
+func candidateSchedule(result *CompileResult) *runbook.Schedule {
+	if result == nil || len(result.Candidate.Agents) == 0 || result.Candidate.Agents[0].Runbook == nil {
+		return nil
+	}
+	trigger, ok := result.Candidate.Agents[0].Runbook.Triggers["recurring"]
+	if !ok {
+		return nil
+	}
+	return trigger.Schedule
+}
+
+func TestScheduleIntentManualPromptCannotGainRunbookTrigger(t *testing.T) {
+	result := compileScheduledCandidate(t, "Create one Agent with one manual objective", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil)
+	if !result.Valid || candidateSchedule(result) != nil {
 		t.Fatalf("manual candidate = %#v", result)
 	}
 	if !containsString(result.Assumptions, "Recurring schedules were removed because the request requires manual execution.") {
@@ -75,15 +92,11 @@ func TestScheduleIntentManualPromptCannotGainCadence(t *testing.T) {
 	}
 }
 
-func TestScheduleIntentExplicitlyRejectsRecurringObjectives(t *testing.T) {
-	for _, prompt := range []string{
-		"Create one inactive Agent that answers general questions. Give it no recurring objectives.",
-		"Create one Agent without recurring work.",
-		"Create one Agent for non-recurring work.",
-	} {
+func TestScheduleIntentExplicitlyRejectsRecurringRunbooks(t *testing.T) {
+	for _, prompt := range []string{"Create one inactive Agent that answers general questions. Give it no recurring objectives.", "Create one Agent without recurring work.", "Create one Agent for non-recurring work."} {
 		t.Run(prompt, func(t *testing.T) {
-			result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), nil, nil)
-			if !result.Valid || hasScheduleIntentQuestion(result.UnresolvedQuestions) || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 {
+			result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil)
+			if !result.Valid || hasScheduleIntentQuestion(result.UnresolvedQuestions) || candidateSchedule(result) != nil {
 				t.Fatalf("explicit non-recurring candidate = %#v", result)
 			}
 		})
@@ -91,56 +104,37 @@ func TestScheduleIntentExplicitlyRejectsRecurringObjectives(t *testing.T) {
 }
 
 func TestScheduleIntentExactDailyTimezoneIsPreserved(t *testing.T) {
-	cadence := dailyCadence("09:00", "UTC")
-	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(cadence), nil, nil)
-	if !result.Valid || !reflect.DeepEqual(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence, cadence) {
+	schedule := dailySchedule("09:00", "UTC")
+	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(schedule), nil, nil)
+	if !result.Valid || !reflect.DeepEqual(candidateSchedule(result), schedule) {
 		t.Fatalf("exact daily candidate = %#v", result)
 	}
 }
 
-func TestScheduleIntentExactWeekdaysUsesPortableCronCadence(t *testing.T) {
-	cadence := weekdayCadence("09:00", "UTC")
-	result := compileScheduledCandidate(t, "Create one Agent that runs every weekday at 09:00 UTC", scheduledAuthoringCandidate(cadence), nil, nil)
-	if !result.Valid || len(result.UnresolvedQuestions) != 0 ||
-		!reflect.DeepEqual(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence, cadence) {
+func TestScheduleIntentExactWeekdaysUsesPortableCronTrigger(t *testing.T) {
+	schedule := weekdaySchedule("09:00", "UTC")
+	result := compileScheduledCandidate(t, "Create one Agent that runs every weekday at 09:00 UTC", scheduledAuthoringCandidate(schedule), nil, nil)
+	if !result.Valid || len(result.UnresolvedQuestions) != 0 || !reflect.DeepEqual(candidateSchedule(result), schedule) {
 		t.Fatalf("exact weekday candidate = %#v", result)
 	}
 }
 
-func TestAuthoredCronCadenceRequiresPortableSixFieldDialect(t *testing.T) {
-	if err := validateAuthoredObjectiveCadence(map[string]interface{}{
-		"type": "cron", "cronExpression": "0 9 * * 1-5", "timezone": "UTC",
-	}); err == nil || !strings.Contains(err.Error(), "six valid fields") {
-		t.Fatalf("five-field cron error = %v", err)
-	}
-	if err := validateAuthoredObjectiveCadence(weekdayCadence("09:00", "UTC")); err != nil {
-		t.Fatalf("six-field cron rejected: %v", err)
-	}
-}
-
 func TestScheduleIntentAmbiguousRecurrenceProducesTypedGuidance(t *testing.T) {
-	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), nil, nil)
-	if result.Valid || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 || len(result.UnresolvedQuestions) != 1 {
+	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil)
+	if result.Valid || candidateSchedule(result) != nil || len(result.UnresolvedQuestions) != 1 {
 		t.Fatalf("ambiguous recurring candidate = %#v", result)
 	}
 	question := result.UnresolvedQuestions[0]
-	if question.ID != scheduleIntentQuestionID || question.Category != RefinementCategoryPolicy || question.Answer.Kind != RefinementAnswerText ||
-		question.Answer.Minimum != 1 || question.Answer.Maximum != 256 || len(question.Blocking) != 2 || len(question.Provenance) != 1 {
+	if question.ID != scheduleIntentQuestionID || question.Category != RefinementCategoryPolicy || question.Answer.Kind != RefinementAnswerText || question.Answer.Minimum != 1 || question.Answer.Maximum != 256 || len(question.Blocking) != 2 || len(question.Provenance) != 1 {
 		t.Fatalf("schedule guidance = %#v", question)
 	}
 }
 
 func TestScheduleIntentNaturalOnceDailyLanguageRequestsMissingClockAndTimezone(t *testing.T) {
-	for _, prompt := range []string{
-		"Create one Agent that posts once a day",
-		"Create one Agent that posts once per day",
-		"Create one Agent that runs every single day",
-		"Create one Agent that posts every single day, once a day",
-	} {
+	for _, prompt := range []string{"Create one Agent that posts once a day", "Create one Agent that posts once per day", "Create one Agent that runs every single day", "Create one Agent that posts every single day, once a day"} {
 		t.Run(prompt, func(t *testing.T) {
-			result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), nil, nil)
-			if result.Valid || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 ||
-				len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
+			result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil)
+			if result.Valid || candidateSchedule(result) != nil || len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID {
 				t.Fatalf("natural once-daily candidate = %#v", result)
 			}
 		})
@@ -148,155 +142,41 @@ func TestScheduleIntentNaturalOnceDailyLanguageRequestsMissingClockAndTimezone(t
 }
 
 func TestScheduleIntentDailyVariedTimeUsesPortableJitterWindow(t *testing.T) {
-	cadence := dailyCadence("00:00", "UTC")
-	cadence["jitterSeconds"] = int64(86399)
+	schedule := dailySchedule("00:00", "UTC")
+	schedule.JitterSeconds = 86399
 	prompt := "Create one Agent that scours r/greenwoodworking and r/woodcarving once per day at a varied time UTC"
-	result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(cadence), nil, nil)
+	result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(schedule), nil, nil)
 	if !result.Valid || hasScheduleIntentQuestion(result.UnresolvedQuestions) || len(result.Validation) != 0 {
 		t.Fatalf("varied daily schedule = %#v", result)
 	}
-
-	missingJitter := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailyCadence("00:00", "UTC")), nil, nil)
+	missingJitter := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailySchedule("00:00", "UTC")), nil, nil)
 	if missingJitter.Valid || !hasValidationCode(missingJitter.Validation, "schedule_intent_mismatch") {
 		t.Fatalf("fixed schedule satisfied varied-time intent: %#v", missingJitter)
 	}
 }
 
-func TestScheduleIntentQuestionDefersScheduleBlockedSourceMaterialization(t *testing.T) {
-	candidate := scheduledAuthoringCandidate(map[string]interface{}{
-		"type": "interval", "intervalSeconds": float64(300),
-		"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-			"skillId": "reddit-search", "skillVersion": "2.0.0", "action": "search", "inputs": map[string]interface{}{},
-		}},
-	})
-	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "reddit-search", VersionConstraint: "2.0.0", RequiredActions: []string{"search"}}}
-	candidate.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-search"}
-	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create one Agent that researches Reddit regularly",
-		Catalog: CapabilityCatalog{
-			Skills: map[string]SkillCapability{"reddit-search": {ID: "reddit-search", Version: "2.0.0", Actions: []string{"search"}, Readiness: SkillReadinessReady}},
-			CapabilityNeeds: []CapabilityNeed{{
-				ID: "reddit-access", Prompt: "How should Reddit be accessed?", WhyNeeded: "A verified source action is required.", SkillIDs: []string{"reddit-search"}, Priority: 900,
-				SourceScope: &CapabilitySourceScopeRequirement{Prompt: "Which subreddits?", WhyNeeded: "Source scope must be explicit.", Minimum: 1, Maximum: 20, Priority: 950, MaterializationInputKeys: []string{"subreddit"}},
-			}},
-		},
-		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
-			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"), Source: RefinementAnswerSourceUser,
-			Value: RefinementProviderAnswerValue{Items: []string{"openseal"}},
-		}}},
-	})
-	if err != nil || result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 1 ||
-		result.UnresolvedQuestions[0].ID != scheduleIntentQuestionID || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 {
-		t.Fatalf("schedule-blocked source materialization = %#v, err = %v", result, err)
-	}
-}
-
-func TestAnsweredSourceScopeWithoutRecurrenceDefaultsToOnDemand(t *testing.T) {
-	candidate := scheduledAuthoringCandidate(nil)
-	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "reddit-search", VersionConstraint: "2.0.0", RequiredActions: []string{"search"}}}
-	candidate.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-search"}
-	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a Reddit agent that can scour the vibecoding subreddit",
-		Catalog: sourceScopeCatalog(),
-		Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
-			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"), Source: RefinementAnswerSourceUser,
-			Value: RefinementProviderAnswerValue{Items: []string{"vibecoding"}},
-		}}},
-	})
-	if err != nil || !result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 0 {
-		t.Fatalf("on-demand source candidate = %#v, err = %v", result, err)
-	}
-}
-
-func TestOnDemandSourceScopeProducesUsableUnscheduledAgent(t *testing.T) {
-	candidate := scheduledAuthoringCandidate(nil)
-	candidate.Agents[0].SkillRequirements = []agent.SkillRequirement{{SkillID: "reddit-search", VersionConstraint: "2.0.0", RequiredActions: []string{"search"}}}
-	candidate.Agents[0].Authority.AllowedSkillIDs = []string{"reddit-search"}
-	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{
-		{
-			QuestionID: CapabilitySourceScopeQuestionID("reddit-access"), Source: RefinementAnswerSourceUser,
-			Value: RefinementProviderAnswerValue{Items: []string{"vibecoding"}},
-		},
-		{
-			QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
-			Value: RefinementProviderAnswerValue{Text: "on demand"},
-		},
-	}}
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a Reddit agent that can scour the vibecoding subreddit",
-		Catalog: sourceScopeCatalog(), Refinement: refinement,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Valid || len(result.Validation) != 0 || len(result.UnresolvedQuestions) != 0 ||
-		len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) != 0 {
-		t.Fatalf("on-demand source agent = %#v", result)
-	}
-}
-
-func TestScheduleIntentAuditedAnswerAuthorizesExactCadence(t *testing.T) {
-	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
-		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
-		Value: RefinementProviderAnswerValue{Text: "daily at 09:00 UTC"},
-	}}}
-	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailyCadence("09:00", "UTC")), refinement, nil)
-	if !result.Valid || len(result.UnresolvedQuestions) != 0 || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) == 0 {
+func TestScheduleIntentAuditedAnswerAuthorizesExactTrigger(t *testing.T) {
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: "daily at 09:00 UTC"}}}}
+	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), refinement, nil)
+	if !result.Valid || len(result.UnresolvedQuestions) != 0 || candidateSchedule(result) == nil {
 		t.Fatalf("answered recurring candidate = %#v", result)
 	}
 }
 
-func TestScheduleIntentAuditedWeekdayAnswerDoesNotReopenQuestion(t *testing.T) {
-	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
-		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
-		Value: RefinementProviderAnswerValue{Text: "Every weekday at 09:00 UTC"},
-	}}}
-	result := compileScheduledCandidate(t, "Create one Agent with a recurring objective", scheduledAuthoringCandidate(weekdayCadence("09:00", "UTC")), refinement, nil)
-	if !result.Valid || len(result.UnresolvedQuestions) != 0 || hasScheduleIntentQuestion(result.UnresolvedQuestions) {
-		t.Fatalf("answered weekday candidate = %#v", result)
-	}
-}
-
-func TestScheduleIntentMismatchedWeekdayCadenceFailsClosed(t *testing.T) {
-	result := compileScheduledCandidate(t, "Create one Agent that runs every weekday at 09:00 UTC", scheduledAuthoringCandidate(weekdayCadence("10:00", "UTC")), nil, nil)
-	if result.Valid || !hasValidationCode(result.Validation, "schedule_intent_mismatch") || !hasValidationCode(result.Validation, "requested_schedule_missing") {
-		t.Fatalf("mismatched weekday candidate = %#v", result)
-	}
-}
-
-func TestScheduleIntentMismatchedCadenceFailsClosed(t *testing.T) {
-	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(dailyCadence("10:00", "UTC")), nil, nil)
-	if result.Valid || len(result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence) == 0 ||
-		!hasValidationCode(result.Validation, "schedule_intent_mismatch") || !hasValidationCode(result.Validation, "requested_schedule_missing") {
+func TestScheduleIntentMismatchedTriggerFailsClosed(t *testing.T) {
+	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(dailySchedule("10:00", "UTC")), nil, nil)
+	if result.Valid || candidateSchedule(result) == nil || !hasValidationCode(result.Validation, "schedule_intent_mismatch") || !hasValidationCode(result.Validation, "requested_schedule_missing") {
 		t.Fatalf("mismatched recurring candidate = %#v", result)
 	}
 }
 
 func TestScheduleIntentAmendmentPreservesExistingAndRemovesWidening(t *testing.T) {
-	existing := scheduledAuthoringCandidate(dailyCadence("08:00", "UTC"))
-	candidate := scheduledAuthoringCandidate(dailyCadence("09:00", "UTC"))
+	existing := scheduledAuthoringCandidate(dailySchedule("08:00", "UTC"))
+	candidate := scheduledAuthoringCandidate(dailySchedule("09:00", "UTC"))
 	candidate.Agents[0].Version = "1.1.0"
-	candidate.Agents[0].ObjectiveTemplates = append(candidate.Agents[0].ObjectiveTemplates, workforce.ObjectiveTemplate{
-		ID: "invented", Title: "Invented", Goal: "Unrequested recurring work", Priority: 2, Cadence: dailyCadence("10:00", "UTC"),
-	})
+	candidate.Agents[0].Runbook.Triggers["invented"] = runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: dailySchedule("10:00", "UTC"), Entrypoint: "operate", ObjectiveID: WorkforceObjectiveKey("agent", "operator", "operate")}
 	result := compileScheduledCandidate(t, "Improve the Agent's instructions", candidate, nil, &existing)
-	objectives := result.Candidate.Agents[0].ObjectiveTemplates
-	if !result.Valid || !reflect.DeepEqual(objectives[0].Cadence, existing.Agents[0].ObjectiveTemplates[0].Cadence) || len(objectives[1].Cadence) != 0 {
+	if !result.Valid || !reflect.DeepEqual(candidateSchedule(result), existing.Agents[0].Runbook.Triggers["recurring"].Schedule) || len(result.Candidate.Agents[0].Runbook.Triggers) != 1 {
 		t.Fatalf("non-schedule amendment = %#v", result)
 	}
 }

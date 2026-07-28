@@ -23,12 +23,14 @@ type workforceApplication struct {
 	activation                 authoring.WorkforceActivationIntent
 	agentDefinitions           []*agent.AgentDefinition
 	agentDeployments           []*agent.AgentDeployment
+	agentRunbooks              []workforceAgentRunbookApplication
 	agentActivations           []workforce.DefinitionActivation
 	skillBindings              []*capability.Binding
 	teamDefinition             *team.Definition
 	teamDeployment             *team.Deployment
 	teamActivation             workforce.DefinitionActivation
 	objectives                 []workforceObjectiveApplication
+	runbookActivations         []workforceRunbookActivationApplication
 	initiative                 *Initiative
 	initiativeExpectedRevision int64
 	conversationEndpoints      []workforceConversationEndpointApplication
@@ -37,6 +39,16 @@ type workforceApplication struct {
 
 type workforceObjectiveApplication struct {
 	value            *Objective
+	expectedRevision int64
+}
+
+type workforceAgentRunbookApplication struct {
+	definition   *agent.AgentDefinition
+	deploymentID string
+}
+
+type workforceRunbookActivationApplication struct {
+	value            *RunbookActivation
 	expectedRevision int64
 }
 
@@ -143,6 +155,7 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 			return nil, err
 		}
 		application.objectives = append(application.objectives, objectives...)
+		application.agentRunbooks = append(application.agentRunbooks, workforceAgentRunbookApplication{definition: definition, deploymentID: deploymentID})
 	}
 	if value.Result.Candidate.Team == nil {
 		if err := finishWorkforceApplication(value, application, deploymentByDefinition); err != nil {
@@ -200,8 +213,18 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 }
 
 func finishWorkforceApplication(value *authoring.ChangeSet, application *workforceApplication, deploymentByDefinition map[string]string) error {
+	for _, source := range application.agentRunbooks {
+		activations, err := materializeRunbookActivations(value, source.definition, source.deploymentID, application.objectives)
+		if err != nil {
+			return err
+		}
+		application.runbookActivations = append(application.runbookActivations, activations...)
+	}
 	for _, objective := range application.objectives {
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "objective", ID: objective.value.ID, Revision: objective.value.Revision})
+	}
+	for _, activation := range application.runbookActivations {
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "runbook", ID: activation.value.ID, Version: activation.value.DefinitionVersion, Revision: activation.value.Revision})
 	}
 	if value.Result.Candidate.Initiative != nil {
 		initiative, err := materializeInitiative(value, application, deploymentByDefinition)
@@ -843,6 +866,20 @@ func synchronizeWorkforceSkillBindingResources(application *workforceApplication
 	}
 }
 
+func synchronizeWorkforceRunbookResource(application *workforceApplication, activation *RunbookActivation) {
+	if application == nil || activation == nil {
+		return
+	}
+	for index := range application.resources {
+		resource := &application.resources[index]
+		if resource.Kind == "runbook" && resource.ID == activation.ID {
+			resource.Version = activation.DefinitionVersion
+			resource.Revision = activation.Revision
+			return
+		}
+	}
+}
+
 func synchronizeWorkforceConversationEndpointBindings(application *workforceApplication) error {
 	if application == nil {
 		return nil
@@ -891,35 +928,13 @@ func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, 
 		status = ObjectiveStatusDraft
 	}
 	for _, template := range templates {
-		var cadence *ObjectiveCadence
-		if len(template.Cadence) > 0 {
-			payload, err := json.Marshal(template.Cadence)
-			if err != nil {
-				return nil, fmt.Errorf("materialize Objective %s cadence: %w", template.ID, err)
-			}
-			var decoded ObjectiveCadence
-			if err := json.Unmarshal(payload, &decoded); err != nil {
-				return nil, fmt.Errorf("materialize Objective %s cadence: %w", template.ID, err)
-			}
-			if deployed := deploymentByDefinition[decoded.AssignedAgentID]; deployed != "" {
-				decoded.AssignedAgentID = deployed
-			}
-			if blueprint := value.Result.Candidate.Initiative; blueprint != nil && decoded.RunTemplate != nil && decoded.RunTemplate.Context["initiativeId"] == blueprint.ID {
-				decoded.RunTemplate.Context["initiativeId"] = value.Placement.InitiativeID
-			}
-			cadence = &decoded
-		}
-		eventRules, err := materializeObjectiveEventRules(value, template, deploymentByDefinition)
-		if err != nil {
-			return nil, err
-		}
 		key := authoring.WorkforceObjectiveKey(ownerType, definitionID, template.ID)
 		placement := value.Placement.Objectives[key]
 		revision := int64(1)
 		if placement.ExpectedRevision > 0 {
 			revision = placement.ExpectedRevision + 1
 		}
-		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: status, Priority: template.Priority, Cadence: cadence, EventRules: eventRules, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
+		objective := &Objective{ID: placement.ID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerType(ownerType), ID: ownerID}, Title: template.Title, Goal: template.Goal, Status: status, Priority: template.Priority, Constraints: template.Constraints, SuccessCriteria: template.SuccessCriteria, Revision: revision, CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt}
 		if err := objective.Validate(); err != nil {
 			return nil, fmt.Errorf("materialize Objective %s: %w", template.ID, err)
 		}
@@ -928,30 +943,91 @@ func materializeObjectives(value *authoring.ChangeSet, ownerType, definitionID, 
 	return result, nil
 }
 
-func materializeObjectiveEventRules(value *authoring.ChangeSet, template workforce.ObjectiveTemplate, deploymentByDefinition map[string]string) (map[string]interface{}, error) {
-	if len(template.EventRules) == 0 {
-		return template.EventRules, nil
+func materializeRunbookActivations(value *authoring.ChangeSet, definition *agent.AgentDefinition, deploymentID string, objectives []workforceObjectiveApplication) ([]workforceRunbookActivationApplication, error) {
+	if definition == nil || definition.Runbook == nil {
+		return nil, nil
 	}
-	rules, err := DecodeObjectiveEventRules(template.EventRules)
-	if err != nil {
-		return nil, fmt.Errorf("materialize Objective %s event rules: %w", template.ID, err)
-	}
-	for index := range rules.Rules {
-		rule := &rules.Rules[index]
-		if deployed := deploymentByDefinition[rule.AssignedAgentID]; deployed != "" {
-			rule.AssignedAgentID = deployed
-		}
-		if blueprint := value.Result.Candidate.Initiative; blueprint != nil && rule.RunTemplate != nil && rule.RunTemplate.Context["initiativeId"] == blueprint.ID {
-			rule.RunTemplate.Context["initiativeId"] = value.Placement.InitiativeID
+	objectivesByID := make(map[string]*Objective, len(objectives))
+	for _, objective := range objectives {
+		if objective.value != nil {
+			objectivesByID[objective.value.ID] = objective.value
 		}
 	}
-	payload, err := json.Marshal(rules)
-	if err != nil {
-		return nil, fmt.Errorf("materialize Objective %s event rules: %w", template.ID, err)
+	triggerIDs := make([]string, 0, len(definition.Runbook.Triggers))
+	for triggerID := range definition.Runbook.Triggers {
+		triggerIDs = append(triggerIDs, triggerID)
 	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(payload, &result); err != nil {
-		return nil, fmt.Errorf("materialize Objective %s event rules: %w", template.ID, err)
+	sort.Strings(triggerIDs)
+	result := make([]workforceRunbookActivationApplication, 0, len(triggerIDs))
+	for _, triggerID := range triggerIDs {
+		trigger := definition.Runbook.Triggers[triggerID]
+		if trigger.Kind != runbook.TriggerSchedule {
+			continue
+		}
+		placement, ok := value.Placement.Objectives[trigger.ObjectiveID]
+		if !ok || strings.TrimSpace(placement.ID) == "" {
+			return nil, fmt.Errorf("Runbook trigger %s Objective %s has no reviewed placement", triggerID, trigger.ObjectiveID)
+		}
+		objective := objectivesByID[placement.ID]
+		if objective == nil {
+			return nil, fmt.Errorf("Runbook trigger %s Objective %s was not materialized", triggerID, trigger.ObjectiveID)
+		}
+		input, err := materializeRunbookTriggerInput(trigger.Input)
+		if err != nil {
+			return nil, fmt.Errorf("Runbook trigger %s input: %w", triggerID, err)
+		}
+		policy := map[string]interface{}(nil)
+		if blueprint := value.Result.Candidate.Initiative; blueprint != nil {
+			for _, monitor := range blueprint.SourceMonitors {
+				if monitor.ObjectiveRef != trigger.ObjectiveID || monitor.AssignedAgentDefinitionID != definition.ID {
+					continue
+				}
+				if input == nil {
+					input = map[string]interface{}{}
+				}
+				if input["sourceMonitorId"] != nil {
+					return nil, fmt.Errorf("Runbook trigger %s is shared by multiple source monitors", triggerID)
+				}
+				input["initiativeId"], input["sourceMonitorId"] = value.Placement.InitiativeID, monitor.ID
+				policy = map[string]interface{}{"sourcePolicyRef": monitor.SourcePolicyRef}
+			}
+		}
+		revision := value.Placement.AgentExpectedRevisions[definition.ID] + 1
+		status := RunbookActivationActive
+		if value.Result.Candidate.Activation == authoring.WorkforceActivationInactive {
+			status = RunbookActivationPaused
+		}
+		activation := &RunbookActivation{
+			ID:    uuid.NewSHA1(uuid.NameSpaceOID, []byte(value.Scope.Kind+"\x00"+value.Scope.ID+"\x00"+deploymentID+"\x00"+definition.Runbook.ID+"\x00"+triggerID)).String(),
+			Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: objective.Owner, ObjectiveID: objective.ID,
+			AssignedAgentID: deploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			TriggerID: triggerID, Trigger: trigger, Input: input, Policy: policy, Budget: runbookBudgetPolicyValue(trigger.Budget),
+			MaximumConcurrent: trigger.MaximumConcurrent, Status: status, Revision: revision,
+			CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt,
+		}
+		activation.Trigger.ObjectiveID = objective.ID
+		if err := activation.Validate(); err != nil {
+			return nil, fmt.Errorf("materialize Runbook trigger %s: %w", triggerID, err)
+		}
+		result = append(result, workforceRunbookActivationApplication{value: activation, expectedRevision: value.Placement.AgentExpectedRevisions[definition.ID]})
+	}
+	return result, nil
+}
+
+func materializeRunbookTriggerInput(values map[string]runbook.Value) (map[string]interface{}, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]interface{}, len(values))
+	for name, value := range values {
+		if len(value.Literal) == 0 || value.Ref != "" || len(value.Template) > 0 {
+			return nil, fmt.Errorf("%s must be a literal", name)
+		}
+		var decoded interface{}
+		if err := json.Unmarshal(value.Literal, &decoded); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		result[name] = decoded
 	}
 	return result, nil
 }
@@ -1049,7 +1125,7 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 	if err := initiative.Validate(); err != nil {
 		return nil, fmt.Errorf("materialize Initiative: %w", err)
 	}
-	if err := validateMaterializedInitiativeMonitors(initiative, application.objectives); err != nil {
+	if err := validateMaterializedInitiativeMonitors(initiative, application); err != nil {
 		return nil, err
 	}
 	idempotency := sha256.Sum256([]byte("workforce-change-set\x00" + value.ID + "\x00" + value.ApplyReceipt.IdempotencyKey))
@@ -1062,21 +1138,39 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 	return initiative, nil
 }
 
-func validateMaterializedInitiativeMonitors(initiative *Initiative, objectives []workforceObjectiveApplication) error {
-	byID := make(map[string]*Objective, len(objectives))
-	for _, objective := range objectives {
+func validateMaterializedInitiativeMonitors(initiative *Initiative, application *workforceApplication) error {
+	byID := make(map[string]*Objective, len(application.objectives))
+	for _, objective := range application.objectives {
 		byID[objective.value.ID] = objective.value
+	}
+	definitions := make(map[string]*agent.AgentDefinition, len(application.agentDefinitions))
+	for _, definition := range application.agentDefinitions {
+		definitions[definition.ID+"\x00"+definition.Version] = definition
 	}
 	for _, monitor := range initiative.SourceMonitors {
 		objective := byID[monitor.ObjectiveID]
-		if objective == nil || objective.Owner != initiative.Owner || objective.Cadence == nil || objective.Cadence.RunTemplate == nil || objective.Cadence.RunTemplate.Capability == nil {
-			return fmt.Errorf("Initiative source monitor %s has no matching owned executable Objective", monitor.ID)
+		if objective == nil || objective.Owner != initiative.Owner {
+			return fmt.Errorf("Initiative source monitor %s has no matching owned Objective", monitor.ID)
 		}
-		capability := objective.Cadence.RunTemplate.Capability
-		if objective.Cadence.AssignedAgentID != monitor.AssignedAgentID || capability.SkillID != monitor.SkillID || capability.SkillVersion != monitor.SkillVersion || capability.Action != monitor.Action ||
-			objective.Cadence.RunTemplate.Context["initiativeId"] != initiative.ID || objective.Cadence.RunTemplate.Context["sourceMonitorId"] != monitor.ID ||
-			objective.Cadence.RunTemplate.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
-			return fmt.Errorf("Initiative source monitor %s drifted from its Objective cadence", monitor.ID)
+		matched := false
+		for _, activation := range application.runbookActivations {
+			item := activation.value
+			if item.ObjectiveID != monitor.ObjectiveID || item.AssignedAgentID != monitor.AssignedAgentID || item.Input["initiativeId"] != initiative.ID || item.Input["sourceMonitorId"] != monitor.ID || item.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
+				continue
+			}
+			definition := definitions[item.DefinitionID+"\x00"+item.DefinitionVersion]
+			if definition == nil || definition.Runbook == nil {
+				continue
+			}
+			for _, step := range definition.Runbook.Steps {
+				if step.Kind == runbook.StepAction && step.Action != nil && step.Action.SkillID == monitor.SkillID && step.Action.SkillVersion == monitor.SkillVersion && step.Action.Action == monitor.Action {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return fmt.Errorf("Initiative source monitor %s has no matching Objective-owned Runbook action", monitor.ID)
 		}
 	}
 	return nil

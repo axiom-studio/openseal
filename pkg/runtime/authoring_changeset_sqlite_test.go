@@ -133,7 +133,7 @@ func TestSQLiteAtomicWorkforceApplyPersistsWholeAggregateAcrossRestart(t *testin
 	}
 }
 
-func TestSQLiteWorkforceApplyActivatesEmbeddedRunbookBeforeScheduledObjective(t *testing.T) {
+func TestSQLiteWorkforceApplyMaterializesObjectiveOwnedScheduledRunbook(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
@@ -143,14 +143,15 @@ func TestSQLiteWorkforceApplyActivatesEmbeddedRunbookBeforeScheduledObjective(t 
 
 	value := testApplicableWorkforceChangeSet()
 	definition := value.Result.Candidate.Agents[0]
+	objectiveRef := authoring.WorkforceObjectiveKey("agent", definition.ID, definition.ObjectiveTemplates[0].ID)
 	definition.Runbook = &runbook.Definition{
 		APIVersion: runbook.APIVersion, ID: "agent-operations", Version: "1.0.0", Name: "Agent operations",
 		Entrypoints: map[string]string{"operate": "done"},
-		Steps:       map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
-	}
-	definition.ObjectiveTemplates[0].Cadence = map[string]interface{}{
-		"type": "interval", "intervalSeconds": int64(3600), "assignedAgentId": "agent",
-		"runTemplate": map[string]interface{}{"entrypoint": "operate"},
+		Triggers: map[string]runbook.Trigger{"hourly": {
+			Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"},
+			Entrypoint: "operate", ObjectiveID: objectiveRef,
+		}},
+		Steps: map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
 	}
 	if _, _, err = store.CreateChangeSet(ctx, value, "create-runbook", "digest-runbook"); err != nil {
 		t.Fatal(err)
@@ -178,20 +179,23 @@ func TestSQLiteWorkforceApplyActivatesEmbeddedRunbookBeforeScheduledObjective(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	var scheduled *Objective
-	for _, objective := range objectives {
-		if objective.ID == "objective:agent" {
-			scheduled = objective
+	var objective *Objective
+	for _, candidate := range objectives {
+		if candidate.ID == "objective:agent" {
+			objective = candidate
 		}
 	}
-	if scheduled == nil || scheduled.Cadence == nil || scheduled.Cadence.AssignedAgentID != "agent-live" ||
-		scheduled.Cadence.RunTemplate == nil || scheduled.Cadence.RunTemplate.Entrypoint != "operate" {
-		t.Fatalf("scheduled Objective did not pin the activated Agent Runbook: %#v", objectives)
+	if objective == nil || objective.Cadence != nil || len(objective.EventRules) != 0 {
+		t.Fatalf("Objective must remain an outcome without execution configuration: %#v", objectives)
+	}
+	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
+	if err != nil || len(activations) != 1 || activations[0].AssignedAgentID != "agent-live" || activations[0].Trigger.Entrypoint != "operate" {
+		t.Fatalf("materialized Runbook activation=%#v err=%v", activations, err)
 	}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, ObjectiveID: scheduled.ID,
-		Owner: scheduled.Owner, AssignedAgentID: "agent-live", Entrypoint: "operate",
-		Goal: scheduled.Goal, Source: RunSourceSchedule,
+		Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, ObjectiveID: objective.ID,
+		Owner: objective.Owner, AssignedAgentID: "agent-live", Entrypoint: activations[0].Trigger.Entrypoint,
+		Goal: objective.Goal, Source: RunSourceSchedule,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +234,8 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	definition := &agent.AgentDefinition{
 		ID: "slack-agent", Version: "1.0.0", DisplayName: "Slack agent",
 		Purpose: "Respond to Slack messages", SystemPrompt: "Respond helpfully.",
-		Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		Authority:          agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "respond", Title: "Respond", Goal: "Respond to permitted Slack messages", Priority: 1}},
 		Runbook: &runbook.Definition{
 			APIVersion: runbook.APIVersion, ID: "respond", Version: "1.0.0", Name: "Respond",
 			Entrypoints: map[string]string{"respond": "delegate"},
@@ -240,6 +245,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 			}},
 			Triggers: map[string]runbook.Trigger{"on-message": {
 				Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived, Entrypoint: "respond",
+				ObjectiveID: authoring.WorkforceObjectiveKey("agent", "slack-agent", "respond"),
 			}},
 			Steps: map[string]runbook.Step{
 				"delegate": {
@@ -305,6 +311,9 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		}},
 		Placement: authoring.ChangeSetPlacement{
 			AgentDeploymentIDs: map[string]string{"slack-agent": "slack-agent-live"},
+			Objectives: map[string]authoring.ObjectivePlacement{
+				authoring.WorkforceObjectiveKey("agent", "slack-agent", "respond"): {ID: "objective:slack-respond"},
+			},
 			CredentialReferences: map[string]map[string]capability.CredentialReference{
 				"slack-agent": {"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/one/slack"}},
 			},
@@ -383,7 +392,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		delegatedDeployment != "slack-agent-live" {
 		t.Fatalf("delegated deployment=%q err=%v", delegatedDeployment, err)
 	}
-	if len(result.ApplyReceipt.Resources) != 4 {
+	if len(result.ApplyReceipt.Resources) != 5 {
 		t.Fatalf("applied resources=%#v", result.ApplyReceipt.Resources)
 	}
 
@@ -393,6 +402,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	amend.Result.Candidate.Agents[0].Version = "2.0.0"
 	amend.Result.Candidate.ConversationEndpoints = nil
 	amend.Placement.AgentExpectedRevisions = map[string]int64{"slack-agent": 1}
+	amend.Placement.Objectives[authoring.WorkforceObjectiveKey("agent", "slack-agent", "respond")] = authoring.ObjectivePlacement{ID: "objective:slack-respond", ExpectedRevision: 1}
 	amend.Placement.ConversationEndpoints = map[string]authoring.ConversationEndpointPlacement{}
 	amend.Status, amend.Revision, amend.ApplyReceipt = authoring.ChangeSetReady, 2, nil
 	amend.UpdatedAt = applied.UpdatedAt.Add(time.Minute)
@@ -419,90 +429,6 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	bindings, err = store.ListSkillBindings(ctx, scope, "slack-agent-live")
 	if err != nil || len(bindings) != 0 {
 		t.Fatalf("removed adapter binding=%#v err=%v", bindings, err)
-	}
-}
-
-func TestSQLiteWorkforceApplyAcceptsCanonicalAgentEventAssignment(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	value := testApplicableWorkforceChangeSet()
-	canonicalAgentID := "tenant/one/agent"
-	value.Result.Candidate.Agents[0].ID = canonicalAgentID
-	value.Result.Candidate.Agents[0].ObjectiveTemplates[0].EventRules = map[string]interface{}{
-		"version": "1",
-		"rules": []interface{}{map[string]interface{}{
-			"id": "warning", "eventType": "kubernetes.warning", "source": "kubernetes:cluster:1",
-			"attributes": map[string]interface{}{"namespace": "operations"}, "assignedAgentId": canonicalAgentID,
-		}},
-	}
-	value.Result.Candidate.Team.ObjectiveTemplates[0].EventRules = map[string]interface{}{
-		"version": "1",
-		"rules": []interface{}{map[string]interface{}{
-			"id": "team-warning", "eventType": "kubernetes.warning", "source": "kubernetes:cluster:1",
-			"attributes": map[string]interface{}{"namespace": "operations"}, "assignedAgentId": canonicalAgentID,
-		}},
-	}
-	value.Result.Candidate.Team.Roles[0].RequiredDefinitionIDs = []string{canonicalAgentID}
-	value.Result.Candidate.Assignments[0].AgentDefinitionID = canonicalAgentID
-	value.Placement.AgentDeploymentIDs = map[string]string{canonicalAgentID: "agent-live"}
-	delete(value.Placement.Objectives, authoring.WorkforceObjectiveKey("agent", "agent", "agent-goal"))
-	value.Placement.Objectives[authoring.WorkforceObjectiveKey("agent", canonicalAgentID, "agent-goal")] = authoring.ObjectivePlacement{ID: "objective:agent"}
-	if _, _, err = store.CreateChangeSet(context.Background(), value, "canonical-event", "digest"); err != nil {
-		t.Fatal(err)
-	}
-	applied := appliedRuntimeChangeSet(value, "receipt", "apply", value.UpdatedAt.Add(time.Minute))
-	if _, err = store.ApplyChangeSet(context.Background(), applied, 2); err != nil {
-		t.Fatal(err)
-	}
-	objective, err := store.GetObjective(context.Background(), Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, "objective:agent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rules, err := DecodeObjectiveEventRules(objective.EventRules)
-	if err != nil || len(rules.Rules) != 1 || rules.Rules[0].AssignedAgentID != "agent-live" {
-		t.Fatalf("deployed event assignment = %#v, %v", rules, err)
-	}
-	if reviewed := value.Result.Candidate.Agents[0].ObjectiveTemplates[0].EventRules["rules"].([]interface{})[0].(map[string]interface{})["assignedAgentId"]; reviewed != canonicalAgentID {
-		t.Fatalf("reviewed candidate assignment mutated to %#v", reviewed)
-	}
-	teamObjective, err := store.GetObjective(context.Background(), Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, "objective:team")
-	if err != nil {
-		t.Fatal(err)
-	}
-	teamRules, err := DecodeObjectiveEventRules(teamObjective.EventRules)
-	if err != nil || len(teamRules.Rules) != 1 || teamRules.Rules[0].AssignedAgentID != "agent-live" {
-		t.Fatalf("deployed Team event assignment = %#v, %v", teamRules, err)
-	}
-}
-
-func TestMaterializeObjectiveEventRulesTranslatesInitiativeContext(t *testing.T) {
-	value := testApplicableWorkforceChangeSet()
-	value.Result.Candidate.Initiative = &authoring.InitiativeBlueprint{ID: "research-program"}
-	value.Placement.InitiativeID = "initiative:live"
-	template := workforce.ObjectiveTemplate{ID: "monitor", EventRules: map[string]interface{}{
-		"version": "1",
-		"rules": []interface{}{map[string]interface{}{
-			"id": "observation", "eventType": "source.observed", "assignedAgentId": "agent",
-			"runTemplate": map[string]interface{}{"context": map[string]interface{}{"initiativeId": "research-program"}},
-		}},
-	}}
-	materialized, err := materializeObjectiveEventRules(value, template, map[string]string{"agent": "agent-live"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rules, err := DecodeObjectiveEventRules(materialized)
-	if err != nil || len(rules.Rules) != 1 {
-		t.Fatalf("materialized rules = %#v, %v", rules, err)
-	}
-	if rules.Rules[0].AssignedAgentID != "agent-live" || rules.Rules[0].RunTemplate.Context["initiativeId"] != "initiative:live" {
-		t.Fatalf("materialized event rule = %#v", rules.Rules[0])
-	}
-	original := template.EventRules["rules"].([]interface{})[0].(map[string]interface{})
-	if original["assignedAgentId"] != "agent" || original["runTemplate"].(map[string]interface{})["context"].(map[string]interface{})["initiativeId"] != "research-program" {
-		t.Fatalf("reviewed event template mutated: %#v", original)
 	}
 }
 
@@ -1175,7 +1101,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-initiative", IdempotencyKey: "apply-initiative", CandidateDigest: value.CandidateDigest, Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute)}
 	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
 	result, err := store.ApplyChangeSet(ctx, applied, 2)
-	if err != nil || len(result.ApplyReceipt.Resources) != 8 || result.ApplyReceipt.Activation != authoring.WorkforceActivationActive {
+	if err != nil || len(result.ApplyReceipt.Resources) != 9 || result.ApplyReceipt.Activation != authoring.WorkforceActivationActive {
 		t.Fatalf("apply result=%#v err=%v", result, err)
 	}
 	initiative, err := store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
@@ -1195,10 +1121,12 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 			monitorObjective = objective
 		}
 	}
-	if monitorObjective == nil || monitorObjective.Cadence == nil || monitorObjective.Cadence.AssignedAgentID != "agent-live" ||
-		monitorObjective.Cadence.RunTemplate.Context["initiativeId"] != initiative.ID ||
-		monitorObjective.Cadence.RunTemplate.Capability.SkillVersion != "1.2.3" {
-		t.Fatalf("materialized monitor Objective=%#v", monitorObjective)
+	if monitorObjective == nil || monitorObjective.Cadence != nil || len(monitorObjective.EventRules) != 0 {
+		t.Fatalf("materialized monitor Objective must contain only its outcome: %#v", monitorObjective)
+	}
+	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: initiative.Scope, ObjectiveID: monitorObjective.ID})
+	if err != nil || len(runbooks) != 1 || runbooks[0].AssignedAgentID != "agent-live" || runbooks[0].Input["initiativeId"] != initiative.ID || runbooks[0].Input["sourceMonitorId"] != "community-listening" {
+		t.Fatalf("materialized monitor Runbook=%#v err=%v", runbooks, err)
 	}
 	found := false
 	for _, resource := range result.ApplyReceipt.Resources {
@@ -1281,7 +1209,11 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	if err != nil || initiative.Status != InitiativeStatusDraft {
 		t.Fatalf("inactive Initiative=%#v err=%v", initiative, err)
 	}
-	schedule, err := NewObjectiveScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
+	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: initiative.Scope, ObjectiveID: "objective:team"})
+	if err != nil || len(runbooks) != 1 || runbooks[0].Status != RunbookActivationPaused {
+		t.Fatalf("inactive Runbooks=%#v err=%v", runbooks, err)
+	}
+	schedule, err := NewRunbookScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
 	if err != nil || schedule.Examined != 0 || schedule.Scheduled != 0 {
 		t.Fatalf("inactive schedule=%#v err=%v", schedule, err)
 	}
@@ -1302,7 +1234,7 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	catalog.SourcePolicies = map[string]authoring.SourcePolicyCapability{
 		"approved-communities": {
 			Reference: "approved-communities",
-			Sources:   []authoring.SourcePolicySourceCapability{{Host: "community.example"}},
+			Sources:   []authoring.SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5,
 		},
 	}
 	catalog.AgentCredentialRequirements = []authoring.AgentCredentialRequirement{{
@@ -1786,17 +1718,23 @@ func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
 		"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}, MaximumRisk: capability.RiskLevelRead},
 	}}
-	teamObjective := &value.Result.Candidate.Team.ObjectiveTemplates[0]
-	teamObjective.Cadence = map[string]interface{}{
-		"type": "interval", "intervalSeconds": int64(3600), "assignedAgentId": "agent", "maximumConcurrent": 1,
-		"runBudget": map[string]interface{}{"maxTurns": int64(2), "maxActions": int64(1), "maxDurationMs": int64(60000)},
-		"runTemplate": map[string]interface{}{
-			"context":    map[string]interface{}{"initiativeId": "research-program", "sourceMonitorId": "community-listening"},
-			"policy":     map[string]interface{}{"sourcePolicyRef": "approved-communities"},
-			"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"query": "agent runtime pain points"}},
+	teamObjectiveRef := authoring.WorkforceObjectiveKey(authoring.InitiativeOwnerTeam, "team", "team-goal")
+	agentDefinition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "community-monitor", Version: "1.0.0", Name: "Community monitor",
+		Entrypoints: map[string]string{"monitor": "observe"},
+		Triggers: map[string]runbook.Trigger{"hourly": {
+			Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 */1 * * *", Timezone: "UTC"}, Entrypoint: "monitor",
+			ObjectiveID: teamObjectiveRef, MaximumConcurrent: 1, Budget: &runbook.BudgetAllocation{MaxTurns: 2, MaxActions: 1, MaxDurationMS: 60000},
+		}},
+		Steps: map[string]runbook.Step{
+			"observe": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "community-source", SkillVersion: "1.2.3", Action: "observe",
+				Arguments:  map[string]runbook.Value{"url": runtimeLiteral("https://community.example/feed"), "maxItems": runtimeLiteral(5), "query": runtimeLiteral("agent runtime pain points")},
+				ResultPath: "/results/observe", Next: "done",
+			}},
+			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 		},
 	}
-	teamObjectiveRef := authoring.WorkforceObjectiveKey(authoring.InitiativeOwnerTeam, "team", "team-goal")
 	value.Result.Candidate.Initiative = &authoring.InitiativeBlueprint{
 		ID: "research-program", Title: "Research program", Purpose: "Continuously understand user pain points",
 		Owner:         authoring.InitiativeOwnerReference{Type: authoring.InitiativeOwnerTeam, DefinitionID: "team"},
@@ -1812,6 +1750,11 @@ func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {
 	}
 	value.Placement.InitiativeID = "initiative:research"
 	return value
+}
+
+func runtimeLiteral(value interface{}) runbook.Value {
+	payload, _ := json.Marshal(value)
+	return runbook.Value{Literal: payload}
 }
 
 func registerInitiativeSourceSkill(t *testing.T, store skill.CatalogStore) {
