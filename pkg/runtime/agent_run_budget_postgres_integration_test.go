@@ -93,20 +93,12 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 		t.Fatalf("first attempt = %#v", first)
 	}
 	recovered := claimAcrossReplicas(now.Add(2*time.Second), "recovery-")[0]
-	if recovered.ID != run.ID || recovered.BudgetUsage.Attempts != 2 || !runAttemptBudgetExceeded(recovered) {
+	if recovered.ID != run.ID || recovered.Status != AgentRunStatusPaused || recovered.BudgetUsage.Attempts != 1 ||
+		!runAttemptBudgetAtLimit(recovered) || runAttemptBudgetExceeded(recovered) {
 		t.Fatalf("recovered attempt = %#v", recovered)
 	}
-	result, err := NewTurnCoordinator(primary, primary, primary).Advance(ctx, AdvanceAgentRunRequest{
-		Scope: scope, RunID: run.ID, WorkerID: recovered.LeaseOwner,
-	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		t.Fatal("attempt-exhausted runner executed")
-		return nil, nil
-	}))
-	if !errors.Is(err, ErrBudgetExhausted) || result == nil || result.Run.Status != AgentRunStatusPaused || result.Event == nil || result.Event.EventType != "budget.exhausted" {
-		t.Fatalf("attempt enforcement = %#v, %v", result, err)
-	}
 	loaded, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
-	if err != nil || loaded.Status != AgentRunStatusPaused || loaded.BudgetUsage.Attempts != 2 {
+	if err != nil || loaded.Status != AgentRunStatusPaused || loaded.BudgetUsage.Attempts != 1 {
 		t.Fatalf("replica restart view = %#v, %v", loaded, err)
 	}
 }

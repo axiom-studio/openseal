@@ -950,15 +950,62 @@ func TestAgentRunWorkerPoolYieldsBetweenTurnSlices(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundYield := false
-	claimUsageEvents := 0
+	claimEvents := 0
 	for _, event := range events {
 		foundYield = foundYield || event.EventType == "run.yielded"
-		if event.EventType == "run.claimed" && event.UsageDelta != nil && event.UsageDelta.Attempts == 1 {
-			claimUsageEvents++
+		if event.EventType == "run.claimed" {
+			claimEvents++
+			if event.UsageDelta != nil {
+				t.Fatalf("run.claimed duplicated scheduler-owned attempt usage: %#v", event)
+			}
 		}
 	}
-	if !foundYield || claimUsageEvents != 2 {
+	if !foundYield || claimEvents != 2 {
 		t.Fatalf("yield activity was not recorded: %#v", events)
+	}
+}
+
+func TestAgentRunWorkerNeverChargesPastAttemptLimit(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "attempt-limit"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "use exactly one autonomous attempt", Source: RunSourceObjective,
+		Budget: &BudgetPolicy{MaxAttempts: 1, MaxTurns: 5},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			calls.Add(1)
+			return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, OutputSummary: "More work remains"}, nil
+		})}, nil
+	}), nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "agent", MaxTurnsPerClaim: 1,
+		PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Start(ctx)
+	defer pool.Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	var paused *AgentRun
+	for time.Now().Before(deadline) {
+		paused, err = NewPortfolioService(store).GetAgentRun(ctx, scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if paused.Status == AgentRunStatusPaused {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if paused == nil || paused.Status != AgentRunStatusPaused || paused.BudgetUsage.Attempts != 1 || calls.Load() != 1 {
+		t.Fatalf("attempt ceiling was not exact: run=%#v calls=%d", paused, calls.Load())
 	}
 }
 
