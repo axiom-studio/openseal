@@ -2,6 +2,7 @@ package openseal
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,6 +33,14 @@ func TestPublicFacadeExposesRunbookScheduleReconciliation(t *testing.T) {
 	request := ReconcileRunbookSchedulesRequest{Scope: Scope{Kind: "tenant", ID: "operations"}, Limit: 50}
 	if request.Scope.ID != "operations" || request.Limit != 50 {
 		t.Fatalf("objective schedule request = %#v", request)
+	}
+}
+
+func TestPublicFacadeExposesRunbookActivationErrors(t *testing.T) {
+	if !errors.Is(ErrRunbookActivationNotFound, runtime.ErrRunbookActivationNotFound) ||
+		!errors.Is(ErrRunbookActivationRevision, runtime.ErrRunbookActivationRevision) ||
+		!errors.Is(ErrRunbookActivationIdempotency, runtime.ErrRunbookActivationIdempotency) {
+		t.Fatal("Runbook activation errors are not exposed through the public facade")
 	}
 }
 
