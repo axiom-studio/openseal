@@ -13,7 +13,7 @@ import (
 
 const (
 	ObjectiveManagementSkillID      = "openseal.objectives"
-	ObjectiveManagementSkillVersion = "1.0.1"
+	ObjectiveManagementSkillVersion = "1.0.2"
 	ObjectiveActionCreate           = "create"
 	ObjectiveActionUpdate           = "update"
 	ObjectiveActionPause            = "pause"
