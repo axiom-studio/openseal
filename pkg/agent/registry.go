@@ -587,7 +587,18 @@ func canonicalizeDefinition(value *AgentDefinition) {
 	for index := range value.SkillRequirements {
 		value.SkillRequirements[index].RequiredActions = normalizedStrings(value.SkillRequirements[index].RequiredActions)
 	}
+	for index := range value.Authority.StandingGrants {
+		grant := &value.Authority.StandingGrants[index]
+		grant.ID = strings.TrimSpace(grant.ID)
+		grant.SkillID = strings.TrimSpace(grant.SkillID)
+		grant.Action = strings.TrimSpace(grant.Action)
+		grant.ExternalOperation = strings.ToLower(strings.TrimSpace(grant.ExternalOperation))
+		grant.ResourcePrefix = strings.TrimSpace(grant.ResourcePrefix)
+	}
 	sort.Slice(value.SkillRequirements, func(i, j int) bool { return value.SkillRequirements[i].SkillID < value.SkillRequirements[j].SkillID })
+	sort.Slice(value.Authority.StandingGrants, func(i, j int) bool {
+		return value.Authority.StandingGrants[i].ID < value.Authority.StandingGrants[j].ID
+	})
 	sort.Slice(value.ObjectiveTemplates, func(i, j int) bool { return value.ObjectiveTemplates[i].ID < value.ObjectiveTemplates[j].ID })
 	sort.Slice(value.Evaluations, func(i, j int) bool { return value.Evaluations[i].ID < value.Evaluations[j].ID })
 }

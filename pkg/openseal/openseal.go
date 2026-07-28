@@ -70,6 +70,7 @@ type (
 	RunbookTurnRunner         = runtime.RunbookTurnRunner
 
 	AgentDefinition                           = kernelagent.AgentDefinition
+	AgentStandingActionGrant                  = kernelagent.StandingActionGrant
 	AgentManifest                             = kernelagent.Manifest
 	AgentManifestMetadata                     = kernelagent.ManifestMetadata
 	AgentManifestSpec                         = kernelagent.ManifestSpec
@@ -2186,7 +2187,7 @@ func New(opts ...Option) (*Engine, error) {
 		skills:                   skill.NewCatalogWithStore(store),
 		agents:                   agentRegistry,
 		teams:                    kernelteam.NewRegistry(agentRegistry),
-		actionPolicy:             runtime.NewDefaultActionPolicy(),
+		actionPolicy:             nil,
 		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
 		logger:                   sugar,
 	}
@@ -2197,6 +2198,9 @@ func New(opts ...Option) (*Engine, error) {
 		if err := opt(e); err != nil {
 			return nil, fmt.Errorf("engine option: %w", err)
 		}
+	}
+	if e.actionPolicy == nil {
+		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
 	}
 	if err := e.rebuildAuthoringChangeSets(); err != nil {
 		return nil, fmt.Errorf("workforce change set configuration: %w", err)
