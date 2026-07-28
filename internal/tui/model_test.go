@@ -75,6 +75,7 @@ type fakeKernelClient struct {
 	createKeys                 []string
 	createRequests             []kernelapi.CreateAgentRunRequest
 	objectives                 []*runtime.Objective
+	runbooks                   []*runtime.RunbookActivation
 	objectiveKeys              []string
 	objectiveCreates           []kernelapi.CreateObjectiveRequest
 	objectiveUpdates           []kernelapi.UpdateObjectiveRequest
@@ -832,10 +833,23 @@ func (f *fakeKernelClient) ListObjectives(context.Context, runtime.ObjectiveFilt
 func (f *fakeKernelClient) GetObjective(_ context.Context, _ runtime.Scope, id string) (*kernelapi.ObjectiveDetail, error) {
 	for _, objective := range f.objectives {
 		if objective.ID == id {
-			return &kernelapi.ObjectiveDetail{Objective: objective, Runs: f.runs}, nil
+			return &kernelapi.ObjectiveDetail{Objective: objective, Runbooks: f.runbooks, Runs: f.runs}, nil
 		}
 	}
 	return nil, runtime.ErrObjectiveNotFound
+}
+
+func (f *fakeKernelClient) ListRunbooks(context.Context, runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
+	return f.runbooks, nil
+}
+
+func (f *fakeKernelClient) GetRunbook(_ context.Context, _ runtime.Scope, id string) (*runtime.RunbookActivation, error) {
+	for _, value := range f.runbooks {
+		if value.ID == id {
+			return value, nil
+		}
+	}
+	return nil, runtime.ErrRunbookActivationNotFound
 }
 
 func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error) {
@@ -1315,7 +1329,7 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 func TestTUIRunbookScheduleReconciliationIsCapabilityGated(t *testing.T) {
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	fake := &fakeKernelClient{
-		document:       kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbookSchedulesCapability()),
+		document:       kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability()),
 		scheduleResult: &kernelapi.RunbookScheduleReconciliation{Scope: scope, Result: &runtime.RunbookScheduleResult{Examined: 3, Scheduled: 2}},
 	}
 	model := newTestModel(t, fake)
@@ -1328,13 +1342,13 @@ func TestTUIRunbookScheduleReconciliationIsCapabilityGated(t *testing.T) {
 		t.Fatalf("schedule projection missing: status=%q view=%s", model.status, model.View())
 	}
 
-	drifted := kernelapi.RunbookSchedulesCapability()
+	drifted := kernelapi.RunbooksCapability()
 	drifted.Version = "future"
 	closedFake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), drifted)}
 	closed := newTestModel(t, closedFake)
 	applyCommand(t, closed, closed.loadCapabilities())
-	if closed.runbookScheduleCapability.Available || closed.reconcileRunbookSchedules() != nil || len(closedFake.scheduleRequests) != 0 || strings.Contains(closed.View(), "reconcile schedules") {
-		t.Fatalf("mismatched schedule capability did not fail closed: %#v", closed.runbookScheduleCapability)
+	if closed.runbookCapability.Available || closed.reconcileRunbookSchedules() != nil || len(closedFake.scheduleRequests) != 0 || strings.Contains(closed.View(), "reconcile schedules") {
+		t.Fatalf("mismatched Runbook capability did not fail closed: %#v", closed.runbookCapability)
 	}
 }
 
@@ -2620,7 +2634,16 @@ func TestWorkforceBindingConfigurationUsesSequentialTypedAuthorizedChoices(t *te
 }
 
 func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
-	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
+	fake := &fakeKernelClient{
+		document: kernelapi.Capabilities(),
+		runbooks: []*runtime.RunbookActivation{{
+			ID: "daily-scan", Scope: runtime.Scope{Kind: "local", ID: "default"},
+			Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, ObjectiveID: "objective-created",
+			DefinitionID: "community-scan", DefinitionVersion: "1.0.0", AssignedAgentID: "researcher",
+			TriggerID: "daily", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "scan", Schedule: &runbook.Schedule{Cron: "0 0 9 * * *", Timezone: "UTC"}},
+			Status: runtime.RunbookActivationActive, Revision: 1,
+		}},
+	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	if !model.objectiveCapability.Available || model.section != sectionObjectives || !strings.Contains(model.View(), "Objective portfolio") {
@@ -2636,6 +2659,11 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	}
 	if model.selectedObjectiveRecord() == nil || model.selectedObjectiveRecord().ID != "objective-created" {
 		t.Fatalf("selected objective = %#v", model.selectedObjectiveRecord())
+	}
+	view := model.View()
+	if !strings.Contains(view, "Runbooks · 1") || !strings.Contains(view, "community-scan@1.0.0") ||
+		!strings.Contains(view, "Schedule · 0 0 9 * * * · UTC") {
+		t.Fatalf("Objective-owned Runbook was not rendered:\n%s", view)
 	}
 	model.mode = modeObjectiveEdit
 	model.focusComposerEditor()

@@ -922,8 +922,8 @@ const (
 	SkillBindingsCapabilityVersion           = kernelapi.SkillBindingsCapabilityVersion
 	EventRoutingCapabilityID                 = kernelapi.EventRoutingCapabilityID
 	EventRoutingCapabilityVersion            = kernelapi.EventRoutingCapabilityVersion
-	RunbookSchedulesCapabilityID             = kernelapi.RunbookSchedulesCapabilityID
-	RunbookSchedulesCapabilityVersion        = kernelapi.RunbookSchedulesCapabilityVersion
+	RunbooksCapabilityID                     = kernelapi.RunbooksCapabilityID
+	RunbooksCapabilityVersion                = kernelapi.RunbooksCapabilityVersion
 	SourcePoliciesCapabilityID               = kernelapi.SourcePoliciesCapabilityID
 	SourcePoliciesCapabilityVersion          = kernelapi.SourcePoliciesCapabilityVersion
 	WorkforceAuthoringCapabilityID           = kernelapi.WorkforceAuthoringCapabilityID
@@ -1059,8 +1059,8 @@ func ObjectivesCapability() KernelCapability {
 	return kernelapi.ObjectivesCapability()
 }
 
-func RunbookSchedulesCapability() KernelCapability {
-	return kernelapi.RunbookSchedulesCapability()
+func RunbooksCapability() KernelCapability {
+	return kernelapi.RunbooksCapability()
 }
 
 func EventSourceSubscriptionsCapability() KernelCapability {
