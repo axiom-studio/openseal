@@ -480,13 +480,17 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		}
 		return source, nil
 	}
+	budget, err := completeChildBudgetAllocation(run, proposal.Budget)
+	if err != nil {
+		return nil, err
+	}
 	created, err := p.collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		ID: requestID, Scope: run.Scope, Kind: AgentRequestKindRequest,
 		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: proposal.AssignedAgentID},
 		SourceRunID: run.ID, Goal: proposal.Goal, SharedContext: sharedContext, ChildCheckpoint: proposal.Checkpoint,
 		AcceptancePolicy: AgentRequestAcceptanceRecipientReview,
-		BudgetAllocation: proposal.Budget, IdempotencyKey: key,
+		BudgetAllocation: budget, IdempotencyKey: key,
 	})
 	if err != nil {
 		return nil, err

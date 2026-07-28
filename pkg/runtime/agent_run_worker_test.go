@@ -770,6 +770,53 @@ func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *t
 	}
 }
 
+func TestAgentRunWorkerCompletesPartialBoundedDelegationBudget(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "partial-delegation-budget"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
+		Goal: "delegate bounded browser work", Source: RunSourceSchedule,
+		Budget: &BudgetPolicy{
+			MaxAttempts: 3, MaxTurns: 30, MaxInputTokens: 120000, MaxOutputTokens: 60000,
+			MaxTotalTokens: 180000, MaxCostMicros: 900000, MaxDurationMS: 600000, MaxActions: 60,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &TurnDelegationProposal{
+		StepID: "perform", AssignedAgentID: "browser", Goal: "Perform the bounded browser task",
+		Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 24, MaxTotalTokens: 150000},
+	}
+	waiting, err := pool.materializeTurnDelegation(t.Context(), "worker", source, &AgentTurn{ID: "turn", RequestedDelegation: proposal})
+	if err != nil || waiting.Status != AgentRunStatusWaitingForAgent {
+		t.Fatalf("materialized delegation = %#v, %v", waiting, err)
+	}
+	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: source.ID, Limit: 10})
+	if err != nil || len(requests) != 1 {
+		t.Fatalf("requests = %#v, %v", requests, err)
+	}
+	budget := requests[0].BudgetAllocation
+	if budget == nil || budget.MaxAttempts != 3 || budget.MaxTurns != 24 || budget.MaxInputTokens != 120000 ||
+		budget.MaxOutputTokens != 60000 || budget.MaxTotalTokens != 150000 || budget.MaxCostMicros != 900000 ||
+		budget.MaxDurationMS != 600000 || budget.MaxActions != 60 {
+		t.Fatalf("completed child budget = %#v", budget)
+	}
+
+	overAllocated := *proposal
+	overAllocated.StepID = "perform-too-much"
+	overAllocated.Budget = &BudgetPolicy{MaxAttempts: 4, MaxTurns: 24, MaxTotalTokens: 150000}
+	if _, err := pool.materializeTurnDelegation(t.Context(), "worker", source, &AgentTurn{ID: "turn-two", RequestedDelegation: &overAllocated}); err == nil || !strings.Contains(err.Error(), "exceeds parent remaining capacity") {
+		t.Fatalf("explicit over-allocation error = %v", err)
+	}
+}
+
 func TestAgentRunWorkerCompletesDelegationClarificationRoundTrip(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "delegation-clarification"}
