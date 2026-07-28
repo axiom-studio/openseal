@@ -49,6 +49,34 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	}
 }
 
+func TestRunbookTurnExposesKernelRunIdentityToActionArguments(t *testing.T) {
+	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "session", Version: "1", Name: "Session", Entrypoints: map[string]string{"start": "open"}, Steps: map[string]runbook.Step{
+		"open": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "browser", SkillVersion: "1", Action: "start", Arguments: map[string]runbook.Value{
+			"sessionId": {Ref: "/runtime/runId"},
+		}, ResultPath: "/steps/open", Next: "done"}},
+		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+	}}
+	runner, err := NewRunbookTurnRunner(definition, "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run-123", RootRunID: "root-456", ObjectiveID: "objective-789", Checkpoint: map[string]interface{}{
+		"runtime": map[string]interface{}{"runId": "spoofed"},
+	}}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-1", Sequence: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments, err := resolveTurnActionInput(outcome.ContinuationCheckpoint, outcome.ProposedActions[0].InputRef)
+	if err != nil || arguments["sessionId"] != run.ID {
+		t.Fatalf("arguments=%#v err=%v", arguments, err)
+	}
+	runtimeContext, _ := outcome.ContinuationCheckpoint["runtime"].(map[string]interface{})
+	if runtimeContext["rootRunId"] != run.RootRunID || runtimeContext["objectiveId"] != run.ObjectiveID {
+		t.Fatalf("runtime context=%#v", runtimeContext)
+	}
+}
+
 func TestRunbookTurnValidatesCallableOutput(t *testing.T) {
 	definition := &runbook.Definition{
 		APIVersion: runbook.APIVersion, ID: "typed", Version: "1", Name: "Typed",
