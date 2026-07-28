@@ -73,3 +73,42 @@ func TestPostgresProjectRestartAndAtomicActivity(t *testing.T) {
 		t.Fatalf("update=%#v err=%v", updated, err)
 	}
 }
+
+func TestPostgresRepairsActivityProjectionWhenLedgerIsAheadOfSchema(t *testing.T) {
+	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
+	}
+	schema := "activity_repair_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	ctx := context.Background()
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.ExecContext(ctx, `
+		DROP INDEX IF EXISTS `+store.table("run_activity_project_feed_idx")+`;
+		ALTER TABLE `+store.table("run_activity")+` DROP COLUMN project_id;
+		DELETE FROM `+store.table("schema_migrations")+` WHERE version=$1
+	`, activityProjectionRepairMigrationVersion); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	store.Close()
+
+	store, err = NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var columnExists bool
+	if err = store.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema=$1 AND table_name='run_activity' AND column_name='project_id'
+	)`, schema).Scan(&columnExists); err != nil || !columnExists {
+		t.Fatalf("project_id exists=%v err=%v", columnExists, err)
+	}
+	var migrationName string
+	if err = store.db.QueryRowContext(ctx, `SELECT name FROM `+store.table("schema_migrations")+` WHERE version=$1`, activityProjectionRepairMigrationVersion).Scan(&migrationName); err != nil || migrationName != "reconcile indexed activity projections" {
+		t.Fatalf("activity repair migration=%q err=%v", migrationName, err)
+	}
+}
