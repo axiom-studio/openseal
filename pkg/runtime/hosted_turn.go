@@ -287,11 +287,6 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if errors.Is(err, ErrTurnHostConfiguration) {
 			return nil, err
 		}
-		if ctx.Err() == nil {
-			if completed := completeFromDurableActionReceipt(input.Run.Checkpoint); completed != nil {
-				return completed, nil
-			}
-		}
 		return nil, retryableTurnHostError{cause: err}
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
@@ -495,42 +490,6 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 		EvidenceClaims: append([]EvidenceClaim(nil), response.EvidenceClaims...), EvidenceGrounding: cloneEvidenceGroundingReview(response.EvidenceGrounding),
 	}, nil
-}
-
-// completeFromDurableActionReceipt separates authoritative action completion
-// from optional model narration. lastAction alone is model-visible and cannot
-// be trusted; the matching kernel-owned history entry is the completion proof.
-func completeFromDurableActionReceipt(checkpoint map[string]interface{}) *TurnOutcome {
-	last, ok := checkpoint["lastAction"].(map[string]interface{})
-	if !ok || fmt.Sprint(last["status"]) != string(ActionCallStatusSucceeded) {
-		return nil
-	}
-	callID := strings.TrimSpace(fmt.Sprint(last["actionCallId"]))
-	entries := actionHistoryEntries(checkpoint)
-	if callID == "" || len(entries) == 0 {
-		return nil
-	}
-	receipt := entries[len(entries)-1]
-	if strings.TrimSpace(fmt.Sprint(receipt["actionCallId"])) != callID || fmt.Sprint(receipt["status"]) != string(ActionCallStatusSucceeded) {
-		return nil
-	}
-	result := map[string]interface{}{
-		"actionCallId": callID,
-		"skillId":      strings.TrimSpace(fmt.Sprint(receipt["skillId"])),
-		"skillVersion": strings.TrimSpace(fmt.Sprint(receipt["skillVersion"])),
-		"action":       strings.TrimSpace(fmt.Sprint(receipt["action"])),
-		"status":       string(ActionCallStatusSucceeded),
-	}
-	if value, exists := receipt["result"]; exists {
-		result["result"] = deepCloneCheckpointValue(value)
-	}
-	summary := fmt.Sprintf("Completed %s.%s from its durable action receipt; optional model narration was unavailable.", result["skillId"], result["action"])
-	return &TurnOutcome{
-		Decisions:     []TurnDecision{{Summary: "Used the kernel-owned successful action receipt as the terminal result.", EvidenceRefs: []string{"action:" + callID}}},
-		OutputSummary: summary, NextRunStatus: AgentRunStatusCompleted,
-		ContinuationCheckpoint: deepCloneCheckpointMap(checkpoint),
-		RunOutput:              map[string]interface{}{"actionReceipt": result, "completionMode": "durable_action_receipt"},
-	}
 }
 
 func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint map[string]interface{}) (map[string]interface{}, error) {
