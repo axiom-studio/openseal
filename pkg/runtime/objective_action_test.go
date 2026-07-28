@@ -10,6 +10,23 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+func TestObjectiveManagementSkillVersionsRunbookOnlyContract(t *testing.T) {
+	definition := ObjectiveManagementSkill()
+	if definition.Version != "1.0.2" {
+		t.Fatalf("Objective management Skill version = %q", definition.Version)
+	}
+	for _, actionName := range []string{ObjectiveActionCreate, ObjectiveActionUpdate} {
+		action := definition.Actions[actionName]
+		properties, _ := action.InputSchema["properties"].(map[string]interface{})
+		if _, exists := properties["cadence"]; exists {
+			t.Fatalf("%s action still exposes Objective cadence", actionName)
+		}
+		if _, exists := properties["eventRules"]; exists {
+			t.Fatalf("%s action still exposes Objective event rules", actionName)
+		}
+	}
+}
+
 func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testing.T) {
 	for _, testCase := range objectiveActionStores() {
 		t.Run(testCase.name, func(t *testing.T) {
