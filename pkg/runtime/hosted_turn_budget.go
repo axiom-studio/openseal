@@ -27,7 +27,16 @@ const (
 	// tokenizer drift after the kernel reserves its immutable envelope. The
 	// exact usage is still charged and must fit the user's remaining budget.
 	HostedTurnInputSettlementToleranceTokens int64 = 256
-	HostedTurnMinimumOutputTokens            int64 = 64
+	// HostedTurnMaximumProviderAttempts is the portable upper bound for one
+	// hosted Turn invocation, including a single deterministic schema repair.
+	// The kernel reserves the complete envelope before dispatch so a repair can
+	// never consume unreserved lifetime budget.
+	HostedTurnMaximumProviderAttempts int64 = 2
+	// HostedTurnRepairInputReserveTokens covers the bounded validation message
+	// appended to the second provider request. The rejected model response is
+	// not replayed into the repair prompt.
+	HostedTurnRepairInputReserveTokens int64 = 1024
+	HostedTurnMinimumOutputTokens      int64 = 64
 	// HostedTurnMaximumOutputReservationTokens bounds one provider exchange;
 	// the Run's output policy remains a lifetime budget shared by many Turns.
 	HostedTurnMaximumOutputReservationTokens int64 = 32768
@@ -110,6 +119,18 @@ func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
 	return HostedTurnProtocolInputReserveTokens + HostedTurnBudgetEnvelopeReserveTokens + estimateHostedJSONTokens(input) + int64(len(request.ModelMedia))*HostedTurnMediaReserveTokens, nil
 }
 
+// EstimateHostedTurnMaximumInputTokens returns the worst-case input charged by
+// the bounded hosted protocol. A host may make one initial provider request and
+// one schema-repair request; provider usage is reported cumulatively for the
+// durable Turn, so both requests must be reserved atomically.
+func EstimateHostedTurnMaximumInputTokens(request HostedTurnRequest) (int64, error) {
+	perAttempt, err := EstimateHostedTurnInputTokens(request)
+	if err != nil {
+		return 0, err
+	}
+	return perAttempt*HostedTurnMaximumProviderAttempts + HostedTurnRepairInputReserveTokens, nil
+}
+
 func EstimateEvidenceGroundingReviewInputTokens(request EvidenceGroundingRequest) (int64, error) {
 	estimate := request
 	estimate.MaxOutputTokens = 0
@@ -161,7 +182,7 @@ func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecution
 		}
 		estimatedInput, err = EstimateEvidenceGroundingReviewInputTokens(buildEvidenceGroundingRequest(input, snapshot, groundingState, 0))
 	} else {
-		estimatedInput, err = EstimateHostedTurnInputTokens(request)
+		estimatedInput, err = EstimateHostedTurnMaximumInputTokens(request)
 	}
 	if err != nil {
 		return BudgetUsage{}, fmt.Errorf("estimate hosted Turn input: %w", err)
