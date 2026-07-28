@@ -133,6 +133,83 @@ func TestSQLiteAtomicWorkforceApplyPersistsWholeAggregateAcrossRestart(t *testin
 	}
 }
 
+func TestSQLiteWorkforceApplyActivatesEmbeddedRunbookBeforeScheduledObjective(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	value := testApplicableWorkforceChangeSet()
+	definition := value.Result.Candidate.Agents[0]
+	definition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "agent-operations", Version: "1.0.0", Name: "Agent operations",
+		Entrypoints: map[string]string{"operate": "done"},
+		Steps:       map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
+	}
+	definition.ObjectiveTemplates[0].Cadence = map[string]interface{}{
+		"type": "interval", "intervalSeconds": int64(3600), "assignedAgentId": "agent",
+		"runTemplate": map[string]interface{}{"entrypoint": "operate"},
+	}
+	if _, _, err = store.CreateChangeSet(ctx, value, "create-runbook", "digest-runbook"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(value)
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{
+		ID: "receipt-runbook", IdempotencyKey: "apply-runbook", CandidateDigest: value.CandidateDigest,
+		Actor: authoring.ChangeSetActor{Type: "user", ID: "7"}, AppliedAt: value.UpdatedAt.Add(time.Minute),
+	}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	if _, err = store.ApplyChangeSet(ctx, applied, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := store.GetDefinition(ctx, "agent", "1")
+	if err != nil || stored.Runbook == nil || stored.Runbook.Entrypoints["operate"] != "done" {
+		t.Fatalf("stored Agent Runbook = %#v, err = %v", stored, err)
+	}
+	deployment, err := store.GetDeployment(ctx, value.Scope, "agent-live")
+	if err != nil || deployment.RolloutStatus != agent.RolloutActive || deployment.ActiveVersion != stored.Version {
+		t.Fatalf("active Agent deployment = %#v, err = %v", deployment, err)
+	}
+	objectives, err := store.ListObjectives(ctx, ObjectiveFilter{Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scheduled *Objective
+	for _, objective := range objectives {
+		if objective.ID == "objective:agent" {
+			scheduled = objective
+		}
+	}
+	if scheduled == nil || scheduled.Cadence == nil || scheduled.Cadence.AssignedAgentID != "agent-live" ||
+		scheduled.Cadence.RunTemplate == nil || scheduled.Cadence.RunTemplate.Entrypoint != "operate" {
+		t.Fatalf("scheduled Objective did not pin the activated Agent Runbook: %#v", objectives)
+	}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, ObjectiveID: scheduled.ID,
+		Owner: scheduled.Owner, AssignedAgentID: "agent-live", Entrypoint: "operate",
+		Goal: scheduled.Goal, Source: RunSourceSchedule,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := ResolveCatalogTurnRunner(ctx, &resolverCatalog{
+		deployment: deployment, definition: stored,
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot-runbook", Scope: deployment.Scope, DeploymentID: deployment.ID,
+		},
+	}, run, CatalogTurnResolverConfig{})
+	if err != nil {
+		t.Fatalf("resolve applied Agent Runbook entrypoint: %v", err)
+	}
+	if _, ok := binding.Runner.(*RunbookTurnRunner); !ok {
+		t.Fatalf("scheduled entrypoint resolved runner = %T", binding.Runner)
+	}
+}
+
 func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBinding(t *testing.T) {
 	ctx := context.Background()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
@@ -1714,7 +1791,6 @@ func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {
 		"type": "interval", "intervalSeconds": int64(3600), "assignedAgentId": "agent", "maximumConcurrent": 1,
 		"runBudget": map[string]interface{}{"maxTurns": int64(2), "maxActions": int64(1), "maxDurationMs": int64(60000)},
 		"runTemplate": map[string]interface{}{
-			"entrypoint": "monitor",
 			"context":    map[string]interface{}{"initiativeId": "research-program", "sourceMonitorId": "community-listening"},
 			"policy":     map[string]interface{}{"sourcePolicyRef": "approved-communities"},
 			"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"query": "agent runtime pain points"}},
