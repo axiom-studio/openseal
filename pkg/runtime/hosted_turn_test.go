@@ -49,7 +49,7 @@ type recordingTurnHost struct {
 	err      error
 }
 
-func TestHostedTurnCompletesFromDurableReceiptWhenPostActionNarrationFails(t *testing.T) {
+func TestHostedTurnRetriesWhenPostActionReasoningFails(t *testing.T) {
 	host := &recordingTurnHost{err: errors.New("unexpected EOF")}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser", DefinitionID: "browser", DefinitionVersion: "1"})
 	if err != nil {
@@ -63,14 +63,8 @@ func TestHostedTurnCompletesFromDurableReceiptWhenPostActionNarrationFails(t *te
 		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Capture the page", Checkpoint: checkpoint},
 		Turn: &AgentTurn{ID: "summary-turn"},
 	})
-	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted ||
-		outcome.RunOutput["completionMode"] != "durable_action_receipt" {
-		t.Fatalf("receipt completion outcome=%#v err=%v", outcome, err)
-	}
-	receipt, _ := outcome.RunOutput["actionReceipt"].(map[string]interface{})
-	if receipt["actionCallId"] != "snapshot-call" || receipt["action"] != "browser-snapshot" ||
-		len(outcome.ProposedActions) != 0 || len(outcome.Decisions) != 1 {
-		t.Fatalf("durable receipt projection = %#v, outcome=%#v", receipt, outcome)
+	if outcome != nil || !errors.Is(err, ErrTurnHostUnavailable) {
+		t.Fatalf("post-action retry outcome=%#v err=%v", outcome, err)
 	}
 }
 
