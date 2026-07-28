@@ -35,15 +35,20 @@ type SkillCapability struct {
 	ActionRisks     map[string]capability.RiskLevel `json:"actionRisks,omitempty"`
 	// ActionContracts are host-owned, credential-free action envelopes used for
 	// deterministic validation. Provider prompt projections must strip them.
-	ActionContracts      map[string]SkillActionContract  `json:"actionContracts,omitempty"`
-	CredentialKinds      []string                        `json:"credentialKinds,omitempty"`
-	Credentials          []SkillCredential               `json:"credentials,omitempty"`
-	ConversationAdapters []ConversationAdapterCapability `json:"conversationAdapters,omitempty"`
-	BindingConfigSchema  map[string]interface{}          `json:"bindingConfigSchema,omitempty"`
-	PromptAvailable      bool                            `json:"promptAvailable,omitempty"`
-	MaximumRisk          capability.RiskLevel            `json:"maximumRisk,omitempty"`
-	Readiness            SkillReadiness                  `json:"readiness,omitempty"`
-	Compatibility        []SkillCompatibility            `json:"compatibility,omitempty"`
+	ActionContracts map[string]SkillActionContract `json:"actionContracts,omitempty"`
+	// HostedModelInputTokens is a host-attested conservative ceiling for this
+	// Skill's complete per-Turn model projection: prompt instructions, action
+	// descriptions and schemas, and bounded binding metadata. It contains no
+	// prompt text or credential data and is removed from provider prompts.
+	HostedModelInputTokens int64                           `json:"hostedModelInputTokens,omitempty"`
+	CredentialKinds        []string                        `json:"credentialKinds,omitempty"`
+	Credentials            []SkillCredential               `json:"credentials,omitempty"`
+	ConversationAdapters   []ConversationAdapterCapability `json:"conversationAdapters,omitempty"`
+	BindingConfigSchema    map[string]interface{}          `json:"bindingConfigSchema,omitempty"`
+	PromptAvailable        bool                            `json:"promptAvailable,omitempty"`
+	MaximumRisk            capability.RiskLevel            `json:"maximumRisk,omitempty"`
+	Readiness              SkillReadiness                  `json:"readiness,omitempty"`
+	Compatibility          []SkillCompatibility            `json:"compatibility,omitempty"`
 }
 
 // SkillActionContract is the exact model-callable envelope for one authorized
@@ -133,6 +138,19 @@ type CapabilityCatalog struct {
 	AuthorityConstraint       *AuthorityConstraint                       `json:"authorityConstraint,omitempty"`
 	Diagnostics               []CatalogDiagnostic                        `json:"diagnostics,omitempty"`
 	RuntimeComposition        *RuntimeCompositionCapability              `json:"runtimeComposition,omitempty"`
+	HostedExecution           *HostedExecutionCapability                 `json:"hostedExecution,omitempty"`
+}
+
+const HostedExecutionProtocolV1 = "openseal.hosted-execution/v1"
+
+// HostedExecutionCapability lets a host attest to the non-Skill portion of a
+// hosted model exchange. Skill-specific ceilings live beside each exact Skill
+// capability so OpenSeal can validate a reviewed composition without learning
+// private prompt instructions or host binding details.
+type HostedExecutionCapability struct {
+	ProtocolVersion     string `json:"protocolVersion"`
+	BaseInputTokens     int64  `json:"baseInputTokens"`
+	MinimumOutputTokens int64  `json:"minimumOutputTokens"`
 }
 
 const RuntimeCompositionProtocolV1 = "openseal.runtime-composition/v1"
