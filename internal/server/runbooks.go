@@ -41,6 +41,25 @@ func (s *Server) handleGetRunbook(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) handleUpdateRunbook(w http.ResponseWriter, r *http.Request) {
+	scope, err := scopeFromQuery(r)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var request runtime.UpdateRunbookActivationRequest
+	if err = decodeStrictJSON(r, &request); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	value, err := runtime.NewRunbookActivationService(s.store).Update(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), request)
+	if err != nil {
+		s.respondRunbookError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, value)
+}
+
 func runbookFilterFromQuery(r *http.Request) (runtime.RunbookActivationFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
@@ -89,6 +108,10 @@ func runbookFilterFromQuery(r *http.Request) (runtime.RunbookActivationFilter, e
 func (s *Server) respondRunbookError(w http.ResponseWriter, err error) {
 	if errors.Is(err, runtime.ErrRunbookActivationNotFound) {
 		s.respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, runtime.ErrRunbookActivationRevision) {
+		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
 	s.respondError(w, http.StatusBadRequest, err.Error())
