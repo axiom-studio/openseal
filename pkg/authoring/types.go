@@ -28,11 +28,14 @@ type SkillCapability struct {
 	// the host for this catalog entry. It is persisted with authoring state but
 	// removed from provider prompts: models select catalog ids, while OpenSeal
 	// deterministically places runtime authority.
-	RuntimeIdentity      *capability.SkillIdentity       `json:"runtimeIdentity,omitempty"`
-	Name                 string                          `json:"name,omitempty"`
-	Description          string                          `json:"description,omitempty"`
-	Actions              []string                        `json:"actions,omitempty"`
-	ActionRisks          map[string]capability.RiskLevel `json:"actionRisks,omitempty"`
+	RuntimeIdentity *capability.SkillIdentity       `json:"runtimeIdentity,omitempty"`
+	Name            string                          `json:"name,omitempty"`
+	Description     string                          `json:"description,omitempty"`
+	Actions         []string                        `json:"actions,omitempty"`
+	ActionRisks     map[string]capability.RiskLevel `json:"actionRisks,omitempty"`
+	// ActionContracts are host-owned, credential-free action envelopes used for
+	// deterministic validation. Provider prompt projections must strip them.
+	ActionContracts      map[string]SkillActionContract  `json:"actionContracts,omitempty"`
 	CredentialKinds      []string                        `json:"credentialKinds,omitempty"`
 	Credentials          []SkillCredential               `json:"credentials,omitempty"`
 	ConversationAdapters []ConversationAdapterCapability `json:"conversationAdapters,omitempty"`
@@ -41,6 +44,16 @@ type SkillCapability struct {
 	MaximumRisk          capability.RiskLevel            `json:"maximumRisk,omitempty"`
 	Readiness            SkillReadiness                  `json:"readiness,omitempty"`
 	Compatibility        []SkillCompatibility            `json:"compatibility,omitempty"`
+}
+
+// SkillActionContract is the exact model-callable envelope for one authorized
+// Skill action. It contains no binding, credential, or executor details.
+type SkillActionContract struct {
+	Description       string                 `json:"description,omitempty"`
+	InputSchema       map[string]interface{} `json:"inputSchema,omitempty"`
+	SemanticArguments map[string]string      `json:"semanticArguments,omitempty"`
+	Risk              capability.RiskLevel   `json:"risk,omitempty"`
+	SideEffect        capability.SideEffect  `json:"sideEffect,omitempty"`
 }
 
 // ConversationAdapterCapability is the model-safe projection used to compose
