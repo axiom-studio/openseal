@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 const (
@@ -51,7 +53,7 @@ type evidenceProjectionBounds struct {
 	totalRunes   int
 }
 
-func normalizedEvidenceProjection(value *ObjectiveEvidenceProjection) (evidenceProjectionBounds, bool) {
+func normalizedEvidenceProjection(value *runbook.EvidenceProjection) (evidenceProjectionBounds, bool) {
 	if value != nil && value.Disabled {
 		return evidenceProjectionBounds{}, false
 	}
@@ -74,7 +76,7 @@ func normalizedEvidenceProjection(value *ObjectiveEvidenceProjection) (evidenceP
 	return bounds, true
 }
 
-func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope Scope, initiativeID string, cutoff time.Time, projection *ObjectiveEvidenceProjection) (*EvidenceSnapshot, error) {
+func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope Scope, initiativeID string, cutoff time.Time, projection *runbook.EvidenceProjection) (*EvidenceSnapshot, error) {
 	if store == nil {
 		return nil, errors.New("Initiative evidence projection requires SourceObservation persistence")
 	}

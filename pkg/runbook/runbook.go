@@ -48,14 +48,35 @@ const TriggerSchedule TriggerKind = "schedule"
 // Runbook. Transport configuration and credentials stay in provider Skills;
 // the Runbook consumes only a canonical event type and entrypoint.
 type Trigger struct {
-	Kind              TriggerKind       `json:"kind"`
-	EventType         string            `json:"eventType,omitempty"`
-	Schedule          *Schedule         `json:"schedule,omitempty"`
-	Entrypoint        string            `json:"entrypoint"`
-	ObjectiveID       string            `json:"objectiveId,omitempty"`
-	Input             map[string]Value  `json:"input,omitempty"`
-	Budget            *BudgetAllocation `json:"budget,omitempty"`
-	MaximumConcurrent int               `json:"maximumConcurrent,omitempty"`
+	Kind              TriggerKind         `json:"kind"`
+	EventType         string              `json:"eventType,omitempty"`
+	Schedule          *Schedule           `json:"schedule,omitempty"`
+	Entrypoint        string              `json:"entrypoint"`
+	ObjectiveID       string              `json:"objectiveId,omitempty"`
+	Input             map[string]Value    `json:"input,omitempty"`
+	Budget            *BudgetAllocation   `json:"budget,omitempty"`
+	Evidence          *EvidenceProjection `json:"evidence,omitempty"`
+	MaximumConcurrent int                 `json:"maximumConcurrent,omitempty"`
+}
+
+// EvidenceProjection bounds the immutable, credential-free evidence snapshot
+// captured when a Runbook trigger creates a Run. It belongs to the execution
+// method, not to the Objective that describes the desired outcome.
+type EvidenceProjection struct {
+	Disabled            bool `json:"disabled,omitempty"`
+	MaximumObservations int  `json:"maximumObservations,omitempty"`
+	MaximumSummaryRunes int  `json:"maximumSummaryRunes,omitempty"`
+	MaximumTotalRunes   int  `json:"maximumTotalRunes,omitempty"`
+}
+
+func (p *EvidenceProjection) Validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.MaximumObservations < 0 || p.MaximumObservations > 99 || p.MaximumSummaryRunes < 0 || p.MaximumSummaryRunes > 4000 || p.MaximumTotalRunes < 0 || p.MaximumTotalRunes > 100000 {
+		return errors.New("evidence projection bounds are invalid")
+	}
+	return nil
 }
 
 // Schedule is the portable timing contract of a Runbook trigger. Authoring

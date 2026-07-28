@@ -185,7 +185,7 @@ func TestSQLiteWorkforceApplyMaterializesObjectiveOwnedScheduledRunbook(t *testi
 			objective = candidate
 		}
 	}
-	if objective == nil || objective.Cadence != nil || len(objective.EventRules) != 0 {
+	if objective == nil {
 		t.Fatalf("Objective must remain an outcome without execution configuration: %#v", objectives)
 	}
 	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
@@ -392,7 +392,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		delegatedDeployment != "slack-agent-live" {
 		t.Fatalf("delegated deployment=%q err=%v", delegatedDeployment, err)
 	}
-	if len(result.ApplyReceipt.Resources) != 5 {
+	if len(result.ApplyReceipt.Resources) != 6 {
 		t.Fatalf("applied resources=%#v", result.ApplyReceipt.Resources)
 	}
 
@@ -1121,7 +1121,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 			monitorObjective = objective
 		}
 	}
-	if monitorObjective == nil || monitorObjective.Cadence != nil || len(monitorObjective.EventRules) != 0 {
+	if monitorObjective == nil {
 		t.Fatalf("materialized monitor Objective must contain only its outcome: %#v", monitorObjective)
 	}
 	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: initiative.Scope, ObjectiveID: monitorObjective.ID})

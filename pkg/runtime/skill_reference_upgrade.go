@@ -281,36 +281,8 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, fmt.Errorf("%w: current Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
 	}
 
-	objectives, err := s.store.ListObjectives(ctx, ObjectiveFilter{Scope: req.Scope})
-	if err != nil {
-		return nil, err
-	}
 	objectiveImpacts := make([]SkillReferenceObjectiveImpact, 0)
-	objectiveIDs := make(map[string]bool)
 	referencedActions := make(map[string]bool)
-	for _, objective := range objectives {
-		references, referenceErr := objectiveSkillReferences(objective, req.DeploymentID, current)
-		if referenceErr != nil {
-			return nil, fmt.Errorf("%w: objective %s: %v", ErrSkillReferenceUpgradeInvalid, objective.ID, referenceErr)
-		}
-		if len(references) == 0 {
-			continue
-		}
-		impactReferences := make([]SkillReferenceObjectiveReference, 0, len(references))
-		for _, reference := range references {
-			if err := s.catalog.ValidateDefinitionInput(ctx, target.ID, target.Version, targetSource, reference.Invocation.Action, reference.Invocation.Inputs); err != nil {
-				return nil, fmt.Errorf("%w: objective %s action %s: %v", ErrSkillReferenceUpgradeInvalid, objective.ID, reference.Invocation.Action, err)
-			}
-			impactReferences = append(impactReferences, SkillReferenceObjectiveReference{
-				Kind: reference.Kind, ID: reference.ID, Action: reference.Invocation.Action,
-			})
-			referencedActions[reference.Invocation.Action] = true
-		}
-		objectiveImpacts = append(objectiveImpacts, SkillReferenceObjectiveImpact{
-			ID: objective.ID, ExpectedRevision: objective.Revision, References: impactReferences,
-		})
-		objectiveIDs[objective.ID] = true
-	}
 	initiatives, err := s.store.ListInitiatives(ctx, InitiativeFilter{Scope: req.Scope})
 	if err != nil {
 		return nil, err
@@ -322,9 +294,6 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 			if !referenceOwnedOrAssigned(initiative.Owner, monitor.AssignedAgentID, req.DeploymentID) ||
 				monitor.SkillID != current.SkillID || monitor.SkillVersion != current.SkillVersion {
 				continue
-			}
-			if !objectiveIDs[monitor.ObjectiveID] {
-				return nil, fmt.Errorf("%w: Initiative %s monitor %s has no matching scheduled Objective reference", ErrSkillReferenceUpgradeInvalid, initiative.ID, monitor.ID)
 			}
 			if _, ok := target.Actions[monitor.Action]; !ok {
 				return nil, fmt.Errorf("%w: Initiative %s monitor %s action %s is absent from target", ErrSkillReferenceUpgradeInvalid, initiative.ID, monitor.ID, monitor.Action)
@@ -419,25 +388,6 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 
 	objectiveCandidates := make([]SkillReferenceObjectiveMutation, 0, len(current.Objectives))
 	activityIDs := make([]string, 0, len(current.Objectives)+len(current.Initiatives))
-	for _, impact := range current.Objectives {
-		objective, loadErr := s.store.GetObjective(ctx, current.Scope, impact.ID)
-		if loadErr != nil || objective == nil || objective.Revision != impact.ExpectedRevision {
-			return nil, ErrSkillReferenceUpgradeConflict
-		}
-		next := cloneObjective(objective)
-		if replaceErr := replaceObjectiveSkillReferences(next, current.DeploymentID, current.From, current.To, impact.References); replaceErr != nil {
-			return nil, fmt.Errorf("%w: objective %s: %v", ErrSkillReferenceUpgradeConflict, impact.ID, replaceErr)
-		}
-		next.Revision++
-		next.UpdatedAt = now
-		event := objectiveActivityEvent(next, req.Actor, ActivityVisibilityScope, "objective.skill_reference_upgraded",
-			fmt.Sprintf("Objective Skill reference upgraded from %s to %s", current.From.Version, current.To.Version), now,
-			skillReferenceUpgradeActivityPayload(current, req.Reason))
-		activityIDs = append(activityIDs, event.ID)
-		objectiveCandidates = append(objectiveCandidates, SkillReferenceObjectiveMutation{
-			Value: next, ExpectedRevision: impact.ExpectedRevision, Event: event,
-		})
-	}
 	initiativeCandidates := make([]SkillReferenceInitiativeMutation, 0, len(current.Initiatives))
 	for _, impact := range current.Initiatives {
 		initiative, loadErr := s.store.GetInitiative(ctx, current.Scope, impact.ID)
@@ -478,91 +428,8 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	return receipt, nil
 }
 
-type objectiveSkillReference struct {
-	Kind       string
-	ID         string
-	Invocation *ObjectiveCapabilityInvocation
-}
-
-func objectiveSkillReferences(objective *Objective, deploymentID string, binding *skill.Binding) ([]objectiveSkillReference, error) {
-	if objective == nil || binding == nil {
-		return nil, nil
-	}
-	result := make([]objectiveSkillReference, 0)
-	if objective.Cadence != nil && referenceOwnedOrAssigned(objective.Owner, objective.Cadence.AssignedAgentID, deploymentID) &&
-		objective.Cadence.RunTemplate != nil && matchesObjectiveSkillReference(objective.Cadence.RunTemplate.Capability, binding.SkillID, binding.SkillVersion) {
-		result = append(result, objectiveSkillReference{Kind: "cadence", Invocation: objective.Cadence.RunTemplate.Capability})
-	}
-	rules, err := DecodeObjectiveEventRules(objective.EventRules)
-	if err != nil {
-		return nil, err
-	}
-	if rules == nil {
-		return result, nil
-	}
-	for index := range rules.Rules {
-		rule := &rules.Rules[index]
-		if referenceOwnedOrAssigned(objective.Owner, rule.AssignedAgentID, deploymentID) && rule.RunTemplate != nil &&
-			matchesObjectiveSkillReference(rule.RunTemplate.Capability, binding.SkillID, binding.SkillVersion) {
-			result = append(result, objectiveSkillReference{Kind: "event_rule", ID: rule.ID, Invocation: rule.RunTemplate.Capability})
-		}
-	}
-	return result, nil
-}
-
-func matchesObjectiveSkillReference(invocation *ObjectiveCapabilityInvocation, skillID, version string) bool {
-	return invocation != nil && invocation.SkillID == skillID && invocation.SkillVersion == version
-}
-
 func referenceOwnedOrAssigned(owner ObjectiveOwner, assignedID, deploymentID string) bool {
 	return owner.ID == deploymentID || assignedID == deploymentID
-}
-
-func replaceObjectiveSkillReferences(objective *Objective, deploymentID string, from, to SkillReferenceIdentity, expected []SkillReferenceObjectiveReference) error {
-	binding := &skill.Binding{SkillID: from.ID, SkillVersion: from.Version}
-	current, err := objectiveSkillReferences(objective, deploymentID, binding)
-	if err != nil {
-		return err
-	}
-	projected := make([]SkillReferenceObjectiveReference, 0, len(current))
-	for _, reference := range current {
-		projected = append(projected, SkillReferenceObjectiveReference{
-			Kind: reference.Kind, ID: reference.ID, Action: reference.Invocation.Action,
-		})
-	}
-	if !reflect.DeepEqual(projected, expected) {
-		return errors.New("reviewed references changed")
-	}
-	if objective.Cadence != nil && referenceOwnedOrAssigned(objective.Owner, objective.Cadence.AssignedAgentID, deploymentID) &&
-		objective.Cadence.RunTemplate != nil &&
-		matchesObjectiveSkillReference(objective.Cadence.RunTemplate.Capability, from.ID, from.Version) {
-		objective.Cadence.RunTemplate.Capability.SkillID = to.ID
-		objective.Cadence.RunTemplate.Capability.SkillVersion = to.Version
-	}
-	rules, err := DecodeObjectiveEventRules(objective.EventRules)
-	if err != nil || rules == nil {
-		return err
-	}
-	changed := false
-	for index := range rules.Rules {
-		rule := &rules.Rules[index]
-		if referenceOwnedOrAssigned(objective.Owner, rule.AssignedAgentID, deploymentID) && rule.RunTemplate != nil &&
-			matchesObjectiveSkillReference(rule.RunTemplate.Capability, from.ID, from.Version) {
-			rule.RunTemplate.Capability.SkillID = to.ID
-			rule.RunTemplate.Capability.SkillVersion = to.Version
-			changed = true
-		}
-	}
-	if changed {
-		encoded, encodeErr := json.Marshal(rules)
-		if encodeErr != nil {
-			return encodeErr
-		}
-		if err := json.Unmarshal(encoded, &objective.EventRules); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func exactUpgradeDefinition(ctx context.Context, catalog *skill.Catalog, id, version, sourceIdentity string) (*skill.Definition, error) {

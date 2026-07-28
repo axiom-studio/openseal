@@ -198,7 +198,7 @@ type Model struct {
 	requestCapability                  kernelapi.Capability
 	approvalCapability                 kernelapi.Capability
 	objectiveCapability                kernelapi.Capability
-	objectiveScheduleCapability        kernelapi.Capability
+	runbookScheduleCapability          kernelapi.Capability
 	eventSourceCapability              kernelapi.Capability
 	initiativeCapability               kernelapi.Capability
 	outreachCapability                 kernelapi.Capability
@@ -491,8 +491,8 @@ type objectiveUpdated struct {
 	err       error
 }
 
-type objectiveSchedulesReconciled struct {
-	reconciliation *kernelapi.ObjectiveScheduleReconciliation
+type runbookSchedulesReconciled struct {
+	reconciliation *kernelapi.RunbookScheduleReconciliation
 	err            error
 }
 
@@ -735,7 +735,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		requestCapability, hasRequests := msg.document.Find(kernelapi.AgentRequestsCapabilityID, kernelapi.AgentRequestsCapabilityVersion)
 		approvalCapability, hasApprovals := msg.document.Find(kernelapi.ActionApprovalsCapabilityID, kernelapi.ActionApprovalsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
-		objectiveScheduleCapability, hasObjectiveSchedules := msg.document.Find(kernelapi.ObjectiveSchedulesCapabilityID, kernelapi.ObjectiveSchedulesCapabilityVersion)
+		runbookScheduleCapability, hasRunbookSchedules := msg.document.Find(kernelapi.RunbookSchedulesCapabilityID, kernelapi.RunbookSchedulesCapabilityVersion)
 		eventSourceCapability, hasEventSources := msg.document.Find(kernelapi.EventSourceSubscriptionsCapabilityID, kernelapi.EventSourceSubscriptionsCapabilityVersion)
 		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
 		outreachCapability, hasOutreach := msg.document.Find(kernelapi.OutreachCapabilityID, kernelapi.OutreachCapabilityVersion)
@@ -757,7 +757,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.requestCapability = requestCapability
 		m.approvalCapability = approvalCapability
 		m.objectiveCapability = objectiveCapability
-		m.objectiveScheduleCapability = objectiveScheduleCapability
+		m.runbookScheduleCapability = runbookScheduleCapability
 		m.eventSourceCapability = eventSourceCapability
 		m.initiativeCapability = initiativeCapability
 		m.outreachCapability = outreachCapability
@@ -801,8 +801,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasObjectives || !objectiveCapability.Available {
 			m.objectiveCapability = kernelapi.Capability{}
 		}
-		if !hasObjectiveSchedules || !objectiveScheduleCapability.Available || !objectiveScheduleCapability.Supports(kernelapi.OperationReconcile) {
-			m.objectiveScheduleCapability = kernelapi.Capability{}
+		if !hasRunbookSchedules || !runbookScheduleCapability.Available || !runbookScheduleCapability.Supports(kernelapi.OperationReconcile) {
+			m.runbookScheduleCapability = kernelapi.Capability{}
 		}
 		if !hasEventSources || !eventSourceCapability.Available || !eventSourceCapability.Supports(kernelapi.OperationList) {
 			m.eventSourceCapability = kernelapi.Capability{}
@@ -1058,7 +1058,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectives = msg.objectives
 		m.restoreObjectiveSelection()
 		return m, nil
-	case objectiveSchedulesReconciled:
+	case runbookSchedulesReconciled:
 		m.busy = false
 		if msg.err != nil {
 			m.err = msg.err
@@ -2210,7 +2210,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && m.supportsSkillBinding(kernelapi.OperationPlanUpgrade) {
 				m.prepareSkillBindingUpgradeComposer()
 			} else if m.section == sectionObjectives {
-				return m, m.reconcileObjectiveSchedules()
+				return m, m.reconcileRunbookSchedules()
 			} else if m.section == sectionRuns {
 				if run := m.selectedRun(); run != nil && m.supportsRun(kernelapi.OperationIntervene) && !isTerminal(run.Status) {
 					m.mode = modeGuide
@@ -3122,15 +3122,15 @@ func (m *Model) loadObjectives() tea.Cmd {
 	}
 }
 
-func (m *Model) reconcileObjectiveSchedules() tea.Cmd {
-	if !m.supportsObjectiveSchedule(kernelapi.OperationReconcile) || m.busy {
+func (m *Model) reconcileRunbookSchedules() tea.Cmd {
+	if !m.supportsRunbookSchedule(kernelapi.OperationReconcile) || m.busy {
 		return nil
 	}
 	m.busy, m.err = true, nil
-	m.status = "Reconciling due objective schedules…"
+	m.status = "Reconciling due Runbook schedules…"
 	return func() tea.Msg {
-		result, err := m.client.ReconcileObjectiveSchedules(m.ctx, kernelapi.ReconcileObjectiveSchedulesRequest{Scope: m.config.Scope, Limit: 100})
-		return objectiveSchedulesReconciled{reconciliation: result, err: err}
+		result, err := m.client.ReconcileRunbookSchedules(m.ctx, kernelapi.ReconcileRunbookSchedulesRequest{Scope: m.config.Scope, Limit: 100})
+		return runbookSchedulesReconciled{reconciliation: result, err: err}
 	}
 }
 
@@ -4604,8 +4604,8 @@ func (m *Model) supportsObjective(operation string) bool {
 	return m.ready && m.objectiveCapability.Supports(operation)
 }
 
-func (m *Model) supportsObjectiveSchedule(operation string) bool {
-	return m.ready && m.objectiveScheduleCapability.Supports(operation)
+func (m *Model) supportsRunbookSchedule(operation string) bool {
+	return m.ready && m.runbookScheduleCapability.Supports(operation)
 }
 
 func (m *Model) supportsEventSource(operation string) bool {

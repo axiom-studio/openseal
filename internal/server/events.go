@@ -13,7 +13,7 @@ func (s *Server) handleRouteEvent(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, err := runtime.NewObjectiveEventRouter(s.store).Route(r.Context(), event)
+	result, err := runtime.NewRunbookEventRouter(s.store).Route(r.Context(), event)
 	if err != nil {
 		s.respondEventRouteError(w, err)
 		return

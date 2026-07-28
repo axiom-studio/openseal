@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/delivery"
 	"github.com/axiom-studio/openseal/pkg/document"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
@@ -397,26 +398,23 @@ func composeResearchWorkforce(
 		request := CreateObjectiveRequest{
 			Scope: scope, Owner: owner, Title: value.title, Goal: value.goal, Status: ObjectiveStatusActive,
 		}
-		if value.key == "monitor" {
-			request.Cadence = &ObjectiveCadence{
-				Type: ObjectiveCadenceInterval, IntervalSeconds: 3600, AssignedAgentID: researcherID,
-				RunTemplate: &ObjectiveRunTemplate{
-					Context: map[string]interface{}{
-						"initiativeId": researchInitiativeID, "sourceMonitorId": "forums",
-					},
-					Policy: map[string]interface{}{"sourcePolicyRef": "approved-public-forums"},
-					Capability: &ObjectiveCapabilityInvocation{
-						SkillID: "public-forum-reader", SkillVersion: "1.0.0", Action: "search",
-						Inputs: map[string]interface{}{"query": "competitor pain points"},
-					},
-				},
-			}
-		}
 		objective, createErr := engine.CreateObjective(ctx, request)
 		if createErr != nil {
 			t.Fatal(createErr)
 		}
 		objectives[value.key] = objective
+		if value.key == "monitor" {
+			_, createErr = engine.CreateRunbookActivation(ctx, CreateRunbookActivationRequest{
+				ID: "forums-monitor-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: researcherID,
+				DefinitionID: "market-research", DefinitionVersion: "1.0.0", TriggerID: "forums",
+				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
+				Input:   map[string]interface{}{"initiativeId": researchInitiativeID, "sourceMonitorId": "forums", "query": "competitor pain points"},
+				Policy:  map[string]interface{}{"sourcePolicyRef": "approved-public-forums"}, Status: RunbookActivationActive,
+			})
+			if createErr != nil {
+				t.Fatal(createErr)
+			}
+		}
 	}
 	return objectives
 }

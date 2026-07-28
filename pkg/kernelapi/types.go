@@ -20,8 +20,8 @@ const (
 	AgentRunsCapabilityVersion                 = "1"
 	ObjectivesCapabilityID                     = "objectives"
 	ObjectivesCapabilityVersion                = "1"
-	ObjectiveSchedulesCapabilityID             = "objective-schedules"
-	ObjectiveSchedulesCapabilityVersion        = "1"
+	RunbookSchedulesCapabilityID               = "runbook-schedules"
+	RunbookSchedulesCapabilityVersion          = "1"
 	InitiativesCapabilityID                    = "initiatives"
 	InitiativesCapabilityVersion               = "1"
 	SourceMonitorsCapabilityID                 = "source-monitors"
@@ -446,9 +446,9 @@ func ObjectivesCapability() Capability {
 	}
 }
 
-func ObjectiveSchedulesCapability() Capability {
+func RunbookSchedulesCapability() Capability {
 	return Capability{
-		ID: ObjectiveSchedulesCapabilityID, Version: ObjectiveSchedulesCapabilityVersion, Available: true,
+		ID: RunbookSchedulesCapabilityID, Version: RunbookSchedulesCapabilityVersion, Available: true,
 		Operations: []string{OperationReconcile},
 	}
 }
@@ -530,7 +530,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), ObjectiveSchedulesCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), RunbookSchedulesCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -750,34 +750,28 @@ type ResolveActionApprovalRequest struct {
 }
 
 type CreateObjectiveRequest struct {
-	Scope            runtime.Scope             `json:"scope"`
-	Owner            runtime.ObjectiveOwner    `json:"owner"`
-	Title            string                    `json:"title"`
-	Goal             string                    `json:"goal"`
-	Status           runtime.ObjectiveStatus   `json:"status,omitempty"`
-	Priority         int                       `json:"priority,omitempty"`
-	Cadence          *runtime.ObjectiveCadence `json:"cadence,omitempty"`
-	EventRules       map[string]interface{}    `json:"eventRules,omitempty"`
-	Budget           *runtime.BudgetPolicy     `json:"budget,omitempty"`
-	Constraints      map[string]interface{}    `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{}    `json:"successCriteria,omitempty"`
-	NextEvaluationAt *time.Time                `json:"nextEvaluationAt,omitempty"`
-	IdempotencyKey   string                    `json:"idempotencyKey,omitempty"`
+	Scope           runtime.Scope           `json:"scope"`
+	Owner           runtime.ObjectiveOwner  `json:"owner"`
+	Title           string                  `json:"title"`
+	Goal            string                  `json:"goal"`
+	Status          runtime.ObjectiveStatus `json:"status,omitempty"`
+	Priority        int                     `json:"priority,omitempty"`
+	Budget          *runtime.BudgetPolicy   `json:"budget,omitempty"`
+	Constraints     map[string]interface{}  `json:"constraints,omitempty"`
+	SuccessCriteria map[string]interface{}  `json:"successCriteria,omitempty"`
+	IdempotencyKey  string                  `json:"idempotencyKey,omitempty"`
 }
 
 type UpdateObjectiveRequest struct {
-	ExpectedRevision int64                     `json:"expectedRevision"`
-	Title            *string                   `json:"title,omitempty"`
-	Goal             *string                   `json:"goal,omitempty"`
-	Status           *runtime.ObjectiveStatus  `json:"status,omitempty"`
-	Priority         *int                      `json:"priority,omitempty"`
-	Cadence          *runtime.ObjectiveCadence `json:"cadence,omitempty"`
-	EventRules       map[string]interface{}    `json:"eventRules,omitempty"`
-	Budget           *runtime.BudgetPolicy     `json:"budget,omitempty"`
-	Constraints      map[string]interface{}    `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{}    `json:"successCriteria,omitempty"`
-	ProgressSummary  *string                   `json:"progressSummary,omitempty"`
-	NextEvaluationAt *time.Time                `json:"nextEvaluationAt,omitempty"`
+	ExpectedRevision int64                    `json:"expectedRevision"`
+	Title            *string                  `json:"title,omitempty"`
+	Goal             *string                  `json:"goal,omitempty"`
+	Status           *runtime.ObjectiveStatus `json:"status,omitempty"`
+	Priority         *int                     `json:"priority,omitempty"`
+	Budget           *runtime.BudgetPolicy    `json:"budget,omitempty"`
+	Constraints      map[string]interface{}   `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}   `json:"successCriteria,omitempty"`
+	ProgressSummary  *string                  `json:"progressSummary,omitempty"`
 }
 
 type ObjectiveDetail struct {
@@ -785,15 +779,15 @@ type ObjectiveDetail struct {
 	Runs      []*runtime.AgentRun `json:"runs"`
 }
 
-type ReconcileObjectiveSchedulesRequest struct {
+type ReconcileRunbookSchedulesRequest struct {
 	Scope runtime.Scope `json:"scope"`
 	Limit int           `json:"limit,omitempty"`
 }
 
-type ObjectiveScheduleReconciliation struct {
-	Scope        runtime.Scope                    `json:"scope"`
-	ReconciledAt time.Time                        `json:"reconciledAt"`
-	Result       *runtime.ObjectiveScheduleResult `json:"result"`
+type RunbookScheduleReconciliation struct {
+	Scope        runtime.Scope                  `json:"scope"`
+	ReconciledAt time.Time                      `json:"reconciledAt"`
+	Result       *runtime.RunbookScheduleResult `json:"result"`
 }
 
 type CreateEventSourceSubscriptionRequest struct {

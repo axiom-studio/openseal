@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
@@ -16,7 +17,17 @@ func TestSourceMonitorAPIExposesCheckpointAndEvidenceReadOnly(t *testing.T) {
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
 	portfolio := runtime.NewPortfolioService(store)
-	objective, err := portfolio.CreateObjective(ctx, runtime.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "Monitor", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive, Cadence: &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 60, AssignedAgentID: "researcher", RunTemplate: &runtime.ObjectiveRunTemplate{Context: map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"}, Policy: map[string]interface{}{"sourcePolicyRef": "public@1"}, Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "reader", SkillVersion: "1", Action: "read"}}}})
+	objective, err := portfolio.CreateObjective(ctx, runtime.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "Monitor", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.NewRunbookActivationService(store).Create(ctx, runtime.CreateRunbookActivationRequest{
+		ID: "monitor-1-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
+		DefinitionID: "research", DefinitionVersion: "1.0.0", TriggerID: "monitor-1",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
+		Input:   map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"},
+		Policy:  map[string]interface{}{"sourcePolicyRef": "public@1"}, Status: runtime.RunbookActivationActive,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

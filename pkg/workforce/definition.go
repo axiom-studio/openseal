@@ -14,8 +14,6 @@ type ObjectiveTemplate struct {
 	Title           string                 `json:"title"`
 	Goal            string                 `json:"goal"`
 	Priority        int                    `json:"priority,omitempty"`
-	Cadence         map[string]interface{} `json:"cadence,omitempty"`
-	EventRules      map[string]interface{} `json:"eventRules,omitempty"`
 	SuccessCriteria map[string]interface{} `json:"successCriteria,omitempty"`
 	Constraints     map[string]interface{} `json:"constraints,omitempty"`
 }

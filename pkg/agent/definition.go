@@ -121,7 +121,6 @@ func (d *AgentDefinition) Validate() error {
 			return errors.New("objective templates require unique ids, title, goal, and non-negative priority")
 		}
 		for field, value := range map[string]interface{}{
-			"cadence": template.Cadence, "eventRules": template.EventRules,
 			"successCriteria": template.SuccessCriteria, "constraints": template.Constraints,
 		} {
 			if err := validateNoSecrets(value, "objectiveTemplates."+template.ID+"."+field); err != nil {

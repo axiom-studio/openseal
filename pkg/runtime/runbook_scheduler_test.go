@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -98,5 +99,57 @@ func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	now = values[0].NextRunAt.Add(time.Second)
 	if result, err := scheduler.ReconcileScope(ctx, scope, 50); err != nil || result.Scheduled != 2 {
 		t.Fatalf("schedule siblings=%#v err=%v", result, err)
+	}
+}
+
+func TestRunbookSchedulerCapturesBoundedInitiativeEvidence(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "evidence"}
+	initiative, monitorRuns := seedExecutableMonitorInitiative(t, store, scope)
+	monitorService := NewSourceMonitorService(store, store, store, nil)
+	if _, err := monitorService.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-a", monitorRuns["monitor-a"], 0, "one", "thread-one", "a deliberately long finding")); err != nil {
+		t.Fatal(err)
+	}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: initiative.Owner, Title: "Synthesize", Goal: "Synthesize cited findings", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		ID: "synthesize", Scope: scope, Owner: initiative.Owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
+		DefinitionID: "research", DefinitionVersion: "1", TriggerID: "synthesize",
+		Trigger: runbook.Trigger{
+			Kind: runbook.TriggerSchedule, Entrypoint: "synthesize", Schedule: &runbook.Schedule{Cron: "*/1 * * * * *", Timezone: "UTC"},
+			Evidence: &runbook.EvidenceProjection{MaximumObservations: 1, MaximumSummaryRunes: 8, MaximumTotalRunes: 8},
+		},
+		Input: map[string]interface{}{"initiativeId": initiative.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().UTC().Add(-time.Second).Truncate(time.Second)
+	activation.NextOccurrenceBase, activation.NextRunAt = &due, &due
+	activation.Revision++
+	activation.UpdatedAt = time.Now().UTC()
+	if err := store.UpdateRunbookActivation(ctx, activation, activation.Revision-1); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewRunbookScheduler(store).ReconcileScope(ctx, scope, 10)
+	if err != nil || result.Scheduled != 1 {
+		t.Fatalf("schedule=%#v err=%v", result, err)
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs=%#v err=%v", runs, err)
+	}
+	encoded, _ := json.Marshal(runs[0].Context[EvidenceSnapshotContextKey])
+	var snapshot EvidenceSnapshot
+	if err := json.Unmarshal(encoded, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.InitiativeID != initiative.ID || snapshot.SelectedCount != 1 || len([]rune(snapshot.Observations[0].Summary)) != 8 || !snapshot.Truncated {
+		t.Fatalf("snapshot=%#v", &snapshot)
 	}
 }

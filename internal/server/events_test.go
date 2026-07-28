@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
@@ -19,12 +21,7 @@ func TestEventAPIProjectsCanonicalRunsAndRejectsProtocolDrift(t *testing.T) {
 		"owner":{"type":"agent","id":"sre"},
 		"title":"Production reliability",
 		"goal":"Investigate Kubernetes warnings safely",
-		"status":"active",
-		"eventRules":{"version":"1","rules":[{
-			"id":"backoff","eventType":"kubernetes.warning","source":"cluster:production",
-			"attributes":{"reason":"BackOff"},"assignedAgentId":"sre",
-			"runTemplate":{"entrypoint":"investigate","context":{"mode":"evidence-first"}}
-		}]}
+		"status":"active"
 	}`
 	createdObjective := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", objectiveBody, "sre-objective")
 	if createdObjective.Code != http.StatusCreated {
@@ -32,6 +29,15 @@ func TestEventAPIProjectsCanonicalRunsAndRejectsProtocolDrift(t *testing.T) {
 	}
 	var objective runtime.Objective
 	if err := json.NewDecoder(createdObjective.Body).Decode(&objective); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runtime.NewRunbookActivationService(store).Create(context.Background(), runtime.CreateRunbookActivationRequest{
+		ID: "backoff", Scope: objective.Scope, Owner: objective.Owner, ObjectiveID: objective.ID, AssignedAgentID: "sre",
+		DefinitionID: "kubernetes-investigation", DefinitionVersion: "1", TriggerID: "backoff",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent, EventType: "kubernetes.warning", Entrypoint: "investigate"},
+		Input:   map[string]interface{}{"mode": "evidence-first"}, Status: runtime.RunbookActivationActive,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	eventBody := `{
