@@ -81,3 +81,93 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 		t.Fatalf("public amendment activation = %#v %#v, %v", activated, amendedDeployment, err)
 	}
 }
+
+func TestAgentStandingAuthorityAllowsOnlyExactReviewedActionScope(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
+		ID: "reddit-agent", Version: "1.0.0", DisplayName: "Reddit Agent", Purpose: "Contribute useful comments", SystemPrompt: "Be useful.",
+		SkillRequirements: []AgentSkillRequirement{{SkillID: "skill-browser", RequiredActions: []string{"camoufox-fill", "camoufox-commit"}}},
+		Authority: AgentAuthorityPolicy{
+			MaximumRisk: SkillRiskExternal, AllowedSkillIDs: []string{"skill-browser"}, MaxConcurrentRuns: 1, RequireApprovalAt: SkillRiskWrite,
+			StandingGrants: []AgentStandingActionGrant{
+				{ID: "prepare-comment", SkillID: "skill-browser", Action: "camoufox-fill"},
+				{ID: "publish-reddit-comment", SkillID: "skill-browser", Action: "camoufox-commit", ExternalOperation: "comment:create", ResourcePrefix: "https://old.reddit.com/"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = engine.CreateAgentDeployment(ctx, &AgentDeployment{
+		ID: "reddit-agent", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: AgentRolloutActive, Environment: "test", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "reviewed standing authority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run-one", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reddit-agent"}, AssignedAgentID: "reddit-agent"}
+	bound := func(action string) *BoundSkillAction {
+		return &BoundSkillAction{
+			Definition: &SkillDefinition{ID: "skill-browser", Version: "2.0.6"},
+			Action:     SkillAction{Name: action, Risk: SkillRiskExternal, SideEffect: SkillSideEffectExternal},
+			Binding:    &SkillBinding{ID: "browser-binding", SkillID: "skill-browser", SkillVersion: "2.0.6"},
+		}
+	}
+
+	prepare, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{Run: run, Bound: bound("camoufox-fill")})
+	if err != nil || prepare.Disposition != ActionDispositionAllow {
+		t.Fatalf("preparatory grant = %#v, %v", prepare, err)
+	}
+	publish, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{
+		Run: run, Bound: bound("camoufox-commit"),
+		ExternalOperation: &ExternalOperationIdentity{Resource: "https://old.reddit.com/r/woodworking/comments/abc/topic/def", Operation: "comment:create"},
+	})
+	if err != nil || publish.Disposition != ActionDispositionAllow {
+		t.Fatalf("publish grant = %#v, %v", publish, err)
+	}
+	outside, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{
+		Run: run, Bound: bound("camoufox-commit"),
+		ExternalOperation: &ExternalOperationIdentity{Resource: "https://example.com/topics/def", Operation: "comment:create"},
+	})
+	if err != nil || outside.Disposition != ActionDispositionRequireApproval {
+		t.Fatalf("outside target = %#v, %v", outside, err)
+	}
+	wrongOperation, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{
+		Run: run, Bound: bound("camoufox-commit"),
+		ExternalOperation: &ExternalOperationIdentity{Resource: "https://old.reddit.com/r/woodworking/comments/abc/topic/def", Operation: "post:delete"},
+	})
+	if err != nil || wrongOperation.Disposition != ActionDispositionRequireApproval {
+		t.Fatalf("wrong operation = %#v, %v", wrongOperation, err)
+	}
+}
+
+func TestAgentStandingAuthorityRejectsUndeclaredOrUnboundedGrants(t *testing.T) {
+	base := func() *AgentDefinition {
+		return &AgentDefinition{
+			ID: "agent", Version: "1.0.0", DisplayName: "Agent", Purpose: "Test grants", SystemPrompt: "Act within authority.",
+			SkillRequirements: []AgentSkillRequirement{{SkillID: "browser", RequiredActions: []string{"commit"}}},
+			Authority:         AgentAuthorityPolicy{MaximumRisk: SkillRiskExternal, MaxConcurrentRuns: 1},
+		}
+	}
+	for _, test := range []struct {
+		name  string
+		grant AgentStandingActionGrant
+	}{
+		{name: "undeclared action", grant: AgentStandingActionGrant{ID: "fill", SkillID: "browser", Action: "fill"}},
+		{name: "partial external scope", grant: AgentStandingActionGrant{ID: "commit", SkillID: "browser", Action: "commit", ExternalOperation: "comment:create"}},
+		{name: "credential-bearing prefix", grant: AgentStandingActionGrant{ID: "commit", SkillID: "browser", Action: "commit", ExternalOperation: "comment:create", ResourcePrefix: "https://user:pass@example.com/"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := base()
+			candidate.Authority.StandingGrants = []AgentStandingActionGrant{test.grant}
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("expected invalid standing grant")
+			}
+		})
+	}
+}

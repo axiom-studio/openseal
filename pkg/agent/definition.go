@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 )
 
 var versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
+var standingOperationPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
 
 type SkillRequirement struct {
 	SkillID           string   `json:"skillId"`
@@ -23,12 +25,26 @@ type SkillRequirement struct {
 	Optional          bool     `json:"optional,omitempty"`
 }
 
+// StandingActionGrant records reviewed, durable authority for one exact Skill
+// action. ExternalOperation and ResourcePrefix narrow stable external writes to
+// one semantic operation and destination family; both must be present together.
+// Host target policy, binding restrictions, and idempotency remain independently
+// authoritative.
+type StandingActionGrant struct {
+	ID                string `json:"id"`
+	SkillID           string `json:"skillId"`
+	Action            string `json:"action"`
+	ExternalOperation string `json:"externalOperation,omitempty"`
+	ResourcePrefix    string `json:"resourcePrefix,omitempty"`
+}
+
 type AuthorityPolicy struct {
-	MaximumRisk       capability.RiskLevel `json:"maximumRisk"`
-	AllowedSkillIDs   []string             `json:"allowedSkillIds,omitempty"`
-	MaxConcurrentRuns int                  `json:"maxConcurrentRuns"`
-	BudgetCeilings    map[string]float64   `json:"budgetCeilings,omitempty"`
-	RequireApprovalAt capability.RiskLevel `json:"requireApprovalAt,omitempty"`
+	MaximumRisk       capability.RiskLevel  `json:"maximumRisk"`
+	AllowedSkillIDs   []string              `json:"allowedSkillIds,omitempty"`
+	MaxConcurrentRuns int                   `json:"maxConcurrentRuns"`
+	BudgetCeilings    map[string]float64    `json:"budgetCeilings,omitempty"`
+	RequireApprovalAt capability.RiskLevel  `json:"requireApprovalAt,omitempty"`
+	StandingGrants    []StandingActionGrant `json:"standingGrants,omitempty"`
 }
 
 type MemoryPolicy struct {
@@ -86,6 +102,28 @@ func (d *AgentDefinition) Validate() error {
 	if d.Authority.RequireApprovalAt != "" && !validRisk(d.Authority.RequireApprovalAt) {
 		return errors.New("agent definition approval risk is invalid")
 	}
+	seenGrants := make(map[string]bool, len(d.Authority.StandingGrants))
+	for _, grant := range d.Authority.StandingGrants {
+		if strings.TrimSpace(grant.ID) == "" || strings.TrimSpace(grant.SkillID) == "" || strings.TrimSpace(grant.Action) == "" || seenGrants[grant.ID] {
+			return errors.New("agent standing authority grants require unique ids, skill ids, and actions")
+		}
+		seenGrants[grant.ID] = true
+		if (strings.TrimSpace(grant.ExternalOperation) == "") != (strings.TrimSpace(grant.ResourcePrefix) == "") {
+			return errors.New("agent standing authority external operation and resource prefix must be specified together")
+		}
+		if grant.ExternalOperation != "" {
+			parsed, err := url.Parse(strings.TrimSpace(grant.ResourcePrefix))
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !standingOperationPattern.MatchString(strings.TrimSpace(grant.ExternalOperation)) {
+				return errors.New("agent standing authority external writes require a bounded operation and credential-free HTTP(S) resource prefix")
+			}
+		}
+		if err := validateNoSecrets(map[string]interface{}{
+			"externalOperation": grant.ExternalOperation,
+			"resourcePrefix":    grant.ResourcePrefix,
+		}, "authority.standingGrants"); err != nil {
+			return err
+		}
+	}
 	if d.Memory.Retention < 0 || d.Memory.MaximumBytes < 0 || d.Escalation.AfterFailures < 0 || d.Escalation.AfterDuration < 0 {
 		return errors.New("agent definition memory and escalation limits cannot be negative")
 	}
@@ -96,11 +134,21 @@ func (d *AgentDefinition) Validate() error {
 		return err
 	}
 	seenSkills := make(map[string]bool)
+	requiredActions := make(map[string]map[string]bool)
 	for _, requirement := range d.SkillRequirements {
 		if strings.TrimSpace(requirement.SkillID) == "" || seenSkills[requirement.SkillID] {
 			return errors.New("agent definition skill requirements require unique skill ids")
 		}
 		seenSkills[requirement.SkillID] = true
+		requiredActions[requirement.SkillID] = make(map[string]bool, len(requirement.RequiredActions))
+		for _, action := range requirement.RequiredActions {
+			requiredActions[requirement.SkillID][action] = true
+		}
+	}
+	for _, grant := range d.Authority.StandingGrants {
+		if !requiredActions[grant.SkillID][grant.Action] {
+			return fmt.Errorf("agent standing authority grant %s must reference an exact required Skill action", grant.ID)
+		}
 	}
 	if d.Runbook != nil {
 		if diagnostics := runbook.Validate(d.Runbook); len(diagnostics) > 0 {
