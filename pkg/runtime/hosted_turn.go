@@ -789,7 +789,7 @@ func applyHostedMinimumChildBudget(request *HostedTurnRequest) error {
 	}
 	minimum := hostedMinimumChildBudget(request.Budget.Policy)
 	request.Budget.MinimumChild = minimum
-	estimatedInput, err := EstimateHostedTurnInputTokens(*request)
+	estimatedInput, err := EstimateHostedTurnMaximumInputTokens(*request)
 	if err != nil {
 		return fmt.Errorf("estimate minimum hosted child budget: %w", err)
 	}

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 type countedHostedTurnHost struct {
@@ -122,6 +124,43 @@ func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
 	}
 }
 
+func TestHostedTurnBudgetReservesInitialAndRepairProviderInputs(t *testing.T) {
+	runner, err := NewHostedTurnRunner(&countedHostedTurnHost{}, HostedTurnRunnerConfig{
+		AgentID: "browser-agent", DefinitionID: "browser-agent", DefinitionVersion: "1",
+		Actions: []capability.ModelAction{{Name: "browser.snapshot", Description: "Capture the current semantic page snapshot."}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{
+		ID: "browser-run", Scope: Scope{Kind: "tenant", ID: "7"}, AssignedAgentID: "browser-agent",
+		Goal: "Inspect the page and continue", Checkpoint: map[string]interface{}{
+			"lastAction": map[string]interface{}{
+				"actionCallId": "snapshot-1", "status": "succeeded", "action": "browser.snapshot",
+				"result": map[string]interface{}{"snapshot": strings.Repeat("semantic browser evidence ", 1200)},
+			},
+		},
+		Budget: &BudgetPolicy{MaxInputTokens: 200000, MaxOutputTokens: 20000, MaxTotalTokens: 220000},
+	}
+	turn := &AgentTurn{ID: "turn-4"}
+	oneRequest, err := runner.buildRequest(TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oneAttempt, err := EstimateHostedTurnInputTokens(oneRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := runner.PlanTurnBudget(t.Context(), TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := oneAttempt*HostedTurnMaximumProviderAttempts + HostedTurnRepairInputReserveTokens
+	if reservation.InputTokens != want || reservation.InputTokens <= oneAttempt {
+		t.Fatalf("input reservation=%d, one attempt=%d, want bounded attempts=%d", reservation.InputTokens, oneAttempt, want)
+	}
+}
+
 func TestHostedBrowserNextTurnPersistsInadmissibleBudgetState(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "browser-multi-turn"}
@@ -176,8 +215,8 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Do bounded work", Budget: &BudgetPolicy{
-			MaxAttempts: 3, MaxTurns: 3, MaxInputTokens: 8000, MaxOutputTokens: 2000,
-			MaxTotalTokens: 10000, MaxDurationMS: 120000,
+			MaxAttempts: 3, MaxTurns: 3, MaxInputTokens: 32000, MaxOutputTokens: 2000,
+			MaxTotalTokens: 34000, MaxDurationMS: 120000,
 		},
 	})
 	if err != nil {
@@ -201,7 +240,7 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	if reserved.InputTokens < HostedTurnProtocolInputReserveTokens || reserved.OutputTokens <= 0 || reserved.OutputTokens > 2000 {
 		t.Fatalf("reservation=%#v", reserved)
 	}
-	if host.request.Budget.Remaining.MaxTotalTokens != 10000 || host.request.Budget.Remaining.MaxOutputTokens != 2000 {
+	if host.request.Budget.Remaining.MaxTotalTokens != 34000 || host.request.Budget.Remaining.MaxOutputTokens != 2000 {
 		t.Fatalf("remaining budget must exclude current reservation: %#v", host.request.Budget.Remaining)
 	}
 	if host.request.Budget.MinimumChild.MaxAttempts != HostedTurnMinimumChildAttempts ||
@@ -363,7 +402,7 @@ func TestGroundedHostedTurnReservationIncludesDraftInstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	applyEvidenceGroundingDraftInstruction(&request, snapshot)
-	estimate, err := EstimateHostedTurnInputTokens(request)
+	estimate, err := EstimateHostedTurnMaximumInputTokens(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +438,7 @@ func TestHostedTurnBudgetReservationIsAtomicAgainstConcurrentWorker(t *testing.T
 	scope := Scope{Kind: "tenant", ID: "atomic-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 2000, MaxTotalTokens: 34000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -471,7 +510,7 @@ func TestHostedTurnBudgetRetryReusesAndSettlesOneReservation(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "retry-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 2000, MaxTotalTokens: 34000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -517,7 +556,7 @@ func TestHostedTurnBudgetRetryReconcilesReservationAfterIntervention(t *testing.
 	scope := Scope{Kind: "tenant", ID: "retry-budget-intervention"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 8000, MaxOutputTokens: 2000, MaxTotalTokens: 10000},
+		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 2000, MaxTotalTokens: 34000},
 	})
 	if err != nil {
 		t.Fatal(err)
