@@ -120,7 +120,7 @@ func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx)
 			run_id TEXT NOT NULL,
 			agent_id TEXT NOT NULL DEFAULT '',
 			objective_id TEXT NOT NULL DEFAULT '',
-			initiative_id TEXT NOT NULL DEFAULT '',
+			project_id TEXT NOT NULL DEFAULT '',
 			team_id TEXT NOT NULL DEFAULT '',
 			severity TEXT NOT NULL DEFAULT 'info',
 			visibility TEXT NOT NULL DEFAULT 'scope',
@@ -169,17 +169,17 @@ func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) err
 	if err != nil {
 		return err
 	}
-	initiativeProjectionApplied, err := s.postgresMigrationApplied(ctx, tx, 23)
+	projectProjectionApplied, err := s.postgresMigrationApplied(ctx, tx, 23)
 	if err != nil {
 		return err
 	}
-	if activityProjectionApplied && initiativeProjectionApplied {
+	if activityProjectionApplied && projectProjectionApplied {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE `+s.table("run_activity")+`
 		ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT '',
 		ADD COLUMN IF NOT EXISTS objective_id TEXT NOT NULL DEFAULT '',
-		ADD COLUMN IF NOT EXISTS initiative_id TEXT NOT NULL DEFAULT '',
+		ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '',
 		ADD COLUMN IF NOT EXISTS team_id TEXT NOT NULL DEFAULT '',
 		ADD COLUMN IF NOT EXISTS severity TEXT NOT NULL DEFAULT 'info',
 		ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'scope'`); err != nil {
@@ -188,7 +188,7 @@ func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) err
 	if _, err := tx.ExecContext(ctx, `UPDATE `+s.table("run_activity")+` SET
 		agent_id = COALESCE(NULLIF(agent_id, ''), payload->>'agentId', ''),
 		objective_id = COALESCE(NULLIF(objective_id, ''), payload->>'objectiveId', ''),
-		initiative_id = COALESCE(NULLIF(initiative_id, ''), payload->>'initiativeId', ''),
+		project_id = COALESCE(NULLIF(project_id, ''), payload->>'projectId', ''),
 		team_id = COALESCE(NULLIF(team_id, ''), payload->>'teamId', ''),
 		severity = COALESCE(NULLIF(severity, ''), payload->>'severity', 'info'),
 		visibility = COALESCE(NULLIF(visibility, ''), payload->>'visibility', 'scope')`); err != nil {
@@ -197,7 +197,7 @@ func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) err
 	statements := []string{
 		`CREATE INDEX IF NOT EXISTS run_activity_agent_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, agent_id, created_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS run_activity_objective_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, objective_id, created_at DESC, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS run_activity_initiative_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, initiative_id, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS run_activity_project_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, project_id, created_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS run_activity_team_feed_idx ON ` + s.table("run_activity") + ` (scope_kind, scope_id, team_id, created_at DESC, id DESC)`,
 	}
 	for _, statement := range statements {
@@ -208,7 +208,7 @@ func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) err
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (6, 'indexed activity projections') ON CONFLICT (version) DO NOTHING`); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (23, 'indexed initiative activity projections') ON CONFLICT (version) DO NOTHING`)
+	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (23, 'indexed project activity projections') ON CONFLICT (version) DO NOTHING`)
 	return err
 }
 
@@ -312,9 +312,9 @@ func (s *PostgresStore) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("run_activity")+`
-		(scope_kind, scope_id, run_id, agent_id, objective_id, initiative_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
+		(scope_kind, scope_id, run_id, agent_id, objective_id, project_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)`, persisted.Scope.Kind, persisted.Scope.ID,
-		activityStreamID(persisted), persisted.AgentID, persisted.ObjectiveID, persisted.InitiativeID, persisted.TeamID, persisted.Severity, persisted.Visibility,
+		activityStreamID(persisted), persisted.AgentID, persisted.ObjectiveID, persisted.ProjectID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func (s *PostgresStore) ListActivity(ctx context.Context, filter ActivityFilter)
 	query := `SELECT payload FROM ` + s.table("run_activity") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
 	placeholder := 3
-	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"initiative_id", filter.InitiativeID}, {"team_id", filter.TeamID}}
+	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"project_id", filter.ProjectID}, {"team_id", filter.TeamID}}
 	for _, selector := range selectors {
 		if selector.value == "" {
 			continue

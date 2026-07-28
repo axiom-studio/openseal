@@ -48,7 +48,7 @@ Depending on the connected server, the workspace can expose:
   definition amendments, including self-proposed conversation changes and
   direct invocation of callable operations from the exact active runbook
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
-- **Objectives / Initiatives** — multi-objective portfolios, schedule supervision,
+- **Objectives / Projects** — multi-objective portfolios, schedule supervision,
   and project context
 - **Sources** — durable event-source subscriptions, connector health, checkpoints,
   and CAS-protected pause, resume, and retirement
@@ -98,7 +98,7 @@ Section shortcuts work while the list panel is focused:
 | `T` | Teams |
 | `o` | Objectives |
 | `S` | Event sources |
-| `i` | Initiatives |
+| `i` | Projects |
 | `O` | Outreach |
 | `I` | Conversation integrations |
 | `s` | Skills |
@@ -119,7 +119,7 @@ Common controls:
 | `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
 | `m` | Open the contextual message, refinement, or amendment composer; in Activity, load the next page |
-| `p` | Pause/resume selected Run, Agent, Team, Initiative, or event source; pin/unpin a Skill |
+| `p` | Pause/resume selected Run, Agent, Team, Project, or event source; pin/unpin a Skill |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
 | `?` / `M` | Request or provide clarification for an Agent request |

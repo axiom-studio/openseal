@@ -394,7 +394,7 @@ func TestAnsweredSourceScopeAcceptsAPIActionMaterializationWithoutRSSMonitor(t *
 	}
 	need := CapabilityNeed{ID: "reddit-access", SkillIDs: []string{"openseal.source", "reddit-post-search"}}
 	if !capabilitySourceScopeMaterialized(&candidate, need, []string{"openclaw", "selfhosted"}, []string{"subreddits", "query", "url"}) {
-		t.Fatal("API-backed source scope was incorrectly required to use an Initiative source monitor")
+		t.Fatal("API-backed source scope was incorrectly required to use a Project source monitor")
 	}
 }
 

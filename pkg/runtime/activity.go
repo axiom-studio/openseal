@@ -52,7 +52,7 @@ type ActivityEvent struct {
 	Severity         ActivitySeverity       `json:"severity"`
 	AgentID          string                 `json:"agentId,omitempty"`
 	ObjectiveID      string                 `json:"objectiveId,omitempty"`
-	InitiativeID     string                 `json:"initiativeId,omitempty"`
+	ProjectID        string                 `json:"projectId,omitempty"`
 	RunID            string                 `json:"runId"`
 	TurnID           string                 `json:"turnId,omitempty"`
 	ParentRunID      string                 `json:"parentRunId,omitempty"`
@@ -75,7 +75,7 @@ func (e *ActivityEvent) Validate() error {
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}
-	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "" && strings.TrimSpace(e.InitiativeID) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
+	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "" && strings.TrimSpace(e.ProjectID) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
 		return errors.New("activity subject, type, and summary are required")
 	}
 	if e.UsageDelta != nil {
@@ -127,7 +127,7 @@ type ActivityFilter struct {
 	RunIDs          []string
 	AgentID         string
 	ObjectiveID     string
-	InitiativeID    string
+	ProjectID       string
 	TeamID          string
 	EventTypes      []string
 	Severities      []ActivitySeverity
@@ -158,8 +158,8 @@ func activityStreamID(event *ActivityEvent) string {
 	if event.RunID != "" {
 		return event.RunID
 	}
-	if event.InitiativeID != "" {
-		return "initiative:" + event.InitiativeID
+	if event.ProjectID != "" {
+		return "project:" + event.ProjectID
 	}
 	return "objective:" + event.ObjectiveID
 }

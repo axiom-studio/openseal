@@ -36,8 +36,8 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 		t.Fatalf("migration=%q err=%v", migration, err)
 	}
 	scope := Scope{Kind: "tenant", ID: "postgres-monitor"}
-	initiative, runs := seedExecutableMonitorInitiative(t, primary, scope)
-	request := sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "PostgreSQL finding")
+	project, runs := seedExecutableMonitorProject(t, primary, scope)
+	request := sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "PostgreSQL finding")
 	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	expires := base.Add(time.Hour)
 	request.RetentionExpiresAt = &expires
@@ -69,7 +69,7 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 	if succeeded == 0 || succeeded+conflicted != 2 {
 		t.Fatalf("succeeded=%d replayed=%d conflicted=%d", succeeded, replayed, conflicted)
 	}
-	noChangeRequest := checkpointRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 1, "cursor-1", "no-change-postgres")
+	noChangeRequest := checkpointRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 1, "cursor-1", "no-change-postgres")
 	type checkpointOutcome struct {
 		result *SourceMonitorCheckpointResult
 		err    error
@@ -102,14 +102,14 @@ func TestPostgresSourceMonitorIngestIsReplicaSafeAndRestartDurable(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkpoint, err := primary.GetSourceMonitorCheckpoint(ctx, scope, initiative.ID, "monitor-a")
-	observations, listErr := primary.ListSourceObservations(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-a"})
+	checkpoint, err := primary.GetSourceMonitorCheckpoint(ctx, scope, project.ID, "monitor-a")
+	observations, listErr := primary.ListSourceObservations(ctx, SourceObservationFilter{Scope: scope, ProjectID: project.ID, MonitorID: "monitor-a"})
 	if err != nil || listErr != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 1 || checkpoint.LastActionCallID != "no-change-postgres" || len(observations) != 1 {
 		t.Fatalf("checkpoint=%#v observations=%#v err=%v listErr=%v", checkpoint, observations, err, listErr)
 	}
 	retainedService := NewSourceMonitorService(primary, primary, primary, primary)
 	retainedService.now = func() time.Time { return expires }
-	retained, retainedErr := retainedService.List(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-a"})
+	retained, retainedErr := retainedService.List(ctx, SourceObservationFilter{Scope: scope, ProjectID: project.ID, MonitorID: "monitor-a"})
 	if retainedErr != nil || len(retained) != 0 {
 		t.Fatalf("expired PostgreSQL evidence remained product-visible: values=%#v err=%v", retained, retainedErr)
 	}

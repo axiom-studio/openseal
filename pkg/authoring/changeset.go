@@ -102,13 +102,13 @@ type ChangeSetLifecycleEvent struct {
 type ChangeSetPlacement struct {
 	TeamDeploymentID   string            `json:"teamDeploymentId"`
 	AgentDeploymentIDs map[string]string `json:"agentDeploymentIds"`
-	InitiativeID       string            `json:"initiativeId,omitempty"`
+	ProjectID          string            `json:"projectId,omitempty"`
 	// Expected revisions select compare-and-swap updates per resource. Zero means
 	// create, allowing one amendment to preserve existing resources and add new ones.
-	TeamExpectedRevision       int64                                                `json:"teamExpectedRevision,omitempty"`
-	AgentExpectedRevisions     map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
-	InitiativeExpectedRevision int64                                                `json:"initiativeExpectedRevision,omitempty"`
-	CredentialReferences       map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
+	TeamExpectedRevision    int64                                                `json:"teamExpectedRevision,omitempty"`
+	AgentExpectedRevisions  map[string]int64                                     `json:"agentExpectedRevisions,omitempty"`
+	ProjectExpectedRevision int64                                                `json:"projectExpectedRevision,omitempty"`
+	CredentialReferences    map[string]map[string]capability.CredentialReference `json:"credentialReferences,omitempty"`
 	// BindingConfigs selects reviewed non-secret Skill configuration by Agent
 	// definition and catalog Skill id. Models cannot place values here; hosts
 	// materialize and validate this authority before apply.
@@ -1353,12 +1353,12 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 	if requested.TeamExpectedRevision != 0 && requested.TeamExpectedRevision != current.TeamExpectedRevision {
 		return ChangeSetPlacement{}, errors.New("activation target team revision is immutable")
 	}
-	if requested.InitiativeID != "" && requested.InitiativeID != current.InitiativeID {
-		return ChangeSetPlacement{}, errors.New("activation target initiative is immutable")
+	if requested.ProjectID != "" && requested.ProjectID != current.ProjectID {
+		return ChangeSetPlacement{}, errors.New("activation target project is immutable")
 	}
-	if requested.InitiativeExpectedRevision != 0 &&
-		requested.InitiativeExpectedRevision != current.InitiativeExpectedRevision {
-		return ChangeSetPlacement{}, errors.New("activation target initiative revision is immutable")
+	if requested.ProjectExpectedRevision != 0 &&
+		requested.ProjectExpectedRevision != current.ProjectExpectedRevision {
+		return ChangeSetPlacement{}, errors.New("activation target project revision is immutable")
 	}
 	if requested.Environment != "" && requested.Environment != current.Environment {
 		return ChangeSetPlacement{}, errors.New("activation target environment is immutable")
@@ -1681,12 +1681,12 @@ func validateApplyPlacement(value *ChangeSet) error {
 	if value.Placement.TeamExpectedRevision < 0 {
 		return errors.New("Team placement expected revision cannot be negative")
 	}
-	if value.Result.Candidate.Initiative != nil {
-		if strings.TrimSpace(value.Placement.InitiativeID) == "" {
-			return errors.New("Initiative placement is required")
+	if value.Result.Candidate.Project != nil {
+		if strings.TrimSpace(value.Placement.ProjectID) == "" {
+			return errors.New("Project placement is required")
 		}
-		if value.Placement.InitiativeExpectedRevision < 0 {
-			return errors.New("Initiative placement expected revision cannot be negative")
+		if value.Placement.ProjectExpectedRevision < 0 {
+			return errors.New("Project placement expected revision cannot be negative")
 		}
 	}
 	for key, objective := range value.Placement.Objectives {
@@ -2003,7 +2003,7 @@ func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement Mis
 	return hasPlacementGap
 }
 
-// missingRequirementAgentID maps an Initiative source monitor back to the
+// missingRequirementAgentID maps a Project source monitor back to the
 // Agent that executes it. Source monitors do not own credentials or Skill
 // configuration independently; the assigned Agent's reviewed placement is the
 // single authority used by both the scheduled Objective and its monitor.
@@ -2014,11 +2014,11 @@ func missingRequirementAgentID(candidate *WorkforceCandidate, requirement Missin
 	if agentID := strings.TrimPrefix(requirement.RequiredBy, "agent:"); agentID != requirement.RequiredBy {
 		return strings.TrimSpace(agentID)
 	}
-	if candidate.Initiative == nil {
+	if candidate.Project == nil {
 		return ""
 	}
-	for _, monitor := range candidate.Initiative.SourceMonitors {
-		requiredBy := "initiative:" + candidate.Initiative.ID + "/monitor:" + monitor.ID
+	for _, monitor := range candidate.Project.SourceMonitors {
+		requiredBy := "project:" + candidate.Project.ID + "/monitor:" + monitor.ID
 		if requirement.RequiredBy == requiredBy && requirement.ID == monitor.SkillID {
 			return strings.TrimSpace(monitor.AssignedAgentDefinitionID)
 		}
@@ -2043,7 +2043,7 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 			qualified := canonicalIdentity(scope, old)
 			ids[old] = qualified
 			for _, template := range definition.ObjectiveTemplates {
-				objectiveIDs[WorkforceObjectiveKey(InitiativeOwnerAgent, old, template.ID)] = WorkforceObjectiveKey(InitiativeOwnerAgent, qualified, template.ID)
+				objectiveIDs[WorkforceObjectiveKey(ProjectOwnerAgent, old, template.ID)] = WorkforceObjectiveKey(ProjectOwnerAgent, qualified, template.ID)
 			}
 		}
 	}
@@ -2052,7 +2052,7 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 		teamID = candidate.Team.ID
 		qualified := canonicalIdentity(scope, teamID)
 		for _, template := range candidate.Team.ObjectiveTemplates {
-			objectiveIDs[WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, template.ID)] = WorkforceObjectiveKey(InitiativeOwnerTeam, qualified, template.ID)
+			objectiveIDs[WorkforceObjectiveKey(ProjectOwnerTeam, teamID, template.ID)] = WorkforceObjectiveKey(ProjectOwnerTeam, qualified, template.ID)
 		}
 	}
 	for _, definition := range candidate.Agents {
@@ -2091,14 +2091,14 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 			endpoint.Handler.AgentDefinitionID = qualified
 		}
 	}
-	if candidate.Initiative != nil {
-		blueprint := candidate.Initiative
+	if candidate.Project != nil {
+		blueprint := candidate.Project
 		switch blueprint.Owner.Type {
-		case InitiativeOwnerAgent:
+		case ProjectOwnerAgent:
 			if qualified := ids[blueprint.Owner.DefinitionID]; qualified != "" {
 				blueprint.Owner.DefinitionID = qualified
 			}
-		case InitiativeOwnerTeam:
+		case ProjectOwnerTeam:
 			if candidate.Team != nil && blueprint.Owner.DefinitionID == teamID {
 				blueprint.Owner.DefinitionID = candidate.Team.ID
 			}
@@ -2245,9 +2245,9 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	if candidate.Team != nil && strings.TrimSpace(placement.TeamDeploymentID) == "" {
 		placement.TeamDeploymentID = "team:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Team.ID)[:32]
 	}
-	if candidate.Initiative != nil {
-		if strings.TrimSpace(placement.InitiativeID) == "" {
-			placement.InitiativeID = "initiative:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Initiative.ID)[:32]
+	if candidate.Project != nil {
+		if strings.TrimSpace(placement.ProjectID) == "" {
+			placement.ProjectID = "project:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Project.ID)[:32]
 		}
 	}
 	if placement.ConversationEndpoints == nil {
@@ -2323,13 +2323,13 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 	if currentTeamID == parentPlacement.TeamDeploymentID && parentPlacement.TeamExpectedRevision > 0 {
 		placement.TeamExpectedRevision = parentPlacement.TeamExpectedRevision
 	}
-	currentInitiativeID := strings.TrimSpace(placement.InitiativeID)
-	if currentInitiativeID == "" {
-		placement.InitiativeID = parentPlacement.InitiativeID
-		currentInitiativeID = parentPlacement.InitiativeID
+	currentProjectID := strings.TrimSpace(placement.ProjectID)
+	if currentProjectID == "" {
+		placement.ProjectID = parentPlacement.ProjectID
+		currentProjectID = parentPlacement.ProjectID
 	}
-	if currentInitiativeID == parentPlacement.InitiativeID && parentPlacement.InitiativeExpectedRevision > 0 {
-		placement.InitiativeExpectedRevision = parentPlacement.InitiativeExpectedRevision
+	if currentProjectID == parentPlacement.ProjectID && parentPlacement.ProjectExpectedRevision > 0 {
+		placement.ProjectExpectedRevision = parentPlacement.ProjectExpectedRevision
 	}
 	if strings.TrimSpace(placement.Environment) == "" {
 		placement.Environment = parentPlacement.Environment
@@ -2460,8 +2460,8 @@ func inheritAppliedRevisions(placement *ChangeSetPlacement, parent *ChangeSet) {
 	if revision := resources["team_deployment\x00"+placement.TeamDeploymentID]; revision > 0 {
 		placement.TeamExpectedRevision = revision
 	}
-	if revision := resources["initiative\x00"+placement.InitiativeID]; revision > 0 {
-		placement.InitiativeExpectedRevision = revision
+	if revision := resources["project\x00"+placement.ProjectID]; revision > 0 {
+		placement.ProjectExpectedRevision = revision
 	}
 	for key, objective := range placement.Objectives {
 		if revision := resources["objective\x00"+objective.ID]; revision > 0 {
@@ -2797,8 +2797,8 @@ func digestString(value string) string {
 
 func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 	copy := ChangeSetPlacement{
-		TeamDeploymentID: value.TeamDeploymentID, InitiativeID: value.InitiativeID,
-		TeamExpectedRevision: value.TeamExpectedRevision, InitiativeExpectedRevision: value.InitiativeExpectedRevision,
+		TeamDeploymentID: value.TeamDeploymentID, ProjectID: value.ProjectID,
+		TeamExpectedRevision: value.TeamExpectedRevision, ProjectExpectedRevision: value.ProjectExpectedRevision,
 		Environment: value.Environment,
 	}
 	if value.AgentDeploymentIDs != nil {

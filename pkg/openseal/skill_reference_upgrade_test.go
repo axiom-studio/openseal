@@ -67,17 +67,17 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 		ID: "release-monitor", Scope: scope, Owner: objective.Owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 		DefinitionID: "source-monitor", DefinitionVersion: "1", TriggerID: "releases",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-		Input:   map[string]interface{}{"initiativeId": "release-research", "sourceMonitorId": "releases", "url": "https://example.com/feed.xml", "maxItems": 3},
+		Input:   map[string]interface{}{"projectId": "release-research", "sourceMonitorId": "releases", "url": "https://example.com/feed.xml", "maxItems": 3},
 		Policy:  map[string]interface{}{"sourcePolicyRef": "public-feed@1"}, Budget: &openseal.BudgetPolicy{MaxAttempts: 2, MaxTurns: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	initiative, _, err := engine.CreateInitiative(ctx, openseal.CreateInitiativeRequest{
-		Initiative: &openseal.Initiative{
+	project, _, err := engine.CreateProject(ctx, openseal.CreateProjectRequest{
+		Project: &openseal.Project{
 			ID: "release-research", Scope: scope, Owner: objective.Owner, Title: "Release research",
-			Purpose: "Track releases", Status: openseal.InitiativeStatusActive, ObjectiveRefs: []string{objective.ID},
-			SourceMonitors: []openseal.InitiativeSourceMonitorReference{{
+			Purpose: "Track releases", Status: openseal.ProjectStatusActive, ObjectiveRefs: []string{objective.ID},
+			SourceMonitors: []openseal.ProjectSourceMonitorReference{{
 				ID: "releases", ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 				SkillID: source.SkillID, SkillVersion: from.Version, Action: source.ObserveFeed,
 				SourcePolicyRef: "public-feed@1", Deduplication: openseal.SourceMonitorDeduplicateStableSourceAndContent,
@@ -105,7 +105,7 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.ApprovalRequired || len(plan.Objectives) != 0 || len(plan.Initiatives) != 1 || len(plan.Initiatives[0].MonitorIDs) != 1 {
+	if plan.ApprovalRequired || len(plan.Objectives) != 0 || len(plan.Projects) != 1 || len(plan.Projects[0].MonitorIDs) != 1 {
 		t.Fatalf("unexpected plan: %#v", plan)
 	}
 	receipt, err := engine.ApplySkillReferenceUpgrade(ctx, openseal.ApplySkillReferenceUpgradeRequest{
@@ -118,20 +118,20 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	if receipt.BindingRevision != binding.Revision+1 || len(receipt.ActivityIDs) != 1 {
 		t.Fatalf("unexpected receipt: %#v", receipt)
 	}
-	initiativeActivity, err := engine.ListActivityFeed(ctx, openseal.ActivityFeedRequest{
-		Scope: scope, InitiativeID: initiative.ID, EventTypes: []string{"initiative.skill_reference_upgraded"},
+	projectActivity, err := engine.ListActivityFeed(ctx, openseal.ActivityFeedRequest{
+		Scope: scope, ProjectID: project.ID, EventTypes: []string{"project.skill_reference_upgraded"},
 	})
-	if err != nil || len(initiativeActivity.Items) != 1 {
-		t.Fatalf("initiative upgrade activity=%#v err=%v", initiativeActivity, err)
+	if err != nil || len(projectActivity.Items) != 1 {
+		t.Fatalf("project upgrade activity=%#v err=%v", projectActivity, err)
 	}
 	updatedBinding, err := engine.GetSkillBinding(ctx, skillScope, "researcher", binding.ID)
 	if err != nil || updatedBinding.SkillVersion != to.Version || updatedBinding.Revision != receipt.BindingRevision ||
 		len(updatedBinding.Lifecycle) != 2 || updatedBinding.Lifecycle[1].Reason != "Adopt the reviewed source runtime" {
 		t.Fatalf("binding=%#v err=%v", updatedBinding, err)
 	}
-	updatedInitiative, err := engine.GetInitiative(ctx, scope, initiative.ID)
-	if err != nil || updatedInitiative.SourceMonitors[0].SkillVersion != to.Version {
-		t.Fatalf("initiative=%#v err=%v", updatedInitiative, err)
+	updatedProject, err := engine.GetProject(ctx, scope, project.ID)
+	if err != nil || updatedProject.SourceMonitors[0].SkillVersion != to.Version {
+		t.Fatalf("project=%#v err=%v", updatedProject, err)
 	}
 	restoredHistory, err := engine.GetAgentRun(ctx, scope, historical.ID)
 	if err != nil || restoredHistory.Context["capabilityInvocation"].(map[string]interface{})["skillVersion"] != from.Version {

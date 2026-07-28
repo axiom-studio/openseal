@@ -80,12 +80,12 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return err
 		}
 	}
-	for _, mutation := range application.Initiatives {
+	for _, mutation := range application.Projects {
 		encoded, marshalErr := json.Marshal(mutation.Value)
 		if marshalErr != nil {
 			return marshalErr
 		}
-		result, err = conn.ExecContext(ctx, `UPDATE initiatives
+		result, err = conn.ExecContext(ctx, `UPDATE projects
 			SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,payload=?
 			WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
 			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Revision,

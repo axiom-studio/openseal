@@ -31,28 +31,28 @@ type outreachDraft struct {
 }
 
 func (m *Model) loadOutreach() tea.Cmd {
-	initiative := m.selectedInitiativeRecord()
-	if initiative == nil || !m.supportsOutreach(kernelapi.OperationList) {
+	project := m.selectedProjectRecord()
+	if project == nil || !m.supportsOutreach(kernelapi.OperationList) {
 		m.outreachThreads, m.outreachObservations, m.outreachActions = nil, nil, nil
 		return nil
 	}
 	m.loading = true
-	initiativeID := initiative.ID
-	scope := initiative.Scope
-	monitors := append([]runtime.SourceMonitorReference(nil), initiative.SourceMonitors...)
+	projectID := project.ID
+	scope := project.Scope
+	monitors := append([]runtime.SourceMonitorReference(nil), project.SourceMonitors...)
 	observationIndex := m.outreachObservationSelected
 	canCreate := m.supportsOutreach(kernelapi.OperationCreate) && m.skillActionCapability.Supports(kernelapi.OperationList)
 	return func() tea.Msg {
-		threads, err := m.client.ListOutreachThreads(m.ctx, runtime.OutreachThreadFilter{Scope: scope, InitiativeID: initiativeID, Limit: 100})
+		threads, err := m.client.ListOutreachThreads(m.ctx, runtime.OutreachThreadFilter{Scope: scope, ProjectID: projectID, Limit: 100})
 		if err != nil {
-			return outreachLoaded{initiativeID: initiativeID, err: err}
+			return outreachLoaded{projectID: projectID, err: err}
 		}
 		observations := make([]*runtime.SourceObservation, 0)
 		if canCreate && m.supportsSourceMonitor(kernelapi.OperationListObservations) {
 			for _, monitor := range monitors {
-				items, listErr := m.client.ListSourceObservations(m.ctx, runtime.SourceObservationFilter{Scope: scope, InitiativeID: initiativeID, MonitorID: monitor.ID, Limit: 100})
+				items, listErr := m.client.ListSourceObservations(m.ctx, runtime.SourceObservationFilter{Scope: scope, ProjectID: projectID, MonitorID: monitor.ID, Limit: 100})
 				if listErr != nil {
-					return outreachLoaded{initiativeID: initiativeID, err: listErr}
+					return outreachLoaded{projectID: projectID, err: listErr}
 				}
 				observations = append(observations, items...)
 			}
@@ -64,14 +64,14 @@ func (m *Model) loadOutreach() tea.Cmd {
 			if monitor := outreachMonitor(monitors, selected.MonitorID); monitor != nil {
 				result, actionErr := m.client.ListAgentSkillActions(m.ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, monitor.AssignedAgentID, []string{"target", "body"}, capability.SideEffectExternal)
 				if actionErr != nil {
-					return outreachLoaded{initiativeID: initiativeID, err: actionErr}
+					return outreachLoaded{projectID: projectID, err: actionErr}
 				}
 				if result != nil {
 					actions = result.Actions
 				}
 			}
 		}
-		return outreachLoaded{initiativeID: initiativeID, threads: threads, observations: observations, actions: actions}
+		return outreachLoaded{projectID: projectID, threads: threads, observations: observations, actions: actions}
 	}
 }
 
@@ -85,7 +85,7 @@ func outreachMonitor(monitors []runtime.SourceMonitorReference, id string) *runt
 }
 
 func (m *Model) canCreateOutreachDraft() bool {
-	return m.supportsOutreach(kernelapi.OperationCreate) && m.selectedInitiativeRecord() != nil &&
+	return m.supportsOutreach(kernelapi.OperationCreate) && m.selectedProjectRecord() != nil &&
 		m.selectedOutreachObservation() != nil && m.selectedOutreachAction() != nil
 }
 
@@ -101,11 +101,11 @@ func (m *Model) prepareOutreachComposer() {
 }
 
 func (m *Model) submitOutreachDraft() tea.Cmd {
-	initiative := m.selectedInitiativeRecord()
+	project := m.selectedProjectRecord()
 	observation := m.selectedOutreachObservation()
 	action := m.selectedOutreachAction()
 	prompt := strings.TrimSpace(m.editor.Value())
-	if !m.canCreateOutreachDraft() || initiative == nil || observation == nil || action == nil || m.busy {
+	if !m.canCreateOutreachDraft() || project == nil || observation == nil || action == nil || m.busy {
 		return nil
 	}
 	draft, err := parseOutreachDraft(prompt)
@@ -113,13 +113,13 @@ func (m *Model) submitOutreachDraft() tea.Cmd {
 		m.status = err.Error()
 		return nil
 	}
-	fingerprint := strings.Join([]string{initiative.ID, observation.ID, action.BindingID, fmt.Sprint(action.BindingRevision), prompt}, "\x00")
+	fingerprint := strings.Join([]string{project.ID, observation.ID, action.BindingID, fmt.Sprint(action.BindingRevision), prompt}, "\x00")
 	if m.pendingOutreachKey == "" || m.pendingOutreachPrompt != fingerprint {
 		m.pendingOutreachKey, m.pendingOutreachPrompt = uuid.NewString(), fingerprint
 	}
 	key := m.pendingOutreachKey
 	request := kernelapi.CreateOutreachThreadRequest{
-		Scope: m.config.Scope, InitiativeID: initiative.ID, SourceObservationID: observation.ID,
+		Scope: m.config.Scope, ProjectID: project.ID, SourceObservationID: observation.ID,
 		ApprovalPolicyRef: draft.approvalPolicyRef, Identity: draft.identity, IdempotencyKey: key,
 		Message: kernelapi.CreateOutreachMessageRequest{
 			ID: uuid.NewString(), Intent: draft.intent, Body: draft.body,
@@ -189,7 +189,7 @@ func (m *Model) deliverSelectedOutreachDraft() tea.Cmd {
 	key := "tui-outreach-delivery:" + thread.ID + ":" + message.ID
 	m.busy, m.err, m.status = true, nil, "Creating governed delivery Run…"
 	return func() tea.Msg {
-		run, err := m.client.DeliverOutreachMessage(m.ctx, thread.InitiativeID, thread.ID, message.ID, kernelapi.DeliverOutreachMessageRequest{Scope: thread.Scope, IdempotencyKey: key}, key)
+		run, err := m.client.DeliverOutreachMessage(m.ctx, thread.ProjectID, thread.ID, message.ID, kernelapi.DeliverOutreachMessageRequest{Scope: thread.Scope, IdempotencyKey: key}, key)
 		return outreachDeliveryCreated{run: run, threadID: thread.ID, err: err}
 	}
 }
@@ -297,13 +297,13 @@ func (m *Model) renderOutreachContent(width int) string {
 		title += mutedStyle.Render("  refreshing…")
 	}
 	lines := []string{title, ""}
-	initiative := m.selectedInitiativeRecord()
-	if initiative == nil {
-		return strings.Join(append(lines, mutedStyle.Render("Select an Initiative first, then press O.")), "\n")
+	project := m.selectedProjectRecord()
+	if project == nil {
+		return strings.Join(append(lines, mutedStyle.Render("Select a Project first, then press O.")), "\n")
 	}
-	lines = append(lines, compact("Initiative · "+initiative.Title, max(width-4, 24)))
+	lines = append(lines, compact("Project · "+project.Title, max(width-4, 24)))
 	if len(m.outreachThreads) == 0 {
-		lines = append(lines, mutedStyle.Render("No outreach threads exist for this Initiative."))
+		lines = append(lines, mutedStyle.Render("No outreach threads exist for this Project."))
 	} else {
 		visible := max(3, min(len(m.outreachThreads), max(m.height-24, 5)))
 		start := max(0, min(m.outreachSelected-visible/2, len(m.outreachThreads)-visible))

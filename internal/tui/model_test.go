@@ -87,14 +87,14 @@ type fakeKernelClient struct {
 	eventSourceError           error
 	eventSourceUpdates         []kernelapi.UpdateEventSourceSubscriptionRequest
 	eventSourceRetires         []kernelapi.RetireEventSourceSubscriptionRequest
-	initiatives                []*runtime.Initiative
+	projects                   []*runtime.Project
 	monitorCheckpoints         map[string]*runtime.SourceMonitorCheckpoint
 	monitorObservations        map[string][]*runtime.SourceObservation
 	activityPages              map[string]*runtime.ActivityFeedPage
 	activityRequests           []runtime.ActivityFeedRequest
-	initiativeKeys             []string
-	initiativeCreates          []kernelapi.CreateInitiativeRequest
-	initiativeUpdates          []kernelapi.UpdateInitiativeRequest
+	projectKeys                []string
+	projectCreates             []kernelapi.CreateProjectRequest
+	projectUpdates             []kernelapi.UpdateProjectRequest
 	outreachThreads            []*runtime.OutreachThread
 	outreachCreates            []kernelapi.CreateOutreachThreadRequest
 	outreachCreateKeys         []string
@@ -866,21 +866,21 @@ func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, i
 	return nil, runtime.ErrObjectiveNotFound
 }
 
-func (f *fakeKernelClient) CreateInitiative(_ context.Context, request kernelapi.CreateInitiativeRequest, key string) (*runtime.Initiative, error) {
-	f.initiativeKeys = append(f.initiativeKeys, key)
-	f.initiativeCreates = append(f.initiativeCreates, request)
-	initiative := &runtime.Initiative{ID: "initiative-created", Scope: request.Scope, Owner: request.Owner, Title: request.Title, Purpose: request.Purpose, Status: request.Status, ObjectiveRefs: request.ObjectiveRefs, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	f.initiatives = append([]*runtime.Initiative{initiative}, f.initiatives...)
-	return initiative, nil
+func (f *fakeKernelClient) CreateProject(_ context.Context, request kernelapi.CreateProjectRequest, key string) (*runtime.Project, error) {
+	f.projectKeys = append(f.projectKeys, key)
+	f.projectCreates = append(f.projectCreates, request)
+	project := &runtime.Project{ID: "project-created", Scope: request.Scope, Owner: request.Owner, Title: request.Title, Purpose: request.Purpose, Status: request.Status, ObjectiveRefs: request.ObjectiveRefs, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.projects = append([]*runtime.Project{project}, f.projects...)
+	return project, nil
 }
 
-func (f *fakeKernelClient) ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
-	return f.initiatives, nil
+func (f *fakeKernelClient) ListProjects(context.Context, runtime.ProjectFilter) ([]*runtime.Project, error) {
+	return f.projects, nil
 }
 func (f *fakeKernelClient) CreateOutreachThread(_ context.Context, request kernelapi.CreateOutreachThreadRequest, key string) (*runtime.OutreachThread, error) {
 	f.outreachCreates = append(f.outreachCreates, request)
 	f.outreachCreateKeys = append(f.outreachCreateKeys, key)
-	thread := &runtime.OutreachThread{ID: "outreach-created", Scope: request.Scope, InitiativeID: request.InitiativeID, SourceObservationID: request.SourceObservationID,
+	thread := &runtime.OutreachThread{ID: "outreach-created", Scope: request.Scope, ProjectID: request.ProjectID, SourceObservationID: request.SourceObservationID,
 		Identity: request.Identity, ApprovalPolicyRef: request.ApprovalPolicyRef, Status: runtime.OutreachThreadOpen,
 		Messages: []runtime.OutreachMessage{{ID: request.Message.ID, Direction: runtime.OutreachMessageOutbound, Intent: request.Message.Intent, Body: request.Message.Body, Status: runtime.OutreachMessageDraft}}}
 	f.outreachThreads = append([]*runtime.OutreachThread{thread}, f.outreachThreads...)
@@ -889,7 +889,7 @@ func (f *fakeKernelClient) CreateOutreachThread(_ context.Context, request kerne
 func (f *fakeKernelClient) ListOutreachThreads(_ context.Context, filter runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error) {
 	result := make([]*runtime.OutreachThread, 0, len(f.outreachThreads))
 	for _, thread := range f.outreachThreads {
-		if thread.InitiativeID == filter.InitiativeID {
+		if thread.ProjectID == filter.ProjectID {
 			result = append(result, thread)
 		}
 	}
@@ -903,13 +903,13 @@ func (f *fakeKernelClient) GetOutreachThread(_ context.Context, _ runtime.Scope,
 	}
 	return nil, runtime.ErrOutreachThreadNotFound
 }
-func (f *fakeKernelClient) DeliverOutreachMessage(_ context.Context, initiativeID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, key string) (*runtime.AgentRun, error) {
+func (f *fakeKernelClient) DeliverOutreachMessage(_ context.Context, projectID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, key string) (*runtime.AgentRun, error) {
 	f.outreachDeliveries = append(f.outreachDeliveries, request)
 	f.outreachDeliveryKeys = append(f.outreachDeliveryKeys, key)
-	return &runtime.AgentRun{ID: "outreach-run", Scope: request.Scope, Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": threadID, "messageId": messageID}}, Goal: initiativeID}, nil
+	return &runtime.AgentRun{ID: "outreach-run", Scope: request.Scope, Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": threadID, "messageId": messageID}}, Goal: projectID}, nil
 }
 func (f *fakeKernelClient) ListSourceObservations(_ context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
-	return f.monitorObservations[sourceMonitorStatusKey(filter.InitiativeID, filter.MonitorID)], nil
+	return f.monitorObservations[sourceMonitorStatusKey(filter.ProjectID, filter.MonitorID)], nil
 }
 func (f *fakeKernelClient) ListActivity(_ context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	f.activityRequests = append(f.activityRequests, request)
@@ -931,8 +931,8 @@ func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
 		selector = "team:" + request.TeamID
 	} else if request.ObjectiveID != "" {
 		selector = "objective:" + request.ObjectiveID
-	} else if request.InitiativeID != "" {
-		selector = "initiative:" + request.InitiativeID
+	} else if request.ProjectID != "" {
+		selector = "project:" + request.ProjectID
 	} else if request.RunID != "" {
 		selector = "run:" + request.RunID
 	}
@@ -944,40 +944,40 @@ func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
 	}
 	return selector
 }
-func (f *fakeKernelClient) GetSourceMonitorCheckpoint(_ context.Context, _ runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
-	checkpoint := f.monitorCheckpoints[sourceMonitorStatusKey(initiativeID, monitorID)]
+func (f *fakeKernelClient) GetSourceMonitorCheckpoint(_ context.Context, _ runtime.Scope, projectID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
+	checkpoint := f.monitorCheckpoints[sourceMonitorStatusKey(projectID, monitorID)]
 	if checkpoint == nil {
 		return nil, runtime.ErrSourceObservationNotFound
 	}
 	return checkpoint, nil
 }
-func (f *fakeKernelClient) GetInitiative(_ context.Context, _ runtime.Scope, id string) (*runtime.Initiative, error) {
-	for _, initiative := range f.initiatives {
-		if initiative.ID == id {
-			return initiative, nil
+func (f *fakeKernelClient) GetProject(_ context.Context, _ runtime.Scope, id string) (*runtime.Project, error) {
+	for _, project := range f.projects {
+		if project.ID == id {
+			return project, nil
 		}
 	}
-	return nil, runtime.ErrInitiativeNotFound
+	return nil, runtime.ErrProjectNotFound
 }
-func (f *fakeKernelClient) PatchInitiative(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error) {
-	f.initiativeUpdates = append(f.initiativeUpdates, request)
-	for _, initiative := range f.initiatives {
-		if initiative.ID == id {
+func (f *fakeKernelClient) PatchProject(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateProjectRequest) (*runtime.Project, error) {
+	f.projectUpdates = append(f.projectUpdates, request)
+	for _, project := range f.projects {
+		if project.ID == id {
 			if request.Purpose != nil {
-				initiative.Purpose = *request.Purpose
+				project.Purpose = *request.Purpose
 			}
 			if request.Status != nil {
-				initiative.Status = *request.Status
+				project.Status = *request.Status
 			}
 			if request.ObjectiveRefs != nil {
-				initiative.ObjectiveRefs = append([]string(nil), (*request.ObjectiveRefs)...)
+				project.ObjectiveRefs = append([]string(nil), (*request.ObjectiveRefs)...)
 			}
-			initiative.Revision++
-			initiative.UpdatedAt = time.Now()
-			return initiative, nil
+			project.Revision++
+			project.UpdatedAt = time.Now()
+			return project, nil
 		}
 	}
-	return nil, runtime.ErrInitiativeNotFound
+	return nil, runtime.ErrProjectNotFound
 }
 
 func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*runtime.AgentRunCommandResult, error) {
@@ -2698,33 +2698,33 @@ func TestObjectiveAndRunViewsProjectAttemptAndDurationBudgets(t *testing.T) {
 	}
 }
 
-func TestInitiativePortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *testing.T) {
+func TestProjectPortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*runtime.Objective{{ID: "objective-research", Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, Title: "Research customer pain", Goal: "Gather cited evidence", Status: runtime.ObjectiveStatusActive, Revision: 1}}}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	if !model.initiativeCapability.Available {
-		t.Fatal("Initiative capability was not discovered")
+	if !model.projectCapability.Available {
+		t.Fatal("Project capability was not discovered")
 	}
-	model.section, model.mode = sectionInitiatives, modeInitiativeCreate
+	model.section, model.mode = sectionProjects, modeProjectCreate
 	model.focusComposerEditor()
 	model.editor.SetValue("Customer insight campaign\nCoordinate monitoring and a cited report.")
-	applyCommand(t, model, model.submitInitiative())
-	if len(fake.initiativeCreates) != 1 || fake.initiativeKeys[0] == "" || fake.initiativeCreates[0].Status != runtime.InitiativeStatusActive || len(fake.initiativeCreates[0].ObjectiveRefs) != 1 || fake.initiativeCreates[0].ObjectiveRefs[0] != "objective-research" {
-		t.Fatalf("Initiative create=%#v keys=%#v", fake.initiativeCreates, fake.initiativeKeys)
+	applyCommand(t, model, model.submitProject())
+	if len(fake.projectCreates) != 1 || fake.projectKeys[0] == "" || fake.projectCreates[0].Status != runtime.ProjectStatusActive || len(fake.projectCreates[0].ObjectiveRefs) != 1 || fake.projectCreates[0].ObjectiveRefs[0] != "objective-research" {
+		t.Fatalf("Project create=%#v keys=%#v", fake.projectCreates, fake.projectKeys)
 	}
-	if view := model.View(); !strings.Contains(view, "Initiative portfolio") || !strings.Contains(view, "1 objectives") {
-		t.Fatalf("Initiative not rendered:\n%s", view)
+	if view := model.View(); !strings.Contains(view, "Project portfolio") || !strings.Contains(view, "1 objectives") {
+		t.Fatalf("Project not rendered:\n%s", view)
 	}
-	model.mode = modeInitiativeEdit
+	model.mode = modeProjectEdit
 	model.focusComposerEditor()
 	model.editor.SetValue("Monitor evidence, coordinate outreach, and publish a cited report.")
-	applyCommand(t, model, model.submitInitiativeAmendment())
-	if len(fake.initiativeUpdates) != 1 || fake.initiativeUpdates[0].ExpectedRevision != 1 || fake.initiativeUpdates[0].Purpose == nil {
-		t.Fatalf("Initiative update=%#v", fake.initiativeUpdates)
+	applyCommand(t, model, model.submitProjectAmendment())
+	if len(fake.projectUpdates) != 1 || fake.projectUpdates[0].ExpectedRevision != 1 || fake.projectUpdates[0].Purpose == nil {
+		t.Fatalf("Project update=%#v", fake.projectUpdates)
 	}
-	applyCommand(t, model, model.pauseOrResumeInitiative())
-	if len(fake.initiativeUpdates) != 2 || fake.initiativeUpdates[1].ExpectedRevision != 2 || fake.initiativeUpdates[1].Status == nil || *fake.initiativeUpdates[1].Status != runtime.InitiativeStatusPaused {
-		t.Fatalf("Initiative lifecycle=%#v", fake.initiativeUpdates)
+	applyCommand(t, model, model.pauseOrResumeProject())
+	if len(fake.projectUpdates) != 2 || fake.projectUpdates[1].ExpectedRevision != 2 || fake.projectUpdates[1].Status == nil || *fake.projectUpdates[1].Status != runtime.ProjectStatusPaused {
+		t.Fatalf("Project lifecycle=%#v", fake.projectUpdates)
 	}
 	second := &runtime.Objective{ID: "objective-outreach", Scope: fake.objectives[0].Scope, Owner: fake.objectives[0].Owner, Title: "Coordinate outreach", Goal: "Follow up safely", Status: runtime.ObjectiveStatusActive, Revision: 1}
 	fake.objectives = append(fake.objectives, second)
@@ -2732,17 +2732,17 @@ func TestInitiativePortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *test
 	model.objectiveSelected = 1
 	model.selectedObjective = second.ID
 	applyCommand(t, model, model.toggleSelectedObjectiveLink())
-	last := fake.initiativeUpdates[len(fake.initiativeUpdates)-1]
+	last := fake.projectUpdates[len(fake.projectUpdates)-1]
 	if last.ObjectiveRefs == nil || len(*last.ObjectiveRefs) != 2 || (*last.ObjectiveRefs)[1] != second.ID {
 		t.Fatalf("linked objectives=%#v", last.ObjectiveRefs)
 	}
 }
 
-func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
+func TestProjectPortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 	scope := runtime.Scope{Kind: "local", ID: "default"}
-	initiative := &runtime.Initiative{
-		ID: "initiative-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		Title: "Market research", Purpose: "Monitor governed sources", Status: runtime.InitiativeStatusActive, Revision: 3,
+	project := &runtime.Project{
+		ID: "project-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
+		Title: "Market research", Purpose: "Monitor governed sources", Status: runtime.ProjectStatusActive, Revision: 3,
 		SourceMonitors: []runtime.SourceMonitorReference{{
 			ID: "reddit-kubernetes", ObjectiveID: "objective-research", AssignedAgentID: "researcher",
 			SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
@@ -2750,55 +2750,55 @@ func TestInitiativePortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
 		}},
 	}
 	objective := &runtime.Objective{
-		ID: "objective-research", Scope: scope, Owner: initiative.Owner, Title: "Monitor sources", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive,
+		ID: "objective-research", Scope: scope, Owner: project.Owner, Title: "Monitor sources", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive,
 	}
-	key := sourceMonitorStatusKey(initiative.ID, "reddit-kubernetes")
+	key := sourceMonitorStatusKey(project.ID, "reddit-kubernetes")
 	fake := &fakeKernelClient{
-		document: kernelapi.Capabilities(), initiatives: []*runtime.Initiative{initiative}, objectives: []*runtime.Objective{objective},
+		document: kernelapi.Capabilities(), projects: []*runtime.Project{project}, objectives: []*runtime.Objective{objective},
 		monitorCheckpoints: map[string]*runtime.SourceMonitorCheckpoint{key: {
-			Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes", LastRunID: "run-live-123",
+			Scope: scope, ProjectID: project.ID, MonitorID: "reddit-kubernetes", LastRunID: "run-live-123",
 			ObservationCount: 5, LastSuccessAt: time.Now().Add(-time.Minute), Revision: 2,
 		}},
 		monitorObservations: map[string][]*runtime.SourceObservation{key: {{
-			ID: "observation-1", Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes",
+			ID: "observation-1", Scope: scope, ProjectID: project.ID, MonitorID: "reddit-kubernetes",
 			Summary: "Operators want simpler upgrades", SourceURI: "https://www.reddit.com/r/kubernetes/comments/example",
 			ArtifactRef: &runtime.ResourceReference{Kind: runtime.ResourceKindArtifact, ID: "captured-thread", Revision: 2},
 		}}},
-		activityPages: map[string]*runtime.ActivityFeedPage{"initiative:" + initiative.ID: {Items: []runtime.ActivityProjection{{
-			ID: "initiative-progress-1", EventType: "artifact.created", InitiativeID: initiative.ID, Summary: "Weekly research brief produced", CreatedAt: time.Now().Add(-30 * time.Second),
+		activityPages: map[string]*runtime.ActivityFeedPage{"project:" + project.ID: {Items: []runtime.ActivityProjection{{
+			ID: "project-progress-1", EventType: "artifact.created", ProjectID: project.ID, Summary: "Weekly research brief produced", CreatedAt: time.Now().Add(-30 * time.Second),
 		}}}, "run-live-123": {Items: []runtime.ActivityProjection{{
-			ID: "source-policy-call-1", EventType: "source_policy.authorized", InitiativeID: initiative.ID, RunID: "run-live-123", CreatedAt: time.Now().Add(-2 * time.Minute),
+			ID: "source-policy-call-1", EventType: "source_policy.authorized", ProjectID: project.ID, RunID: "run-live-123", CreatedAt: time.Now().Add(-2 * time.Minute),
 			Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "policyId": "public-reddit-research", "policyVersion": "2026-07-13", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": float64(5)},
 		}}}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	model.section = sectionInitiatives
+	model.section = sectionProjects
 	view := model.View()
 	for _, expected := range []string{"Recent activity", "Weekly research brief produced", "reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
 		if !strings.Contains(view, expected) {
-			t.Fatalf("Initiative monitor view missing %q:\n%s", expected, view)
+			t.Fatalf("Project monitor view missing %q:\n%s", expected, view)
 		}
 	}
-	var policyRequest, initiativeRequest *runtime.ActivityFeedRequest
+	var policyRequest, projectRequest *runtime.ActivityFeedRequest
 	for index := range fake.activityRequests {
 		request := &fake.activityRequests[index]
 		if request.RunID == "run-live-123" {
 			policyRequest = request
 		}
-		if request.InitiativeID == initiative.ID {
-			initiativeRequest = request
+		if request.ProjectID == project.ID {
+			projectRequest = request
 		}
 	}
 	if policyRequest == nil || !policyRequest.IncludeDetails || len(policyRequest.EventTypes) != 1 || policyRequest.EventTypes[0] != "source_policy.authorized" {
 		t.Fatalf("activity requests=%#v", fake.activityRequests)
 	}
-	if initiativeRequest == nil || initiativeRequest.Limit != 5 || initiativeRequest.IncludeDetails {
-		t.Fatalf("initiative activity request=%#v", initiativeRequest)
+	if projectRequest == nil || projectRequest.Limit != 5 || projectRequest.IncludeDetails {
+		t.Fatalf("project activity request=%#v", projectRequest)
 	}
 }
 
-func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBoundary(t *testing.T) {
+func TestProjectPolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBoundary(t *testing.T) {
 	store := runtime.NewMemoryStore()
 	scope := runtime.Scope{Kind: "local", ID: "research"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
@@ -2813,14 +2813,14 @@ func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBounda
 		ID: "reddit-kubernetes-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "source-monitor", DefinitionVersion: "1", TriggerID: "reddit-kubernetes",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-		Input:   map[string]interface{}{"initiativeId": "initiative-policy", "sourceMonitorId": "reddit-kubernetes"},
+		Input:   map[string]interface{}{"projectId": "project-policy", "sourceMonitorId": "reddit-kubernetes"},
 		Policy:  map[string]interface{}{"sourcePolicyRef": "public-reddit@1"}, Status: runtime.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	initiative, _, err := runtime.NewInitiativeService(store, store).Create(t.Context(), runtime.CreateInitiativeRequest{Initiative: &runtime.Initiative{
-		ID: "initiative-policy", Scope: scope, Owner: owner, Title: "Governed research", Purpose: "Collect permitted evidence", Status: runtime.InitiativeStatusActive,
+	project, _, err := runtime.NewProjectService(store, store).Create(t.Context(), runtime.CreateProjectRequest{Project: &runtime.Project{
+		ID: "project-policy", Scope: scope, Owner: owner, Title: "Governed research", Purpose: "Collect permitted evidence", Status: runtime.ProjectStatusActive,
 		ObjectiveRefs: []string{objective.ID}, SourceMonitors: []runtime.SourceMonitorReference{{
 			ID: "reddit-kubernetes", ObjectiveID: objective.ID, AssignedAgentID: owner.ID, SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
 			SourcePolicyRef: "public-reddit@1", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
@@ -2831,19 +2831,19 @@ func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBounda
 	}
 	run, err := portfolio.CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID, Goal: objective.Goal, Source: runtime.RunSourceSchedule,
-		Context: map[string]interface{}{"initiativeId": initiative.ID, "sourceMonitorId": "reddit-kubernetes"},
+		Context: map[string]interface{}{"projectId": project.ID, "sourceMonitorId": "reddit-kubernetes"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runtime.NewSourceMonitorService(store, store, store, store).AdvanceCheckpoint(t.Context(), runtime.AdvanceSourceMonitorCheckpointRequest{
-		Scope: scope, InitiativeID: initiative.ID, MonitorID: "reddit-kubernetes", RunID: run.ID, AgentID: owner.ID,
+		Scope: scope, ProjectID: project.ID, MonitorID: "reddit-kubernetes", RunID: run.ID, AgentID: owner.ID,
 		SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed", ActionCallID: "call-policy",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runtime.NewRunActivityService(store, store).AppendActivity(t.Context(), &runtime.ActivityEvent{
-		ID: "source-policy-call-policy", Scope: scope, InitiativeID: initiative.ID, ObjectiveID: objective.ID, RunID: run.ID, AgentID: owner.ID,
+		ID: "source-policy-call-policy", Scope: scope, ProjectID: project.ID, ObjectiveID: objective.ID, RunID: run.ID, AgentID: owner.ID,
 		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo, Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"},
 		Summary: "Source access authorized by policy", Visibility: runtime.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
 		Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "actionCallId": "call-policy", "policyId": "public-reddit", "policyVersion": "1", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": 5},
@@ -2862,7 +2862,7 @@ func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBounda
 	}
 	model.width, model.height = 120, 40
 	applyCommand(t, model, model.loadCapabilities())
-	model.section = sectionInitiatives
+	model.section = sectionProjects
 	view := model.View()
 	for _, expected := range []string{"Last success", "Authorized by public-reddit@1", "www.reddit.com/r/kubernetes · up to 5 items"} {
 		if !strings.Contains(view, expected) {
@@ -2871,35 +2871,35 @@ func TestInitiativePolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBounda
 	}
 }
 
-func TestInitiativeCreationRequiresRealObjective(t *testing.T) {
+func TestProjectCreationRequiresRealObjective(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	model.mode = modeInitiativeCreate
+	model.mode = modeProjectCreate
 	model.editor.SetValue("Unbound campaign")
-	if command := model.submitInitiative(); command != nil {
-		t.Fatal("created Initiative without an Objective")
+	if command := model.submitProject(); command != nil {
+		t.Fatal("created Project without an Objective")
 	}
-	if !strings.Contains(model.status, "Objective") || len(fake.initiativeCreates) != 0 {
-		t.Fatalf("status=%q creates=%#v", model.status, fake.initiativeCreates)
+	if !strings.Contains(model.status, "Objective") || len(fake.projectCreates) != 0 {
+		t.Fatalf("status=%q creates=%#v", model.status, fake.projectCreates)
 	}
 }
 
 func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *testing.T) {
 	now := time.Now().UTC()
 	scope := runtime.Scope{Kind: "local", ID: "default"}
-	initiative := &runtime.Initiative{
-		ID: "initiative-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		Title: "Community research", Status: runtime.InitiativeStatusActive,
+	project := &runtime.Project{
+		ID: "project-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
+		Title: "Community research", Status: runtime.ProjectStatusActive,
 		SourceMonitors: []runtime.SourceMonitorReference{{ID: "forum", AssignedAgentID: "researcher", SourcePolicyRef: "public-forum@1"}},
 	}
 	observation := &runtime.SourceObservation{
-		ID: "evidence-1", Scope: scope, InitiativeID: initiative.ID, MonitorID: "forum", Summary: "Install flow is confusing",
+		ID: "evidence-1", Scope: scope, ProjectID: project.ID, MonitorID: "forum", Summary: "Install flow is confusing",
 		SourceURI: "https://forum.example/thread/1", ObservedAt: now,
 	}
 	disclosure := "Disclosure: automated OpenSeal research assistant."
 	thread := &runtime.OutreachThread{
-		ID: "thread-1", Scope: scope, InitiativeID: initiative.ID, SourceObservationID: observation.ID, TargetURI: observation.SourceURI,
+		ID: "thread-1", Scope: scope, ProjectID: project.ID, SourceObservationID: observation.ID, TargetURI: observation.SourceURI,
 		AssignedAgentID: "researcher", SourcePolicyRef: "public-forum@1", ApprovalPolicyRef: "human-review",
 		Identity: runtime.OutreachIdentity{ProfileRef: "profile:research", DisplayName: "Research", Affiliation: "OpenSeal", Disclosure: disclosure},
 		Status:   runtime.OutreachThreadOpen, Messages: []runtime.OutreachMessage{{
@@ -2912,11 +2912,11 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 	}
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(
-			kernelapi.InitiativesCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(), kernelapi.AgentRunsCapability(),
+			kernelapi.ProjectsCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(), kernelapi.AgentRunsCapability(),
 		),
-		initiatives: []*runtime.Initiative{initiative}, outreachThreads: []*runtime.OutreachThread{thread},
-		runs:                []*runtime.AgentRun{{ID: "run-1", Scope: scope, Owner: initiative.Owner, AssignedAgentID: "researcher", Goal: "Deliver reviewed outreach", Status: runtime.AgentRunStatusWaitingForApproval, Revision: 3}},
-		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(initiative.ID, "forum"): {observation}},
+		projects: []*runtime.Project{project}, outreachThreads: []*runtime.OutreachThread{thread},
+		runs:                []*runtime.AgentRun{{ID: "run-1", Scope: scope, Owner: project.Owner, AssignedAgentID: "researcher", Goal: "Deliver reviewed outreach", Status: runtime.AgentRunStatusWaitingForApproval, Revision: 3}},
+		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(project.ID, "forum"): {observation}},
 		skillActions: []capability.ModelAction{{
 			Name: "Reply", BindingID: "forum-account", BindingRevision: 4, SkillID: "forum", Version: "1", Action: "reply",
 			SideEffect: capability.SideEffectExternal, SemanticArguments: map[string]string{"target": "url", "body": "message"},
@@ -2968,8 +2968,8 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 	}
 
 	readOnly := &fakeKernelClient{
-		document:    kernelapi.NewCapabilityDocument(kernelapi.InitiativesCapability(), kernelapi.OutreachCapability(kernelapi.OperationGet, kernelapi.OperationList)),
-		initiatives: []*runtime.Initiative{initiative}, outreachThreads: []*runtime.OutreachThread{thread},
+		document: kernelapi.NewCapabilityDocument(kernelapi.ProjectsCapability(), kernelapi.OutreachCapability(kernelapi.OperationGet, kernelapi.OperationList)),
+		projects: []*runtime.Project{project}, outreachThreads: []*runtime.OutreachThread{thread},
 	}
 	readOnlyModel := newTestModel(t, readOnly)
 	applyCommand(t, readOnlyModel, readOnlyModel.loadCapabilities())
@@ -2980,10 +2980,10 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 
 	teamFake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(
-			kernelapi.InitiativesCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(),
+			kernelapi.ProjectsCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(),
 		),
-		initiatives:         []*runtime.Initiative{initiative},
-		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(initiative.ID, "forum"): {observation}},
+		projects:            []*runtime.Project{project},
+		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(project.ID, "forum"): {observation}},
 		skillActions:        fake.skillActions,
 	}
 	teamConfig := DefaultConfig()
@@ -2998,7 +2998,7 @@ func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *te
 	teamModel.section = sectionOutreach
 	applyCommand(t, teamModel, teamModel.loadOutreach())
 	if !teamModel.canCreateOutreachDraft() || teamModel.selectedOutreachAction() == nil || teamModel.selectedOutreachAction().BindingID != "forum-account" {
-		t.Fatalf("Team Initiative could not discover its monitor Agent's authorized action: capability=%#v actions=%#v", teamModel.skillActionCapability, teamModel.outreachActions)
+		t.Fatalf("Team Project could not discover its monitor Agent's authorized action: capability=%#v actions=%#v", teamModel.skillActionCapability, teamModel.outreachActions)
 	}
 }
 
@@ -3256,15 +3256,15 @@ func TestRunViewProjectsCanonicalParentLineage(t *testing.T) {
 	}
 }
 
-func TestEvidenceSnapshotProjectsAcrossRunObjectiveAndInitiativeInspection(t *testing.T) {
+func TestEvidenceSnapshotProjectsAcrossRunObjectiveAndProjectInspection(t *testing.T) {
 	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
 	model.ready = true
 	model.focus = focusPanel
 	model.runCapability = kernelapi.AgentRunsCapability()
 	model.objectiveCapability = kernelapi.ObjectivesCapability()
-	model.initiativeCapability = kernelapi.InitiativesCapability()
+	model.projectCapability = kernelapi.ProjectsCapability()
 	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
-	model.initiatives = []*runtime.Initiative{{ID: "initiative-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.InitiativeStatusActive}}
+	model.projects = []*runtime.Project{{ID: "project-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.ProjectStatusActive}}
 	older := evidenceSnapshotRun("run-older", "snapshot-old", time.Date(2026, 7, 19, 9, 0, 0, 0, time.UTC))
 	newer := evidenceSnapshotRun("run-newer", "snapshot-new", time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
 	model.runs = []*runtime.AgentRun{older, newer}
@@ -3272,7 +3272,7 @@ func TestEvidenceSnapshotProjectsAcrossRunObjectiveAndInitiativeInspection(t *te
 	model.section = sectionRuns
 	model.selected = 1
 	view := model.renderRunsContent(180)
-	for _, expected := range []string{"Evidence snapshot", "2 selected · 3 expired · bounded/truncated", "Snapshot · snapshot-new", "Initiative · initiative-research", "Run · run-newer", "25 observations · 120 runes/summary · 1000 runes total", "v expand bounded evidence"} {
+	for _, expected := range []string{"Evidence snapshot", "2 selected · 3 expired · bounded/truncated", "Snapshot · snapshot-new", "Project · project-research", "Run · run-newer", "25 observations · 120 runes/summary · 1000 runes total", "v expand bounded evidence"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Run evidence projection missing %q:\n%s", expected, view)
 		}
@@ -3286,9 +3286,9 @@ func TestEvidenceSnapshotProjectsAcrossRunObjectiveAndInitiativeInspection(t *te
 		t.Fatalf("Objective did not project its latest scheduled snapshot:\n%s", view)
 	}
 
-	model.section = sectionInitiatives
-	if view = model.renderInitiativesContent(180); !strings.Contains(view, "snapshot-new") || strings.Contains(view, "snapshot-old") {
-		t.Fatalf("Initiative did not project its latest scheduled snapshot:\n%s", view)
+	model.section = sectionProjects
+	if view = model.renderProjectsContent(180); !strings.Contains(view, "snapshot-new") || strings.Contains(view, "snapshot-old") {
+		t.Fatalf("Project did not project its latest scheduled snapshot:\n%s", view)
 	}
 }
 
@@ -3355,9 +3355,9 @@ func TestEvidenceGroundingProjectsVerifiedClaimsAcrossInspectionSurfaces(t *test
 	model.focus = focusPanel
 	model.runCapability = kernelapi.AgentRunsCapability()
 	model.objectiveCapability = kernelapi.ObjectivesCapability()
-	model.initiativeCapability = kernelapi.InitiativesCapability()
+	model.projectCapability = kernelapi.ProjectsCapability()
 	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
-	model.initiatives = []*runtime.Initiative{{ID: "initiative-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.InitiativeStatusActive}}
+	model.projects = []*runtime.Project{{ID: "project-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.ProjectStatusActive}}
 	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
 	model.runs = []*runtime.AgentRun{run}
 
@@ -3398,9 +3398,9 @@ func TestEvidenceGroundingProjectsVerifiedClaimsAcrossInspectionSurfaces(t *test
 	if view = model.renderObjectivesContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
 		t.Fatalf("Objective inspection omitted grounding:\n%s", view)
 	}
-	model.section = sectionInitiatives
-	if view = model.renderInitiativesContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
-		t.Fatalf("Initiative inspection omitted grounding:\n%s", view)
+	model.section = sectionProjects
+	if view = model.renderProjectsContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
+		t.Fatalf("Project inspection omitted grounding:\n%s", view)
 	}
 }
 
@@ -3543,10 +3543,10 @@ func evidenceSnapshotRun(id, snapshotID string, createdAt time.Time) *runtime.Ag
 	run.CreatedAt = createdAt
 	run.UpdatedAt = createdAt
 	run.Context = map[string]interface{}{
-		"initiativeId": "initiative-research",
+		"projectId": "project-research",
 		runtime.EvidenceSnapshotContextKey: map[string]interface{}{
 			"apiVersion": evidenceSnapshotAPIVersion,
-			"id":         snapshotID, "initiativeId": "initiative-research",
+			"id":         snapshotID, "projectId": "project-research",
 			"selectedCount": 2, "expiredCount": 3, "truncated": true,
 			"observationLimit": 25, "summaryRuneLimit": 120, "totalSummaryRuneLimit": 1000,
 			"observations": []interface{}{
@@ -3719,13 +3719,13 @@ func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testin
 	}
 }
 
-func TestTeamChannelProjectsGovernedInitiativeProposalInline(t *testing.T) {
+func TestTeamChannelProjectsGovernedProjectProposalInline(t *testing.T) {
 	conversation := testConversation("research", "customer-research", 1, 2)
 	approval := &runtime.ApprovalCheckpoint{
-		ID: "approval-initiative", Scope: conversation.Scope, RunID: "run-initiative", ActionCallID: "call-initiative",
-		Status: runtime.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create customer research Initiative",
+		ID: "approval-project", Scope: conversation.Scope, RunID: "run-project", ActionCallID: "call-project",
+		Status: runtime.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create customer research Project",
 		ProposedAction: map[string]interface{}{
-			"resourceType": "initiative", "operation": "create",
+			"resourceType": "project", "operation": "create",
 			"owner": map[string]interface{}{"type": "team", "id": "research-team"},
 			"changes": map[string]interface{}{
 				"title": "Customer research", "purpose": "Research pain points and follow up with qualified leads",
@@ -3737,7 +3737,7 @@ func TestTeamChannelProjectsGovernedInitiativeProposalInline(t *testing.T) {
 	message := &runtime.ChannelMessage{
 		ID: "proposal", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
 		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "research-lead"},
-		Intent: runtime.MessageIntentProposal, Content: "I prepared the Initiative for review.",
+		Intent: runtime.MessageIntentProposal, Content: "I prepared the Project for review.",
 		Audience:   runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel},
 		References: []runtime.ConversationReference{{Kind: runtime.ConversationReferenceApproval, ID: approval.ID, Version: 1}}, CreatedAt: time.Now(),
 	}
@@ -3757,15 +3757,15 @@ func TestTeamChannelProjectsGovernedInitiativeProposalInline(t *testing.T) {
 	model.width = 180
 	view := model.View()
 	for _, expected := range []string{
-		"Initiative · create · pending", "Create customer research Initiative", "Owner · team:research-team",
+		"Project · create · pending", "Create customer research Project", "Owner · team:research-team",
 		"Purpose · Research pain points", "Objectives · 2 · monitor-feedback, follow-up-leads", "Milestones · 1", "A approvals",
 	} {
 		if !strings.Contains(view, expected) {
-			t.Fatalf("channel Initiative projection missing %q:\n%s", expected, view)
+			t.Fatalf("channel Project projection missing %q:\n%s", expected, view)
 		}
 	}
 	if strings.Contains(view, "apiKey") || strings.Contains(view, "credential") {
-		t.Fatalf("channel Initiative projection exposed untyped configuration:\n%s", view)
+		t.Fatalf("channel Project projection exposed untyped configuration:\n%s", view)
 	}
 }
 
@@ -4368,7 +4368,7 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 		From:                    runtime.SkillReferenceIdentity{ID: "source", Version: "1", SourceIdentity: "registry:source"},
 		To:                      runtime.SkillReferenceIdentity{ID: "source", Version: "2", SourceIdentity: "registry:source"},
 		Objectives:              []runtime.SkillReferenceObjectiveImpact{{ID: "monitor-hourly", ExpectedRevision: 3}},
-		Initiatives:             []runtime.SkillReferenceInitiativeImpact{{ID: "market-research", ExpectedRevision: 5, MonitorIDs: []string{"forums"}}},
+		Projects:                []runtime.SkillReferenceProjectImpact{{ID: "market-research", ExpectedRevision: 5, MonitorIDs: []string{"forums"}}},
 		TeamAuthority: &runtime.SkillReferenceTeamAuthorityImpact{
 			DeploymentID: "research-team", ExpectedRevision: 2, DefinitionID: "research", DefinitionVersion: "4", AuthorizedRoleIDs: []string{"analyst"},
 		},
@@ -4394,7 +4394,7 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 	model.editor.SetValue("version: 2\nsource: registry:source")
 	applyCommand(t, model, model.submitSkillBindingUpgradePlan())
 	view := model.renderClawHubSkillsContent(120)
-	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "1 Initiative(s)", "historical Runs stay unchanged", "roles analyst", "additional governed action", "Explicit approval"} {
+	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "1 Project(s)", "historical Runs stay unchanged", "roles analyst", "additional governed action", "Explicit approval"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("upgrade review missing %q:\n%s", expected, view)
 		}

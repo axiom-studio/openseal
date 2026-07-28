@@ -10,20 +10,20 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *Server) outreachService(w http.ResponseWriter) (*runtime.OutreachService, runtime.InitiativeStore, runtime.SourceMonitorStore, bool) {
+func (s *Server) outreachService(w http.ResponseWriter) (*runtime.OutreachService, runtime.ProjectStore, runtime.SourceMonitorStore, bool) {
 	outreach, outreachOK := s.store.(runtime.OutreachStore)
-	initiatives, initiativesOK := s.store.(runtime.InitiativeStore)
+	projects, projectsOK := s.store.(runtime.ProjectStore)
 	sources, sourcesOK := s.store.(runtime.SourceMonitorStore)
 	actions, actionsOK := s.store.(runtime.OutreachActionReader)
-	if !outreachOK || !initiativesOK || !sourcesOK || !actionsOK {
+	if !outreachOK || !projectsOK || !sourcesOK || !actionsOK {
 		s.respondError(w, http.StatusServiceUnavailable, "outreach capability is unavailable")
 		return nil, nil, nil, false
 	}
-	return runtime.NewOutreachService(outreach, initiatives, sources, actions), initiatives, sources, true
+	return runtime.NewOutreachService(outreach, projects, sources, actions), projects, sources, true
 }
 
 func (s *Server) handleCreateOutreachThread(w http.ResponseWriter, r *http.Request) {
-	service, initiatives, sources, ok := s.outreachService(w)
+	service, projects, sources, ok := s.outreachService(w)
 	if !ok {
 		return
 	}
@@ -37,15 +37,15 @@ func (s *Server) handleCreateOutreachThread(w http.ResponseWriter, r *http.Reque
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	initiativeID := strings.TrimSpace(r.PathValue("id"))
-	if strings.TrimSpace(payload.InitiativeID) != initiativeID {
-		s.respondError(w, http.StatusBadRequest, "outreach Initiative does not match the route")
+	projectID := strings.TrimSpace(r.PathValue("id"))
+	if strings.TrimSpace(payload.ProjectID) != projectID {
+		s.respondError(w, http.StatusBadRequest, "outreach Project does not match the route")
 		return
 	}
-	initiative, err := initiatives.GetInitiative(r.Context(), payload.Scope, initiativeID)
-	if err != nil || initiative == nil {
+	project, err := projects.GetProject(r.Context(), payload.Scope, projectID)
+	if err != nil || project == nil {
 		if err == nil {
-			err = runtime.ErrInitiativeNotFound
+			err = runtime.ErrProjectNotFound
 		}
 		s.respondOutreachError(w, err)
 		return
@@ -58,19 +58,19 @@ func (s *Server) handleCreateOutreachThread(w http.ResponseWriter, r *http.Reque
 		s.respondOutreachError(w, err)
 		return
 	}
-	if observation.InitiativeID != initiative.ID {
-		s.respondError(w, http.StatusBadRequest, "source observation does not belong to the Initiative")
+	if observation.ProjectID != project.ID {
+		s.respondError(w, http.StatusBadRequest, "source observation does not belong to the Project")
 		return
 	}
 	var monitor *runtime.SourceMonitorReference
-	for index := range initiative.SourceMonitors {
-		if initiative.SourceMonitors[index].ID == observation.MonitorID {
-			monitor = &initiative.SourceMonitors[index]
+	for index := range project.SourceMonitors {
+		if project.SourceMonitors[index].ID == observation.MonitorID {
+			monitor = &project.SourceMonitors[index]
 			break
 		}
 	}
 	if monitor == nil {
-		s.respondError(w, http.StatusConflict, "source observation monitor is no longer part of the Initiative")
+		s.respondError(w, http.StatusConflict, "source observation monitor is no longer part of the Project")
 		return
 	}
 	selected := payload.Message.Capability
@@ -106,9 +106,9 @@ func (s *Server) handleCreateOutreachThread(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	thread := &runtime.OutreachThread{
-		ID: strings.TrimSpace(payload.ID), Scope: payload.Scope, InitiativeID: initiative.ID,
+		ID: strings.TrimSpace(payload.ID), Scope: payload.Scope, ProjectID: project.ID,
 		SourceObservationID: observation.ID, MonitorID: observation.MonitorID, StableSourceID: observation.StableSourceID,
-		TargetURI: observation.SourceURI, Owner: initiative.Owner, AssignedAgentID: monitor.AssignedAgentID,
+		TargetURI: observation.SourceURI, Owner: project.Owner, AssignedAgentID: monitor.AssignedAgentID,
 		SourcePolicyRef: monitor.SourcePolicyRef, ApprovalPolicyRef: strings.TrimSpace(payload.ApprovalPolicyRef), Identity: payload.Identity,
 		Messages: []runtime.OutreachMessage{{
 			ID: strings.TrimSpace(payload.Message.ID), Direction: runtime.OutreachMessageOutbound, Intent: payload.Message.Intent,
@@ -125,7 +125,7 @@ func (s *Server) handleCreateOutreachThread(w http.ResponseWriter, r *http.Reque
 		key = strings.TrimSpace(payload.IdempotencyKey)
 	}
 	created, event, err := service.Create(r.Context(), runtime.CreateOutreachThreadRequest{
-		Thread: thread, IdempotencyKey: key, Actor: standaloneInitiativeActor, Visibility: outreachVisibility(initiative.Owner),
+		Thread: thread, IdempotencyKey: key, Actor: standaloneProjectActor, Visibility: outreachVisibility(project.Owner),
 	})
 	if err != nil {
 		s.respondOutreachError(w, err)
@@ -139,7 +139,7 @@ func (s *Server) handleCreateOutreachThread(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleListOutreachThreads(w http.ResponseWriter, r *http.Request) {
-	service, initiatives, _, ok := s.outreachService(w)
+	service, projects, _, ok := s.outreachService(w)
 	if !ok {
 		return
 	}
@@ -148,10 +148,10 @@ func (s *Server) handleListOutreachThreads(w http.ResponseWriter, r *http.Reques
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	initiativeID := strings.TrimSpace(r.PathValue("id"))
-	if initiative, getErr := initiatives.GetInitiative(r.Context(), scope, initiativeID); getErr != nil || initiative == nil {
+	projectID := strings.TrimSpace(r.PathValue("id"))
+	if project, getErr := projects.GetProject(r.Context(), scope, projectID); getErr != nil || project == nil {
 		if getErr == nil {
-			getErr = runtime.ErrInitiativeNotFound
+			getErr = runtime.ErrProjectNotFound
 		}
 		s.respondOutreachError(w, getErr)
 		return
@@ -166,7 +166,7 @@ func (s *Server) handleListOutreachThreads(w http.ResponseWriter, r *http.Reques
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter := runtime.OutreachThreadFilter{Scope: scope, InitiativeID: initiativeID, SourceObservationID: strings.TrimSpace(r.URL.Query().Get("sourceObservationId")), Limit: limit, Offset: offset}
+	filter := runtime.OutreachThreadFilter{Scope: scope, ProjectID: projectID, SourceObservationID: strings.TrimSpace(r.URL.Query().Get("sourceObservationId")), Limit: limit, Offset: offset}
 	for _, raw := range queryValues(r, "status") {
 		status := runtime.OutreachThreadStatus(raw)
 		if status != runtime.OutreachThreadOpen && status != runtime.OutreachThreadClosed && status != runtime.OutreachThreadCanceled {
@@ -198,7 +198,7 @@ func (s *Server) handleGetOutreachThread(w http.ResponseWriter, r *http.Request)
 		s.respondOutreachError(w, err)
 		return
 	}
-	if thread.InitiativeID != strings.TrimSpace(r.PathValue("id")) {
+	if thread.ProjectID != strings.TrimSpace(r.PathValue("id")) {
 		s.respondOutreachError(w, runtime.ErrOutreachThreadNotFound)
 		return
 	}
@@ -210,7 +210,7 @@ func (s *Server) handleDeliverOutreachMessage(w http.ResponseWriter, r *http.Req
 		s.respondError(w, http.StatusServiceUnavailable, "outreach delivery runtime is unavailable")
 		return
 	}
-	service, initiatives, _, ok := s.outreachService(w)
+	service, projects, _, ok := s.outreachService(w)
 	if !ok {
 		return
 	}
@@ -219,17 +219,17 @@ func (s *Server) handleDeliverOutreachMessage(w http.ResponseWriter, r *http.Req
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	initiativeID := strings.TrimSpace(r.PathValue("id"))
-	initiative, err := initiatives.GetInitiative(r.Context(), payload.Scope, initiativeID)
-	if err != nil || initiative == nil {
+	projectID := strings.TrimSpace(r.PathValue("id"))
+	project, err := projects.GetProject(r.Context(), payload.Scope, projectID)
+	if err != nil || project == nil {
 		if err == nil {
-			err = runtime.ErrInitiativeNotFound
+			err = runtime.ErrProjectNotFound
 		}
 		s.respondOutreachError(w, err)
 		return
 	}
 	thread, err := service.Get(r.Context(), payload.Scope, strings.TrimSpace(r.PathValue("threadId")))
-	if err != nil || thread.InitiativeID != initiative.ID {
+	if err != nil || thread.ProjectID != project.ID {
 		if err == nil {
 			err = runtime.ErrOutreachThreadNotFound
 		}
@@ -259,10 +259,10 @@ func (s *Server) handleDeliverOutreachMessage(w http.ResponseWriter, r *http.Req
 	result, err := s.outreachDelivery(r.Context(), runtime.CreateAgentRunRequest{
 		Scope: payload.Scope, Kind: runtime.RunKindAgentWork, Owner: thread.Owner, AssignedAgentID: thread.AssignedAgentID,
 		ConcurrencyKey: "outreach:" + thread.ID + ":" + message.ID,
-		Goal:           "Deliver reviewed outreach message for Initiative " + initiative.Title, Source: runtime.RunSourceRequest, Priority: payload.Priority,
+		Goal:           "Deliver reviewed outreach message for Project " + project.Title, Source: runtime.RunSourceRequest, Priority: payload.Priority,
 		Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": thread.ID, "messageId": message.ID}},
 		Budget:  payload.Budget, Policy: map[string]interface{}{"outreachApprovalPolicyRef": thread.ApprovalPolicyRef}, IdempotencyKey: key,
-		Actor: standaloneInitiativeActor, Visibility: outreachVisibility(thread.Owner),
+		Actor: standaloneProjectActor, Visibility: outreachVisibility(thread.Owner),
 	})
 	if err != nil {
 		s.respondAgentRunError(w, err)
@@ -284,7 +284,7 @@ func outreachVisibility(owner runtime.ObjectiveOwner) runtime.ActivityVisibility
 
 func (s *Server) respondOutreachError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, runtime.ErrOutreachThreadNotFound), errors.Is(err, runtime.ErrSourceObservationNotFound), errors.Is(err, runtime.ErrInitiativeNotFound):
+	case errors.Is(err, runtime.ErrOutreachThreadNotFound), errors.Is(err, runtime.ErrSourceObservationNotFound), errors.Is(err, runtime.ErrProjectNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, runtime.ErrOutreachThreadConflict), errors.Is(err, runtime.ErrOutreachThreadIdempotency):
 		s.respondError(w, http.StatusConflict, err.Error())

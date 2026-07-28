@@ -11,7 +11,7 @@ type MemoryStore struct {
 	mu                       sync.RWMutex
 	objectives               map[string]*Objective
 	runbookActivations       map[string]*RunbookActivation
-	initiatives              map[string]*Initiative
+	projects                 map[string]*Project
 	sourceObservations       map[string]*SourceObservation
 	sourceObservationKeys    map[string]string
 	sourceMonitorCheckpoints map[string]*SourceMonitorCheckpoint
@@ -60,7 +60,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		objectives:               make(map[string]*Objective),
 		runbookActivations:       make(map[string]*RunbookActivation),
-		initiatives:              make(map[string]*Initiative),
+		projects:                 make(map[string]*Project),
 		sourceObservations:       make(map[string]*SourceObservation),
 		sourceObservationKeys:    make(map[string]string),
 		sourceMonitorCheckpoints: make(map[string]*SourceMonitorCheckpoint),

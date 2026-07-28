@@ -148,12 +148,12 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
 		contextValues["runbookTriggerId"] = activation.TriggerID
 		if activation.Trigger.Evidence != nil {
-			initiativeID, _ := contextValues["initiativeId"].(string)
-			initiativeID = strings.TrimSpace(initiativeID)
-			if initiativeID == "" {
-				return result, fmt.Errorf("Runbook activation %s evidence projection requires initiativeId input", activation.ID)
+			projectID, _ := contextValues["projectId"].(string)
+			projectID = strings.TrimSpace(projectID)
+			if projectID == "" {
+				return result, fmt.Errorf("Runbook activation %s evidence projection requires projectId input", activation.ID)
 			}
-			snapshot, snapshotErr := buildEvidenceSnapshot(ctx, s.store, scope, initiativeID, now, activation.Trigger.Evidence)
+			snapshot, snapshotErr := buildEvidenceSnapshot(ctx, s.store, scope, projectID, now, activation.Trigger.Evidence)
 			if snapshotErr != nil {
 				return result, fmt.Errorf("Runbook activation %s evidence projection: %w", activation.ID, snapshotErr)
 			}

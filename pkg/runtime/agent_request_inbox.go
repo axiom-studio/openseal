@@ -239,8 +239,8 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		"sharedContext":        cloneMap(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{AgentRequestInboxContextKey: inbox}
-	if initiativeID, _ := source.Context["initiativeId"].(string); strings.TrimSpace(initiativeID) != "" {
-		contextValue["initiativeId"] = strings.TrimSpace(initiativeID)
+	if projectID, _ := source.Context["projectId"].(string); strings.TrimSpace(projectID) != "" {
+		contextValue["projectId"] = strings.TrimSpace(projectID)
 	}
 	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, assignedAgentID)
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{

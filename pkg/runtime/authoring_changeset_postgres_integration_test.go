@@ -300,8 +300,8 @@ func TestPostgresAtomicWorkforceApplyHasOneReplicaWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	registerInitiativeSourceSkill(t, primary)
-	ready := testInitiativeWorkforceChangeSet()
+	registerProjectSourceSkill(t, primary)
+	ready := testProjectWorkforceChangeSet()
 	if _, _, err = primary.CreateChangeSet(ctx, ready, "create", "digest"); err != nil {
 		t.Fatal(err)
 	}
@@ -342,9 +342,9 @@ func TestPostgresAtomicWorkforceApplyHasOneReplicaWinner(t *testing.T) {
 	if objectives, err := replica.ListObjectives(ctx, ObjectiveFilter{Scope: Scope{Kind: "tenant", ID: "one"}}); err != nil || len(objectives) != 2 {
 		t.Fatalf("objectives=%d err=%v", len(objectives), err)
 	}
-	initiative, err := replica.GetInitiative(ctx, Scope{Kind: "tenant", ID: "one"}, ready.Placement.InitiativeID)
-	if err != nil || initiative.Revision != 1 || len(initiative.SourceMonitors) != 1 || initiative.SourceMonitors[0].AssignedAgentID != "agent-live" {
-		t.Fatalf("Initiative=%#v err=%v", initiative, err)
+	project, err := replica.GetProject(ctx, Scope{Kind: "tenant", ID: "one"}, ready.Placement.ProjectID)
+	if err != nil || project.Revision != 1 || len(project.SourceMonitors) != 1 || project.SourceMonitors[0].AssignedAgentID != "agent-live" {
+		t.Fatalf("Project=%#v err=%v", project, err)
 	}
 }
 
@@ -364,8 +364,8 @@ func TestPostgresAtomicWorkforceApplyHonorsInactiveCommitment(t *testing.T) {
 		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+store.quotedSchema()+` CASCADE`)
 		_ = store.Close()
 	})
-	registerInitiativeSourceSkill(t, store)
-	ready := testInitiativeWorkforceChangeSet()
+	registerProjectSourceSkill(t, store)
+	ready := testProjectWorkforceChangeSet()
 	ready.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
 	if _, _, err = store.CreateChangeSet(ctx, ready, "create-inactive", "digest-inactive"); err != nil {
 		t.Fatal(err)
@@ -433,15 +433,15 @@ func TestPostgresAtomicWorkforceApplyHonorsInactiveCommitment(t *testing.T) {
 			t.Fatalf("Objective %s status=%s", objective.ID, objective.Status)
 		}
 	}
-	initiative, err := store.GetInitiative(ctx, Scope{Kind: ready.Scope.Kind, ID: ready.Scope.ID}, ready.Placement.InitiativeID)
-	if err != nil || initiative.Status != InitiativeStatusDraft {
-		t.Fatalf("inactive Initiative=%#v err=%v", initiative, err)
+	project, err := store.GetProject(ctx, Scope{Kind: ready.Scope.Kind, ID: ready.Scope.ID}, ready.Placement.ProjectID)
+	if err != nil || project.Status != ProjectStatusDraft {
+		t.Fatalf("inactive Project=%#v err=%v", project, err)
 	}
-	schedule, err := NewRunbookScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
+	schedule, err := NewRunbookScheduler(store).ReconcileScope(ctx, project.Scope, 10)
 	if err != nil || schedule.Examined != 0 || schedule.Scheduled != 0 {
 		t.Fatalf("inactive schedule=%#v err=%v", schedule, err)
 	}
-	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: initiative.Scope})
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: project.Scope})
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("inactive Runs=%#v err=%v", runs, err)
 	}

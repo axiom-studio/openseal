@@ -112,11 +112,11 @@ func (s *MemoryStore) AppendActivity(_ context.Context, event *ActivityEvent) (*
 	if event.RunID != "" && s.agentRuns[portfolioKey(event.Scope, event.RunID)] == nil {
 		return nil, ErrRunNotFound
 	}
-	if event.RunID == "" && event.InitiativeID == "" && s.objectives[portfolioKey(event.Scope, event.ObjectiveID)] == nil {
+	if event.RunID == "" && event.ProjectID == "" && s.objectives[portfolioKey(event.Scope, event.ObjectiveID)] == nil {
 		return nil, ErrObjectiveNotFound
 	}
-	if event.InitiativeID != "" && s.initiatives[initiativeKey(event.Scope, event.InitiativeID)] == nil {
-		return nil, ErrInitiativeNotFound
+	if event.ProjectID != "" && s.projects[projectKey(event.Scope, event.ProjectID)] == nil {
+		return nil, ErrProjectNotFound
 	}
 	persisted := appendMemoryActivityLocked(s, event)
 	return cloneActivityEvent(persisted), nil

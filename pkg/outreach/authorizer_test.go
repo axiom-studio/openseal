@@ -11,20 +11,20 @@ import (
 )
 
 type authorizationStateStub struct {
-	run        *runtime.AgentRun
-	initiative *runtime.Initiative
-	thread     *runtime.OutreachThread
-	call       *runtime.ActionCall
-	approval   *runtime.ApprovalCheckpoint
-	events     []*runtime.ActivityEvent
+	run      *runtime.AgentRun
+	project  *runtime.Project
+	thread   *runtime.OutreachThread
+	call     *runtime.ActionCall
+	approval *runtime.ApprovalCheckpoint
+	events   []*runtime.ActivityEvent
 }
 
 func (s *authorizationStateStub) GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error) {
 	return s.run, nil
 }
 
-func (s *authorizationStateStub) GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error) {
-	return s.initiative, nil
+func (s *authorizationStateStub) GetProject(context.Context, runtime.Scope, string) (*runtime.Project, error) {
+	return s.project, nil
 }
 
 func (s *authorizationStateStub) GetOutreachThread(context.Context, runtime.Scope, string) (*runtime.OutreachThread, error) {
@@ -141,8 +141,8 @@ func authorizedFixture(withApproval bool) (*authorizationStateStub, runtime.Tool
 		run: &runtime.AgentRun{ID: "run-1", Scope: scope, Owner: owner, ObjectiveID: "objective-1", AssignedAgentID: "researcher",
 			Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": "thread-1", "messageId": "message-1"}},
 			Policy:  map[string]interface{}{"outreachApprovalPolicyRef": "human-review"}},
-		initiative: &runtime.Initiative{ID: "initiative-1", Scope: scope, Owner: owner},
-		thread: &runtime.OutreachThread{ID: "thread-1", Scope: scope, InitiativeID: "initiative-1", SourceObservationID: "evidence-1", TargetURI: target,
+		project: &runtime.Project{ID: "project-1", Scope: scope, Owner: owner},
+		thread: &runtime.OutreachThread{ID: "thread-1", Scope: scope, ProjectID: "project-1", SourceObservationID: "evidence-1", TargetURI: target,
 			Owner: owner, AssignedAgentID: "researcher", SourcePolicyRef: "community@1", ApprovalPolicyRef: "human-review", Status: runtime.OutreachThreadOpen, Messages: []runtime.OutreachMessage{message}},
 		call: call,
 	}

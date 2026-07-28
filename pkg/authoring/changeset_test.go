@@ -987,9 +987,9 @@ func TestSourceMonitorUsesAssignedAgentSkillBindingPlacement(t *testing.T) {
 				SkillID: "skill-browser", RequiredActions: []string{"browser-open", "browser-fill-secret"},
 			}},
 		}},
-		Initiative: &InitiativeBlueprint{
+		Project: &ProjectBlueprint{
 			ID: "research",
-			SourceMonitors: []InitiativeSourceMonitorBlueprint{{
+			SourceMonitors: []ProjectSourceMonitorBlueprint{{
 				ID: "reddit", AssignedAgentDefinitionID: agentID, SkillID: "skill-browser",
 			}},
 		},
@@ -1005,7 +1005,7 @@ func TestSourceMonitorUsesAssignedAgentSkillBindingPlacement(t *testing.T) {
 		},
 	}}
 	requirement := MissingRequirement{
-		Kind: "skill_binding", ID: "skill-browser", RequiredBy: "initiative:research/monitor:reddit",
+		Kind: "skill_binding", ID: "skill-browser", RequiredBy: "project:research/monitor:reddit",
 	}
 	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		agentID: {
@@ -1231,7 +1231,7 @@ func TestAtomicMemoryApplyCreatesResourcesForRecoveredUnappliedAmendment(t *test
 		Scope: scope, ParentID: rejected.ID, Prompt: "recover unchanged", Catalog: catalog, Placement: rejected.Placement,
 		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "recover",
 	})
-	if err != nil || recovered.Status != ChangeSetReview || recovered.Mode != ModeAmend || len(recovered.Placement.AgentExpectedRevisions) != 0 || recovered.Placement.TeamExpectedRevision != 0 || recovered.Placement.InitiativeExpectedRevision != 0 {
+	if err != nil || recovered.Status != ChangeSetReview || recovered.Mode != ModeAmend || len(recovered.Placement.AgentExpectedRevisions) != 0 || recovered.Placement.TeamExpectedRevision != 0 || recovered.Placement.ProjectExpectedRevision != 0 {
 		t.Fatalf("recovered=%#v err=%v", recovered, err)
 	}
 	for key, objective := range recovered.Placement.Objectives {
@@ -1311,17 +1311,17 @@ func TestAmendmentPlacementRevisionsComeOnlyFromAppliedReceipt(t *testing.T) {
 	parent := &ChangeSet{Placement: ChangeSetPlacement{
 		AgentDeploymentIDs: map[string]string{agentDefinitionID: "agent-live"},
 		TeamDeploymentID:   "team-live",
-		InitiativeID:       "initiative-live",
+		ProjectID:          "project-live",
 		Environment:        "production",
 		Objectives:         map[string]ObjectivePlacement{objectiveKey: {ID: "objective-live"}},
 	}}
 
 	unapplied := ChangeSetPlacement{}
 	inheritParentPlacement(&unapplied, parent)
-	if unapplied.AgentDeploymentIDs[agentDefinitionID] != "agent-live" || unapplied.TeamDeploymentID != "team-live" || unapplied.InitiativeID != "initiative-live" || unapplied.Environment != "production" {
+	if unapplied.AgentDeploymentIDs[agentDefinitionID] != "agent-live" || unapplied.TeamDeploymentID != "team-live" || unapplied.ProjectID != "project-live" || unapplied.Environment != "production" {
 		t.Fatalf("stable placement was not inherited: %#v", unapplied)
 	}
-	if len(unapplied.AgentExpectedRevisions) != 0 || unapplied.TeamExpectedRevision != 0 || unapplied.InitiativeExpectedRevision != 0 || unapplied.Objectives[objectiveKey].ExpectedRevision != 0 {
+	if len(unapplied.AgentExpectedRevisions) != 0 || unapplied.TeamExpectedRevision != 0 || unapplied.ProjectExpectedRevision != 0 || unapplied.Objectives[objectiveKey].ExpectedRevision != 0 {
 		t.Fatalf("unapplied candidate invented persistence revisions: %#v", unapplied)
 	}
 
@@ -1329,44 +1329,44 @@ func TestAmendmentPlacementRevisionsComeOnlyFromAppliedReceipt(t *testing.T) {
 		{Kind: "agent_deployment", ID: "agent-live", Revision: 3},
 		{Kind: "team_deployment", ID: "team-live", Revision: 4},
 		{Kind: "objective", ID: "objective-live", Revision: 5},
-		{Kind: "initiative", ID: "initiative-live", Revision: 6},
+		{Kind: "project", ID: "project-live", Revision: 6},
 	}}
 	// Positive values submitted by a client are not concurrency truth. Stable
 	// resource identities inherit the exact authoritative receipt revisions.
 	applied := ChangeSetPlacement{
-		AgentDeploymentIDs:         map[string]string{agentDefinitionID: "agent-live"},
-		AgentExpectedRevisions:     map[string]int64{agentDefinitionID: 1},
-		TeamDeploymentID:           "team-live",
-		TeamExpectedRevision:       1,
-		InitiativeID:               "initiative-live",
-		InitiativeExpectedRevision: 1,
-		Objectives:                 map[string]ObjectivePlacement{objectiveKey: {ID: "objective-live", ExpectedRevision: 1}},
+		AgentDeploymentIDs:      map[string]string{agentDefinitionID: "agent-live"},
+		AgentExpectedRevisions:  map[string]int64{agentDefinitionID: 1},
+		TeamDeploymentID:        "team-live",
+		TeamExpectedRevision:    1,
+		ProjectID:               "project-live",
+		ProjectExpectedRevision: 1,
+		Objectives:              map[string]ObjectivePlacement{objectiveKey: {ID: "objective-live", ExpectedRevision: 1}},
 	}
 	inheritParentPlacement(&applied, parent)
-	if applied.AgentExpectedRevisions[agentDefinitionID] != 3 || applied.TeamExpectedRevision != 4 || applied.Objectives[objectiveKey].ExpectedRevision != 5 || applied.InitiativeExpectedRevision != 6 {
+	if applied.AgentExpectedRevisions[agentDefinitionID] != 3 || applied.TeamExpectedRevision != 4 || applied.Objectives[objectiveKey].ExpectedRevision != 5 || applied.ProjectExpectedRevision != 6 {
 		t.Fatalf("applied receipt revisions were not inherited exactly: %#v", applied)
 	}
 	retargeted := ChangeSetPlacement{
 		AgentDeploymentIDs: map[string]string{agentDefinitionID: "agent-new"},
 		TeamDeploymentID:   "team-new",
-		InitiativeID:       "initiative-new",
+		ProjectID:          "project-new",
 		Objectives:         map[string]ObjectivePlacement{objectiveKey: {ID: "objective-new"}},
 	}
 	inheritParentPlacement(&retargeted, parent)
-	if retargeted.AgentExpectedRevisions[agentDefinitionID] != 0 || retargeted.TeamExpectedRevision != 0 || retargeted.Objectives[objectiveKey].ExpectedRevision != 0 || retargeted.InitiativeExpectedRevision != 0 {
+	if retargeted.AgentExpectedRevisions[agentDefinitionID] != 0 || retargeted.TeamExpectedRevision != 0 || retargeted.Objectives[objectiveKey].ExpectedRevision != 0 || retargeted.ProjectExpectedRevision != 0 {
 		t.Fatalf("retargeted resources inherited old resource revisions: %#v", retargeted)
 	}
 
 	refined := &ChangeSet{Placement: applied}
 	grandchild := ChangeSetPlacement{}
 	inheritParentPlacement(&grandchild, refined)
-	if grandchild.AgentExpectedRevisions[agentDefinitionID] != 3 || grandchild.TeamExpectedRevision != 4 || grandchild.Objectives[objectiveKey].ExpectedRevision != 5 || grandchild.InitiativeExpectedRevision != 6 {
+	if grandchild.AgentExpectedRevisions[agentDefinitionID] != 3 || grandchild.TeamExpectedRevision != 4 || grandchild.Objectives[objectiveKey].ExpectedRevision != 5 || grandchild.ProjectExpectedRevision != 6 {
 		t.Fatalf("applied lineage revisions were not preserved: %#v", grandchild)
 	}
 }
 
-func TestAtomicMemoryApplyComposesInitiativeWithPortableDefaultPlacement(t *testing.T) {
-	payload, _ := json.Marshal(GenerationResponse{Candidate: researchInitiativeCandidate()})
+func TestAtomicMemoryApplyComposesProjectWithPortableDefaultPlacement(t *testing.T) {
+	payload, _ := json.Marshal(GenerationResponse{Candidate: researchProjectCandidate()})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
 	store := NewMemoryChangeSetStore()
 	service, _ := NewChangeSetService(compiler, store)
@@ -1376,24 +1376,24 @@ func TestAtomicMemoryApplyComposesInitiativeWithPortableDefaultPlacement(t *test
 	}, SourcePolicies: map[string]SourcePolicyCapability{
 		"approved-communities": {Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5},
 	}}
-	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "Create a continuing research Initiative that runs every hour", Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-initiative"})
-	if err != nil || !created.Result.Valid || created.Result.Candidate.Initiative == nil {
-		t.Fatalf("created Initiative ChangeSet=%#v err=%v", created, err)
+	created, _, err := service.Create(context.Background(), CreateChangeSetRequest{Scope: scope, Prompt: "Create a continuing research Project that runs every hour", Catalog: catalog, Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "create-project"})
+	if err != nil || !created.Result.Valid || created.Result.Candidate.Project == nil {
+		t.Fatalf("created Project ChangeSet=%#v err=%v", created, err)
 	}
 	ready, _, err := service.SubmitEvaluation(context.Background(), SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: created.ID, ExpectedRevision: created.Revision, CandidateDigest: created.CandidateDigest, Allowed: true, Actor: ChangeSetActor{Type: "evaluator", ID: "policy"}, IdempotencyKey: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: "Activate Initiative", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
-	if err != nil || len(store.initiatives) != 1 || strings.Contains(applied.Placement.InitiativeID, "/") {
-		t.Fatalf("applied Initiative=%#v stored=%#v err=%v", applied, store.initiatives, err)
+	applied, _, err := service.Apply(context.Background(), ApplyChangeSetRequest{Scope: scope, ChangeSetID: ready.ID, ExpectedRevision: ready.Revision, CandidateDigest: ready.CandidateDigest, Reason: "Activate Project", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "apply"})
+	if err != nil || len(store.projects) != 1 || strings.Contains(applied.Placement.ProjectID, "/") {
+		t.Fatalf("applied Project=%#v stored=%#v err=%v", applied, store.projects, err)
 	}
 	found := false
 	for _, resource := range applied.ApplyReceipt.Resources {
-		found = found || resource.Kind == "initiative" && resource.ID == applied.Placement.InitiativeID && resource.Revision == 1
+		found = found || resource.Kind == "project" && resource.ID == applied.Placement.ProjectID && resource.Revision == 1
 	}
 	if !found {
-		t.Fatalf("Initiative receipt=%#v", applied.ApplyReceipt.Resources)
+		t.Fatalf("Project receipt=%#v", applied.ApplyReceipt.Resources)
 	}
 }
 
@@ -1420,21 +1420,21 @@ func TestChangeSetCanonicalizesDefinitionIdentityPerScopeBeforeApproval(t *testi
 	}
 }
 
-func TestChangeSetCanonicalizesInitiativeSymbolicReferencesWithDefinitions(t *testing.T) {
-	candidate := researchInitiativeCandidate()
+func TestChangeSetCanonicalizesProjectSymbolicReferencesWithDefinitions(t *testing.T) {
+	candidate := researchProjectCandidate()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	canonicalizeCandidateScope(&candidate, scope)
 	canonicalizeCandidateScope(&candidate, scope)
 
-	initiative := candidate.Initiative
+	project := candidate.Project
 	agentID, teamID := "tenant/one/community-researcher", "tenant/one/gtm-research"
-	monitorRef := WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, "monitor")
-	if candidate.Agents[0].ID != agentID || candidate.Team.ID != teamID || initiative.Owner.DefinitionID != teamID ||
-		initiative.ObjectiveRefs[0] != WorkforceObjectiveKey(InitiativeOwnerAgent, agentID, "collect") ||
-		initiative.ObjectiveRefs[1] != monitorRef || initiative.Milestones[0].ObjectiveRefs[0] != monitorRef ||
-		initiative.SourceMonitors[0].ObjectiveRef != monitorRef || initiative.SourceMonitors[0].AssignedAgentDefinitionID != agentID ||
-		initiative.Deliverables[0].ObjectiveRefs[0] != WorkforceObjectiveKey(InitiativeOwnerTeam, teamID, "report") {
-		t.Fatalf("canonical Initiative candidate = %#v", candidate)
+	monitorRef := WorkforceObjectiveKey(ProjectOwnerTeam, teamID, "monitor")
+	if candidate.Agents[0].ID != agentID || candidate.Team.ID != teamID || project.Owner.DefinitionID != teamID ||
+		project.ObjectiveRefs[0] != WorkforceObjectiveKey(ProjectOwnerAgent, agentID, "collect") ||
+		project.ObjectiveRefs[1] != monitorRef || project.Milestones[0].ObjectiveRefs[0] != monitorRef ||
+		project.SourceMonitors[0].ObjectiveRef != monitorRef || project.SourceMonitors[0].AssignedAgentDefinitionID != agentID ||
+		project.Deliverables[0].ObjectiveRefs[0] != WorkforceObjectiveKey(ProjectOwnerTeam, teamID, "report") {
+		t.Fatalf("canonical Project candidate = %#v", candidate)
 	}
 	trigger := candidate.Agents[0].Runbook.Triggers["hourly"]
 	if trigger.ObjectiveID != monitorRef {
@@ -1442,10 +1442,10 @@ func TestChangeSetCanonicalizesInitiativeSymbolicReferencesWithDefinitions(t *te
 	}
 	placement := ChangeSetPlacement{}
 	canonicalizePlacement(&placement, scope, &candidate)
-	firstInitiativeID := placement.InitiativeID
+	firstProjectID := placement.ProjectID
 	canonicalizePlacement(&placement, scope, &candidate)
-	if placement.InitiativeID == "" || placement.InitiativeID != firstInitiativeID || strings.Contains(placement.InitiativeID, "/") {
-		t.Fatalf("portable deterministic Initiative placement = %#v", placement)
+	if placement.ProjectID == "" || placement.ProjectID != firstProjectID || strings.Contains(placement.ProjectID, "/") {
+		t.Fatalf("portable deterministic Project placement = %#v", placement)
 	}
 	for key, objective := range placement.Objectives {
 		if objective.ID == "" || strings.Contains(objective.ID, "/") {

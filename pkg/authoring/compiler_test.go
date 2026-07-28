@@ -1023,8 +1023,8 @@ func TestCompilerRepairsAgentAuthorityToSelectedActionRisk(t *testing.T) {
 	}
 }
 
-func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testing.T) {
-	candidate := researchInitiativeCandidate()
+func TestCompilerValidatesProjectBlueprintAndExactMonitorCapability(t *testing.T) {
+	candidate := researchProjectCandidate()
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
@@ -1032,13 +1032,13 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	}, SourcePolicies: map[string]SourcePolicyCapability{
 		"approved-communities": {Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5},
 	}}
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a continuing market research initiative that runs every hour", Catalog: catalog})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a continuing market research project that runs every hour", Catalog: catalog})
 	if err != nil || !result.Valid || len(result.Validation) != 0 || len(result.MissingRequirements) != 0 {
-		t.Fatalf("valid Initiative compile = %#v, err = %v", result, err)
+		t.Fatalf("valid Project compile = %#v, err = %v", result, err)
 	}
 
-	wrongOwner := researchInitiativeCandidate()
-	wrongOwner.Initiative.SourceMonitors[0].ObjectiveRef = WorkforceObjectiveKey(InitiativeOwnerAgent, "community-researcher", "collect")
+	wrongOwner := researchProjectCandidate()
+	wrongOwner.Project.SourceMonitors[0].ObjectiveRef = WorkforceObjectiveKey(ProjectOwnerAgent, "community-researcher", "collect")
 	wrongOwnerPayload, _ := json.Marshal(GenerationResponse{Candidate: wrongOwner})
 	compiler, _ = NewCompiler(staticGenerator{payload: wrongOwnerPayload})
 	result, err = compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour", Catalog: catalog})
@@ -1061,7 +1061,7 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 		t.Fatalf("missing source policy = %#v, err = %v", result, err)
 	}
 
-	outOfScope := researchInitiativeCandidate()
+	outOfScope := researchProjectCandidate()
 	outOfScope.Agents[0].Runbook.Steps["observe"].Action.Arguments["url"] = literalActionValue("https://attacker.example/feed")
 	outOfScopePayload, _ := json.Marshal(GenerationResponse{Candidate: outOfScope})
 	compiler, _ = NewCompiler(staticGenerator{payload: outOfScopePayload})
@@ -1073,8 +1073,8 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 }
 
 func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAuthority(t *testing.T) {
-	candidate := researchInitiativeCandidate()
-	candidate.Initiative.SourceMonitors[0].SourcePolicyRef = "approved-communities@2026-07-22"
+	candidate := researchProjectCandidate()
+	candidate.Project.SourceMonitors[0].SourcePolicyRef = "approved-communities@2026-07-22"
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	generator := &repairingGenerator{generated: payload, repaired: payload}
 	compiler, _ := NewCompiler(generator)
@@ -1084,7 +1084,7 @@ func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAut
 		MaximumItems: 5, RetentionDays: 30, ApprovalPolicy: "source-policy-admin",
 	}
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a continuing market research initiative that runs every hour",
+		Mode: ModeCreate, Prompt: "Create a continuing market research project that runs every hour",
 		Catalog: CapabilityCatalog{
 			Skills: map[string]SkillCapability{"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}}},
 			CapabilityNeeds: []CapabilityNeed{{
@@ -1126,9 +1126,9 @@ func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAut
 	}
 }
 
-func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.T) {
-	candidate := researchInitiativeCandidate()
-	candidate.Initiative = nil
+func TestCompilerRejectsGovernedSourceActionWithoutProjectMonitor(t *testing.T) {
+	candidate := researchProjectCandidate()
+	candidate.Project = nil
 	action := candidate.Agents[0].Runbook.Steps["observe"].Action
 	action.SkillID, action.SkillVersion, action.Action = source.SkillID, source.SkillVersion, source.ObserveFeed
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
@@ -1142,8 +1142,8 @@ func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.
 }
 
 func TestCompilerMaterializesCatalogOwnedSourceMonitorWithoutGrantingAuthority(t *testing.T) {
-	candidate := researchInitiativeCandidate()
-	candidate.Initiative.SourceMonitors = nil
+	candidate := researchProjectCandidate()
+	candidate.Project.SourceMonitors = nil
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	policy := source.Policy{
@@ -1167,7 +1167,7 @@ func TestCompilerMaterializesCatalogOwnedSourceMonitorWithoutGrantingAuthority(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Candidate.Initiative.SourceMonitors) != 1 || result.Candidate.Initiative.SourceMonitors[0].SourcePolicyRef != "approved-communities@proposal-v1" ||
+	if len(result.Candidate.Project.SourceMonitors) != 1 || result.Candidate.Project.SourceMonitors[0].SourcePolicyRef != "approved-communities@proposal-v1" ||
 		len(result.SourcePolicyProposals) != 1 || result.SourcePolicyProposals[0].Reference != "approved-communities@proposal-v1" || result.Valid {
 		t.Fatalf("deterministic inert source monitor = %#v", result)
 	}
@@ -1229,7 +1229,7 @@ func validationMessageContains(issues []ValidationIssue, fragment string) bool {
 	return false
 }
 
-func researchInitiativeCandidate() WorkforceCandidate {
+func researchProjectCandidate() WorkforceCandidate {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	agentDefinition := candidate.Agents[0]
 	agentDefinition.SkillRequirements = []agent.SkillRequirement{{SkillID: "community-source", VersionConstraint: "1.2.3", RequiredActions: []string{"observe"}}}
@@ -1244,7 +1244,7 @@ func researchInitiativeCandidate() WorkforceCandidate {
 		Entrypoints: map[string]string{"monitor": "observe"},
 		Triggers: map[string]runbook.Trigger{"hourly": {
 			Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 */1 * * *", Timezone: "UTC"}, Entrypoint: "monitor",
-			ObjectiveID: WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor"), MaximumConcurrent: 1,
+			ObjectiveID: WorkforceObjectiveKey(ProjectOwnerTeam, candidate.Team.ID, "monitor"), MaximumConcurrent: 1,
 			Budget: &runbook.BudgetAllocation{MaxTurns: 2, MaxActions: 1, MaxDurationMS: 60000},
 		}},
 		Steps: map[string]runbook.Step{
@@ -1256,21 +1256,21 @@ func researchInitiativeCandidate() WorkforceCandidate {
 			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 		},
 	}
-	candidate.Initiative = &InitiativeBlueprint{
+	candidate.Project = &ProjectBlueprint{
 		ID: "market-intelligence", Title: "Market intelligence", Purpose: "Continuously understand user pain points",
-		Owner: InitiativeOwnerReference{Type: InitiativeOwnerTeam, DefinitionID: candidate.Team.ID},
+		Owner: ProjectOwnerReference{Type: ProjectOwnerTeam, DefinitionID: candidate.Team.ID},
 		ObjectiveRefs: []string{
-			WorkforceObjectiveKey(InitiativeOwnerAgent, agentDefinition.ID, "collect"),
-			WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor"),
-			WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "report"),
+			WorkforceObjectiveKey(ProjectOwnerAgent, agentDefinition.ID, "collect"),
+			WorkforceObjectiveKey(ProjectOwnerTeam, candidate.Team.ID, "monitor"),
+			WorkforceObjectiveKey(ProjectOwnerTeam, candidate.Team.ID, "report"),
 		},
-		Milestones: []InitiativeMilestoneBlueprint{{ID: "baseline", Title: "Establish baseline", ObjectiveRefs: []string{WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor")}}},
-		Hypotheses: []InitiativeHypothesisBlueprint{{ID: "setup-friction", Statement: "Setup friction is a leading adoption barrier", Confidence: 0.5}},
-		SourceMonitors: []InitiativeSourceMonitorBlueprint{{
-			ID: "community-listening", ObjectiveRef: WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor"), AssignedAgentDefinitionID: agentDefinition.ID,
-			SkillID: "community-source", SkillVersion: "1.2.3", Action: "observe", SourcePolicyRef: "approved-communities", Deduplication: InitiativeDeduplicateStableSourceAndContent,
+		Milestones: []ProjectMilestoneBlueprint{{ID: "baseline", Title: "Establish baseline", ObjectiveRefs: []string{WorkforceObjectiveKey(ProjectOwnerTeam, candidate.Team.ID, "monitor")}}},
+		Hypotheses: []ProjectHypothesisBlueprint{{ID: "setup-friction", Statement: "Setup friction is a leading adoption barrier", Confidence: 0.5}},
+		SourceMonitors: []ProjectSourceMonitorBlueprint{{
+			ID: "community-listening", ObjectiveRef: WorkforceObjectiveKey(ProjectOwnerTeam, candidate.Team.ID, "monitor"), AssignedAgentDefinitionID: agentDefinition.ID,
+			SkillID: "community-source", SkillVersion: "1.2.3", Action: "observe", SourcePolicyRef: "approved-communities", Deduplication: ProjectDeduplicateStableSourceAndContent,
 		}},
-		Deliverables: []InitiativeDeliverableBlueprint{{ID: "monthly-report", Title: "Monthly cited report", ObjectiveRefs: []string{WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "report")}}},
+		Deliverables: []ProjectDeliverableBlueprint{{ID: "monthly-report", Title: "Monthly cited report", ObjectiveRefs: []string{WorkforceObjectiveKey(ProjectOwnerTeam, candidate.Team.ID, "report")}}},
 		Policy:       map[string]interface{}{"outreachApproval": "required"},
 	}
 	return candidate

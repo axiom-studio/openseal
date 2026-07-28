@@ -44,24 +44,24 @@ func TestSourceMonitorObservationIngestDeduplicatesAndSurvivesRestart(t *testing
 			defer closeStore()
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "research"}
-			initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
-			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
-			first, err := service.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Finding one"))
+			project, runs := seedExecutableMonitorProject(t, store, scope)
+			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(ProjectStore), store, store.(ArtifactStore))
+			first, err := service.Ingest(ctx, sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Finding one"))
 			if err != nil || first.Replayed || first.Event == nil || first.Checkpoint.Revision != 1 || first.Checkpoint.ObservationCount != 1 {
 				t.Fatalf("first=%#v err=%v", first, err)
 			}
-			replay, err := service.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 1, "cursor-2", "thread-7", "Finding one"))
+			replay, err := service.Ingest(ctx, sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 1, "cursor-2", "thread-7", "Finding one"))
 			if err != nil || !replay.Replayed || replay.Event != nil || replay.Observation.ID != first.Observation.ID || replay.Checkpoint.Revision != 2 || replay.Checkpoint.Cursor != "cursor-2" || replay.Checkpoint.ObservationCount != 1 {
 				t.Fatalf("replay=%#v err=%v", replay, err)
 			}
-			other, err := service.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-b", runs["monitor-b"], 0, "cursor-b", "thread-7", "Finding one"))
+			other, err := service.Ingest(ctx, sourceObservationRequest(scope, project.ID, "monitor-b", runs["monitor-b"], 0, "cursor-b", "thread-7", "Finding one"))
 			if err != nil || other.Replayed || other.Observation.ID == first.Observation.ID {
 				t.Fatalf("other=%#v err=%v", other, err)
 			}
 			store = restart()
-			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
-			checkpoint, err := service.GetCheckpoint(ctx, scope, initiative.ID, "monitor-a")
-			values, listErr := service.List(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, Limit: 10})
+			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(ProjectStore), store, store.(ArtifactStore))
+			checkpoint, err := service.GetCheckpoint(ctx, scope, project.ID, "monitor-a")
+			values, listErr := service.List(ctx, SourceObservationFilter{Scope: scope, ProjectID: project.ID, Limit: 10})
 			if err != nil || listErr != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 1 || len(values) != 2 {
 				t.Fatalf("checkpoint=%#v values=%#v err=%v listErr=%v", checkpoint, values, err, listErr)
 			}
@@ -100,28 +100,28 @@ func TestSourceMonitorReadsExcludeExpiredEvidenceWithoutDeletingAuditRecords(t *
 			defer closeStore()
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "retention"}
-			initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
-			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
+			project, runs := seedExecutableMonitorProject(t, store, scope)
+			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(ProjectStore), store, store.(ArtifactStore))
 			base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 			service.now = func() time.Time { return base }
 
 			expires := base.Add(time.Hour)
-			expiredRequest := sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-expired", "thread-expired", "Expired finding")
+			expiredRequest := sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-expired", "thread-expired", "Expired finding")
 			expiredRequest.RetentionExpiresAt = &expires
 			expired, err := service.Ingest(ctx, expiredRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
-			activeRequest := sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 1, "cursor-active", "thread-active", "Retained finding")
+			activeRequest := sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 1, "cursor-active", "thread-active", "Retained finding")
 			active, err := service.Ingest(ctx, activeRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			store = restart()
-			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
+			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(ProjectStore), store, store.(ArtifactStore))
 			service.now = func() time.Time { return expires }
-			values, err := service.List(ctx, SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, Limit: 1})
+			values, err := service.List(ctx, SourceObservationFilter{Scope: scope, ProjectID: project.ID, Limit: 1})
 			if err != nil || len(values) != 1 || values[0].ID != active.Observation.ID {
 				t.Fatalf("retained values=%#v err=%v", values, err)
 			}
@@ -138,11 +138,11 @@ func TestSourceMonitorReadsExcludeExpiredEvidenceWithoutDeletingAuditRecords(t *
 func TestSourceMonitorObservationConcurrentCASCannotSkipEvidence(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "race"}
-	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
+	project, runs := seedExecutableMonitorProject(t, store, scope)
 	service := NewSourceMonitorService(store, store, store, store)
 	requests := []IngestSourceObservationRequest{
-		sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-a", "thread-a", "Finding A"),
-		sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-b", "thread-b", "Finding B"),
+		sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-a", "thread-a", "Finding A"),
+		sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-b", "thread-b", "Finding B"),
 	}
 	var wg sync.WaitGroup
 	results := make(chan *SourceObservationIngestResult, 2)
@@ -172,7 +172,7 @@ func TestSourceMonitorObservationConcurrentCASCannotSkipEvidence(t *testing.T) {
 	if succeeded != 1 || conflicted != 1 {
 		t.Fatalf("succeeded=%d conflicted=%d", succeeded, conflicted)
 	}
-	checkpoint, err := service.GetCheckpoint(context.Background(), scope, initiative.ID, "monitor-a")
+	checkpoint, err := service.GetCheckpoint(context.Background(), scope, project.ID, "monitor-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestSourceMonitorObservationConcurrentCASCannotSkipEvidence(t *testing.T) {
 	if _, err = service.Ingest(context.Background(), retry); err != nil {
 		t.Fatal(err)
 	}
-	values, err := service.List(context.Background(), SourceObservationFilter{Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-a"})
+	values, err := service.List(context.Background(), SourceObservationFilter{Scope: scope, ProjectID: project.ID, MonitorID: "monitor-a"})
 	if err != nil || len(values) != 2 {
 		t.Fatalf("values=%#v err=%v", values, err)
 	}
@@ -223,13 +223,13 @@ func TestSourceMonitorNoChangeCheckpointIsDurableAndReplaySafe(t *testing.T) {
 			store, restart, closeStore := fixture.open(t)
 			defer closeStore()
 			scope := Scope{Kind: "tenant", ID: "no-change"}
-			initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
-			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
-			first, err := service.Ingest(context.Background(), sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "Finding one"))
+			project, runs := seedExecutableMonitorProject(t, store, scope)
+			service := NewSourceMonitorService(store.(SourceMonitorStore), store.(ProjectStore), store, store.(ArtifactStore))
+			first, err := service.Ingest(context.Background(), sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "Finding one"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := checkpointRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 1, "cursor-1", "no-change-action")
+			request := checkpointRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 1, "cursor-1", "no-change-action")
 			advanced, err := service.AdvanceCheckpoint(context.Background(), request)
 			if err != nil || advanced.Replayed || advanced.Event == nil || advanced.Checkpoint.Revision != 2 || advanced.Checkpoint.ObservationCount != 1 || advanced.Checkpoint.LastObservationID != first.Observation.ID {
 				t.Fatalf("advanced=%#v err=%v", advanced, err)
@@ -239,8 +239,8 @@ func TestSourceMonitorNoChangeCheckpointIsDurableAndReplaySafe(t *testing.T) {
 				t.Fatalf("replay=%#v err=%v", replay, err)
 			}
 			store = restart()
-			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(InitiativeStore), store, store.(ArtifactStore))
-			checkpoint, err := service.GetCheckpoint(context.Background(), scope, initiative.ID, "monitor-a")
+			service = NewSourceMonitorService(store.(SourceMonitorStore), store.(ProjectStore), store, store.(ArtifactStore))
+			checkpoint, err := service.GetCheckpoint(context.Background(), scope, project.ID, "monitor-a")
 			if err != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 1 || checkpoint.LastActionCallID != "no-change-action" || checkpoint.Cursor != "cursor-1" {
 				t.Fatalf("checkpoint=%#v err=%v", checkpoint, err)
 			}
@@ -251,11 +251,11 @@ func TestSourceMonitorNoChangeCheckpointIsDurableAndReplaySafe(t *testing.T) {
 func TestSourceMonitorNoChangeCheckpointConcurrentCAS(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "no-change-race"}
-	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
+	project, runs := seedExecutableMonitorProject(t, store, scope)
 	service := NewSourceMonitorService(store, store, store, store)
 	requests := []AdvanceSourceMonitorCheckpointRequest{
-		checkpointRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-a", "action-a"),
-		checkpointRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-b", "action-b"),
+		checkpointRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-a", "action-a"),
+		checkpointRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-b", "action-b"),
 	}
 	var wg sync.WaitGroup
 	errorsOut := make(chan error, 2)
@@ -284,7 +284,7 @@ func TestSourceMonitorNoChangeCheckpointConcurrentCAS(t *testing.T) {
 	}
 }
 
-func seedExecutableMonitorInitiative(t *testing.T, store KernelStore, scope Scope) (*Initiative, map[string]string) {
+func seedExecutableMonitorProject(t *testing.T, store KernelStore, scope Scope) (*Project, map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}
@@ -301,7 +301,7 @@ func seedExecutableMonitorInitiative(t *testing.T, store KernelStore, scope Scop
 			ID: monitorID + "-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 			DefinitionID: "research", DefinitionVersion: "1.0.0", TriggerID: monitorID,
 			Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-			Input:   map[string]interface{}{"initiativeId": "initiative-research", "sourceMonitorId": monitorID},
+			Input:   map[string]interface{}{"projectId": "project-research", "sourceMonitorId": monitorID},
 			Policy:  map[string]interface{}{"sourcePolicyRef": "approved-forums"}, Status: RunbookActivationActive,
 		})
 		if err != nil {
@@ -309,24 +309,24 @@ func seedExecutableMonitorInitiative(t *testing.T, store KernelStore, scope Scop
 		}
 		objectiveIDs = append(objectiveIDs, objective.ID)
 		monitors = append(monitors, SourceMonitorReference{ID: monitorID, ObjectiveID: objective.ID, AssignedAgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", SourcePolicyRef: "approved-forums", Deduplication: SourceMonitorDeduplicateStableSourceAndContent})
-		run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "researcher", Goal: objective.Goal, Source: RunSourceSchedule, Context: map[string]interface{}{"initiativeId": "initiative-research", "sourceMonitorId": monitorID}})
+		run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "researcher", Goal: objective.Goal, Source: RunSourceSchedule, Context: map[string]interface{}{"projectId": "project-research", "sourceMonitorId": monitorID}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		runs[monitorID] = run.ID
 	}
-	initiative, _, err := NewInitiativeService(store.(InitiativeStore), store).Create(ctx, CreateInitiativeRequest{Initiative: &Initiative{ID: "initiative-research", Scope: scope, Title: "Research", Purpose: "Collect cited evidence", Status: InitiativeStatusActive, Owner: owner, ObjectiveRefs: objectiveIDs, SourceMonitors: monitors}, Actor: ActivityActor{Type: "user", ID: "operator"}})
+	project, _, err := NewProjectService(store.(ProjectStore), store).Create(ctx, CreateProjectRequest{Project: &Project{ID: "project-research", Scope: scope, Title: "Research", Purpose: "Collect cited evidence", Status: ProjectStatusActive, Owner: owner, ObjectiveRefs: objectiveIDs, SourceMonitors: monitors}, Actor: ActivityActor{Type: "user", ID: "operator"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return initiative, runs
+	return project, runs
 }
 
-func sourceObservationRequest(scope Scope, initiativeID, monitorID, runID string, expected int64, cursor, stableSourceID, summary string) IngestSourceObservationRequest {
+func sourceObservationRequest(scope Scope, projectID, monitorID, runID string, expected int64, cursor, stableSourceID, summary string) IngestSourceObservationRequest {
 	digest := sha256.Sum256([]byte(summary))
-	return IngestSourceObservationRequest{Scope: scope, InitiativeID: initiativeID, MonitorID: monitorID, ExpectedCheckpointRevision: expected, Cursor: cursor, StableSourceID: stableSourceID, SourceURI: "https://forum.example/threads/" + stableSourceID, ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: summary, ObservedAt: time.Now().UTC(), RunID: runID, AgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", ActionCallID: "action-" + cursor, Metadata: map[string]interface{}{"confidence": .8}}
+	return IngestSourceObservationRequest{Scope: scope, ProjectID: projectID, MonitorID: monitorID, ExpectedCheckpointRevision: expected, Cursor: cursor, StableSourceID: stableSourceID, SourceURI: "https://forum.example/threads/" + stableSourceID, ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: summary, ObservedAt: time.Now().UTC(), RunID: runID, AgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", ActionCallID: "action-" + cursor, Metadata: map[string]interface{}{"confidence": .8}}
 }
 
-func checkpointRequest(scope Scope, initiativeID, monitorID, runID string, expected int64, cursor, actionCallID string) AdvanceSourceMonitorCheckpointRequest {
-	return AdvanceSourceMonitorCheckpointRequest{Scope: scope, InitiativeID: initiativeID, MonitorID: monitorID, ExpectedCheckpointRevision: expected, Cursor: cursor, RunID: runID, AgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", ActionCallID: actionCallID}
+func checkpointRequest(scope Scope, projectID, monitorID, runID string, expected int64, cursor, actionCallID string) AdvanceSourceMonitorCheckpointRequest {
+	return AdvanceSourceMonitorCheckpointRequest{Scope: scope, ProjectID: projectID, MonitorID: monitorID, ExpectedCheckpointRevision: expected, Cursor: cursor, RunID: runID, AgentID: "researcher", SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", ActionCallID: actionCallID}
 }

@@ -50,10 +50,10 @@ type KernelClient interface {
 	GetEventSourceCheckpoint(context.Context, runtime.Scope, string) (*runtime.EventSourceCheckpoint, error)
 	AdvanceEventSourceCheckpoint(context.Context, runtime.Scope, string, kernelapi.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error)
 	RouteEvent(context.Context, runtime.EventEnvelope) (*runtime.EventRouteResult, error)
-	CreateInitiative(context.Context, kernelapi.CreateInitiativeRequest, string) (*runtime.Initiative, error)
-	ListInitiatives(context.Context, runtime.InitiativeFilter) ([]*runtime.Initiative, error)
-	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
-	PatchInitiative(context.Context, runtime.Scope, string, kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error)
+	CreateProject(context.Context, kernelapi.CreateProjectRequest, string) (*runtime.Project, error)
+	ListProjects(context.Context, runtime.ProjectFilter) ([]*runtime.Project, error)
+	GetProject(context.Context, runtime.Scope, string) (*runtime.Project, error)
+	PatchProject(context.Context, runtime.Scope, string, kernelapi.UpdateProjectRequest) (*runtime.Project, error)
 	CreateOutreachThread(context.Context, kernelapi.CreateOutreachThreadRequest, string) (*runtime.OutreachThread, error)
 	ListOutreachThreads(context.Context, runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error)
 	GetOutreachThread(context.Context, runtime.Scope, string, string) (*runtime.OutreachThread, error)
@@ -908,15 +908,15 @@ func (c *KernelHTTPClient) RouteEvent(ctx context.Context, event runtime.EventEn
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) CreateInitiative(ctx context.Context, request kernelapi.CreateInitiativeRequest, idempotencyKey string) (*runtime.Initiative, error) {
-	var initiative runtime.Initiative
-	if err := c.do(ctx, http.MethodPost, "/api/v1/initiatives", request, idempotencyKey, &initiative); err != nil {
+func (c *KernelHTTPClient) CreateProject(ctx context.Context, request kernelapi.CreateProjectRequest, idempotencyKey string) (*runtime.Project, error) {
+	var project runtime.Project
+	if err := c.do(ctx, http.MethodPost, "/api/v1/projects", request, idempotencyKey, &project); err != nil {
 		return nil, err
 	}
-	return &initiative, nil
+	return &project, nil
 }
 
-func (c *KernelHTTPClient) ListInitiatives(ctx context.Context, filter runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
+func (c *KernelHTTPClient) ListProjects(ctx context.Context, filter runtime.ProjectFilter) ([]*runtime.Project, error) {
 	query := scopeQuery(filter.Scope)
 	if filter.Owner != nil {
 		query.Set("ownerType", string(filter.Owner.Type))
@@ -932,36 +932,36 @@ func (c *KernelHTTPClient) ListInitiatives(ctx context.Context, filter runtime.I
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var initiatives []*runtime.Initiative
-	if err := c.do(ctx, http.MethodGet, "/api/v1/initiatives?"+query.Encode(), nil, "", &initiatives); err != nil {
+	var projects []*runtime.Project
+	if err := c.do(ctx, http.MethodGet, "/api/v1/projects?"+query.Encode(), nil, "", &projects); err != nil {
 		return nil, err
 	}
-	return initiatives, nil
+	return projects, nil
 }
 
-func (c *KernelHTTPClient) GetInitiative(ctx context.Context, scope runtime.Scope, initiativeID string) (*runtime.Initiative, error) {
+func (c *KernelHTTPClient) GetProject(ctx context.Context, scope runtime.Scope, projectID string) (*runtime.Project, error) {
 	query := scopeQuery(scope)
-	var initiative runtime.Initiative
-	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &initiative); err != nil {
+	var project runtime.Project
+	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &project); err != nil {
 		return nil, err
 	}
-	return &initiative, nil
+	return &project, nil
 }
 
-func (c *KernelHTTPClient) PatchInitiative(ctx context.Context, scope runtime.Scope, initiativeID string, request kernelapi.UpdateInitiativeRequest) (*runtime.Initiative, error) {
+func (c *KernelHTTPClient) PatchProject(ctx context.Context, scope runtime.Scope, projectID string, request kernelapi.UpdateProjectRequest) (*runtime.Project, error) {
 	query := scopeQuery(scope)
-	var initiative runtime.Initiative
-	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodPatch, path, request, "", &initiative); err != nil {
+	var project runtime.Project
+	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "?" + query.Encode()
+	if err := c.do(ctx, http.MethodPatch, path, request, "", &project); err != nil {
 		return nil, err
 	}
-	return &initiative, nil
+	return &project, nil
 }
 
 func (c *KernelHTTPClient) CreateOutreachThread(ctx context.Context, request kernelapi.CreateOutreachThreadRequest, idempotencyKey string) (*runtime.OutreachThread, error) {
 	var thread runtime.OutreachThread
-	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(request.InitiativeID)) + "/outreach"
+	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(request.ProjectID)) + "/outreach"
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &thread); err != nil {
 		return nil, err
 	}
@@ -981,26 +981,26 @@ func (c *KernelHTTPClient) ListOutreachThreads(ctx context.Context, filter runti
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
 	var threads []*runtime.OutreachThread
-	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(filter.InitiativeID)) + "/outreach?" + query.Encode()
+	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(filter.ProjectID)) + "/outreach?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &threads); err != nil {
 		return nil, err
 	}
 	return threads, nil
 }
 
-func (c *KernelHTTPClient) GetOutreachThread(ctx context.Context, scope runtime.Scope, initiativeID, threadID string) (*runtime.OutreachThread, error) {
+func (c *KernelHTTPClient) GetOutreachThread(ctx context.Context, scope runtime.Scope, projectID, threadID string) (*runtime.OutreachThread, error) {
 	query := scopeQuery(scope)
 	var thread runtime.OutreachThread
-	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) + "?" + query.Encode()
+	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &thread); err != nil {
 		return nil, err
 	}
 	return &thread, nil
 }
 
-func (c *KernelHTTPClient) DeliverOutreachMessage(ctx context.Context, initiativeID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, idempotencyKey string) (*runtime.AgentRun, error) {
+func (c *KernelHTTPClient) DeliverOutreachMessage(ctx context.Context, projectID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, idempotencyKey string) (*runtime.AgentRun, error) {
 	var run runtime.AgentRun
-	path := "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) +
+	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) +
 		"/messages/" + url.PathEscape(strings.TrimSpace(messageID)) + "/deliveries"
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &run); err != nil {
 		return nil, err
@@ -1011,7 +1011,7 @@ func (c *KernelHTTPClient) DeliverOutreachMessage(ctx context.Context, initiativ
 func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	query := scopeQuery(request.Scope)
 	for _, item := range []struct{ key, value string }{
-		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"initiativeId", request.InitiativeID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
+		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"projectId", request.ProjectID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
 	} {
 		if value := strings.TrimSpace(item.value); value != "" {
 			query.Set(item.key, value)
@@ -1050,24 +1050,24 @@ func (c *KernelHTTPClient) ListSourceObservations(ctx context.Context, filter ru
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
 	var observations []*runtime.SourceObservation
-	path := sourceMonitorPath(filter.InitiativeID, filter.MonitorID, "observations") + "?" + query.Encode()
+	path := sourceMonitorPath(filter.ProjectID, filter.MonitorID, "observations") + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &observations); err != nil {
 		return nil, err
 	}
 	return observations, nil
 }
 
-func (c *KernelHTTPClient) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
+func (c *KernelHTTPClient) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, projectID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
 	var checkpoint runtime.SourceMonitorCheckpoint
-	path := sourceMonitorPath(initiativeID, monitorID, "checkpoint") + "?" + scopeQuery(scope).Encode()
+	path := sourceMonitorPath(projectID, monitorID, "checkpoint") + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &checkpoint); err != nil {
 		return nil, err
 	}
 	return &checkpoint, nil
 }
 
-func sourceMonitorPath(initiativeID, monitorID, suffix string) string {
-	return "/api/v1/initiatives/" + url.PathEscape(strings.TrimSpace(initiativeID)) + "/source-monitors/" + url.PathEscape(strings.TrimSpace(monitorID)) + "/" + suffix
+func sourceMonitorPath(projectID, monitorID, suffix string) string {
+	return "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "/source-monitors/" + url.PathEscape(strings.TrimSpace(monitorID)) + "/" + suffix
 }
 
 func clawHubPath(kind, reference, action string) string {

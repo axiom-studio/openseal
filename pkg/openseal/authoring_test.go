@@ -38,36 +38,36 @@ func TestPublicWorkforceObjectivePlacementContract(t *testing.T) {
 	}
 }
 
-func TestPublicWorkforceInitiativeAuthoringContract(t *testing.T) {
-	candidate := WorkforceCandidate{Initiative: &WorkforceInitiativeBlueprint{
+func TestPublicWorkforceProjectAuthoringContract(t *testing.T) {
+	candidate := WorkforceCandidate{Project: &WorkforceProjectBlueprint{
 		ID: "research", Title: "Research", Purpose: "Understand users",
-		Owner:         WorkforceInitiativeOwnerReference{Type: WorkforceInitiativeOwnerTeam, DefinitionID: "research-team"},
+		Owner:         WorkforceProjectOwnerReference{Type: WorkforceProjectOwnerTeam, DefinitionID: "research-team"},
 		ObjectiveRefs: []string{WorkforceObjectiveKey("team", "research-team", "monitor")},
-		Milestones:    []WorkforceInitiativeMilestoneBlueprint{{ID: "baseline", Title: "Baseline"}},
-		Hypotheses:    []WorkforceInitiativeHypothesisBlueprint{{ID: "friction", Statement: "Setup is difficult", Confidence: 0.5}},
-		SourceMonitors: []WorkforceInitiativeSourceMonitorBlueprint{{
+		Milestones:    []WorkforceProjectMilestoneBlueprint{{ID: "baseline", Title: "Baseline"}},
+		Hypotheses:    []WorkforceProjectHypothesisBlueprint{{ID: "friction", Statement: "Setup is difficult", Confidence: 0.5}},
+		SourceMonitors: []WorkforceProjectSourceMonitorBlueprint{{
 			ID: "community", ObjectiveRef: WorkforceObjectiveKey("team", "research-team", "monitor"), AssignedAgentDefinitionID: "researcher",
-			SkillID: "source", SkillVersion: "1", Action: "observe", SourcePolicyRef: "approved", Deduplication: WorkforceInitiativeDeduplicateStableSourceAndContent,
+			SkillID: "source", SkillVersion: "1", Action: "observe", SourcePolicyRef: "approved", Deduplication: WorkforceProjectDeduplicateStableSourceAndContent,
 		}},
-		Deliverables: []WorkforceInitiativeDeliverableBlueprint{{ID: "report", Title: "Cited report"}},
+		Deliverables: []WorkforceProjectDeliverableBlueprint{{ID: "report", Title: "Cited report"}},
 	}}
-	placement := WorkforceChangeSetPlacement{InitiativeID: "initiative-live", InitiativeExpectedRevision: 2}
+	placement := WorkforceChangeSetPlacement{ProjectID: "project-live", ProjectExpectedRevision: 2}
 	catalog := WorkforceCapabilityCatalog{SourcePolicies: map[string]WorkforceSourcePolicyCapability{
 		"approved@1": {Reference: "approved@1", Sources: []WorkforceSourcePolicySourceCapability{{Host: "community.example", PathPrefixes: []string{"/forum"}}}},
 	}}
-	if candidate.Initiative.Owner.DefinitionID != "research-team" || placement.InitiativeID != "initiative-live" || placement.InitiativeExpectedRevision != 2 || catalog.SourcePolicies["approved@1"].Sources[0].Host != "community.example" {
-		t.Fatalf("public Initiative contract candidate=%#v placement=%#v", candidate, placement)
+	if candidate.Project.Owner.DefinitionID != "research-team" || placement.ProjectID != "project-live" || placement.ProjectExpectedRevision != 2 || catalog.SourcePolicies["approved@1"].Sources[0].Host != "community.example" {
+		t.Fatalf("public Project contract candidate=%#v placement=%#v", candidate, placement)
 	}
 }
 
-func TestPublicInitiativeLifecycleConstants(t *testing.T) {
-	initiative := Initiative{Status: InitiativeStatusActive}
-	milestone := InitiativeMilestone{Status: InitiativeMilestonePending}
-	hypothesis := InitiativeHypothesis{Status: InitiativeHypothesisOpen}
-	deliverable := InitiativeDeliverable{Status: InitiativeDeliverablePlanned}
-	monitor := InitiativeSourceMonitorReference{Deduplication: InitiativeSourceDeduplicateStableSourceAndContent}
-	if initiative.Status != "active" || milestone.Status != "pending" || hypothesis.Status != "open" || deliverable.Status != "planned" || monitor.Deduplication != "stable_source_and_content" {
-		t.Fatalf("public Initiative lifecycle constants drifted")
+func TestPublicProjectLifecycleConstants(t *testing.T) {
+	project := Project{Status: ProjectStatusActive}
+	milestone := ProjectMilestone{Status: ProjectMilestonePending}
+	hypothesis := ProjectHypothesis{Status: ProjectHypothesisOpen}
+	deliverable := ProjectDeliverable{Status: ProjectDeliverablePlanned}
+	monitor := ProjectSourceMonitorReference{Deduplication: ProjectSourceDeduplicateStableSourceAndContent}
+	if project.Status != "active" || milestone.Status != "pending" || hypothesis.Status != "open" || deliverable.Status != "planned" || monitor.Deduplication != "stable_source_and_content" {
+		t.Fatalf("public Project lifecycle constants drifted")
 	}
 }
 

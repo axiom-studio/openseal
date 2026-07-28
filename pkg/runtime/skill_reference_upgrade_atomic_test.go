@@ -53,11 +53,11 @@ func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgra
 	if err := store.CreateObjective(ctx, objective); err != nil {
 		t.Fatal(err)
 	}
-	initiative := &Initiative{
-		ID: "initiative", Scope: scope, Owner: objective.Owner, Title: "Research", Purpose: "Coordinate research",
-		Status: InitiativeStatusActive, ObjectiveRefs: []string{objective.ID}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	project := &Project{
+		ID: "project", Scope: scope, Owner: objective.Owner, Title: "Research", Purpose: "Coordinate research",
+		Status: ProjectStatusActive, ObjectiveRefs: []string{objective.ID}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := store.CreateInitiative(ctx, initiative); err != nil {
+	if err := store.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,33 +68,33 @@ func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgra
 	nextObjective := cloneObjective(objective)
 	nextObjective.Revision = 2
 	nextObjective.UpdatedAt = nextBinding.UpdatedAt
-	nextInitiative := cloneInitiative(initiative)
+	nextProject := cloneProject(project)
 	// The reviewed expected revision is deliberately stale. The candidate is
 	// internally valid for that expectation so the conflict occurs in storage
 	// after the binding and Objective update statements have run.
-	nextInitiative.Revision = 3
-	nextInitiative.UpdatedAt = nextBinding.UpdatedAt
+	nextProject.Revision = 3
+	nextProject.UpdatedAt = nextBinding.UpdatedAt
 	plan := &SkillReferenceUpgradePlan{
 		APIVersion: SkillReferenceUpgradeAPIVersion, Scope: scope, DeploymentID: binding.DeploymentID,
 		BindingID: binding.ID, ExpectedBindingRevision: 1,
-		From:        SkillReferenceIdentity{ID: binding.SkillID, Version: binding.SkillVersion},
-		To:          SkillReferenceIdentity{ID: binding.SkillID, Version: nextBinding.SkillVersion},
-		Objectives:  []SkillReferenceObjectiveImpact{{ID: objective.ID, ExpectedRevision: 1}},
-		Initiatives: []SkillReferenceInitiativeImpact{{ID: initiative.ID, ExpectedRevision: 2}},
-		Digest:      "sha256:reviewed",
+		From:       SkillReferenceIdentity{ID: binding.SkillID, Version: binding.SkillVersion},
+		To:         SkillReferenceIdentity{ID: binding.SkillID, Version: nextBinding.SkillVersion},
+		Objectives: []SkillReferenceObjectiveImpact{{ID: objective.ID, ExpectedRevision: 1}},
+		Projects:   []SkillReferenceProjectImpact{{ID: project.ID, ExpectedRevision: 2}},
+		Digest:     "sha256:reviewed",
 	}
 	objectiveEvent := objectiveActivityEvent(nextObjective, ActivityActor{Type: "user", ID: "operator"},
 		ActivityVisibilityScope, "objective.skill_reference_upgraded", "Upgrade Objective reference",
 		nextObjective.UpdatedAt, map[string]interface{}{"planDigest": plan.Digest})
-	initiativeEvent := initiativeEvent(nextInitiative, "initiative.skill_reference_upgraded",
-		ActivityActor{Type: "user", ID: "operator"}, ActivityVisibilityScope, "Upgrade Initiative reference")
+	projectEvent := projectEvent(nextProject, "project.skill_reference_upgraded",
+		ActivityActor{Type: "user", ID: "operator"}, ActivityVisibilityScope, "Upgrade Project reference")
 	mutation := &SkillReferenceUpgradeMutation{
 		Plan: plan, Binding: nextBinding,
 		Objectives: []SkillReferenceObjectiveMutation{{
 			Value: nextObjective, ExpectedRevision: 1, Event: objectiveEvent,
 		}},
-		Initiatives: []SkillReferenceInitiativeMutation{{
-			Value: nextInitiative, ExpectedRevision: 2, Event: initiativeEvent,
+		Projects: []SkillReferenceProjectMutation{{
+			Value: nextProject, ExpectedRevision: 2, Event: projectEvent,
 		}},
 		Receipt: &SkillReferenceUpgradeReceipt{
 			APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: plan.Digest, Scope: scope,
@@ -113,8 +113,8 @@ func assertSkillReferenceUpgradeRollback(t *testing.T, store SkillReferenceUpgra
 	if err != nil || restoredObjective.Revision != 1 {
 		t.Fatalf("objective changed after rollback: %#v err=%v", restoredObjective, err)
 	}
-	restoredInitiative, err := store.GetInitiative(ctx, scope, initiative.ID)
-	if err != nil || restoredInitiative.Revision != 1 {
-		t.Fatalf("initiative changed after rollback: %#v err=%v", restoredInitiative, err)
+	restoredProject, err := store.GetProject(ctx, scope, project.ID)
+	if err != nil || restoredProject.Revision != 1 {
+		t.Fatalf("project changed after rollback: %#v err=%v", restoredProject, err)
 	}
 }

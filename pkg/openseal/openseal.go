@@ -184,12 +184,12 @@ type (
 	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
-	WorkforceInitiativeBlueprint              = authoring.InitiativeBlueprint
-	WorkforceInitiativeOwnerReference         = authoring.InitiativeOwnerReference
-	WorkforceInitiativeMilestoneBlueprint     = authoring.InitiativeMilestoneBlueprint
-	WorkforceInitiativeHypothesisBlueprint    = authoring.InitiativeHypothesisBlueprint
-	WorkforceInitiativeSourceMonitorBlueprint = authoring.InitiativeSourceMonitorBlueprint
-	WorkforceInitiativeDeliverableBlueprint   = authoring.InitiativeDeliverableBlueprint
+	WorkforceProjectBlueprint                 = authoring.ProjectBlueprint
+	WorkforceProjectOwnerReference            = authoring.ProjectOwnerReference
+	WorkforceProjectMilestoneBlueprint        = authoring.ProjectMilestoneBlueprint
+	WorkforceProjectHypothesisBlueprint       = authoring.ProjectHypothesisBlueprint
+	WorkforceProjectSourceMonitorBlueprint    = authoring.ProjectSourceMonitorBlueprint
+	WorkforceProjectDeliverableBlueprint      = authoring.ProjectDeliverableBlueprint
 	WorkforceAuthoringRequest                 = authoring.GenerateRequest
 	WorkforceAuthoringGenerator               = authoring.Generator
 	WorkforceAuthoringResult                  = authoring.CompileResult
@@ -237,7 +237,7 @@ type (
 	SkillReferenceIdentity                    = runtime.SkillReferenceIdentity
 	SkillReferenceObjectiveReference          = runtime.SkillReferenceObjectiveReference
 	SkillReferenceObjectiveImpact             = runtime.SkillReferenceObjectiveImpact
-	SkillReferenceInitiativeImpact            = runtime.SkillReferenceInitiativeImpact
+	SkillReferenceProjectImpact               = runtime.SkillReferenceProjectImpact
 	SkillReferenceTeamAuthorityImpact         = runtime.SkillReferenceTeamAuthorityImpact
 	PlanSkillReferenceUpgradeRequest          = runtime.PlanSkillReferenceUpgradeRequest
 	ApplySkillReferenceUpgradeRequest         = runtime.ApplySkillReferenceUpgradeRequest
@@ -267,21 +267,21 @@ type (
 	CreateRunbookActivationRequest     = runtime.CreateRunbookActivationRequest
 	RunbookScheduleResult              = runtime.RunbookScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
-	Initiative                         = runtime.Initiative
-	InitiativeStatus                   = runtime.InitiativeStatus
-	InitiativeFilter                   = runtime.InitiativeFilter
-	InitiativeStore                    = runtime.InitiativeStore
-	CreateInitiativeRequest            = runtime.CreateInitiativeRequest
-	UpdateInitiativeRequest            = runtime.UpdateInitiativeRequest
-	InitiativeResourceReference        = runtime.ResourceReference
-	InitiativeResourceKind             = runtime.ResourceKind
-	InitiativeMilestone                = runtime.InitiativeMilestone
-	InitiativeMilestoneStatus          = runtime.MilestoneStatus
-	InitiativeHypothesis               = runtime.InitiativeHypothesis
-	InitiativeHypothesisStatus         = runtime.HypothesisStatus
-	InitiativeSourceMonitorReference   = runtime.SourceMonitorReference
-	InitiativeDeliverable              = runtime.InitiativeDeliverable
-	InitiativeDeliverableStatus        = runtime.DeliverableStatus
+	Project                            = runtime.Project
+	ProjectStatus                      = runtime.ProjectStatus
+	ProjectFilter                      = runtime.ProjectFilter
+	ProjectStore                       = runtime.ProjectStore
+	CreateProjectRequest               = runtime.CreateProjectRequest
+	UpdateProjectRequest               = runtime.UpdateProjectRequest
+	ProjectResourceReference           = runtime.ResourceReference
+	ProjectResourceKind                = runtime.ResourceKind
+	ProjectMilestone                   = runtime.ProjectMilestone
+	ProjectMilestoneStatus             = runtime.MilestoneStatus
+	ProjectHypothesis                  = runtime.ProjectHypothesis
+	ProjectHypothesisStatus            = runtime.HypothesisStatus
+	ProjectSourceMonitorReference      = runtime.SourceMonitorReference
+	ProjectDeliverable                 = runtime.ProjectDeliverable
+	ProjectDeliverableStatus           = runtime.DeliverableStatus
 	OutreachThread                     = runtime.OutreachThread
 	OutreachThreadStatus               = runtime.OutreachThreadStatus
 	OutreachIdentity                   = runtime.OutreachIdentity
@@ -844,7 +844,7 @@ func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
 	return capability.NewSkillIdentity(id, version, sourceIdentity)
 }
 
-type InitiativeSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
+type ProjectSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
 type (
 	SourceObservation                     = runtime.SourceObservation
@@ -1075,8 +1075,8 @@ func EventRoutingCapability() KernelCapability {
 	return kernelapi.EventRoutingCapability()
 }
 
-func InitiativesCapability() KernelCapability {
-	return kernelapi.InitiativesCapability()
+func ProjectsCapability() KernelCapability {
+	return kernelapi.ProjectsCapability()
 }
 
 func SourceMonitorsCapability() KernelCapability {
@@ -1207,9 +1207,9 @@ var (
 	ObjectiveManagementSkill           = runtime.ObjectiveManagementSkill
 	NewObjectiveActionValidator        = runtime.NewObjectiveActionValidator
 	NewObjectiveActionDispatcher       = runtime.NewObjectiveActionDispatcher
-	InitiativeManagementSkill          = runtime.InitiativeManagementSkill
-	NewInitiativeActionValidator       = runtime.NewInitiativeActionValidator
-	NewInitiativeActionDispatcher      = runtime.NewInitiativeActionDispatcher
+	ProjectManagementSkill             = runtime.ProjectManagementSkill
+	NewProjectActionValidator          = runtime.NewProjectActionValidator
+	NewProjectActionDispatcher         = runtime.NewProjectActionDispatcher
 	AgentManagementSkill               = runtime.AgentManagementSkill
 	NewAgentBehaviorActionValidator    = runtime.NewAgentBehaviorActionValidator
 	NewAgentBehaviorActionDispatcher   = runtime.NewAgentBehaviorActionDispatcher
@@ -1271,7 +1271,7 @@ type PersistentKernelStore interface {
 	runtime.RunDependencyStore
 	runtime.ConversationStore
 	runtime.ArtifactStore
-	runtime.InitiativeStore
+	runtime.ProjectStore
 	runtime.SourceMonitorStore
 	runtime.SkillReferenceUpgradeStore
 	kernelagent.Store
@@ -1297,11 +1297,11 @@ var (
 	ErrEventSourceCheckpointConflict        = runtime.ErrEventSourceCheckpointConflict
 	ErrInvalidEventSourceCheckpoint         = runtime.ErrInvalidEventSourceCheckpoint
 	ErrInvalidOwner                         = runtime.ErrInvalidOwner
-	ErrInitiativeNotFound                   = runtime.ErrInitiativeNotFound
-	ErrInitiativeConflict                   = runtime.ErrInitiativeConflict
-	ErrInitiativeIdempotency                = runtime.ErrInitiativeIdempotency
-	ErrInitiativeNoChanges                  = runtime.ErrInitiativeNoChanges
-	ErrInvalidInitiative                    = runtime.ErrInvalidInitiative
+	ErrProjectNotFound                      = runtime.ErrProjectNotFound
+	ErrProjectConflict                      = runtime.ErrProjectConflict
+	ErrProjectIdempotency                   = runtime.ErrProjectIdempotency
+	ErrProjectNoChanges                     = runtime.ErrProjectNoChanges
+	ErrInvalidProject                       = runtime.ErrInvalidProject
 	ErrObjectiveNotFound                    = runtime.ErrObjectiveNotFound
 	ErrObjectiveIdempotency                 = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition           = runtime.ErrInvalidObjectiveTransition
@@ -1479,107 +1479,107 @@ func NewSkillSourceWatcher(catalog *skillsource.Catalog, roots []skillsource.Roo
 }
 
 const (
-	WorkforceAuthoringCreate                             = authoring.ModeCreate
-	WorkforceAuthoringAmend                              = authoring.ModeAmend
-	WorkforceChangeSetBlocked                            = authoring.ChangeSetBlocked
-	WorkforceChangeSetReview                             = authoring.ChangeSetReview
-	WorkforceChangeSetEvaluating                         = authoring.ChangeSetEvaluating
-	WorkforceChangeSetAwaitingApproval                   = authoring.ChangeSetAwaitingApproval
-	WorkforceChangeSetReady                              = authoring.ChangeSetReady
-	WorkforceChangeSetApplied                            = authoring.ChangeSetApplied
-	WorkforceChangeSetRejected                           = authoring.ChangeSetRejected
-	WorkforceChangeSetFailed                             = authoring.ChangeSetFailed
-	WorkforceActivationActive                            = authoring.WorkforceActivationActive
-	WorkforceActivationInactive                          = authoring.WorkforceActivationInactive
-	WorkforceInitiativeOwnerAgent                        = authoring.InitiativeOwnerAgent
-	WorkforceInitiativeOwnerTeam                         = authoring.InitiativeOwnerTeam
-	WorkforceInitiativeDeduplicateStableSource           = authoring.InitiativeDeduplicateStableSource
-	WorkforceInitiativeDeduplicateContentDigest          = authoring.InitiativeDeduplicateContentDigest
-	WorkforceInitiativeDeduplicateStableSourceAndContent = authoring.InitiativeDeduplicateStableSourceAndContent
-	WorkforceCatalogDiagnosticExecutionTargetMissing     = authoring.CatalogDiagnosticExecutionTargetMissing
+	WorkforceAuthoringCreate                          = authoring.ModeCreate
+	WorkforceAuthoringAmend                           = authoring.ModeAmend
+	WorkforceChangeSetBlocked                         = authoring.ChangeSetBlocked
+	WorkforceChangeSetReview                          = authoring.ChangeSetReview
+	WorkforceChangeSetEvaluating                      = authoring.ChangeSetEvaluating
+	WorkforceChangeSetAwaitingApproval                = authoring.ChangeSetAwaitingApproval
+	WorkforceChangeSetReady                           = authoring.ChangeSetReady
+	WorkforceChangeSetApplied                         = authoring.ChangeSetApplied
+	WorkforceChangeSetRejected                        = authoring.ChangeSetRejected
+	WorkforceChangeSetFailed                          = authoring.ChangeSetFailed
+	WorkforceActivationActive                         = authoring.WorkforceActivationActive
+	WorkforceActivationInactive                       = authoring.WorkforceActivationInactive
+	WorkforceProjectOwnerAgent                        = authoring.ProjectOwnerAgent
+	WorkforceProjectOwnerTeam                         = authoring.ProjectOwnerTeam
+	WorkforceProjectDeduplicateStableSource           = authoring.ProjectDeduplicateStableSource
+	WorkforceProjectDeduplicateContentDigest          = authoring.ProjectDeduplicateContentDigest
+	WorkforceProjectDeduplicateStableSourceAndContent = authoring.ProjectDeduplicateStableSourceAndContent
+	WorkforceCatalogDiagnosticExecutionTargetMissing  = authoring.CatalogDiagnosticExecutionTargetMissing
 
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
 
-	ObjectiveStatusDraft             = runtime.ObjectiveStatusDraft
-	ObjectiveStatusActive            = runtime.ObjectiveStatusActive
-	ObjectiveStatusPaused            = runtime.ObjectiveStatusPaused
-	ObjectiveStatusSatisfied         = runtime.ObjectiveStatusSatisfied
-	ObjectiveStatusFailed            = runtime.ObjectiveStatusFailed
-	ObjectiveStatusRetired           = runtime.ObjectiveStatusRetired
-	ObjectiveManagementSkillID       = runtime.ObjectiveManagementSkillID
-	ObjectiveManagementSkillVersion  = runtime.ObjectiveManagementSkillVersion
-	ObjectiveActionCreate            = runtime.ObjectiveActionCreate
-	ObjectiveActionUpdate            = runtime.ObjectiveActionUpdate
-	ObjectiveActionPause             = runtime.ObjectiveActionPause
-	InitiativeManagementSkillID      = runtime.InitiativeManagementSkillID
-	InitiativeManagementSkillVersion = runtime.InitiativeManagementSkillVersion
-	InitiativeActionCreate           = runtime.InitiativeActionCreate
-	InitiativeActionUpdate           = runtime.InitiativeActionUpdate
-	InitiativeActionPause            = runtime.InitiativeActionPause
-	AgentManagementSkillID           = runtime.AgentManagementSkillID
-	AgentManagementSkillVersion      = runtime.AgentManagementSkillVersion
-	AgentActionAmendBehavior         = runtime.AgentActionAmendBehavior
-	TeamManagementSkillID            = runtime.TeamManagementSkillID
-	TeamManagementSkillVersion       = runtime.TeamManagementSkillVersion
-	TeamActionUpdateRole             = runtime.TeamActionUpdateRole
-	SkillManagementSkillID           = runtime.SkillManagementSkillID
-	SkillManagementSkillVersion      = runtime.SkillManagementSkillVersion
-	SkillActionDiscover              = runtime.SkillActionDiscoverBinding
-	SkillActionUpsertBinding         = runtime.SkillActionUpsertBinding
-	SkillActionDisableBinding        = runtime.SkillActionDisableBinding
-	RunbookActivationActive          = runtime.RunbookActivationActive
-	RunbookActivationPaused          = runtime.RunbookActivationPaused
-	RunbookActivationRetired         = runtime.RunbookActivationRetired
+	ObjectiveStatusDraft            = runtime.ObjectiveStatusDraft
+	ObjectiveStatusActive           = runtime.ObjectiveStatusActive
+	ObjectiveStatusPaused           = runtime.ObjectiveStatusPaused
+	ObjectiveStatusSatisfied        = runtime.ObjectiveStatusSatisfied
+	ObjectiveStatusFailed           = runtime.ObjectiveStatusFailed
+	ObjectiveStatusRetired          = runtime.ObjectiveStatusRetired
+	ObjectiveManagementSkillID      = runtime.ObjectiveManagementSkillID
+	ObjectiveManagementSkillVersion = runtime.ObjectiveManagementSkillVersion
+	ObjectiveActionCreate           = runtime.ObjectiveActionCreate
+	ObjectiveActionUpdate           = runtime.ObjectiveActionUpdate
+	ObjectiveActionPause            = runtime.ObjectiveActionPause
+	ProjectManagementSkillID        = runtime.ProjectManagementSkillID
+	ProjectManagementSkillVersion   = runtime.ProjectManagementSkillVersion
+	ProjectActionCreate             = runtime.ProjectActionCreate
+	ProjectActionUpdate             = runtime.ProjectActionUpdate
+	ProjectActionPause              = runtime.ProjectActionPause
+	AgentManagementSkillID          = runtime.AgentManagementSkillID
+	AgentManagementSkillVersion     = runtime.AgentManagementSkillVersion
+	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
+	TeamManagementSkillID           = runtime.TeamManagementSkillID
+	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
+	TeamActionUpdateRole            = runtime.TeamActionUpdateRole
+	SkillManagementSkillID          = runtime.SkillManagementSkillID
+	SkillManagementSkillVersion     = runtime.SkillManagementSkillVersion
+	SkillActionDiscover             = runtime.SkillActionDiscoverBinding
+	SkillActionUpsertBinding        = runtime.SkillActionUpsertBinding
+	SkillActionDisableBinding       = runtime.SkillActionDisableBinding
+	RunbookActivationActive         = runtime.RunbookActivationActive
+	RunbookActivationPaused         = runtime.RunbookActivationPaused
+	RunbookActivationRetired        = runtime.RunbookActivationRetired
 
-	InitiativeStatusDraft                             = runtime.InitiativeStatusDraft
-	InitiativeStatusActive                            = runtime.InitiativeStatusActive
-	InitiativeStatusPaused                            = runtime.InitiativeStatusPaused
-	InitiativeStatusCompleted                         = runtime.InitiativeStatusCompleted
-	InitiativeStatusFailed                            = runtime.InitiativeStatusFailed
-	InitiativeStatusCanceled                          = runtime.InitiativeStatusCanceled
-	InitiativeStatusArchived                          = runtime.InitiativeStatusArchived
-	InitiativeResourceAgentDefinition                 = runtime.ResourceKindAgentDefinition
-	InitiativeResourceAgentDeployment                 = runtime.ResourceKindAgentDeployment
-	InitiativeResourceTeamDefinition                  = runtime.ResourceKindTeamDefinition
-	InitiativeResourceTeamDeployment                  = runtime.ResourceKindTeamDeployment
-	InitiativeResourceArtifact                        = runtime.ResourceKindArtifact
-	InitiativeResourceEvidence                        = runtime.ResourceKindEvidence
-	InitiativeMilestonePending                        = runtime.MilestonePending
-	InitiativeMilestoneInProgress                     = runtime.MilestoneInProgress
-	InitiativeMilestoneCompleted                      = runtime.MilestoneCompleted
-	InitiativeMilestoneBlocked                        = runtime.MilestoneBlocked
-	InitiativeMilestoneCanceled                       = runtime.MilestoneCanceled
-	InitiativeHypothesisOpen                          = runtime.HypothesisOpen
-	InitiativeHypothesisSupported                     = runtime.HypothesisSupported
-	InitiativeHypothesisContradicted                  = runtime.HypothesisContradicted
-	InitiativeHypothesisInconclusive                  = runtime.HypothesisInconclusive
-	InitiativeDeliverablePlanned                      = runtime.DeliverablePlanned
-	InitiativeDeliverableInProgress                   = runtime.DeliverableInProgress
-	InitiativeDeliverableReview                       = runtime.DeliverableReview
-	InitiativeDeliverableDelivered                    = runtime.DeliverableDelivered
-	InitiativeDeliverableCanceled                     = runtime.DeliverableCanceled
-	InitiativeSourceDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
-	InitiativeSourceDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
-	InitiativeSourceDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
-	OutreachThreadOpen                                = runtime.OutreachThreadOpen
-	OutreachThreadClosed                              = runtime.OutreachThreadClosed
-	OutreachThreadCanceled                            = runtime.OutreachThreadCanceled
-	OutreachMessageOutbound                           = runtime.OutreachMessageOutbound
-	OutreachMessageInbound                            = runtime.OutreachMessageInbound
-	OutreachIntentClarify                             = runtime.OutreachIntentClarify
-	OutreachIntentRequestFeedback                     = runtime.OutreachIntentRequestFeedback
-	OutreachIntentAnswer                              = runtime.OutreachIntentAnswer
-	OutreachIntentFollowUp                            = runtime.OutreachIntentFollowUp
-	OutreachMessageDraft                              = runtime.OutreachMessageDraft
-	OutreachMessagePendingApproval                    = runtime.OutreachMessagePendingApproval
-	OutreachMessageReady                              = runtime.OutreachMessageReady
-	OutreachMessageDelivered                          = runtime.OutreachMessageDelivered
-	OutreachMessageReceived                           = runtime.OutreachMessageReceived
-	OutreachMessageDeclined                           = runtime.OutreachMessageDeclined
-	OutreachMessageFailed                             = runtime.OutreachMessageFailed
-	OutreachMessageCanceled                           = runtime.OutreachMessageCanceled
-	OutreachInvocationContextKey                      = runtime.OutreachInvocationContextKey
+	ProjectStatusDraft                             = runtime.ProjectStatusDraft
+	ProjectStatusActive                            = runtime.ProjectStatusActive
+	ProjectStatusPaused                            = runtime.ProjectStatusPaused
+	ProjectStatusCompleted                         = runtime.ProjectStatusCompleted
+	ProjectStatusFailed                            = runtime.ProjectStatusFailed
+	ProjectStatusCanceled                          = runtime.ProjectStatusCanceled
+	ProjectStatusArchived                          = runtime.ProjectStatusArchived
+	ProjectResourceAgentDefinition                 = runtime.ResourceKindAgentDefinition
+	ProjectResourceAgentDeployment                 = runtime.ResourceKindAgentDeployment
+	ProjectResourceTeamDefinition                  = runtime.ResourceKindTeamDefinition
+	ProjectResourceTeamDeployment                  = runtime.ResourceKindTeamDeployment
+	ProjectResourceArtifact                        = runtime.ResourceKindArtifact
+	ProjectResourceEvidence                        = runtime.ResourceKindEvidence
+	ProjectMilestonePending                        = runtime.MilestonePending
+	ProjectMilestoneInProgress                     = runtime.MilestoneInProgress
+	ProjectMilestoneCompleted                      = runtime.MilestoneCompleted
+	ProjectMilestoneBlocked                        = runtime.MilestoneBlocked
+	ProjectMilestoneCanceled                       = runtime.MilestoneCanceled
+	ProjectHypothesisOpen                          = runtime.HypothesisOpen
+	ProjectHypothesisSupported                     = runtime.HypothesisSupported
+	ProjectHypothesisContradicted                  = runtime.HypothesisContradicted
+	ProjectHypothesisInconclusive                  = runtime.HypothesisInconclusive
+	ProjectDeliverablePlanned                      = runtime.DeliverablePlanned
+	ProjectDeliverableInProgress                   = runtime.DeliverableInProgress
+	ProjectDeliverableReview                       = runtime.DeliverableReview
+	ProjectDeliverableDelivered                    = runtime.DeliverableDelivered
+	ProjectDeliverableCanceled                     = runtime.DeliverableCanceled
+	ProjectSourceDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
+	ProjectSourceDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
+	ProjectSourceDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
+	OutreachThreadOpen                             = runtime.OutreachThreadOpen
+	OutreachThreadClosed                           = runtime.OutreachThreadClosed
+	OutreachThreadCanceled                         = runtime.OutreachThreadCanceled
+	OutreachMessageOutbound                        = runtime.OutreachMessageOutbound
+	OutreachMessageInbound                         = runtime.OutreachMessageInbound
+	OutreachIntentClarify                          = runtime.OutreachIntentClarify
+	OutreachIntentRequestFeedback                  = runtime.OutreachIntentRequestFeedback
+	OutreachIntentAnswer                           = runtime.OutreachIntentAnswer
+	OutreachIntentFollowUp                         = runtime.OutreachIntentFollowUp
+	OutreachMessageDraft                           = runtime.OutreachMessageDraft
+	OutreachMessagePendingApproval                 = runtime.OutreachMessagePendingApproval
+	OutreachMessageReady                           = runtime.OutreachMessageReady
+	OutreachMessageDelivered                       = runtime.OutreachMessageDelivered
+	OutreachMessageReceived                        = runtime.OutreachMessageReceived
+	OutreachMessageDeclined                        = runtime.OutreachMessageDeclined
+	OutreachMessageFailed                          = runtime.OutreachMessageFailed
+	OutreachMessageCanceled                        = runtime.OutreachMessageCanceled
+	OutreachInvocationContextKey                   = runtime.OutreachInvocationContextKey
 
 	RunSourceManual          = runtime.RunSourceManual
 	RunSourceChat            = runtime.RunSourceChat
@@ -1698,7 +1698,7 @@ const (
 	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
 
 	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
-	ConversationReferenceInitiative     = runtime.ConversationReferenceInitiative
+	ConversationReferenceProject        = runtime.ConversationReferenceProject
 	ConversationReferenceRun            = runtime.ConversationReferenceRun
 	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
 	ConversationReferenceApproval       = runtime.ConversationReferenceApproval
@@ -2029,7 +2029,7 @@ func ValidateWorkforceAuthoringPrompt(prompt string) error {
 type Engine struct {
 	store                         runtime.KernelStore
 	portfolio                     *runtime.PortfolioService
-	initiatives                   *runtime.InitiativeService
+	projects                      *runtime.ProjectService
 	sourceMonitors                *runtime.SourceMonitorService
 	eventSources                  *runtime.EventSourceCheckpointService
 	eventSourceSubscriptions      *runtime.EventSourceSubscriptionService
@@ -2151,7 +2151,7 @@ func New(opts ...Option) (*Engine, error) {
 	e := &Engine{
 		store:                    store,
 		portfolio:                runtime.NewPortfolioService(store),
-		initiatives:              runtime.NewInitiativeService(store, store),
+		projects:                 runtime.NewProjectService(store, store),
 		sourceMonitors:           runtime.NewSourceMonitorService(store, store, store, store),
 		eventSources:             runtime.NewEventSourceCheckpointService(store),
 		eventSourceSubscriptions: runtime.NewEventSourceSubscriptionService(store, store),
@@ -2313,15 +2313,15 @@ func WithStore(store runtime.KernelStore) Option {
 		e.portfolio = runtime.NewPortfolioService(store)
 		e.eventSources = runtime.NewEventSourceCheckpointService(store)
 		e.eventSourceSubscriptions = runtime.NewEventSourceSubscriptionService(store, store)
-		if initiativeStore, ok := store.(runtime.InitiativeStore); ok {
-			e.initiatives = runtime.NewInitiativeService(initiativeStore, store)
+		if projectStore, ok := store.(runtime.ProjectStore); ok {
+			e.projects = runtime.NewProjectService(projectStore, store)
 			if sourceMonitorStore, supported := store.(runtime.SourceMonitorStore); supported {
 				artifactStore, _ := store.(runtime.ArtifactStore)
-				e.sourceMonitors = runtime.NewSourceMonitorService(sourceMonitorStore, initiativeStore, store, artifactStore)
+				e.sourceMonitors = runtime.NewSourceMonitorService(sourceMonitorStore, projectStore, store, artifactStore)
 				if outreachStore, outreachSupported := store.(runtime.OutreachStore); outreachSupported {
 					actionReader, actionsSupported := store.(runtime.OutreachActionReader)
 					if actionsSupported {
-						e.outreach = runtime.NewOutreachService(outreachStore, initiativeStore, sourceMonitorStore, actionReader)
+						e.outreach = runtime.NewOutreachService(outreachStore, projectStore, sourceMonitorStore, actionReader)
 					} else {
 						e.outreach = nil
 					}
@@ -2333,7 +2333,7 @@ func WithStore(store runtime.KernelStore) Option {
 				e.outreach = nil
 			}
 		} else {
-			e.initiatives = nil
+			e.projects = nil
 			e.sourceMonitors = nil
 			e.outreach = nil
 		}
@@ -3236,29 +3236,29 @@ func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.Runb
 	return e.store.ListRunbookActivations(ctx, filter)
 }
 
-func (e *Engine) CreateInitiative(ctx context.Context, req runtime.CreateInitiativeRequest) (*runtime.Initiative, *runtime.ActivityEvent, error) {
-	if e.initiatives == nil {
-		return nil, nil, errors.New("initiative capability is unavailable")
+func (e *Engine) CreateProject(ctx context.Context, req runtime.CreateProjectRequest) (*runtime.Project, *runtime.ActivityEvent, error) {
+	if e.projects == nil {
+		return nil, nil, errors.New("project capability is unavailable")
 	}
-	return e.initiatives.Create(ctx, req)
+	return e.projects.Create(ctx, req)
 }
-func (e *Engine) GetInitiative(ctx context.Context, scope runtime.Scope, id string) (*runtime.Initiative, error) {
-	if e.initiatives == nil {
-		return nil, errors.New("initiative capability is unavailable")
+func (e *Engine) GetProject(ctx context.Context, scope runtime.Scope, id string) (*runtime.Project, error) {
+	if e.projects == nil {
+		return nil, errors.New("project capability is unavailable")
 	}
-	return e.initiatives.Get(ctx, scope, id)
+	return e.projects.Get(ctx, scope, id)
 }
-func (e *Engine) ListInitiatives(ctx context.Context, filter runtime.InitiativeFilter) ([]*runtime.Initiative, error) {
-	if e.initiatives == nil {
-		return nil, errors.New("initiative capability is unavailable")
+func (e *Engine) ListProjects(ctx context.Context, filter runtime.ProjectFilter) ([]*runtime.Project, error) {
+	if e.projects == nil {
+		return nil, errors.New("project capability is unavailable")
 	}
-	return e.initiatives.List(ctx, filter)
+	return e.projects.List(ctx, filter)
 }
-func (e *Engine) UpdateInitiative(ctx context.Context, scope runtime.Scope, initiativeID string, req runtime.UpdateInitiativeRequest) (*runtime.Initiative, *runtime.ActivityEvent, error) {
-	if e.initiatives == nil {
-		return nil, nil, errors.New("initiative capability is unavailable")
+func (e *Engine) UpdateProject(ctx context.Context, scope runtime.Scope, projectID string, req runtime.UpdateProjectRequest) (*runtime.Project, *runtime.ActivityEvent, error) {
+	if e.projects == nil {
+		return nil, nil, errors.New("project capability is unavailable")
 	}
-	return e.initiatives.Patch(ctx, scope, initiativeID, req)
+	return e.projects.Patch(ctx, scope, projectID, req)
 }
 
 func (e *Engine) IngestSourceObservation(ctx context.Context, req runtime.IngestSourceObservationRequest) (*runtime.SourceObservationIngestResult, error) {
@@ -3275,11 +3275,11 @@ func (e *Engine) AdvanceSourceMonitorCheckpoint(ctx context.Context, req runtime
 	return e.sourceMonitors.AdvanceCheckpoint(ctx, req)
 }
 
-func (e *Engine) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, initiativeID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
+func (e *Engine) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, projectID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
 	if e.sourceMonitors == nil {
 		return nil, errors.New("source monitor capability is unavailable")
 	}
-	return e.sourceMonitors.GetCheckpoint(ctx, scope, initiativeID, monitorID)
+	return e.sourceMonitors.GetCheckpoint(ctx, scope, projectID, monitorID)
 }
 
 func (e *Engine) ListSourceObservations(ctx context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {

@@ -1084,34 +1084,34 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 	}
 }
 
-func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testing.T) {
+func TestSQLiteAtomicWorkforceApplyMaterializesProjectAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	registerInitiativeSourceSkill(t, store)
-	value := testInitiativeWorkforceChangeSet()
-	if _, _, err = store.CreateChangeSet(ctx, value, "create-initiative", "digest"); err != nil {
+	registerProjectSourceSkill(t, store)
+	value := testProjectWorkforceChangeSet()
+	if _, _, err = store.CreateChangeSet(ctx, value, "create-project", "digest"); err != nil {
 		t.Fatal(err)
 	}
 	applied := cloneRuntimeChangeSet(value)
 	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
-	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-initiative", IdempotencyKey: "apply-initiative", CandidateDigest: value.CandidateDigest, Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute)}
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-project", IdempotencyKey: "apply-project", CandidateDigest: value.CandidateDigest, Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute)}
 	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
 	result, err := store.ApplyChangeSet(ctx, applied, 2)
 	if err != nil || len(result.ApplyReceipt.Resources) != 9 || result.ApplyReceipt.Activation != authoring.WorkforceActivationActive {
 		t.Fatalf("apply result=%#v err=%v", result, err)
 	}
-	initiative, err := store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
-	if err != nil || initiative.Status != InitiativeStatusActive || initiative.Owner != (ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-live"}) || initiative.Revision != 1 ||
-		len(initiative.ObjectiveRefs) != 1 || initiative.ObjectiveRefs[0] != "objective:team" || len(initiative.SourceMonitors) != 1 ||
-		initiative.SourceMonitors[0].AssignedAgentID != "agent-live" || initiative.SourceMonitors[0].ObjectiveID != "objective:team" ||
-		len(initiative.Milestones) != 1 || len(initiative.Hypotheses) != 1 || len(initiative.Deliverables) != 1 {
-		t.Fatalf("Initiative=%#v err=%v", initiative, err)
+	project, err := store.GetProject(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.ProjectID)
+	if err != nil || project.Status != ProjectStatusActive || project.Owner != (ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-live"}) || project.Revision != 1 ||
+		len(project.ObjectiveRefs) != 1 || project.ObjectiveRefs[0] != "objective:team" || len(project.SourceMonitors) != 1 ||
+		project.SourceMonitors[0].AssignedAgentID != "agent-live" || project.SourceMonitors[0].ObjectiveID != "objective:team" ||
+		len(project.Milestones) != 1 || len(project.Hypotheses) != 1 || len(project.Deliverables) != 1 {
+		t.Fatalf("Project=%#v err=%v", project, err)
 	}
-	objectives, err := store.ListObjectives(ctx, ObjectiveFilter{Scope: initiative.Scope})
+	objectives, err := store.ListObjectives(ctx, ObjectiveFilter{Scope: project.Scope})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1124,16 +1124,16 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 	if monitorObjective == nil {
 		t.Fatalf("materialized monitor Objective must contain only its outcome: %#v", monitorObjective)
 	}
-	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: initiative.Scope, ObjectiveID: monitorObjective.ID})
-	if err != nil || len(runbooks) != 1 || runbooks[0].AssignedAgentID != "agent-live" || runbooks[0].Input["initiativeId"] != initiative.ID || runbooks[0].Input["sourceMonitorId"] != "community-listening" {
+	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: project.Scope, ObjectiveID: monitorObjective.ID})
+	if err != nil || len(runbooks) != 1 || runbooks[0].AssignedAgentID != "agent-live" || runbooks[0].Input["projectId"] != project.ID || runbooks[0].Input["sourceMonitorId"] != "community-listening" {
 		t.Fatalf("materialized monitor Runbook=%#v err=%v", runbooks, err)
 	}
 	found := false
 	for _, resource := range result.ApplyReceipt.Resources {
-		found = found || resource.Kind == "initiative" && resource.ID == initiative.ID && resource.Revision == 1
+		found = found || resource.Kind == "project" && resource.ID == project.ID && resource.Revision == 1
 	}
 	if !found {
-		t.Fatalf("Initiative missing from receipt: %#v", result.ApplyReceipt.Resources)
+		t.Fatalf("Project missing from receipt: %#v", result.ApplyReceipt.Resources)
 	}
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
@@ -1143,9 +1143,9 @@ func TestSQLiteAtomicWorkforceApplyMaterializesInitiativeAcrossRestart(t *testin
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	restored, err := restarted.GetInitiative(ctx, initiative.Scope, initiative.ID)
-	if err != nil || restored.Revision != 1 || restored.SourceMonitors[0] != initiative.SourceMonitors[0] || restored.CreationFingerprint == "" || restored.IdempotencyKeyHash == "" {
-		t.Fatalf("restored Initiative=%#v err=%v", restored, err)
+	restored, err := restarted.GetProject(ctx, project.Scope, project.ID)
+	if err != nil || restored.Revision != 1 || restored.SourceMonitors[0] != project.SourceMonitors[0] || restored.CreationFingerprint == "" || restored.IdempotencyKeyHash == "" {
+		t.Fatalf("restored Project=%#v err=%v", restored, err)
 	}
 }
 
@@ -1156,8 +1156,8 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 	}
 	defer store.Close()
 	ctx := context.Background()
-	registerInitiativeSourceSkill(t, store)
-	value := testInitiativeWorkforceChangeSet()
+	registerProjectSourceSkill(t, store)
+	value := testProjectWorkforceChangeSet()
 	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
 	value.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
 	value.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
@@ -1205,19 +1205,19 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 			t.Fatalf("Objective %s status=%s", objective.ID, objective.Status)
 		}
 	}
-	initiative, err := store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
-	if err != nil || initiative.Status != InitiativeStatusDraft {
-		t.Fatalf("inactive Initiative=%#v err=%v", initiative, err)
+	project, err := store.GetProject(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.ProjectID)
+	if err != nil || project.Status != ProjectStatusDraft {
+		t.Fatalf("inactive Project=%#v err=%v", project, err)
 	}
-	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: initiative.Scope, ObjectiveID: "objective:team"})
+	runbooks, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: project.Scope, ObjectiveID: "objective:team"})
 	if err != nil || len(runbooks) != 1 || runbooks[0].Status != RunbookActivationPaused {
 		t.Fatalf("inactive Runbooks=%#v err=%v", runbooks, err)
 	}
-	schedule, err := NewRunbookScheduler(store).ReconcileScope(ctx, initiative.Scope, 10)
+	schedule, err := NewRunbookScheduler(store).ReconcileScope(ctx, project.Scope, 10)
 	if err != nil || schedule.Examined != 0 || schedule.Scheduled != 0 {
 		t.Fatalf("inactive schedule=%#v err=%v", schedule, err)
 	}
-	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: initiative.Scope})
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: project.Scope})
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("inactive Runs=%#v err=%v", runs, err)
 	}
@@ -1286,9 +1286,9 @@ func TestSQLiteAtomicWorkforceApplyHonorsInactiveCommitmentWithoutScheduling(t *
 			t.Fatalf("activated Objective %s=%#v", objective.ID, objective)
 		}
 	}
-	initiative, err = store.GetInitiative(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.InitiativeID)
-	if err != nil || initiative.Status != InitiativeStatusActive || initiative.Revision != 2 {
-		t.Fatalf("activated Initiative=%#v err=%v", initiative, err)
+	project, err = store.GetProject(ctx, Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.Placement.ProjectID)
+	if err != nil || project.Status != ProjectStatusActive || project.Revision != 2 {
+		t.Fatalf("activated Project=%#v err=%v", project, err)
 	}
 }
 
@@ -1299,8 +1299,8 @@ func TestSQLiteStartupRecoversLegacyWorkforceActivationContinuations(t *testing.
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	registerInitiativeSourceSkill(t, store)
-	value := testInitiativeWorkforceChangeSet()
+	registerProjectSourceSkill(t, store)
+	value := testProjectWorkforceChangeSet()
 	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
 	value.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
 	if _, _, err = store.CreateChangeSet(ctx, value, "create-legacy-inactive", "digest-legacy-inactive"); err != nil {
@@ -1343,16 +1343,16 @@ func TestSQLiteStartupRecoversLegacyWorkforceActivationContinuations(t *testing.
 	}
 }
 
-func TestSQLiteAtomicWorkforceInitiativeAmendUsesCASWithoutPartialState(t *testing.T) {
+func TestSQLiteAtomicWorkforceProjectAmendUsesCASWithoutPartialState(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	registerInitiativeSourceSkill(t, store)
-	created := testInitiativeWorkforceChangeSet()
-	if _, _, err = store.CreateChangeSet(ctx, created, "create-initiative", "create"); err != nil {
+	registerProjectSourceSkill(t, store)
+	created := testProjectWorkforceChangeSet()
+	if _, _, err = store.CreateChangeSet(ctx, created, "create-project", "create"); err != nil {
 		t.Fatal(err)
 	}
 	first := cloneRuntimeChangeSet(created)
@@ -1363,23 +1363,23 @@ func TestSQLiteAtomicWorkforceInitiativeAmendUsesCASWithoutPartialState(t *testi
 		t.Fatal(err)
 	}
 
-	stale := initiativeAmendChangeSet(created, "amend-stale", 99)
+	stale := projectAmendChangeSet(created, "amend-stale", 99)
 	if _, _, err = store.CreateChangeSet(ctx, stale, "amend-stale", "amend-stale"); err != nil {
 		t.Fatal(err)
 	}
 	staleApply := appliedRuntimeChangeSet(stale, "receipt-stale", "apply-stale", first.UpdatedAt.Add(time.Minute))
 	if _, err = store.ApplyChangeSet(ctx, staleApply, 2); !errors.Is(err, authoring.ErrChangeSetRevision) {
-		t.Fatalf("stale Initiative apply=%v", err)
+		t.Fatalf("stale Project apply=%v", err)
 	}
 	if _, err = store.GetDefinition(ctx, "agent", "2"); !errors.Is(err, agent.ErrDefinitionNotFound) {
-		t.Fatalf("stale Initiative apply leaked Agent definition: %v", err)
+		t.Fatalf("stale Project apply leaked Agent definition: %v", err)
 	}
-	current, err := store.GetInitiative(ctx, Scope{Kind: "tenant", ID: "one"}, created.Placement.InitiativeID)
+	current, err := store.GetProject(ctx, Scope{Kind: "tenant", ID: "one"}, created.Placement.ProjectID)
 	if err != nil || current.Revision != 1 || current.Title != "Research program" {
-		t.Fatalf("Initiative after stale apply=%#v err=%v", current, err)
+		t.Fatalf("Project after stale apply=%#v err=%v", current, err)
 	}
 
-	amend := initiativeAmendChangeSet(created, "amend-valid", 1)
+	amend := projectAmendChangeSet(created, "amend-valid", 1)
 	amend.Result.Candidate.Activation = authoring.WorkforceActivationInactive
 	amend.Result.Commitments.Activation = authoring.ActivationCommitmentInactive
 	if _, _, err = store.CreateChangeSet(ctx, amend, "amend-valid", "amend-valid"); err != nil {
@@ -1389,9 +1389,9 @@ func TestSQLiteAtomicWorkforceInitiativeAmendUsesCASWithoutPartialState(t *testi
 	if _, err = store.ApplyChangeSet(ctx, validApply, 2); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := store.GetInitiative(ctx, Scope{Kind: "tenant", ID: "one"}, created.Placement.InitiativeID)
-	if err != nil || updated.Revision != 2 || updated.Title != "Research program v2" || updated.Status != InitiativeStatusDraft || !updated.CreatedAt.Equal(current.CreatedAt) || updated.IdempotencyKeyHash != current.IdempotencyKeyHash {
-		t.Fatalf("amended Initiative=%#v err=%v", updated, err)
+	updated, err := store.GetProject(ctx, Scope{Kind: "tenant", ID: "one"}, created.Placement.ProjectID)
+	if err != nil || updated.Revision != 2 || updated.Title != "Research program v2" || updated.Status != ProjectStatusDraft || !updated.CreatedAt.Equal(current.CreatedAt) || updated.IdempotencyKeyHash != current.IdempotencyKeyHash {
+		t.Fatalf("amended Project=%#v err=%v", updated, err)
 	}
 	agents := agent.NewRegistryWithStore(store)
 	teams := team.NewRegistryWithStore(store, agents)
@@ -1710,7 +1710,7 @@ func testAgentDeploymentIdentityCollisionChangeSet(id string) *authoring.ChangeS
 	return value
 }
 
-func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {
+func testProjectWorkforceChangeSet() *authoring.ChangeSet {
 	value := testApplicableWorkforceChangeSet()
 	agentDefinition := value.Result.Candidate.Agents[0]
 	agentDefinition.SkillRequirements = []agent.SkillRequirement{{SkillID: "community-source", VersionConstraint: "1.2.3", RequiredActions: []string{"observe"}}}
@@ -1718,7 +1718,7 @@ func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
 		"community-source": {ID: "community-source", Version: "1.2.3", Actions: []string{"observe"}, MaximumRisk: capability.RiskLevelRead},
 	}}
-	teamObjectiveRef := authoring.WorkforceObjectiveKey(authoring.InitiativeOwnerTeam, "team", "team-goal")
+	teamObjectiveRef := authoring.WorkforceObjectiveKey(authoring.ProjectOwnerTeam, "team", "team-goal")
 	agentDefinition.Runbook = &runbook.Definition{
 		APIVersion: runbook.APIVersion, ID: "community-monitor", Version: "1.0.0", Name: "Community monitor",
 		Entrypoints: map[string]string{"monitor": "observe"},
@@ -1735,20 +1735,20 @@ func testInitiativeWorkforceChangeSet() *authoring.ChangeSet {
 			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 		},
 	}
-	value.Result.Candidate.Initiative = &authoring.InitiativeBlueprint{
+	value.Result.Candidate.Project = &authoring.ProjectBlueprint{
 		ID: "research-program", Title: "Research program", Purpose: "Continuously understand user pain points",
-		Owner:         authoring.InitiativeOwnerReference{Type: authoring.InitiativeOwnerTeam, DefinitionID: "team"},
+		Owner:         authoring.ProjectOwnerReference{Type: authoring.ProjectOwnerTeam, DefinitionID: "team"},
 		ObjectiveRefs: []string{teamObjectiveRef},
-		Milestones:    []authoring.InitiativeMilestoneBlueprint{{ID: "baseline", Title: "Establish baseline", ObjectiveRefs: []string{teamObjectiveRef}}},
-		Hypotheses:    []authoring.InitiativeHypothesisBlueprint{{ID: "setup-friction", Statement: "Setup friction limits adoption", Confidence: 0.5}},
-		SourceMonitors: []authoring.InitiativeSourceMonitorBlueprint{{
+		Milestones:    []authoring.ProjectMilestoneBlueprint{{ID: "baseline", Title: "Establish baseline", ObjectiveRefs: []string{teamObjectiveRef}}},
+		Hypotheses:    []authoring.ProjectHypothesisBlueprint{{ID: "setup-friction", Statement: "Setup friction limits adoption", Confidence: 0.5}},
+		SourceMonitors: []authoring.ProjectSourceMonitorBlueprint{{
 			ID: "community-listening", ObjectiveRef: teamObjectiveRef, AssignedAgentDefinitionID: "agent", SkillID: "community-source", SkillVersion: "1.2.3", Action: "observe",
-			SourcePolicyRef: "approved-communities", Deduplication: authoring.InitiativeDeduplicateStableSourceAndContent,
+			SourcePolicyRef: "approved-communities", Deduplication: authoring.ProjectDeduplicateStableSourceAndContent,
 		}},
-		Deliverables: []authoring.InitiativeDeliverableBlueprint{{ID: "cited-report", Title: "Cited report", ObjectiveRefs: []string{teamObjectiveRef}}},
+		Deliverables: []authoring.ProjectDeliverableBlueprint{{ID: "cited-report", Title: "Cited report", ObjectiveRefs: []string{teamObjectiveRef}}},
 		Policy:       map[string]interface{}{"outreachApproval": "required"},
 	}
-	value.Placement.InitiativeID = "initiative:research"
+	value.Placement.ProjectID = "project:research"
 	return value
 }
 
@@ -1757,7 +1757,7 @@ func runtimeLiteral(value interface{}) runbook.Value {
 	return runbook.Value{Literal: payload}
 }
 
-func registerInitiativeSourceSkill(t *testing.T, store skill.CatalogStore) {
+func registerProjectSourceSkill(t *testing.T, store skill.CatalogStore) {
 	t.Helper()
 	catalog := skill.NewCatalogWithStore(store)
 	if err := catalog.Register(context.Background(), &skill.Definition{
@@ -1771,15 +1771,15 @@ func registerInitiativeSourceSkill(t *testing.T, store skill.CatalogStore) {
 	}
 }
 
-func initiativeAmendChangeSet(created *authoring.ChangeSet, id string, initiativeRevision int64) *authoring.ChangeSet {
-	amend := testInitiativeWorkforceChangeSet()
+func projectAmendChangeSet(created *authoring.ChangeSet, id string, projectRevision int64) *authoring.ChangeSet {
+	amend := testProjectWorkforceChangeSet()
 	amend.ID, amend.ParentID, amend.Mode, amend.CandidateDigest = id, created.ID, authoring.ModeAmend, "candidate-"+id
 	amend.Result.Candidate.Agents[0].Version = "2"
 	amend.Result.Candidate.Team.Version = "2"
-	amend.Result.Candidate.Initiative.Title = "Research program v2"
+	amend.Result.Candidate.Project.Title = "Research program v2"
 	amend.Placement.AgentExpectedRevisions = map[string]int64{"agent": 1}
 	amend.Placement.TeamExpectedRevision = 1
-	amend.Placement.InitiativeExpectedRevision = initiativeRevision
+	amend.Placement.ProjectExpectedRevision = projectRevision
 	for key, placement := range amend.Placement.Objectives {
 		placement.ExpectedRevision = 1
 		amend.Placement.Objectives[key] = placement

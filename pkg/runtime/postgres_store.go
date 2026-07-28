@@ -283,10 +283,13 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (1, 'initial kernel schema') ON CONFLICT (version) DO NOTHING`); err != nil {
 		return err
 	}
+	if err := s.migrateProjectContract(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.migratePortfolio(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.migrateInitiatives(ctx, tx); err != nil {
+	if err := s.migrateProjects(ctx, tx); err != nil {
 		return err
 	}
 	if err := s.migrateSourceMonitors(ctx, tx); err != nil {

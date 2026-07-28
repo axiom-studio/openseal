@@ -118,14 +118,14 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeEventSourceRetire && !m.supportsEventSource(kernelapi.OperationRetire) {
 		return m.renderUnavailableComposer(width, "Retire event source", "This server does not advertise event-source retirement.")
 	}
-	if m.mode == modeInitiativeCreate && !m.supportsInitiative(kernelapi.OperationCreate) {
-		return m.renderUnavailableComposer(width, "Create an Initiative", "This server does not advertise Initiative creation.")
+	if m.mode == modeProjectCreate && !m.supportsProject(kernelapi.OperationCreate) {
+		return m.renderUnavailableComposer(width, "Create a Project", "This server does not advertise Project creation.")
 	}
-	if m.mode == modeInitiativeEdit && !m.supportsInitiative(kernelapi.OperationPatch) {
-		return m.renderUnavailableComposer(width, "Amend Initiative", "This server does not advertise Initiative updates.")
+	if m.mode == modeProjectEdit && !m.supportsProject(kernelapi.OperationPatch) {
+		return m.renderUnavailableComposer(width, "Amend Project", "This server does not advertise Project updates.")
 	}
 	if m.mode == modeOutreachCreate && !m.canCreateOutreachDraft() {
-		return m.renderUnavailableComposer(width, "Draft public outreach", "Select an Initiative, source observation, and authorized external Skill action first.")
+		return m.renderUnavailableComposer(width, "Draft public outreach", "Select a Project, source observation, and authorized external Skill action first.")
 	}
 	if m.mode == modeSkillInstall && !m.supportsClawHub(clawhub.LifecycleInstall) {
 		return m.renderUnavailableComposer(width, "Install a Skill", "This server does not advertise governed ClawHub installation.")
@@ -308,16 +308,16 @@ func (m *Model) renderComposer(width int) string {
 		title = "Retire selected event source"
 		description = "Type RETIRE exactly. The connector stops permanently while health, checkpoints, and audit remain durable."
 		owner = "Revision-bound permanent lifecycle change"
-	case modeInitiativeCreate:
-		title = "Create an Initiative"
+	case modeProjectCreate:
+		title = "Create a Project"
 		description = "Compose durable objectives into a coordinated outcome that survives restarts."
 		if objective := m.selectedObjectiveRecord(); objective != nil {
 			owner = "Starts with Objective · " + compact(objective.Title, 48)
 		} else {
 			owner = "Select an Objective first"
 		}
-	case modeInitiativeEdit:
-		title = "Amend selected Initiative"
+	case modeProjectEdit:
+		title = "Amend selected Project"
 		description = "Refine its purpose without losing coordination state or audit history."
 	case modeOutreachCreate:
 		title = "Draft public outreach"
@@ -417,8 +417,8 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionSources {
 		content = m.renderEventSourcesContent(width)
-	} else if m.section == sectionInitiatives {
-		content = m.renderInitiativesContent(width)
+	} else if m.section == sectionProjects {
+		content = m.renderProjectsContent(width)
 	} else if m.section == sectionOutreach {
 		content = m.renderOutreachContent(width)
 	} else if m.section == sectionIntegrations {
@@ -488,9 +488,9 @@ func (m *Model) renderPanelTabs() string {
 		}
 		tabs = append(tabs, label)
 	}
-	if m.initiativeCapability.Available {
-		label := "i Initiatives"
-		if m.section == sectionInitiatives {
+	if m.projectCapability.Available {
+		label := "i Projects"
+		if m.section == sectionProjects {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -1702,52 +1702,52 @@ func (m *Model) renderEventSourcesContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderInitiativesContent(width int) string {
-	title := headerStyle.Render("Initiative portfolio")
+func (m *Model) renderProjectsContent(width int) string {
+	title := headerStyle.Render("Project portfolio")
 	if m.loading {
 		title += mutedStyle.Render("  refreshing…")
 	}
 	lines := []string{title, ""}
-	if len(m.initiatives) == 0 {
-		lines = append(lines, mutedStyle.Render("No Initiatives yet. Compose one from a selected Objective."))
+	if len(m.projects) == 0 {
+		lines = append(lines, mutedStyle.Render("No Projects yet. Compose one from a selected Objective."))
 	} else {
-		visible := max(3, min(len(m.initiatives), max(m.height-18, 5)))
-		start := max(0, min(m.initiativeSelected-visible/2, len(m.initiatives)-visible))
-		for index := start; index < min(len(m.initiatives), start+visible); index++ {
-			initiative := m.initiatives[index]
+		visible := max(3, min(len(m.projects), max(m.height-18, 5)))
+		start := max(0, min(m.projectSelected-visible/2, len(m.projects)-visible))
+		for index := start; index < min(len(m.projects), start+visible); index++ {
+			project := m.projects[index]
 			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
-			if index == m.initiativeSelected {
+			if index == m.projectSelected {
 				prefix, style = "› ", selectedStyle
 			}
-			lines = append(lines, style.Render(fmt.Sprintf("%s%-10s %s", prefix, string(initiative.Status), compact(initiative.Title, max(width-18, 20)))))
+			lines = append(lines, style.Render(fmt.Sprintf("%s%-10s %s", prefix, string(project.Status), compact(project.Title, max(width-18, 20)))))
 		}
 	}
-	if initiative := m.selectedInitiativeRecord(); initiative != nil {
-		lines = append(lines, "", mutedStyle.Render("Selected"), compact(initiative.Purpose, max(width-8, 24)))
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(initiative.ObjectiveRefs), len(initiative.Milestones), len(initiative.SourceMonitors), len(initiative.Deliverables))))
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", initiative.Revision, relativeTime(initiative.UpdatedAt))))
-		if activityErr := m.initiativeActivityErrors[initiative.ID]; activityErr != nil {
+	if project := m.selectedProjectRecord(); project != nil {
+		lines = append(lines, "", mutedStyle.Render("Selected"), compact(project.Purpose, max(width-8, 24)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(project.ObjectiveRefs), len(project.Milestones), len(project.SourceMonitors), len(project.Deliverables))))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", project.Revision, relativeTime(project.UpdatedAt))))
+		if activityErr := m.projectActivityErrors[project.ID]; activityErr != nil {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact("Activity unavailable · "+activityErr.Error(), max(width-6, 24))))
-		} else if activity := m.initiativeActivity[initiative.ID]; len(activity) > 0 {
+		} else if activity := m.projectActivity[project.ID]; len(activity) > 0 {
 			lines = append(lines, "", mutedStyle.Render("Recent activity"))
 			for _, item := range activity[:min(3, len(activity))] {
 				lines = append(lines, compact(fmt.Sprintf("%s · %s · %s", strings.ReplaceAll(item.EventType, "_", " "), item.Summary, relativeTime(item.CreatedAt)), max(width-6, 24)))
 			}
 		} else if m.activityCapability.Supports(kernelapi.OperationList) {
-			lines = append(lines, "", mutedStyle.Render("No durable activity recorded for this Initiative."))
+			lines = append(lines, "", mutedStyle.Render("No durable activity recorded for this Project."))
 		}
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
-		if len(initiative.SourceMonitors) > 0 {
+		if len(project.SourceMonitors) > 0 {
 			lines = append(lines, "", mutedStyle.Render("Source monitors"))
-			for _, monitor := range initiative.SourceMonitors {
+			for _, monitor := range project.SourceMonitors {
 				lines = append(lines, compact(fmt.Sprintf("%s · %s@%s %s", monitor.ID, monitor.SkillID, monitor.SkillVersion, monitor.Action), max(width-4, 24)))
 				details := fmt.Sprintf("Agent %s · %s", monitor.AssignedAgentID, monitor.Deduplication)
 				lines = append(lines, mutedStyle.Render(compact(details, max(width-6, 24))))
 				if monitor.SourcePolicyRef != "" {
 					lines = append(lines, mutedStyle.Render(compact("Policy · "+monitor.SourcePolicyRef, max(width-6, 24))))
 				}
-				if status, ok := m.sourceMonitorStatuses[sourceMonitorStatusKey(initiative.ID, monitor.ID)]; ok {
+				if status, ok := m.sourceMonitorStatuses[sourceMonitorStatusKey(project.ID, monitor.ID)]; ok {
 					if status.err != nil {
 						lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("Status unavailable · "+status.err.Error(), max(width-6, 24))))
 					} else if status.checkpoint == nil {
@@ -1776,17 +1776,17 @@ func (m *Model) renderInitiativesContent(width int) string {
 			}
 		}
 		actions := []string{}
-		if m.supportsInitiative(kernelapi.OperationPatch) {
+		if m.supportsProject(kernelapi.OperationPatch) {
 			actions = append(actions, "Enter amend", "p pause/resume", "l link selected objective")
 		}
-		if m.supportsInitiative(kernelapi.OperationCreate) {
+		if m.supportsProject(kernelapi.OperationCreate) {
 			actions = append(actions, "n create")
 		}
 		if len(actions) > 0 {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 		}
-	} else if m.supportsInitiative(kernelapi.OperationCreate) {
-		lines = append(lines, "", mutedStyle.Render("Select an Objective, then press i and n to compose an Initiative."))
+	} else if m.supportsProject(kernelapi.OperationCreate) {
+		lines = append(lines, "", mutedStyle.Render("Select an Objective, then press i and n to compose a Project."))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1878,7 +1878,7 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 	if plan := m.skillBindingUpgradePlan; plan != nil {
 		lines = append(lines, "",
 			headerStyle.Render(fmt.Sprintf("Reviewed update · %s@%s → %s@%s", plan.From.ID, plan.From.Version, plan.To.ID, plan.To.Version)),
-			mutedStyle.Render(fmt.Sprintf("%d Objective(s) · %d Initiative(s) · historical Runs stay unchanged", len(plan.Objectives), len(plan.Initiatives))),
+			mutedStyle.Render(fmt.Sprintf("%d Objective(s) · %d Project(s) · historical Runs stay unchanged", len(plan.Objectives), len(plan.Projects))),
 		)
 		if plan.TeamAuthority != nil {
 			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Team authority · definition %s@%s · roles %s",
@@ -2550,7 +2550,7 @@ func activitySubjectLines(item *runtime.ActivityProjection) []string {
 	}
 	lines := make([]string, 0, 4)
 	for _, subject := range []struct{ label, value string }{
-		{"Agent", item.AgentID}, {"Team", item.TeamID}, {"Objective", item.ObjectiveID}, {"Initiative", item.InitiativeID},
+		{"Agent", item.AgentID}, {"Team", item.TeamID}, {"Objective", item.ObjectiveID}, {"Project", item.ProjectID},
 		{"Run", item.RunID}, {"Parent Run", item.ParentRunID}, {"Turn", item.TurnID},
 	} {
 		if subject.value != "" {
@@ -2766,7 +2766,7 @@ func renderConversationActionApproval(approval *runtime.ApprovalCheckpoint, widt
 	case "objective":
 		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
 		lines = appendTypedConversationChange(lines, "Goal", changes["goal"], width)
-	case "initiative":
+	case "project":
 		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
 		lines = appendTypedConversationChange(lines, "Purpose", changes["purpose"], width)
 		if refs := conversationStringSlice(changes["objectiveRefs"]); len(refs) > 0 {
@@ -2816,8 +2816,8 @@ func conversationResourceLabel(resourceType string) string {
 	switch resourceType {
 	case "objective":
 		return "Objective"
-	case "initiative":
-		return "Initiative"
+	case "project":
+		return "Project"
 	case "skill_binding":
 		return "Skill access"
 	default:

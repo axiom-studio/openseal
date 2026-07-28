@@ -25,7 +25,7 @@ func TestConversationFactsValidateStructuredChannelState(t *testing.T) {
 		Mentions: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "reviewer"}},
 		References: []ConversationReference{
 			{Kind: ConversationReferenceRun, ID: "run-42"},
-			{Kind: ConversationReferenceInitiative, ID: "initiative-launch", Version: 2},
+			{Kind: ConversationReferenceProject, ID: "project-launch", Version: 2},
 			{Kind: ConversationReferenceArtifact, ID: "launch-evidence", Version: 3},
 		},
 		RequiresResponse: true, IdempotencyKey: "release-question-v1", CreatedAt: now,

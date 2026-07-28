@@ -1426,9 +1426,9 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		if len(candidate.Assignments) > 0 {
 			issues = append(issues, issue("assignments", "team_required", "Assignments require a Team definition"))
 		}
-		issues = append(issues, validateInitiativeBlueprint(candidate, agents)...)
-		if existing != nil && existing.Initiative != nil && (candidate.Initiative == nil || candidate.Initiative.ID != existing.Initiative.ID) {
-			issues = append(issues, issue("initiative.id", "invalid_amendment_identity", "Amended Initiative must keep its id"))
+		issues = append(issues, validateProjectBlueprint(candidate, agents)...)
+		if existing != nil && existing.Project != nil && (candidate.Project == nil || candidate.Project.ID != existing.Project.ID) {
+			issues = append(issues, issue("project.id", "invalid_amendment_identity", "Amended Project must keep its id"))
 		}
 		return issues
 	}
@@ -1498,9 +1498,9 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 			}
 		}
 	}
-	issues = append(issues, validateInitiativeBlueprint(candidate, agents)...)
-	if existing != nil && existing.Initiative != nil && (candidate.Initiative == nil || candidate.Initiative.ID != existing.Initiative.ID) {
-		issues = append(issues, issue("initiative.id", "invalid_amendment_identity", "Amended Initiative must keep its id"))
+	issues = append(issues, validateProjectBlueprint(candidate, agents)...)
+	if existing != nil && existing.Project != nil && (candidate.Project == nil || candidate.Project.ID != existing.Project.ID) {
+		issues = append(issues, issue("project.id", "invalid_amendment_identity", "Amended Project must keep its id"))
 	}
 	return issues
 }
@@ -1645,10 +1645,10 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 			}
 		}
 	}
-	if candidate.Initiative != nil {
-		for _, monitor := range candidate.Initiative.SourceMonitors {
+	if candidate.Project != nil {
+		for _, monitor := range candidate.Project.SourceMonitors {
 			available, ok := catalog.Skills[monitor.SkillID]
-			requiredBy := "initiative:" + candidate.Initiative.ID + "/monitor:" + monitor.ID
+			requiredBy := "project:" + candidate.Project.ID + "/monitor:" + monitor.ID
 			if !ok {
 				key := "skill:" + monitor.SkillID + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: "skill", ID: monitor.SkillID, RequiredBy: requiredBy}
@@ -1713,7 +1713,7 @@ func credentialRequirementAvailable(catalog CapabilityCatalog, requirement skill
 	return false
 }
 
-func sourceMonitorWithinPolicy(candidate *WorkforceCandidate, monitor InitiativeSourceMonitorBlueprint, policy SourcePolicyCapability) bool {
+func sourceMonitorWithinPolicy(candidate *WorkforceCandidate, monitor ProjectSourceMonitorBlueprint, policy SourcePolicyCapability) bool {
 	if candidate == nil || policy.MaximumItems < 1 {
 		return false
 	}
