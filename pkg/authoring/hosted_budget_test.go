@@ -26,34 +26,45 @@ func TestHostedRunbookBudgetRejectsBrowserCatalogThatCannotStartOrFinish(t *test
 }
 
 func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *testing.T) {
-	candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{MaxTurns: 4, MaxTotalTokens: 101024})
-	definition := candidate.Agents[0].Runbook
-	definition.Entrypoints = map[string]string{"daily": "work"}
-	definition.Triggers = map[string]runbook.Trigger{"daily": {
-		Kind: runbook.TriggerSchedule, Entrypoint: "daily",
-		Budget: &runbook.BudgetAllocation{MaxAttempts: 2, MaxTurns: 5, MaxInputTokens: 90000, MaxOutputTokens: 1024, MaxTotalTokens: 100000, MaxActions: 3},
-	}}
-	definition.Steps["work"] = runbook.Step{Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
-		AgentID: literalActionValue("agent/browser"), Goal: literalActionValue("Use the Browser safely."), Mode: runbook.DelegateReason,
-		Budget: &runbook.BudgetAllocation{MaxTurns: 4, MaxInputTokens: 100000, MaxOutputTokens: 1024, MaxTotalTokens: 101024, MaxActions: 3},
-		Next:   "done",
-	}}
-	definition.Steps["done"] = runbook.Step{Kind: runbook.StepEnd, End: &runbook.EndStep{}}
+	for _, test := range []struct {
+		name      string
+		kind      runbook.TriggerKind
+		eventType string
+	}{
+		{name: "schedule", kind: runbook.TriggerSchedule},
+		{name: "event", kind: runbook.TriggerEvent, eventType: "source.observation.created"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{MaxTurns: 4, MaxTotalTokens: 101024})
+			definition := candidate.Agents[0].Runbook
+			definition.Entrypoints = map[string]string{"operate": "work"}
+			definition.Triggers = map[string]runbook.Trigger{"operate": {
+				Kind: test.kind, EventType: test.eventType, Entrypoint: "operate",
+				Budget: &runbook.BudgetAllocation{MaxAttempts: 2, MaxTurns: 5, MaxInputTokens: 90000, MaxOutputTokens: 1024, MaxTotalTokens: 100000, MaxActions: 3},
+			}}
+			definition.Steps["work"] = runbook.Step{Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
+				AgentID: literalActionValue("agent/browser"), Goal: literalActionValue("Use the Browser safely."), Mode: runbook.DelegateReason,
+				Budget: &runbook.BudgetAllocation{MaxTurns: 4, MaxInputTokens: 100000, MaxOutputTokens: 1024, MaxTotalTokens: 101024, MaxActions: 3},
+				Next:   "done",
+			}}
+			definition.Steps["done"] = runbook.Step{Kind: runbook.StepEnd, End: &runbook.EndStep{}}
 
-	issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog())
-	if !hasValidationCode(issues, "hosted_parent_attempts_insufficient") ||
-		!hasValidationCode(issues, "hosted_parent_turns_insufficient") ||
-		!hasValidationCode(issues, "hosted_parent_input_insufficient") ||
-		!hasValidationCode(issues, "hosted_parent_total_insufficient") {
-		t.Fatalf("missing parent capacity issues = %#v", issues)
-	}
+			issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog())
+			if !hasValidationCode(issues, "hosted_parent_attempts_insufficient") ||
+				!hasValidationCode(issues, "hosted_parent_turns_insufficient") ||
+				!hasValidationCode(issues, "hosted_parent_input_insufficient") ||
+				!hasValidationCode(issues, "hosted_parent_total_insufficient") {
+				t.Fatalf("missing parent capacity issues = %#v", issues)
+			}
 
-	definition.Triggers["daily"] = runbook.Trigger{
-		Kind: runbook.TriggerSchedule, Entrypoint: "daily",
-		Budget: &runbook.BudgetAllocation{MaxAttempts: 6, MaxTurns: 6, MaxInputTokens: 100000, MaxOutputTokens: 1024, MaxTotalTokens: 101024, MaxActions: 3},
-	}
-	if issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog()); len(issues) != 0 {
-		t.Fatalf("funded parent budget issues = %#v", issues)
+			definition.Triggers["operate"] = runbook.Trigger{
+				Kind: test.kind, EventType: test.eventType, Entrypoint: "operate",
+				Budget: &runbook.BudgetAllocation{MaxAttempts: 6, MaxTurns: 6, MaxInputTokens: 100000, MaxOutputTokens: 1024, MaxTotalTokens: 101024, MaxActions: 3},
+			}
+			if issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog()); len(issues) != 0 {
+				t.Fatalf("funded parent budget issues = %#v", issues)
+			}
+		})
 	}
 }
 
