@@ -91,6 +91,7 @@ func TestValidatePortableScheduledTriggers(t *testing.T) {
 	}
 	definition.Triggers = map[string]Trigger{"daily": {
 		Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399}, Entrypoint: "start",
+		ObjectiveID: "useful-participation", Input: map[string]Value{"communities": literal([]string{"r/woodworking"})}, MaximumConcurrent: 1,
 	}}
 	if diagnostics := Validate(definition); len(diagnostics) != 0 {
 		t.Fatalf("scheduled trigger diagnostics = %#v", diagnostics)
@@ -98,7 +99,11 @@ func TestValidatePortableScheduledTriggers(t *testing.T) {
 
 	definition.Triggers["daily"] = Trigger{Kind: TriggerSchedule, EventType: "clock.tick", Schedule: &Schedule{Cron: "0 0 0 * *", Timezone: "UTC"}, Entrypoint: "start"}
 	diagnostics := Validate(definition)
-	if len(diagnostics) != 2 || diagnostics[0].Code != "trigger.event_type_forbidden" || diagnostics[1].Code != "trigger.schedule_invalid" {
+	codes := map[string]bool{}
+	for _, diagnostic := range diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["trigger.event_type_forbidden"] || !codes["trigger.schedule_invalid"] || !codes["trigger.objective_required"] {
 		t.Fatalf("invalid scheduled trigger diagnostics = %#v", diagnostics)
 	}
 }

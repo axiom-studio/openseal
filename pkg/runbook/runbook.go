@@ -48,10 +48,14 @@ const TriggerSchedule TriggerKind = "schedule"
 // Runbook. Transport configuration and credentials stay in provider Skills;
 // the Runbook consumes only a canonical event type and entrypoint.
 type Trigger struct {
-	Kind       TriggerKind `json:"kind"`
-	EventType  string      `json:"eventType,omitempty"`
-	Schedule   *Schedule   `json:"schedule,omitempty"`
-	Entrypoint string      `json:"entrypoint"`
+	Kind              TriggerKind       `json:"kind"`
+	EventType         string            `json:"eventType,omitempty"`
+	Schedule          *Schedule         `json:"schedule,omitempty"`
+	Entrypoint        string            `json:"entrypoint"`
+	ObjectiveID       string            `json:"objectiveId,omitempty"`
+	Input             map[string]Value  `json:"input,omitempty"`
+	Budget            *BudgetAllocation `json:"budget,omitempty"`
+	MaximumConcurrent int               `json:"maximumConcurrent,omitempty"`
 }
 
 // Schedule is the portable timing contract of a Runbook trigger. Authoring
