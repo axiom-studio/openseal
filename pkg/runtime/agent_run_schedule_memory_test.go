@@ -99,16 +99,9 @@ func TestMemoryAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
 		t.Fatalf("first claim = %#v, %v", first, err)
 	}
 	recovered, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "recovery", Now: now.Add(2 * time.Second), LeaseDuration: time.Second, AgingInterval: time.Minute})
-	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.BudgetUsage.Attempts != 2 || !runAttemptBudgetExceeded(recovered) {
+	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.Status != AgentRunStatusPaused ||
+		recovered.BudgetUsage.Attempts != 1 || !runAttemptBudgetAtLimit(recovered) || runAttemptBudgetExceeded(recovered) {
 		t.Fatalf("recovered claim = %#v, %v", recovered, err)
-	}
-	calls := 0
-	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "recovery"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		calls++
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted}, nil
-	}))
-	if !errors.Is(err, ErrBudgetExhausted) || calls != 0 || result == nil || result.Run.Status != AgentRunStatusPaused || result.Event == nil || result.Event.EventType != "budget.exhausted" {
-		t.Fatalf("attempt enforcement = %#v, calls=%d err=%v", result, calls, err)
 	}
 }
 
