@@ -36,14 +36,14 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 		ID: "monitor-1-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "research-agent",
 		DefinitionID: "research", DefinitionVersion: "1.0.0", TriggerID: "monitor-1",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 */5 * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-		Input:   map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"},
+		Input:   map[string]interface{}{"projectId": "project-1", "sourceMonitorId": "monitor-1"},
 		Policy:  map[string]interface{}{"sourcePolicyRef": "public-forum@1"}, Status: runtime.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	initiative, _, err := runtime.NewInitiativeService(store, store).Create(ctx, runtime.CreateInitiativeRequest{Initiative: &runtime.Initiative{
-		ID: "initiative-1", Scope: scope, Owner: owner, Title: "Research Initiative", Purpose: "Understand user pain", Status: runtime.InitiativeStatusActive,
+	project, _, err := runtime.NewProjectService(store, store).Create(ctx, runtime.CreateProjectRequest{Project: &runtime.Project{
+		ID: "project-1", Scope: scope, Owner: owner, Title: "Research Project", Purpose: "Understand user pain", Status: runtime.ProjectStatusActive,
 		ObjectiveRefs: []string{objective.ID}, SourceMonitors: []runtime.SourceMonitorReference{{
 			ID: "monitor-1", ObjectiveID: objective.ID, AssignedAgentID: "research-agent", SkillID: "source", SkillVersion: "1.0.0", Action: "observe",
 			SourcePolicyRef: "public-forum@1", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
@@ -54,14 +54,14 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 	}
 	sourceRun, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "research-agent", Goal: "Monitor source", Source: runtime.RunSourceSchedule,
-		Context: map[string]interface{}{"initiativeId": initiative.ID, "sourceMonitorId": "monitor-1"},
+		Context: map[string]interface{}{"projectId": project.ID, "sourceMonitorId": "monitor-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte("setup is difficult"))
 	ingested, err := runtime.NewSourceMonitorService(store, store, store, store).Ingest(ctx, runtime.IngestSourceObservationRequest{
-		Scope: scope, InitiativeID: initiative.ID, MonitorID: "monitor-1", Cursor: "cursor-1", StableSourceID: "thread-1",
+		Scope: scope, ProjectID: project.ID, MonitorID: "monitor-1", Cursor: "cursor-1", StableSourceID: "thread-1",
 		SourceURI: "https://forum.example/thread/1", ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: "Setup is difficult.", ObservedAt: time.Now().UTC(),
 		RunID: sourceRun.ID, AgentID: "research-agent", SkillID: "source", SkillVersion: "1.0.0", Action: "observe", ActionCallID: "source-call-1",
 	})
@@ -102,8 +102,8 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 	}
 	disclosure := "Disclosure: I am an OpenSeal automated research agent."
 	body := "Could you share which setup step was hardest? " + disclosure
-	createBody := `{"scope":{"kind":"local","id":"research"},"initiativeId":"initiative-1","sourceObservationId":"` + ingested.Observation.ID + `","approvalPolicyRef":"human-review","identity":{"profileRef":"profile:research","displayName":"OpenSeal Research","affiliation":"OpenSeal","disclosure":"` + disclosure + `"},"message":{"id":"message-1","intent":"request_feedback","body":"` + body + `","capability":{"bindingId":"outreach-binding","bindingRevision":1,"skillId":"outreach","skillVersion":"1.0.0","action":"reply"}}}`
-	createdResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/initiatives/initiative-1/outreach", createBody, "draft-1")
+	createBody := `{"scope":{"kind":"local","id":"research"},"projectId":"project-1","sourceObservationId":"` + ingested.Observation.ID + `","approvalPolicyRef":"human-review","identity":{"profileRef":"profile:research","displayName":"OpenSeal Research","affiliation":"OpenSeal","disclosure":"` + disclosure + `"},"message":{"id":"message-1","intent":"request_feedback","body":"` + body + `","capability":{"bindingId":"outreach-binding","bindingRevision":1,"skillId":"outreach","skillVersion":"1.0.0","action":"reply"}}}`
+	createdResponse := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/projects/project-1/outreach", createBody, "draft-1")
 	if createdResponse.Code != http.StatusCreated {
 		t.Fatalf("create = %d %s", createdResponse.Code, createdResponse.Body.String())
 	}
@@ -114,16 +114,16 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 	if thread.TargetURI != ingested.Observation.SourceURI || thread.Messages[0].Capability.Arguments["body"] != body || thread.Messages[0].Capability.Arguments["targetUri"] != ingested.Observation.SourceURI {
 		t.Fatalf("thread = %#v", thread)
 	}
-	replayed := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/initiatives/initiative-1/outreach", createBody, "draft-1")
+	replayed := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/projects/project-1/outreach", createBody, "draft-1")
 	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), thread.ID) {
 		t.Fatalf("replay = %d %s", replayed.Code, replayed.Body.String())
 	}
-	listed := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/initiatives/initiative-1/outreach?scopeKind=local&scopeId=research&limit=10", "", "")
-	got := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/initiatives/initiative-1/outreach/"+thread.ID+"?scopeKind=local&scopeId=research", "", "")
+	listed := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/projects/project-1/outreach?scopeKind=local&scopeId=research&limit=10", "", "")
+	got := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/projects/project-1/outreach/"+thread.ID+"?scopeKind=local&scopeId=research", "", "")
 	if listed.Code != http.StatusOK || got.Code != http.StatusOK || !strings.Contains(listed.Body.String(), thread.ID) || !strings.Contains(got.Body.String(), thread.ID) {
 		t.Fatalf("listed = %d %s; got = %d %s", listed.Code, listed.Body.String(), got.Code, got.Body.String())
 	}
-	delivery := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/initiatives/initiative-1/outreach/"+thread.ID+"/messages/message-1/deliveries", `{"scope":{"kind":"local","id":"research"}}`, "delivery-1")
+	delivery := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/projects/project-1/outreach/"+thread.ID+"/messages/message-1/deliveries", `{"scope":{"kind":"local","id":"research"}}`, "delivery-1")
 	if delivery.Code != http.StatusCreated {
 		t.Fatalf("delivery = %d %s", delivery.Code, delivery.Body.String())
 	}
@@ -135,7 +135,7 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 	if run.AssignedAgentID != "research-agent" || invocation["threadId"] != thread.ID || invocation["messageId"] != "message-1" {
 		t.Fatalf("delivery run = %#v", run)
 	}
-	crossScope := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/initiatives/initiative-1/outreach/"+thread.ID+"?scopeKind=local&scopeId=foreign", "", "")
+	crossScope := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/projects/project-1/outreach/"+thread.ID+"?scopeKind=local&scopeId=foreign", "", "")
 	if crossScope.Code != http.StatusNotFound {
 		t.Fatalf("cross scope = %d %s", crossScope.Code, crossScope.Body.String())
 	}

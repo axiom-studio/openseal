@@ -44,7 +44,7 @@ type SkillReferenceObjectiveImpact struct {
 	References       []SkillReferenceObjectiveReference `json:"references"`
 }
 
-type SkillReferenceInitiativeImpact struct {
+type SkillReferenceProjectImpact struct {
 	ID               string   `json:"id"`
 	ExpectedRevision int64    `json:"expectedRevision"`
 	MonitorIDs       []string `json:"monitorIds"`
@@ -75,7 +75,7 @@ type SkillReferenceUpgradePlan struct {
 	From                    SkillReferenceIdentity             `json:"from"`
 	To                      SkillReferenceIdentity             `json:"to"`
 	Objectives              []SkillReferenceObjectiveImpact    `json:"objectives,omitempty"`
-	Initiatives             []SkillReferenceInitiativeImpact   `json:"initiatives,omitempty"`
+	Projects                []SkillReferenceProjectImpact      `json:"projects,omitempty"`
 	TeamAuthority           *SkillReferenceTeamAuthorityImpact `json:"teamAuthority,omitempty"`
 	Findings                []SkillReferenceUpgradeFinding     `json:"findings,omitempty"`
 	ApprovalRequired        bool                               `json:"approvalRequired"`
@@ -104,21 +104,21 @@ type ApplySkillReferenceUpgradeRequest struct {
 }
 
 type SkillReferenceUpgradeReceipt struct {
-	APIVersion      string                           `json:"apiVersion"`
-	PlanDigest      string                           `json:"planDigest"`
-	Scope           Scope                            `json:"scope"`
-	DeploymentID    string                           `json:"deploymentId"`
-	BindingID       string                           `json:"bindingId"`
-	BindingRevision int64                            `json:"bindingRevision"`
-	From            SkillReferenceIdentity           `json:"from"`
-	To              SkillReferenceIdentity           `json:"to"`
-	Objectives      []SkillReferenceObjectiveImpact  `json:"objectives,omitempty"`
-	Initiatives     []SkillReferenceInitiativeImpact `json:"initiatives,omitempty"`
-	Actor           ActivityActor                    `json:"actor"`
-	Reason          string                           `json:"reason"`
-	Approval        *SkillReferenceUpgradeApproval   `json:"approval,omitempty"`
-	ActivityIDs     []string                         `json:"activityIds,omitempty"`
-	AppliedAt       time.Time                        `json:"appliedAt"`
+	APIVersion      string                          `json:"apiVersion"`
+	PlanDigest      string                          `json:"planDigest"`
+	Scope           Scope                           `json:"scope"`
+	DeploymentID    string                          `json:"deploymentId"`
+	BindingID       string                          `json:"bindingId"`
+	BindingRevision int64                           `json:"bindingRevision"`
+	From            SkillReferenceIdentity          `json:"from"`
+	To              SkillReferenceIdentity          `json:"to"`
+	Objectives      []SkillReferenceObjectiveImpact `json:"objectives,omitempty"`
+	Projects        []SkillReferenceProjectImpact   `json:"projects,omitempty"`
+	Actor           ActivityActor                   `json:"actor"`
+	Reason          string                          `json:"reason"`
+	Approval        *SkillReferenceUpgradeApproval  `json:"approval,omitempty"`
+	ActivityIDs     []string                        `json:"activityIds,omitempty"`
+	AppliedAt       time.Time                       `json:"appliedAt"`
 }
 
 type SkillReferenceObjectiveMutation struct {
@@ -127,8 +127,8 @@ type SkillReferenceObjectiveMutation struct {
 	Event            *ActivityEvent
 }
 
-type SkillReferenceInitiativeMutation struct {
-	Value            *Initiative
+type SkillReferenceProjectMutation struct {
+	Value            *Project
 	ExpectedRevision int64
 	Event            *ActivityEvent
 }
@@ -137,17 +137,17 @@ type SkillReferenceInitiativeMutation struct {
 // service. Store implementations must apply all records in one transaction or
 // leave every record unchanged.
 type SkillReferenceUpgradeMutation struct {
-	Plan        *SkillReferenceUpgradePlan
-	Binding     *skill.Binding
-	Objectives  []SkillReferenceObjectiveMutation
-	Initiatives []SkillReferenceInitiativeMutation
-	Receipt     *SkillReferenceUpgradeReceipt
+	Plan       *SkillReferenceUpgradePlan
+	Binding    *skill.Binding
+	Objectives []SkillReferenceObjectiveMutation
+	Projects   []SkillReferenceProjectMutation
+	Receipt    *SkillReferenceUpgradeReceipt
 }
 
 type SkillReferenceUpgradeStore interface {
 	skill.CatalogStore
 	PortfolioStore
-	InitiativeStore
+	ProjectStore
 	ApplySkillReferenceUpgrade(context.Context, *SkillReferenceUpgradeMutation) error
 }
 
@@ -163,7 +163,7 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 		mutation.Binding.DeploymentID != mutation.Plan.DeploymentID ||
 		mutation.Binding.Revision != mutation.Plan.ExpectedBindingRevision+1 ||
 		len(mutation.Objectives) != len(mutation.Plan.Objectives) ||
-		len(mutation.Initiatives) != len(mutation.Plan.Initiatives) {
+		len(mutation.Projects) != len(mutation.Plan.Projects) {
 		return ErrSkillReferenceUpgradeInvalid
 	}
 	objectiveRevisions := make(map[string]int64, len(mutation.Plan.Objectives))
@@ -182,20 +182,20 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 			return fmt.Errorf("%w: objective activity: %v", ErrSkillReferenceUpgradeInvalid, err)
 		}
 	}
-	initiativeRevisions := make(map[string]int64, len(mutation.Plan.Initiatives))
-	for _, impact := range mutation.Plan.Initiatives {
-		initiativeRevisions[impact.ID] = impact.ExpectedRevision
+	projectRevisions := make(map[string]int64, len(mutation.Plan.Projects))
+	for _, impact := range mutation.Plan.Projects {
+		projectRevisions[impact.ID] = impact.ExpectedRevision
 	}
-	for _, item := range mutation.Initiatives {
-		if item.Value == nil || item.Event == nil || item.ExpectedRevision != initiativeRevisions[item.Value.ID] ||
+	for _, item := range mutation.Projects {
+		if item.Value == nil || item.Event == nil || item.ExpectedRevision != projectRevisions[item.Value.ID] ||
 			item.Value.Revision != item.ExpectedRevision+1 || item.Value.Scope != mutation.Plan.Scope {
 			return ErrSkillReferenceUpgradeInvalid
 		}
 		if err := item.Value.Validate(); err != nil {
-			return fmt.Errorf("%w: initiative %s: %v", ErrSkillReferenceUpgradeInvalid, item.Value.ID, err)
+			return fmt.Errorf("%w: project %s: %v", ErrSkillReferenceUpgradeInvalid, item.Value.ID, err)
 		}
 		if err := item.Event.Validate(); err != nil {
-			return fmt.Errorf("%w: initiative activity: %v", ErrSkillReferenceUpgradeInvalid, err)
+			return fmt.Errorf("%w: project activity: %v", ErrSkillReferenceUpgradeInvalid, err)
 		}
 	}
 	return nil
@@ -283,33 +283,33 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 
 	objectiveImpacts := make([]SkillReferenceObjectiveImpact, 0)
 	referencedActions := make(map[string]bool)
-	initiatives, err := s.store.ListInitiatives(ctx, InitiativeFilter{Scope: req.Scope})
+	projects, err := s.store.ListProjects(ctx, ProjectFilter{Scope: req.Scope})
 	if err != nil {
 		return nil, err
 	}
-	initiativeImpacts := make([]SkillReferenceInitiativeImpact, 0)
-	for _, initiative := range initiatives {
+	projectImpacts := make([]SkillReferenceProjectImpact, 0)
+	for _, project := range projects {
 		monitorIDs := make([]string, 0)
-		for _, monitor := range initiative.SourceMonitors {
-			if !referenceOwnedOrAssigned(initiative.Owner, monitor.AssignedAgentID, req.DeploymentID) ||
+		for _, monitor := range project.SourceMonitors {
+			if !referenceOwnedOrAssigned(project.Owner, monitor.AssignedAgentID, req.DeploymentID) ||
 				monitor.SkillID != current.SkillID || monitor.SkillVersion != current.SkillVersion {
 				continue
 			}
 			if _, ok := target.Actions[monitor.Action]; !ok {
-				return nil, fmt.Errorf("%w: Initiative %s monitor %s action %s is absent from target", ErrSkillReferenceUpgradeInvalid, initiative.ID, monitor.ID, monitor.Action)
+				return nil, fmt.Errorf("%w: Project %s monitor %s action %s is absent from target", ErrSkillReferenceUpgradeInvalid, project.ID, monitor.ID, monitor.Action)
 			}
 			monitorIDs = append(monitorIDs, monitor.ID)
 			referencedActions[monitor.Action] = true
 		}
 		if len(monitorIDs) > 0 {
 			sort.Strings(monitorIDs)
-			initiativeImpacts = append(initiativeImpacts, SkillReferenceInitiativeImpact{
-				ID: initiative.ID, ExpectedRevision: initiative.Revision, MonitorIDs: monitorIDs,
+			projectImpacts = append(projectImpacts, SkillReferenceProjectImpact{
+				ID: project.ID, ExpectedRevision: project.Revision, MonitorIDs: monitorIDs,
 			})
 		}
 	}
 	sort.Slice(objectiveImpacts, func(i, j int) bool { return objectiveImpacts[i].ID < objectiveImpacts[j].ID })
-	sort.Slice(initiativeImpacts, func(i, j int) bool { return initiativeImpacts[i].ID < initiativeImpacts[j].ID })
+	sort.Slice(projectImpacts, func(i, j int) bool { return projectImpacts[i].ID < projectImpacts[j].ID })
 
 	findings := compareUpgradeContracts(previous, target, current.AllowedActions, referencedActions)
 	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, target)
@@ -321,7 +321,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		BindingID: current.ID, ExpectedBindingRevision: current.Revision,
 		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
-		Objectives: objectiveImpacts, Initiatives: initiativeImpacts, TeamAuthority: teamAuthority, Findings: findings,
+		Objectives: objectiveImpacts, Projects: projectImpacts, TeamAuthority: teamAuthority, Findings: findings,
 		ApprovalRequired: len(findings) > 0, GeneratedAt: s.now().UTC(),
 	}
 	plan.Digest, err = skillReferenceUpgradeDigest(plan)
@@ -387,14 +387,14 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	})
 
 	objectiveCandidates := make([]SkillReferenceObjectiveMutation, 0, len(current.Objectives))
-	activityIDs := make([]string, 0, len(current.Objectives)+len(current.Initiatives))
-	initiativeCandidates := make([]SkillReferenceInitiativeMutation, 0, len(current.Initiatives))
-	for _, impact := range current.Initiatives {
-		initiative, loadErr := s.store.GetInitiative(ctx, current.Scope, impact.ID)
-		if loadErr != nil || initiative == nil || initiative.Revision != impact.ExpectedRevision {
+	activityIDs := make([]string, 0, len(current.Objectives)+len(current.Projects))
+	projectCandidates := make([]SkillReferenceProjectMutation, 0, len(current.Projects))
+	for _, impact := range current.Projects {
+		project, loadErr := s.store.GetProject(ctx, current.Scope, impact.ID)
+		if loadErr != nil || project == nil || project.Revision != impact.ExpectedRevision {
 			return nil, ErrSkillReferenceUpgradeConflict
 		}
-		next := cloneInitiative(initiative)
+		next := cloneProject(project)
 		selected := make(map[string]bool, len(impact.MonitorIDs))
 		for _, id := range impact.MonitorIDs {
 			selected[id] = true
@@ -406,22 +406,22 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		}
 		next.Revision++
 		next.UpdatedAt = now
-		event := initiativeEvent(next, "initiative.skill_reference_upgraded", req.Actor, ActivityVisibilityScope,
-			fmt.Sprintf("Initiative Skill reference upgraded from %s to %s", current.From.Version, current.To.Version))
+		event := projectEvent(next, "project.skill_reference_upgraded", req.Actor, ActivityVisibilityScope,
+			fmt.Sprintf("Project Skill reference upgraded from %s to %s", current.From.Version, current.To.Version))
 		event.Payload = skillReferenceUpgradeActivityPayload(current, req.Reason)
 		activityIDs = append(activityIDs, event.ID)
-		initiativeCandidates = append(initiativeCandidates, SkillReferenceInitiativeMutation{
+		projectCandidates = append(projectCandidates, SkillReferenceProjectMutation{
 			Value: next, ExpectedRevision: impact.ExpectedRevision, Event: event,
 		})
 	}
 	receipt := &SkillReferenceUpgradeReceipt{
 		APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: current.Digest, Scope: current.Scope,
 		DeploymentID: current.DeploymentID, BindingID: current.BindingID, BindingRevision: binding.Revision,
-		From: current.From, To: current.To, Objectives: current.Objectives, Initiatives: current.Initiatives,
+		From: current.From, To: current.To, Objectives: current.Objectives, Projects: current.Projects,
 		Actor: req.Actor, Reason: req.Reason, Approval: req.Approval, ActivityIDs: activityIDs, AppliedAt: now,
 	}
 	if err := s.store.ApplySkillReferenceUpgrade(ctx, &SkillReferenceUpgradeMutation{
-		Plan: current, Binding: binding, Objectives: objectiveCandidates, Initiatives: initiativeCandidates, Receipt: receipt,
+		Plan: current, Binding: binding, Objectives: objectiveCandidates, Projects: projectCandidates, Receipt: receipt,
 	}); err != nil {
 		return nil, err
 	}

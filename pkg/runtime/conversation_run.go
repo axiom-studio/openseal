@@ -1013,7 +1013,7 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 			References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
 		}, true
 	}
-	if resourceType != "objective" && resourceType != "initiative" {
+	if resourceType != "objective" && resourceType != "project" {
 		return nil, false
 	}
 	resource := conversationResultMap(result[resourceType])
@@ -1026,9 +1026,9 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 	operation := strings.TrimSpace(fmt.Sprint(result["operation"]))
 	label := "Objective"
 	kind := ConversationReferenceObjective
-	if resourceType == "initiative" {
-		label = "Initiative"
-		kind = ConversationReferenceInitiative
+	if resourceType == "project" {
+		label = "Project"
+		kind = ConversationReferenceProject
 	}
 	verb := "updated"
 	if operation == "create" {
@@ -1089,8 +1089,8 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		resourceType, label = agentBehaviorResourceType, "Agent behavior"
 	case ObjectiveManagementSkillID:
 		resourceType, label, kind, idField = "objective", "Objective", ConversationReferenceObjective, "objectiveId"
-	case InitiativeManagementSkillID:
-		resourceType, label, kind, idField = "initiative", "Initiative", ConversationReferenceInitiative, "initiativeId"
+	case ProjectManagementSkillID:
+		resourceType, label, kind, idField = "project", "Project", ConversationReferenceProject, "projectId"
 	default:
 		return nil, false
 	}
@@ -1159,8 +1159,8 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 		version = AgentManagementSkillVersion
 	case ObjectiveManagementSkillID:
 		version = ObjectiveManagementSkillVersion
-	case InitiativeManagementSkillID:
-		version = InitiativeManagementSkillVersion
+	case ProjectManagementSkillID:
+		version = ProjectManagementSkillVersion
 	default:
 		return nil, false
 	}

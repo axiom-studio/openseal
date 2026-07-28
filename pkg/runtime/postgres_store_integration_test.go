@@ -817,7 +817,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("action tables after rollback = %d, %v", actionTables, err)
 	}
 	var recentTables int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('initiatives','workforce_change_sets')`, primary.schema).Scan(&recentTables); err != nil || recentTables != 0 {
+	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('projects','workforce_change_sets')`, primary.schema).Scan(&recentTables); err != nil || recentTables != 0 {
 		t.Fatalf("recent tables after rollback = %d, %v", recentTables, err)
 	}
 	if err := primary.migrate(ctx); err != nil {

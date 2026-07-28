@@ -49,7 +49,7 @@ Team definitions also follow a governed amendment lifecycle. Runtime Team
 management actions are ordinary typed Skills when enabled by an embedding host,
 so a model cannot mutate a Team by bypassing validation and policy.
 
-## Objectives and Initiatives
+## Objectives and Projects
 
 An **Objective** is a persistent desired outcome owned by one Agent or Team.
 Owners may hold many active objectives at once. Objectives include priority,
@@ -61,10 +61,11 @@ to an Agent, exact trigger, inputs, policy, budget, and concurrency limit.
 Schedule reconciliation creates idempotent Runs from due Runbook occurrences;
 event routing creates Runs from matching active Runbook event triggers.
 
-An **Initiative** groups Objectives and delivery context into one durable
-project. Implemented Initiative records can link milestones, hypotheses, source
-monitors, deliverables, and existing objectives. They are composed from shared
-runtime primitives rather than using a separate execution engine.
+A **Project** is an optional grouping for several Objectives that share
+milestones, hypotheses, evidence, artifacts, or a delivery boundary. Ordinary
+Agent and Team work does not require a Project. Projects coordinate existing
+Objective and Runbook resources; they do not introduce another execution
+engine.
 
 ## Runs, turns, and recovery
 

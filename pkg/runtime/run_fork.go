@@ -251,17 +251,17 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			assignedAgentID = source.AssignedAgentID
 			childContext = cloneMap(source.Context)
 			childPlan = cloneMap(source.Plan)
-		} else if initiativeID, ok := source.Context["initiativeId"].(string); ok && strings.TrimSpace(initiativeID) != "" {
-			// Initiative identity is safe, canonical work lineage. Preserve it
+		} else if projectID, ok := source.Context["projectId"].(string); ok && strings.TrimSpace(projectID) != "" {
+			// Project identity is safe, canonical work lineage. Preserve it
 			// across Agent boundaries without copying the source Run's broader
 			// context, which may contain owner-private references.
 			if childContext == nil {
 				childContext = map[string]interface{}{}
 			}
-			if supplied, exists := childContext["initiativeId"]; exists && supplied != initiativeID {
-				return nil, errors.New("fork branch cannot replace its source Initiative lineage")
+			if supplied, exists := childContext["projectId"]; exists && supplied != projectID {
+				return nil, errors.New("fork branch cannot replace its source Project lineage")
 			}
-			childContext["initiativeId"] = initiativeID
+			childContext["projectId"] = projectID
 		}
 		if branch.Mode != "" {
 			if childContext == nil {

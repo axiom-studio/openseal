@@ -105,9 +105,9 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 		Summary: "Run created", Visibility: visibility, CreatedAt: now,
 		Payload: map[string]interface{}{"status": run.Status, "source": run.Source, "owner": run.Owner},
 	}
-	if initiativeID, _ := run.Context["initiativeId"].(string); strings.TrimSpace(initiativeID) != "" {
-		event.InitiativeID = strings.TrimSpace(initiativeID)
-		event.Payload["initiativeId"] = event.InitiativeID
+	if projectID, _ := run.Context["projectId"].(string); strings.TrimSpace(projectID) != "" {
+		event.ProjectID = strings.TrimSpace(projectID)
+		event.Payload["projectId"] = event.ProjectID
 	}
 	if snapshotID := evidenceSnapshotIdentity(run.Context); snapshotID != "" {
 		event.Payload["evidenceSnapshotId"] = snapshotID

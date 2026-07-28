@@ -150,12 +150,12 @@ func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 	}
 }
 
-func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(t *testing.T) {
+func TestRunForkCoordinatorPreservesProjectWithoutTransferringPrivateContext(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "7"}
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "lead", Goal: "Coordinate research", Source: RunSourceManual,
-		Context: map[string]interface{}{"initiativeId": "initiative-1", "privateCredentialRef": "source-only", "privateBrief": "lead-only"},
+		Context: map[string]interface{}{"projectId": "project-1", "privateCredentialRef": "source-only", "privateBrief": "lead-only"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -176,16 +176,16 @@ func TestRunForkCoordinatorPreservesInitiativeWithoutTransferringPrivateContext(
 	drift := request
 	drift.ForkID = "drifted-wave"
 	drift.Branches = append([]RunForkBranch(nil), request.Branches...)
-	drift.Branches[0].Context = map[string]interface{}{"initiativeId": "another-initiative"}
+	drift.Branches[0].Context = map[string]interface{}{"projectId": "another-project"}
 	if _, err = NewRunForkCoordinator(store).Create(t.Context(), drift); err == nil {
-		t.Fatal("fork replaced authoritative Initiative lineage")
+		t.Fatal("fork replaced authoritative Project lineage")
 	}
 	created, err := NewRunForkCoordinator(store).Create(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, child := range created.Children {
-		if child.Context["initiativeId"] != "initiative-1" || child.Context["product"] == nil || child.Context["privateCredentialRef"] != nil || child.Context["privateBrief"] != nil {
+		if child.Context["projectId"] != "project-1" || child.Context["product"] == nil || child.Context["privateCredentialRef"] != nil || child.Context["privateBrief"] != nil {
 			t.Fatalf("child context = %#v", child.Context)
 		}
 	}

@@ -155,7 +155,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
-		Intent: MessageIntentQuestion, Content: "Pause the initiative.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Intent: MessageIntentQuestion, Content: "Pause the project.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "canceled-trigger",
 	})
 	if err != nil {
@@ -276,7 +276,7 @@ func TestConversationRunTurnRunnerTruthfullyResolvesRequiredTeamRequestWhenEvery
 	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
-		Intent: MessageIntentQuestion, Content: "Pause the initiative.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Intent: MessageIntentQuestion, Content: "Pause the project.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "silent-team-trigger",
 	})
 	if err != nil {
@@ -696,26 +696,26 @@ func TestConversationRunTurnRunnerProjectsGovernedAgentRejectionWithoutReproposa
 	}
 }
 
-func TestGovernedConversationActionCompletionProjectsInitiativeIdentity(t *testing.T) {
+func TestGovernedConversationActionCompletionProjectsProjectIdentity(t *testing.T) {
 	run := &AgentRun{
-		ID: "run-initiative", Checkpoint: map[string]interface{}{
+		ID: "run-project", Checkpoint: map[string]interface{}{
 			"lastAction": map[string]interface{}{
 				"status": "succeeded",
 				"result": map[string]interface{}{
-					"resourceType": "initiative", "operation": "update", "created": false,
-					"initiative": map[string]interface{}{
-						"id": "initiative-research", "title": "Customer research", "status": "active", "revision": float64(4),
+					"resourceType": "project", "operation": "update", "created": false,
+					"project": map[string]interface{}{
+						"id": "project-research", "title": "Customer research", "status": "active", "revision": float64(4),
 					},
 				},
 			},
 		},
 	}
 	completion, ok := governedConversationActionCompletion(run)
-	if !ok || completion.Content != "Initiative “Customer research” was updated successfully and is now active." ||
-		completion.ResourceType != "initiative" || completion.ResourceID != "initiative-research" ||
+	if !ok || completion.Content != "Project “Customer research” was updated successfully and is now active." ||
+		completion.ResourceType != "project" || completion.ResourceID != "project-research" ||
 		len(completion.References) != 2 ||
-		completion.References[1] != (ConversationReference{Kind: ConversationReferenceInitiative, ID: "initiative-research", Version: 4}) {
-		t.Fatalf("initiative completion = %#v, ok=%v", completion, ok)
+		completion.References[1] != (ConversationReference{Kind: ConversationReferenceProject, ID: "project-research", Version: 4}) {
+		t.Fatalf("project completion = %#v, ok=%v", completion, ok)
 	}
 }
 
@@ -796,23 +796,23 @@ func TestGovernedConversationProposalFailureProjectsLifecycleError(t *testing.T)
 
 func TestGovernedConversationActionFailureProjectsStaleRevision(t *testing.T) {
 	run := &AgentRun{
-		ID: "run-stale-initiative", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
+		ID: "run-stale-project", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
 		Checkpoint: map[string]interface{}{"lastAction": map[string]interface{}{
-			"actionCallId": "call-stale-initiative", "status": ActionCallStatusFailed,
-			"skillId": InitiativeManagementSkillID, "action": ObjectiveActionPause,
+			"actionCallId": "call-stale-project", "status": ActionCallStatusFailed,
+			"skillId": ProjectManagementSkillID, "action": ObjectiveActionPause,
 			"arguments": map[string]interface{}{
-				"initiativeId": "initiative-research", "expectedRevision": float64(1),
+				"projectId": "project-research", "expectedRevision": float64(1),
 			},
-			"approvalId": "approval-stale-initiative", "error": "initiative revision conflict",
+			"approvalId": "approval-stale-project", "error": "project revision conflict",
 		}},
 	}
 	outcome, ok := governedConversationActionOutcome(run)
-	if !ok || outcome.Content != "Initiative pause was not applied because the Initiative changed while approval was pending. Review the latest state and try again." ||
-		outcome.ResourceType != "initiative" || outcome.ResourceID != "initiative-research" || len(outcome.References) != 3 ||
+	if !ok || outcome.Content != "Project pause was not applied because the Project changed while approval was pending. Review the latest state and try again." ||
+		outcome.ResourceType != "project" || outcome.ResourceID != "project-research" || len(outcome.References) != 3 ||
 		outcome.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) ||
-		outcome.References[1] != (ConversationReference{Kind: ConversationReferenceApproval, ID: "approval-stale-initiative"}) ||
-		outcome.References[2] != (ConversationReference{Kind: ConversationReferenceInitiative, ID: "initiative-research"}) {
-		t.Fatalf("stale Initiative outcome = %#v, ok=%v", outcome, ok)
+		outcome.References[1] != (ConversationReference{Kind: ConversationReferenceApproval, ID: "approval-stale-project"}) ||
+		outcome.References[2] != (ConversationReference{Kind: ConversationReferenceProject, ID: "project-research"}) {
+		t.Fatalf("stale Project outcome = %#v, ok=%v", outcome, ok)
 	}
 }
 

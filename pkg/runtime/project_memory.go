@@ -5,23 +5,23 @@ import (
 	"sort"
 )
 
-func initiativeKey(scope Scope, id string) string {
+func projectKey(scope Scope, id string) string {
 	return scope.Kind + "\x00" + scope.ID + "\x00" + id
 }
-func (s *MemoryStore) CreateInitiative(_ context.Context, i *Initiative) error {
+func (s *MemoryStore) CreateProject(_ context.Context, i *Project) error {
 	if err := i.Validate(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k := initiativeKey(i.Scope, i.ID)
-	if _, ok := s.initiatives[k]; ok {
-		return ErrInitiativeConflict
+	k := projectKey(i.Scope, i.ID)
+	if _, ok := s.projects[k]; ok {
+		return ErrProjectConflict
 	}
-	s.initiatives[k] = cloneInitiative(i)
+	s.projects[k] = cloneProject(i)
 	return nil
 }
-func (s *MemoryStore) CreateInitiativeWithEvent(_ context.Context, i *Initiative, e *ActivityEvent) (*ActivityEvent, error) {
+func (s *MemoryStore) CreateProjectWithEvent(_ context.Context, i *Project, e *ActivityEvent) (*ActivityEvent, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
@@ -30,55 +30,55 @@ func (s *MemoryStore) CreateInitiativeWithEvent(_ context.Context, i *Initiative
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k := initiativeKey(i.Scope, i.ID)
-	if s.initiatives[k] != nil {
-		return nil, ErrInitiativeConflict
+	k := projectKey(i.Scope, i.ID)
+	if s.projects[k] != nil {
+		return nil, ErrProjectConflict
 	}
 	if i.IdempotencyKeyHash != "" {
-		for _, v := range s.initiatives {
+		for _, v := range s.projects {
 			if v.Scope == i.Scope && v.IdempotencyKeyHash == i.IdempotencyKeyHash {
-				return nil, ErrInitiativeIdempotency
+				return nil, ErrProjectIdempotency
 			}
 		}
 	}
-	s.initiatives[k] = cloneInitiative(i)
+	s.projects[k] = cloneProject(i)
 	p := appendMemoryActivityLocked(s, e)
 	return cloneActivityEvent(p), nil
 }
-func (s *MemoryStore) GetInitiative(_ context.Context, scope Scope, id string) (*Initiative, error) {
+func (s *MemoryStore) GetProject(_ context.Context, scope Scope, id string) (*Project, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	i := s.initiatives[initiativeKey(scope, id)]
+	i := s.projects[projectKey(scope, id)]
 	if i == nil {
-		return nil, ErrInitiativeNotFound
+		return nil, ErrProjectNotFound
 	}
-	return cloneInitiative(i), nil
+	return cloneProject(i), nil
 }
-func (s *MemoryStore) GetInitiativeByIdempotency(_ context.Context, scope Scope, key string) (*Initiative, error) {
+func (s *MemoryStore) GetProjectByIdempotency(_ context.Context, scope Scope, key string) (*Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, i := range s.initiatives {
+	for _, i := range s.projects {
 		if i.Scope == scope && i.IdempotencyKeyHash == key {
-			return cloneInitiative(i), nil
+			return cloneProject(i), nil
 		}
 	}
-	return nil, ErrInitiativeNotFound
+	return nil, ErrProjectNotFound
 }
-func (s *MemoryStore) ListInitiatives(_ context.Context, f InitiativeFilter) ([]*Initiative, error) {
+func (s *MemoryStore) ListProjects(_ context.Context, f ProjectFilter) ([]*Project, error) {
 	if err := f.Scope.Validate(); err != nil {
 		return nil, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	status := map[InitiativeStatus]bool{}
+	status := map[ProjectStatus]bool{}
 	for _, v := range f.Statuses {
 		status[v] = true
 	}
-	out := []*Initiative{}
-	for _, i := range s.initiatives {
+	out := []*Project{}
+	for _, i := range s.projects {
 		if i.Scope != f.Scope {
 			continue
 		}
@@ -91,7 +91,7 @@ func (s *MemoryStore) ListInitiatives(_ context.Context, f InitiativeFilter) ([]
 		if f.ObjectiveID != "" && !containsString(i.ObjectiveRefs, f.ObjectiveID) {
 			continue
 		}
-		out = append(out, cloneInitiative(i))
+		out = append(out, cloneProject(i))
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].UpdatedAt.After(out[b].UpdatedAt) })
 	start := f.Offset
@@ -104,7 +104,7 @@ func (s *MemoryStore) ListInitiatives(_ context.Context, f InitiativeFilter) ([]
 	}
 	return out[start:end], nil
 }
-func (s *MemoryStore) UpdateInitiativeWithEvent(_ context.Context, i *Initiative, expected int64, e *ActivityEvent) (*ActivityEvent, error) {
+func (s *MemoryStore) UpdateProjectWithEvent(_ context.Context, i *Project, expected int64, e *ActivityEvent) (*ActivityEvent, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
@@ -113,36 +113,36 @@ func (s *MemoryStore) UpdateInitiativeWithEvent(_ context.Context, i *Initiative
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k := initiativeKey(i.Scope, i.ID)
-	cur := s.initiatives[k]
+	k := projectKey(i.Scope, i.ID)
+	cur := s.projects[k]
 	if cur == nil {
-		return nil, ErrInitiativeNotFound
+		return nil, ErrProjectNotFound
 	}
 	if cur.Revision != expected || i.Revision != expected+1 {
-		return nil, ErrInitiativeConflict
+		return nil, ErrProjectConflict
 	}
-	s.initiatives[k] = cloneInitiative(i)
+	s.projects[k] = cloneProject(i)
 	p := appendMemoryActivityLocked(s, e)
 	return cloneActivityEvent(p), nil
 }
-func (s *MemoryStore) UpdateInitiative(_ context.Context, i *Initiative, expected int64) error {
+func (s *MemoryStore) UpdateProject(_ context.Context, i *Project, expected int64) error {
 	if err := i.Validate(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k := initiativeKey(i.Scope, i.ID)
-	current := s.initiatives[k]
+	k := projectKey(i.Scope, i.ID)
+	current := s.projects[k]
 	if current == nil {
-		return ErrInitiativeNotFound
+		return ErrProjectNotFound
 	}
 	if current.Revision != expected || i.Revision != expected+1 {
-		return ErrInitiativeConflict
+		return ErrProjectConflict
 	}
-	s.initiatives[k] = cloneInitiative(i)
+	s.projects[k] = cloneProject(i)
 	return nil
 }
-func initiativeContainsString(v []string, w string) bool {
+func projectContainsString(v []string, w string) bool {
 	for _, s := range v {
 		if s == w {
 			return true
@@ -151,4 +151,4 @@ func initiativeContainsString(v []string, w string) bool {
 	return false
 }
 
-var _ InitiativeStore = (*MemoryStore)(nil)
+var _ ProjectStore = (*MemoryStore)(nil)

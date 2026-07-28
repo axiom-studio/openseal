@@ -95,7 +95,7 @@ func migrateActivity(db *sql.DB) error {
 			run_id TEXT NOT NULL,
 			agent_id TEXT NOT NULL DEFAULT '',
 			objective_id TEXT NOT NULL DEFAULT '',
-			initiative_id TEXT NOT NULL DEFAULT '',
+			project_id TEXT NOT NULL DEFAULT '',
 			team_id TEXT NOT NULL DEFAULT '',
 			severity TEXT NOT NULL DEFAULT 'info',
 			visibility TEXT NOT NULL DEFAULT 'scope',
@@ -121,8 +121,8 @@ func migrateActivity(db *sql.DB) error {
 			ON run_activity(scope_kind, scope_id, agent_id, created_at DESC, id DESC);
 		CREATE INDEX IF NOT EXISTS idx_run_activity_objective_feed
 			ON run_activity(scope_kind, scope_id, objective_id, created_at DESC, id DESC);
-		CREATE INDEX IF NOT EXISTS idx_run_activity_initiative_feed
-			ON run_activity(scope_kind, scope_id, initiative_id, created_at DESC, id DESC);
+		CREATE INDEX IF NOT EXISTS idx_run_activity_project_feed
+			ON run_activity(scope_kind, scope_id, project_id, created_at DESC, id DESC);
 		CREATE INDEX IF NOT EXISTS idx_run_activity_team_feed
 			ON run_activity(scope_kind, scope_id, team_id, created_at DESC, id DESC);
 	`)
@@ -152,7 +152,7 @@ func addMissingActivityColumns(db *sql.DB) error {
 	additions := []struct{ name, statement string }{
 		{"agent_id", `ALTER TABLE run_activity ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`},
 		{"objective_id", `ALTER TABLE run_activity ADD COLUMN objective_id TEXT NOT NULL DEFAULT ''`},
-		{"initiative_id", `ALTER TABLE run_activity ADD COLUMN initiative_id TEXT NOT NULL DEFAULT ''`},
+		{"project_id", `ALTER TABLE run_activity ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`},
 		{"team_id", `ALTER TABLE run_activity ADD COLUMN team_id TEXT NOT NULL DEFAULT ''`},
 		{"severity", `ALTER TABLE run_activity ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'`},
 		{"visibility", `ALTER TABLE run_activity ADD COLUMN visibility TEXT NOT NULL DEFAULT 'scope'`},
@@ -168,7 +168,7 @@ func addMissingActivityColumns(db *sql.DB) error {
 	_, err = db.Exec(`UPDATE run_activity SET
 		agent_id = COALESCE(NULLIF(agent_id, ''), json_extract(payload, '$.agentId'), ''),
 		objective_id = COALESCE(NULLIF(objective_id, ''), json_extract(payload, '$.objectiveId'), ''),
-		initiative_id = COALESCE(NULLIF(initiative_id, ''), json_extract(payload, '$.initiativeId'), ''),
+		project_id = COALESCE(NULLIF(project_id, ''), json_extract(payload, '$.projectId'), ''),
 		team_id = COALESCE(NULLIF(team_id, ''), json_extract(payload, '$.teamId'), ''),
 		severity = COALESCE(NULLIF(severity, ''), json_extract(payload, '$.severity'), 'info'),
 		visibility = COALESCE(NULLIF(visibility, ''), json_extract(payload, '$.visibility'), 'scope')`)
@@ -286,9 +286,9 @@ func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *Activi
 		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO run_activity
-		(scope_kind, scope_id, run_id, agent_id, objective_id, initiative_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
+		(scope_kind, scope_id, run_id, agent_id, objective_id, project_id, team_id, severity, visibility, sequence, id, event_type, created_at, payload)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persisted.Scope.Kind, persisted.Scope.ID, activityStreamID(persisted),
-		persisted.AgentID, persisted.ObjectiveID, persisted.InitiativeID, persisted.TeamID, persisted.Severity, persisted.Visibility,
+		persisted.AgentID, persisted.ObjectiveID, persisted.ProjectID, persisted.TeamID, persisted.Severity, persisted.Visibility,
 		persisted.Sequence, persisted.ID, persisted.EventType, persisted.CreatedAt, string(payload)); err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (s *SQLiteStore) ListActivity(ctx context.Context, filter ActivityFilter) (
 	}
 	query := `SELECT payload FROM run_activity WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
-	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"initiative_id", filter.InitiativeID}, {"team_id", filter.TeamID}}
+	selectors := []struct{ column, value string }{{"run_id", filter.RunID}, {"agent_id", filter.AgentID}, {"objective_id", filter.ObjectiveID}, {"project_id", filter.ProjectID}, {"team_id", filter.TeamID}}
 	for _, selector := range selectors {
 		if selector.value != "" {
 			query += " AND " + selector.column + " = ?"

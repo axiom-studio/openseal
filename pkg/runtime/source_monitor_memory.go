@@ -10,11 +10,11 @@ func sourceObservationKey(scope Scope, id string) string {
 }
 
 func sourceObservationDedupeStoreKey(observation *SourceObservation) string {
-	return observation.Scope.Kind + "\x00" + observation.Scope.ID + "\x00" + observation.InitiativeID + "\x00" + observation.MonitorID + "\x00" + observation.DedupeKey
+	return observation.Scope.Kind + "\x00" + observation.Scope.ID + "\x00" + observation.ProjectID + "\x00" + observation.MonitorID + "\x00" + observation.DedupeKey
 }
 
-func sourceMonitorCheckpointKey(scope Scope, initiativeID, monitorID string) string {
-	return scope.Kind + "\x00" + scope.ID + "\x00" + initiativeID + "\x00" + monitorID
+func sourceMonitorCheckpointKey(scope Scope, projectID, monitorID string) string {
+	return scope.Kind + "\x00" + scope.ID + "\x00" + projectID + "\x00" + monitorID
 }
 
 func (s *MemoryStore) IngestSourceObservation(_ context.Context, observation *SourceObservation, checkpoint *SourceMonitorCheckpoint, expected int64, event *ActivityEvent) (*SourceObservation, *SourceMonitorCheckpoint, *ActivityEvent, bool, error) {
@@ -26,7 +26,7 @@ func (s *MemoryStore) IngestSourceObservation(_ context.Context, observation *So
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	checkpointKey := sourceMonitorCheckpointKey(observation.Scope, observation.InitiativeID, observation.MonitorID)
+	checkpointKey := sourceMonitorCheckpointKey(observation.Scope, observation.ProjectID, observation.MonitorID)
 	current := s.sourceMonitorCheckpoints[checkpointKey]
 	currentRevision := int64(0)
 	if current != nil {
@@ -62,7 +62,7 @@ func (s *MemoryStore) AdvanceSourceMonitorCheckpoint(_ context.Context, checkpoi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := sourceMonitorCheckpointKey(checkpoint.Scope, checkpoint.InitiativeID, checkpoint.MonitorID)
+	key := sourceMonitorCheckpointKey(checkpoint.Scope, checkpoint.ProjectID, checkpoint.MonitorID)
 	current := s.sourceMonitorCheckpoints[key]
 	if current != nil && current.LastActionCallID == checkpoint.LastActionCallID {
 		return cloneSourceMonitorCheckpoint(current), nil, true, nil
@@ -118,7 +118,7 @@ func (s *MemoryStore) ListSourceObservations(_ context.Context, filter SourceObs
 	defer s.mu.RUnlock()
 	values := make([]*SourceObservation, 0)
 	for _, value := range s.sourceObservations {
-		if value.Scope != filter.Scope || filter.InitiativeID != "" && value.InitiativeID != filter.InitiativeID || filter.MonitorID != "" && value.MonitorID != filter.MonitorID || filter.RunID != "" && value.RunID != filter.RunID || filter.ActionCallID != "" && value.ActionCallID != filter.ActionCallID {
+		if value.Scope != filter.Scope || filter.ProjectID != "" && value.ProjectID != filter.ProjectID || filter.MonitorID != "" && value.MonitorID != filter.MonitorID || filter.RunID != "" && value.RunID != filter.RunID || filter.ActionCallID != "" && value.ActionCallID != filter.ActionCallID {
 			continue
 		}
 		if !filter.RetainedAt.IsZero() && sourceObservationExpiredAt(value, filter.RetainedAt) {
@@ -142,10 +142,10 @@ func (s *MemoryStore) ListSourceObservations(_ context.Context, filter SourceObs
 	return values[start:end], nil
 }
 
-func (s *MemoryStore) GetSourceMonitorCheckpoint(_ context.Context, scope Scope, initiativeID, monitorID string) (*SourceMonitorCheckpoint, error) {
+func (s *MemoryStore) GetSourceMonitorCheckpoint(_ context.Context, scope Scope, projectID, monitorID string) (*SourceMonitorCheckpoint, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	value := s.sourceMonitorCheckpoints[sourceMonitorCheckpointKey(scope, initiativeID, monitorID)]
+	value := s.sourceMonitorCheckpoints[sourceMonitorCheckpointKey(scope, projectID, monitorID)]
 	if value == nil {
 		return nil, ErrSourceObservationNotFound
 	}

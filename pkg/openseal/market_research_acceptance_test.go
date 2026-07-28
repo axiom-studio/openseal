@@ -21,13 +21,13 @@ import (
 
 const (
 	researchTeamID       = "market-research-team"
-	researchInitiativeID = "competitor-research"
+	researchProjectID = "competitor-research"
 	researcherID         = "source-researcher"
 	analystID            = "research-analyst"
 	publisherID          = "report-publisher"
 )
 
-func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *testing.T) {
+func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -43,39 +43,39 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 	sourceRun := mustCreateRun(t, ctx, engine, CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objectives["monitor"].ID, Owner: owner, AssignedAgentID: researcherID,
 		Goal: "Monitor approved public discussions", Source: RunSourceSchedule,
-		Context: map[string]interface{}{"initiativeId": researchInitiativeID, "sourceMonitorId": "forums"},
+		Context: map[string]interface{}{"projectId": researchProjectID, "sourceMonitorId": "forums"},
 	})
-	initiative, _, err := engine.CreateInitiative(ctx, CreateInitiativeRequest{
-		Initiative: &Initiative{
-			ID: researchInitiativeID, Scope: scope, Title: "Competitor user research",
+	project, _, err := engine.CreateProject(ctx, CreateProjectRequest{
+		Project: &Project{
+			ID: researchProjectID, Scope: scope, Title: "Competitor user research",
 			Purpose: "Identify evidence-backed user pain points and deliver a reviewed report",
-			Status:  InitiativeStatusActive, Owner: owner,
-			AgentRefs: []InitiativeResourceReference{
-				{Kind: InitiativeResourceAgentDeployment, ID: researcherID},
-				{Kind: InitiativeResourceAgentDeployment, ID: analystID},
-				{Kind: InitiativeResourceAgentDeployment, ID: publisherID},
+			Status:  ProjectStatusActive, Owner: owner,
+			AgentRefs: []ProjectResourceReference{
+				{Kind: ProjectResourceAgentDeployment, ID: researcherID},
+				{Kind: ProjectResourceAgentDeployment, ID: analystID},
+				{Kind: ProjectResourceAgentDeployment, ID: publisherID},
 			},
-			TeamRefs:      []InitiativeResourceReference{{Kind: InitiativeResourceTeamDeployment, ID: researchTeamID}},
+			TeamRefs:      []ProjectResourceReference{{Kind: ProjectResourceTeamDeployment, ID: researchTeamID}},
 			ObjectiveRefs: []string{objectives["monitor"].ID, objectives["report"].ID, objectives["deliver"].ID},
 			RunRefs:       []string{sourceRun.ID},
-			SourceMonitors: []InitiativeSourceMonitorReference{{
+			SourceMonitors: []ProjectSourceMonitorReference{{
 				ID: "forums", ObjectiveID: objectives["monitor"].ID, AssignedAgentID: researcherID,
 				SkillID: "public-forum-reader", SkillVersion: "1.0.0", Action: "search",
-				SourcePolicyRef: "approved-public-forums", Deduplication: InitiativeSourceDeduplicateStableSourceAndContent,
+				SourcePolicyRef: "approved-public-forums", Deduplication: ProjectSourceDeduplicateStableSourceAndContent,
 			}},
-			Milestones: []InitiativeMilestone{{
-				ID: "evidence", Title: "Collect evidence", Status: InitiativeMilestoneInProgress,
+			Milestones: []ProjectMilestone{{
+				ID: "evidence", Title: "Collect evidence", Status: ProjectMilestoneInProgress,
 				ObjectiveRefs: []string{objectives["monitor"].ID},
 			}, {
-				ID: "report", Title: "Deliver reviewed report", Status: InitiativeMilestonePending,
+				ID: "report", Title: "Deliver reviewed report", Status: ProjectMilestonePending,
 				ObjectiveRefs: []string{objectives["report"].ID, objectives["deliver"].ID},
 			}},
-			Deliverables: []InitiativeDeliverable{{
-				ID: "weekly-report", Title: "Cited market-research report", Status: InitiativeDeliverablePlanned,
+			Deliverables: []ProjectDeliverable{{
+				ID: "weekly-report", Title: "Cited market-research report", Status: ProjectDeliverablePlanned,
 				ObjectiveRefs: []string{objectives["report"].ID, objectives["deliver"].ID},
 			}},
 		},
-		IdempotencyKey: "research-initiative", Actor: ActivityActor{Type: "user", ID: "operator"},
+		IdempotencyKey: "research-project", Actor: ActivityActor{Type: "user", ID: "operator"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 	} {
 		digest := sha256.Sum256([]byte(finding.summary))
 		result, ingestErr := engine.IngestSourceObservation(ctx, IngestSourceObservationRequest{
-			Scope: scope, InitiativeID: initiative.ID, MonitorID: "forums",
+			Scope: scope, ProjectID: project.ID, MonitorID: "forums",
 			ExpectedCheckpointRevision: int64(index), Cursor: "page-" + string(rune('1'+index)),
 			StableSourceID: finding.stableID, SourceURI: finding.uri,
 			ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: finding.summary,
@@ -112,12 +112,12 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 		t.Fatal(err)
 	}
 	store, engine = openResearchAcceptanceEngine(t, databasePath, scope, nil, nil)
-	checkpoint, err := engine.GetSourceMonitorCheckpoint(ctx, scope, initiative.ID, "forums")
+	checkpoint, err := engine.GetSourceMonitorCheckpoint(ctx, scope, project.ID, "forums")
 	if err != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 2 {
 		t.Fatalf("checkpoint=%#v err=%v", checkpoint, err)
 	}
 	persistedEvidence, err := engine.ListSourceObservations(ctx, SourceObservationFilter{
-		Scope: scope, InitiativeID: initiative.ID, Limit: 10,
+		Scope: scope, ProjectID: project.ID, Limit: 10,
 	})
 	if err != nil || len(persistedEvidence) != 2 {
 		t.Fatalf("evidence=%#v err=%v", persistedEvidence, err)
@@ -126,7 +126,7 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 	reportRun := mustCreateRun(t, ctx, engine, CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objectives["report"].ID, Owner: owner, AssignedAgentID: analystID,
 		Goal: "Synthesize a cited report", Source: RunSourceObjective,
-		Context: map[string]interface{}{"initiativeId": initiative.ID},
+		Context: map[string]interface{}{"projectId": project.ID},
 	})
 	reportBody := "Finding 1: " + observations[0].Summary + "\nSource: " + observations[0].SourceURI +
 		"\n\nFinding 2: " + observations[1].Summary + "\nSource: " + observations[1].SourceURI
@@ -167,7 +167,7 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 	deliveryRun := mustCreateRun(t, ctx, engine, CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objectives["deliver"].ID, Owner: owner, AssignedAgentID: publisherID,
 		Goal: "Deliver the reviewed report", Source: RunSourceObjective,
-		Context: map[string]interface{}{"initiativeId": initiative.ID},
+		Context: map[string]interface{}{"projectId": project.ID},
 	})
 	claimed, err := engine.ClaimNextAgentRun(ctx, AgentRunClaimRequest{
 		Scope: scope, WorkerID: "publisher-worker", AssignedAgentID: publisherID, LeaseDuration: time.Minute,
@@ -195,13 +195,13 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 	}
 
 	runRefs := []string{sourceRun.ID, reportRun.ID, deliveryRun.ID}
-	deliverables := []InitiativeDeliverable{{
-		ID: "weekly-report", Title: "Cited market-research report", Status: InitiativeDeliverableReview,
+	deliverables := []ProjectDeliverable{{
+		ID: "weekly-report", Title: "Cited market-research report", Status: ProjectDeliverableReview,
 		ObjectiveRefs: []string{objectives["report"].ID, objectives["deliver"].ID},
-		ArtifactRefs:  []InitiativeResourceReference{{Kind: InitiativeResourceArtifact, ID: reportArtifact.Artifact.ID, Revision: 1}},
+		ArtifactRefs:  []ProjectResourceReference{{Kind: ProjectResourceArtifact, ID: reportArtifact.Artifact.ID, Revision: 1}},
 	}}
-	initiative, _, err = engine.UpdateInitiative(ctx, scope, initiative.ID, UpdateInitiativeRequest{
-		ExpectedRevision: initiative.Revision, RunRefs: &runRefs, Deliverables: &deliverables,
+	project, _, err = engine.UpdateProject(ctx, scope, project.ID, UpdateProjectRequest{
+		ExpectedRevision: project.Revision, RunRefs: &runRefs, Deliverables: &deliverables,
 		Checkpoint: map[string]interface{}{"phase": "awaiting_delivery_approval", "evidenceCount": 2},
 		Actor:      ActivityActor{Type: "agent", ID: analystID},
 	})
@@ -249,21 +249,21 @@ func TestMarketResearchInitiativeSurvivesRestartAndDeliversReviewedReport(t *tes
 	}
 	mustCompleteRun(t, ctx, engine, currentDeliveryRun, "Reviewed report accepted by delivery provider")
 
-	deliverables[0].Status = InitiativeDeliverableDelivered
-	milestones := []InitiativeMilestone{
-		{ID: "evidence", Title: "Collect evidence", Status: InitiativeMilestoneCompleted, ObjectiveRefs: []string{objectives["monitor"].ID}},
-		{ID: "report", Title: "Deliver reviewed report", Status: InitiativeMilestoneCompleted, ObjectiveRefs: []string{objectives["report"].ID, objectives["deliver"].ID}},
+	deliverables[0].Status = ProjectDeliverableDelivered
+	milestones := []ProjectMilestone{
+		{ID: "evidence", Title: "Collect evidence", Status: ProjectMilestoneCompleted, ObjectiveRefs: []string{objectives["monitor"].ID}},
+		{ID: "report", Title: "Deliver reviewed report", Status: ProjectMilestoneCompleted, ObjectiveRefs: []string{objectives["report"].ID, objectives["deliver"].ID}},
 	}
-	completed := InitiativeStatusCompleted
-	initiative, _, err = engine.UpdateInitiative(ctx, scope, initiative.ID, UpdateInitiativeRequest{
-		ExpectedRevision: initiative.Revision, Status: &completed, Milestones: &milestones, Deliverables: &deliverables,
+	completed := ProjectStatusCompleted
+	project, _, err = engine.UpdateProject(ctx, scope, project.ID, UpdateProjectRequest{
+		ExpectedRevision: project.Revision, Status: &completed, Milestones: &milestones, Deliverables: &deliverables,
 		Checkpoint: map[string]interface{}{"phase": "completed", "deliveryReceiptId": "delivery-receipt-1"},
 		Actor:      ActivityActor{Type: "agent", ID: publisherID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertResearchAcceptance(t, ctx, engine, scope, initiative.ID, reportArtifact.Artifact.ID, proposal.Call.ID)
+	assertResearchAcceptance(t, ctx, engine, scope, project.ID, reportArtifact.Artifact.ID, proposal.Call.ID)
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func composeResearchWorkforce(
 				ID: "forums-monitor-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: researcherID,
 				DefinitionID: "market-research", DefinitionVersion: "1.0.0", TriggerID: "forums",
 				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-				Input:   map[string]interface{}{"initiativeId": researchInitiativeID, "sourceMonitorId": "forums", "query": "competitor pain points"},
+				Input:   map[string]interface{}{"projectId": researchProjectID, "sourceMonitorId": "forums", "query": "competitor pain points"},
 				Policy:  map[string]interface{}{"sourcePolicyRef": "approved-public-forums"}, Status: RunbookActivationActive,
 			})
 			if createErr != nil {
@@ -475,22 +475,22 @@ func assertResearchAcceptance(
 	ctx context.Context,
 	engine *Engine,
 	scope Scope,
-	initiativeID string,
+	projectID string,
 	artifactID string,
 	actionID string,
 ) {
 	t.Helper()
-	initiative, err := engine.GetInitiative(ctx, scope, initiativeID)
-	if err != nil || initiative.Status != InitiativeStatusCompleted || len(initiative.RunRefs) != 3 ||
-		len(initiative.Deliverables) != 1 || initiative.Deliverables[0].Status != InitiativeDeliverableDelivered {
-		t.Fatalf("initiative=%#v err=%v", initiative, err)
+	project, err := engine.GetProject(ctx, scope, projectID)
+	if err != nil || project.Status != ProjectStatusCompleted || len(project.RunRefs) != 3 ||
+		len(project.Deliverables) != 1 || project.Deliverables[0].Status != ProjectDeliverableDelivered {
+		t.Fatalf("project=%#v err=%v", project, err)
 	}
 	artifact, err := engine.GetArtifact(ctx, scope, artifactID, 1)
 	if err != nil || artifact.MediaType != "application/pdf" || len(artifact.Evidence) != 2 ||
-		artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != initiative.Owner {
+		artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != project.Owner {
 		t.Fatalf("artifact=%#v err=%v", artifact, err)
 	}
-	approvalValues, err := engine.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: initiative.RunRefs[2]})
+	approvalValues, err := engine.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: project.RunRefs[2]})
 	if err != nil || len(approvalValues) != 1 || approvalValues[0].Status != ApprovalStatusApproved {
 		t.Fatalf("approvals=%#v err=%v", approvalValues, err)
 	}
@@ -499,14 +499,14 @@ func assertResearchAcceptance(
 		t.Fatalf("delivery call=%#v err=%v", call, err)
 	}
 	observations, err := engine.ListSourceObservations(ctx, SourceObservationFilter{
-		Scope: scope, InitiativeID: initiative.ID, Limit: 10,
+		Scope: scope, ProjectID: project.ID, Limit: 10,
 	})
 	if err != nil || len(observations) != 2 {
 		t.Fatalf("observations=%#v err=%v", observations, err)
 	}
-	for _, runID := range initiative.RunRefs {
+	for _, runID := range project.RunRefs {
 		run, loadErr := engine.GetAgentRun(ctx, scope, runID)
-		if loadErr != nil || run.Status != AgentRunStatusCompleted || run.Owner != initiative.Owner {
+		if loadErr != nil || run.Status != AgentRunStatusCompleted || run.Owner != project.Owner {
 			t.Fatalf("run=%#v err=%v", run, loadErr)
 		}
 	}

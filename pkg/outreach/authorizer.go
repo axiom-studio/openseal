@@ -28,7 +28,7 @@ func (f PolicyResolverFunc) ResolveOutreachPolicy(ctx context.Context, scope ski
 
 type AuthorizationState interface {
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
-	GetInitiative(context.Context, runtime.Scope, string) (*runtime.Initiative, error)
+	GetProject(context.Context, runtime.Scope, string) (*runtime.Project, error)
 	GetOutreachThread(context.Context, runtime.Scope, string) (*runtime.OutreachThread, error)
 	GetActionCall(context.Context, runtime.Scope, string) (*runtime.ActionCall, error)
 	GetApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
@@ -125,7 +125,7 @@ func (a *CanonicalInvocationAuthorizer) AuthorizeOutreachInvocation(ctx context.
 	if thread == nil {
 		return nil, errors.New("load outreach thread: not found")
 	}
-	if thread.InitiativeID == "" || thread.Status != runtime.OutreachThreadOpen || thread.AssignedAgentID != invocation.DeploymentID || thread.Owner != run.Owner {
+	if thread.ProjectID == "" || thread.Status != runtime.OutreachThreadOpen || thread.AssignedAgentID != invocation.DeploymentID || thread.Owner != run.Owner {
 		return nil, errors.New("outreach thread does not belong to the active Run")
 	}
 	message := messageByID(thread, messageID)
@@ -165,11 +165,11 @@ func (a *CanonicalInvocationAuthorizer) AuthorizeOutreachInvocation(ctx context.
 	if err != nil {
 		return nil, fmt.Errorf("source policy %s denied outreach: %w", thread.SourcePolicyRef, err)
 	}
-	initiative, err := a.state.GetInitiative(ctx, scope, thread.InitiativeID)
-	if err != nil || initiative == nil || initiative.Owner != thread.Owner {
-		return nil, errors.New("outreach Initiative ownership is unavailable or inconsistent")
+	project, err := a.state.GetProject(ctx, scope, thread.ProjectID)
+	if err != nil || project == nil || project.Owner != thread.Owner {
+		return nil, errors.New("outreach Project ownership is unavailable or inconsistent")
 	}
-	if err := a.recordDecision(ctx, run, initiative, thread, message, decision, call.ID); err != nil {
+	if err := a.recordDecision(ctx, run, project, thread, message, decision, call.ID); err != nil {
 		return nil, err
 	}
 	return &InvocationAuthorization{Decision: *decision, ApprovalPolicy: thread.ApprovalPolicyRef}, nil
@@ -201,7 +201,7 @@ func validateInvocationAction(call *runtime.ActionCall, run *runtime.AgentRun, t
 	return nil
 }
 
-func (a *CanonicalInvocationAuthorizer) recordDecision(ctx context.Context, run *runtime.AgentRun, initiative *runtime.Initiative, thread *runtime.OutreachThread, message *runtime.OutreachMessage, decision *source.OutreachPolicyDecision, actionCallID string) error {
+func (a *CanonicalInvocationAuthorizer) recordDecision(ctx context.Context, run *runtime.AgentRun, project *runtime.Project, thread *runtime.OutreachThread, message *runtime.OutreachMessage, decision *source.OutreachPolicyDecision, actionCallID string) error {
 	eventID := "outreach-policy-" + strings.TrimSpace(actionCallID)
 	existing, err := a.state.ListActivity(ctx, runtime.ActivityFilter{Scope: run.Scope, RunID: run.ID, EventTypes: []string{"outreach.policy_authorized"}, Limit: 100})
 	if err != nil {
@@ -211,12 +211,12 @@ func (a *CanonicalInvocationAuthorizer) recordDecision(ctx context.Context, run 
 		return nil
 	}
 	visibility, teamID := runtime.ActivityVisibilityScope, ""
-	if initiative.Owner.Type == runtime.OwnerTypeTeam {
-		visibility, teamID = runtime.ActivityVisibilityTeam, initiative.Owner.ID
+	if project.Owner.Type == runtime.OwnerTypeTeam {
+		visibility, teamID = runtime.ActivityVisibilityTeam, project.Owner.ID
 	}
 	event := &runtime.ActivityEvent{
 		ID: eventID, Scope: run.Scope, EventType: "outreach.policy_authorized", Severity: runtime.ActivitySeverityInfo,
-		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, InitiativeID: initiative.ID, RunID: run.ID, TeamID: teamID,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, ProjectID: project.ID, RunID: run.ID, TeamID: teamID,
 		Actor: runtime.ActivityActor{Type: "system", ID: "outreach-policy"}, Visibility: visibility,
 		Summary: "Reviewed outreach authorized by source policy",
 		Payload: map[string]interface{}{

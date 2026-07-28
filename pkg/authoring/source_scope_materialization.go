@@ -345,23 +345,23 @@ func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need Capab
 }
 
 func materializeCatalogSourceMonitor(candidate *WorkforceCandidate, need CapabilityNeed, match sourceScopeInvocation) []ValidationIssue {
-	if candidate == nil || candidate.Initiative == nil || need.SourcePolicyProposal == nil || match.action == nil || match.objectiveRef == "" {
+	if candidate == nil || candidate.Project == nil || need.SourcePolicyProposal == nil || match.action == nil || match.objectiveRef == "" {
 		return nil
 	}
-	if !stringSet(candidate.Initiative.ObjectiveRefs)[match.objectiveRef] || !stringSet(need.SourcePolicyProposal.SkillIDs)[match.action.SkillID] {
+	if !stringSet(candidate.Project.ObjectiveRefs)[match.objectiveRef] || !stringSet(need.SourcePolicyProposal.SkillIDs)[match.action.SkillID] {
 		return nil
 	}
 	reference := strings.TrimSpace(need.SourcePolicyProposal.Policy.ID) + "@" + strings.TrimSpace(need.SourcePolicyProposal.Policy.Version)
 	monitorID := catalogSourceMonitorID(need.ID)
-	for _, existing := range candidate.Initiative.SourceMonitors {
+	for _, existing := range candidate.Project.SourceMonitors {
 		if existing.ID == monitorID || existing.ObjectiveRef == match.objectiveRef {
 			return nil
 		}
 	}
-	candidate.Initiative.SourceMonitors = append(candidate.Initiative.SourceMonitors, InitiativeSourceMonitorBlueprint{
+	candidate.Project.SourceMonitors = append(candidate.Project.SourceMonitors, ProjectSourceMonitorBlueprint{
 		ID: monitorID, ObjectiveRef: match.objectiveRef, AssignedAgentDefinitionID: match.agentID,
 		SkillID: match.action.SkillID, SkillVersion: match.action.SkillVersion, Action: match.action.Action,
-		SourcePolicyRef: reference, Deduplication: InitiativeDeduplicateStableSourceAndContent,
+		SourcePolicyRef: reference, Deduplication: ProjectDeduplicateStableSourceAndContent,
 	})
 	return nil
 }

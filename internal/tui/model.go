@@ -99,7 +99,7 @@ const (
 	sectionTeams
 	sectionObjectives
 	sectionSources
-	sectionInitiatives
+	sectionProjects
 	sectionOutreach
 	sectionIntegrations
 	sectionSkills
@@ -125,8 +125,8 @@ const (
 	modeObjectiveEdit
 	modeEventSourceCreate
 	modeEventSourceRetire
-	modeInitiativeCreate
-	modeInitiativeEdit
+	modeProjectCreate
+	modeProjectEdit
 	modeOutreachCreate
 	modeIntegrationCreate
 	modeIntegrationActivate
@@ -200,7 +200,7 @@ type Model struct {
 	objectiveCapability                kernelapi.Capability
 	runbookCapability                  kernelapi.Capability
 	eventSourceCapability              kernelapi.Capability
-	initiativeCapability               kernelapi.Capability
+	projectCapability                  kernelapi.Capability
 	outreachCapability                 kernelapi.Capability
 	conversationGatewayCapability      kernelapi.Capability
 	sourceMonitorCapability            kernelapi.Capability
@@ -270,9 +270,9 @@ type Model struct {
 	eventSourceSelected                int
 	selectedEventSource                string
 	eventSourceDetail                  *runtime.EventSourceSubscriptionDetail
-	initiatives                        []*runtime.Initiative
-	initiativeSelected                 int
-	selectedInitiative                 string
+	projects                           []*runtime.Project
+	projectSelected                    int
+	selectedProject                    string
 	outreachThreads                    []*runtime.OutreachThread
 	outreachSelected                   int
 	selectedOutreach                   string
@@ -285,8 +285,8 @@ type Model struct {
 	selectedConversationGateway        string
 	conversationGatewayAdapterSelected int
 	sourceMonitorStatuses              map[string]sourceMonitorStatus
-	initiativeActivity                 map[string][]runtime.ActivityProjection
-	initiativeActivityErrors           map[string]error
+	projectActivity                    map[string][]runtime.ActivityProjection
+	projectActivityErrors              map[string]error
 	clawHubSkills                      []clawhub.InstalledState
 	skillActions                       []capability.ModelAction
 	skillBindings                      []*capability.Binding
@@ -326,8 +326,8 @@ type Model struct {
 	pendingObjectivePrompt             string
 	pendingEventSourceID               string
 	pendingEventSourcePrompt           string
-	pendingInitiativeKey               string
-	pendingInitiativePrompt            string
+	pendingProjectKey                  string
+	pendingProjectPrompt               string
 	pendingOutreachKey                 string
 	pendingOutreachPrompt              string
 	pendingClawHubPrompt               string
@@ -515,9 +515,9 @@ type eventSourceChanged struct {
 	err    error
 }
 
-type initiativesLoaded struct {
-	initiatives []*runtime.Initiative
-	err         error
+type projectsLoaded struct {
+	projects []*runtime.Project
+	err      error
 }
 
 type sourceMonitorStatus struct {
@@ -534,17 +534,17 @@ type sourceMonitorsLoaded struct {
 	activity       map[string][]runtime.ActivityProjection
 	activityErrors map[string]error
 }
-type initiativeCreated struct {
-	initiative *runtime.Initiative
-	err        error
+type projectCreated struct {
+	project *runtime.Project
+	err     error
 }
-type initiativeUpdated struct {
-	initiative *runtime.Initiative
-	err        error
+type projectUpdated struct {
+	project *runtime.Project
+	err     error
 }
 
 type outreachLoaded struct {
-	initiativeID string
+	projectID    string
 	threads      []*runtime.OutreachThread
 	observations []*runtime.SourceObservation
 	actions      []capability.ModelAction
@@ -739,7 +739,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		runbookCapability, hasRunbooks := msg.document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
 		eventSourceCapability, hasEventSources := msg.document.Find(kernelapi.EventSourceSubscriptionsCapabilityID, kernelapi.EventSourceSubscriptionsCapabilityVersion)
-		initiativeCapability, hasInitiatives := msg.document.Find(kernelapi.InitiativesCapabilityID, kernelapi.InitiativesCapabilityVersion)
+		projectCapability, hasProjects := msg.document.Find(kernelapi.ProjectsCapabilityID, kernelapi.ProjectsCapabilityVersion)
 		outreachCapability, hasOutreach := msg.document.Find(kernelapi.OutreachCapabilityID, kernelapi.OutreachCapabilityVersion)
 		conversationGatewayCapability, hasConversationGateways := msg.document.Find(kernelapi.ConversationGatewaysCapabilityID, kernelapi.ConversationGatewaysCapabilityVersion)
 		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
@@ -761,7 +761,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectiveCapability = objectiveCapability
 		m.runbookCapability = runbookCapability
 		m.eventSourceCapability = eventSourceCapability
-		m.initiativeCapability = initiativeCapability
+		m.projectCapability = projectCapability
 		m.outreachCapability = outreachCapability
 		m.conversationGatewayCapability = conversationGatewayCapability
 		m.sourceMonitorCapability = sourceMonitorCapability
@@ -809,10 +809,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasEventSources || !eventSourceCapability.Available || !eventSourceCapability.Supports(kernelapi.OperationList) {
 			m.eventSourceCapability = kernelapi.Capability{}
 		}
-		if !hasInitiatives || !initiativeCapability.Available {
-			m.initiativeCapability = kernelapi.Capability{}
+		if !hasProjects || !projectCapability.Available {
+			m.projectCapability = kernelapi.Capability{}
 		}
-		if !hasOutreach || !outreachCapability.Available || !outreachCapability.Supports(kernelapi.OperationList) || !m.initiativeCapability.Available {
+		if !hasOutreach || !outreachCapability.Available || !outreachCapability.Supports(kernelapi.OperationList) || !m.projectCapability.Available {
 			m.outreachCapability = kernelapi.Capability{}
 		}
 		if !hasConversationGateways || !conversationGatewayCapability.Available || !conversationGatewayCapability.Supports(kernelapi.OperationList) || m.conversationGatewayClient == nil {
@@ -848,8 +848,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
 			m.sourcePolicyCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.initiativeCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
-			m.unavailable = "This server does not advertise workforce authoring, objectives, Initiatives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+			m.unavailable = "This server does not advertise workforce authoring, objectives, Projects, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
@@ -872,10 +872,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionSources
 			m.mode = modeEventSourceCreate
 			m.editor.Placeholder = "Press n or Tab to configure a durable event source."
-		} else if m.initiativeCapability.Available {
-			m.section = sectionInitiatives
-			m.mode = modeInitiativeCreate
-			m.editor.Placeholder = "Describe the Initiative outcome…"
+		} else if m.projectCapability.Available {
+			m.section = sectionProjects
+			m.mode = modeProjectCreate
+			m.editor.Placeholder = "Describe the Project outcome…"
 		} else if m.conversationGatewayCapability.Available {
 			m.section = sectionIntegrations
 			m.focusPanelList()
@@ -913,7 +913,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 		}
 		m.activateReadyRefinement()
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadInitiatives(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceCompiled:
 		m.busy = false
 		if msg.err != nil {
@@ -1117,19 +1117,19 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Event source %s · %s · revision %d.", msg.action, msg.item.Status, msg.item.Revision)
 		}
 		return m, m.loadEventSources()
-	case initiativesLoaded:
+	case projectsLoaded:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
 		}
-		m.err, m.initiatives = nil, msg.initiatives
-		m.restoreInitiativeSelection()
+		m.err, m.projects = nil, msg.projects
+		m.restoreProjectSelection()
 		return m, tea.Batch(m.loadSourceMonitors(), m.loadOutreach())
 	case sourceMonitorsLoaded:
 		m.sourceMonitorStatuses = msg.statuses
-		m.initiativeActivity = msg.activity
-		m.initiativeActivityErrors = msg.activityErrors
+		m.projectActivity = msg.activity
+		m.projectActivityErrors = msg.activityErrors
 		return m, nil
 	case clawHubSkillsLoaded:
 		m.loading = false
@@ -1243,7 +1243,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedSkillBinding = msg.receipt.BindingID
 			m.status = fmt.Sprintf("Skill updated to %s@%s · binding revision %d.", msg.receipt.To.ID, msg.receipt.To.Version, msg.receipt.BindingRevision)
 		}
-		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions(), m.loadObjectives(), m.loadInitiatives(), m.loadActivity(false))
+		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions(), m.loadObjectives(), m.loadProjects(), m.loadActivity(false))
 	case clawHubLifecycleCompleted:
 		m.busy = false
 		if msg.err != nil {
@@ -1595,42 +1595,42 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetComposerMode()
 		m.focusPanelList()
 		return m, m.loadObjectives()
-	case initiativeCreated:
+	case projectCreated:
 		m.busy = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.status = "Initiative creation failed. Your prompt is preserved for retry."
+			m.status = "Project creation failed. Your prompt is preserved for retry."
 			return m, nil
 		}
 		m.err = nil
-		m.pendingInitiativeKey, m.pendingInitiativePrompt = "", ""
+		m.pendingProjectKey, m.pendingProjectPrompt = "", ""
 		m.editor.Reset()
-		m.selectedInitiative = msg.initiative.ID
-		m.status = "Initiative added to the durable portfolio."
-		m.section = sectionInitiatives
+		m.selectedProject = msg.project.ID
+		m.status = "Project added to the durable portfolio."
+		m.section = sectionProjects
 		m.focusPanelList()
-		return m, m.loadInitiatives()
-	case initiativeUpdated:
+		return m, m.loadProjects()
+	case projectUpdated:
 		m.busy = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.status = "The Initiative changed elsewhere. Refresh and try again."
-			return m, m.loadInitiatives()
+			m.status = "The Project changed elsewhere. Refresh and try again."
+			return m, m.loadProjects()
 		}
 		m.err = nil
 		m.editor.Reset()
-		m.selectedInitiative = msg.initiative.ID
-		m.status = "Initiative revision recorded."
+		m.selectedProject = msg.project.ID
+		m.status = "Project revision recorded."
 		m.resetComposerMode()
 		m.focusPanelList()
-		return m, m.loadInitiatives()
+		return m, m.loadProjects()
 	case outreachLoaded:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
 		}
-		if initiative := m.selectedInitiativeRecord(); initiative == nil || initiative.ID != msg.initiativeID {
+		if project := m.selectedProjectRecord(); project == nil || project.ID != msg.projectID {
 			return m, nil
 		}
 		m.err = nil
@@ -1728,7 +1728,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadInitiatives(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 			if m.authoringChangeSet != nil {
 				commands = append(commands, m.loadWorkforceChangeSet())
 			}
@@ -1791,10 +1791,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitEventSource()
 			case modeEventSourceRetire:
 				return m, m.retireEventSource()
-			case modeInitiativeCreate:
-				return m, m.submitInitiative()
-			case modeInitiativeEdit:
-				return m, m.submitInitiativeAmendment()
+			case modeProjectCreate:
+				return m, m.submitProject()
+			case modeProjectEdit:
+				return m, m.submitProjectAmendment()
 			case modeOutreachCreate:
 				return m, m.submitOutreachDraft()
 			case modeIntegrationCreate:
@@ -1975,10 +1975,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadEventSources()
 			}
 		case "i":
-			if m.initiativeCapability.Available {
-				m.section = sectionInitiatives
+			if m.projectCapability.Available {
+				m.section = sectionProjects
 				m.resetEvidenceInspection()
-				return m, tea.Batch(m.loadInitiatives(), m.loadRuns())
+				return m, tea.Batch(m.loadProjects(), m.loadRuns())
 			}
 		case "O":
 			if m.outreachCapability.Available {
@@ -2028,10 +2028,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.SetValue(eventSourceComposerTemplate())
 				m.editor.Placeholder = eventSourceComposerTemplate()
 				m.focusComposerEditor()
-			} else if m.section == sectionInitiatives && m.supportsInitiative(kernelapi.OperationCreate) {
-				m.mode = modeInitiativeCreate
+			} else if m.section == sectionProjects && m.supportsProject(kernelapi.OperationCreate) {
+				m.mode = modeProjectCreate
 				m.editor.Reset()
-				m.editor.Placeholder = "Describe the Initiative outcome…"
+				m.editor.Placeholder = "Describe the Project outcome…"
 				m.focusComposerEditor()
 			} else if m.section == sectionOutreach && m.canCreateOutreachDraft() {
 				m.prepareOutreachComposer()
@@ -2069,7 +2069,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveConversationGatewayAdapterChoice(-1)
 			} else if m.section == sectionSkills {
 				m.moveClawHubSelection(-1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
 				m.moveEvidenceObservation(-1)
 			}
 		case "]":
@@ -2088,19 +2088,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveConversationGatewayAdapterChoice(1)
 			} else if m.section == sectionSkills {
 				m.moveClawHubSelection(1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
 				m.moveEvidenceObservation(1)
 			}
 		case "{":
 			if m.section == sectionOutreach {
 				m.moveOutreachAction(-1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
 				m.moveGroundingPage(-1)
 			}
 		case "}":
 			if m.section == sectionOutreach {
 				m.moveOutreachAction(1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
 				m.moveGroundingPage(1)
 			}
 		case "b":
@@ -2133,8 +2133,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pauseOrResumeAgentDeployment()
 			} else if m.section == sectionTeams {
 				return m, m.pauseOrResumeTeamDeployment()
-			} else if m.section == sectionInitiatives {
-				return m, m.pauseOrResumeInitiative()
+			} else if m.section == sectionProjects {
+				return m, m.pauseOrResumeProject()
 			} else if m.section == sectionSources {
 				return m, m.pauseOrResumeEventSource()
 			} else if m.section == sectionIntegrations {
@@ -2149,7 +2149,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pinOrUnpinClawHub()
 			}
 		case "l":
-			if m.section == sectionInitiatives {
+			if m.section == sectionProjects {
 				return m, m.toggleSelectedObjectiveLink()
 			}
 		case "x":
@@ -2238,10 +2238,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the amended objective…"
 				m.focusComposerEditor()
-			} else if m.section == sectionInitiatives && m.selectedInitiativeRecord() != nil && m.supportsInitiative(kernelapi.OperationPatch) {
-				m.mode = modeInitiativeEdit
+			} else if m.section == sectionProjects && m.selectedProjectRecord() != nil && m.supportsProject(kernelapi.OperationPatch) {
+				m.mode = modeProjectEdit
 				m.editor.Reset()
-				m.editor.Placeholder = "Describe the amended Initiative purpose…"
+				m.editor.Placeholder = "Describe the amended Project purpose…"
 				m.focusComposerEditor()
 			} else if m.section == sectionOutreach {
 				return m, m.inspectSelectedOutreachRun()
@@ -2285,14 +2285,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
 			} else if m.section == sectionSkills {
 				return m, m.verifySelectedClawHub()
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
 				if lineage := m.selectedEvidenceLineage(); lineage != nil && lineage.err == nil {
 					m.evidenceExpanded = !m.evidenceExpanded
 					m.evidenceObservationSelected = 0
 				}
 			}
 		case "V":
-			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionInitiatives {
+			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
 				if grounding := m.selectedEvidenceGrounding(); grounding != nil && grounding.err == nil {
 					m.groundingExpanded = !m.groundingExpanded
 					m.groundingPageSelected = 0
@@ -3171,14 +3171,14 @@ func (m *Model) loadSelectedEventSource() tea.Cmd {
 	}
 }
 
-func (m *Model) loadInitiatives() tea.Cmd {
-	if !m.supportsInitiative(kernelapi.OperationList) {
+func (m *Model) loadProjects() tea.Cmd {
+	if !m.supportsProject(kernelapi.OperationList) {
 		return nil
 	}
 	m.loading = true
 	return func() tea.Msg {
-		initiatives, err := m.client.ListInitiatives(m.ctx, runtime.InitiativeFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
-		return initiativesLoaded{initiatives, err}
+		projects, err := m.client.ListProjects(m.ctx, runtime.ProjectFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
+		return projectsLoaded{projects, err}
 	}
 }
 
@@ -3188,33 +3188,33 @@ func (m *Model) loadSourceMonitors() tea.Cmd {
 	if !monitorAvailable && !activityAvailable {
 		return nil
 	}
-	initiatives := append([]*runtime.Initiative(nil), m.initiatives...)
+	projects := append([]*runtime.Project(nil), m.projects...)
 	return func() tea.Msg {
 		statuses := make(map[string]sourceMonitorStatus)
 		activity := make(map[string][]runtime.ActivityProjection)
 		activityErrors := make(map[string]error)
-		for _, initiative := range initiatives {
-			if initiative == nil {
+		for _, project := range projects {
+			if project == nil {
 				continue
 			}
 			if activityAvailable {
 				page, activityErr := m.client.ListActivity(m.ctx, runtime.ActivityFeedRequest{
-					Scope: initiative.Scope, InitiativeID: initiative.ID, Limit: 5,
+					Scope: project.Scope, ProjectID: project.ID, Limit: 5,
 				})
 				if activityErr != nil {
-					activityErrors[initiative.ID] = activityErr
+					activityErrors[project.ID] = activityErr
 				} else if page != nil {
-					activity[initiative.ID] = page.Items
+					activity[project.ID] = page.Items
 				}
 			}
 			if !monitorAvailable {
 				continue
 			}
-			for _, monitor := range initiative.SourceMonitors {
-				key := sourceMonitorStatusKey(initiative.ID, monitor.ID)
-				checkpoint, checkpointErr := m.client.GetSourceMonitorCheckpoint(m.ctx, initiative.Scope, initiative.ID, monitor.ID)
+			for _, monitor := range project.SourceMonitors {
+				key := sourceMonitorStatusKey(project.ID, monitor.ID)
+				checkpoint, checkpointErr := m.client.GetSourceMonitorCheckpoint(m.ctx, project.Scope, project.ID, monitor.ID)
 				observations, observationsErr := m.client.ListSourceObservations(m.ctx, runtime.SourceObservationFilter{
-					Scope: initiative.Scope, InitiativeID: initiative.ID, MonitorID: monitor.ID, Limit: 5,
+					Scope: project.Scope, ProjectID: project.ID, MonitorID: monitor.ID, Limit: 5,
 				})
 				status := sourceMonitorStatus{checkpoint: checkpoint, observations: observations}
 				if checkpointErr != nil && !errors.Is(checkpointErr, runtime.ErrSourceObservationNotFound) {
@@ -3225,7 +3225,7 @@ func (m *Model) loadSourceMonitors() tea.Cmd {
 				}
 				if checkpoint != nil && strings.TrimSpace(checkpoint.LastRunID) != "" && m.activityCapability.Supports(kernelapi.OperationList) {
 					page, activityErr := m.client.ListActivity(m.ctx, runtime.ActivityFeedRequest{
-						Scope: initiative.Scope, RunID: checkpoint.LastRunID, EventTypes: []string{"source_policy.authorized"}, Limit: 25, IncludeDetails: true,
+						Scope: project.Scope, RunID: checkpoint.LastRunID, EventTypes: []string{"source_policy.authorized"}, Limit: 25, IncludeDetails: true,
 					})
 					if activityErr != nil {
 						status.policyErr = activityErr
@@ -3282,8 +3282,8 @@ func integerPayload(payload map[string]interface{}, key string) (int, bool) {
 	}
 }
 
-func sourceMonitorStatusKey(initiativeID, monitorID string) string {
-	return initiativeID + "\x00" + monitorID
+func sourceMonitorStatusKey(projectID, monitorID string) string {
+	return projectID + "\x00" + monitorID
 }
 
 func (m *Model) loadClawHubSkills() tea.Cmd {
@@ -3427,8 +3427,8 @@ func (m *Model) loadPanel() tea.Cmd {
 	if m.section == sectionSources {
 		return m.loadEventSources()
 	}
-	if m.section == sectionInitiatives {
-		return tea.Batch(m.loadInitiatives(), m.loadRuns())
+	if m.section == sectionProjects {
+		return tea.Batch(m.loadProjects(), m.loadRuns())
 	}
 	if m.section == sectionOutreach {
 		return m.loadOutreach()
@@ -3783,74 +3783,74 @@ func (m *Model) retireEventSource() tea.Cmd {
 	}
 }
 
-func (m *Model) submitInitiative() tea.Cmd {
+func (m *Model) submitProject() tea.Cmd {
 	prompt := strings.TrimSpace(m.editor.Value())
 	objective := m.selectedObjectiveRecord()
-	if !m.supportsInitiative(kernelapi.OperationCreate) || m.busy || prompt == "" {
+	if !m.supportsProject(kernelapi.OperationCreate) || m.busy || prompt == "" {
 		if prompt == "" {
-			m.status = "Describe the Initiative before adding it."
+			m.status = "Describe the Project before adding it."
 		}
 		return nil
 	}
 	if objective == nil {
-		m.status = "Select or create an Objective before composing an Initiative."
+		m.status = "Select or create an Objective before composing a Project."
 		return nil
 	}
-	if m.pendingInitiativeKey == "" || m.pendingInitiativePrompt != prompt {
-		m.pendingInitiativeKey, m.pendingInitiativePrompt = uuid.NewString(), prompt
+	if m.pendingProjectKey == "" || m.pendingProjectPrompt != prompt {
+		m.pendingProjectKey, m.pendingProjectPrompt = uuid.NewString(), prompt
 	}
-	m.busy, m.err, m.status = true, nil, "Adding Initiative to the durable portfolio…"
-	request := kernelapi.CreateInitiativeRequest{Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Purpose: prompt, Status: runtime.InitiativeStatusActive, ObjectiveRefs: []string{objective.ID}}
-	key := m.pendingInitiativeKey
+	m.busy, m.err, m.status = true, nil, "Adding Project to the durable portfolio…"
+	request := kernelapi.CreateProjectRequest{Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Purpose: prompt, Status: runtime.ProjectStatusActive, ObjectiveRefs: []string{objective.ID}}
+	key := m.pendingProjectKey
 	return func() tea.Msg {
-		initiative, err := m.client.CreateInitiative(m.ctx, request, key)
-		return initiativeCreated{initiative, err}
+		project, err := m.client.CreateProject(m.ctx, request, key)
+		return projectCreated{project, err}
 	}
 }
 
-func (m *Model) submitInitiativeAmendment() tea.Cmd {
-	initiative := m.selectedInitiativeRecord()
+func (m *Model) submitProjectAmendment() tea.Cmd {
+	project := m.selectedProjectRecord()
 	purpose := strings.TrimSpace(m.editor.Value())
-	if initiative == nil || !m.supportsInitiative(kernelapi.OperationPatch) || m.busy || purpose == "" {
+	if project == nil || !m.supportsProject(kernelapi.OperationPatch) || m.busy || purpose == "" {
 		if purpose == "" {
-			m.status = "Describe the amended Initiative purpose."
+			m.status = "Describe the amended Project purpose."
 		}
 		return nil
 	}
-	m.busy, m.err, m.status = true, nil, "Recording Initiative revision…"
-	request := kernelapi.UpdateInitiativeRequest{ExpectedRevision: initiative.Revision, Purpose: &purpose}
+	m.busy, m.err, m.status = true, nil, "Recording Project revision…"
+	request := kernelapi.UpdateProjectRequest{ExpectedRevision: project.Revision, Purpose: &purpose}
 	return func() tea.Msg {
-		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
-		return initiativeUpdated{updated, err}
+		updated, err := m.client.PatchProject(m.ctx, m.config.Scope, project.ID, request)
+		return projectUpdated{updated, err}
 	}
 }
 
-func (m *Model) pauseOrResumeInitiative() tea.Cmd {
-	initiative := m.selectedInitiativeRecord()
-	if initiative == nil || m.busy || !m.supportsInitiative(kernelapi.OperationPatch) {
+func (m *Model) pauseOrResumeProject() tea.Cmd {
+	project := m.selectedProjectRecord()
+	if project == nil || m.busy || !m.supportsProject(kernelapi.OperationPatch) {
 		return nil
 	}
-	status := runtime.InitiativeStatusPaused
-	if initiative.Status == runtime.InitiativeStatusPaused {
-		status = runtime.InitiativeStatusActive
+	status := runtime.ProjectStatusPaused
+	if project.Status == runtime.ProjectStatusPaused {
+		status = runtime.ProjectStatusActive
 	}
-	m.busy, m.err, m.status = true, nil, "Updating Initiative lifecycle…"
-	request := kernelapi.UpdateInitiativeRequest{ExpectedRevision: initiative.Revision, Status: &status}
+	m.busy, m.err, m.status = true, nil, "Updating Project lifecycle…"
+	request := kernelapi.UpdateProjectRequest{ExpectedRevision: project.Revision, Status: &status}
 	return func() tea.Msg {
-		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
-		return initiativeUpdated{updated, err}
+		updated, err := m.client.PatchProject(m.ctx, m.config.Scope, project.ID, request)
+		return projectUpdated{updated, err}
 	}
 }
 
 func (m *Model) toggleSelectedObjectiveLink() tea.Cmd {
-	initiative, objective := m.selectedInitiativeRecord(), m.selectedObjectiveRecord()
-	if initiative == nil || objective == nil || m.busy || !m.supportsInitiative(kernelapi.OperationPatch) {
+	project, objective := m.selectedProjectRecord(), m.selectedObjectiveRecord()
+	if project == nil || objective == nil || m.busy || !m.supportsProject(kernelapi.OperationPatch) {
 		if objective == nil {
-			m.status = "Select an Objective before linking it to this Initiative."
+			m.status = "Select an Objective before linking it to this Project."
 		}
 		return nil
 	}
-	refs, found := append([]string(nil), initiative.ObjectiveRefs...), -1
+	refs, found := append([]string(nil), project.ObjectiveRefs...), -1
 	for index, id := range refs {
 		if id == objective.ID {
 			found = index
@@ -3859,20 +3859,20 @@ func (m *Model) toggleSelectedObjectiveLink() tea.Cmd {
 	}
 	if found >= 0 {
 		if len(refs) == 1 {
-			m.status = "An Initiative must retain at least one Objective."
+			m.status = "A Project must retain at least one Objective."
 			return nil
 		}
 		refs = append(refs[:found], refs[found+1:]...)
-		m.status = "Removing Objective from Initiative…"
+		m.status = "Removing Objective from Project…"
 	} else {
 		refs = append(refs, objective.ID)
-		m.status = "Linking Objective to Initiative…"
+		m.status = "Linking Objective to Project…"
 	}
 	m.busy, m.err = true, nil
-	request := kernelapi.UpdateInitiativeRequest{ExpectedRevision: initiative.Revision, ObjectiveRefs: &refs}
+	request := kernelapi.UpdateProjectRequest{ExpectedRevision: project.Revision, ObjectiveRefs: &refs}
 	return func() tea.Msg {
-		updated, err := m.client.PatchInitiative(m.ctx, m.config.Scope, initiative.ID, request)
-		return initiativeUpdated{updated, err}
+		updated, err := m.client.PatchProject(m.ctx, m.config.Scope, project.ID, request)
+		return projectUpdated{updated, err}
 	}
 }
 
@@ -4577,7 +4577,7 @@ func (m *Model) defaultOperationalSection() panelSection {
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionSources, m.eventSourceCapability.Available},
-		{sectionInitiatives, m.initiativeCapability.Available},
+		{sectionProjects, m.projectCapability.Available},
 		{sectionOutreach, m.outreachCapability.Available},
 		{sectionIntegrations, m.conversationGatewayCapability.Available},
 		{sectionRuns, m.runCapability.Available},
@@ -4622,8 +4622,8 @@ func (m *Model) supportsEventSource(operation string) bool {
 	return m.ready && m.eventSourceCapability.Supports(operation)
 }
 
-func (m *Model) supportsInitiative(operation string) bool {
-	return m.ready && m.initiativeCapability.Supports(operation)
+func (m *Model) supportsProject(operation string) bool {
+	return m.ready && m.projectCapability.Supports(operation)
 }
 
 func (m *Model) supportsSourceMonitor(operation string) bool {
@@ -5530,8 +5530,8 @@ func (m *Model) movePanelSelection(delta int) {
 		m.moveEventSourceSelection(delta)
 		return
 	}
-	if m.section == sectionInitiatives {
-		m.moveInitiativeSelection(delta)
+	if m.section == sectionProjects {
+		m.moveProjectSelection(delta)
 		return
 	}
 	if m.section == sectionOutreach {
@@ -6083,11 +6083,11 @@ func teamEvaluationPlaceholder(entry *kernelapi.TeamDeploymentCatalogEntry) stri
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) selectedInitiativeRecord() *runtime.Initiative {
-	if m.initiativeSelected < 0 || m.initiativeSelected >= len(m.initiatives) {
+func (m *Model) selectedProjectRecord() *runtime.Project {
+	if m.projectSelected < 0 || m.projectSelected >= len(m.projects) {
 		return nil
 	}
-	return m.initiatives[m.initiativeSelected]
+	return m.projects[m.projectSelected]
 }
 
 func (m *Model) selectedClawHubRecord() *clawhub.InstalledState {
@@ -6148,27 +6148,27 @@ func (m *Model) moveSkillBindingSelection(delta int) {
 	m.skillBindingSelected = max(0, min(len(m.skillBindings)-1, m.skillBindingSelected+delta))
 	m.selectedSkillBinding = m.skillBindings[m.skillBindingSelected].ID
 }
-func (m *Model) restoreInitiativeSelection() {
-	if len(m.initiatives) == 0 {
-		m.initiativeSelected = 0
-		m.selectedInitiative = ""
+func (m *Model) restoreProjectSelection() {
+	if len(m.projects) == 0 {
+		m.projectSelected = 0
+		m.selectedProject = ""
 		return
 	}
-	for i, v := range m.initiatives {
-		if v.ID == m.selectedInitiative {
-			m.initiativeSelected = i
+	for i, v := range m.projects {
+		if v.ID == m.selectedProject {
+			m.projectSelected = i
 			return
 		}
 	}
-	m.initiativeSelected = min(m.initiativeSelected, len(m.initiatives)-1)
-	m.selectedInitiative = m.initiatives[m.initiativeSelected].ID
+	m.projectSelected = min(m.projectSelected, len(m.projects)-1)
+	m.selectedProject = m.projects[m.projectSelected].ID
 }
-func (m *Model) moveInitiativeSelection(delta int) {
-	if len(m.initiatives) == 0 {
+func (m *Model) moveProjectSelection(delta int) {
+	if len(m.projects) == 0 {
 		return
 	}
-	m.initiativeSelected = max(0, min(len(m.initiatives)-1, m.initiativeSelected+delta))
-	m.selectedInitiative = m.initiatives[m.initiativeSelected].ID
+	m.projectSelected = max(0, min(len(m.projects)-1, m.projectSelected+delta))
+	m.selectedProject = m.projects[m.projectSelected].ID
 	m.resetEvidenceInspection()
 }
 
@@ -6483,9 +6483,9 @@ func (m *Model) prepareComposerForSection() {
 		m.editor.SetValue(eventSourceComposerTemplate())
 		m.editor.Placeholder = eventSourceComposerTemplate()
 		m.focusComposerEditor()
-	case m.section == sectionInitiatives && m.supportsInitiative(kernelapi.OperationCreate):
-		m.mode = modeInitiativeCreate
-		m.editor.Placeholder = "Describe the Initiative outcome…"
+	case m.section == sectionProjects && m.supportsProject(kernelapi.OperationCreate):
+		m.mode = modeProjectCreate
+		m.editor.Placeholder = "Describe the Project outcome…"
 		m.focusComposerEditor()
 	case m.section == sectionOutreach && m.canCreateOutreachDraft():
 		m.prepareOutreachComposer()
@@ -6561,9 +6561,9 @@ func (m *Model) resetComposerMode() {
 		m.editor.Placeholder = "Press n or Tab to configure a durable event source."
 		return
 	}
-	if m.section == sectionInitiatives {
-		m.mode = modeInitiativeCreate
-		m.editor.Placeholder = "Describe the Initiative outcome…"
+	if m.section == sectionProjects {
+		m.mode = modeProjectCreate
+		m.editor.Placeholder = "Describe the Project outcome…"
 		return
 	}
 	if m.section == sectionOutreach {

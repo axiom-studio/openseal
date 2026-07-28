@@ -60,7 +60,7 @@ make docker-down
 - Versioned Agent definitions and durable Agent deployments
 - First-class Teams with semantic roles, roster assignments, policy, and
   Team-owned Skill bindings
-- Multi-objective portfolios, Initiatives, schedules, event routing, and
+- Multi-objective portfolios, Projects, schedules, event routing, and
   durable Runs with bounded leases and checkpoints
 - Typed Skill definitions, least-privilege deployment bindings, action
   approvals, credential references, and execution-time secret boundaries

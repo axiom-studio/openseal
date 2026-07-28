@@ -116,7 +116,7 @@ func evidenceSnapshotForGrounding(contextValues map[string]interface{}) (*Eviden
 	if decoder.Decode(&struct{}{}) != io.EOF {
 		return nil, errors.New("evidence snapshot contains multiple values")
 	}
-	if snapshot.APIVersion != evidenceSnapshotAPIVersion || strings.TrimSpace(snapshot.ID) == "" || strings.TrimSpace(snapshot.InitiativeID) == "" {
+	if snapshot.APIVersion != evidenceSnapshotAPIVersion || strings.TrimSpace(snapshot.ID) == "" || strings.TrimSpace(snapshot.ProjectID) == "" {
 		return nil, errors.New("evidence snapshot has an invalid envelope")
 	}
 	if snapshot.SelectedCount != len(snapshot.Observations) || snapshot.ObservationLimit < len(snapshot.Observations) || snapshot.ObservationLimit < 1 || snapshot.SummaryRuneLimit < 1 || snapshot.TotalSummaryRuneLimit < 1 {

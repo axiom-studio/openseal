@@ -12,13 +12,13 @@ func migrateOutreach(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS outreach_threads (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
-			initiative_id TEXT NOT NULL, source_observation_id TEXT NOT NULL,
+			project_id TEXT NOT NULL, source_observation_id TEXT NOT NULL,
 			identity_profile_ref TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL,
 			updated_at DATETIME NOT NULL, idempotency_key_hash TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL,
 			PRIMARY KEY(scope_kind,scope_id,id)
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_idempotency ON outreach_threads(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>'';
-		CREATE INDEX IF NOT EXISTS idx_outreach_initiative ON outreach_threads(scope_kind,scope_id,initiative_id,status,updated_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_outreach_project ON outreach_threads(scope_kind,scope_id,project_id,status,updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_outreach_observation ON outreach_threads(scope_kind,scope_id,source_observation_id,updated_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_outreach_identity ON outreach_threads(scope_kind,scope_id,identity_profile_ref,updated_at DESC);
 	`)
@@ -34,8 +34,8 @@ func (s *SQLiteStore) CreateOutreachThreadWithEvent(ctx context.Context, thread 
 		return nil, err
 	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `INSERT INTO outreach_threads(scope_kind,scope_id,id,initiative_id,source_observation_id,identity_profile_ref,status,revision,updated_at,idempotency_key_hash,payload)VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-			thread.Scope.Kind, thread.Scope.ID, thread.ID, thread.InitiativeID, thread.SourceObservationID, thread.Identity.ProfileRef,
+		_, err := conn.ExecContext(ctx, `INSERT INTO outreach_threads(scope_kind,scope_id,id,project_id,source_observation_id,identity_profile_ref,status,revision,updated_at,idempotency_key_hash,payload)VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			thread.Scope.Kind, thread.Scope.ID, thread.ID, thread.ProjectID, thread.SourceObservationID, thread.Identity.ProfileRef,
 			thread.Status, thread.Revision, thread.UpdatedAt, thread.IdempotencyKeyHash, string(payload))
 		return err
 	})
@@ -79,7 +79,7 @@ func (s *SQLiteStore) ListOutreachThreads(ctx context.Context, filter OutreachTh
 	}
 	query := `SELECT payload FROM outreach_threads WHERE scope_kind=? AND scope_id=?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
-	for _, selector := range []struct{ column, value string }{{"initiative_id", filter.InitiativeID}, {"source_observation_id", filter.SourceObservationID}} {
+	for _, selector := range []struct{ column, value string }{{"project_id", filter.ProjectID}, {"source_observation_id", filter.SourceObservationID}} {
 		if strings.TrimSpace(selector.value) != "" {
 			query += ` AND ` + selector.column + `=?`
 			args = append(args, strings.TrimSpace(selector.value))

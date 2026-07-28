@@ -46,7 +46,7 @@ activity, or checked-in YAML.
 
 Standalone mode uses one SQLite store for definitions, deployments, objectives,
 Runs, turns, leases, budgets, actions, approvals, collaboration, conversations,
-activity, artifacts, Skills, ChangeSets, Initiatives, source checkpoints, and
+activity, artifacts, Skills, ChangeSets, Projects, source checkpoints, and
 outreach. Artifact bytes are stored separately beneath `artifactsPath` and tied
 to immutable catalog records by size and digest.
 
@@ -162,7 +162,7 @@ exercises independent objective portfolios, a Team, child Runs, deterministic
 actions, restart recovery, collaboration, a winner message, and a verified game
 log artifact without external network calls.
 
-The default suite also includes a three-Agent market-research Initiative. It
+The default suite also includes a three-Agent market-research Project. It
 joins recurring source monitoring, deduplicated provenance-linked evidence,
 restart recovery, cited PDF generation, approval-gated email delivery, and a
 durable provider receipt into one portable end-to-end journey. Source and
@@ -174,7 +174,7 @@ Run either acceptance scenario directly while developing:
 
 ```bash
 go test ./pkg/openseal \
-  -run 'Test(ThreeAgentSnakesAndLadders|MarketResearchInitiative)' \
+  -run 'Test(ThreeAgentSnakesAndLadders|MarketResearchProject)' \
   -count=1
 ```
 

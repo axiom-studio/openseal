@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestInitiativeAPIExposesIdempotentMultiObjectiveLifecycle(t *testing.T) {
+func TestProjectAPIExposesIdempotentMultiObjectiveLifecycle(t *testing.T) {
 	store := runtime.NewMemoryStore()
 	server := NewServer(store, zap.NewNop().Sugar())
 	objectiveBody := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"research"},"title":"Evidence","goal":"Collect evidence","status":"active"}`
@@ -23,38 +23,38 @@ func TestInitiativeAPIExposesIdempotentMultiObjectiveLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"research"},"title":"Market research","purpose":"Deliver a cited report","status":"active","objectiveRefs":["` + objective.ID + `"]}`
-	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/initiatives", body, "research-initiative")
+	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/projects", body, "research-project")
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create = %d %s", created.Code, created.Body.String())
 	}
-	var initiative runtime.Initiative
-	if err := json.NewDecoder(created.Body).Decode(&initiative); err != nil {
+	var project runtime.Project
+	if err := json.NewDecoder(created.Body).Decode(&project); err != nil {
 		t.Fatal(err)
 	}
-	if initiative.Revision != 1 || initiative.Status != runtime.InitiativeStatusActive || len(initiative.ObjectiveRefs) != 1 {
-		t.Fatalf("initiative = %#v", initiative)
+	if project.Revision != 1 || project.Status != runtime.ProjectStatusActive || len(project.ObjectiveRefs) != 1 {
+		t.Fatalf("project = %#v", project)
 	}
-	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/initiatives", body, "research-initiative")
-	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), initiative.ID) {
+	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/projects", body, "research-project")
+	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), project.ID) {
 		t.Fatalf("replay = %d %s", replayed.Code, replayed.Body.String())
 	}
-	conflict := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/initiatives", strings.Replace(body, "cited report", "different report", 1), "research-initiative")
+	conflict := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/projects", strings.Replace(body, "cited report", "different report", 1), "research-project")
 	if conflict.Code != http.StatusConflict {
 		t.Fatalf("conflict = %d %s", conflict.Code, conflict.Body.String())
 	}
-	paused := performAgentRunRequest(t, server.Handler(), http.MethodPatch, "/api/v1/initiatives/"+initiative.ID+"?scopeKind=tenant&scopeId=one", `{"expectedRevision":1,"status":"paused"}`, "")
+	paused := performAgentRunRequest(t, server.Handler(), http.MethodPatch, "/api/v1/projects/"+project.ID+"?scopeKind=tenant&scopeId=one", `{"expectedRevision":1,"status":"paused"}`, "")
 	if paused.Code != http.StatusOK || !strings.Contains(paused.Body.String(), `"status":"paused"`) {
 		t.Fatalf("pause = %d %s", paused.Code, paused.Body.String())
 	}
-	list := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/initiatives?scopeKind=tenant&scopeId=one&ownerType=team&ownerId=research&objectiveId="+objective.ID+"&status=paused", "", "")
-	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), initiative.ID) {
+	list := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/projects?scopeKind=tenant&scopeId=one&ownerType=team&ownerId=research&objectiveId="+objective.ID+"&status=paused", "", "")
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), project.ID) {
 		t.Fatalf("list = %d %s", list.Code, list.Body.String())
 	}
-	crossScope := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/initiatives/"+initiative.ID+"?scopeKind=tenant&scopeId=two", "", "")
+	crossScope := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/projects/"+project.ID+"?scopeKind=tenant&scopeId=two", "", "")
 	if crossScope.Code != http.StatusNotFound {
 		t.Fatalf("cross scope = %d %s", crossScope.Code, crossScope.Body.String())
 	}
-	noOp := performAgentRunRequest(t, server.Handler(), http.MethodPatch, "/api/v1/initiatives/"+initiative.ID+"?scopeKind=tenant&scopeId=one", `{"expectedRevision":2}`, "")
+	noOp := performAgentRunRequest(t, server.Handler(), http.MethodPatch, "/api/v1/projects/"+project.ID+"?scopeKind=tenant&scopeId=one", `{"expectedRevision":2}`, "")
 	if noOp.Code != http.StatusBadRequest {
 		t.Fatalf("no-op = %d %s", noOp.Code, noOp.Body.String())
 	}
