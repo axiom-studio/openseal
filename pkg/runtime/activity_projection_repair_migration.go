@@ -31,7 +31,13 @@ func (s *PostgresStore) migrateActivityProjectionRepair(ctx context.Context, tx 
 		project_id = COALESCE(NULLIF(project_id, ''), payload->>'projectId', ''),
 		team_id = COALESCE(NULLIF(team_id, ''), payload->>'teamId', ''),
 		severity = COALESCE(NULLIF(severity, ''), payload->>'severity', 'info'),
-		visibility = COALESCE(NULLIF(visibility, ''), payload->>'visibility', 'scope')`); err != nil {
+		visibility = COALESCE(NULLIF(visibility, ''), payload->>'visibility', 'scope')
+		WHERE (agent_id = '' AND COALESCE(payload->>'agentId', '') <> '')
+		   OR (objective_id = '' AND COALESCE(payload->>'objectiveId', '') <> '')
+		   OR (project_id = '' AND COALESCE(payload->>'projectId', '') <> '')
+		   OR (team_id = '' AND COALESCE(payload->>'teamId', '') <> '')
+		   OR (severity = '' AND COALESCE(payload->>'severity', '') <> '')
+		   OR (visibility = '' AND COALESCE(payload->>'visibility', '') <> '')`); err != nil {
 		return err
 	}
 	for _, statement := range []string{
