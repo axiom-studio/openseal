@@ -199,6 +199,56 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	}
 }
 
+func TestCatalogTurnResolverHidesOriginatingRunbookFromDelegatedAgent(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
+	}}
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "daily-browser-task", Version: "1.2.3", Name: "Daily browser task",
+		Interfaces: map[string]runbook.Interface{"dailyOccurrence": {
+			Description:  "Run the daily browser task",
+			InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false},
+			OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": true},
+		}},
+	}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "browser", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "browser", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "model-binding"}},
+		},
+		definition: &kernelagent.AgentDefinition{ID: "browser", Version: "1", Purpose: "Browse", SystemPrompt: "Use bounded tools.", Runbook: definition},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser"},
+	}
+	run := &AgentRun{
+		ID: "child", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequest,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser"}, AssignedAgentID: "browser", Goal: "Perform delegated work",
+		Context: map[string]interface{}{"triggerInput": map[string]interface{}{
+			"runbookDefinitionId": "daily-browser-task", "runbookDefinitionVersion": "1.2.3",
+		}},
+	}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binding.RunbookOperations) != 0 {
+		t.Fatalf("originating Runbook remained callable: %#v", binding.RunbookOperations)
+	}
+	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.RunbookOperations) != 0 {
+		t.Fatalf("host received originating Runbook: %#v", host.request.RunbookOperations)
+	}
+
+	run.Context["triggerInput"].(map[string]interface{})["runbookDefinitionVersion"] = "different"
+	binding, err = ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil || len(binding.RunbookOperations) != 1 {
+		t.Fatalf("unrelated Runbook identity was filtered: binding=%#v error=%v", binding, err)
+	}
+}
+
 func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "42"}
 	host := &recordingTurnHost{response: &HostedTurnResponse{
