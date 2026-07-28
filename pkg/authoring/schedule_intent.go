@@ -30,6 +30,7 @@ type scheduleIntent struct {
 	dayOfWeek       string
 	cronExpression  string
 	timezone        string
+	jitterSeconds   int64
 }
 
 var (
@@ -139,6 +140,12 @@ func parseScheduleIntent(value string) scheduleIntent {
 	if frequency != "" {
 		clock := scheduleClockPattern.FindStringSubmatch(value)
 		zone := scheduleTimezonePattern.FindString(value)
+		varied := containsAnySchedulePhrase(lower, "varied time", "varying time", "random time", "different time each day")
+		if frequency == "daily" && varied && zone != "" {
+			if _, err := time.LoadLocation(zone); err == nil {
+				return scheduleIntent{kind: scheduleIntentExact, cadenceType: "daily", timeOfDay: "00:00", timezone: zone, jitterSeconds: 24*60*60 - 1}
+			}
+		}
 		if len(clock) == 3 && zone != "" {
 			if _, err := time.LoadLocation(zone); err == nil {
 				hour, _ := strconv.Atoi(clock[1])
@@ -199,7 +206,7 @@ func upsertScheduleIntentQuestion(generated *GenerationResponse) {
 	generated.UnresolvedQuestions = append(generated.UnresolvedQuestions, RefinementQuestion{
 		ID:        scheduleIntentQuestionID,
 		Category:  RefinementCategoryPolicy,
-		Prompt:    "When should this work run? Choose “on demand”, or specify an exact schedule such as “daily at 09:00 UTC”.",
+		Prompt:    "When should this work run? Choose “on demand”, specify an exact time such as “daily at 09:00 UTC”, or a bounded varied window such as “daily at a varied time UTC”.",
 		WhyNeeded: "This source is ready, but OpenSeal needs to know whether the Agent should wait for you or run automatically.",
 		Blocking:  []RefinementBlockingScope{RefinementBlocksCandidate, RefinementBlocksApply},
 		Answer: RefinementAnswerSchema{
@@ -341,6 +348,10 @@ func cadenceMatchesScheduleIntent(cadence map[string]interface{}, intent schedul
 			strings.TrimSpace(fmt.Sprint(cadence["timezone"])) == intent.timezone
 	}
 	if strings.TrimSpace(fmt.Sprint(cadence["timeOfDay"])) != intent.timeOfDay || strings.TrimSpace(fmt.Sprint(cadence["timezone"])) != intent.timezone {
+		return false
+	}
+	jitter, _ := numericInt64(cadence["jitterSeconds"])
+	if jitter != intent.jitterSeconds {
 		return false
 	}
 	return intent.cadenceType != "weekly" || strings.EqualFold(strings.TrimSpace(fmt.Sprint(cadence["dayOfWeek"])), intent.dayOfWeek)

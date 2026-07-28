@@ -1383,13 +1383,32 @@ func cadenceTriggerLabel(cadence map[string]interface{}) string {
 			return fmt.Sprintf("Every %ds", seconds)
 		}
 	case "daily":
+		if jitter := positiveJSONNumber(cadence["jitterSeconds"]); jitter > 0 {
+			return fmt.Sprintf("Daily · varies within %s after %v %v", cadenceJitterLabel(jitter), cadence["timeOfDay"], cadence["timezone"])
+		}
 		return "Daily at " + fmt.Sprint(cadence["timeOfDay"])
 	case "weekly":
+		if jitter := positiveJSONNumber(cadence["jitterSeconds"]); jitter > 0 {
+			return fmt.Sprintf("%v · varies within %s after %v %v", cadence["dayOfWeek"], cadenceJitterLabel(jitter), cadence["timeOfDay"], cadence["timezone"])
+		}
 		return fmt.Sprintf("%v at %v", cadence["dayOfWeek"], cadence["timeOfDay"])
 	case "cron":
 		return "Cron · " + fmt.Sprint(cadence["cronExpression"])
 	}
 	return "Scheduled"
+}
+
+func cadenceJitterLabel(seconds int64) string {
+	if seconds >= 3600 && seconds%3600 == 0 {
+		return fmt.Sprintf("%dh", seconds/3600)
+	}
+	if seconds >= 3600 {
+		return fmt.Sprintf("%.1fh", float64(seconds)/3600)
+	}
+	if seconds >= 60 {
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func automationBudgetLabel(value interface{}) string {

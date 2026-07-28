@@ -44,6 +44,85 @@ func TestObjectiveCadenceCronNextUsesConfiguredTimezone(t *testing.T) {
 	}
 }
 
+func TestObjectiveCadenceJitterIsStableBoundedAndDistinctPerObjective(t *testing.T) {
+	cadence := &ObjectiveCadence{
+		Type: ObjectiveCadenceDaily, TimeOfDay: "00:00", Timezone: "UTC", JitterSeconds: 86399,
+	}
+	from := time.Date(2026, time.July, 28, 0, 0, 0, 0, time.UTC)
+	first, err := cadence.NextFor("objective:rowan", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := cadence.NextFor("objective:rowan", from)
+	if err != nil || !replayed.Equal(first) {
+		t.Fatalf("restart-stable occurrence = %s, want %s, err=%v", replayed, first, err)
+	}
+	if !first.After(from) || !first.Before(from.Add(24*time.Hour)) {
+		t.Fatalf("daily jitter occurrence %s is outside the authorized window", first)
+	}
+	other, err := cadence.NextFor("objective:willow", from)
+	if err != nil || other.Equal(first) {
+		t.Fatalf("distinct Objective occurrence = %s, first=%s, err=%v", other, first, err)
+	}
+	next, err := cadence.NextFor("objective:rowan", first)
+	if err != nil || !next.After(first) || !next.Before(from.Add(48*time.Hour)) {
+		t.Fatalf("next daily jitter occurrence = %s, err=%v", next, err)
+	}
+	if _, err = cadence.Next(from); err == nil || !strings.Contains(err.Error(), "stable objective key") {
+		t.Fatalf("unkeyed jitter was accepted: %v", err)
+	}
+}
+
+func TestObjectiveCadenceJitterRejectsUnboundedOrOverlappingSchedules(t *testing.T) {
+	for name, cadence := range map[string]*ObjectiveCadence{
+		"missing timezone": {Type: ObjectiveCadenceDaily, TimeOfDay: "00:00", JitterSeconds: 60},
+		"whole next day":   {Type: ObjectiveCadenceDaily, TimeOfDay: "00:00", Timezone: "UTC", JitterSeconds: 86400},
+		"interval":         {Type: ObjectiveCadenceInterval, IntervalSeconds: 3600, JitterSeconds: 60},
+		"cron":             {Type: ObjectiveCadenceCron, CronExpression: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 60},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := cadence.Validate(); err == nil {
+				t.Fatal("invalid jittered cadence was accepted")
+			}
+		})
+	}
+}
+
+func TestObjectiveSchedulerEmitsOneAuditableRunForJitteredWindow(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	now := time.Date(2026, time.July, 28, 20, 0, 0, 0, time.UTC)
+	due := now.Add(-time.Minute)
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: Scope{Kind: "tenant", ID: "jitter"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"},
+		Title: "Daily participation", Goal: "Find useful discussions and draft replies", Status: ObjectiveStatusActive,
+		Cadence: &ObjectiveCadence{
+			Type: ObjectiveCadenceDaily, TimeOfDay: "00:00", Timezone: "UTC", JitterSeconds: 86399,
+			AssignedAgentID: "rowan", RunTemplate: &ObjectiveRunTemplate{Entrypoint: "participate"},
+		},
+		NextEvaluationAt: &due, IdempotencyKey: "rowan-daily",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewObjectiveScheduler(store)
+	scheduler.now = func() time.Time { return now }
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err = scheduler.ReconcileScope(ctx, objective.Scope, 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("jittered runs=%#v err=%v", runs, err)
+	}
+	run := runs[0]
+	if run.Entrypoint != "participate" || run.Context["scheduledFor"] != due.Format(time.RFC3339Nano) ||
+		run.Context["scheduleWindowStart"] == "" || run.Context["scheduleWindowEnd"] == "" {
+		t.Fatalf("auditable jittered Run = %#v", run)
+	}
+}
+
 func TestObjectiveCadenceCapabilityRequiresBudgetForBothDurablePhases(t *testing.T) {
 	template := &ObjectiveRunTemplate{Capability: &ObjectiveCapabilityInvocation{
 		SkillID: "openseal.kubernetes", SkillVersion: "1.0.1", Action: "list_events",

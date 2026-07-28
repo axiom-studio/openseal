@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,6 +30,7 @@ type ObjectiveCadence struct {
 	DayOfWeek         string                `json:"dayOfWeek,omitempty"`
 	CronExpression    string                `json:"cronExpression,omitempty"`
 	Timezone          string                `json:"timezone,omitempty"`
+	JitterSeconds     int64                 `json:"jitterSeconds,omitempty"`
 	AssignedAgentID   string                `json:"assignedAgentId,omitempty"`
 	RunBudget         *BudgetPolicy         `json:"runBudget,omitempty"`
 	RunTemplate       *ObjectiveRunTemplate `json:"runTemplate,omitempty"`
@@ -107,6 +110,12 @@ func (t *ObjectiveRunTemplate) Validate() error {
 	if _, reserved := t.Context["scheduledFor"]; reserved {
 		return errors.New("objective cadence runTemplate context cannot override scheduledFor")
 	}
+	if _, reserved := t.Context["scheduleWindowStart"]; reserved {
+		return errors.New("objective cadence runTemplate context cannot override scheduleWindowStart")
+	}
+	if _, reserved := t.Context["scheduleWindowEnd"]; reserved {
+		return errors.New("objective cadence runTemplate context cannot override scheduleWindowEnd")
+	}
 	if _, reserved := t.Context["capabilityInvocation"]; reserved {
 		return errors.New("objective cadence runTemplate context cannot override capabilityInvocation")
 	}
@@ -146,6 +155,9 @@ func (c *ObjectiveCadence) Validate() error {
 	if c.MaximumConcurrent < 0 {
 		return errors.New("objective cadence maximum concurrency cannot be negative")
 	}
+	if c.JitterSeconds < 0 {
+		return errors.New("objective cadence jitterSeconds cannot be negative")
+	}
 	switch c.Type {
 	case ObjectiveCadenceInterval:
 		if c.IntervalSeconds <= 0 {
@@ -155,12 +167,18 @@ func (c *ObjectiveCadence) Validate() error {
 		if _, _, err := parseObjectiveClock(c.TimeOfDay); err != nil {
 			return err
 		}
+		if c.JitterSeconds >= 24*60*60 {
+			return errors.New("daily objective cadence jitterSeconds must be less than one day")
+		}
 	case ObjectiveCadenceWeekly:
 		if _, _, err := parseObjectiveClock(c.TimeOfDay); err != nil {
 			return err
 		}
 		if _, err := objectiveWeekday(c.DayOfWeek); err != nil {
 			return err
+		}
+		if c.JitterSeconds >= 7*24*60*60 {
+			return errors.New("weekly objective cadence jitterSeconds must be less than one week")
 		}
 	case ObjectiveCadenceCron:
 		if _, err := parseObjectiveCron(c.CronExpression); err != nil {
@@ -172,6 +190,14 @@ func (c *ObjectiveCadence) Validate() error {
 	if c.Timezone != "" {
 		if _, err := time.LoadLocation(c.Timezone); err != nil {
 			return fmt.Errorf("objective cadence timezone: %w", err)
+		}
+	}
+	if c.JitterSeconds > 0 {
+		if c.Type != ObjectiveCadenceDaily && c.Type != ObjectiveCadenceWeekly {
+			return errors.New("objective cadence jitterSeconds is supported only for daily and weekly schedules")
+		}
+		if strings.TrimSpace(c.Timezone) == "" {
+			return errors.New("jittered objective cadence requires an explicit timezone")
 		}
 	}
 	return nil
@@ -194,8 +220,18 @@ func validateObjectiveCapabilityRunBudget(template *ObjectiveRunTemplate, budget
 }
 
 func (c *ObjectiveCadence) Next(from time.Time) (time.Time, error) {
+	return c.NextFor("", from)
+}
+
+// NextFor selects the next schedule occurrence. Jitter is derived from the
+// stable Objective key and the unjittered local calendar occurrence so every
+// replica and restart agrees without storing random worker state.
+func (c *ObjectiveCadence) NextFor(objectiveKey string, from time.Time) (time.Time, error) {
 	if err := c.Validate(); err != nil {
 		return time.Time{}, err
+	}
+	if c.JitterSeconds > 0 && strings.TrimSpace(objectiveKey) == "" {
+		return time.Time{}, errors.New("jittered objective cadence requires a stable objective key")
 	}
 	loc := time.UTC
 	if c.Timezone != "" {
@@ -207,19 +243,23 @@ func (c *ObjectiveCadence) Next(from time.Time) (time.Time, error) {
 	case ObjectiveCadenceDaily:
 		hour, minute, _ := parseObjectiveClock(c.TimeOfDay)
 		local := from.In(loc)
-		next := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
-		if !next.After(local) {
-			next = next.AddDate(0, 0, 1)
+		base := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
+		next := c.jitterOccurrence(objectiveKey, base)
+		if !next.After(from) {
+			base = base.AddDate(0, 0, 1)
+			next = c.jitterOccurrence(objectiveKey, base)
 		}
 		return next.UTC(), nil
 	case ObjectiveCadenceWeekly:
 		hour, minute, _ := parseObjectiveClock(c.TimeOfDay)
 		weekday, _ := objectiveWeekday(c.DayOfWeek)
 		local := from.In(loc)
-		days := (int(weekday) - int(local.Weekday()) + 7) % 7
-		next := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc).AddDate(0, 0, days)
-		if !next.After(local) {
-			next = next.AddDate(0, 0, 7)
+		daysSince := (int(local.Weekday()) - int(weekday) + 7) % 7
+		base := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc).AddDate(0, 0, -daysSince)
+		next := c.jitterOccurrence(objectiveKey, base)
+		if !next.After(from) {
+			base = base.AddDate(0, 0, 7)
+			next = c.jitterOccurrence(objectiveKey, base)
 		}
 		return next.UTC(), nil
 	case ObjectiveCadenceCron:
@@ -228,6 +268,44 @@ func (c *ObjectiveCadence) Next(from time.Time) (time.Time, error) {
 	default:
 		return time.Time{}, fmt.Errorf("unsupported objective cadence type %q", c.Type)
 	}
+}
+
+func (c *ObjectiveCadence) jitterOccurrence(objectiveKey string, base time.Time) time.Time {
+	if c.JitterSeconds <= 0 {
+		return base
+	}
+	seed := strings.Join([]string{objectiveKey, string(c.Type), c.TimeOfDay, c.DayOfWeek, c.Timezone, base.UTC().Format(time.RFC3339Nano)}, "\x00")
+	digest := sha256.Sum256([]byte(seed))
+	offset := binary.BigEndian.Uint64(digest[:8]) % uint64(c.JitterSeconds+1)
+	return base.Add(time.Duration(offset) * time.Second)
+}
+
+// OccurrenceWindow returns the authorized local-calendar window that produced
+// an occurrence. It is used for audit and UI projection; selection remains a
+// single instant and does not authorize additional Runs within the window.
+func (c *ObjectiveCadence) OccurrenceWindow(occurrence time.Time) (time.Time, time.Time, error) {
+	if err := c.Validate(); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if c.JitterSeconds == 0 {
+		value := occurrence.UTC()
+		return value, value, nil
+	}
+	loc, _ := time.LoadLocation(c.Timezone)
+	local := occurrence.In(loc)
+	hour, minute, _ := parseObjectiveClock(c.TimeOfDay)
+	base := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
+	if c.Type == ObjectiveCadenceWeekly {
+		weekday, _ := objectiveWeekday(c.DayOfWeek)
+		daysSince := (int(local.Weekday()) - int(weekday) + 7) % 7
+		base = base.AddDate(0, 0, -daysSince)
+		if base.After(local) {
+			base = base.AddDate(0, 0, -7)
+		}
+	} else if base.After(local) {
+		base = base.AddDate(0, 0, -1)
+	}
+	return base.UTC(), base.Add(time.Duration(c.JitterSeconds) * time.Second).UTC(), nil
 }
 
 func parseObjectiveCron(value string) (cron.Schedule, error) {

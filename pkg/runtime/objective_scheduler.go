@@ -89,7 +89,7 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 		}
 		result.Examined++
 		if objective.NextEvaluationAt == nil {
-			next, nextErr := objective.Cadence.Next(now)
+			next, nextErr := objective.Cadence.NextFor(objective.ID, now)
 			if nextErr != nil {
 				return result, fmt.Errorf("objective %s cadence: %w", objective.ID, nextErr)
 			}
@@ -154,6 +154,14 @@ func (s *ObjectiveScheduler) ReconcileScope(ctx context.Context, scope Scope, li
 			continue
 		}
 		contextValues := map[string]interface{}{"scheduledFor": scheduledFor.Format(time.RFC3339Nano)}
+		if objective.Cadence.JitterSeconds > 0 {
+			windowStart, windowEnd, windowErr := objective.Cadence.OccurrenceWindow(scheduledFor)
+			if windowErr != nil {
+				return result, fmt.Errorf("objective %s cadence window: %w", objective.ID, windowErr)
+			}
+			contextValues["scheduleWindowStart"] = windowStart.Format(time.RFC3339Nano)
+			contextValues["scheduleWindowEnd"] = windowEnd.Format(time.RFC3339Nano)
+		}
 		entrypoint := ""
 		policy := map[string]interface{}(nil)
 		if objective.Cadence.RunTemplate != nil {
@@ -271,7 +279,7 @@ func (s *ObjectiveScheduler) validateSourceMonitorLineage(objective *Objective, 
 }
 
 func (s *ObjectiveScheduler) advanceObjective(ctx context.Context, scope Scope, objective *Objective, scheduledFor time.Time) error {
-	next, err := objective.Cadence.Next(scheduledFor)
+	next, err := objective.Cadence.NextFor(objective.ID, scheduledFor)
 	if err != nil {
 		return err
 	}
@@ -293,7 +301,7 @@ func (s *ObjectiveScheduler) advanceObjective(ctx context.Context, scope Scope, 
 }
 
 func (s *ObjectiveScheduler) deferObjective(ctx context.Context, objective *Objective, now time.Time, state ObjectiveScheduleState, reason string) error {
-	next, err := objective.Cadence.Next(now)
+	next, err := objective.Cadence.NextFor(objective.ID, now)
 	if err != nil {
 		return fmt.Errorf("objective %s cadence: %w", objective.ID, err)
 	}
