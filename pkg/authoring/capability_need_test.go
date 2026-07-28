@@ -8,6 +8,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func capabilityNeedCandidate() WorkforceCandidate {
@@ -380,12 +382,16 @@ func TestAnsweredSourceScopeWithoutScheduleDefaultsToOnDemand(t *testing.T) {
 
 func TestAnsweredSourceScopeAcceptsAPIActionMaterializationWithoutRSSMonitor(t *testing.T) {
 	candidate := capabilityNeedCandidate()
-	candidate.Agents[0].ObjectiveTemplates = []agent.ObjectiveTemplate{{
-		ID: "listen", Title: "Listen", Goal: "Monitor the selected communities",
-		Cadence: map[string]interface{}{"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-			"skillId": "reddit-post-search", "action": "search", "inputs": map[string]interface{}{"query": "subreddit:openclaw OR subreddit:selfhosted"},
-		}}},
-	}}
+	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{ID: "listen", Title: "Listen", Goal: "Monitor the selected communities", Priority: 1}}
+	candidate.Agents[0].Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "listen", Version: "1.0.0", Name: "Listen",
+		Entrypoints: map[string]string{"listen": "search"},
+		Triggers:    map[string]runbook.Trigger{"daily": {Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}, Entrypoint: "listen", ObjectiveID: WorkforceObjectiveKey("agent", "researcher", "listen")}},
+		Steps: map[string]runbook.Step{
+			"search": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "reddit-post-search", SkillVersion: "1.0.0", Action: "search", Arguments: map[string]runbook.Value{"query": literalActionValue("subreddit:openclaw OR subreddit:selfhosted")}, ResultPath: "/results/search", Next: "done"}},
+			"done":   {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
 	need := CapabilityNeed{ID: "reddit-access", SkillIDs: []string{"openseal.source", "reddit-post-search"}}
 	if !capabilitySourceScopeMaterialized(&candidate, need, []string{"openclaw", "selfhosted"}, []string{"subreddits", "query", "url"}) {
 		t.Fatal("API-backed source scope was incorrectly required to use an Initiative source monitor")

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -192,6 +193,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 				return nil, authoring.ErrChangeSetRevision
 			}
 			item.CreatedAt = current.CreatedAt
+			if item.UpdatedAt.Before(item.CreatedAt) {
+				item.UpdatedAt = item.CreatedAt
+			}
 		}
 		payload, _ := json.Marshal(item)
 		if objective.expectedRevision == 0 {
@@ -208,6 +212,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err = applySQLiteWorkforceRunbookActivations(ctx, tx, value, application); err != nil {
+		return nil, err
 	}
 	if err = applySQLiteWorkforceInitiative(ctx, tx, application.initiative, application.initiativeExpectedRevision); err != nil {
 		return nil, err
@@ -233,6 +240,77 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		return nil, err
 	}
 	return decodeChangeSet(string(payload))
+}
+
+func applySQLiteWorkforceRunbookActivations(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, application *workforceApplication) error {
+	desiredByAgent := map[string]map[string]bool{}
+	for _, desired := range application.runbookActivations {
+		item := desired.value
+		if desiredByAgent[item.AssignedAgentID] == nil {
+			desiredByAgent[item.AssignedAgentID] = map[string]bool{}
+		}
+		desiredByAgent[item.AssignedAgentID][item.ID] = true
+		var payload string
+		err := tx.QueryRowContext(ctx, `SELECT payload FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND id=?`, value.Scope.Kind, value.Scope.ID, item.ID).Scan(&payload)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			item.Revision = 1
+		case err != nil:
+			return err
+		default:
+			var current RunbookActivation
+			if json.Unmarshal([]byte(payload), &current) != nil || current.AssignedAgentID != item.AssignedAgentID {
+				return authoring.ErrChangeSetRevision
+			}
+			item.CreatedAt = current.CreatedAt
+			if item.UpdatedAt.Before(item.CreatedAt) {
+				item.UpdatedAt = item.CreatedAt
+			}
+			if reflect.DeepEqual(current.Trigger.Schedule, item.Trigger.Schedule) {
+				item.NextOccurrenceBase, item.NextRunAt = current.NextOccurrenceBase, current.NextRunAt
+			}
+			item.Revision = current.Revision + 1
+		}
+		if err := item.Validate(); err != nil {
+			return fmt.Errorf("materialized Runbook activation %s revision=%d createdAt=%s updatedAt=%s: %w", item.ID, item.Revision, item.CreatedAt, item.UpdatedAt, err)
+		}
+		encoded, _ := json.Marshal(item)
+		if errors.Is(err, sql.ErrNoRows) {
+			_, err = tx.ExecContext(ctx, `INSERT INTO runbook_activations (id,scope_kind,scope_id,owner_type,owner_id,objective_id,assigned_agent_id,status,next_run_at,revision,updated_at,idempotency_key_hash,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.ID, item.Scope.Kind, item.Scope.ID, item.Owner.Type, item.Owner.ID, item.ObjectiveID, item.AssignedAgentID, item.Status, item.NextRunAt, item.Revision, item.UpdatedAt, item.IdempotencyKeyHash, string(encoded))
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE runbook_activations SET owner_type=?,owner_id=?,objective_id=?,assigned_agent_id=?,status=?,next_run_at=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, item.Owner.Type, item.Owner.ID, item.ObjectiveID, item.AssignedAgentID, item.Status, item.NextRunAt, item.Revision, item.UpdatedAt, string(encoded), item.Scope.Kind, item.Scope.ID, item.ID)
+		}
+		if err != nil {
+			return err
+		}
+		synchronizeWorkforceRunbookResource(application, item)
+	}
+	for _, deploymentID := range value.Placement.AgentDeploymentIDs {
+		rows, err := tx.QueryContext(ctx, `SELECT id FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND assigned_agent_id=?`, value.Scope.Kind, value.Scope.ID, deploymentID)
+		if err != nil {
+			return err
+		}
+		var obsolete []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			if !desiredByAgent[deploymentID][id] {
+				obsolete = append(obsolete, id)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, id := range obsolete {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND id=?`, value.Scope.Kind, value.Scope.ID, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func applySQLiteWorkforceConversationEndpoints(

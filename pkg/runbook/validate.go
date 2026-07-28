@@ -99,9 +99,6 @@ func (v *validator) validate() {
 			if err := trigger.Schedule.Validate(); err != nil {
 				v.add(path+".schedule", "trigger.schedule_invalid", "%v", err)
 			}
-			if strings.TrimSpace(trigger.ObjectiveID) == "" || len(trigger.ObjectiveID) > 160 {
-				v.add(path+".objectiveId", "trigger.objective_required", "schedule trigger must belong to one Objective")
-			}
 			if trigger.MaximumConcurrent < 0 {
 				v.add(path+".maximumConcurrent", "trigger.concurrency_invalid", "maximum concurrency cannot be negative")
 			}
@@ -122,6 +119,9 @@ func (v *validator) validate() {
 			}
 		default:
 			v.add(path+".kind", "trigger.kind_unsupported", "trigger kind must be %q or %q", TriggerEvent, TriggerSchedule)
+		}
+		if strings.TrimSpace(trigger.ObjectiveID) == "" || len(trigger.ObjectiveID) > 160 {
+			v.add(path+".objectiveId", "trigger.objective_required", "Runbook trigger must belong to one Objective")
 		}
 		if _, ok := v.definition.Entrypoints[trigger.Entrypoint]; !ok {
 			v.add(path+".entrypoint", "trigger.entrypoint_unknown", "trigger must name an exact entrypoint")

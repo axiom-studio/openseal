@@ -63,14 +63,16 @@ func candidateUsesProposedSourcePolicy(candidate *WorkforceCandidate, reference 
 func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	for _, invocation := range candidateObjectiveCapabilityInvocations(candidate) {
-		skillID, _ := invocation.invocation["skillId"].(string)
-		action, _ := invocation.invocation["action"].(string)
+		if invocation.action == nil {
+			continue
+		}
+		skillID, action := invocation.action.SkillID, invocation.action.Action
 		if strings.TrimSpace(skillID) != source.SkillID || strings.TrimSpace(action) != source.ObserveFeed {
 			continue
 		}
-		objectiveRef := strings.TrimSuffix(invocation.path, ".cadence")
+		objectiveRef := invocation.objectiveRef
 		projected := false
-		if candidate != nil && candidate.Initiative != nil && objectiveRef != invocation.path {
+		if candidate != nil && candidate.Initiative != nil && objectiveRef != "" {
 			for _, monitor := range candidate.Initiative.SourceMonitors {
 				if monitor.ObjectiveRef == objectiveRef && monitor.SkillID == source.SkillID && monitor.Action == source.ObserveFeed {
 					projected = true
@@ -80,7 +82,7 @@ func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationI
 		}
 		if !projected {
 			issues = append(issues, issue(
-				"objectives."+invocation.path+".runTemplate.capability",
+				invocation.path,
 				"source_action_requires_monitor",
 				"The governed source observer must be projected by an exact Initiative source monitor so policy decisions, checkpoints, and evidence remain enforceable",
 			))

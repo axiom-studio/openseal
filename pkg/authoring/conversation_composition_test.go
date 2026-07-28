@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 const slackChatbotPrompt = "I want a Slack agent that listens to my message in the channel that it is installed in and then responds back to them."
@@ -35,6 +36,7 @@ func slackChatbotCandidate() WorkforceCandidate {
 			Authority: agent.AuthorityPolicy{
 				MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1,
 			},
+			ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "respond", Title: "Respond", Goal: "Respond helpfully to permitted conversation messages", Priority: 1}},
 			Runbook: &runbook.Definition{
 				APIVersion: runbook.APIVersion,
 				ID:         "respond-to-message",
@@ -53,7 +55,7 @@ func slackChatbotCandidate() WorkforceCandidate {
 				Triggers: map[string]runbook.Trigger{
 					"on-message": {
 						Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived,
-						Entrypoint: "respond",
+						Entrypoint: "respond", ObjectiveID: WorkforceObjectiveKey("agent", agentID, "respond"),
 					},
 				},
 				Steps: map[string]runbook.Step{
