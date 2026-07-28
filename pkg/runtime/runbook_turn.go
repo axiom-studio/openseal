@@ -60,6 +60,7 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 	if checkpoint == nil {
 		checkpoint = map[string]interface{}{}
 	}
+	initializeRunbookRuntime(checkpoint, input.Run)
 	initializeRunbookInput(checkpoint, input.Run)
 	state, err := decodeRunbookState(checkpoint)
 	if err != nil {
@@ -512,6 +513,18 @@ func (r *RunbookTurnRunner) failed(checkpoint map[string]interface{}, state runb
 	return &TurnOutcome{Decisions: decisions, OutputSummary: message, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed, RunError: message}
 }
 func stepError(id string, err error) error { return fmt.Errorf("runbook step %s: %w", id, err) }
+
+func initializeRunbookRuntime(checkpoint map[string]interface{}, run *AgentRun) {
+	rootRunID := run.RootRunID
+	if rootRunID == "" {
+		rootRunID = run.ID
+	}
+	checkpoint["runtime"] = map[string]interface{}{
+		"runId":       run.ID,
+		"rootRunId":   rootRunID,
+		"objectiveId": run.ObjectiveID,
+	}
+}
 
 func initializeRunbookInput(checkpoint map[string]interface{}, run *AgentRun) {
 	if _, ok := checkpoint["input"]; ok {
