@@ -122,6 +122,16 @@ func agentRunEligible(run *AgentRun, claim AgentRunClaim) bool {
 // execution authority. A lease-expiry reclaim is a new attempt even when it
 // resumes an existing Turn, so process restarts cannot reset this ceiling.
 func applyAgentRunClaim(run *AgentRun, claim AgentRunClaim) error {
+	if runAttemptBudgetAtLimit(run) {
+		run.PausedFrom = run.Status
+		run.Status = AgentRunStatusPaused
+		run.LeaseOwner = ""
+		run.LeaseExpiresAt = nil
+		run.BudgetState = BudgetStateExhausted
+		run.Revision++
+		run.UpdatedAt = claim.Now
+		return nil
+	}
 	expires := claim.Now.Add(claim.LeaseDuration)
 	run.Status = AgentRunStatusRunning
 	run.LeaseOwner = claim.WorkerID
@@ -154,6 +164,10 @@ func applyAgentRunClaim(run *AgentRun, claim AgentRunClaim) error {
 
 func runAttemptBudgetExceeded(run *AgentRun) bool {
 	return run != nil && run.Budget != nil && run.Budget.MaxAttempts > 0 && run.BudgetUsage.Attempts > run.Budget.MaxAttempts
+}
+
+func runAttemptBudgetAtLimit(run *AgentRun) bool {
+	return run != nil && run.Budget != nil && run.Budget.MaxAttempts > 0 && run.BudgetUsage.Attempts >= run.Budget.MaxAttempts
 }
 
 func agentRunEffectivePriority(run *AgentRun, now time.Time, agingInterval time.Duration) int64 {

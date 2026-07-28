@@ -112,7 +112,8 @@ func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 	}
 	defer reopened.Close()
 	recovered, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "recovery", Now: now.Add(2 * time.Second), LeaseDuration: time.Second, AgingInterval: time.Minute})
-	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.BudgetUsage.Attempts != 2 || !runAttemptBudgetExceeded(recovered) {
+	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.Status != AgentRunStatusPaused ||
+		recovered.BudgetUsage.Attempts != 1 || !runAttemptBudgetAtLimit(recovered) || runAttemptBudgetExceeded(recovered) {
 		t.Fatalf("restart recovery = %#v, %v", recovered, err)
 	}
 }
