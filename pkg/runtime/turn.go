@@ -90,6 +90,7 @@ type AgentTurn struct {
 	WakeCondition          *WakeCondition           `json:"wakeCondition,omitempty"`
 	RunOutput              map[string]interface{}   `json:"runOutput,omitempty"`
 	RunError               string                   `json:"runError,omitempty"`
+	BudgetAdmission        *BudgetAdmission         `json:"budgetAdmission,omitempty"`
 	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
 	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
 	Error                  string                   `json:"error,omitempty"`
@@ -117,6 +118,11 @@ func (t *AgentTurn) Validate() error {
 	}
 	if !validAgentTurnStatus(t.Status) {
 		return errors.New("agent turn status is invalid")
+	}
+	if t.BudgetAdmission != nil {
+		if err := t.BudgetAdmission.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -168,6 +174,7 @@ type FinishAgentTurnRequest struct {
 	WakeCondition          *WakeCondition
 	RunOutput              map[string]interface{}
 	RunError               string
+	BudgetAdmission        *BudgetAdmission
 	EvidenceClaims         []EvidenceClaim
 	EvidenceGrounding      *EvidenceGroundingReview
 	Error                  string
@@ -272,6 +279,7 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	turn.WakeCondition = req.WakeCondition
 	turn.RunOutput = req.RunOutput
 	turn.RunError = req.RunError
+	turn.BudgetAdmission = req.BudgetAdmission
 	turn.EvidenceClaims = append([]EvidenceClaim(nil), req.EvidenceClaims...)
 	turn.EvidenceGrounding = cloneEvidenceGroundingReview(req.EvidenceGrounding)
 	turn.Error = req.Error

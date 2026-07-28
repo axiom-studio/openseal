@@ -171,20 +171,20 @@ func (r *HostedTurnRunner) PlanTurnBudget(_ context.Context, input TurnExecution
 	reservation := BudgetUsage{}
 	if policy.MaxInputTokens > 0 {
 		if remaining.MaxInputTokens < estimatedInput {
-			return BudgetUsage{}, fmt.Errorf("%w: hosted input requires %d tokens but %d remain", ErrBudgetExhausted, estimatedInput, remaining.MaxInputTokens)
+			return BudgetUsage{}, &BudgetAdmissionError{Admission: BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "input_tokens", Required: estimatedInput, Remaining: remaining.MaxInputTokens, Reservation: BudgetUsage{InputTokens: estimatedInput}}}
 		}
 		reservation.InputTokens = estimatedInput
 	}
 	if policy.MaxTotalTokens > 0 {
 		if remaining.MaxTotalTokens < estimatedInput+HostedTurnMinimumOutputTokens {
-			return BudgetUsage{}, fmt.Errorf("%w: hosted input requires %d tokens plus %d minimum output tokens but %d total tokens remain", ErrBudgetExhausted, estimatedInput, HostedTurnMinimumOutputTokens, remaining.MaxTotalTokens)
+			return BudgetUsage{}, &BudgetAdmissionError{Admission: BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "total_tokens", Required: estimatedInput + HostedTurnMinimumOutputTokens, Remaining: remaining.MaxTotalTokens, Reservation: BudgetUsage{InputTokens: estimatedInput, OutputTokens: HostedTurnMinimumOutputTokens}}}
 		}
 		reservation.InputTokens = estimatedInput
 		reservation.OutputTokens = remaining.MaxTotalTokens - estimatedInput
 	}
 	if policy.MaxOutputTokens > 0 {
 		if remaining.MaxOutputTokens < HostedTurnMinimumOutputTokens {
-			return BudgetUsage{}, fmt.Errorf("%w: hosted output requires at least %d tokens but %d remain", ErrBudgetExhausted, HostedTurnMinimumOutputTokens, remaining.MaxOutputTokens)
+			return BudgetUsage{}, &BudgetAdmissionError{Admission: BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "output_tokens", Required: HostedTurnMinimumOutputTokens, Remaining: remaining.MaxOutputTokens, Reservation: BudgetUsage{OutputTokens: HostedTurnMinimumOutputTokens}}}
 		}
 		if reservation.OutputTokens == 0 || remaining.MaxOutputTokens < reservation.OutputTokens {
 			reservation.OutputTokens = remaining.MaxOutputTokens

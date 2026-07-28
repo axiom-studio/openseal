@@ -9,6 +9,53 @@ import (
 
 var ErrBudgetExhausted = errors.New("run budget is exhausted")
 
+type BudgetAdmissionReason string
+
+const (
+	BudgetAdmissionHostedInput BudgetAdmissionReason = "hosted_input_preflight"
+	BudgetAdmissionReservation BudgetAdmissionReason = "reservation_exceeds_remaining"
+)
+
+// BudgetAdmission records the exact bounded-turn calculation that made a Run
+// inadmissible. It is durable API state rather than an opaque worker error so
+// operators can distinguish consumed budget from capacity required by the
+// next turn.
+type BudgetAdmission struct {
+	Reason      BudgetAdmissionReason `json:"reason"`
+	Dimension   string                `json:"dimension"`
+	Required    int64                 `json:"required"`
+	Remaining   int64                 `json:"remaining"`
+	Reservation BudgetUsage           `json:"reservation,omitempty"`
+	TurnID      string                `json:"turnId,omitempty"`
+	EvaluatedAt time.Time             `json:"evaluatedAt,omitempty"`
+}
+
+func (a BudgetAdmission) Validate() error {
+	if a.Reason != BudgetAdmissionHostedInput && a.Reason != BudgetAdmissionReservation {
+		return errors.New("budget admission reason is invalid")
+	}
+	if a.Dimension == "" || a.Required < 0 || a.Remaining < 0 {
+		return errors.New("budget admission dimension and non-negative capacity are required")
+	}
+	if a.TurnID == "" || a.EvaluatedAt.IsZero() {
+		return errors.New("budget admission turn and evaluation time are required")
+	}
+	return a.Reservation.Validate()
+}
+
+type BudgetAdmissionError struct {
+	Admission BudgetAdmission
+}
+
+func (e *BudgetAdmissionError) Error() string {
+	if e == nil {
+		return ErrBudgetExhausted.Error()
+	}
+	return fmt.Sprintf("%s: %s requires %d but %d remain", ErrBudgetExhausted, e.Admission.Dimension, e.Admission.Required, e.Admission.Remaining)
+}
+
+func (*BudgetAdmissionError) Unwrap() error { return ErrBudgetExhausted }
+
 type BudgetState string
 
 const (
@@ -231,6 +278,39 @@ func BudgetWouldExceed(policy BudgetPolicy, usage BudgetUsage) (bool, []string, 
 		}
 	}
 	return len(reasons) > 0, reasons, nil
+}
+
+func budgetReservationAdmission(policy BudgetPolicy, used, reservation BudgetUsage) BudgetAdmission {
+	type dimension struct {
+		name     string
+		used     int64
+		required int64
+		limit    int64
+	}
+	dimensions := []dimension{
+		{"attempts", used.Attempts, reservation.Attempts, policy.MaxAttempts},
+		{"turns", used.Turns, reservation.Turns, policy.MaxTurns},
+		{"input_tokens", used.InputTokens, reservation.InputTokens, policy.MaxInputTokens},
+		{"output_tokens", used.OutputTokens, reservation.OutputTokens, policy.MaxOutputTokens},
+		{"total_tokens", used.InputTokens + used.OutputTokens, reservation.InputTokens + reservation.OutputTokens, policy.MaxTotalTokens},
+		{"cost_micros", used.CostMicros, reservation.CostMicros, policy.MaxCostMicros},
+		{"duration_ms", used.DurationMS, reservation.DurationMS, policy.MaxDurationMS},
+		{"actions", used.Actions, reservation.Actions, policy.MaxActions},
+	}
+	for _, item := range dimensions {
+		if item.limit == 0 || item.used+item.required <= item.limit {
+			continue
+		}
+		remaining := item.limit - item.used
+		if remaining < 0 {
+			remaining = 0
+		}
+		return BudgetAdmission{
+			Reason: BudgetAdmissionReservation, Dimension: item.name,
+			Required: item.required, Remaining: remaining, Reservation: reservation,
+		}
+	}
+	return BudgetAdmission{Reason: BudgetAdmissionReservation, Dimension: "unknown", Reservation: reservation}
 }
 
 func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) error {
