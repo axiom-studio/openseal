@@ -817,7 +817,7 @@ func TestAgentRunWorkerCompletesPartialBoundedDelegationBudget(t *testing.T) {
 	}
 }
 
-func TestAgentRunWorkerConstrainsAuthoredRunbookDelegationToRemainingBudget(t *testing.T) {
+func TestAgentRunWorkerRejectsExplicitRunbookDelegationOverAllocation(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "runbook-delegation-budget"}
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
@@ -840,16 +840,12 @@ func TestAgentRunWorkerConstrainsAuthoredRunbookDelegationToRemainingBudget(t *t
 		StepID: "perform", AssignedAgentID: "browser", Goal: "Perform the browser task", Checkpoint: map[string]interface{}{},
 		Budget: &BudgetPolicy{MaxAttempts: 2, MaxTurns: 24, MaxTotalTokens: 200000, MaxDurationMS: 1800000, MaxActions: 60},
 	}
-	if _, err := pool.materializeTurnDelegation(t.Context(), "worker", source, &AgentTurn{ID: "turn", RequestedDelegation: proposal}); err != nil {
-		t.Fatal(err)
+	if _, err := pool.materializeTurnDelegation(t.Context(), "worker", source, &AgentTurn{ID: "turn", RequestedDelegation: proposal}); err == nil || !strings.Contains(err.Error(), "exceeds parent remaining capacity") {
+		t.Fatalf("explicit Runbook over-allocation error = %v", err)
 	}
 	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: source.ID, Limit: 10})
-	if err != nil || len(requests) != 1 {
+	if err != nil || len(requests) != 0 {
 		t.Fatalf("requests = %#v, %v", requests, err)
-	}
-	budget := requests[0].BudgetAllocation
-	if budget == nil || budget.MaxAttempts != 1 || budget.MaxTurns != 23 || budget.MaxTotalTokens != 200000 || budget.MaxActions != 60 {
-		t.Fatalf("constrained Runbook child budget = %#v", budget)
 	}
 }
 
