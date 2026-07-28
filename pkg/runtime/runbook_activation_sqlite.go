@@ -93,7 +93,7 @@ func (s *SQLiteStore) ListRunbookActivations(ctx context.Context, filter Runbook
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return sortAndLimitRunbookActivations(values, filter.Limit), nil
+	return sortAndLimitRunbookActivations(values, filter.Limit, filter.Offset), nil
 }
 
 func (s *SQLiteStore) UpdateRunbookActivation(ctx context.Context, value *RunbookActivation, expectedRevision int64) error {

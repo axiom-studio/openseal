@@ -102,6 +102,10 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil || len(runbooks) != 1 || runbooks[0].ID != scheduledActivation.ID {
 		t.Fatalf("Runbooks=%#v err=%v", runbooks, err)
 	}
+	nextRunbooks, err := client.ListRunbooks(ctx, runtime.RunbookActivationFilter{Scope: scope, ObjectiveID: scheduledObjective.ID, Limit: 10, Offset: 1})
+	if err != nil || len(nextRunbooks) != 0 {
+		t.Fatalf("Runbook next page=%#v err=%v", nextRunbooks, err)
+	}
 	loadedRunbook, err := client.GetRunbook(ctx, scope, scheduledActivation.ID)
 	if err != nil || loadedRunbook.ObjectiveID != scheduledObjective.ID || loadedRunbook.TriggerID != "recurring" {
 		t.Fatalf("Runbook=%#v err=%v", loadedRunbook, err)

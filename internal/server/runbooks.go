@@ -50,8 +50,12 @@ func runbookFilterFromQuery(r *http.Request) (runtime.RunbookActivationFilter, e
 	if err != nil {
 		return runtime.RunbookActivationFilter{}, err
 	}
+	offset, err := boundedIntQuery(r, "offset", 0, 0, 1000000)
+	if err != nil {
+		return runtime.RunbookActivationFilter{}, err
+	}
 	filter := runtime.RunbookActivationFilter{
-		Scope: scope, ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), Limit: limit,
+		Scope: scope, ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), Limit: limit, Offset: offset,
 	}
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
