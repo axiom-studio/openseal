@@ -49,6 +49,48 @@ type recordingTurnHost struct {
 	err      error
 }
 
+func TestHostedTurnCompletesFromDurableReceiptWhenPostActionNarrationFails(t *testing.T) {
+	host := &recordingTurnHost{err: errors.New("unexpected EOF")}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser", DefinitionID: "browser", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := checkpointTerminalAction(nil, &ActionCall{
+		ID: "snapshot-call", SkillID: "skill-browser", SkillVersion: "2.0.5", Action: "browser-snapshot",
+		Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"url": "https://fixture.test/thread"},
+	}, nil)
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Capture the page", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "summary-turn"},
+	})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted ||
+		outcome.RunOutput["completionMode"] != "durable_action_receipt" {
+		t.Fatalf("receipt completion outcome=%#v err=%v", outcome, err)
+	}
+	receipt, _ := outcome.RunOutput["actionReceipt"].(map[string]interface{})
+	if receipt["actionCallId"] != "snapshot-call" || receipt["action"] != "browser-snapshot" ||
+		len(outcome.ProposedActions) != 0 || len(outcome.Decisions) != 1 {
+		t.Fatalf("durable receipt projection = %#v, outcome=%#v", receipt, outcome)
+	}
+}
+
+func TestHostedTurnDoesNotTrustModelVisibleLastActionWithoutKernelHistory(t *testing.T) {
+	host := &recordingTurnHost{err: errors.New("unexpected EOF")}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser", DefinitionID: "browser", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Capture the page", Checkpoint: map[string]interface{}{
+			"lastAction": map[string]interface{}{"actionCallId": "invented", "status": "succeeded"},
+		}},
+		Turn: &AgentTurn{ID: "summary-turn"},
+	})
+	if !errors.Is(err, ErrTurnHostUnavailable) {
+		t.Fatalf("untrusted lastAction error = %v", err)
+	}
+}
+
 func (h *recordingTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
 	h.request = request
 	return h.response, h.err
