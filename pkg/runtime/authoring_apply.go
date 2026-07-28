@@ -997,7 +997,7 @@ func materializeRunbookActivations(value *authoring.ChangeSet, definition *agent
 		activation := &RunbookActivation{
 			ID:    uuid.NewSHA1(uuid.NameSpaceOID, []byte(value.Scope.Kind+"\x00"+value.Scope.ID+"\x00"+deploymentID+"\x00"+definition.Runbook.ID+"\x00"+triggerID)).String(),
 			Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Owner: objective.Owner, ObjectiveID: objective.ID,
-			AssignedAgentID: deploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			AssignedAgentID: deploymentID, DefinitionID: definition.Runbook.ID, DefinitionVersion: definition.Runbook.Version,
 			TriggerID: triggerID, Trigger: trigger, Input: input, Policy: policy, Budget: runbookBudgetPolicyValue(trigger.Budget),
 			MaximumConcurrent: trigger.MaximumConcurrent, Status: status, Revision: revision,
 			CreatedAt: value.ApplyReceipt.AppliedAt, UpdatedAt: value.ApplyReceipt.AppliedAt,
@@ -1142,7 +1142,9 @@ func validateMaterializedProjectMonitors(project *Project, application *workforc
 	}
 	definitions := make(map[string]*agent.AgentDefinition, len(application.agentDefinitions))
 	for _, definition := range application.agentDefinitions {
-		definitions[definition.ID+"\x00"+definition.Version] = definition
+		if definition != nil && definition.Runbook != nil {
+			definitions[definition.Runbook.ID+"\x00"+definition.Runbook.Version] = definition
+		}
 	}
 	for _, monitor := range project.SourceMonitors {
 		objective := byID[monitor.ObjectiveID]
