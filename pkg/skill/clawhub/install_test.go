@@ -214,7 +214,7 @@ PRIVATE_PREVIEW_PROMPT_BODY must not enter the control-plane projection.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.APIVersion != CompilationPreviewAPIVersion || !preview.Compatible || !preview.PromptAvailable || preview.Receipt.SourceIdentity != manager.identity(reference) ||
+	if preview.APIVersion != CompilationPreviewAPIVersion || !preview.Compatible || !preview.PromptAvailable || preview.HostedModelInputTokens <= 0 || preview.Receipt.SourceIdentity != manager.identity(reference) ||
 		preview.Receipt.Version != "2.1.0" || len(preview.Receipt.SourceDigest) != 64 || len(preview.Receipt.ArchiveSHA256) != 64 ||
 		!strings.HasPrefix(preview.Receipt.CompilationDigest, "sha256:") {
 		t.Fatalf("preview identity is incomplete: %#v", preview)
