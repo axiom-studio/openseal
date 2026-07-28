@@ -29,7 +29,11 @@ import (
 )
 
 func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
-	store := runtime.NewMemoryStore()
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel-client.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
 	api := server.NewServer(store, zap.NewNop().Sugar())
 	api.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
 	httpServer := httptest.NewServer(api.Handler())
@@ -41,8 +45,8 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	capability, ok := document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
-	if !ok || !capability.Supports(kernelapi.OperationCreate) || !capability.Supports(kernelapi.OperationIntervene) {
+	runCapability, ok := document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+	if !ok || !runCapability.Supports(kernelapi.OperationCreate) || !runCapability.Supports(kernelapi.OperationIntervene) {
 		t.Fatalf("unexpected capabilities: %#v", document)
 	}
 	objectiveCapability, ok := document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
@@ -67,6 +71,25 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
+	registry := kernelagent.NewRegistryWithStore(store)
+	definition, err := registry.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Monitor feedback", SystemPrompt: "Research carefully.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "research", Version: "1", Name: "Research",
+			Entrypoints: map[string]string{"monitor": "done"},
+			Steps:       map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: owner.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "test"); err != nil {
+		t.Fatal(err)
+	}
 	objective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Monitor product feedback", Status: runtime.ObjectiveStatusActive,
 		Budget: &runtime.BudgetPolicy{MaxTurns: 40},
@@ -107,7 +130,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatalf("Runbook next page=%#v err=%v", nextRunbooks, err)
 	}
 	loadedRunbook, err := client.GetRunbook(ctx, scope, scheduledActivation.ID)
-	if err != nil || loadedRunbook.ObjectiveID != scheduledObjective.ID || loadedRunbook.TriggerID != "recurring" {
+	if err != nil || loadedRunbook.Activation.ObjectiveID != scheduledObjective.ID || loadedRunbook.Activation.TriggerID != "recurring" || loadedRunbook.Definition.ID != "research" {
 		t.Fatalf("Runbook=%#v err=%v", loadedRunbook, err)
 	}
 	scheduledDetail, err := client.GetObjective(ctx, scope, scheduledObjective.ID)
@@ -126,8 +149,8 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pausedRunbook, err := client.UpdateRunbook(ctx, scope, scheduledActivation.ID, runtime.UpdateRunbookActivationRequest{ExpectedRevision: loadedRunbook.Revision, Status: runtime.RunbookActivationPaused})
-	if err != nil || pausedRunbook.Status != runtime.RunbookActivationPaused || pausedRunbook.Revision != loadedRunbook.Revision+1 {
+	pausedRunbook, err := client.UpdateRunbook(ctx, scope, scheduledActivation.ID, runtime.UpdateRunbookActivationRequest{ExpectedRevision: loadedRunbook.Activation.Revision, Status: runtime.RunbookActivationPaused})
+	if err != nil || pausedRunbook.Status != runtime.RunbookActivationPaused || pausedRunbook.Revision != loadedRunbook.Activation.Revision+1 {
 		t.Fatalf("paused Runbook=%#v err=%v", pausedRunbook, err)
 	}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{

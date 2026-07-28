@@ -9,15 +9,65 @@ import (
 	"strings"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/google/uuid"
 )
 
 var (
 	ErrRunbookActivationNotFound    = errors.New("Runbook activation not found")
+	ErrRunbookDefinitionNotFound    = errors.New("Runbook definition not found")
 	ErrRunbookActivationRevision    = errors.New("Runbook activation revision conflict")
 	ErrRunbookActivationIdempotency = errors.New("Runbook activation idempotency key was already used with different input")
 )
+
+// RunbookDetail combines an owner-scoped activation with the exact immutable
+// definition it pins. This is the canonical inspection projection used by
+// interactive clients; neither the activation nor its definition is copied
+// into a second lifecycle.
+type RunbookDetail struct {
+	Activation *RunbookActivation  `json:"activation"`
+	Definition *runbook.Definition `json:"definition"`
+}
+
+type RunbookDefinitionCatalog interface {
+	GetDeployment(context.Context, capability.ScopeReference, string) (*kernelagent.AgentDeployment, error)
+	ListDefinitionVersions(context.Context, string) ([]*kernelagent.AgentDefinition, error)
+}
+
+// ResolveRunbookDetail follows the activation's tenant-scoped Agent deployment
+// to find the exact historic Agent definition containing the pinned Runbook.
+// It never substitutes the Agent's current version for the activation's pin.
+func ResolveRunbookDetail(ctx context.Context, store RunbookActivationStore, catalog RunbookDefinitionCatalog, scope Scope, activationID string) (*RunbookDetail, error) {
+	if store == nil || catalog == nil {
+		return nil, errors.New("Runbook detail dependencies are not configured")
+	}
+	activation, err := store.GetRunbookActivation(ctx, scope, strings.TrimSpace(activationID))
+	if err != nil {
+		return nil, err
+	}
+	if activation == nil {
+		return nil, ErrRunbookActivationNotFound
+	}
+	deployment, err := catalog.GetDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, activation.AssignedAgentID)
+	if err != nil {
+		return nil, err
+	}
+	versions, err := catalog.ListDefinitionVersions(ctx, deployment.DefinitionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, definition := range versions {
+		if definition == nil || definition.Runbook == nil {
+			continue
+		}
+		if definition.Runbook.ID == activation.DefinitionID && definition.Runbook.Version == activation.DefinitionVersion {
+			return &RunbookDetail{Activation: activation, Definition: definition.Runbook}, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s@%s", ErrRunbookDefinitionNotFound, activation.DefinitionID, activation.DefinitionVersion)
+}
 
 type RunbookActivationStatus string
 
