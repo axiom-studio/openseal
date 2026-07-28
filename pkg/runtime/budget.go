@@ -364,12 +364,78 @@ func completeChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (
 	if err := allocation.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid child budget allocation: %w", err)
 	}
-	effective, err := EffectiveBudgetUsage(parent.BudgetUsage, parent.BudgetReservations)
+	capacity, err := remainingChildBudgetCapacity(parent)
 	if err != nil {
 		return nil, err
 	}
-	existing := sumBudgetPolicies(parent.BudgetAllocations)
 	completed := *cloneBudgetPolicy(allocation)
+	if completed.MaxAttempts == 0 {
+		completed.MaxAttempts = capacity.MaxAttempts
+	}
+	if completed.MaxTurns == 0 {
+		completed.MaxTurns = capacity.MaxTurns
+	}
+	if completed.MaxInputTokens == 0 {
+		completed.MaxInputTokens = capacity.MaxInputTokens
+	}
+	if completed.MaxOutputTokens == 0 {
+		completed.MaxOutputTokens = capacity.MaxOutputTokens
+	}
+	if completed.MaxTotalTokens == 0 {
+		completed.MaxTotalTokens = capacity.MaxTotalTokens
+	}
+	if completed.MaxCostMicros == 0 {
+		completed.MaxCostMicros = capacity.MaxCostMicros
+	}
+	if completed.MaxDurationMS == 0 {
+		completed.MaxDurationMS = capacity.MaxDurationMS
+	}
+	if completed.MaxActions == 0 {
+		completed.MaxActions = capacity.MaxActions
+	}
+	if err := validateChildBudgetAllocation(parent, &completed); err != nil {
+		return nil, err
+	}
+	return &completed, nil
+}
+
+func constrainRunbookChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (*BudgetPolicy, error) {
+	if allocation == nil || parent == nil || parent.Budget == nil {
+		return cloneBudgetPolicy(allocation), nil
+	}
+	capacity, err := remainingChildBudgetCapacity(parent)
+	if err != nil {
+		return nil, err
+	}
+	constrained := *cloneBudgetPolicy(allocation)
+	constrain := func(requested *int64, available int64) {
+		if *requested > 0 && available > 0 && *requested > available {
+			*requested = available
+		}
+	}
+	constrain(&constrained.MaxAttempts, capacity.MaxAttempts)
+	constrain(&constrained.MaxTurns, capacity.MaxTurns)
+	constrain(&constrained.MaxInputTokens, capacity.MaxInputTokens)
+	constrain(&constrained.MaxOutputTokens, capacity.MaxOutputTokens)
+	constrain(&constrained.MaxTotalTokens, capacity.MaxTotalTokens)
+	constrain(&constrained.MaxCostMicros, capacity.MaxCostMicros)
+	constrain(&constrained.MaxDurationMS, capacity.MaxDurationMS)
+	constrain(&constrained.MaxActions, capacity.MaxActions)
+	return &constrained, nil
+}
+
+func remainingChildBudgetCapacity(parent *AgentRun) (BudgetPolicy, error) {
+	if parent == nil {
+		return BudgetPolicy{}, ErrRunNotFound
+	}
+	if parent.Budget == nil {
+		return BudgetPolicy{}, nil
+	}
+	effective, err := EffectiveBudgetUsage(parent.BudgetUsage, parent.BudgetReservations)
+	if err != nil {
+		return BudgetPolicy{}, err
+	}
+	existing := sumBudgetPolicies(parent.BudgetAllocations)
 	remaining := func(limit, used, allocated int64) int64 {
 		if limit == 0 {
 			return 0
@@ -380,34 +446,16 @@ func completeChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (
 		}
 		return value
 	}
-	if completed.MaxAttempts == 0 {
-		completed.MaxAttempts = remaining(parent.Budget.MaxAttempts, effective.Attempts, existing.MaxAttempts)
-	}
-	if completed.MaxTurns == 0 {
-		completed.MaxTurns = remaining(parent.Budget.MaxTurns, effective.Turns, existing.MaxTurns)
-	}
-	if completed.MaxInputTokens == 0 {
-		completed.MaxInputTokens = remaining(parent.Budget.MaxInputTokens, effective.InputTokens, existing.MaxInputTokens)
-	}
-	if completed.MaxOutputTokens == 0 {
-		completed.MaxOutputTokens = remaining(parent.Budget.MaxOutputTokens, effective.OutputTokens, existing.MaxOutputTokens)
-	}
-	if completed.MaxTotalTokens == 0 {
-		completed.MaxTotalTokens = remaining(parent.Budget.MaxTotalTokens, effective.InputTokens+effective.OutputTokens, existing.MaxTotalTokens)
-	}
-	if completed.MaxCostMicros == 0 {
-		completed.MaxCostMicros = remaining(parent.Budget.MaxCostMicros, effective.CostMicros, existing.MaxCostMicros)
-	}
-	if completed.MaxDurationMS == 0 {
-		completed.MaxDurationMS = remaining(parent.Budget.MaxDurationMS, effective.DurationMS, existing.MaxDurationMS)
-	}
-	if completed.MaxActions == 0 {
-		completed.MaxActions = remaining(parent.Budget.MaxActions, effective.Actions, existing.MaxActions)
-	}
-	if err := validateChildBudgetAllocation(parent, &completed); err != nil {
-		return nil, err
-	}
-	return &completed, nil
+	return BudgetPolicy{
+		MaxAttempts:     remaining(parent.Budget.MaxAttempts, effective.Attempts, existing.MaxAttempts),
+		MaxTurns:        remaining(parent.Budget.MaxTurns, effective.Turns, existing.MaxTurns),
+		MaxInputTokens:  remaining(parent.Budget.MaxInputTokens, effective.InputTokens, existing.MaxInputTokens),
+		MaxOutputTokens: remaining(parent.Budget.MaxOutputTokens, effective.OutputTokens, existing.MaxOutputTokens),
+		MaxTotalTokens:  remaining(parent.Budget.MaxTotalTokens, effective.InputTokens+effective.OutputTokens, existing.MaxTotalTokens),
+		MaxCostMicros:   remaining(parent.Budget.MaxCostMicros, effective.CostMicros, existing.MaxCostMicros),
+		MaxDurationMS:   remaining(parent.Budget.MaxDurationMS, effective.DurationMS, existing.MaxDurationMS),
+		MaxActions:      remaining(parent.Budget.MaxActions, effective.Actions, existing.MaxActions),
+	}, nil
 }
 
 func addRunBudgetAllocation(run *AgentRun, allocationID string, allocation *BudgetPolicy) error {
