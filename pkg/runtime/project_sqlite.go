@@ -40,6 +40,9 @@ func migrateProjects(db *sql.DB) error {
 			return err
 		}
 	}
+	if _, err = db.Exec(`UPDATE projects SET payload=json_remove(payload,'$.runRefs') WHERE json_type(payload,'$.runRefs') IS NOT NULL`); err != nil {
+		return err
+	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_projects_scope ON projects(scope_kind,scope_id,status,updated_at); CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(scope_kind,scope_id,owner_type,owner_id,updated_at); CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_idempotency ON projects(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''`)
 	return err
 }

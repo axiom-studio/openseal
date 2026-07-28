@@ -27,12 +27,21 @@ func TestPostgresProjectRestartAndAtomicActivity(t *testing.T) {
 	if err = store.db.QueryRowContext(ctx, `SELECT name FROM `+store.table("schema_migrations")+` WHERE version=23`).Scan(&migrationName); err != nil || migrationName != "indexed project activity projections" {
 		t.Fatalf("project activity migration=%q err=%v", migrationName, err)
 	}
+	if err = store.db.QueryRowContext(ctx, `SELECT name FROM `+store.table("schema_migrations")+` WHERE version=$1`, projectRunRefsMigrationVersion).Scan(&migrationName); err != nil || migrationName != "derive Project Runs from Objective lineage" {
+		t.Fatalf("Project lineage migration=%q err=%v", migrationName, err)
+	}
 	scope := Scope{Kind: "tenant", ID: "restart"}
 	seedProjectObjectives(t, store, scope)
 	svc := NewProjectService(store, store)
 	created, event, err := svc.Create(ctx, CreateProjectRequest{Project: projectFixture(scope), IdempotencyKey: "restart-key", Actor: ActivityActor{Type: "user", ID: "u1"}})
 	if err != nil || event == nil {
 		t.Fatalf("create event=%#v err=%v", event, err)
+	}
+	if _, err = store.db.ExecContext(ctx, `UPDATE `+store.table("projects")+` SET payload=jsonb_set(payload,'{runRefs}','["legacy-run"]'::jsonb) WHERE id=$1`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.ExecContext(ctx, `DELETE FROM `+store.table("schema_migrations")+` WHERE version=$1`, projectRunRefsMigrationVersion); err != nil {
+		t.Fatal(err)
 	}
 	store.Close()
 	store, err = NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
@@ -43,6 +52,10 @@ func TestPostgresProjectRestartAndAtomicActivity(t *testing.T) {
 	got, err := store.GetProject(ctx, scope, created.ID)
 	if err != nil || got.Revision != 1 {
 		t.Fatalf("restart project=%#v err=%v", got, err)
+	}
+	var migratedPayload string
+	if err = store.db.QueryRowContext(ctx, `SELECT payload::text FROM `+store.table("projects")+` WHERE id=$1`, created.ID).Scan(&migratedPayload); err != nil || strings.Contains(migratedPayload, "runRefs") {
+		t.Fatalf("Project lineage payload=%s err=%v", migratedPayload, err)
 	}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-a"}
 	listed, err := store.ListProjects(ctx, ProjectFilter{Scope: scope, Owner: &owner, Statuses: []ProjectStatus{ProjectStatusDraft}, ObjectiveID: "objective-a", Limit: 1})

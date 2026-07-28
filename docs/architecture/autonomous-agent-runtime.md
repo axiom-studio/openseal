@@ -62,6 +62,9 @@ erDiagram
     AGENT_DEPLOYMENT ||--o{ ROSTER_ASSIGNMENT : fills
     AGENT_DEPLOYMENT ||--o{ OBJECTIVE : owns
     TEAM_DEPLOYMENT ||--o{ OBJECTIVE : owns
+    PROJECT }o--|{ OBJECTIVE : groups
+    OBJECTIVE ||--o{ RUNBOOK_ACTIVATION : owns
+    RUNBOOK_ACTIVATION ||--o{ RUN : triggers
     OBJECTIVE ||--o{ RUN : advances
     RUN ||--o{ TURN : checkpoints
     RUN ||--o{ ACTION_CALL : proposes

@@ -63,9 +63,21 @@ event routing creates Runs from matching active Runbook event triggers.
 
 A **Project** is an optional grouping for several Objectives that share
 milestones, hypotheses, evidence, artifacts, or a delivery boundary. Ordinary
-Agent and Team work does not require a Project. Projects coordinate existing
-Objective and Runbook resources; they do not introduce another execution
-engine.
+Agent and Team work does not require a Project. A Project never owns a cadence,
+Runbook scheduler, or mutable list of Runs. Its execution history is derived
+from the referenced Objectives and their Runbook activations, so there is one
+authoritative lineage:
+
+```mermaid
+flowchart LR
+    Project[Optional Project] --> Objective[Objective: desired outcome]
+    Objective --> Activation[Runbook activation: method + trigger]
+    Activation --> Run[Run: one bounded execution]
+    Run --> Turn[Turns and governed actions]
+```
+
+Use a Project only when work genuinely needs shared multi-objective context.
+Do not create one merely because an Objective repeats.
 
 ## Runs, turns, and recovery
 
