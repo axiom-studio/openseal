@@ -102,9 +102,15 @@ func validateHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabil
 func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *runbook.DelegateStep, catalog CapabilityCatalog) []ValidationIssue {
 	perTurn := catalog.HostedExecution.BaseInputTokens + hostedAgentDefinitionTokens(target, delegate)
 	actions := int64(0)
+	issues := make([]ValidationIssue, 0)
 	for _, requirement := range target.SkillRequirements {
 		skill, ok := catalog.Skills[strings.TrimSpace(requirement.SkillID)]
 		if !ok || requirement.Optional {
+			continue
+		}
+		if skill.HostedModelInputTokens < 1 && (len(requirement.RequiredActions) > 0 || requirement.PromptRequired) {
+			issues = append(issues, issue(path, "hosted_budget_skill_envelope_unavailable",
+				fmt.Sprintf("Skill %s has no host-attested model input ceiling; refresh the capability catalog before activation", skill.ID)))
 			continue
 		}
 		perTurn += skill.HostedModelInputTokens
@@ -129,7 +135,6 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 		{"maxOutputTokens", "hosted_budget_output_insufficient", "hosted model output tokens", budget.MaxOutputTokens, requiredOutput},
 		{"maxTotalTokens", "hosted_budget_total_insufficient", "hosted total tokens", budget.MaxTotalTokens, requiredTotal},
 	}
-	issues := make([]ValidationIssue, 0)
 	for _, check := range checks {
 		if check.required > 0 && check.actual > 0 && check.actual < check.required {
 			issues = append(issues, issue(path+"."+check.field, check.code,

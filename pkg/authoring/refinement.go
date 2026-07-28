@@ -802,7 +802,7 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		if skill.MaximumRisk != "" && riskRank(skill.MaximumRisk) < 0 {
 			return fmt.Errorf("Skill %s maximum risk is invalid", id)
 		}
-		if skill.HostedModelInputTokens < 0 || (catalog.HostedExecution != nil && (len(skill.Actions) > 0 || skill.PromptAvailable) && skill.HostedModelInputTokens < 1) {
+		if skill.HostedModelInputTokens < 0 {
 			return fmt.Errorf("Skill %s hosted model input ceiling is invalid", id)
 		}
 		actions := stringSet(skill.Actions)

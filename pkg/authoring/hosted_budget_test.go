@@ -43,6 +43,18 @@ func TestHostedExecutionAttestationStaysOutOfProviderCatalog(t *testing.T) {
 	}
 }
 
+func TestHostedRunbookBudgetRequiresSelectedSkillAttestation(t *testing.T) {
+	candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{MaxTurns: 10})
+	catalog := hostedBrowserBudgetCatalog()
+	skill := catalog.Skills["skill-browser"]
+	skill.HostedModelInputTokens = 0
+	catalog.Skills["skill-browser"] = skill
+	issues := validateHostedRunbookBudgets(&candidate, catalog)
+	if !hasValidationCode(issues, "hosted_budget_skill_envelope_unavailable") {
+		t.Fatalf("missing Skill attestation issues = %#v", issues)
+	}
+}
+
 func TestHostedSkillModelInputTokenCeilingIncludesPrivatePromptAndSchemas(t *testing.T) {
 	definition := capability.Definition{
 		ID: "skill-browser", Version: "2.0.5",
