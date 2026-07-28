@@ -449,7 +449,7 @@ func ObjectivesCapability() Capability {
 func RunbooksCapability() Capability {
 	return Capability{
 		ID: RunbooksCapabilityID, Version: RunbooksCapabilityVersion, Available: true,
-		Operations: []string{OperationGet, OperationList, OperationReconcile},
+		Operations: []string{OperationGet, OperationList, OperationUpdate, OperationReconcile},
 	}
 }
 
