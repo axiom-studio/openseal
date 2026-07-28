@@ -1397,6 +1397,19 @@ func parseGeneratedDuration(raw string) (time.Duration, error) {
 	return time.Duration(count) * unit, nil
 }
 
+func validateObjectiveTemplatesAreOutcomeOnly(path string, templates []workforce.ObjectiveTemplate) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	for index := range templates {
+		if len(templates[index].Cadence) != 0 {
+			issues = append(issues, issue(fmt.Sprintf("%s[%d].cadence", path, index), "objective_execution_forbidden", "Objectives describe outcomes; put schedules and execution in a Runbook trigger"))
+		}
+		if len(templates[index].EventRules) != 0 {
+			issues = append(issues, issue(fmt.Sprintf("%s[%d].eventRules", path, index), "objective_execution_forbidden", "Objectives describe outcomes; put event wakes and execution in a Runbook trigger"))
+		}
+	}
+	return issues
+}
+
 func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandidate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	if _, err := EffectiveWorkforceActivationIntent(candidate.Activation); err != nil {
@@ -1417,8 +1430,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 			issues = append(issues, issue(path, "invalid_agent", err.Error()))
 		}
 		issues = append(issues, validateAgentSkillAuthority(path, definition)...)
-		issues = append(issues, validateObjectiveTemplateCadences(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
-		issues = append(issues, validateObjectiveTemplateEventRules(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
+		issues = append(issues, validateObjectiveTemplatesAreOutcomeOnly(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
 	issues = append(issues, validateObjectiveRunbookEntrypoints(candidate, agents)...)
 	issues = append(issues, validateSourceActionProjection(candidate)...)
@@ -1449,8 +1461,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 	if !hasSpeakingRole {
 		issues = append(issues, issue("team.roles", "no_speaking_role", "A prompt-created Team requires at least one role with active channel participation"))
 	}
-	issues = append(issues, validateObjectiveTemplateCadences("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
-	issues = append(issues, validateObjectiveTemplateEventRules("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
+	issues = append(issues, validateObjectiveTemplatesAreOutcomeOnly("team.objectiveTemplates", candidate.Team.ObjectiveTemplates)...)
 	roles := make(map[string]int, len(candidate.Team.Roles))
 	roleDefinitions := make(map[string]map[string]bool, len(candidate.Team.Roles))
 	for _, role := range candidate.Team.Roles {
@@ -1652,7 +1663,6 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 		}
 	}
 	if candidate.Initiative != nil {
-		objectives := candidateObjectiveTemplates(candidate)
 		for _, monitor := range candidate.Initiative.SourceMonitors {
 			available, ok := catalog.Skills[monitor.SkillID]
 			requiredBy := "initiative:" + candidate.Initiative.ID + "/monitor:" + monitor.ID
@@ -1685,7 +1695,7 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 			if !policyAvailable || policy.Reference != monitor.SourcePolicyRef {
 				key := "source_policy:" + monitor.SourcePolicyRef + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: "source_policy", ID: monitor.SourcePolicyRef, RequiredBy: requiredBy}
-			} else if !sourceMonitorWithinPolicy(objectives[monitor.ObjectiveRef], policy) {
+			} else if !sourceMonitorWithinPolicy(candidate, monitor, policy) {
 				key := "source_scope:" + monitor.SourcePolicyRef + ":" + requiredBy
 				missing[key] = MissingRequirement{Kind: "source_scope", ID: monitor.SourcePolicyRef, RequiredBy: requiredBy}
 			}
@@ -1720,15 +1730,27 @@ func credentialRequirementAvailable(catalog CapabilityCatalog, requirement skill
 	return false
 }
 
-func sourceMonitorWithinPolicy(template *workforce.ObjectiveTemplate, policy SourcePolicyCapability) bool {
-	if template == nil || policy.MaximumItems < 1 {
+func sourceMonitorWithinPolicy(candidate *WorkforceCandidate, monitor InitiativeSourceMonitorBlueprint, policy SourcePolicyCapability) bool {
+	if candidate == nil || policy.MaximumItems < 1 {
 		return false
 	}
-	runTemplate, _ := template.Cadence["runTemplate"].(map[string]interface{})
-	capability, _ := runTemplate["capability"].(map[string]interface{})
-	inputs, _ := capability["inputs"].(map[string]interface{})
-	rawURL, _ := inputs["url"].(string)
-	maximumItems, ok := jsonInteger(inputs["maxItems"])
+	var rawURL string
+	var maximumItems int64
+	found := false
+	for _, invocation := range candidateObjectiveCapabilityInvocations(candidate) {
+		if invocation.action == nil || invocation.objectiveRef != monitor.ObjectiveRef || invocation.agentID != monitor.AssignedAgentDefinitionID ||
+			invocation.action.SkillID != monitor.SkillID || invocation.action.SkillVersion != monitor.SkillVersion || invocation.action.Action != monitor.Action {
+			continue
+		}
+		_ = json.Unmarshal(invocation.action.Arguments["url"].Literal, &rawURL)
+		_ = json.Unmarshal(invocation.action.Arguments["maxItems"].Literal, &maximumItems)
+		found = true
+		break
+	}
+	if !found {
+		return false
+	}
+	ok := maximumItems > 0
 	if !ok || maximumItems < 1 || maximumItems > int64(policy.MaximumItems) {
 		return false
 	}

@@ -5,76 +5,52 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func TestObjectiveCapabilityInputsUseExactAuthorizedActionContract(t *testing.T) {
-	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
-		ID: "reddit-researcher",
-		ObjectiveTemplates: []workforce.ObjectiveTemplate{{
-			ID: "daily-scan", Title: "Daily scan", Goal: "Inspect permitted Reddit sources",
-			Cadence: map[string]interface{}{
-				"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-					"skillId": "skill-browser", "skillVersion": "2.0.1", "action": "browser-open",
-					"inputs": map[string]interface{}{"url": "https://www.reddit.com/r/openseal", "maxItems": float64(10)},
-				}},
+func browserActionCandidate() WorkforceCandidate {
+	return WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID:                 "reddit-researcher",
+		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "daily-scan", Title: "Daily scan", Goal: "Inspect permitted Reddit sources", Priority: 1}},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "scan", Version: "1.0.0", Name: "Scan",
+			Entrypoints: map[string]string{"scan": "open"},
+			Triggers:    map[string]runbook.Trigger{"daily": {Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}, Entrypoint: "scan", ObjectiveID: WorkforceObjectiveKey("agent", "reddit-researcher", "daily-scan")}},
+			Steps: map[string]runbook.Step{
+				"open": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "skill-browser", SkillVersion: "2.0.1", Action: "browser-open", Arguments: map[string]runbook.Value{"url": literalActionValue("https://www.reddit.com/r/openseal"), "maxItems": literalActionValue(10)}, ResultPath: "/results/open", Next: "done"}},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 			},
-		}},
-	}}}
-	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
-		"skill-browser": {
-			ID: "skill-browser", Version: "2.0.1", Actions: []string{"browser-open"},
-			ActionContracts: map[string]SkillActionContract{"browser-open": {InputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false,
-				"properties": map[string]interface{}{
-					"sessionId": map[string]interface{}{"type": "string"},
-					"url":       map[string]interface{}{"type": "string"},
-				},
-				"required": []interface{}{"sessionId", "url"},
-			}}},
 		},
-	}}
+	}}}
+}
 
+func browserActionCatalog() CapabilityCatalog {
+	return CapabilityCatalog{Skills: map[string]SkillCapability{"skill-browser": {
+		ID: "skill-browser", Version: "2.0.1", Actions: []string{"browser-open"},
+		ActionContracts: map[string]SkillActionContract{"browser-open": {InputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{"sessionId": map[string]interface{}{"type": "string"}, "url": map[string]interface{}{"type": "string"}},
+			"required":   []interface{}{"sessionId", "url"},
+		}}},
+	}}}
+}
+
+func TestRunbookCapabilityInputsUseExactAuthorizedActionContract(t *testing.T) {
+	candidate, catalog := browserActionCandidate(), browserActionCatalog()
 	issues := validateObjectiveCapabilityInputs(&candidate, catalog, false)
 	if len(issues) != 1 || issues[0].Code != "capability_action_input_invalid" || issues[0].Path == "" {
 		t.Fatalf("invalid invocation issues = %#v", issues)
 	}
-
-	invocation := candidate.Agents[0].ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["capability"].(map[string]interface{})
-	invocation["inputs"] = map[string]interface{}{
-		"sessionId": "reddit-daily-scan", "url": "https://www.reddit.com/r/openseal",
-	}
+	action := candidate.Agents[0].Runbook.Steps["open"].Action
+	action.Arguments = map[string]runbook.Value{"sessionId": literalActionValue("reddit-daily-scan"), "url": literalActionValue("https://www.reddit.com/r/openseal")}
 	if issues = validateObjectiveCapabilityInputs(&candidate, catalog, false); len(issues) != 0 {
 		t.Fatalf("valid invocation issues = %#v", issues)
 	}
 }
 
-func TestApplyPlacementRevalidatesObjectiveCapabilityInputs(t *testing.T) {
-	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
-		ID: "reddit-researcher",
-		ObjectiveTemplates: []workforce.ObjectiveTemplate{{
-			ID: "daily-scan", Title: "Daily scan", Goal: "Inspect permitted Reddit sources",
-			Cadence: map[string]interface{}{"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-				"skillId": "skill-browser", "skillVersion": "2.0.1", "action": "browser-open",
-				"inputs": map[string]interface{}{"url": "https://www.reddit.com/r/openseal"},
-			}}},
-		}},
-	}}}
-	changeSet := &ChangeSet{
-		Result: CompileResult{Candidate: candidate, Valid: true},
-		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{"skill-browser": {
-			ID: "skill-browser", Version: "2.0.1", Actions: []string{"browser-open"},
-			ActionContracts: map[string]SkillActionContract{"browser-open": {InputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false,
-				"properties": map[string]interface{}{
-					"sessionId": map[string]interface{}{"type": "string"},
-					"url":       map[string]interface{}{"type": "string"},
-				},
-				"required": []interface{}{"sessionId", "url"},
-			}}},
-		}}},
-	}
-
+func TestApplyPlacementRevalidatesRunbookCapabilityInputs(t *testing.T) {
+	changeSet := &ChangeSet{Result: CompileResult{Candidate: browserActionCandidate(), Valid: true}, Catalog: browserActionCatalog()}
 	err := validateApplyPlacement(changeSet)
 	var readiness *ChangeSetReadinessError
 	if !errors.As(err, &readiness) || len(readiness.Issues) != 1 || readiness.Issues[0].Code != "skill_binding_capability_action_input_invalid" {

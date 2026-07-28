@@ -132,8 +132,8 @@ func validateInitiativeBlueprint(candidate *WorkforceCandidate, agents map[strin
 		if agent == nil || !agentAuthorizes(agent, monitor.SkillID, monitor.SkillVersion, monitor.Action) {
 			issues = append(issues, issue(path+".assignedAgentDefinitionId", "invalid_source_monitor_agent", "Source monitor Agent must exist and require the exact Skill action and version"))
 		}
-		if template := objectives[monitor.ObjectiveRef]; template == nil || !cadenceProjectsMonitor(template.Cadence, blueprint.ID, monitor) {
-			issues = append(issues, issue(path+".objectiveRef", "invalid_source_monitor_cadence", "Source monitor Objective cadence must project the same Initiative, monitor, Agent, Skill action, and policy"))
+		if objectives[monitor.ObjectiveRef] == nil || !runbookProjectsMonitor(candidate, monitor) {
+			issues = append(issues, issue(path+".objectiveRef", "invalid_source_monitor_runbook", "Source monitor must be implemented by an exact Objective-owned Runbook action"))
 		}
 	}
 	seen = map[string]bool{}
@@ -152,32 +152,8 @@ func validateInitiativeBlueprint(candidate *WorkforceCandidate, agents map[strin
 // provenance that the reviewed Initiative does not define. Runtime placement
 // resolves these symbolic references and the scheduler deliberately rejects
 // drift, so an orphan must be repaired before the candidate can be activated.
-func validateSourceMonitorContext(candidate *WorkforceCandidate) []ValidationIssue {
-	monitors := map[string]InitiativeSourceMonitorBlueprint{}
-	if candidate.Initiative != nil {
-		for _, monitor := range candidate.Initiative.SourceMonitors {
-			monitors[monitor.ID] = monitor
-		}
-	}
-	issues := []ValidationIssue{}
-	for objectiveRef, template := range candidateObjectiveTemplates(candidate) {
-		runTemplate, _ := template.Cadence["runTemplate"].(map[string]interface{})
-		contextValues, _ := runTemplate["context"].(map[string]interface{})
-		monitorID, _ := contextValues["sourceMonitorId"].(string)
-		monitorID = strings.TrimSpace(monitorID)
-		if monitorID == "" {
-			continue
-		}
-		monitor, exists := monitors[monitorID]
-		if !exists || monitor.ObjectiveRef != objectiveRef {
-			issues = append(issues, issue(
-				objectiveRef+".cadence.runTemplate.context.sourceMonitorId",
-				"orphaned_source_monitor_context",
-				"Scheduled Objective source monitor context must reference its reviewed Initiative source monitor",
-			))
-		}
-	}
-	return issues
+func validateSourceMonitorContext(_ *WorkforceCandidate) []ValidationIssue {
+	return nil
 }
 
 func agentAuthorizes(definition *agent.AgentDefinition, skillID, version, action string) bool {
@@ -240,12 +216,12 @@ func validInitiativeDeduplication(value string) bool {
 	return value == InitiativeDeduplicateStableSource || value == InitiativeDeduplicateContentDigest || value == InitiativeDeduplicateStableSourceAndContent
 }
 
-func cadenceProjectsMonitor(cadence map[string]interface{}, initiativeID string, monitor InitiativeSourceMonitorBlueprint) bool {
-	assigned, _ := cadence["assignedAgentId"].(string)
-	runTemplate, _ := cadence["runTemplate"].(map[string]interface{})
-	contextValues, _ := runTemplate["context"].(map[string]interface{})
-	policy, _ := runTemplate["policy"].(map[string]interface{})
-	capability, _ := runTemplate["capability"].(map[string]interface{})
-	return assigned == monitor.AssignedAgentDefinitionID && contextValues["initiativeId"] == initiativeID && contextValues["sourceMonitorId"] == monitor.ID &&
-		policy["sourcePolicyRef"] == monitor.SourcePolicyRef && capability["skillId"] == monitor.SkillID && capability["skillVersion"] == monitor.SkillVersion && capability["action"] == monitor.Action
+func runbookProjectsMonitor(candidate *WorkforceCandidate, monitor InitiativeSourceMonitorBlueprint) bool {
+	for _, invocation := range candidateObjectiveCapabilityInvocations(candidate) {
+		if invocation.action != nil && invocation.agentID == monitor.AssignedAgentDefinitionID && invocation.objectiveRef == monitor.ObjectiveRef &&
+			invocation.action.SkillID == monitor.SkillID && invocation.action.SkillVersion == monitor.SkillVersion && invocation.action.Action == monitor.Action {
+			return true
+		}
+	}
+	return false
 }

@@ -7,30 +7,26 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 // materializeAnsweredCapabilitySourceScopes is the deterministic boundary
-// between a guided source-scope answer and executable durable work. The model
-// may propose the surrounding Objective, but it is never trusted to reproduce
-// an audited answer in capability inputs.
+// between an audited source-scope answer and an Objective-owned Runbook. The
+// model chooses the operation shape; OpenSeal writes the exact user answer into
+// credential-free Runbook values.
 func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, request GenerateRequest) []ValidationIssue {
 	if candidate == nil {
 		return nil
 	}
 	if request.Mode == ModeAmend && request.Existing != nil {
-		preserveRefinementObjectives(candidate, request.Existing)
+		preserveRefinementWork(candidate, request.Existing)
 	}
-	answered := make(map[string]RefinementProviderAnswerValue)
-	if request.Refinement != nil {
-		answered = make(map[string]RefinementProviderAnswerValue, len(request.Refinement.Answers))
-		for _, answer := range request.Refinement.Answers {
-			answered[strings.TrimSpace(answer.QuestionID)] = answer.Value
-		}
-	}
+	answered := refinementAnswers(request.Refinement)
 	issues := make([]ValidationIssue, 0)
-	for _, need := range request.Catalog.CapabilityNeeds {
+	for _, rawNeed := range request.Catalog.CapabilityNeeds {
+		need := selectedCapabilityNeed(rawNeed, answered)
 		requirement := need.SourceScope
 		answer, exists := answered[CapabilitySourceScopeQuestionID(need.ID)]
 		if !exists && requirement != nil && len(requirement.Targets) > 0 {
@@ -39,109 +35,332 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 		if requirement == nil || len(requirement.MaterializationInputKeys) == 0 || !exists {
 			continue
 		}
-		need = selectedCapabilityNeed(need, answered)
 		targets := nonEmptyUnique(answer.Items)
 		if len(targets) == 0 {
 			continue
 		}
-		matches := matchingSourceScopeInvocations(candidate, need, request.Catalog)
-		if len(matches) == 0 {
-			routes := matchingSourceScopeRunbooks(candidate, need, request.Catalog)
-			if len(routes) == 1 {
-				materializeRunbookSourceTargets(routes[0], targets, requirement.MaterializationInputKeys)
-				continue
-			}
-			if len(routes) > 1 {
-				paths := make([]string, 0, len(routes))
-				for _, route := range routes {
-					paths = append(paths, route.path)
-				}
-				issues = append(issues, issue(
-					"objectives.cadence.runTemplate.entrypoint",
-					"source_scope_runbook_ambiguous",
-					fmt.Sprintf("Source scope %s matches multiple Objective Runbooks (%s); keep one exact scheduled entrypoint", strings.Join(targets, ", "), strings.Join(paths, ", ")),
-				))
-				continue
-			}
-			if !sourceCapabilityRequiresDurableAction(request) {
-				continue
-			}
-			issues = append(issues, issue(
-				"objectives.cadence.runTemplate.capability",
-				"source_scope_action_not_found",
-				fmt.Sprintf("Source scope %s cannot be applied: add one Objective cadence or event rule that invokes an authorized action for capability need %s", strings.Join(targets, ", "), need.ID),
-			))
+		actions := preferInvocationWithMaterializationInput(matchingSourceScopeInvocations(candidate, need, request.Catalog), requirement.MaterializationInputKeys)
+		if len(actions) == 1 {
+			materializeSourceTargets(actions[0], targets, requirement.MaterializationInputKeys)
+			issues = append(issues, materializeCatalogSourceMonitor(candidate, need, actions[0])...)
 			continue
 		}
-		matches = preferInvocationWithMaterializationInput(matches, requirement.MaterializationInputKeys)
-		if len(matches) != 1 {
-			paths := make([]string, 0, len(matches))
-			for _, match := range matches {
-				paths = append(paths, match.path)
+		if len(actions) > 1 {
+			paths := make([]string, 0, len(actions))
+			for _, action := range actions {
+				paths = append(paths, action.path)
 			}
-			issues = append(issues, issue(
-				"objectives.cadence.runTemplate.capability",
-				"source_scope_action_ambiguous",
-				fmt.Sprintf("Source scope %s matches multiple Objective actions (%s); keep exactly one action or preselect one with a %s input", strings.Join(targets, ", "), strings.Join(paths, ", "), strings.Join(requirement.MaterializationInputKeys, "/")),
-			))
+			issues = append(issues, issue("runbooks.steps.action.arguments", "source_scope_action_ambiguous", fmt.Sprintf("Source scope %s matches multiple Runbook actions (%s); keep one exact action", strings.Join(targets, ", "), strings.Join(paths, ", "))))
 			continue
 		}
-		if !capabilitySourceScopeMaterialized(candidate, need, targets, requirement.MaterializationInputKeys, request.Catalog) {
-			materializeSourceTargets(matches[0].invocation, targets, requirement.MaterializationInputKeys)
+		routes := matchingSourceScopeRunbooks(candidate, need, request.Catalog)
+		if len(routes) == 1 {
+			materializeRunbookSourceTargets(routes[0], targets, requirement.MaterializationInputKeys)
+			continue
 		}
-		issues = append(issues, materializeCatalogSourceMonitor(candidate, need, matches[0])...)
+		if len(routes) > 1 {
+			paths := make([]string, 0, len(routes))
+			for _, route := range routes {
+				paths = append(paths, route.path)
+			}
+			issues = append(issues, issue("runbooks.triggers", "source_scope_runbook_ambiguous", fmt.Sprintf("Source scope %s matches multiple Runbook triggers (%s); keep one exact trigger", strings.Join(targets, ", "), strings.Join(paths, ", "))))
+			continue
+		}
+		if sourceCapabilityRequiresDurableAction(request) {
+			issues = append(issues, issue("runbooks", "source_scope_action_not_found", fmt.Sprintf("Source scope %s cannot be applied: add one Objective-owned Runbook that uses an authorized action for capability need %s", strings.Join(targets, ", "), need.ID)))
+		}
 	}
 	return issues
 }
 
-// materializeCatalogSourceMonitor turns an audited source-Skill choice into
-// the Initiative envelope required by runtime authorization. The compiler may
-// wire an exact catalog-owned draft into the plan, but it never activates that
-// policy; registration and activation remain explicit host-governed actions.
+func refinementAnswers(refinement *RefinementContext) map[string]RefinementProviderAnswerValue {
+	result := map[string]RefinementProviderAnswerValue{}
+	if refinement == nil {
+		return result
+	}
+	for _, answer := range refinement.Answers {
+		result[strings.TrimSpace(answer.QuestionID)] = answer.Value
+	}
+	return result
+}
+
+type sourceScopeInvocation struct {
+	path         string
+	definition   *runbook.Definition
+	stepID       string
+	action       *runbook.ActionStep
+	agentID      string
+	objectiveRef string
+}
+
+type sourceScopeRunbook struct {
+	path         string
+	definition   *runbook.Definition
+	triggerID    string
+	agentID      string
+	objectiveRef string
+	entrypoint   string
+}
+
+func matchingSourceScopeInvocations(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) []sourceScopeInvocation {
+	allowed := stringSet(need.SkillIDs)
+	result := make([]sourceScopeInvocation, 0)
+	for _, invocation := range candidateObjectiveCapabilityInvocations(candidate) {
+		if sourceScopeInvocationMatches(invocation, allowed, catalog) {
+			result = append(result, invocation)
+		}
+	}
+	return result
+}
+
+func candidateObjectiveCapabilityInvocations(candidate *WorkforceCandidate) []sourceScopeInvocation {
+	if candidate == nil {
+		return nil
+	}
+	result := make([]sourceScopeInvocation, 0)
+	for agentIndex, definition := range candidate.Agents {
+		if definition == nil || definition.Runbook == nil {
+			continue
+		}
+		objectiveRef := uniqueRunbookObjective(definition.Runbook)
+		stepIDs := make([]string, 0, len(definition.Runbook.Steps))
+		for stepID := range definition.Runbook.Steps {
+			stepIDs = append(stepIDs, stepID)
+		}
+		sort.Strings(stepIDs)
+		for _, stepID := range stepIDs {
+			step := definition.Runbook.Steps[stepID]
+			if step.Kind != runbook.StepAction || step.Action == nil {
+				continue
+			}
+			result = append(result, sourceScopeInvocation{
+				path: fmt.Sprintf("agents[%d].runbook.steps.%s.action", agentIndex, stepID), definition: definition.Runbook,
+				stepID: stepID, action: step.Action, agentID: definition.ID, objectiveRef: objectiveRef,
+			})
+		}
+	}
+	return result
+}
+
+func uniqueRunbookObjective(definition *runbook.Definition) string {
+	result := ""
+	for _, trigger := range definition.Triggers {
+		objective := strings.TrimSpace(trigger.ObjectiveID)
+		if objective == "" {
+			continue
+		}
+		if result != "" && result != objective {
+			return ""
+		}
+		result = objective
+	}
+	return result
+}
+
+func sourceScopeInvocationMatches(invocation sourceScopeInvocation, allowed map[string]bool, catalog CapabilityCatalog) bool {
+	if invocation.action == nil {
+		return false
+	}
+	skillID := strings.TrimSpace(invocation.action.SkillID)
+	version := strings.TrimSpace(invocation.action.SkillVersion)
+	action := strings.TrimSpace(invocation.action.Action)
+	skill, exists := catalog.Skills[skillID]
+	return allowed[skillID] && exists && version == strings.TrimSpace(skill.Version) && stringSet(skill.Actions)[action]
+}
+
+func preferInvocationWithMaterializationInput(matches []sourceScopeInvocation, inputKeys []string) []sourceScopeInvocation {
+	preferred := make([]sourceScopeInvocation, 0, len(matches))
+	allowed := stringSet(inputKeys)
+	for _, match := range matches {
+		for key := range match.action.Arguments {
+			if allowed[key] {
+				preferred = append(preferred, match)
+				break
+			}
+		}
+	}
+	if len(preferred) == 1 {
+		return preferred
+	}
+	return matches
+}
+
+func materializeSourceTargets(invocation sourceScopeInvocation, targets, inputKeys []string) {
+	if invocation.action == nil || invocation.definition == nil {
+		return
+	}
+	if invocation.action.Arguments == nil {
+		invocation.action.Arguments = map[string]runbook.Value{}
+	}
+	key := ""
+	for _, candidate := range inputKeys {
+		if _, exists := invocation.action.Arguments[candidate]; exists {
+			key = candidate
+			break
+		}
+	}
+	if key == "" {
+		key = inputKeys[0]
+	}
+	var value interface{} = append([]string(nil), targets...)
+	if len(targets) == 1 {
+		value = targets[0]
+	}
+	encoded, _ := json.Marshal(value)
+	invocation.action.Arguments[key] = runbook.Value{Literal: encoded}
+	step := invocation.definition.Steps[invocation.stepID]
+	step.Action = invocation.action
+	invocation.definition.Steps[invocation.stepID] = step
+}
+
+func matchingSourceScopeRunbooks(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) []sourceScopeRunbook {
+	if candidate == nil {
+		return nil
+	}
+	allowed := stringSet(need.SkillIDs)
+	result := make([]sourceScopeRunbook, 0)
+	for agentIndex, definition := range candidate.Agents {
+		if definition == nil || definition.Runbook == nil || !agentDeclaresSourceSkill(definition, allowed, catalog) {
+			continue
+		}
+		triggerIDs := make([]string, 0, len(definition.Runbook.Triggers))
+		for id := range definition.Runbook.Triggers {
+			triggerIDs = append(triggerIDs, id)
+		}
+		sort.Strings(triggerIDs)
+		for _, triggerID := range triggerIDs {
+			trigger := definition.Runbook.Triggers[triggerID]
+			result = append(result, sourceScopeRunbook{
+				path: fmt.Sprintf("agents[%d].runbook.triggers.%s", agentIndex, triggerID), definition: definition.Runbook,
+				triggerID: triggerID, agentID: definition.ID, objectiveRef: trigger.ObjectiveID, entrypoint: trigger.Entrypoint,
+			})
+		}
+	}
+	return result
+}
+
+func agentDeclaresSourceSkill(definition *agent.AgentDefinition, allowed map[string]bool, catalog CapabilityCatalog) bool {
+	for _, requirement := range definition.SkillRequirements {
+		if !allowed[requirement.SkillID] {
+			continue
+		}
+		skill, exists := catalog.Skills[requirement.SkillID]
+		if exists && strings.TrimSpace(skill.Version) == strings.TrimSpace(requirement.VersionConstraint) {
+			return true
+		}
+	}
+	return false
+}
+
+func materializeRunbookSourceTargets(route sourceScopeRunbook, targets, inputKeys []string) {
+	key := sourceScopeMaterializationKey(inputKeys, len(targets))
+	if key == "" || route.definition == nil {
+		return
+	}
+	trigger := route.definition.Triggers[route.triggerID]
+	if trigger.Input == nil {
+		trigger.Input = map[string]runbook.Value{}
+	}
+	encoded, _ := json.Marshal(append([]string(nil), targets...))
+	trigger.Input[key] = runbook.Value{Literal: encoded}
+	route.definition.Triggers[route.triggerID] = trigger
+
+	contract := route.definition.Interfaces[route.entrypoint]
+	if contract.InputSchema == nil {
+		contract.InputSchema = map[string]interface{}{"type": "object", "additionalProperties": false}
+	}
+	properties, _ := contract.InputSchema["properties"].(map[string]interface{})
+	if properties == nil {
+		properties = map[string]interface{}{}
+		contract.InputSchema["properties"] = properties
+	}
+	properties[key] = map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "minItems": 1}
+	required := schemaStringList(contract.InputSchema["required"])
+	if !stringSet(required)[key] {
+		required = append(required, key)
+		sort.Strings(required)
+		contract.InputSchema["required"] = required
+	}
+	route.definition.Interfaces[route.entrypoint] = contract
+	for stepID, step := range route.definition.Steps {
+		if step.Kind == runbook.StepDelegate && step.Delegate != nil {
+			if step.Delegate.Context == nil {
+				step.Delegate.Context = map[string]runbook.Value{}
+			}
+			step.Delegate.Context[key] = runbook.Value{Ref: "/input/" + key}
+			route.definition.Steps[stepID] = step
+		}
+	}
+}
+
+func sourceScopeMaterializationKey(inputKeys []string, targetCount int) string {
+	if targetCount > 1 {
+		for _, key := range inputKeys {
+			if key == "subreddits" || key == "communities" {
+				return key
+			}
+		}
+	}
+	if len(inputKeys) > 0 {
+		return inputKeys[0]
+	}
+	return ""
+}
+
+func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need CapabilityNeed, targets, inputKeys []string, catalogs ...CapabilityCatalog) bool {
+	targets = nonEmptyUnique(targets)
+	if candidate == nil || len(targets) == 0 {
+		return false
+	}
+	allowedSkills, allowedKeys := stringSet(need.SkillIDs), stringSet(inputKeys)
+	found := make(map[string]bool, len(targets))
+	observe := func(key string, raw []byte) {
+		if !allowedKeys[key] {
+			return
+		}
+		materialized := strings.ToLower(string(raw))
+		for _, target := range targets {
+			if strings.Contains(materialized, strings.ToLower(target)) {
+				found[target] = true
+			}
+		}
+	}
+	for _, invocation := range candidateObjectiveCapabilityInvocations(candidate) {
+		if invocation.action == nil || !allowedSkills[strings.TrimSpace(invocation.action.SkillID)] {
+			continue
+		}
+		for key, value := range invocation.action.Arguments {
+			observe(key, value.Literal)
+		}
+	}
+	if len(catalogs) > 0 {
+		for _, route := range matchingSourceScopeRunbooks(candidate, need, catalogs[0]) {
+			trigger := route.definition.Triggers[route.triggerID]
+			for key, value := range trigger.Input {
+				observe(key, value.Literal)
+			}
+		}
+	}
+	return len(found) == len(targets)
+}
+
 func materializeCatalogSourceMonitor(candidate *WorkforceCandidate, need CapabilityNeed, match sourceScopeInvocation) []ValidationIssue {
-	if candidate == nil || candidate.Initiative == nil || need.SourcePolicyProposal == nil || !strings.HasSuffix(match.path, ".cadence") {
+	if candidate == nil || candidate.Initiative == nil || need.SourcePolicyProposal == nil || match.action == nil || match.objectiveRef == "" {
 		return nil
 	}
-	skillID, _ := match.invocation["skillId"].(string)
-	skillVersion, _ := match.invocation["skillVersion"].(string)
-	action, _ := match.invocation["action"].(string)
-	if !stringSet(need.SourcePolicyProposal.SkillIDs)[skillID] {
+	if !stringSet(candidate.Initiative.ObjectiveRefs)[match.objectiveRef] || !stringSet(need.SourcePolicyProposal.SkillIDs)[match.action.SkillID] {
 		return nil
 	}
-	objectiveRef := strings.TrimSuffix(match.path, ".cadence")
-	objective := candidateObjectiveTemplates(candidate)[objectiveRef]
-	if objective == nil || !stringSet(candidate.Initiative.ObjectiveRefs)[objectiveRef] {
-		return nil
-	}
-	assignedAgentID, _ := objective.Cadence["assignedAgentId"].(string)
-	policy := need.SourcePolicyProposal.Policy
-	reference := strings.TrimSpace(policy.ID) + "@" + strings.TrimSpace(policy.Version)
+	reference := strings.TrimSpace(need.SourcePolicyProposal.Policy.ID) + "@" + strings.TrimSpace(need.SourcePolicyProposal.Policy.Version)
 	monitorID := catalogSourceMonitorID(need.ID)
 	for _, existing := range candidate.Initiative.SourceMonitors {
-		if existing.ID == monitorID || existing.ObjectiveRef == objectiveRef {
+		if existing.ID == monitorID || existing.ObjectiveRef == match.objectiveRef {
 			return nil
 		}
 	}
-	runTemplate, _ := objective.Cadence["runTemplate"].(map[string]interface{})
-	if runTemplate == nil {
-		return nil
-	}
-	contextValues, _ := runTemplate["context"].(map[string]interface{})
-	if contextValues == nil {
-		contextValues = map[string]interface{}{}
-		runTemplate["context"] = contextValues
-	}
-	policyValues, _ := runTemplate["policy"].(map[string]interface{})
-	if policyValues == nil {
-		policyValues = map[string]interface{}{}
-		runTemplate["policy"] = policyValues
-	}
-	contextValues["initiativeId"] = candidate.Initiative.ID
-	contextValues["sourceMonitorId"] = monitorID
-	policyValues["sourcePolicyRef"] = reference
 	candidate.Initiative.SourceMonitors = append(candidate.Initiative.SourceMonitors, InitiativeSourceMonitorBlueprint{
-		ID: monitorID, ObjectiveRef: objectiveRef, AssignedAgentDefinitionID: assignedAgentID,
-		SkillID: skillID, SkillVersion: skillVersion, Action: action,
+		ID: monitorID, ObjectiveRef: match.objectiveRef, AssignedAgentDefinitionID: match.agentID,
+		SkillID: match.action.SkillID, SkillVersion: match.action.SkillVersion, Action: match.action.Action,
 		SourcePolicyRef: reference, Deduplication: InitiativeDeduplicateStableSourceAndContent,
 	})
 	return nil
@@ -163,247 +382,26 @@ func selectedCapabilityNeed(need CapabilityNeed, answered map[string]RefinementP
 	return need
 }
 
-type sourceScopeInvocation struct {
-	path       string
-	invocation map[string]interface{}
-}
-
-type sourceScopeRunbook struct {
-	path       string
-	template   map[string]interface{}
-	definition *runbook.Definition
-	entrypoint string
-}
-
-func matchingSourceScopeRunbooks(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) []sourceScopeRunbook {
-	if candidate == nil {
-		return nil
-	}
-	agents := make(map[string]*runbook.Definition, len(candidate.Agents))
-	for _, definition := range candidate.Agents {
-		if definition != nil && definition.Runbook != nil {
-			agents[definition.ID] = definition.Runbook
+// A refinement answer amends reviewed work. Preserve outcome metadata and an
+// already reviewed Runbook when the probabilistic regeneration omits them.
+func preserveRefinementWork(candidate, existing *WorkforceCandidate) {
+	existingAgents := make(map[string]*agent.AgentDefinition, len(existing.Agents))
+	for _, definition := range existing.Agents {
+		if definition != nil {
+			existingAgents[definition.ID] = definition
 		}
 	}
-	allowed := stringSet(need.SkillIDs)
-	result := make([]sourceScopeRunbook, 0)
-	objectives := candidateObjectiveTemplates(candidate)
-	keys := make([]string, 0, len(objectives))
-	for key := range objectives {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		objective := objectives[key]
-		template, _ := objective.Cadence["runTemplate"].(map[string]interface{})
-		entrypoint, _ := template["entrypoint"].(string)
-		assignedAgentID, _ := objective.Cadence["assignedAgentId"].(string)
-		if strings.TrimSpace(assignedAgentID) == "" {
-			assignedAgentID = candidateObjectiveAgentOwner(candidate, objective)
-		}
-		definition := agents[strings.TrimSpace(assignedAgentID)]
-		entrypoint = strings.TrimSpace(entrypoint)
-		if definition == nil || entrypoint == "" || len(definition.Entrypoints) != 1 || definition.Entrypoints[entrypoint] == "" || !runbookUsesSourceSkill(definition, allowed, catalog) {
-			continue
-		}
-		result = append(result, sourceScopeRunbook{path: key + ".cadence", template: template, definition: definition, entrypoint: entrypoint})
-	}
-	return result
-}
-
-func candidateObjectiveAgentOwner(candidate *WorkforceCandidate, objective *workforce.ObjectiveTemplate) string {
 	for _, definition := range candidate.Agents {
 		if definition == nil {
 			continue
 		}
-		for index := range definition.ObjectiveTemplates {
-			if &definition.ObjectiveTemplates[index] == objective {
-				return definition.ID
-			}
-		}
-	}
-	return ""
-}
-
-func runbookUsesSourceSkill(definition *runbook.Definition, allowed map[string]bool, catalog CapabilityCatalog) bool {
-	for _, step := range definition.Steps {
-		if step.Kind != runbook.StepAction || step.Action == nil || !allowed[strings.TrimSpace(step.Action.SkillID)] {
+		previous := existingAgents[definition.ID]
+		if previous == nil {
 			continue
 		}
-		skill, exists := catalog.Skills[strings.TrimSpace(step.Action.SkillID)]
-		if exists && strings.TrimSpace(skill.Version) == strings.TrimSpace(step.Action.SkillVersion) && stringSet(skill.Actions)[strings.TrimSpace(step.Action.Action)] {
-			return true
-		}
-	}
-	return false
-}
-
-func materializeRunbookSourceTargets(route sourceScopeRunbook, targets, inputKeys []string) {
-	key := sourceScopeMaterializationKey(inputKeys, len(targets))
-	if key == "" {
-		return
-	}
-	contextValues, _ := route.template["context"].(map[string]interface{})
-	if contextValues == nil {
-		contextValues = map[string]interface{}{}
-		route.template["context"] = contextValues
-	}
-	contextValues[key] = append([]string(nil), targets...)
-
-	contract := route.definition.Interfaces[route.entrypoint]
-	if contract.InputSchema == nil {
-		contract.InputSchema = map[string]interface{}{"type": "object", "additionalProperties": false}
-	}
-	properties, _ := contract.InputSchema["properties"].(map[string]interface{})
-	if properties == nil {
-		properties = map[string]interface{}{}
-		contract.InputSchema["properties"] = properties
-	}
-	properties[key] = map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "minItems": 1}
-	required := schemaStringList(contract.InputSchema["required"])
-	if !stringSet(required)[key] {
-		required = append(required, key)
-		sort.Strings(required)
-		contract.InputSchema["required"] = required
-	}
-	route.definition.Interfaces[route.entrypoint] = contract
-
-	for stepID, step := range route.definition.Steps {
-		if step.Kind != runbook.StepDelegate || step.Delegate == nil {
-			continue
-		}
-		if step.Delegate.Context == nil {
-			step.Delegate.Context = map[string]runbook.Value{}
-		}
-		step.Delegate.Context[key] = runbook.Value{Ref: "/input/" + key}
-		route.definition.Steps[stepID] = step
-	}
-}
-
-func sourceScopeMaterializationKey(inputKeys []string, targetCount int) string {
-	if targetCount > 1 {
-		for _, key := range inputKeys {
-			if key == "subreddits" || key == "communities" {
-				return key
-			}
-		}
-	}
-	if len(inputKeys) > 0 {
-		return inputKeys[0]
-	}
-	return ""
-}
-
-func matchingSourceScopeInvocations(candidate *WorkforceCandidate, need CapabilityNeed, catalog CapabilityCatalog) []sourceScopeInvocation {
-	allowed := stringSet(need.SkillIDs)
-	result := make([]sourceScopeInvocation, 0)
-	for _, candidate := range candidateObjectiveCapabilityInvocations(candidate) {
-		if sourceScopeInvocationMatches(candidate.invocation, allowed, catalog) {
-			result = append(result, candidate)
-		}
-	}
-	return result
-}
-
-func candidateObjectiveCapabilityInvocations(candidate *WorkforceCandidate) []sourceScopeInvocation {
-	if candidate == nil {
-		return nil
-	}
-	result := make([]sourceScopeInvocation, 0)
-	objectiveKeys := make([]string, 0)
-	objectives := candidateObjectiveTemplates(candidate)
-	for key := range objectives {
-		objectiveKeys = append(objectiveKeys, key)
-	}
-	sort.Strings(objectiveKeys)
-	for _, objectiveKey := range objectiveKeys {
-		objective := objectives[objectiveKey]
-		if invocation := runTemplateCapability(objective.Cadence["runTemplate"]); invocation != nil {
-			result = append(result, sourceScopeInvocation{path: objectiveKey + ".cadence", invocation: invocation})
-		}
-		rules, _ := objective.EventRules["rules"].([]interface{})
-		for index, raw := range rules {
-			rule, _ := raw.(map[string]interface{})
-			if invocation := runTemplateCapability(rule["runTemplate"]); invocation != nil {
-				result = append(result, sourceScopeInvocation{path: fmt.Sprintf("%s.eventRules[%d]", objectiveKey, index), invocation: invocation})
-			}
-		}
-	}
-	return result
-}
-
-func runTemplateCapability(raw interface{}) map[string]interface{} {
-	template, _ := raw.(map[string]interface{})
-	invocation, _ := template["capability"].(map[string]interface{})
-	return invocation
-}
-
-func sourceScopeInvocationMatches(invocation map[string]interface{}, allowed map[string]bool, catalog CapabilityCatalog) bool {
-	if invocation == nil {
-		return false
-	}
-	skillID, _ := invocation["skillId"].(string)
-	version, _ := invocation["skillVersion"].(string)
-	action, _ := invocation["action"].(string)
-	skillID, version, action = strings.TrimSpace(skillID), strings.TrimSpace(version), strings.TrimSpace(action)
-	skill, exists := catalog.Skills[skillID]
-	return allowed[skillID] && exists && version == strings.TrimSpace(skill.Version) && stringSet(skill.Actions)[action]
-}
-
-func preferInvocationWithMaterializationInput(matches []sourceScopeInvocation, inputKeys []string) []sourceScopeInvocation {
-	preferred := make([]sourceScopeInvocation, 0, len(matches))
-	allowed := stringSet(inputKeys)
-	for _, match := range matches {
-		inputs, _ := match.invocation["inputs"].(map[string]interface{})
-		for key := range inputs {
-			if allowed[key] {
-				preferred = append(preferred, match)
-				break
-			}
-		}
-	}
-	if len(preferred) == 1 {
-		return preferred
-	}
-	return matches
-}
-
-func materializeSourceTargets(invocation map[string]interface{}, targets, inputKeys []string) {
-	inputs, _ := invocation["inputs"].(map[string]interface{})
-	if inputs == nil {
-		inputs = map[string]interface{}{}
-		invocation["inputs"] = inputs
-	}
-	key := ""
-	for _, candidate := range inputKeys {
-		if _, exists := inputs[candidate]; exists {
-			key = candidate
-			break
-		}
-	}
-	if key == "" {
-		key = inputKeys[0]
-	}
-	if len(targets) == 1 {
-		inputs[key] = targets[0]
-		return
-	}
-	inputs[key] = append([]string(nil), targets...)
-}
-
-// A refinement answer is an amendment of the reviewed candidate, not a fresh
-// authoring request. Preserve prior Objective data that the probabilistic
-// generator omitted while allowing fields it explicitly returned to advance.
-func preserveRefinementObjectives(candidate, existing *WorkforceCandidate) {
-	existingAgents := make(map[string][]workforce.ObjectiveTemplate, len(existing.Agents))
-	for _, definition := range existing.Agents {
-		if definition != nil {
-			existingAgents[definition.ID] = definition.ObjectiveTemplates
-		}
-	}
-	for _, definition := range candidate.Agents {
-		if definition != nil {
-			definition.ObjectiveTemplates = mergeObjectiveTemplates(definition.ObjectiveTemplates, existingAgents[definition.ID])
+		definition.ObjectiveTemplates = mergeObjectiveTemplates(definition.ObjectiveTemplates, previous.ObjectiveTemplates)
+		if definition.Runbook == nil && previous.Runbook != nil {
+			definition.Runbook = cloneRunbook(previous.Runbook)
 		}
 	}
 	if candidate.Team != nil && existing.Team != nil && candidate.Team.ID == existing.Team.ID {
@@ -420,14 +418,7 @@ func mergeObjectiveTemplates(current, existing []workforce.ObjectiveTemplate) []
 		index, found := byID[previous.ID]
 		if !found {
 			current = append(current, cloneObjectiveTemplate(previous))
-			byID[previous.ID] = len(current) - 1
 			continue
-		}
-		if len(current[index].Cadence) == 0 {
-			current[index].Cadence = cloneObjectiveTemplate(previous).Cadence
-		}
-		if len(current[index].EventRules) == 0 {
-			current[index].EventRules = cloneObjectiveTemplate(previous).EventRules
 		}
 		if len(current[index].SuccessCriteria) == 0 {
 			current[index].SuccessCriteria = cloneObjectiveTemplate(previous).SuccessCriteria
@@ -444,4 +435,11 @@ func cloneObjectiveTemplate(value workforce.ObjectiveTemplate) workforce.Objecti
 	var clone workforce.ObjectiveTemplate
 	_ = json.Unmarshal(payload, &clone)
 	return clone
+}
+
+func cloneRunbook(value *runbook.Definition) *runbook.Definition {
+	payload, _ := json.Marshal(value)
+	var clone runbook.Definition
+	_ = json.Unmarshal(payload, &clone)
+	return &clone
 }

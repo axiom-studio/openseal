@@ -43,7 +43,7 @@ func TestExternalConversationRunbookEventDispatcherCreatesOneExactEventRun(t *te
 			},
 		}},
 		Triggers: map[string]runbook.Trigger{"on-message": {
-			Kind: runbook.TriggerEvent, EventType: externalConversationEventType, Entrypoint: "respond",
+			Kind: runbook.TriggerEvent, EventType: externalConversationEventType, Entrypoint: "respond", ObjectiveID: "agent:support-agent:respond",
 		}},
 		Steps: map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
 	}
@@ -102,7 +102,7 @@ func TestExternalConversationRunbookEventDispatcherRejectsTriggerDrift(t *testin
 		APIVersion: runbook.APIVersion, ID: handler.ID, Version: handler.Version, Name: "Support",
 		Entrypoints: map[string]string{"respond": "done"},
 		Triggers: map[string]runbook.Trigger{"on-message": {
-			Kind: runbook.TriggerEvent, EventType: "incident.created", Entrypoint: "respond",
+			Kind: runbook.TriggerEvent, EventType: "incident.created", Entrypoint: "respond", ObjectiveID: "agent:support-agent:respond",
 		}},
 		Steps: map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
 	}

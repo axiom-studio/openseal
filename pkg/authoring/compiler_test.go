@@ -1062,10 +1062,7 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 	}
 
 	outOfScope := researchInitiativeCandidate()
-	monitorTemplate := &outOfScope.Team.ObjectiveTemplates[0]
-	monitorTemplate.Cadence["runTemplate"].(map[string]interface{})["capability"].(map[string]interface{})["inputs"] = map[string]interface{}{
-		"url": "https://attacker.example/feed", "maxItems": float64(5),
-	}
+	outOfScope.Agents[0].Runbook.Steps["observe"].Action.Arguments["url"] = literalActionValue("https://attacker.example/feed")
 	outOfScopePayload, _ := json.Marshal(GenerationResponse{Candidate: outOfScope})
 	compiler, _ = NewCompiler(staticGenerator{payload: outOfScopePayload})
 	catalog.SourcePolicies["approved-communities"] = SourcePolicyCapability{Reference: "approved-communities", Sources: []SourcePolicySourceCapability{{Host: "community.example"}}, MaximumItems: 5}
@@ -1078,7 +1075,6 @@ func TestCompilerValidatesInitiativeBlueprintAndExactMonitorCapability(t *testin
 func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAuthority(t *testing.T) {
 	candidate := researchInitiativeCandidate()
 	candidate.Initiative.SourceMonitors[0].SourcePolicyRef = "approved-communities@2026-07-22"
-	candidate.Team.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["policy"].(map[string]interface{})["sourcePolicyRef"] = "approved-communities@2026-07-22"
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	generator := &repairingGenerator{generated: payload, repaired: payload}
 	compiler, _ := NewCompiler(generator)
@@ -1133,8 +1129,8 @@ func TestCompilerSurfacesExactCatalogOwnedSourcePolicyProposalWithoutGrantingAut
 func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.T) {
 	candidate := researchInitiativeCandidate()
 	candidate.Initiative = nil
-	invocation := candidate.Team.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["capability"].(map[string]interface{})
-	invocation["skillId"], invocation["skillVersion"], invocation["action"] = source.SkillID, source.SkillVersion, source.ObserveFeed
+	action := candidate.Agents[0].Runbook.Steps["observe"].Action
+	action.SkillID, action.SkillVersion, action.Action = source.SkillID, source.SkillVersion, source.ObserveFeed
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor a public feed every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
@@ -1145,34 +1141,9 @@ func TestCompilerRejectsGovernedSourceActionWithoutInitiativeMonitor(t *testing.
 	}
 }
 
-func TestCompilerRejectsOrphanedSourceMonitorContext(t *testing.T) {
-	candidate := researchInitiativeCandidate()
-	candidate.Initiative.SourceMonitors = nil
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor a public feed every hour"})
-	if err != nil || result.Valid || !hasValidationCode(result.Validation, "orphaned_source_monitor_context") {
-		t.Fatalf("orphaned source monitor result = %#v, err = %v", result, err)
-	}
-}
-
-func TestCompilerRejectsSourceMonitorContextWithoutInitiative(t *testing.T) {
-	candidate := researchInitiativeCandidate()
-	candidate.Initiative = nil
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Monitor a public feed every hour"})
-	if err != nil || result.Valid || !hasValidationCode(result.Validation, "orphaned_source_monitor_context") {
-		t.Fatalf("initiative-free source monitor result = %#v, err = %v", result, err)
-	}
-}
-
 func TestCompilerMaterializesCatalogOwnedSourceMonitorWithoutGrantingAuthority(t *testing.T) {
 	candidate := researchInitiativeCandidate()
 	candidate.Initiative.SourceMonitors = nil
-	runTemplate := candidate.Team.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})
-	delete(runTemplate["context"].(map[string]interface{}), "sourceMonitorId")
-	delete(runTemplate, "policy")
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
 	compiler, _ := NewCompiler(staticGenerator{payload: payload})
 	policy := source.Policy{
@@ -1202,24 +1173,6 @@ func TestCompilerMaterializesCatalogOwnedSourceMonitorWithoutGrantingAuthority(t
 	}
 	if hasValidationCode(result.Validation, "source_action_requires_monitor") {
 		t.Fatalf("materialized monitor was not recognized: %#v", result.Validation)
-	}
-}
-
-func TestCompilerRejectsCadenceThatCannotExecute(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
-		ID: "weekly", Title: "Weekly", Goal: "Report weekly", Priority: 1,
-		Cadence: map[string]interface{}{"assignedAgentId": candidate.Agents[0].ID, "interval": float64(604800000000000)},
-	}}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create it every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || result.Valid || !hasValidationCode(result.Validation, "invalid_objective_cadence") {
-		t.Fatalf("non-executable cadence = %#v, err = %v", result, err)
 	}
 }
 
@@ -1258,183 +1211,6 @@ func TestCompilerMaterializesExactRequiredSkillAuthorityDefault(t *testing.T) {
 	}
 }
 
-func TestCompilerRejectsHostedCadenceBudgetBelowPortableFloor(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
-		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
-		Cadence: map[string]interface{}{
-			"type": "interval", "intervalSeconds": float64(3600),
-			"runBudget": map[string]interface{}{
-				"maxAttempts": float64(3), "maxTurns": float64(3), "maxInputTokens": float64(5000),
-				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(15000),
-			},
-		},
-	}}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create it every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || result.Valid || !hasValidationCode(result.Validation, "invalid_objective_cadence") ||
-		!validationMessageContains(result.Validation, "maxInputTokens must be zero (unbounded) or at least 16000") {
-		t.Fatalf("impossible hosted budget = %#v, err = %v", result, err)
-	}
-}
-
-func TestCompilerAcceptsBoundedHostedEvidenceProjection(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
-		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
-		Cadence: map[string]interface{}{
-			"type": "interval", "intervalSeconds": float64(3600),
-			"runBudget": map[string]interface{}{
-				"maxAttempts": float64(5), "maxTurns": float64(4), "maxInputTokens": float64(32000),
-				"maxOutputTokens": float64(30000), "maxTotalTokens": float64(62000),
-			},
-			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
-				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
-			}},
-		},
-	}}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create it every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || !result.Valid {
-		t.Fatalf("bounded hosted evidence candidate = %#v, err = %v", result, err)
-	}
-	projection := result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})["evidenceProjection"].(map[string]interface{})
-	if projection["maximumObservations"] != float64(7) || projection["maximumSummaryRunes"] != float64(600) || projection["maximumTotalRunes"] != float64(4200) {
-		t.Fatalf("evidence projection did not round-trip: %#v", projection)
-	}
-}
-
-func TestCompilerOmitsExplicitZeroOptionalRunBudgetLimits(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{
-		{
-			ID: "monitor", Title: "Monitor", Goal: "Observe a bounded source", Priority: 1,
-			Cadence: map[string]interface{}{
-				"type": "interval", "intervalSeconds": float64(3600),
-				"runBudget": map[string]interface{}{
-					"maxAttempts": float64(3), "maxTurns": float64(3), "maxActions": float64(1),
-					"maxCostMicros": float64(0), "warningPermille": float64(0),
-				},
-				"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-					"skillId": "reddit-research", "skillVersion": "1.0.0", "action": "read",
-				}},
-			},
-		},
-		{
-			ID: "react", Title: "React", Goal: "React to retained evidence", Priority: 2,
-			EventRules: map[string]interface{}{"version": "1", "rules": []interface{}{map[string]interface{}{
-				"id": "observed", "eventType": "source.observed",
-				"runBudget": map[string]interface{}{
-					"maxAttempts": float64(3), "maxTurns": float64(3), "maxActions": float64(1),
-					"maxDurationMs": float64(0),
-				},
-				"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-					"skillId": "reddit-research", "skillVersion": "1.0.0", "action": "read",
-				}},
-			}}},
-		},
-	}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a monitor every hour", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || !result.Valid {
-		t.Fatalf("zero-valued optional budget normalization = %#v, err = %v", result, err)
-	}
-	cadenceBudget := result.Candidate.Agents[0].ObjectiveTemplates[0].Cadence["runBudget"].(map[string]interface{})
-	if _, exists := cadenceBudget["maxCostMicros"]; exists || cadenceBudget["maxAttempts"] != float64(3) || cadenceBudget["warningPermille"] != float64(0) {
-		t.Fatalf("cadence budget was not normalized exactly: %#v", cadenceBudget)
-	}
-	eventRule := result.Candidate.Agents[0].ObjectiveTemplates[1].EventRules["rules"].([]interface{})[0].(map[string]interface{})
-	eventBudget := eventRule["runBudget"].(map[string]interface{})
-	if _, exists := eventBudget["maxDurationMs"]; exists || eventBudget["maxActions"] != float64(1) {
-		t.Fatalf("event budget was not normalized exactly: %#v", eventBudget)
-	}
-}
-
-func TestCompilerRejectsEvidenceProjectionBudgetWithoutReviewAndRepairCapacity(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
-		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
-		Cadence: map[string]interface{}{
-			"type": "interval", "intervalSeconds": float64(3600),
-			"runBudget": map[string]interface{}{
-				"maxAttempts": float64(5), "maxTurns": float64(3), "maxInputTokens": float64(16000),
-				"maxOutputTokens": float64(10000), "maxTotalTokens": float64(26000),
-			},
-			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
-				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
-			}},
-		},
-	}}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour"})
-	if err != nil || result.Valid || !validationMessageContains(result.Validation, "maxTurns must be zero (unbounded) or at least 4") {
-		t.Fatalf("insufficient evidence-grounding budget = %#v, err = %v", result, err)
-	}
-}
-
-func TestCompilerRejectsEvidenceProjectionBudgetWithoutRetryCapacity(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
-		ID: "weekly", Title: "Weekly", Goal: "Synthesize retained evidence", Priority: 1,
-		Cadence: map[string]interface{}{
-			"type": "interval", "intervalSeconds": float64(3600),
-			"runBudget": map[string]interface{}{
-				"maxAttempts": float64(4), "maxTurns": float64(4), "maxInputTokens": float64(32000),
-				"maxOutputTokens": float64(30000), "maxTotalTokens": float64(62000),
-			},
-			"runTemplate": map[string]interface{}{"evidenceProjection": map[string]interface{}{
-				"maximumObservations": float64(7), "maximumSummaryRunes": float64(600), "maximumTotalRunes": float64(4200),
-			}},
-		},
-	}}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create it every hour"})
-	if err != nil || result.Valid || !validationMessageContains(result.Validation, "maxAttempts must be zero (unbounded) or at least 5") {
-		t.Fatalf("insufficient evidence-grounding attempt budget = %#v, err = %v", result, err)
-	}
-}
-
-func TestCompilerRejectsEventCapabilityBudgetThatCannotComplete(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].ObjectiveTemplates = []workforce.ObjectiveTemplate{{
-		ID: "warnings", Title: "Warnings", Goal: "Inspect warning evidence", Priority: 1,
-		EventRules: map[string]interface{}{"version": "1", "rules": []interface{}{map[string]interface{}{
-			"id": "warning", "eventType": "kubernetes.warning", "assignedAgentId": candidate.Agents[0].ID,
-			"runBudget": map[string]interface{}{"maxAttempts": float64(1), "maxTurns": float64(3), "maxActions": float64(1)},
-			"runTemplate": map[string]interface{}{"capability": map[string]interface{}{
-				"skillId": "reddit-research", "skillVersion": "1.0.0", "action": "read",
-			}},
-		}}},
-	}}
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || result.Valid || !hasValidationCode(result.Validation, "invalid_objective_event_rules") {
-		t.Fatalf("non-completable event capability = %#v, err = %v", result, err)
-	}
-}
-
 func hasValidationCode(issues []ValidationIssue, code string) bool {
 	for _, value := range issues {
 		if value.Code == code {
@@ -1460,19 +1236,25 @@ func researchInitiativeCandidate() WorkforceCandidate {
 	agentDefinition.Authority.AllowedSkillIDs = []string{"community-source"}
 	agentDefinition.ObjectiveTemplates = []workforce.ObjectiveTemplate{{ID: "collect", Title: "Collect evidence", Goal: "Collect permitted community evidence", Priority: 1}}
 	candidate.Team.ObjectiveTemplates = []workforce.ObjectiveTemplate{
-		{
-			ID: "monitor", Title: "Monitor communities", Goal: "Monitor approved sources over time", Priority: 1,
-			Cadence: map[string]interface{}{
-				"type": "interval", "intervalSeconds": float64(3600), "assignedAgentId": "community-researcher", "maximumConcurrent": float64(1),
-				"runBudget": map[string]interface{}{"maxTurns": float64(2), "maxActions": float64(1), "maxDurationMs": float64(60000)},
-				"runTemplate": map[string]interface{}{
-					"context":    map[string]interface{}{"initiativeId": "market-intelligence", "sourceMonitorId": "community-listening"},
-					"policy":     map[string]interface{}{"sourcePolicyRef": "approved-communities"},
-					"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"url": "https://community.example/feed", "maxItems": float64(5)}},
-				},
-			},
-		},
+		{ID: "monitor", Title: "Monitor communities", Goal: "Monitor approved sources over time", Priority: 1},
 		{ID: "report", Title: "Publish report", Goal: "Synthesize a cited report", Priority: 2},
+	}
+	agentDefinition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "community-monitor", Version: "1.0.0", Name: "Community monitor",
+		Entrypoints: map[string]string{"monitor": "observe"},
+		Triggers: map[string]runbook.Trigger{"hourly": {
+			Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 */1 * * *", Timezone: "UTC"}, Entrypoint: "monitor",
+			ObjectiveID: WorkforceObjectiveKey(InitiativeOwnerTeam, candidate.Team.ID, "monitor"), MaximumConcurrent: 1,
+			Budget: &runbook.BudgetAllocation{MaxTurns: 2, MaxActions: 1, MaxDurationMS: 60000},
+		}},
+		Steps: map[string]runbook.Step{
+			"observe": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "community-source", SkillVersion: "1.2.3", Action: "observe",
+				Arguments:  map[string]runbook.Value{"url": literalActionValue("https://community.example/feed"), "maxItems": literalActionValue(5)},
+				ResultPath: "/results/observe", Next: "done",
+			}},
+			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
 	}
 	candidate.Initiative = &InitiativeBlueprint{
 		ID: "market-intelligence", Title: "Market intelligence", Purpose: "Continuously understand user pain points",

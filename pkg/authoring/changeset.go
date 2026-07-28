@@ -2059,7 +2059,7 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 		if definition == nil {
 			continue
 		}
-		canonicalizeRunbookAgentReferences(definition, ids)
+		canonicalizeRunbookReferences(definition, ids, objectiveIDs)
 		definition.ID = ids[definition.ID]
 		canonicalizeObjectiveTemplateAgents(definition.ObjectiveTemplates, ids)
 	}
@@ -2124,9 +2124,15 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 	}
 }
 
-func canonicalizeRunbookAgentReferences(definition *agent.AgentDefinition, ids map[string]string) {
+func canonicalizeRunbookReferences(definition *agent.AgentDefinition, ids, objectiveIDs map[string]string) {
 	if definition == nil || definition.Runbook == nil {
 		return
+	}
+	for triggerID, trigger := range definition.Runbook.Triggers {
+		if qualified := objectiveIDs[trigger.ObjectiveID]; qualified != "" {
+			trigger.ObjectiveID = qualified
+			definition.Runbook.Triggers[triggerID] = trigger
+		}
 	}
 	for stepID, step := range definition.Runbook.Steps {
 		if step.Delegate == nil || len(step.Delegate.AgentID.Literal) == 0 {

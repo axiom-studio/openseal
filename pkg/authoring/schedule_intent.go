@@ -2,13 +2,13 @@ package authoring
 
 import (
 	"fmt"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 const scheduleIntentQuestionID = "schedule-intent"
@@ -50,24 +50,24 @@ func enforceScheduleIntentAuthority(generated *GenerationResponse, request Gener
 	intent := parseScheduleIntent(scheduleIntentAuthorityText(request))
 	switch intent.kind {
 	case scheduleIntentManual:
-		if removeAllCandidateCadences(&generated.Candidate) {
+		if removeAllCandidateSchedules(&generated.Candidate) {
 			generated.Assumptions = append(generated.Assumptions, "Recurring schedules were removed because the request requires manual execution.")
 		}
 		removeScheduleIntentQuestion(generated)
 		return nil
 	case scheduleIntentAbsent:
-		if restoreExistingAndRemoveNewCadences(&generated.Candidate, request.Existing) {
+		if restoreExistingAndRemoveNewSchedules(&generated.Candidate, request.Existing) {
 			generated.Assumptions = append(generated.Assumptions, "Provider-created recurring schedules were removed because recurring execution was not requested.")
 		}
 		removeScheduleIntentQuestion(generated)
 		return nil
 	case scheduleIntentAmbiguous:
-		restoreExistingAndRemoveNewCadences(&generated.Candidate, request.Existing)
+		restoreExistingAndRemoveNewSchedules(&generated.Candidate, request.Existing)
 		upsertScheduleIntentQuestion(generated)
 		return nil
 	case scheduleIntentExact:
 		removeScheduleIntentQuestion(generated)
-		return validateAuthorizedCandidateCadences(&generated.Candidate, request.Existing, intent)
+		return validateAuthorizedCandidateSchedules(&generated.Candidate, request.Existing, intent)
 	default:
 		return nil
 	}
@@ -267,158 +267,153 @@ func deferScheduleBlockedMaterializationIssues(issues []ValidationIssue) []Valid
 	return result
 }
 
-func removeAllCandidateCadences(candidate *WorkforceCandidate) bool {
+func removeAllCandidateSchedules(candidate *WorkforceCandidate) bool {
 	changed := false
-	visitCandidateObjectives(candidate, func(_ string, templates []workforce.ObjectiveTemplate, _ []workforce.ObjectiveTemplate) {
-		for index := range templates {
-			if len(templates[index].Cadence) > 0 {
-				templates[index].Cadence = nil
+	for _, definition := range candidate.Agents {
+		if definition == nil || definition.Runbook == nil {
+			continue
+		}
+		for id, trigger := range definition.Runbook.Triggers {
+			if trigger.Kind == runbook.TriggerSchedule {
+				delete(definition.Runbook.Triggers, id)
 				changed = true
 			}
-		}
-	})
-	return changed
-}
-
-func restoreExistingAndRemoveNewCadences(candidate *WorkforceCandidate, existing *WorkforceCandidate) bool {
-	changed := false
-	visitCandidateObjectivesWithExisting(candidate, existing, func(_ string, templates []workforce.ObjectiveTemplate, previous []workforce.ObjectiveTemplate) {
-		byID := objectiveTemplatesByID(previous)
-		for index := range templates {
-			old := byID[templates[index].ID]
-			if old != nil && len(old.Cadence) > 0 {
-				preserved := preserveExistingCadenceAuthority(old.Cadence, templates[index].Cadence)
-				if !reflect.DeepEqual(templates[index].Cadence, preserved) {
-					templates[index].Cadence = preserved
-					changed = true
-				}
-				continue
-			}
-			if len(templates[index].Cadence) > 0 {
-				templates[index].Cadence = nil
-				changed = true
-			}
-		}
-	})
-	return changed
-}
-
-// preserveExistingCadenceAuthority keeps every schedule, concurrency, budget,
-// and assignment field from the reviewed Objective while allowing an amendment
-// to update the runTemplate payload. This is what lets a later source-scope
-// answer materialize deterministic action inputs without authorizing the model
-// to change when or how often that Objective runs.
-func preserveExistingCadenceAuthority(existing, candidate map[string]interface{}) map[string]interface{} {
-	preserved := cloneAuthoringMap(existing)
-	if candidate != nil {
-		if runTemplate, ok := candidate["runTemplate"]; ok {
-			preserved["runTemplate"] = cloneAuthoringMap(map[string]interface{}{"value": runTemplate})["value"]
 		}
 	}
-	return preserved
+	return changed
 }
 
-func validateAuthorizedCandidateCadences(candidate, existing *WorkforceCandidate, intent scheduleIntent) []ValidationIssue {
+func restoreExistingAndRemoveNewSchedules(candidate *WorkforceCandidate, existing *WorkforceCandidate) bool {
+	changed := false
+	previous := map[string]*agent.AgentDefinition{}
+	if existing != nil {
+		previous = candidateAgentsByID(existing)
+	}
+	for _, definition := range candidate.Agents {
+		if definition == nil || definition.Runbook == nil {
+			continue
+		}
+		oldSchedules := scheduleTriggers(previous[definition.ID])
+		for id, trigger := range definition.Runbook.Triggers {
+			if trigger.Kind == runbook.TriggerSchedule {
+				delete(definition.Runbook.Triggers, id)
+				changed = true
+			}
+		}
+		for id, trigger := range oldSchedules {
+			definition.Runbook.Triggers[id] = trigger
+		}
+	}
+	return changed
+}
+
+func validateAuthorizedCandidateSchedules(candidate, existing *WorkforceCandidate, intent scheduleIntent) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	matched := false
-	visitCandidateObjectivesWithExisting(candidate, existing, func(path string, templates []workforce.ObjectiveTemplate, previous []workforce.ObjectiveTemplate) {
-		byID := objectiveTemplatesByID(previous)
-		for index := range templates {
-			cadence := templates[index].Cadence
-			if len(cadence) == 0 {
+	for agentIndex, definition := range candidate.Agents {
+		if definition == nil || definition.Runbook == nil {
+			continue
+		}
+		for id, trigger := range definition.Runbook.Triggers {
+			if trigger.Kind != runbook.TriggerSchedule {
 				continue
 			}
-			if old := byID[templates[index].ID]; old != nil && reflect.DeepEqual(cadence, old.Cadence) {
-				matched = matched || cadenceMatchesScheduleIntent(cadence, intent)
-				continue
-			}
-			if cadenceMatchesScheduleIntent(cadence, intent) {
+			if scheduleMatchesIntent(trigger.Schedule, intent) {
 				matched = true
 				continue
 			}
-			issues = append(issues, issue(fmt.Sprintf("%s[%d].cadence", path, index), "schedule_intent_mismatch", "Generated cadence does not match the exact cadence authorized by the request"))
+			issues = append(issues, issue(fmt.Sprintf("agents[%d].runbook.triggers.%s.schedule", agentIndex, id), "schedule_intent_mismatch", "Generated Runbook trigger does not match the exact schedule authorized by the request"))
 		}
-	})
+	}
 	if !matched {
-		issues = append(issues, issue("candidate", "requested_schedule_missing", "The request authorizes an exact recurring cadence, but no new Objective preserves that schedule"))
+		issues = append(issues, issue("candidate", "requested_schedule_missing", "The request authorizes an exact recurring schedule, but no Runbook trigger preserves it"))
 	}
 	return issues
 }
 
-func cadenceMatchesScheduleIntent(cadence map[string]interface{}, intent scheduleIntent) bool {
-	if strings.TrimSpace(fmt.Sprint(cadence["type"])) != intent.cadenceType {
+func scheduleMatchesIntent(schedule *runbook.Schedule, intent scheduleIntent) bool {
+	if schedule == nil {
 		return false
 	}
-	if intent.cadenceType == "interval" {
-		value, ok := numericInt64(cadence["intervalSeconds"])
-		return ok && value == intent.intervalSeconds
-	}
-	if intent.cadenceType == "cron" {
-		return normalizeWhitespace(fmt.Sprint(cadence["cronExpression"])) == intent.cronExpression &&
-			strings.TrimSpace(fmt.Sprint(cadence["timezone"])) == intent.timezone
-	}
-	if strings.TrimSpace(fmt.Sprint(cadence["timeOfDay"])) != intent.timeOfDay || strings.TrimSpace(fmt.Sprint(cadence["timezone"])) != intent.timezone {
-		return false
-	}
-	jitter, _ := numericInt64(cadence["jitterSeconds"])
-	if jitter != intent.jitterSeconds {
-		return false
-	}
-	return intent.cadenceType != "weekly" || strings.EqualFold(strings.TrimSpace(fmt.Sprint(cadence["dayOfWeek"])), intent.dayOfWeek)
+	expected, err := scheduleForIntent(intent)
+	return err == nil && normalizeWhitespace(schedule.Cron) == expected.Cron &&
+		strings.TrimSpace(schedule.Timezone) == expected.Timezone && schedule.JitterSeconds == expected.JitterSeconds
 }
 
 func normalizeWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-func numericInt64(value interface{}) (int64, bool) {
-	switch number := value.(type) {
-	case int:
-		return int64(number), true
-	case int64:
-		return number, true
-	case float64:
-		integer := int64(number)
-		return integer, float64(integer) == number
+func scheduleForIntent(intent scheduleIntent) (*runbook.Schedule, error) {
+	timezone := strings.TrimSpace(intent.timezone)
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	cronExpression := strings.TrimSpace(intent.cronExpression)
+	switch intent.cadenceType {
+	case "interval":
+		var err error
+		cronExpression, err = authoringIntervalCron(intent.intervalSeconds)
+		if err != nil {
+			return nil, err
+		}
+	case "daily":
+		hour, minute, err := scheduleClockParts(intent.timeOfDay)
+		if err != nil {
+			return nil, err
+		}
+		cronExpression = fmt.Sprintf("0 %d %d * * *", minute, hour)
+	case "weekly":
+		hour, minute, err := scheduleClockParts(intent.timeOfDay)
+		if err != nil {
+			return nil, err
+		}
+		weekday := map[string]int{"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6}[strings.ToLower(intent.dayOfWeek)]
+		cronExpression = fmt.Sprintf("0 %d %d * * %d", minute, hour, weekday)
+	case "cron":
 	default:
-		return 0, false
+		return nil, fmt.Errorf("unsupported schedule intent %q", intent.cadenceType)
+	}
+	result := &runbook.Schedule{Cron: cronExpression, Timezone: timezone, JitterSeconds: intent.jitterSeconds}
+	return result, result.Validate()
+}
+
+func scheduleClockParts(value string) (int, int, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("schedule clock must be HH:MM")
+	}
+	hour, hourErr := strconv.Atoi(parts[0])
+	minute, minuteErr := strconv.Atoi(parts[1])
+	if hourErr != nil || minuteErr != nil {
+		return 0, 0, fmt.Errorf("schedule clock must be HH:MM")
+	}
+	return hour, minute, nil
+}
+
+func authoringIntervalCron(seconds int64) (string, error) {
+	switch {
+	case seconds > 0 && seconds < 60 && 60%seconds == 0:
+		return fmt.Sprintf("*/%d * * * * *", seconds), nil
+	case seconds >= 60 && seconds < 3600 && seconds%60 == 0 && 60%(seconds/60) == 0:
+		return fmt.Sprintf("0 */%d * * * *", seconds/60), nil
+	case seconds >= 3600 && seconds < 86400 && seconds%3600 == 0 && 24%(seconds/3600) == 0:
+		return fmt.Sprintf("0 0 */%d * * *", seconds/3600), nil
+	case seconds == 86400:
+		return "0 0 0 * * *", nil
+	default:
+		return "", fmt.Errorf("interval %d seconds is not representable by the portable cron trigger", seconds)
 	}
 }
 
-func objectiveTemplatesByID(templates []workforce.ObjectiveTemplate) map[string]*workforce.ObjectiveTemplate {
-	result := make(map[string]*workforce.ObjectiveTemplate, len(templates))
-	for index := range templates {
-		result[templates[index].ID] = &templates[index]
-	}
-	return result
-}
-
-func visitCandidateObjectives(candidate *WorkforceCandidate, visit func(string, []workforce.ObjectiveTemplate, []workforce.ObjectiveTemplate)) {
-	visitCandidateObjectivesWithExisting(candidate, nil, visit)
-}
-
-func visitCandidateObjectivesWithExisting(candidate, existing *WorkforceCandidate, visit func(string, []workforce.ObjectiveTemplate, []workforce.ObjectiveTemplate)) {
-	if candidate == nil {
-		return
-	}
-	existingAgents := map[string][]workforce.ObjectiveTemplate{}
-	if existing != nil {
-		for _, definition := range existing.Agents {
-			if definition != nil {
-				existingAgents[definition.ID] = definition.ObjectiveTemplates
+func scheduleTriggers(definition *agent.AgentDefinition) map[string]runbook.Trigger {
+	result := map[string]runbook.Trigger{}
+	if definition != nil && definition.Runbook != nil {
+		for id, trigger := range definition.Runbook.Triggers {
+			if trigger.Kind == runbook.TriggerSchedule {
+				result[id] = trigger
 			}
 		}
 	}
-	for index, definition := range candidate.Agents {
-		if definition != nil {
-			visit(fmt.Sprintf("agents[%d].objectiveTemplates", index), definition.ObjectiveTemplates, existingAgents[definition.ID])
-		}
-	}
-	if candidate.Team != nil {
-		var previous []workforce.ObjectiveTemplate
-		if existing != nil && existing.Team != nil && existing.Team.ID == candidate.Team.ID {
-			previous = existing.Team.ObjectiveTemplates
-		}
-		visit("team.objectiveTemplates", candidate.Team.ObjectiveTemplates, previous)
-	}
+	return result
 }

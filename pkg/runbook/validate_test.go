@@ -63,7 +63,7 @@ func TestValidatePortableEventTriggers(t *testing.T) {
 		APIVersion: APIVersion, ID: "chatbot", Version: "1", Name: "Chatbot",
 		Entrypoints: map[string]string{"on-message": "done"},
 		Triggers: map[string]Trigger{"conversation-message": {
-			Kind: TriggerEvent, EventType: "conversation.message.received", Entrypoint: "on-message",
+			Kind: TriggerEvent, EventType: "conversation.message.received", Entrypoint: "on-message", ObjectiveID: "agent:chatbot:respond",
 		}},
 		Steps: map[string]Step{"done": {Kind: StepEnd, End: &EndStep{}}},
 	}
