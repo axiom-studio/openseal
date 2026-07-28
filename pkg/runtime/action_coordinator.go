@@ -20,11 +20,12 @@ const (
 )
 
 type ActionPolicyInput struct {
-	Run       *AgentRun
-	Bound     *skill.BoundAction
-	Arguments map[string]interface{}
-	Actor     ActivityActor
-	Summary   string
+	Run               *AgentRun
+	Bound             *skill.BoundAction
+	Arguments         map[string]interface{}
+	ExternalOperation *ExternalOperationIdentity
+	Actor             ActivityActor
+	Summary           string
 }
 
 type ActionPolicyDecision struct {
@@ -212,7 +213,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			return nil, &ExternalOperationConflictError{Prior: prior}
 		}
 	}
-	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), Actor: req.Actor, Summary: req.Summary})
+	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary})
 	if err != nil {
 		return nil, fmt.Errorf("evaluate action policy: %w", err)
 	}
