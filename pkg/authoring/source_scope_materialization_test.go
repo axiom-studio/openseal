@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -94,6 +95,52 @@ func TestCompilerMaterializesAnsweredSourceScopeAndPreservesDroppedObjective(t *
 		if issue.Code == "source_scope_not_materialized" {
 			t.Fatalf("valid answer remained blocked: %#v", first.Validation)
 		}
+	}
+}
+
+func TestMaterializesSourceScopeThroughScheduledRunbookEntrypoint(t *testing.T) {
+	catalog := sourceScopeCatalog()
+	catalog.CapabilityNeeds[0].SourceScope.Targets = []string{"r/openclaw", "r/selfhosted"}
+	definition := sourceScopeAgent("1.0.0", workforce.ObjectiveTemplate{
+		ID: "monitor", Title: "Monitor Reddit", Goal: "Review permitted communities", Priority: 1,
+		Cadence: map[string]interface{}{
+			"type": "daily", "timeOfDay": "00:00", "timezone": "UTC", "assignedAgentId": "researcher",
+			"runTemplate": map[string]interface{}{"entrypoint": "review"},
+		},
+	})
+	definition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "review", Version: "1.0.0", Name: "Review",
+		Entrypoints: map[string]string{"review": "search"},
+		Interfaces: map[string]runbook.Interface{"review": {
+			Description: "Review configured communities.",
+			InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{}, "required": []interface{}{}},
+		}},
+		Steps: map[string]runbook.Step{
+			"search": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "reddit-search", SkillVersion: "2.0.0", Action: "search", ResultPath: "/results/search", Next: "review"}},
+			"review": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{AgentID: literalActionValue("researcher"), Goal: literalActionValue("Review the bounded source results."), ResultPath: "/results/review", Next: "done"}},
+			"done":   {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{definition}}
+	request := GenerateRequest{Mode: ModeCreate, Prompt: "Monitor both communities daily", Catalog: catalog}
+	if issues := materializeAnsweredCapabilitySourceScopes(&candidate, request); len(issues) != 0 {
+		t.Fatalf("Runbook source materialization issues = %#v", issues)
+	}
+
+	template := definition.ObjectiveTemplates[0].Cadence["runTemplate"].(map[string]interface{})
+	contextValues := template["context"].(map[string]interface{})
+	if !reflect.DeepEqual(contextValues["subreddits"], []string{"r/openclaw", "r/selfhosted"}) {
+		t.Fatalf("Runbook schedule source context = %#v", contextValues)
+	}
+	contract := definition.Runbook.Interfaces["review"]
+	if !stringSet(schemaStringList(contract.InputSchema["required"]))["subreddits"] {
+		t.Fatalf("Runbook source interface = %#v", contract.InputSchema)
+	}
+	if reference := definition.Runbook.Steps["review"].Delegate.Context["subreddits"].Ref; reference != "/input/subreddits" {
+		t.Fatalf("delegate source reference = %q", reference)
+	}
+	if !capabilitySourceScopeMaterialized(&candidate, catalog.CapabilityNeeds[0], catalog.CapabilityNeeds[0].SourceScope.Targets, catalog.CapabilityNeeds[0].SourceScope.MaterializationInputKeys, catalog) {
+		t.Fatal("Runbook source scope was not recognized as durable")
 	}
 }
 

@@ -266,7 +266,7 @@ func validateAnsweredCapabilityNeeds(candidate *WorkforceCandidate, request Gene
 		// network capability would ignore the operator's audited choice and can
 		// bypass the Initiative monitor envelope. Require one exact executable
 		// invocation before source-scope materialization proceeds.
-		if selected.SourceScope != nil && sourceCapabilityRequiresDurableAction(request) && len(matchingSourceScopeInvocations(candidate, selected, request.Catalog)) == 0 {
+		if selected.SourceScope != nil && sourceCapabilityRequiresDurableAction(request) && len(matchingSourceScopeInvocations(candidate, selected, request.Catalog)) == 0 && len(matchingSourceScopeRunbooks(candidate, selected, request.Catalog)) == 0 {
 			issues = append(issues, issue("objectives.cadence.runTemplate.capability", "capability_need_action_not_materialized", fmt.Sprintf("Answered source capability need %s must be used by an exact durable Objective action", need.ID)))
 		}
 	}
@@ -320,14 +320,14 @@ func validateCapabilitySourceScopeFulfillment(candidate *WorkforceCandidate, req
 			continue
 		}
 		need = selectedCapabilityNeed(need, answered)
-		if !capabilitySourceScopeMaterialized(candidate, need, answer.Items, requirement.MaterializationInputKeys) {
+		if !capabilitySourceScopeMaterialized(candidate, need, answer.Items, requirement.MaterializationInputKeys, request.Catalog) {
 			issues = append(issues, issue("objectives.cadence.runTemplate.capability.inputs", "source_scope_not_materialized", "Every answered source target must be present in a durable capability action input"))
 		}
 	}
 	return issues
 }
 
-func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need CapabilityNeed, targets, inputKeys []string) bool {
+func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need CapabilityNeed, targets, inputKeys []string, catalogs ...CapabilityCatalog) bool {
 	targets = nonEmptyUnique(targets)
 	if candidate == nil || len(targets) == 0 {
 		return false
@@ -343,6 +343,23 @@ func capabilitySourceScopeMaterialized(candidate *WorkforceCandidate, need Capab
 		}
 		inputs, _ := invocation["inputs"].(map[string]interface{})
 		for key, value := range inputs {
+			if !allowedKeys[key] {
+				continue
+			}
+			materialized := strings.ToLower(fmt.Sprint(value))
+			for _, target := range targets {
+				if strings.Contains(materialized, strings.ToLower(target)) {
+					found[target] = true
+				}
+			}
+		}
+	}
+	if len(catalogs) == 0 {
+		return len(found) == len(targets)
+	}
+	for _, route := range matchingSourceScopeRunbooks(candidate, need, catalogs[0]) {
+		contextValues, _ := route.template["context"].(map[string]interface{})
+		for key, value := range contextValues {
 			if !allowedKeys[key] {
 				continue
 			}
