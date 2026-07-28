@@ -148,10 +148,10 @@ func validateProjectBlueprint(candidate *WorkforceCandidate, agents map[string]*
 	return issues
 }
 
-// validateSourceMonitorContext prevents a scheduled Objective from claiming
-// provenance that the reviewed Project does not define. Runtime placement
-// resolves these symbolic references and the scheduler deliberately rejects
-// drift, so an orphan must be repaired before the candidate can be activated.
+// validateSourceMonitorContext prevents an Objective-owned Runbook trigger
+// from claiming provenance that the reviewed Project does not define. Runtime
+// placement resolves these symbolic references and the scheduler deliberately
+// rejects drift, so an orphan must be repaired before activation.
 func validateSourceMonitorContext(_ *WorkforceCandidate) []ValidationIssue {
 	return nil
 }
