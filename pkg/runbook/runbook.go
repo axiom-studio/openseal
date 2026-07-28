@@ -4,9 +4,15 @@
 package runbook
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 const APIVersion = "openseal.dev/runbook/v1alpha1"
@@ -36,13 +42,103 @@ type TriggerKind string
 
 const TriggerEvent TriggerKind = "event"
 
+const TriggerSchedule TriggerKind = "schedule"
+
 // Trigger declares how an external normalized wake enters a deterministic
 // Runbook. Transport configuration and credentials stay in provider Skills;
 // the Runbook consumes only a canonical event type and entrypoint.
 type Trigger struct {
 	Kind       TriggerKind `json:"kind"`
-	EventType  string      `json:"eventType"`
+	EventType  string      `json:"eventType,omitempty"`
+	Schedule   *Schedule   `json:"schedule,omitempty"`
 	Entrypoint string      `json:"entrypoint"`
+}
+
+// Schedule is the portable timing contract of a Runbook trigger. Authoring
+// surfaces may accept friendly phrases such as "daily" or "every weekday",
+// but persist one explicit six-field cron expression. Jitter is part of the
+// trigger itself and selects one restart-stable instant after each cron
+// occurrence; it is never a detached Objective setting or a worker timer.
+type Schedule struct {
+	Cron          string `json:"cron"`
+	Timezone      string `json:"timezone"`
+	JitterSeconds int64  `json:"jitterSeconds,omitempty"`
+}
+
+const maximumScheduleJitterSeconds = 31 * 24 * 60 * 60
+
+func (s *Schedule) Validate() error {
+	if s == nil {
+		return errors.New("schedule is required")
+	}
+	if s.JitterSeconds < 0 || s.JitterSeconds > maximumScheduleJitterSeconds {
+		return fmt.Errorf("schedule jitterSeconds must be between 0 and %d", maximumScheduleJitterSeconds)
+	}
+	if strings.TrimSpace(s.Timezone) == "" {
+		return errors.New("schedule timezone is required")
+	}
+	if _, err := time.LoadLocation(strings.TrimSpace(s.Timezone)); err != nil {
+		return fmt.Errorf("schedule timezone: %w", err)
+	}
+	_, err := parseScheduleCron(s.Cron)
+	return err
+}
+
+// NextBase returns the next unjittered cron occurrence. Durable schedulers
+// persist this cursor so replicas never derive timing from process-local state.
+func (s *Schedule) NextBase(after time.Time) (time.Time, error) {
+	if err := s.Validate(); err != nil {
+		return time.Time{}, err
+	}
+	location, _ := time.LoadLocation(strings.TrimSpace(s.Timezone))
+	parsed, _ := parseScheduleCron(s.Cron)
+	return parsed.Next(after.In(location)).UTC(), nil
+}
+
+// DueAt deterministically selects the instant inside one cron occurrence's
+// jitter window. triggerKey must identify the activated Runbook trigger, not
+// merely its reusable definition, so independently configured activations do
+// not converge on the same offset.
+func (s *Schedule) DueAt(triggerKey string, base time.Time) (time.Time, error) {
+	if err := s.Validate(); err != nil {
+		return time.Time{}, err
+	}
+	key := strings.TrimSpace(triggerKey)
+	if key == "" {
+		return time.Time{}, errors.New("scheduled Runbook trigger requires a stable trigger key")
+	}
+	base = base.UTC()
+	if s.JitterSeconds == 0 {
+		return base, nil
+	}
+	seed := strings.Join([]string{key, strings.TrimSpace(s.Cron), strings.TrimSpace(s.Timezone), base.Format(time.RFC3339Nano)}, "\x00")
+	digest := sha256.Sum256([]byte(seed))
+	offset := binary.BigEndian.Uint64(digest[:8]) % uint64(s.JitterSeconds+1)
+	return base.Add(time.Duration(offset) * time.Second), nil
+}
+
+func (s *Schedule) Window(base time.Time) (time.Time, time.Time, error) {
+	if err := s.Validate(); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	start := base.UTC()
+	return start, start.Add(time.Duration(s.JitterSeconds) * time.Second), nil
+}
+
+func parseScheduleCron(value string) (cron.Schedule, error) {
+	expression := strings.TrimSpace(value)
+	if expression == "" {
+		return nil, errors.New("schedule cron is required")
+	}
+	if len(expression) > 128 {
+		return nil, errors.New("schedule cron cannot exceed 128 characters")
+	}
+	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parsed, err := parser.Parse(expression)
+	if err != nil {
+		return nil, fmt.Errorf("schedule cron must contain six valid fields: %w", err)
+	}
+	return parsed, nil
 }
 
 type StepKind string
