@@ -21,7 +21,7 @@ const (
 	ObjectivesCapabilityID                     = "objectives"
 	ObjectivesCapabilityVersion                = "1"
 	RunbooksCapabilityID                       = "runbooks"
-	RunbooksCapabilityVersion                  = "1"
+	RunbooksCapabilityVersion                  = "2"
 	ProjectsCapabilityID                       = "projects"
 	ProjectsCapabilityVersion                  = "1"
 	SourceMonitorsCapabilityID                 = "source-monitors"
@@ -71,6 +71,7 @@ const (
 
 const (
 	OperationCreate               = "create"
+	OperationExecute              = "execute"
 	OperationGet                  = "get"
 	OperationList                 = "list"
 	OperationPause                = "pause"
@@ -449,7 +450,7 @@ func ObjectivesCapability() Capability {
 func RunbooksCapability() Capability {
 	return Capability{
 		ID: RunbooksCapabilityID, Version: RunbooksCapabilityVersion, Available: true,
-		Operations: []string{OperationGet, OperationList, OperationUpdate, OperationReconcile},
+		Operations: []string{OperationGet, OperationList, OperationUpdate, OperationExecute, OperationReconcile},
 	}
 }
 

@@ -56,6 +56,9 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if created.Entrypoint != "review" || created.AssignedAgentID != "rowan" || created.Context["runbookActivationId"] != activation.ID || created.Context["runbookTriggerId"] != "daily" {
 		t.Fatalf("scheduled Run=%#v", created)
 	}
+	if pin, ok := created.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != activation.DefinitionID || pin["version"] != activation.DefinitionVersion || pin["trigger"] != activation.TriggerID {
+		t.Fatalf("scheduled Run pin=%#v", created.Plan)
+	}
 	if communities, ok := created.Context["communities"].([]interface{}); !ok || len(communities) != 1 {
 		t.Fatalf("Runbook input=%#v", created.Context)
 	}

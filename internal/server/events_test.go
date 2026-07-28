@@ -31,7 +31,7 @@ func TestEventAPIProjectsCanonicalRunsAndRejectsProtocolDrift(t *testing.T) {
 	if err := json.NewDecoder(createdObjective.Body).Decode(&objective); err != nil {
 		t.Fatal(err)
 	}
-	_, err := runtime.NewRunbookActivationService(store).Create(context.Background(), runtime.CreateRunbookActivationRequest{
+	activation, err := runtime.NewRunbookActivationService(store).Create(context.Background(), runtime.CreateRunbookActivationRequest{
 		ID: "backoff", Scope: objective.Scope, Owner: objective.Owner, ObjectiveID: objective.ID, AssignedAgentID: "sre",
 		DefinitionID: "kubernetes-investigation", DefinitionVersion: "1", TriggerID: "backoff",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent, EventType: "kubernetes.warning", Entrypoint: "investigate"},
@@ -56,6 +56,9 @@ func TestEventAPIProjectsCanonicalRunsAndRejectsProtocolDrift(t *testing.T) {
 	}
 	if len(result.Routes) != 1 || !result.Routes[0].Created || result.Routes[0].Run.ObjectiveID != objective.ID || result.Routes[0].Run.Source != runtime.RunSourceEvent {
 		t.Fatalf("event routes = %#v", result)
+	}
+	if pin, ok := result.Routes[0].Run.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != activation.DefinitionID || pin["version"] != activation.DefinitionVersion || pin["trigger"] != activation.TriggerID {
+		t.Fatalf("event Run pin=%#v", result.Routes[0].Run.Plan)
 	}
 	replay := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/events", eventBody, "")
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), result.Routes[0].Run.ID) {

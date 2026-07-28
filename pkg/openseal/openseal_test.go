@@ -27,7 +27,7 @@ func TestPublicFacadeExposesSourcePolicyLifecycleCapability(t *testing.T) {
 
 func TestPublicFacadeExposesRunbookScheduleReconciliation(t *testing.T) {
 	capability := RunbooksCapability()
-	if capability.ID != RunbooksCapabilityID || capability.Version != RunbooksCapabilityVersion || !capability.Supports(KernelOperationReconcile) {
+	if capability.ID != RunbooksCapabilityID || capability.Version != RunbooksCapabilityVersion || !capability.Supports(KernelOperationReconcile) || !capability.Supports(KernelOperationExecute) {
 		t.Fatalf("objective schedule capability = %#v", capability)
 	}
 	request := ReconcileRunbookSchedulesRequest{Scope: Scope{Kind: "tenant", ID: "operations"}, Limit: 50}

@@ -863,6 +863,10 @@ func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ runtime.Scope, id 
 	return nil, runtime.ErrRunbookActivationNotFound
 }
 
+func (f *fakeKernelClient) StartRunbook(_ context.Context, _ runtime.Scope, _ string, _ runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
+	return nil, errors.New("starting Runbooks is not configured in this TUI test")
+}
+
 func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error) {
 	f.objectiveUpdates = append(f.objectiveUpdates, request)
 	for _, objective := range f.objectives {

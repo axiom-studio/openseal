@@ -169,7 +169,7 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 			Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 			Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
 			Goal: objective.Goal, Source: RunSourceSchedule, Priority: objective.Priority, Context: contextValues,
-			Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget), IdempotencyKey: idempotencyKey,
+			Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget), IdempotencyKey: idempotencyKey,
 			Actor: ActivityActor{Type: "service", ID: "runbook-scheduler"}, Visibility: runbookScheduleVisibility(activation),
 		})
 		if err != nil {

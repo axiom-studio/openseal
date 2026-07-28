@@ -191,9 +191,19 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	started, err := StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
+	if err != nil || started.Run == nil {
+		t.Fatalf("started=%#v err=%v", started, err)
+	}
+	if pin, ok := started.Run.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != "work" || pin["version"] != "1" || pin["trigger"] != "daily" {
+		t.Fatalf("manual Run pin=%#v", started.Run.Plan)
+	}
 	paused, err := service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
 	if err != nil || paused.Status != RunbookActivationPaused || paused.Revision != 2 {
 		t.Fatalf("paused=%#v err=%v", paused, err)
+	}
+	if _, err = StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "paused-run"}); !errors.Is(err, ErrRunbookActivationInactive) {
+		t.Fatalf("paused start error=%v", err)
 	}
 	if _, err = service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: 1, Status: RunbookActivationActive}); !errors.Is(err, ErrRunbookActivationRevision) {
 		t.Fatalf("stale update error=%v", err)
