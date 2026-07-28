@@ -197,6 +197,7 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 	compact.CapabilityNeeds = nil
 	compact.AgentCredentialRequirements = nil
 	compact.AvailableCredentialGrants = nil
+	compact.HostedExecution = nil
 	for id, skill := range compact.Skills {
 		// Exact installed authority is server-owned placement input. The model
 		// sees the catalog id and declared contract, never this binding choice.
@@ -204,6 +205,7 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 		// Exact schemas are deterministic post-generation validation input. The
 		// model receives only the bounded action names and risks it may select.
 		skill.ActionContracts = nil
+		skill.HostedModelInputTokens = 0
 		constraints := make([]SkillCompatibility, 0, len(skill.Compatibility))
 		for _, compatibility := range skill.Compatibility {
 			if compatibility.Compatible {

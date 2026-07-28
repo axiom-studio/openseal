@@ -775,6 +775,11 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 	if err := ValidateRuntimeCompositionCapability(catalog.RuntimeComposition); err != nil {
 		return fmt.Errorf("runtime composition capability: %w", err)
 	}
+	if hosted := catalog.HostedExecution; hosted != nil {
+		if hosted.ProtocolVersion != HostedExecutionProtocolV1 || hosted.BaseInputTokens < 1 || hosted.MinimumOutputTokens < 1 {
+			return errors.New("hosted execution capability is invalid")
+		}
+	}
 	if constraint := catalog.AuthorityConstraint; constraint != nil {
 		if constraint.ID != strings.TrimSpace(constraint.ID) || constraint.Version != strings.TrimSpace(constraint.Version) ||
 			!catalogDiagnosticReferencePattern.MatchString(constraint.ID) || !authorityConstraintVersionPattern.MatchString(constraint.Version) {
@@ -796,6 +801,9 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		}
 		if skill.MaximumRisk != "" && riskRank(skill.MaximumRisk) < 0 {
 			return fmt.Errorf("Skill %s maximum risk is invalid", id)
+		}
+		if skill.HostedModelInputTokens < 0 || (catalog.HostedExecution != nil && (len(skill.Actions) > 0 || skill.PromptAvailable) && skill.HostedModelInputTokens < 1) {
+			return fmt.Errorf("Skill %s hosted model input ceiling is invalid", id)
 		}
 		actions := stringSet(skill.Actions)
 		for action, risk := range skill.ActionRisks {
