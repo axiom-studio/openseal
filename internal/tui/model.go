@@ -266,6 +266,10 @@ type Model struct {
 	runbooks                           []*runtime.RunbookActivation
 	objectiveSelected                  int
 	selectedObjective                  string
+	runbookSelected                    int
+	selectedRunbook                    string
+	runbookDetail                      *runtime.RunbookDetail
+	runbookDetailExpanded              bool
 	eventSources                       []*runtime.EventSourceSubscription
 	eventSourceSelected                int
 	selectedEventSource                string
@@ -481,6 +485,23 @@ type objectivesLoaded struct {
 	objectives []*runtime.Objective
 	runbooks   []*runtime.RunbookActivation
 	err        error
+}
+
+type runbookDetailLoaded struct {
+	id     string
+	detail *runtime.RunbookDetail
+	err    error
+}
+
+type runbookChanged struct {
+	activation *runtime.RunbookActivation
+	action     string
+	err        error
+}
+
+type runbookStarted struct {
+	result *runtime.AgentRunCommandResult
+	err    error
 }
 
 type objectiveCreated struct {
@@ -1060,7 +1081,47 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectives = msg.objectives
 		m.runbooks = msg.runbooks
 		m.restoreObjectiveSelection()
+		m.restoreRunbookSelection()
 		return m, nil
+	case runbookDetailLoaded:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "The reviewed Runbook could not be loaded."
+			return m, nil
+		}
+		m.err = nil
+		if msg.id == m.selectedRunbook {
+			m.runbookDetail = msg.detail
+		}
+		return m, nil
+	case runbookChanged:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = msg.action + " failed. Authoritative Runbook state was preserved."
+			return m, m.loadObjectives()
+		}
+		m.err = nil
+		if msg.activation != nil {
+			m.selectedRunbook = msg.activation.ID
+			m.status = fmt.Sprintf("Runbook %s · revision %d.", msg.action, msg.activation.Revision)
+		}
+		return m, m.loadObjectives()
+	case runbookStarted:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Runbook start failed. No client-authored Run was substituted."
+			return m, nil
+		}
+		m.err = nil
+		if msg.result != nil && msg.result.Run != nil {
+			m.status = fmt.Sprintf("Runbook started · Run %s.", msg.result.Run.ID)
+		} else {
+			m.status = "Runbook started."
+		}
+		return m, tea.Batch(m.loadObjectives(), m.loadRuns())
 	case runbookSchedulesReconciled:
 		m.busy = false
 		if msg.err != nil {
@@ -1931,6 +1992,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionRuns {
 				return m, m.loadSelectedRunHistory()
 			}
+		case "left":
+			if m.section == sectionObjectives {
+				m.moveRunbookSelection(-1)
+			}
+		case "right":
+			if m.section == sectionObjectives {
+				m.moveRunbookSelection(1)
+			}
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
@@ -2129,6 +2198,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "p":
 			if m.section == sectionRuns {
 				return m, m.pauseOrResume()
+			} else if m.section == sectionObjectives {
+				return m, m.pauseOrResumeSelectedRunbook()
 			} else if m.section == sectionReadiness {
 				return m, m.pauseOrResumeAgentDeployment()
 			} else if m.section == sectionTeams {
@@ -2233,6 +2304,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
 			} else if m.section == sectionAuthoring && m.canPrepareWorkforceActivation() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceActivate, "Why should these reviewed resources start working now?…")
+			} else if m.section == sectionObjectives && key == "enter" && m.selectedRunbookRecord() != nil && m.supportsRunbook(kernelapi.OperationGet) {
+				return m, m.toggleSelectedRunbookDetail()
 			} else if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
 				m.mode = modeObjectiveEdit
 				m.editor.Reset()
@@ -2269,7 +2342,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.deliverSelectedOutreachDraft()
 			}
 		case "u":
-			if m.section == sectionSkills {
+			if m.section == sectionObjectives {
+				return m, m.startSelectedRunbook()
+			} else if m.section == sectionSkills {
 				return m, m.updateSelectedClawHub()
 			}
 		case "U":
@@ -3129,6 +3204,62 @@ func (m *Model) loadObjectives() tea.Cmd {
 			runbooks, err = m.client.ListRunbooks(m.ctx, runtime.RunbookActivationFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 500})
 		}
 		return objectivesLoaded{objectives: objectives, runbooks: runbooks, err: err}
+	}
+}
+
+func (m *Model) toggleSelectedRunbookDetail() tea.Cmd {
+	selected := m.selectedRunbookRecord()
+	if selected == nil || !m.supportsRunbook(kernelapi.OperationGet) {
+		return nil
+	}
+	if m.runbookDetailExpanded {
+		m.runbookDetailExpanded = false
+		return nil
+	}
+	m.runbookDetailExpanded = true
+	if m.runbookDetail != nil && m.runbookDetail.Activation != nil && m.runbookDetail.Activation.ID == selected.ID {
+		return nil
+	}
+	m.loading = true
+	id := selected.ID
+	return func() tea.Msg {
+		detail, err := m.client.GetRunbook(m.ctx, m.config.Scope, id)
+		return runbookDetailLoaded{id: id, detail: detail, err: err}
+	}
+}
+
+func (m *Model) startSelectedRunbook() tea.Cmd {
+	selected := m.selectedRunbookRecord()
+	if selected == nil || selected.Status != runtime.RunbookActivationActive || !m.supportsRunbook(kernelapi.OperationExecute) || m.busy {
+		return nil
+	}
+	m.busy, m.err = true, nil
+	m.status = "Starting the exact reviewed Runbook…"
+	id := selected.ID
+	return func() tea.Msg {
+		result, err := m.client.StartRunbook(m.ctx, m.config.Scope, id, runtime.StartRunbookActivationRequest{
+			IdempotencyKey: uuid.NewString(),
+			Actor:          m.config.Actor,
+		})
+		return runbookStarted{result: result, err: err}
+	}
+}
+
+func (m *Model) pauseOrResumeSelectedRunbook() tea.Cmd {
+	selected := m.selectedRunbookRecord()
+	if selected == nil || selected.Status == runtime.RunbookActivationRetired || !m.supportsRunbook(kernelapi.OperationUpdate) || m.busy {
+		return nil
+	}
+	status, action := runtime.RunbookActivationActive, "resumed"
+	if selected.Status == runtime.RunbookActivationActive {
+		status, action = runtime.RunbookActivationPaused, "paused"
+	}
+	m.busy, m.err = true, nil
+	m.status = "Updating Runbook lifecycle…"
+	id, revision := selected.ID, selected.Revision
+	return func() tea.Msg {
+		activation, err := m.client.UpdateRunbook(m.ctx, m.config.Scope, id, runtime.UpdateRunbookActivationRequest{ExpectedRevision: revision, Status: status})
+		return runbookChanged{activation: activation, action: action, err: err}
 	}
 }
 
@@ -5350,6 +5481,64 @@ func (m *Model) selectedObjectiveRecord() *runtime.Objective {
 	return m.objectives[m.objectiveSelected]
 }
 
+func (m *Model) selectedObjectiveRunbooks() []*runtime.RunbookActivation {
+	values := make([]*runtime.RunbookActivation, 0)
+	objective := m.selectedObjectiveRecord()
+	if objective == nil {
+		return values
+	}
+	for _, value := range m.runbooks {
+		if value != nil && value.ObjectiveID == objective.ID {
+			values = append(values, value)
+		}
+	}
+	sort.SliceStable(values, func(left, right int) bool {
+		if values[left].CreatedAt.Equal(values[right].CreatedAt) {
+			return values[left].ID < values[right].ID
+		}
+		return values[left].CreatedAt.Before(values[right].CreatedAt)
+	})
+	return values
+}
+
+func (m *Model) selectedRunbookRecord() *runtime.RunbookActivation {
+	values := m.selectedObjectiveRunbooks()
+	if m.runbookSelected < 0 || m.runbookSelected >= len(values) {
+		return nil
+	}
+	return values[m.runbookSelected]
+}
+
+func (m *Model) restoreRunbookSelection() {
+	values := m.selectedObjectiveRunbooks()
+	if len(values) == 0 {
+		m.runbookSelected, m.selectedRunbook, m.runbookDetail = 0, "", nil
+		m.runbookDetailExpanded = false
+		return
+	}
+	for index, value := range values {
+		if value.ID == m.selectedRunbook {
+			m.runbookSelected = index
+			return
+		}
+	}
+	m.runbookSelected = min(m.runbookSelected, len(values)-1)
+	m.selectedRunbook = values[m.runbookSelected].ID
+	m.runbookDetail = nil
+	m.runbookDetailExpanded = false
+}
+
+func (m *Model) moveRunbookSelection(delta int) {
+	values := m.selectedObjectiveRunbooks()
+	if len(values) == 0 {
+		return
+	}
+	m.runbookSelected = max(0, min(len(values)-1, m.runbookSelected+delta))
+	m.selectedRunbook = values[m.runbookSelected].ID
+	m.runbookDetail = nil
+	m.runbookDetailExpanded = false
+}
+
 func (m *Model) selectedEventSourceRecord() *runtime.EventSourceSubscription {
 	if m.eventSourceSelected < 0 || m.eventSourceSelected >= len(m.eventSources) {
 		return nil
@@ -5415,6 +5604,10 @@ func (m *Model) moveObjectiveSelection(delta int) {
 	}
 	m.objectiveSelected = max(0, min(len(m.objectives)-1, m.objectiveSelected+delta))
 	m.selectedObjective = m.objectives[m.objectiveSelected].ID
+	m.selectedRunbook, m.runbookDetail = "", nil
+	m.runbookSelected = 0
+	m.runbookDetailExpanded = false
+	m.restoreRunbookSelection()
 	m.resetEvidenceInspection()
 }
 
