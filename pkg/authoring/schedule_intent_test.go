@@ -150,12 +150,13 @@ func TestScheduleIntentNaturalOnceDailyLanguageRequestsMissingClockAndTimezone(t
 func TestScheduleIntentDailyVariedTimeUsesPortableJitterWindow(t *testing.T) {
 	cadence := dailyCadence("00:00", "UTC")
 	cadence["jitterSeconds"] = int64(86399)
-	result := compileScheduledCandidate(t, "Create one Agent that runs once per day at a varied time UTC", scheduledAuthoringCandidate(cadence), nil, nil)
+	prompt := "Create one Agent that scours r/greenwoodworking and r/woodcarving once per day at a varied time UTC"
+	result := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(cadence), nil, nil)
 	if !result.Valid || hasScheduleIntentQuestion(result.UnresolvedQuestions) || len(result.Validation) != 0 {
 		t.Fatalf("varied daily schedule = %#v", result)
 	}
 
-	missingJitter := compileScheduledCandidate(t, "Create one Agent that runs once per day at a varied time UTC", scheduledAuthoringCandidate(dailyCadence("00:00", "UTC")), nil, nil)
+	missingJitter := compileScheduledCandidate(t, prompt, scheduledAuthoringCandidate(dailyCadence("00:00", "UTC")), nil, nil)
 	if missingJitter.Valid || !hasValidationCode(missingJitter.Validation, "schedule_intent_mismatch") {
 		t.Fatalf("fixed schedule satisfied varied-time intent: %#v", missingJitter)
 	}
