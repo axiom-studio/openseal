@@ -401,7 +401,7 @@ func composeResearchWorkforce(
 			request.Cadence = &ObjectiveCadence{
 				Type: ObjectiveCadenceInterval, IntervalSeconds: 3600, AssignedAgentID: researcherID,
 				RunTemplate: &ObjectiveRunTemplate{
-					Entrypoint: "monitor", Context: map[string]interface{}{
+					Context: map[string]interface{}{
 						"initiativeId": researchInitiativeID, "sourceMonitorId": "forums",
 					},
 					Policy: map[string]interface{}{"sourcePolicyRef": "approved-public-forums"},

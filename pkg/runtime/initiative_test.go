@@ -335,7 +335,7 @@ func seedInitiativeObjectives(t *testing.T, store PortfolioStore, scope Scope) {
 			objective.Cadence = &ObjectiveCadence{
 				Type: ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "researcher",
 				RunTemplate: &ObjectiveRunTemplate{
-					Entrypoint: "monitor", Context: map[string]interface{}{"initiativeId": "initiative-a", "sourceMonitorId": "monitor-a"},
+					Context:    map[string]interface{}{"initiativeId": "initiative-a", "sourceMonitorId": "monitor-a"},
 					Policy:     map[string]interface{}{"sourcePolicyRef": "approved-forums"},
 					Capability: &ObjectiveCapabilityInvocation{SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", Inputs: map[string]interface{}{"query": "customer pain"}},
 				},

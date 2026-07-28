@@ -1466,7 +1466,6 @@ func researchInitiativeCandidate() WorkforceCandidate {
 				"type": "interval", "intervalSeconds": float64(3600), "assignedAgentId": "community-researcher", "maximumConcurrent": float64(1),
 				"runBudget": map[string]interface{}{"maxTurns": float64(2), "maxActions": float64(1), "maxDurationMs": float64(60000)},
 				"runTemplate": map[string]interface{}{
-					"entrypoint": "monitor",
 					"context":    map[string]interface{}{"initiativeId": "market-intelligence", "sourceMonitorId": "community-listening"},
 					"policy":     map[string]interface{}{"sourcePolicyRef": "approved-communities"},
 					"capability": map[string]interface{}{"skillId": "community-source", "skillVersion": "1.2.3", "action": "observe", "inputs": map[string]interface{}{"url": "https://community.example/feed", "maxItems": float64(5)}},

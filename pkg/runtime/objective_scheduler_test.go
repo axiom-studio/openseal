@@ -85,7 +85,7 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 		Budget: &BudgetPolicy{MaxTurns: 10}, Cadence: &ObjectiveCadence{
 			Type: ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "sre",
 			RunBudget: &BudgetPolicy{MaxTurns: 2}, RunTemplate: &ObjectiveRunTemplate{
-				Entrypoint: "monitor", Context: map[string]interface{}{
+				Context: map[string]interface{}{
 					"initiativeId": "initiative-health", "sourceMonitorId": "cluster-events",
 				}, Policy: map[string]interface{}{"sourcePolicyRef": "production-read-only"}, Capability: &ObjectiveCapabilityInvocation{
 					SkillID: "kubernetes-events", SkillVersion: "1.0.0", Action: "watch", Inputs: map[string]interface{}{"namespace": "production"},
@@ -120,7 +120,7 @@ func TestObjectiveSchedulerCreatesCanonicalBoundedRunAndBackpressures(t *testing
 		t.Fatalf("runs = %#v, err = %v", runs, err)
 	}
 	if runs[0].Source != RunSourceSchedule || runs[0].Budget == nil || runs[0].Budget.MaxTurns != 2 || runs[0].AssignedAgentID != "sre" ||
-		runs[0].Entrypoint != "monitor" || runs[0].Context["initiativeId"] != "initiative-health" || runs[0].Context["sourceMonitorId"] != "cluster-events" ||
+		runs[0].Entrypoint != "" || runs[0].Context["initiativeId"] != "initiative-health" || runs[0].Context["sourceMonitorId"] != "cluster-events" ||
 		runs[0].Context["scheduledFor"] != due.Format(time.RFC3339Nano) || runs[0].Policy["sourcePolicyRef"] != "production-read-only" {
 		t.Fatalf("run = %#v", runs[0])
 	}
@@ -325,6 +325,10 @@ func TestObjectiveCadenceRunTemplateFailsClosedOnSecretsAndReservedContext(t *te
 		"capability secret": {Capability: &ObjectiveCapabilityInvocation{SkillID: "reader", SkillVersion: "1", Action: "search", Inputs: map[string]interface{}{"apiKey": "must-not-persist"}}},
 		"evidence bounds":   {EvidenceProjection: &ObjectiveEvidenceProjection{MaximumObservations: 100}},
 		"long entrypoint":   {Entrypoint: string(make([]byte, 129))},
+		"ambiguous operation": {
+			Entrypoint: "monitor",
+			Capability: &ObjectiveCapabilityInvocation{SkillID: "reader", SkillVersion: "1", Action: "search"},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cadence := &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, RunTemplate: template}

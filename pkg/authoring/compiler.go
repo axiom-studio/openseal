@@ -1418,6 +1418,7 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		issues = append(issues, validateObjectiveTemplateCadences(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 		issues = append(issues, validateObjectiveTemplateEventRules(path+".objectiveTemplates", definition.ObjectiveTemplates)...)
 	}
+	issues = append(issues, validateObjectiveRunbookEntrypoints(candidate, agents)...)
 	issues = append(issues, validateSourceActionProjection(candidate)...)
 	issues = append(issues, validateConversationEndpointBlueprints(candidate)...)
 	if candidate.Team == nil {

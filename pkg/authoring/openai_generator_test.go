@@ -328,7 +328,7 @@ func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 		"An executable cadence is exactly one of",
 		"runBudget is an object with positive",
 		"omit any unbounded dimension instead of writing zero",
-		"runTemplate without a capability executes a hosted model turn",
+		"runTemplate without a capability or entrypoint executes a hosted model turn",
 		"use at least maxInputTokens 16000 and maxOutputTokens 1000",
 		"use 16000/10000/26000 unless the user gives stricter compatible limits",
 		"evidenceProjection adds a separate durable semantic review",

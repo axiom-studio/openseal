@@ -291,7 +291,7 @@ func seedExecutableMonitorInitiative(t *testing.T, store KernelStore, scope Scop
 	monitors := make([]SourceMonitorReference, 0, 2)
 	runs := map[string]string{}
 	for _, monitorID := range []string{"monitor-a", "monitor-b"} {
-		objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{Scope: scope, Owner: owner, Title: monitorID, Goal: "Monitor approved sources", Status: ObjectiveStatusActive, Cadence: &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, AssignedAgentID: "researcher", RunTemplate: &ObjectiveRunTemplate{Entrypoint: "monitor", Context: map[string]interface{}{"initiativeId": "initiative-research", "sourceMonitorId": monitorID}, Policy: map[string]interface{}{"sourcePolicyRef": "approved-forums"}, Capability: &ObjectiveCapabilityInvocation{SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", Inputs: map[string]interface{}{"query": "pain points"}}}}})
+		objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{Scope: scope, Owner: owner, Title: monitorID, Goal: "Monitor approved sources", Status: ObjectiveStatusActive, Cadence: &ObjectiveCadence{Type: ObjectiveCadenceInterval, IntervalSeconds: 60, AssignedAgentID: "researcher", RunTemplate: &ObjectiveRunTemplate{Context: map[string]interface{}{"initiativeId": "initiative-research", "sourceMonitorId": monitorID}, Policy: map[string]interface{}{"sourcePolicyRef": "approved-forums"}, Capability: &ObjectiveCapabilityInvocation{SkillID: "forum-reader", SkillVersion: "1.0.0", Action: "search", Inputs: map[string]interface{}{"query": "pain points"}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}

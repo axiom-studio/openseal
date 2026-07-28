@@ -28,8 +28,8 @@ func TestStandaloneOutreachRoutesMatchAdvertisedLifecycle(t *testing.T) {
 	objective, err := runtime.NewPortfolioService(store).CreateObjective(ctx, runtime.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Collect feedback", Status: runtime.ObjectiveStatusActive,
 		Cadence: &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 300, AssignedAgentID: "research-agent", RunTemplate: &runtime.ObjectiveRunTemplate{
-			Entrypoint: "monitor", Context: map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"},
-			Policy: map[string]interface{}{"sourcePolicyRef": "public-forum@1"}, Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "source", SkillVersion: "1.0.0", Action: "observe"},
+			Context: map[string]interface{}{"initiativeId": "initiative-1", "sourceMonitorId": "monitor-1"},
+			Policy:  map[string]interface{}{"sourcePolicyRef": "public-forum@1"}, Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "source", SkillVersion: "1.0.0", Action: "observe"},
 		}},
 	})
 	if err != nil {
