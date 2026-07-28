@@ -348,6 +348,68 @@ func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) e
 	return nil
 }
 
+// completeChildBudgetAllocation turns a partial, explicit child budget into a
+// fully bounded allocation when its source Run is bounded. An omitted child
+// dimension cannot remain unbounded beneath a bounded parent, so the child is
+// capped at the capacity that is still available after committed usage,
+// reservations, and prior child allocations. Explicit child limits are never
+// widened here and remain subject to validateChildBudgetAllocation.
+func completeChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (*BudgetPolicy, error) {
+	if parent == nil {
+		return nil, ErrRunNotFound
+	}
+	if allocation == nil || parent.Budget == nil {
+		return cloneBudgetPolicy(allocation), nil
+	}
+	if err := allocation.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid child budget allocation: %w", err)
+	}
+	effective, err := EffectiveBudgetUsage(parent.BudgetUsage, parent.BudgetReservations)
+	if err != nil {
+		return nil, err
+	}
+	existing := sumBudgetPolicies(parent.BudgetAllocations)
+	completed := *cloneBudgetPolicy(allocation)
+	remaining := func(limit, used, allocated int64) int64 {
+		if limit == 0 {
+			return 0
+		}
+		value := limit - used - allocated
+		if value < 0 {
+			return 0
+		}
+		return value
+	}
+	if completed.MaxAttempts == 0 {
+		completed.MaxAttempts = remaining(parent.Budget.MaxAttempts, effective.Attempts, existing.MaxAttempts)
+	}
+	if completed.MaxTurns == 0 {
+		completed.MaxTurns = remaining(parent.Budget.MaxTurns, effective.Turns, existing.MaxTurns)
+	}
+	if completed.MaxInputTokens == 0 {
+		completed.MaxInputTokens = remaining(parent.Budget.MaxInputTokens, effective.InputTokens, existing.MaxInputTokens)
+	}
+	if completed.MaxOutputTokens == 0 {
+		completed.MaxOutputTokens = remaining(parent.Budget.MaxOutputTokens, effective.OutputTokens, existing.MaxOutputTokens)
+	}
+	if completed.MaxTotalTokens == 0 {
+		completed.MaxTotalTokens = remaining(parent.Budget.MaxTotalTokens, effective.InputTokens+effective.OutputTokens, existing.MaxTotalTokens)
+	}
+	if completed.MaxCostMicros == 0 {
+		completed.MaxCostMicros = remaining(parent.Budget.MaxCostMicros, effective.CostMicros, existing.MaxCostMicros)
+	}
+	if completed.MaxDurationMS == 0 {
+		completed.MaxDurationMS = remaining(parent.Budget.MaxDurationMS, effective.DurationMS, existing.MaxDurationMS)
+	}
+	if completed.MaxActions == 0 {
+		completed.MaxActions = remaining(parent.Budget.MaxActions, effective.Actions, existing.MaxActions)
+	}
+	if err := validateChildBudgetAllocation(parent, &completed); err != nil {
+		return nil, err
+	}
+	return &completed, nil
+}
+
 func addRunBudgetAllocation(run *AgentRun, allocationID string, allocation *BudgetPolicy) error {
 	if run == nil || run.Budget == nil {
 		return nil
