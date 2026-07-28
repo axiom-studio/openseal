@@ -54,6 +54,7 @@ type CompilationPreview struct {
 	Description            string                             `json:"description,omitempty"`
 	Compatible             bool                               `json:"compatible"`
 	PromptAvailable        bool                               `json:"promptAvailable,omitempty"`
+	HostedModelInputTokens int64                              `json:"hostedModelInputTokens,omitempty"`
 	Actions                map[string]capability.Action       `json:"actions"`
 	CredentialRequirements []capability.CredentialRequirement `json:"credentialRequirements,omitempty"`
 	Requirements           capability.Requirements            `json:"requirements,omitempty"`
@@ -147,6 +148,10 @@ func (m *InstallManager) preview(ctx context.Context, request PreviewRequest, va
 		Version: version, SourceDigest: compilation.SourceDigest, CompilationDigest: compilationProjectionDigest(compilation), ArchiveSHA256: archive.SHA256,
 	}
 	definition := compilation.Definition
+	hostedModelInputTokens, err := capability.HostedSkillModelInputTokenCeiling(*definition)
+	if err != nil {
+		return nil, err
+	}
 	diagnostics := append([]opensealclaw.Diagnostic(nil), compilation.Diagnostics...)
 	compatible := true
 	for _, diagnostic := range diagnostics {
@@ -166,7 +171,8 @@ func (m *InstallManager) preview(ctx context.Context, request PreviewRequest, va
 		APIVersion: CompilationPreviewAPIVersion, Receipt: receipt,
 		DefinitionID: definition.ID, DefinitionVersion: definition.Version, Name: definition.Name, Description: definition.Description,
 		Compatible: compatible, PromptAvailable: definition.Prompt != nil,
-		Actions: clonePreviewActions(definition.Actions), CredentialRequirements: previewCredentialRequirements(definition),
+		HostedModelInputTokens: hostedModelInputTokens,
+		Actions:                clonePreviewActions(definition.Actions), CredentialRequirements: previewCredentialRequirements(definition),
 		Requirements: definition.Requirements, Diagnostics: diagnostics,
 	}, nil
 }
