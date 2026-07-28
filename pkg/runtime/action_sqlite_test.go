@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -11,6 +12,21 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
+
+func TestActionCallDurableJSONPreservesEmptyArgumentObject(t *testing.T) {
+	call := ActionCall{Arguments: map[string]interface{}{}}
+	payload, err := json.Marshal(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ActionCall
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Arguments == nil {
+		t.Fatalf("empty action arguments were lost from durable JSON: %s", payload)
+	}
+}
 
 func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	ctx := context.Background()
