@@ -157,6 +157,7 @@ type (
 	DeploymentChangeKind                      = workforce.DeploymentChangeKind
 	WorkforceAuthoringMode                    = authoring.Mode
 	WorkforceSkillCapability                  = authoring.SkillCapability
+	WorkforceSkillActionContract              = authoring.SkillActionContract
 	WorkforceSkillCredential                  = authoring.SkillCredential
 	WorkforceConversationAdapterCapability    = authoring.ConversationAdapterCapability
 	WorkforceRuntimeCompositionCapability     = authoring.RuntimeCompositionCapability
