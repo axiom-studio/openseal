@@ -189,7 +189,9 @@ func TestSQLiteWorkforceApplyMaterializesObjectiveOwnedScheduledRunbook(t *testi
 		t.Fatalf("Objective must remain an outcome without execution configuration: %#v", objectives)
 	}
 	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: objective.Scope, ObjectiveID: objective.ID})
-	if err != nil || len(activations) != 1 || activations[0].AssignedAgentID != "agent-live" || activations[0].Trigger.Entrypoint != "operate" {
+	if err != nil || len(activations) != 1 || activations[0].AssignedAgentID != "agent-live" ||
+		activations[0].DefinitionID != definition.Runbook.ID || activations[0].DefinitionVersion != definition.Runbook.Version ||
+		activations[0].Trigger.Entrypoint != "operate" {
 		t.Fatalf("materialized Runbook activation=%#v err=%v", activations, err)
 	}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
