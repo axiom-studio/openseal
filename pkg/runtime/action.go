@@ -47,7 +47,7 @@ type ActionCall struct {
 	Status                  ActionCallStatus                     `json:"status"`
 	Risk                    skill.RiskLevel                      `json:"risk"`
 	SideEffect              skill.SideEffect                     `json:"sideEffect"`
-	Arguments               map[string]interface{}               `json:"arguments,omitempty"`
+	Arguments               map[string]interface{}               `json:"arguments"`
 	PreparedRuntime         *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
 	CredentialRefs          map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
 	EvidenceRefs            []string                             `json:"evidenceRefs,omitempty"`
