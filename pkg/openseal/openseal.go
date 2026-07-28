@@ -268,6 +268,7 @@ type (
 	RunbookActivationFilter            = runtime.RunbookActivationFilter
 	CreateRunbookActivationRequest     = runtime.CreateRunbookActivationRequest
 	UpdateRunbookActivationRequest     = runtime.UpdateRunbookActivationRequest
+	StartRunbookActivationRequest      = runtime.StartRunbookActivationRequest
 	RunbookScheduleResult              = runtime.RunbookScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	Project                            = runtime.Project
@@ -932,6 +933,7 @@ const (
 	WorkforceAuthoringCapabilityID           = kernelapi.WorkforceAuthoringCapabilityID
 	WorkforceAuthoringCapabilityVersion      = kernelapi.WorkforceAuthoringCapabilityVersion
 	KernelOperationCreate                    = kernelapi.OperationCreate
+	KernelOperationExecute                   = kernelapi.OperationExecute
 	KernelOperationList                      = kernelapi.OperationList
 	KernelOperationGet                       = kernelapi.OperationGet
 	KernelOperationUpdate                    = kernelapi.OperationUpdate
@@ -3249,6 +3251,10 @@ func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.Runb
 
 func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
 	return runtime.NewRunbookActivationService(e.store).Update(ctx, scope, activationID, req)
+}
+
+func (e *Engine) StartRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
+	return runtime.StartRunbookActivation(ctx, e.store, scope, activationID, req)
 }
 
 func (e *Engine) CreateProject(ctx context.Context, req runtime.CreateProjectRequest) (*runtime.Project, *runtime.ActivityEvent, error) {

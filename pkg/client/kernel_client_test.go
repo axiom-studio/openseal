@@ -66,7 +66,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatalf("event routing capabilities: %#v", document)
 	}
 	scheduleCapability, ok := document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
-	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) || !scheduleCapability.Supports(kernelapi.OperationList) || !scheduleCapability.Supports(kernelapi.OperationGet) {
+	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) || !scheduleCapability.Supports(kernelapi.OperationExecute) || !scheduleCapability.Supports(kernelapi.OperationList) || !scheduleCapability.Supports(kernelapi.OperationGet) {
 		t.Fatalf("Runbook schedule capabilities: %#v", document)
 	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
@@ -144,6 +144,13 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	scheduledRuns, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, ObjectiveID: scheduledObjective.ID})
 	if err != nil || len(scheduledRuns) != 1 || scheduledRuns[0].Source != runtime.RunSourceSchedule {
 		t.Fatalf("scheduled runs = %#v, %v", scheduledRuns, err)
+	}
+	manual, err := client.StartRunbook(ctx, scope, scheduledActivation.ID, runtime.StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
+	if err != nil || manual.Run == nil || manual.Run.Source != runtime.RunSourceManual {
+		t.Fatalf("manual Runbook Run=%#v err=%v", manual, err)
+	}
+	if pin, ok := manual.Run.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != "research" || pin["version"] != "1" || pin["trigger"] != "recurring" {
+		t.Fatalf("manual Runbook pin=%#v", manual.Run.Plan)
 	}
 	loadedRunbook, err = client.GetRunbook(ctx, scope, scheduledActivation.ID)
 	if err != nil {
@@ -272,7 +279,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	for _, run := range runs {
 		runIDs[run.ID] = run.Kind == runtime.RunKindAgentWork
 	}
-	if len(runs) != 3 || !runIDs[created.Run.ID] || !runIDs[routed.Routes[0].Run.ID] || !runIDs[scheduledRuns[0].ID] {
+	if len(runs) != 4 || !runIDs[created.Run.ID] || !runIDs[routed.Routes[0].Run.ID] || !runIDs[scheduledRuns[0].ID] || !runIDs[manual.Run.ID] {
 		t.Fatalf("runs = %#v", runs)
 	}
 

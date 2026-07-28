@@ -131,7 +131,7 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 			Scope: event.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner,
 			AssignedAgentID: activation.AssignedAgentID, Entrypoint: activation.Trigger.Entrypoint,
 			ConcurrencyKey: "runbook:" + activation.ID, Goal: objective.Goal, Priority: objective.Priority,
-			Source: RunSourceEvent, Context: contextValues,
+			Source: RunSourceEvent, Context: contextValues, Plan: runbookActivationPlan(activation),
 			Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
 			IdempotencyKey: runbookEventRouteKey(activation.ID, event.Source, event.ID), Actor: actor,
 			Visibility: ActivityVisibilityScope,
