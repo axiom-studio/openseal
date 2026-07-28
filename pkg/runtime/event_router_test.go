@@ -46,7 +46,7 @@ func TestObjectiveEventRouterMatchesAndCreatesAuditedRunsExactlyOnce(t *testing.
 				t.Fatalf("first route = %#v", first)
 			}
 			run := first.Routes[0].Run
-			if run.ObjectiveID != objective.ID || run.Source != RunSourceEvent || run.Kind != RunKindAgentWork || run.AssignedAgentID != "tenant/operations/sre" || run.Entrypoint != "investigate" {
+			if run.ObjectiveID != objective.ID || run.Source != RunSourceEvent || run.Kind != RunKindAgentWork || run.AssignedAgentID != "tenant/operations/sre" || run.Entrypoint != "" {
 				t.Fatalf("event run identity = %#v", run)
 			}
 			if run.Context["event"].(map[string]interface{})["id"] != event.ID || run.Context["capabilityInvocation"].(map[string]interface{})["action"] != "list_events" {
@@ -269,8 +269,8 @@ func eventObjective(t *testing.T, store KernelStore, scope Scope, status Objecti
 		Severities: []string{"warning"}, Attributes: map[string]interface{}{"namespace": "store", "reason": "BackOff"},
 		AssignedAgentID: "tenant/operations/sre",
 		RunTemplate: &ObjectiveRunTemplate{
-			Entrypoint: "investigate", Context: map[string]interface{}{"operatingMode": "evidence-first"},
-			Policy: map[string]interface{}{"approvalForProduction": true}, Capability: &ObjectiveCapabilityInvocation{
+			Context: map[string]interface{}{"operatingMode": "evidence-first"},
+			Policy:  map[string]interface{}{"approvalForProduction": true}, Capability: &ObjectiveCapabilityInvocation{
 				SkillID: "openseal.kubernetes", SkillVersion: "1.0.0", Action: "list_events", Inputs: map[string]interface{}{"namespace": "store"},
 			},
 		},

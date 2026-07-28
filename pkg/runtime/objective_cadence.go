@@ -101,6 +101,9 @@ func (t *ObjectiveRunTemplate) Validate() error {
 	if len(strings.TrimSpace(t.Entrypoint)) > 128 {
 		return errors.New("objective cadence runTemplate entrypoint cannot exceed 128 characters")
 	}
+	if strings.TrimSpace(t.Entrypoint) != "" && t.Capability != nil {
+		return errors.New("objective cadence runTemplate must choose either an Agent Runbook entrypoint or a direct Skill capability")
+	}
 	if _, reserved := t.Context["scheduledFor"]; reserved {
 		return errors.New("objective cadence runTemplate context cannot override scheduledFor")
 	}
