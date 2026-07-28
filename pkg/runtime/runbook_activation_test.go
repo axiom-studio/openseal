@@ -39,6 +39,10 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ID != activation.ID {
 		t.Fatalf("listed=%#v err=%v", listed, err)
 	}
+	page, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 1, Offset: 1})
+	if err != nil || len(page) != 0 {
+		t.Fatalf("offset page=%#v err=%v", page, err)
+	}
 }
 
 func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) {

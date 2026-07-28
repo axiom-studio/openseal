@@ -141,6 +141,7 @@ type RunbookActivationFilter struct {
 	Statuses     []RunbookActivationStatus
 	TriggerKinds []runbook.TriggerKind
 	Limit        int
+	Offset       int
 }
 
 type RunbookActivationStore interface {
@@ -275,7 +276,7 @@ func matchesRunbookActivationFilter(value *RunbookActivation, filter RunbookActi
 	return true
 }
 
-func sortAndLimitRunbookActivations(values []*RunbookActivation, limit int) []*RunbookActivation {
+func sortAndLimitRunbookActivations(values []*RunbookActivation, limit, offset int) []*RunbookActivation {
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
 			return values[i].ID < values[j].ID
@@ -285,6 +286,13 @@ func sortAndLimitRunbookActivations(values []*RunbookActivation, limit int) []*R
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(values) {
+		return []*RunbookActivation{}
+	}
+	values = values[offset:]
 	if len(values) > limit {
 		values = values[:limit]
 	}
