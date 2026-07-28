@@ -1312,6 +1312,8 @@ var (
 	ErrObjectiveIdempotency                 = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition           = runtime.ErrInvalidObjectiveTransition
 	ErrRunbookActivationNotFound            = runtime.ErrRunbookActivationNotFound
+	ErrRunbookDefinitionNotFound            = runtime.ErrRunbookDefinitionNotFound
+	ErrRunbookActivationInactive            = runtime.ErrRunbookActivationInactive
 	ErrRunbookActivationRevision            = runtime.ErrRunbookActivationRevision
 	ErrRunbookActivationIdempotency         = runtime.ErrRunbookActivationIdempotency
 	ErrBudgetExhausted                      = runtime.ErrBudgetExhausted
