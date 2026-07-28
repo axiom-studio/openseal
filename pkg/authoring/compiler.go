@@ -157,6 +157,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 			validation = append(validation, validateCapabilitySourceScopeFulfillment(&generated.Candidate, request)...)
 		}
 		validation = append(validation, validateSelectedSkillActionRisks(&generated.Candidate, request.Catalog)...)
+		validation = append(validation, validateObjectiveCapabilityInputs(&generated.Candidate, request.Catalog, false)...)
 		validation = append(validation, ValidateCandidateAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)...)
 		validation = append(validation, validatePromptCommitments(commitments, &generated.Candidate)...)
 		if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
@@ -226,6 +227,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, request)...)
 	}
 	result.Validation = append(result.Validation, validateSelectedSkillActionRisks(&result.Candidate, request.Catalog)...)
+	result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, request.Catalog, false)...)
 	result.Validation = append(result.Validation, ValidateCandidateAuthorityConstraint(&result.Candidate, request.Catalog.AuthorityConstraint)...)
 	result.Validation = append(result.Validation, validatePromptCommitments(result.Commitments, &result.Candidate)...)
 	refinementValidation := make([]ValidationIssue, 0, 2)

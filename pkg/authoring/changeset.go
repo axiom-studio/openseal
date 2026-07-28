@@ -484,6 +484,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, compileRequest)...)
 	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, compileRequest)...)
+	result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, request.Catalog, false)...)
 	if len(materializationIssues) == 0 {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
 	}
@@ -792,6 +793,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, changeSet.Generation.Request)...)
 	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, changeSet.Generation.Request)...)
+	result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, changeSet.Catalog, false)...)
 	if len(materializationIssues) == 0 {
 		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
 	}
@@ -1637,6 +1639,9 @@ func (e *ChangeSetReadinessError) Unwrap() error {
 func validateApplyPlacement(value *ChangeSet) error {
 	if !value.Result.Valid || len(value.Result.MissingRequirements) > 0 {
 		return errors.New("workforce candidate has unresolved requirements")
+	}
+	if issues := validateObjectiveCapabilityInputs(&value.Result.Candidate, value.Catalog, true); len(issues) > 0 {
+		return &ChangeSetReadinessError{Issues: issues}
 	}
 	if err := validatePlacementReferences(value.Placement, &value.Result.Candidate); err != nil {
 		return err
@@ -2594,6 +2599,7 @@ func (s *ChangeSetService) validateReadiness(ctx context.Context, value *ChangeS
 		return nil, nil
 	}
 	issues := conversationRoutingValidation(&value.Result.Candidate, value.Placement)
+	issues = append(issues, validateObjectiveCapabilityInputs(&value.Result.Candidate, value.Catalog, true)...)
 	for _, validator := range s.readinessValidators {
 		result, err := validator.ValidateChangeSetReadiness(ctx, value)
 		if err != nil {
