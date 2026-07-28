@@ -1,9 +1,11 @@
 package authoring
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -38,6 +40,25 @@ func TestHostedExecutionAttestationStaysOutOfProviderCatalog(t *testing.T) {
 	compact := compactPromptCapabilityCatalog(catalog)
 	if compact.HostedExecution != nil || compact.Skills["skill-browser"].HostedModelInputTokens != 0 {
 		t.Fatalf("hosted execution attestation leaked into provider catalog: %#v", compact)
+	}
+}
+
+func TestHostedSkillModelInputTokenCeilingIncludesPrivatePromptAndSchemas(t *testing.T) {
+	definition := capability.Definition{
+		ID: "skill-browser", Version: "2.0.5",
+		Prompt: &capability.PromptModule{Instructions: strings.Repeat("private browser instruction ", 200)},
+		Actions: map[string]capability.Action{
+			"snapshot": {Name: "snapshot", Description: "Read the accessible page.", InputSchema: map[string]interface{}{
+				"type": "object", "properties": map[string]interface{}{"sessionId": map[string]interface{}{"type": "string"}},
+			}},
+		},
+	}
+	ceiling, err := HostedSkillModelInputTokenCeiling(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ceiling <= 1024+int64(len(definition.Prompt.Instructions))/2 {
+		t.Fatalf("hosted Skill ceiling %d omitted action or envelope data", ceiling)
 	}
 }
 
