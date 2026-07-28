@@ -726,6 +726,9 @@ func (c *KernelHTTPClient) ListRunbooks(ctx context.Context, filter runtime.Runb
 	if filter.Limit > 0 {
 		query.Set("limit", strconv.Itoa(filter.Limit))
 	}
+	if filter.Offset > 0 {
+		query.Set("offset", strconv.Itoa(filter.Offset))
+	}
 	var values []*runtime.RunbookActivation
 	if err := c.do(ctx, http.MethodGet, "/api/v1/runbooks?"+query.Encode(), nil, "", &values); err != nil {
 		return nil, err

@@ -48,7 +48,7 @@ func (s *MemoryStore) ListRunbookActivations(_ context.Context, filter RunbookAc
 			values = append(values, cloneRunbookActivation(value))
 		}
 	}
-	return sortAndLimitRunbookActivations(values, filter.Limit), nil
+	return sortAndLimitRunbookActivations(values, filter.Limit, filter.Offset), nil
 }
 
 func (s *MemoryStore) UpdateRunbookActivation(_ context.Context, value *RunbookActivation, expectedRevision int64) error {
