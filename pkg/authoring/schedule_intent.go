@@ -112,7 +112,7 @@ func parseScheduleIntent(value string) scheduleIntent {
 
 	if containsWord(lower, "weekday") || containsWord(lower, "weekdays") {
 		clock := scheduleClockPattern.FindStringSubmatch(value)
-		zone := scheduleTimezonePattern.FindString(value)
+		zone := validScheduleTimezone(value)
 		if len(clock) == 3 && zone != "" {
 			if _, err := time.LoadLocation(zone); err == nil {
 				hour, _ := strconv.Atoi(clock[1])
@@ -140,7 +140,7 @@ func parseScheduleIntent(value string) scheduleIntent {
 	}
 	if frequency != "" {
 		clock := scheduleClockPattern.FindStringSubmatch(value)
-		zone := scheduleTimezonePattern.FindString(value)
+		zone := validScheduleTimezone(value)
 		varied := containsAnySchedulePhrase(lower, "varied time", "varying time", "random time", "different time each day")
 		if frequency == "daily" && varied && zone != "" {
 			if _, err := time.LoadLocation(zone); err == nil {
@@ -169,6 +169,15 @@ func parseScheduleIntent(value string) scheduleIntent {
 		return scheduleIntent{kind: scheduleIntentAmbiguous}
 	}
 	return scheduleIntent{kind: scheduleIntentAbsent}
+}
+
+func validScheduleTimezone(value string) string {
+	for _, candidate := range scheduleTimezonePattern.FindAllString(value, -1) {
+		if _, err := time.LoadLocation(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func containsAnySchedulePhrase(value string, phrases ...string) bool {
