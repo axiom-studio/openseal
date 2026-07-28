@@ -76,7 +76,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateActivationContinuationsSQLite(db); err != nil {
 		return err
 	}
-	return migrateSkillBindingLifecycleRepairSQLite(db)
+	if err := migrateSkillBindingLifecycleRepairSQLite(db); err != nil {
+		return err
+	}
+	return migrateObjectiveRunTemplateExclusivitySQLite(db)
 }
 
 // Close closes the underlying database.
