@@ -243,8 +243,10 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	catalog := CapabilityCatalog{
 		Skills: map[string]SkillCapability{"source": {
 			ID: "source", Version: "1.2.3", SourceIdentity: "registry::publisher/source", Actions: []string{"read"},
-			RuntimeIdentity: &exact,
-			Readiness:       SkillReadinessNeedsBinding, CredentialKinds: []string{"oauth"},
+			RuntimeIdentity: &exact, ActionContracts: map[string]SkillActionContract{
+				"read": {InputSchema: map[string]interface{}{"type": "object"}},
+			},
+			Readiness: SkillReadinessNeedsBinding, CredentialKinds: []string{"oauth"},
 			Compatibility: []SkillCompatibility{
 				{Requirement: "action:read", Compatible: true, Evidence: "verified declaration", Reference: "receipt"},
 				{Requirement: "credential:oauth", Compatible: false, Evidence: "binding required"},
@@ -267,7 +269,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	}
 	projected := modelRequest.Catalog.Skills["source"]
 	if projected.ID != "source" || projected.Version != "1.2.3" || projected.SourceIdentity != "registry::publisher/source" ||
-		projected.RuntimeIdentity != nil ||
+		projected.RuntimeIdentity != nil || len(projected.ActionContracts) != 0 ||
 		len(projected.Actions) != 1 || projected.Actions[0] != "read" || projected.Readiness != SkillReadinessNeedsBinding ||
 		len(projected.CredentialKinds) != 1 || len(projected.Compatibility) != 1 || projected.Compatibility[0].Requirement != "credential:oauth" {
 		t.Fatalf("projected Skill = %#v", projected)
@@ -281,7 +283,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	if len(modelRequest.Catalog.AvailableCredentialGrants) != 0 {
 		t.Fatalf("model-visible OAuth 2 grants = %#v", modelRequest.Catalog.AvailableCredentialGrants)
 	}
-	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.CapabilityNeeds) != 1 || len(catalog.AgentCredentialRequirements) != 1 ||
+	if len(catalog.Skills["source"].Compatibility) != 2 || len(catalog.Skills["source"].ActionContracts) != 1 || len(catalog.CapabilityNeeds) != 1 || len(catalog.AgentCredentialRequirements) != 1 ||
 		len(catalog.AvailableCredentialGrants["SOURCE_CONNECTION"]) != 1 {
 		t.Fatalf("canonical catalog was mutated = %#v", catalog)
 	}
