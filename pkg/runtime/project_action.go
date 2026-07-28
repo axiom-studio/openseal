@@ -91,7 +91,6 @@ func projectMutableSchema() map[string]interface{} {
 		"agentRefs":        cloneMap(resourceRefs),
 		"teamRefs":         cloneMap(resourceRefs),
 		"objectiveRefs":    stringArray(),
-		"runRefs":          stringArray(),
 		"milestones":       map[string]interface{}{"type": "array", "items": projectMilestoneSchema()},
 		"hypotheses":       map[string]interface{}{"type": "array", "items": projectHypothesisSchema()},
 		"sourceMonitors":   map[string]interface{}{"type": "array", "items": projectSourceMonitorSchema()},
@@ -371,7 +370,6 @@ type projectCreateArguments struct {
 	AgentRefs     []ResourceReference    `json:"agentRefs,omitempty"`
 	TeamRefs      []ResourceReference    `json:"teamRefs,omitempty"`
 	ObjectiveRefs []string               `json:"objectiveRefs"`
-	RunRefs       []string               `json:"runRefs,omitempty"`
 	Milestones    []ProjectMilestone     `json:"milestones,omitempty"`
 	Hypotheses    []ProjectHypothesis    `json:"hypotheses,omitempty"`
 	Deliverables  []ProjectDeliverable   `json:"deliverables,omitempty"`
@@ -380,7 +378,7 @@ type projectCreateArguments struct {
 }
 
 func (a projectCreateArguments) project(scope Scope, owner ObjectiveOwner) *Project {
-	return &Project{Scope: scope, Owner: owner, Title: a.Title, Purpose: a.Purpose, Status: ProjectStatusDraft, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, RunRefs: a.RunRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy}
+	return &Project{Scope: scope, Owner: owner, Title: a.Title, Purpose: a.Purpose, Status: ProjectStatusDraft, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy}
 }
 
 type projectUpdateArguments struct {
@@ -391,7 +389,6 @@ type projectUpdateArguments struct {
 	AgentRefs        *[]ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs         *[]ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs    *[]string                 `json:"objectiveRefs,omitempty"`
-	RunRefs          *[]string                 `json:"runRefs,omitempty"`
 	Milestones       *[]ProjectMilestone       `json:"milestones,omitempty"`
 	Hypotheses       *[]ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors   *[]SourceMonitorReference `json:"sourceMonitors,omitempty"`
@@ -401,11 +398,11 @@ type projectUpdateArguments struct {
 }
 
 func (a projectUpdateArguments) hasChanges() bool {
-	return a.Title != nil || a.Purpose != nil || a.AgentRefs != nil || a.TeamRefs != nil || a.ObjectiveRefs != nil || a.RunRefs != nil || a.Milestones != nil || a.Hypotheses != nil || a.SourceMonitors != nil || a.Deliverables != nil || a.Budget != nil || a.Policy != nil
+	return a.Title != nil || a.Purpose != nil || a.AgentRefs != nil || a.TeamRefs != nil || a.ObjectiveRefs != nil || a.Milestones != nil || a.Hypotheses != nil || a.SourceMonitors != nil || a.Deliverables != nil || a.Budget != nil || a.Policy != nil
 }
 
 func (a projectUpdateArguments) updateRequest(actor ActivityActor) UpdateProjectRequest {
-	return UpdateProjectRequest{ExpectedRevision: a.ExpectedRevision, Title: a.Title, Purpose: a.Purpose, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, RunRefs: a.RunRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, SourceMonitors: a.SourceMonitors, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy, Actor: actor, Visibility: ActivityVisibilityScope}
+	return UpdateProjectRequest{ExpectedRevision: a.ExpectedRevision, Title: a.Title, Purpose: a.Purpose, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, SourceMonitors: a.SourceMonitors, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy, Actor: actor, Visibility: ActivityVisibilityScope}
 }
 
 func applyProjectArguments(candidate *Project, args projectUpdateArguments) *Project {
@@ -423,9 +420,6 @@ func applyProjectArguments(candidate *Project, args projectUpdateArguments) *Pro
 	}
 	if args.ObjectiveRefs != nil {
 		candidate.ObjectiveRefs = *args.ObjectiveRefs
-	}
-	if args.RunRefs != nil {
-		candidate.RunRefs = *args.RunRefs
 	}
 	if args.Milestones != nil {
 		candidate.Milestones = *args.Milestones
@@ -496,7 +490,7 @@ func projectActionAlreadyApplied(i *Project, args projectUpdateArguments, action
 	}
 	return (args.Title == nil || i.Title == *args.Title) && (args.Purpose == nil || i.Purpose == *args.Purpose) &&
 		(args.AgentRefs == nil || reflect.DeepEqual(i.AgentRefs, *args.AgentRefs)) && (args.TeamRefs == nil || reflect.DeepEqual(i.TeamRefs, *args.TeamRefs)) &&
-		(args.ObjectiveRefs == nil || reflect.DeepEqual(i.ObjectiveRefs, *args.ObjectiveRefs)) && (args.RunRefs == nil || reflect.DeepEqual(i.RunRefs, *args.RunRefs)) &&
+		(args.ObjectiveRefs == nil || reflect.DeepEqual(i.ObjectiveRefs, *args.ObjectiveRefs)) &&
 		(args.Milestones == nil || reflect.DeepEqual(i.Milestones, *args.Milestones)) && (args.Hypotheses == nil || reflect.DeepEqual(i.Hypotheses, *args.Hypotheses)) &&
 		(args.SourceMonitors == nil || reflect.DeepEqual(i.SourceMonitors, *args.SourceMonitors)) && (args.Deliverables == nil || reflect.DeepEqual(i.Deliverables, *args.Deliverables)) &&
 		(args.Budget == nil || reflect.DeepEqual(i.Budget, args.Budget)) && (args.Policy == nil || reflect.DeepEqual(i.Policy, args.Policy))

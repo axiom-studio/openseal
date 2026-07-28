@@ -865,7 +865,6 @@ type CreateProjectRequest struct {
 	AgentRefs      []runtime.ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs       []runtime.ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs  []string                         `json:"objectiveRefs"`
-	RunRefs        []string                         `json:"runRefs,omitempty"`
 	Milestones     []runtime.ProjectMilestone       `json:"milestones,omitempty"`
 	Hypotheses     []runtime.ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors []runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
@@ -884,7 +883,6 @@ type UpdateProjectRequest struct {
 	AgentRefs        *[]runtime.ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs         *[]runtime.ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs    *[]string                         `json:"objectiveRefs,omitempty"`
-	RunRefs          *[]string                         `json:"runRefs,omitempty"`
 	Milestones       *[]runtime.ProjectMilestone       `json:"milestones,omitempty"`
 	Hypotheses       *[]runtime.ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors   *[]runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`

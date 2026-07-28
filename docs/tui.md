@@ -48,8 +48,9 @@ Depending on the connected server, the workspace can expose:
   definition amendments, including self-proposed conversation changes and
   direct invocation of callable operations from the exact active runbook
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
-- **Objectives / Projects** — multi-objective portfolios, schedule supervision,
-  and project context
+- **Objectives / Projects** — desired outcomes with their Runbook methods, plus
+  optional shared multi-objective Project context; schedules remain Runbook
+  triggers rather than Project or Objective settings
 - **Sources** — durable event-source subscriptions, connector health, checkpoints,
   and CAS-protected pause, resume, and retirement
 - **Work** — Runs, lifecycle commands, guidance, evidence, and grounding
