@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
@@ -29,7 +30,12 @@ func (s *Server) handleGetRunbook(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	value, err := s.store.GetRunbookActivation(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
+	registry, err := s.agentRegistry()
+	if err != nil {
+		s.respondError(w, http.StatusNotImplemented, err.Error())
+		return
+	}
+	value, err := runtime.ResolveRunbookDetail(r.Context(), s.store, registry, scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondRunbookError(w, err)
 		return
@@ -111,6 +117,10 @@ func (s *Server) respondRunbookError(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, runtime.ErrRunbookActivationRevision) {
+		s.respondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, runtime.ErrRunbookDefinitionNotFound) || errors.Is(err, kernelagent.ErrDeploymentNotFound) || errors.Is(err, kernelagent.ErrDefinitionNotFound) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
