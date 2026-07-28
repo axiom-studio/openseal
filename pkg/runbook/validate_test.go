@@ -3,6 +3,7 @@ package runbook
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func literal(value interface{}) Value {
@@ -69,16 +70,54 @@ func TestValidatePortableEventTriggers(t *testing.T) {
 	if diagnostics := Validate(definition); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics=%#v", diagnostics)
 	}
-	definition.Triggers["invalid"] = Trigger{Kind: "schedule", EventType: "slack_message", Entrypoint: "missing"}
+	definition.Triggers["invalid"] = Trigger{Kind: "timer", EventType: "slack_message", Entrypoint: "missing"}
 	diagnostics := Validate(definition)
 	codes := map[string]bool{}
 	for _, diagnostic := range diagnostics {
 		codes[diagnostic.Code] = true
 	}
-	for _, code := range []string{"trigger.kind_unsupported", "trigger.event_type_invalid", "trigger.entrypoint_unknown"} {
+	for _, code := range []string{"trigger.kind_unsupported", "trigger.entrypoint_unknown"} {
 		if !codes[code] {
 			t.Fatalf("missing %s in %#v", code, diagnostics)
 		}
+	}
+}
+
+func TestValidatePortableScheduledTriggers(t *testing.T) {
+	definition := &Definition{
+		APIVersion: APIVersion, ID: "daily-review", Version: "1", Name: "Daily review",
+		Entrypoints: map[string]string{"start": "done"},
+		Steps:       map[string]Step{"done": {Kind: StepEnd, End: &EndStep{}}},
+	}
+	definition.Triggers = map[string]Trigger{"daily": {
+		Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399}, Entrypoint: "start",
+	}}
+	if diagnostics := Validate(definition); len(diagnostics) != 0 {
+		t.Fatalf("scheduled trigger diagnostics = %#v", diagnostics)
+	}
+
+	definition.Triggers["daily"] = Trigger{Kind: TriggerSchedule, EventType: "clock.tick", Schedule: &Schedule{Cron: "0 0 0 * *", Timezone: "UTC"}, Entrypoint: "start"}
+	diagnostics := Validate(definition)
+	if len(diagnostics) != 2 || diagnostics[0].Code != "trigger.event_type_forbidden" || diagnostics[1].Code != "trigger.schedule_invalid" {
+		t.Fatalf("invalid scheduled trigger diagnostics = %#v", diagnostics)
+	}
+}
+
+func TestScheduleJitterIsStableAndOwnedByCronOccurrence(t *testing.T) {
+	schedule := &Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399}
+	base, err := schedule.NextBase(time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC))
+	if err != nil || !base.Equal(time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("next base = %v, %v", base, err)
+	}
+	first, err := schedule.DueAt("tenant/3/rowan:daily", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, _ := schedule.DueAt("tenant/3/rowan:daily", base)
+	other, _ := schedule.DueAt("tenant/3/another:daily", base)
+	windowStart, windowEnd, _ := schedule.Window(base)
+	if first != replayed || first.Before(windowStart) || first.After(windowEnd) || first == other {
+		t.Fatalf("jitter first=%v replayed=%v other=%v window=[%v,%v]", first, replayed, other, windowStart, windowEnd)
 	}
 }
 
