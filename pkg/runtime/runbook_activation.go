@@ -170,6 +170,15 @@ type CreateRunbookActivationRequest struct {
 	IdempotencyKey    string
 }
 
+// UpdateRunbookActivationRequest changes the operational lifecycle of one
+// Objective-owned Runbook. Definition, trigger, authority, and input changes
+// require a newly reviewed activation; this command intentionally changes only
+// whether new Runs may be created.
+type UpdateRunbookActivationRequest struct {
+	ExpectedRevision int64                   `json:"expectedRevision"`
+	Status           RunbookActivationStatus `json:"status"`
+}
+
 type RunbookActivationService struct {
 	store interface {
 		RunbookActivationStore
@@ -243,6 +252,49 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		return nil, err
 	}
 	return cloneRunbookActivation(activation), nil
+}
+
+func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id string, request UpdateRunbookActivationRequest) (*RunbookActivation, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("Runbook activation store is not configured")
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if request.ExpectedRevision < 1 {
+		return nil, ErrRunbookActivationRevision
+	}
+	current, err := s.store.GetRunbookActivation(ctx, scope, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, ErrRunbookActivationNotFound
+	}
+	if current.Revision != request.ExpectedRevision {
+		return nil, ErrRunbookActivationRevision
+	}
+	switch request.Status {
+	case RunbookActivationActive, RunbookActivationPaused, RunbookActivationRetired:
+	default:
+		return nil, errors.New("Runbook activation status is invalid")
+	}
+	if current.Status == RunbookActivationRetired && request.Status != RunbookActivationRetired {
+		return nil, errors.New("retired Runbook activation cannot be resumed")
+	}
+	if current.Status == request.Status {
+		return cloneRunbookActivation(current), nil
+	}
+	next := cloneRunbookActivation(current)
+	next.Status = request.Status
+	next.NextOccurrenceBase = nil
+	next.NextRunAt = nil
+	next.Revision++
+	next.UpdatedAt = s.now().UTC()
+	if err := s.store.UpdateRunbookActivation(ctx, next, current.Revision); err != nil {
+		return nil, err
+	}
+	return cloneRunbookActivation(next), nil
 }
 
 func matchesRunbookActivationFilter(value *RunbookActivation, filter RunbookActivationFilter) bool {

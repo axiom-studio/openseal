@@ -266,6 +266,7 @@ type (
 	RunbookActivationStatus            = runtime.RunbookActivationStatus
 	RunbookActivationFilter            = runtime.RunbookActivationFilter
 	CreateRunbookActivationRequest     = runtime.CreateRunbookActivationRequest
+	UpdateRunbookActivationRequest     = runtime.UpdateRunbookActivationRequest
 	RunbookScheduleResult              = runtime.RunbookScheduleResult
 	ObjectiveFilter                    = runtime.ObjectiveFilter
 	Project                            = runtime.Project
@@ -3239,6 +3240,10 @@ func (e *Engine) GetRunbookActivation(ctx context.Context, scope runtime.Scope, 
 
 func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
 	return e.store.ListRunbookActivations(ctx, filter)
+}
+
+func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+	return runtime.NewRunbookActivationService(e.store).Update(ctx, scope, activationID, req)
 }
 
 func (e *Engine) CreateProject(ctx context.Context, req runtime.CreateProjectRequest) (*runtime.Project, *runtime.ActivityEvent, error) {

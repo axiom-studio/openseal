@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -116,5 +117,41 @@ func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("cross-owner Runbook activation succeeded")
+	}
+}
+
+func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "3"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewRunbookActivationService(store)
+	activation, err := service.Create(ctx, CreateRunbookActivationRequest{
+		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "rowan", DefinitionID: "work",
+		DefinitionVersion: "1", TriggerID: "daily",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paused, err := service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
+	if err != nil || paused.Status != RunbookActivationPaused || paused.Revision != 2 {
+		t.Fatalf("paused=%#v err=%v", paused, err)
+	}
+	if _, err = service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: 1, Status: RunbookActivationActive}); !errors.Is(err, ErrRunbookActivationRevision) {
+		t.Fatalf("stale update error=%v", err)
+	}
+	retired, err := service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationRetired})
+	if err != nil || retired.Status != RunbookActivationRetired {
+		t.Fatalf("retired=%#v err=%v", retired, err)
+	}
+	if _, err = service.Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: retired.Revision, Status: RunbookActivationActive}); err == nil {
+		t.Fatal("retired Runbook resumed")
 	}
 }
