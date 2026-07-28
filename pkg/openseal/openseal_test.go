@@ -34,6 +34,10 @@ func TestPublicFacadeExposesRunbookScheduleReconciliation(t *testing.T) {
 	if request.Scope.ID != "operations" || request.Limit != 50 {
 		t.Fatalf("objective schedule request = %#v", request)
 	}
+	schedule := RunbookSchedule{Cron: "0 0 9 * * *", Timezone: "UTC"}
+	if RunbookTriggerSchedule != RunbookTriggerKind("schedule") || schedule.Validate() != nil {
+		t.Fatalf("Runbook schedule facade = %#v, %q", schedule, RunbookTriggerSchedule)
+	}
 }
 
 func TestPublicFacadeExposesRunbookActivationErrors(t *testing.T) {
