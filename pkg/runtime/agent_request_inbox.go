@@ -22,6 +22,8 @@ const (
 
 const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest in inputContext.agentRequestInbox before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Complete the review with runOutput.agentRequestDecision set to exactly {"decision":"accept","message":"concise reason"}, {"decision":"reject","message":"concise reason"}, or {"decision":"request_clarification","message":"one concrete question"}.`
 
+const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again, and do not emit runOutput.agentRequestDecision.`
+
 type agentRequestTeamDefinitionStore interface {
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
 }
@@ -40,6 +42,10 @@ type AgentRequestInboxReconcileResult struct {
 }
 
 type agentRequestDecisionTurnRunner struct {
+	inner TurnRunner
+}
+
+type acceptedAgentRequestExecutionTurnRunner struct {
 	inner TurnRunner
 }
 
@@ -65,6 +71,27 @@ func (r *agentRequestDecisionTurnRunner) RunTurn(ctx context.Context, input Turn
 		if _, _, err := parseAgentRequestDecisionOutput(outcome.RunOutput); err != nil {
 			return nil, err
 		}
+	}
+	return outcome, nil
+}
+
+func (r *acceptedAgentRequestExecutionTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
+	if planner, ok := r.inner.(TurnBudgetPlanner); ok {
+		return planner.PlanTurnBudget(ctx, input)
+	}
+	return BudgetUsage{}, nil
+}
+
+func (r *acceptedAgentRequestExecutionTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+	if r == nil || r.inner == nil {
+		return nil, errors.New("accepted AgentRequest execution runner is unavailable")
+	}
+	outcome, err := r.inner.RunTurn(ctx, input)
+	if err != nil || outcome == nil {
+		return outcome, err
+	}
+	if _, decisionOnly := outcome.RunOutput[AgentRequestDecisionOutputKey]; decisionOnly {
+		return nil, errors.New("accepted AgentRequest execution cannot emit an intake decision")
 	}
 	return outcome, nil
 }

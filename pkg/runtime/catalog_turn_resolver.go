@@ -192,6 +192,14 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, fmt.Errorf("resolve eligible Agent delegation targets: %w", err)
 	}
 	instructions := hostedAgentInstructions(definition)
+	acceptedRequestExecution := run.Source == RunSourceRequest || run.Source == RunSourceHandoff
+	if acceptedRequestExecution {
+		if _, ok := run.Context["collaboration"]; ok {
+			instructions = append(instructions, acceptedAgentRequestExecutionSystemInstruction)
+		} else {
+			acceptedRequestExecution = false
+		}
+	}
 	if delegated, ok := run.Context["delegatedSystemPrompt"].(string); ok && strings.TrimSpace(delegated) != "" {
 		instructions = append(instructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
@@ -205,6 +213,9 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, err
 	}
 	base.Runner = runner
+	if acceptedRequestExecution {
+		base.Runner = &acceptedAgentRequestExecutionTurnRunner{inner: runner}
+	}
 	return &base, nil
 }
 
