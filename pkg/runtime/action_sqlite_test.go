@@ -50,7 +50,10 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			result, err := store.CreateActionProposal(ctx, sqliteApprovalProposal(run, fmt.Sprintf("call-%d", index), "deploy-production", "event-"+fmt.Sprint(index)))
+			proposal := sqliteApprovalProposal(run, fmt.Sprintf("call-%d", index), "deploy-production", "event-"+fmt.Sprint(index))
+			proposal.Call.Arguments = map[string]interface{}{}
+			proposal.Call.InvocationDigest = ComputeActionInvocationDigest(proposal.Call)
+			result, err := store.CreateActionProposal(ctx, proposal)
 			results <- result
 			errs <- err
 		}(i)
@@ -98,7 +101,8 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 1 || calls[0].ID != persistedID || len(approvals) != 1 || len(events) != 1 || persistedRun.Revision != run.Revision+1 || persistedRun.Status != AgentRunStatusWaitingForApproval {
+	if len(calls) != 1 || calls[0].ID != persistedID || calls[0].Arguments == nil || len(calls[0].Arguments) != 0 ||
+		len(approvals) != 1 || len(events) != 1 || persistedRun.Revision != run.Revision+1 || persistedRun.Status != AgentRunStatusWaitingForApproval {
 		t.Fatalf("durable proposal mismatch: calls=%#v approvals=%#v events=%#v run=%#v", calls, approvals, events, persistedRun)
 	}
 	owned, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}})
