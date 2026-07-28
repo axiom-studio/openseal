@@ -44,6 +44,7 @@ type (
 	RunbookInterface          = runbook.Interface
 	RunbookTrigger            = runbook.Trigger
 	RunbookTriggerKind        = runbook.TriggerKind
+	RunbookSchedule           = runbook.Schedule
 	RunbookEvidenceProjection = runbook.EvidenceProjection
 	RunbookStep               = runbook.Step
 	RunbookStepKind           = runbook.StepKind
@@ -983,6 +984,7 @@ const (
 	HostedSkillNotApplied                    = runtime.HostedSkillNotApplied
 	RunbookAPIVersion                        = runbook.APIVersion
 	RunbookTriggerEvent                      = runbook.TriggerEvent
+	RunbookTriggerSchedule                   = runbook.TriggerSchedule
 	RunbookStepAction                        = runbook.StepAction
 	RunbookStepDelegate                      = runbook.StepDelegate
 	RunbookDelegateBehavior                  = runbook.DelegateBehavior
