@@ -22,8 +22,8 @@ const (
 	ObjectivesCapabilityVersion                = "1"
 	RunbooksCapabilityID                       = "runbooks"
 	RunbooksCapabilityVersion                  = "1"
-	InitiativesCapabilityID                    = "initiatives"
-	InitiativesCapabilityVersion               = "1"
+	ProjectsCapabilityID                       = "projects"
+	ProjectsCapabilityVersion                  = "1"
 	SourceMonitorsCapabilityID                 = "source-monitors"
 	SourceMonitorsCapabilityVersion            = "1"
 	OutreachCapabilityID                       = "outreach"
@@ -499,9 +499,9 @@ func EventRoutingCapability() Capability {
 	}
 }
 
-func InitiativesCapability() Capability {
+func ProjectsCapability() Capability {
 	return Capability{
-		ID: InitiativesCapabilityID, Version: InitiativesCapabilityVersion, Available: true,
+		ID: ProjectsCapabilityID, Version: ProjectsCapabilityVersion, Available: true,
 		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPatch},
 	}
 }
@@ -530,7 +530,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), ProjectsCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -854,40 +854,40 @@ type AdvanceEventSourceCheckpointRequest struct {
 	Watermark                    time.Time `json:"watermark,omitempty"`
 }
 
-type CreateInitiativeRequest struct {
+type CreateProjectRequest struct {
 	ID             string                           `json:"id,omitempty"`
 	Scope          runtime.Scope                    `json:"scope"`
 	Owner          runtime.ObjectiveOwner           `json:"owner"`
 	Title          string                           `json:"title"`
 	Purpose        string                           `json:"purpose"`
-	Status         runtime.InitiativeStatus         `json:"status,omitempty"`
+	Status         runtime.ProjectStatus            `json:"status,omitempty"`
 	AgentRefs      []runtime.ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs       []runtime.ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs  []string                         `json:"objectiveRefs"`
 	RunRefs        []string                         `json:"runRefs,omitempty"`
-	Milestones     []runtime.InitiativeMilestone    `json:"milestones,omitempty"`
-	Hypotheses     []runtime.InitiativeHypothesis   `json:"hypotheses,omitempty"`
+	Milestones     []runtime.ProjectMilestone       `json:"milestones,omitempty"`
+	Hypotheses     []runtime.ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors []runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
-	Deliverables   []runtime.InitiativeDeliverable  `json:"deliverables,omitempty"`
+	Deliverables   []runtime.ProjectDeliverable     `json:"deliverables,omitempty"`
 	Budget         *runtime.BudgetPolicy            `json:"budget,omitempty"`
 	Policy         map[string]interface{}           `json:"policy,omitempty"`
 	Checkpoint     map[string]interface{}           `json:"checkpoint,omitempty"`
 	IdempotencyKey string                           `json:"idempotencyKey,omitempty"`
 }
 
-type UpdateInitiativeRequest struct {
+type UpdateProjectRequest struct {
 	ExpectedRevision int64                             `json:"expectedRevision"`
 	Title            *string                           `json:"title,omitempty"`
 	Purpose          *string                           `json:"purpose,omitempty"`
-	Status           *runtime.InitiativeStatus         `json:"status,omitempty"`
+	Status           *runtime.ProjectStatus            `json:"status,omitempty"`
 	AgentRefs        *[]runtime.ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs         *[]runtime.ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs    *[]string                         `json:"objectiveRefs,omitempty"`
 	RunRefs          *[]string                         `json:"runRefs,omitempty"`
-	Milestones       *[]runtime.InitiativeMilestone    `json:"milestones,omitempty"`
-	Hypotheses       *[]runtime.InitiativeHypothesis   `json:"hypotheses,omitempty"`
+	Milestones       *[]runtime.ProjectMilestone       `json:"milestones,omitempty"`
+	Hypotheses       *[]runtime.ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors   *[]runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
-	Deliverables     *[]runtime.InitiativeDeliverable  `json:"deliverables,omitempty"`
+	Deliverables     *[]runtime.ProjectDeliverable     `json:"deliverables,omitempty"`
 	Budget           *runtime.BudgetPolicy             `json:"budget,omitempty"`
 	ClearBudget      bool                              `json:"clearBudget,omitempty"`
 	Policy           map[string]interface{}            `json:"policy,omitempty"`
@@ -913,7 +913,7 @@ type CreateOutreachMessageRequest struct {
 type CreateOutreachThreadRequest struct {
 	ID                  string                       `json:"id,omitempty"`
 	Scope               runtime.Scope                `json:"scope"`
-	InitiativeID        string                       `json:"initiativeId"`
+	ProjectID           string                       `json:"projectId"`
 	SourceObservationID string                       `json:"sourceObservationId"`
 	ApprovalPolicyRef   string                       `json:"approvalPolicyRef"`
 	Identity            runtime.OutreachIdentity     `json:"identity"`

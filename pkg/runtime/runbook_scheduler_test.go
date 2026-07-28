@@ -102,29 +102,29 @@ func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	}
 }
 
-func TestRunbookSchedulerCapturesBoundedInitiativeEvidence(t *testing.T) {
+func TestRunbookSchedulerCapturesBoundedProjectEvidence(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "evidence"}
-	initiative, monitorRuns := seedExecutableMonitorInitiative(t, store, scope)
+	project, monitorRuns := seedExecutableMonitorProject(t, store, scope)
 	monitorService := NewSourceMonitorService(store, store, store, nil)
-	if _, err := monitorService.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-a", monitorRuns["monitor-a"], 0, "one", "thread-one", "a deliberately long finding")); err != nil {
+	if _, err := monitorService.Ingest(ctx, sourceObservationRequest(scope, project.ID, "monitor-a", monitorRuns["monitor-a"], 0, "one", "thread-one", "a deliberately long finding")); err != nil {
 		t.Fatal(err)
 	}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: initiative.Owner, Title: "Synthesize", Goal: "Synthesize cited findings", Status: ObjectiveStatusActive,
+		Scope: scope, Owner: project.Owner, Title: "Synthesize", Goal: "Synthesize cited findings", Status: ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
-		ID: "synthesize", Scope: scope, Owner: initiative.Owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
+		ID: "synthesize", Scope: scope, Owner: project.Owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 		DefinitionID: "research", DefinitionVersion: "1", TriggerID: "synthesize",
 		Trigger: runbook.Trigger{
 			Kind: runbook.TriggerSchedule, Entrypoint: "synthesize", Schedule: &runbook.Schedule{Cron: "*/1 * * * * *", Timezone: "UTC"},
 			Evidence: &runbook.EvidenceProjection{MaximumObservations: 1, MaximumSummaryRunes: 8, MaximumTotalRunes: 8},
 		},
-		Input: map[string]interface{}{"initiativeId": initiative.ID},
+		Input: map[string]interface{}{"projectId": project.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestRunbookSchedulerCapturesBoundedInitiativeEvidence(t *testing.T) {
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.InitiativeID != initiative.ID || snapshot.SelectedCount != 1 || len([]rune(snapshot.Observations[0].Summary)) != 8 || !snapshot.Truncated {
+	if snapshot.ProjectID != project.ID || snapshot.SelectedCount != 1 || len([]rune(snapshot.Observations[0].Summary)) != 8 || !snapshot.Truncated {
 		t.Fatalf("snapshot=%#v", &snapshot)
 	}
 }

@@ -31,7 +31,7 @@ func migrate(db *sql.DB) error {
 	if err := migrateRunbookActivationsSQLite(db); err != nil {
 		return err
 	}
-	if err := migrateInitiatives(db); err != nil {
+	if err := migrateProjects(db); err != nil {
 		return err
 	}
 	if err := migrateSourceMonitors(db); err != nil {

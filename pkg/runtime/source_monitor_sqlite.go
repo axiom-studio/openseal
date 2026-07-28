@@ -13,17 +13,17 @@ func migrateSourceMonitors(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS source_observations (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
-			initiative_id TEXT NOT NULL, monitor_id TEXT NOT NULL, run_id TEXT NOT NULL,
+			project_id TEXT NOT NULL, monitor_id TEXT NOT NULL, run_id TEXT NOT NULL,
 			dedupe_key TEXT NOT NULL, ingested_at DATETIME NOT NULL, payload TEXT NOT NULL,
 			PRIMARY KEY(scope_kind, scope_id, id),
-			UNIQUE(scope_kind, scope_id, initiative_id, monitor_id, dedupe_key)
+			UNIQUE(scope_kind, scope_id, project_id, monitor_id, dedupe_key)
 		);
-		CREATE INDEX IF NOT EXISTS idx_source_observations_monitor ON source_observations(scope_kind,scope_id,initiative_id,monitor_id,ingested_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_source_observations_monitor ON source_observations(scope_kind,scope_id,project_id,monitor_id,ingested_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_source_observations_run ON source_observations(scope_kind,scope_id,run_id,ingested_at DESC);
 		CREATE TABLE IF NOT EXISTS source_monitor_checkpoints (
-			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, initiative_id TEXT NOT NULL, monitor_id TEXT NOT NULL,
+			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, project_id TEXT NOT NULL, monitor_id TEXT NOT NULL,
 			revision INTEGER NOT NULL, updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
-			PRIMARY KEY(scope_kind, scope_id, initiative_id, monitor_id)
+			PRIMARY KEY(scope_kind, scope_id, project_id, monitor_id)
 		);
 	`)
 	return err
@@ -50,7 +50,7 @@ func (s *SQLiteStore) IngestSourceObservation(ctx context.Context, observation *
 			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
-	current, err := getSQLiteSourceMonitorCheckpoint(ctx, conn, observation.Scope, observation.InitiativeID, observation.MonitorID)
+	current, err := getSQLiteSourceMonitorCheckpoint(ctx, conn, observation.Scope, observation.ProjectID, observation.MonitorID)
 	if err != nil && !errors.Is(err, ErrSourceObservationNotFound) {
 		return nil, nil, nil, false, err
 	}
@@ -90,7 +90,7 @@ func (s *SQLiteStore) IngestSourceObservation(ctx context.Context, observation *
 	if err != nil {
 		return nil, nil, nil, false, err
 	}
-	if _, err = conn.ExecContext(ctx, `INSERT INTO source_observations(scope_kind,scope_id,id,initiative_id,monitor_id,run_id,dedupe_key,ingested_at,payload)VALUES(?,?,?,?,?,?,?,?,?)`, observation.Scope.Kind, observation.Scope.ID, observation.ID, observation.InitiativeID, observation.MonitorID, observation.RunID, observation.DedupeKey, observation.IngestedAt, string(payload)); err != nil {
+	if _, err = conn.ExecContext(ctx, `INSERT INTO source_observations(scope_kind,scope_id,id,project_id,monitor_id,run_id,dedupe_key,ingested_at,payload)VALUES(?,?,?,?,?,?,?,?,?)`, observation.Scope.Kind, observation.Scope.ID, observation.ID, observation.ProjectID, observation.MonitorID, observation.RunID, observation.DedupeKey, observation.IngestedAt, string(payload)); err != nil {
 		return nil, nil, nil, false, err
 	}
 	if err = upsertSQLiteSourceMonitorCheckpoint(ctx, conn, next, expected); err != nil {
@@ -125,7 +125,7 @@ func (s *SQLiteStore) AdvanceSourceMonitorCheckpoint(ctx context.Context, checkp
 			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
-	current, err := getSQLiteSourceMonitorCheckpoint(ctx, conn, checkpoint.Scope, checkpoint.InitiativeID, checkpoint.MonitorID)
+	current, err := getSQLiteSourceMonitorCheckpoint(ctx, conn, checkpoint.Scope, checkpoint.ProjectID, checkpoint.MonitorID)
 	if err != nil && !errors.Is(err, ErrSourceObservationNotFound) {
 		return nil, nil, false, err
 	}
@@ -160,10 +160,10 @@ func upsertSQLiteSourceMonitorCheckpoint(ctx context.Context, conn *sql.Conn, ch
 		return err
 	}
 	if expected == 0 {
-		_, err = conn.ExecContext(ctx, `INSERT INTO source_monitor_checkpoints(scope_kind,scope_id,initiative_id,monitor_id,revision,updated_at,payload)VALUES(?,?,?,?,?,?,?)`, checkpoint.Scope.Kind, checkpoint.Scope.ID, checkpoint.InitiativeID, checkpoint.MonitorID, checkpoint.Revision, checkpoint.UpdatedAt, string(payload))
+		_, err = conn.ExecContext(ctx, `INSERT INTO source_monitor_checkpoints(scope_kind,scope_id,project_id,monitor_id,revision,updated_at,payload)VALUES(?,?,?,?,?,?,?)`, checkpoint.Scope.Kind, checkpoint.Scope.ID, checkpoint.ProjectID, checkpoint.MonitorID, checkpoint.Revision, checkpoint.UpdatedAt, string(payload))
 		return err
 	}
-	result, err := conn.ExecContext(ctx, `UPDATE source_monitor_checkpoints SET revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND initiative_id=? AND monitor_id=? AND revision=?`, checkpoint.Revision, checkpoint.UpdatedAt, string(payload), checkpoint.Scope.Kind, checkpoint.Scope.ID, checkpoint.InitiativeID, checkpoint.MonitorID, expected)
+	result, err := conn.ExecContext(ctx, `UPDATE source_monitor_checkpoints SET revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND project_id=? AND monitor_id=? AND revision=?`, checkpoint.Revision, checkpoint.UpdatedAt, string(payload), checkpoint.Scope.Kind, checkpoint.Scope.ID, checkpoint.ProjectID, checkpoint.MonitorID, expected)
 	if err != nil {
 		return err
 	}
@@ -179,9 +179,9 @@ func upsertSQLiteSourceMonitorCheckpoint(ctx context.Context, conn *sql.Conn, ch
 
 func getSQLiteSourceMonitorCheckpoint(ctx context.Context, query interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}, scope Scope, initiativeID, monitorID string) (*SourceMonitorCheckpoint, error) {
+}, scope Scope, projectID, monitorID string) (*SourceMonitorCheckpoint, error) {
 	var payload string
-	err := query.QueryRowContext(ctx, `SELECT payload FROM source_monitor_checkpoints WHERE scope_kind=? AND scope_id=? AND initiative_id=? AND monitor_id=?`, scope.Kind, scope.ID, initiativeID, monitorID).Scan(&payload)
+	err := query.QueryRowContext(ctx, `SELECT payload FROM source_monitor_checkpoints WHERE scope_kind=? AND scope_id=? AND project_id=? AND monitor_id=?`, scope.Kind, scope.ID, projectID, monitorID).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSourceObservationNotFound
 	}
@@ -197,7 +197,7 @@ func getSQLiteSourceMonitorCheckpoint(ctx context.Context, query interface {
 
 func getSQLiteSourceObservationByDedupe(ctx context.Context, conn *sql.Conn, observation *SourceObservation) (*SourceObservation, error) {
 	var payload string
-	err := conn.QueryRowContext(ctx, `SELECT payload FROM source_observations WHERE scope_kind=? AND scope_id=? AND initiative_id=? AND monitor_id=? AND dedupe_key=?`, observation.Scope.Kind, observation.Scope.ID, observation.InitiativeID, observation.MonitorID, observation.DedupeKey).Scan(&payload)
+	err := conn.QueryRowContext(ctx, `SELECT payload FROM source_observations WHERE scope_kind=? AND scope_id=? AND project_id=? AND monitor_id=? AND dedupe_key=?`, observation.Scope.Kind, observation.Scope.ID, observation.ProjectID, observation.MonitorID, observation.DedupeKey).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSourceObservationNotFound
 	}
@@ -240,7 +240,7 @@ func (s *SQLiteStore) ListSourceObservations(ctx context.Context, filter SourceO
 	}
 	query := `SELECT payload FROM source_observations WHERE scope_kind=? AND scope_id=?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
-	for _, selector := range []struct{ column, value string }{{"initiative_id", filter.InitiativeID}, {"monitor_id", filter.MonitorID}, {"run_id", filter.RunID}} {
+	for _, selector := range []struct{ column, value string }{{"project_id", filter.ProjectID}, {"monitor_id", filter.MonitorID}, {"run_id", filter.RunID}} {
 		if selector.value != "" {
 			query += " AND " + selector.column + "=?"
 			args = append(args, selector.value)
@@ -276,8 +276,8 @@ func (s *SQLiteStore) ListSourceObservations(ctx context.Context, filter SourceO
 	return values, rows.Err()
 }
 
-func (s *SQLiteStore) GetSourceMonitorCheckpoint(ctx context.Context, scope Scope, initiativeID, monitorID string) (*SourceMonitorCheckpoint, error) {
-	return getSQLiteSourceMonitorCheckpoint(ctx, s.db, scope, strings.TrimSpace(initiativeID), strings.TrimSpace(monitorID))
+func (s *SQLiteStore) GetSourceMonitorCheckpoint(ctx context.Context, scope Scope, projectID, monitorID string) (*SourceMonitorCheckpoint, error) {
+	return getSQLiteSourceMonitorCheckpoint(ctx, s.db, scope, strings.TrimSpace(projectID), strings.TrimSpace(monitorID))
 }
 
 var _ SourceMonitorStore = (*SQLiteStore)(nil)

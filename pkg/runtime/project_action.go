@@ -12,55 +12,55 @@ import (
 )
 
 const (
-	InitiativeManagementSkillID      = "openseal.initiatives"
-	InitiativeManagementSkillVersion = "1.0.2"
-	InitiativeActionCreate           = "create"
-	InitiativeActionUpdate           = "update"
-	InitiativeActionPause            = "pause"
-	InitiativeManagementEndpoint     = "kernel://initiatives"
+	ProjectManagementSkillID      = "openseal.projects"
+	ProjectManagementSkillVersion = "1.0.2"
+	ProjectActionCreate           = "create"
+	ProjectActionUpdate           = "update"
+	ProjectActionPause            = "pause"
+	ProjectManagementEndpoint     = "kernel://projects"
 )
 
-// InitiativePortfolioStore is the portable persistence boundary required to
-// validate and mutate Initiatives and their canonical Objective references.
-type InitiativePortfolioStore interface {
-	InitiativeStore
+// ProjectPortfolioStore is the portable persistence boundary required to
+// validate and mutate Projects and their canonical Objective references.
+type ProjectPortfolioStore interface {
+	ProjectStore
 	PortfolioStore
 }
 
-// InitiativeKernelStore adds the Run and Action lifecycle required by the
+// ProjectKernelStore adds the Run and Action lifecycle required by the
 // governed dispatcher. It is implemented by the built-in kernel stores.
-type InitiativeKernelStore interface {
+type ProjectKernelStore interface {
 	KernelStore
-	InitiativeStore
+	ProjectStore
 }
 
-// InitiativeManagementSkill exposes project composition as typed, governed
+// ProjectManagementSkill exposes project composition as typed, governed
 // kernel actions. Scope and owner are intentionally absent: both are derived
 // from the durable conversation Run and cannot be supplied by the model.
-func InitiativeManagementSkill() *skill.Definition {
-	mutable := initiativeMutableSchema()
+func ProjectManagementSkill() *skill.Definition {
+	mutable := projectMutableSchema()
 	create := cloneMap(mutable)
-	delete(create, "initiativeId")
+	delete(create, "projectId")
 	delete(create, "expectedRevision")
-	// A SourceMonitor requires an already-known Initiative identity in its
+	// A SourceMonitor requires an already-known Project identity in its
 	// Objective-owned Runbook input. It is attached through update after creation.
 	delete(create, "sourceMonitors")
 	return &skill.Definition{
-		ID: InitiativeManagementSkillID, Version: InitiativeManagementSkillVersion,
-		Name: "Initiatives", Description: "Propose governed changes to the current Agent or Team's multi-objective initiatives.",
-		Transport: skill.TransportReference{Kind: "kernel", Endpoint: InitiativeManagementEndpoint},
+		ID: ProjectManagementSkillID, Version: ProjectManagementSkillVersion,
+		Name: "Projects", Description: "Propose governed changes to the current Agent or Team's multi-objective projects.",
+		Transport: skill.TransportReference{Kind: "kernel", Endpoint: ProjectManagementEndpoint},
 		Actions: map[string]skill.Action{
-			InitiativeActionCreate: initiativeSkillAction(InitiativeActionCreate, "Propose a new draft Initiative that coordinates objectives owned by this Agent or Team.", create, []interface{}{"title", "purpose", "objectiveRefs"}),
-			InitiativeActionUpdate: initiativeSkillAction(InitiativeActionUpdate, "Propose changes to an existing Initiative owned by this Agent or Team using its current revision.", mutable, []interface{}{"initiativeId", "expectedRevision"}),
-			InitiativeActionPause: initiativeSkillAction(InitiativeActionPause, "Propose pausing an existing Initiative owned by this Agent or Team using its current revision.", map[string]interface{}{
-				"initiativeId":     map[string]interface{}{"type": "string", "minLength": 1},
+			ProjectActionCreate: projectSkillAction(ProjectActionCreate, "Propose a new draft Project that coordinates objectives owned by this Agent or Team.", create, []interface{}{"title", "purpose", "objectiveRefs"}),
+			ProjectActionUpdate: projectSkillAction(ProjectActionUpdate, "Propose changes to an existing Project owned by this Agent or Team using its current revision.", mutable, []interface{}{"projectId", "expectedRevision"}),
+			ProjectActionPause: projectSkillAction(ProjectActionPause, "Propose pausing an existing Project owned by this Agent or Team using its current revision.", map[string]interface{}{
+				"projectId":        map[string]interface{}{"type": "string", "minLength": 1},
 				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
-			}, []interface{}{"initiativeId", "expectedRevision"}),
+			}, []interface{}{"projectId", "expectedRevision"}),
 		},
 	}
 }
 
-func initiativeSkillAction(name, description string, properties map[string]interface{}, required []interface{}) skill.Action {
+func projectSkillAction(name, description string, properties map[string]interface{}, required []interface{}) skill.Action {
 	return skill.Action{
 		Name: name, Description: description, Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 		Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
@@ -68,23 +68,23 @@ func initiativeSkillAction(name, description string, properties map[string]inter
 		OutputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]interface{}{
-				"resourceType": map[string]interface{}{"type": "string", "const": "initiative"},
-				"operation":    map[string]interface{}{"type": "string", "enum": []interface{}{InitiativeActionCreate, InitiativeActionUpdate, InitiativeActionPause}},
+				"resourceType": map[string]interface{}{"type": "string", "const": "project"},
+				"operation":    map[string]interface{}{"type": "string", "enum": []interface{}{ProjectActionCreate, ProjectActionUpdate, ProjectActionPause}},
 				"created":      map[string]interface{}{"type": "boolean"},
-				"initiative":   map[string]interface{}{"type": "object"},
+				"project":      map[string]interface{}{"type": "object"},
 			},
-			"required": []interface{}{"resourceType", "operation", "created", "initiative"},
+			"required": []interface{}{"resourceType", "operation", "created", "project"},
 		},
 	}
 }
 
-func initiativeMutableSchema() map[string]interface{} {
+func projectMutableSchema() map[string]interface{} {
 	stringArray := func() map[string]interface{} {
 		return map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true}
 	}
-	resourceRefs := map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true}
+	resourceRefs := map[string]interface{}{"type": "array", "items": projectResourceReferenceSchema(), "uniqueItems": true}
 	return map[string]interface{}{
-		"initiativeId":     map[string]interface{}{"type": "string", "minLength": 1},
+		"projectId":        map[string]interface{}{"type": "string", "minLength": 1},
 		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 		"title":            map[string]interface{}{"type": "string", "minLength": 1},
 		"purpose":          map[string]interface{}{"type": "string", "minLength": 1},
@@ -92,16 +92,16 @@ func initiativeMutableSchema() map[string]interface{} {
 		"teamRefs":         cloneMap(resourceRefs),
 		"objectiveRefs":    stringArray(),
 		"runRefs":          stringArray(),
-		"milestones":       map[string]interface{}{"type": "array", "items": initiativeMilestoneSchema()},
-		"hypotheses":       map[string]interface{}{"type": "array", "items": initiativeHypothesisSchema()},
-		"sourceMonitors":   map[string]interface{}{"type": "array", "items": initiativeSourceMonitorSchema()},
-		"deliverables":     map[string]interface{}{"type": "array", "items": initiativeDeliverableSchema()},
-		"budget":           initiativeBudgetSchema(),
+		"milestones":       map[string]interface{}{"type": "array", "items": projectMilestoneSchema()},
+		"hypotheses":       map[string]interface{}{"type": "array", "items": projectHypothesisSchema()},
+		"sourceMonitors":   map[string]interface{}{"type": "array", "items": projectSourceMonitorSchema()},
+		"deliverables":     map[string]interface{}{"type": "array", "items": projectDeliverableSchema()},
+		"budget":           projectBudgetSchema(),
 		"policy":           map[string]interface{}{"type": "object"},
 	}
 }
 
-func initiativeResourceReferenceSchema() map[string]interface{} {
+func projectResourceReferenceSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
@@ -117,7 +117,7 @@ func initiativeResourceReferenceSchema() map[string]interface{} {
 	}
 }
 
-func initiativeMilestoneSchema() map[string]interface{} {
+func projectMilestoneSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
@@ -131,13 +131,13 @@ func initiativeMilestoneSchema() map[string]interface{} {
 	}
 }
 
-func initiativeHypothesisSchema() map[string]interface{} {
+func projectHypothesisSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
 			"id": map[string]interface{}{"type": "string", "minLength": 1}, "statement": map[string]interface{}{"type": "string", "minLength": 1},
 			"confidence":   map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1},
-			"evidenceRefs": map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true},
+			"evidenceRefs": map[string]interface{}{"type": "array", "items": projectResourceReferenceSchema(), "uniqueItems": true},
 			"status":       map[string]interface{}{"type": "string", "enum": []interface{}{string(HypothesisOpen), string(HypothesisSupported), string(HypothesisContradicted), string(HypothesisInconclusive)}},
 			"updatedAt":    map[string]interface{}{"type": "string", "format": "date-time"},
 		},
@@ -145,7 +145,7 @@ func initiativeHypothesisSchema() map[string]interface{} {
 	}
 }
 
-func initiativeSourceMonitorSchema() map[string]interface{} {
+func projectSourceMonitorSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
@@ -159,13 +159,13 @@ func initiativeSourceMonitorSchema() map[string]interface{} {
 	}
 }
 
-func initiativeDeliverableSchema() map[string]interface{} {
+func projectDeliverableSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
 			"id": map[string]interface{}{"type": "string", "minLength": 1}, "title": map[string]interface{}{"type": "string", "minLength": 1},
 			"status":        map[string]interface{}{"type": "string", "enum": []interface{}{string(DeliverablePlanned), string(DeliverableInProgress), string(DeliverableReview), string(DeliverableDelivered), string(DeliverableCanceled)}},
-			"artifactRefs":  map[string]interface{}{"type": "array", "items": initiativeResourceReferenceSchema(), "uniqueItems": true},
+			"artifactRefs":  map[string]interface{}{"type": "array", "items": projectResourceReferenceSchema(), "uniqueItems": true},
 			"objectiveRefs": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
 			"dueAt":         map[string]interface{}{"type": "string", "format": "date-time"},
 		},
@@ -173,7 +173,7 @@ func initiativeDeliverableSchema() map[string]interface{} {
 	}
 }
 
-func initiativeBudgetSchema() map[string]interface{} {
+func projectBudgetSchema() map[string]interface{} {
 	positive := func() map[string]interface{} { return map[string]interface{}{"type": "integer", "minimum": 1} }
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
@@ -185,19 +185,19 @@ func initiativeBudgetSchema() map[string]interface{} {
 	}
 }
 
-// InitiativeActionValidator performs ownership, reference, lifecycle, and CAS
+// ProjectActionValidator performs ownership, reference, lifecycle, and CAS
 // checks before a mutation can become an approval request.
-type InitiativeActionValidator struct{ store InitiativePortfolioStore }
+type ProjectActionValidator struct{ store ProjectPortfolioStore }
 
-func NewInitiativeActionValidator(store InitiativePortfolioStore) (*InitiativeActionValidator, error) {
+func NewProjectActionValidator(store ProjectPortfolioStore) (*ProjectActionValidator, error) {
 	if store == nil {
-		return nil, errors.New("initiative portfolio store is required")
+		return nil, errors.New("project portfolio store is required")
 	}
-	return &InitiativeActionValidator{store: store}, nil
+	return &ProjectActionValidator{store: store}, nil
 }
 
-func (v *InitiativeActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
-	if !isInitiativeAction(input.Bound) || input.Bound.Action.Name == InitiativeActionCreate {
+func (v *ProjectActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+	if !isProjectAction(input.Bound) || input.Bound.Action.Name == ProjectActionCreate {
 		return nil, false, nil
 	}
 	arguments := cloneMap(input.Arguments)
@@ -205,14 +205,14 @@ func (v *InitiativeActionValidator) ResolveActionProposalArguments(ctx context.C
 		return arguments, true, nil
 	}
 	if v == nil || v.store == nil || input.Run == nil {
-		return nil, true, errors.New("initiative action validator is not configured")
+		return nil, true, errors.New("project action validator is not configured")
 	}
-	target, _ := arguments["initiativeId"].(string)
+	target, _ := arguments["projectId"].(string)
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return arguments, true, nil
 	}
-	current, err := NewInitiativeService(v.store, v.store).Get(ctx, input.Run.Scope, target)
+	current, err := NewProjectService(v.store, v.store).Get(ctx, input.Run.Scope, target)
 	if err != nil {
 		return nil, true, err
 	}
@@ -220,89 +220,89 @@ func (v *InitiativeActionValidator) ResolveActionProposalArguments(ctx context.C
 	return arguments, true, nil
 }
 
-func (v *InitiativeActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
-	if !isInitiativeAction(input.Bound) {
+func (v *ProjectActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+	if !isProjectAction(input.Bound) {
 		return nil, nil
 	}
 	if v == nil || v.store == nil || input.Run == nil {
-		return nil, errors.New("initiative action validator is not configured")
+		return nil, errors.New("project action validator is not configured")
 	}
 	if err := input.Run.Owner.Validate(); err != nil {
-		return nil, fmt.Errorf("initiative action run owner: %w", err)
+		return nil, fmt.Errorf("project action run owner: %w", err)
 	}
-	preview := map[string]interface{}{"resourceType": "initiative", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": cloneMap(input.Arguments)}
-	service := NewInitiativeService(v.store, v.store)
-	if input.Bound.Action.Name == InitiativeActionCreate {
-		args, err := decodeInitiativeCreateArguments(input.Arguments)
+	preview := map[string]interface{}{"resourceType": "project", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": cloneMap(input.Arguments)}
+	service := NewProjectService(v.store, v.store)
+	if input.Bound.Action.Name == ProjectActionCreate {
+		args, err := decodeProjectCreateArguments(input.Arguments)
 		if err != nil {
 			return nil, err
 		}
-		candidate := args.initiative(input.Run.Scope, input.Run.Owner)
-		candidate.ID = "initiative-validation"
+		candidate := args.project(input.Run.Scope, input.Run.Owner)
+		candidate.ID = "project-validation"
 		candidate.Revision = 1
-		if err := validateInitiativeCandidate(ctx, service, candidate); err != nil {
+		if err := validateProjectCandidate(ctx, service, candidate); err != nil {
 			return nil, err
 		}
-		preview["resultingStatus"] = InitiativeStatusDraft
+		preview["resultingStatus"] = ProjectStatusDraft
 		return preview, nil
 	}
-	args, err := decodeInitiativeUpdateArguments(input.Arguments)
+	args, err := decodeProjectUpdateArguments(input.Arguments)
 	if err != nil {
 		return nil, err
 	}
-	current, err := service.Get(ctx, input.Run.Scope, args.InitiativeID)
+	current, err := service.Get(ctx, input.Run.Scope, args.ProjectID)
 	if err != nil {
 		return nil, err
 	}
 	if current.Owner != input.Run.Owner {
-		return nil, errors.New("initiative action target is not owned by the conversation Agent or Team")
+		return nil, errors.New("project action target is not owned by the conversation Agent or Team")
 	}
 	if current.Revision != args.ExpectedRevision {
-		return nil, ErrInitiativeConflict
+		return nil, ErrProjectConflict
 	}
-	preview["initiativeId"] = current.ID
+	preview["projectId"] = current.ID
 	preview["expectedRevision"] = current.Revision
 	preview["current"] = map[string]interface{}{"revision": current.Revision, "title": current.Title, "purpose": current.Purpose, "status": current.Status, "objectiveRefs": current.ObjectiveRefs}
-	if input.Bound.Action.Name == InitiativeActionPause {
-		if current.Status != InitiativeStatusDraft && current.Status != InitiativeStatusActive {
-			return nil, fmt.Errorf("initiative cannot be paused from %s", current.Status)
+	if input.Bound.Action.Name == ProjectActionPause {
+		if current.Status != ProjectStatusDraft && current.Status != ProjectStatusActive {
+			return nil, fmt.Errorf("project cannot be paused from %s", current.Status)
 		}
-		preview["changes"] = map[string]interface{}{"status": InitiativeStatusPaused}
+		preview["changes"] = map[string]interface{}{"status": ProjectStatusPaused}
 		return preview, nil
 	}
 	if !args.hasChanges() {
-		return nil, ErrInitiativeNoChanges
+		return nil, ErrProjectNoChanges
 	}
-	candidate := applyInitiativeArguments(cloneInitiative(current), args)
-	if err := validateInitiativeCandidate(ctx, service, candidate); err != nil {
+	candidate := applyProjectArguments(cloneProject(current), args)
+	if err := validateProjectCandidate(ctx, service, candidate); err != nil {
 		return nil, err
 	}
 	return preview, nil
 }
 
-// InitiativeActionDispatcher executes approved Initiative actions and composes
+// ProjectActionDispatcher executes approved Project actions and composes
 // with the existing external and Objective dispatchers through fallback.
-type InitiativeActionDispatcher struct {
-	store    InitiativeKernelStore
+type ProjectActionDispatcher struct {
+	store    ProjectKernelStore
 	fallback ActionDispatcher
 }
 
-func NewInitiativeActionDispatcher(store InitiativeKernelStore, fallback ActionDispatcher) (*InitiativeActionDispatcher, error) {
+func NewProjectActionDispatcher(store ProjectKernelStore, fallback ActionDispatcher) (*ProjectActionDispatcher, error) {
 	if store == nil {
-		return nil, errors.New("initiative kernel store is required")
+		return nil, errors.New("project kernel store is required")
 	}
-	return &InitiativeActionDispatcher{store: store, fallback: fallback}, nil
+	return &ProjectActionDispatcher{store: store, fallback: fallback}, nil
 }
 
-func (d *InitiativeActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
-	if !isInitiativeAction(input.Bound) {
+func (d *ProjectActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+	if !isProjectAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
 		}
 		return d.fallback.DispatchAction(ctx, input)
 	}
 	if d == nil || d.store == nil || input.Call == nil {
-		return nil, errors.New("initiative action dispatcher is not configured")
+		return nil, errors.New("project action dispatcher is not configured")
 	}
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil || run == nil {
@@ -311,80 +311,80 @@ func (d *InitiativeActionDispatcher) DispatchAction(ctx context.Context, input A
 		}
 		return nil, err
 	}
-	service := NewInitiativeService(d.store, d.store)
+	service := NewProjectService(d.store, d.store)
 	actor := ActivityActor{Type: "agent", ID: run.AssignedAgentID}
 	if actor.ID == "" {
 		actor = ActivityActor{Type: string(run.Owner.Type), ID: run.Owner.ID}
 	}
-	var initiative *Initiative
+	var project *Project
 	created := false
 	switch input.Bound.Action.Name {
-	case InitiativeActionCreate:
-		args, decodeErr := decodeInitiativeCreateArguments(input.Arguments)
+	case ProjectActionCreate:
+		args, decodeErr := decodeProjectCreateArguments(input.Arguments)
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
 		var event *ActivityEvent
-		initiative, event, err = service.Create(ctx, CreateInitiativeRequest{Initiative: args.initiative(run.Scope, run.Owner), IdempotencyKey: input.Call.IdempotencyKey, Actor: actor, Visibility: ActivityVisibilityScope})
+		project, event, err = service.Create(ctx, CreateProjectRequest{Project: args.project(run.Scope, run.Owner), IdempotencyKey: input.Call.IdempotencyKey, Actor: actor, Visibility: ActivityVisibilityScope})
 		created = event != nil
-	case InitiativeActionUpdate, InitiativeActionPause:
-		args, decodeErr := decodeInitiativeUpdateArguments(input.Arguments)
+	case ProjectActionUpdate, ProjectActionPause:
+		args, decodeErr := decodeProjectUpdateArguments(input.Arguments)
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
-		current, getErr := service.Get(ctx, run.Scope, args.InitiativeID)
+		current, getErr := service.Get(ctx, run.Scope, args.ProjectID)
 		if getErr != nil {
 			return nil, getErr
 		}
 		if current.Owner != run.Owner {
-			return nil, errors.New("initiative action target is not owned by the conversation Agent or Team")
+			return nil, errors.New("project action target is not owned by the conversation Agent or Team")
 		}
-		if input.Bound.Action.Name == InitiativeActionPause && current.Status != InitiativeStatusDraft && current.Status != InitiativeStatusActive {
-			if current.Status != InitiativeStatusPaused || current.Revision != args.ExpectedRevision+1 {
-				return nil, fmt.Errorf("initiative cannot be paused from %s", current.Status)
+		if input.Bound.Action.Name == ProjectActionPause && current.Status != ProjectStatusDraft && current.Status != ProjectStatusActive {
+			if current.Status != ProjectStatusPaused || current.Revision != args.ExpectedRevision+1 {
+				return nil, fmt.Errorf("project cannot be paused from %s", current.Status)
 			}
 		}
 		request := args.updateRequest(actor)
-		if input.Bound.Action.Name == InitiativeActionPause {
-			paused := InitiativeStatusPaused
+		if input.Bound.Action.Name == ProjectActionPause {
+			paused := ProjectStatusPaused
 			request.Status = &paused
 		}
-		initiative, _, err = service.Patch(ctx, run.Scope, args.InitiativeID, request)
-		if errors.Is(err, ErrInitiativeConflict) {
-			latest, getLatestErr := service.Get(ctx, run.Scope, args.InitiativeID)
-			if getLatestErr == nil && initiativeActionAlreadyApplied(latest, args, input.Bound.Action.Name) {
-				initiative, err = latest, nil
+		project, _, err = service.Patch(ctx, run.Scope, args.ProjectID, request)
+		if errors.Is(err, ErrProjectConflict) {
+			latest, getLatestErr := service.Get(ctx, run.Scope, args.ProjectID)
+			if getLatestErr == nil && projectActionAlreadyApplied(latest, args, input.Bound.Action.Name) {
+				project, err = latest, nil
 			}
 		}
 	default:
-		err = errors.New("unsupported initiative action")
+		err = errors.New("unsupported project action")
 	}
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"resourceType": "initiative", "operation": input.Bound.Action.Name, "created": created, "initiative": initiative}, nil
+	return map[string]interface{}{"resourceType": "project", "operation": input.Bound.Action.Name, "created": created, "project": project}, nil
 }
 
-type initiativeCreateArguments struct {
-	Title         string                  `json:"title"`
-	Purpose       string                  `json:"purpose"`
-	AgentRefs     []ResourceReference     `json:"agentRefs,omitempty"`
-	TeamRefs      []ResourceReference     `json:"teamRefs,omitempty"`
-	ObjectiveRefs []string                `json:"objectiveRefs"`
-	RunRefs       []string                `json:"runRefs,omitempty"`
-	Milestones    []InitiativeMilestone   `json:"milestones,omitempty"`
-	Hypotheses    []InitiativeHypothesis  `json:"hypotheses,omitempty"`
-	Deliverables  []InitiativeDeliverable `json:"deliverables,omitempty"`
-	Budget        *BudgetPolicy           `json:"budget,omitempty"`
-	Policy        map[string]interface{}  `json:"policy,omitempty"`
+type projectCreateArguments struct {
+	Title         string                 `json:"title"`
+	Purpose       string                 `json:"purpose"`
+	AgentRefs     []ResourceReference    `json:"agentRefs,omitempty"`
+	TeamRefs      []ResourceReference    `json:"teamRefs,omitempty"`
+	ObjectiveRefs []string               `json:"objectiveRefs"`
+	RunRefs       []string               `json:"runRefs,omitempty"`
+	Milestones    []ProjectMilestone     `json:"milestones,omitempty"`
+	Hypotheses    []ProjectHypothesis    `json:"hypotheses,omitempty"`
+	Deliverables  []ProjectDeliverable   `json:"deliverables,omitempty"`
+	Budget        *BudgetPolicy          `json:"budget,omitempty"`
+	Policy        map[string]interface{} `json:"policy,omitempty"`
 }
 
-func (a initiativeCreateArguments) initiative(scope Scope, owner ObjectiveOwner) *Initiative {
-	return &Initiative{Scope: scope, Owner: owner, Title: a.Title, Purpose: a.Purpose, Status: InitiativeStatusDraft, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, RunRefs: a.RunRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy}
+func (a projectCreateArguments) project(scope Scope, owner ObjectiveOwner) *Project {
+	return &Project{Scope: scope, Owner: owner, Title: a.Title, Purpose: a.Purpose, Status: ProjectStatusDraft, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, RunRefs: a.RunRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy}
 }
 
-type initiativeUpdateArguments struct {
-	InitiativeID     string                    `json:"initiativeId"`
+type projectUpdateArguments struct {
+	ProjectID        string                    `json:"projectId"`
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	Title            *string                   `json:"title,omitempty"`
 	Purpose          *string                   `json:"purpose,omitempty"`
@@ -392,23 +392,23 @@ type initiativeUpdateArguments struct {
 	TeamRefs         *[]ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs    *[]string                 `json:"objectiveRefs,omitempty"`
 	RunRefs          *[]string                 `json:"runRefs,omitempty"`
-	Milestones       *[]InitiativeMilestone    `json:"milestones,omitempty"`
-	Hypotheses       *[]InitiativeHypothesis   `json:"hypotheses,omitempty"`
+	Milestones       *[]ProjectMilestone       `json:"milestones,omitempty"`
+	Hypotheses       *[]ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors   *[]SourceMonitorReference `json:"sourceMonitors,omitempty"`
-	Deliverables     *[]InitiativeDeliverable  `json:"deliverables,omitempty"`
+	Deliverables     *[]ProjectDeliverable     `json:"deliverables,omitempty"`
 	Budget           *BudgetPolicy             `json:"budget,omitempty"`
 	Policy           map[string]interface{}    `json:"policy,omitempty"`
 }
 
-func (a initiativeUpdateArguments) hasChanges() bool {
+func (a projectUpdateArguments) hasChanges() bool {
 	return a.Title != nil || a.Purpose != nil || a.AgentRefs != nil || a.TeamRefs != nil || a.ObjectiveRefs != nil || a.RunRefs != nil || a.Milestones != nil || a.Hypotheses != nil || a.SourceMonitors != nil || a.Deliverables != nil || a.Budget != nil || a.Policy != nil
 }
 
-func (a initiativeUpdateArguments) updateRequest(actor ActivityActor) UpdateInitiativeRequest {
-	return UpdateInitiativeRequest{ExpectedRevision: a.ExpectedRevision, Title: a.Title, Purpose: a.Purpose, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, RunRefs: a.RunRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, SourceMonitors: a.SourceMonitors, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy, Actor: actor, Visibility: ActivityVisibilityScope}
+func (a projectUpdateArguments) updateRequest(actor ActivityActor) UpdateProjectRequest {
+	return UpdateProjectRequest{ExpectedRevision: a.ExpectedRevision, Title: a.Title, Purpose: a.Purpose, AgentRefs: a.AgentRefs, TeamRefs: a.TeamRefs, ObjectiveRefs: a.ObjectiveRefs, RunRefs: a.RunRefs, Milestones: a.Milestones, Hypotheses: a.Hypotheses, SourceMonitors: a.SourceMonitors, Deliverables: a.Deliverables, Budget: a.Budget, Policy: a.Policy, Actor: actor, Visibility: ActivityVisibilityScope}
 }
 
-func applyInitiativeArguments(candidate *Initiative, args initiativeUpdateArguments) *Initiative {
+func applyProjectArguments(candidate *Project, args projectUpdateArguments) *Project {
 	if args.Title != nil {
 		candidate.Title = *args.Title
 	}
@@ -448,23 +448,23 @@ func applyInitiativeArguments(candidate *Initiative, args initiativeUpdateArgume
 	return candidate
 }
 
-func decodeInitiativeCreateArguments(arguments map[string]interface{}) (initiativeCreateArguments, error) {
-	var args initiativeCreateArguments
-	return args, decodeInitiativeArguments(arguments, &args)
+func decodeProjectCreateArguments(arguments map[string]interface{}) (projectCreateArguments, error) {
+	var args projectCreateArguments
+	return args, decodeProjectArguments(arguments, &args)
 }
 
-func decodeInitiativeUpdateArguments(arguments map[string]interface{}) (initiativeUpdateArguments, error) {
-	var args initiativeUpdateArguments
-	if err := decodeInitiativeArguments(arguments, &args); err != nil {
+func decodeProjectUpdateArguments(arguments map[string]interface{}) (projectUpdateArguments, error) {
+	var args projectUpdateArguments
+	if err := decodeProjectArguments(arguments, &args); err != nil {
 		return args, err
 	}
-	if strings.TrimSpace(args.InitiativeID) == "" || args.ExpectedRevision < 1 {
-		return args, errors.New("initiativeId and expectedRevision are required")
+	if strings.TrimSpace(args.ProjectID) == "" || args.ExpectedRevision < 1 {
+		return args, errors.New("projectId and expectedRevision are required")
 	}
 	return args, nil
 }
 
-func decodeInitiativeArguments(arguments map[string]interface{}, target interface{}) error {
+func decodeProjectArguments(arguments map[string]interface{}, target interface{}) error {
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
 		return err
@@ -472,14 +472,14 @@ func decodeInitiativeArguments(arguments map[string]interface{}, target interfac
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("invalid initiative action: %w", err)
+		return fmt.Errorf("invalid project action: %w", err)
 	}
 	return nil
 }
 
-func validateInitiativeCandidate(ctx context.Context, service *InitiativeService, candidate *Initiative) error {
+func validateProjectCandidate(ctx context.Context, service *ProjectService, candidate *Project) error {
 	if err := candidate.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidInitiative, err)
+		return fmt.Errorf("%w: %v", ErrInvalidProject, err)
 	}
 	if err := service.validateObjectives(ctx, candidate); err != nil {
 		return err
@@ -487,12 +487,12 @@ func validateInitiativeCandidate(ctx context.Context, service *InitiativeService
 	return service.validateSourceMonitors(ctx, candidate)
 }
 
-func initiativeActionAlreadyApplied(i *Initiative, args initiativeUpdateArguments, action string) bool {
+func projectActionAlreadyApplied(i *Project, args projectUpdateArguments, action string) bool {
 	if i == nil || i.Revision != args.ExpectedRevision+1 {
 		return false
 	}
-	if action == InitiativeActionPause {
-		return i.Status == InitiativeStatusPaused
+	if action == ProjectActionPause {
+		return i.Status == ProjectStatusPaused
 	}
 	return (args.Title == nil || i.Title == *args.Title) && (args.Purpose == nil || i.Purpose == *args.Purpose) &&
 		(args.AgentRefs == nil || reflect.DeepEqual(i.AgentRefs, *args.AgentRefs)) && (args.TeamRefs == nil || reflect.DeepEqual(i.TeamRefs, *args.TeamRefs)) &&
@@ -502,12 +502,12 @@ func initiativeActionAlreadyApplied(i *Initiative, args initiativeUpdateArgument
 		(args.Budget == nil || reflect.DeepEqual(i.Budget, args.Budget)) && (args.Policy == nil || reflect.DeepEqual(i.Policy, args.Policy))
 }
 
-func isInitiativeAction(bound *skill.BoundAction) bool {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != InitiativeManagementSkillID || bound.Definition.Version != InitiativeManagementSkillVersion {
+func isProjectAction(bound *skill.BoundAction) bool {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != ProjectManagementSkillID || bound.Definition.Version != ProjectManagementSkillVersion {
 		return false
 	}
 	switch bound.Action.Name {
-	case InitiativeActionCreate, InitiativeActionUpdate, InitiativeActionPause:
+	case ProjectActionCreate, ProjectActionUpdate, ProjectActionPause:
 		return true
 	}
 	return false

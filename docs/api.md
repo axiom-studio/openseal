@@ -134,13 +134,13 @@ Messages are the collaboration surface. Run, approval, request, artifact, and
 decision records remain canonical and are referenced rather than copied into a
 parallel chat execution system.
 
-## Initiatives, evidence, outreach, and artifacts
+## Projects, evidence, outreach, and artifacts
 
 | Resource | Routes | Purpose |
 | --- | --- | --- |
-| Initiatives | `POST, GET /initiatives`; `GET, PATCH /initiatives/{id}` | Durable project context and linked work |
-| Source monitor evidence | `/initiatives/{id}/source-monitors/{monitorId}/observations` and `/checkpoint` | Provenance-linked observations and cursor state |
-| Outreach | `/initiatives/{id}/outreach/...` | Draft threads and create governed delivery Runs |
+| Projects | `POST, GET /projects`; `GET, PATCH /projects/{id}` | Durable project context and linked work |
+| Source monitor evidence | `/projects/{id}/source-monitors/{monitorId}/observations` and `/checkpoint` | Provenance-linked observations and cursor state |
+| Outreach | `/projects/{id}/outreach/...` | Draft threads and create governed delivery Runs |
 | Artifacts | `POST, GET /artifacts`; `GET /artifacts/{id}` | Immutable metadata and provenance |
 | Artifact content | `POST /artifact-content`; `GET /artifacts/{id}/content`; `POST /artifacts/{id}/resolve` | Stream, verify, or resolve content when configured |
 

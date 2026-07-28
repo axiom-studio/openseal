@@ -28,7 +28,7 @@ const (
 type EvidenceSnapshot struct {
 	APIVersion            string                        `json:"apiVersion"`
 	ID                    string                        `json:"id"`
-	InitiativeID          string                        `json:"initiativeId"`
+	ProjectID             string                        `json:"projectId"`
 	Observations          []EvidenceSnapshotObservation `json:"observations"`
 	SelectedCount         int                           `json:"selectedCount"`
 	ExpiredCount          int                           `json:"expiredCount,omitempty"`
@@ -76,9 +76,9 @@ func normalizedEvidenceProjection(value *runbook.EvidenceProjection) (evidencePr
 	return bounds, true
 }
 
-func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope Scope, initiativeID string, cutoff time.Time, projection *runbook.EvidenceProjection) (*EvidenceSnapshot, error) {
+func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope Scope, projectID string, cutoff time.Time, projection *runbook.EvidenceProjection) (*EvidenceSnapshot, error) {
 	if store == nil {
-		return nil, errors.New("Initiative evidence projection requires SourceObservation persistence")
+		return nil, errors.New("Project evidence projection requires SourceObservation persistence")
 	}
 	bounds, enabled := normalizedEvidenceProjection(projection)
 	if !enabled {
@@ -87,10 +87,10 @@ func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope 
 	// Scan at most the portable SourceObservation page bound. Hitting that bound
 	// is reported as truncation rather than loading an unbounded evidence corpus.
 	values, err := store.ListSourceObservations(ctx, SourceObservationFilter{
-		Scope: scope, InitiativeID: initiativeID, Limit: 100,
+		Scope: scope, ProjectID: projectID, Limit: 100,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list Initiative evidence: %w", err)
+		return nil, fmt.Errorf("list Project evidence: %w", err)
 	}
 	sort.SliceStable(values, func(i, j int) bool {
 		if !values[i].IngestedAt.Equal(values[j].IngestedAt) {
@@ -99,7 +99,7 @@ func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope 
 		return values[i].ID > values[j].ID
 	})
 	snapshot := &EvidenceSnapshot{
-		APIVersion: evidenceSnapshotAPIVersion, InitiativeID: initiativeID,
+		APIVersion: evidenceSnapshotAPIVersion, ProjectID: projectID,
 		ObservationLimit: bounds.observations, SummaryRuneLimit: bounds.summaryRunes,
 		TotalSummaryRuneLimit: bounds.totalRunes,
 		Observations:          make([]EvidenceSnapshotObservation, 0, min(bounds.observations, len(values))),
@@ -112,8 +112,8 @@ func buildEvidenceSnapshot(ctx context.Context, store SourceMonitorStore, scope 
 		if value == nil {
 			continue
 		}
-		if value.InitiativeID != initiativeID || value.Scope != scope {
-			return nil, errors.New("SourceObservation query returned evidence outside the Initiative scope")
+		if value.ProjectID != projectID || value.Scope != scope {
+			return nil, errors.New("SourceObservation query returned evidence outside the Project scope")
 		}
 		if value.RetentionExpiresAt != nil && !value.RetentionExpiresAt.After(cutoff) {
 			snapshot.ExpiredCount++

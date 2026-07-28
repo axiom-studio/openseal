@@ -216,7 +216,7 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 	if err = applySQLiteWorkforceRunbookActivations(ctx, tx, value, application); err != nil {
 		return nil, err
 	}
-	if err = applySQLiteWorkforceInitiative(ctx, tx, application.initiative, application.initiativeExpectedRevision); err != nil {
+	if err = applySQLiteWorkforceProject(ctx, tx, application.project, application.projectExpectedRevision); err != nil {
 		return nil, err
 	}
 	if err = synchronizeWorkforceConversationEndpointBindings(application); err != nil {
@@ -445,35 +445,35 @@ func sqliteUniqueConstraint(err error) bool {
 		sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
 }
 
-func applySQLiteWorkforceInitiative(ctx context.Context, tx *sql.Tx, initiative *Initiative, expectedRevision int64) error {
-	if initiative == nil {
+func applySQLiteWorkforceProject(ctx context.Context, tx *sql.Tx, project *Project, expectedRevision int64) error {
+	if project == nil {
 		return nil
 	}
 	if expectedRevision > 0 {
 		var payload string
-		if err := tx.QueryRowContext(ctx, `SELECT payload FROM initiatives WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, initiative.Scope.Kind, initiative.Scope.ID, initiative.ID, expectedRevision).Scan(&payload); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT payload FROM projects WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, project.Scope.Kind, project.Scope.ID, project.ID, expectedRevision).Scan(&payload); err != nil {
 			return authoring.ErrChangeSetRevision
 		}
-		var current Initiative
+		var current Project
 		if json.Unmarshal([]byte(payload), &current) != nil {
 			return authoring.ErrChangeSetRevision
 		}
-		initiative.CreatedAt = current.CreatedAt
-		initiative.IdempotencyKeyHash = current.IdempotencyKeyHash
-		initiative.CreationFingerprint = current.CreationFingerprint
+		project.CreatedAt = current.CreatedAt
+		project.IdempotencyKeyHash = current.IdempotencyKeyHash
+		project.CreationFingerprint = current.CreationFingerprint
 	}
-	if err := initiative.Validate(); err != nil {
+	if err := project.Validate(); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(initiative)
+	payload, err := json.Marshal(project)
 	if err != nil {
 		return err
 	}
 	if expectedRevision == 0 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO initiatives(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload) VALUES(?,?,?,?,?,?,?,?,?,?)`, initiative.ID, initiative.Scope.Kind, initiative.Scope.ID, initiative.Owner.Type, initiative.Owner.ID, initiative.Status, initiative.Revision, initiative.UpdatedAt, initiative.IdempotencyKeyHash, string(payload))
+		_, err = tx.ExecContext(ctx, `INSERT INTO projects(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload) VALUES(?,?,?,?,?,?,?,?,?,?)`, project.ID, project.Scope.Kind, project.Scope.ID, project.Owner.Type, project.Owner.ID, project.Status, project.Revision, project.UpdatedAt, project.IdempotencyKeyHash, string(payload))
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE initiatives SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,idempotency_key_hash=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, initiative.Owner.Type, initiative.Owner.ID, initiative.Status, initiative.Revision, initiative.UpdatedAt, initiative.IdempotencyKeyHash, string(payload), initiative.Scope.Kind, initiative.Scope.ID, initiative.ID, expectedRevision)
+	result, err := tx.ExecContext(ctx, `UPDATE projects SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,idempotency_key_hash=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, project.Owner.Type, project.Owner.ID, project.Status, project.Revision, project.UpdatedAt, project.IdempotencyKeyHash, string(payload), project.Scope.Kind, project.Scope.ID, project.ID, expectedRevision)
 	if err != nil {
 		return err
 	}

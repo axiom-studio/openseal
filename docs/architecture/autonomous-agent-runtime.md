@@ -18,7 +18,7 @@ flowchart TB
     subgraph Kernel
         Authoring[Workforce ChangeSets]
         Registry[Agent / Team registries]
-        Portfolio[Objectives / Initiatives]
+        Portfolio[Objectives / Projects]
         Runs[Runs / turns / dependencies]
         Collaboration[Requests / channels / activity]
         Governance[Skills / actions / approvals]
@@ -107,11 +107,11 @@ revision, digest, and apply receipt.
 
 Generation is claimed by a leased worker and can recover after process failure.
 The candidate may contain one Agent, several Agents, a Team, objective
-templates, Skill requirements, and an Initiative blueprint. The compiler never
+templates, Skill requirements, and a Project blueprint. The compiler never
 invents a credential value, source allowlist, or approval authority.
 
 Application is atomic in persistent stores: reviewed Agent/Team definitions,
-deployments, objective instances, Skill bindings, Initiative records, and the
+deployments, objective instances, Skill bindings, Project records, and the
 receipt commit together. Expected revision, candidate digest, and idempotency
 key prevent stale or duplicate application.
 

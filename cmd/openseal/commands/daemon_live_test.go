@@ -85,7 +85,7 @@ func DefaultLiveDaemonConfig(databasePath, artifactsPath string, apiPort int, ho
 
 type liveOutreachFixture struct {
 	scope       runtime.Scope
-	initiative  string
+	project  string
 	observation string
 }
 
@@ -122,14 +122,14 @@ func seedLiveOutreach(t *testing.T, path, target string) liveOutreachFixture {
 	}
 	objective, err := engine.CreateObjective(ctx, runtime.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "Collect live feedback", Goal: "Ask one evidence-linked question", Status: runtime.ObjectiveStatusActive,
 		Cadence: &runtime.ObjectiveCadence{Type: runtime.ObjectiveCadenceInterval, IntervalSeconds: 3600, AssignedAgentID: "research-agent", RunTemplate: &runtime.ObjectiveRunTemplate{
-			Entrypoint: "monitor", Context: map[string]interface{}{"initiativeId": "live-research", "sourceMonitorId": "live-monitor"}, Policy: map[string]interface{}{"sourcePolicyRef": "live-community@1"},
+			Entrypoint: "monitor", Context: map[string]interface{}{"projectId": "live-research", "sourceMonitorId": "live-monitor"}, Policy: map[string]interface{}{"sourcePolicyRef": "live-community@1"},
 			Capability: &runtime.ObjectiveCapabilityInvocation{SkillID: "evidence-source", SkillVersion: "1", Action: "observe", Inputs: map[string]interface{}{"url": target, "maxItems": 1}},
 		}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	initiative, _, err := engine.CreateInitiative(ctx, runtime.CreateInitiativeRequest{Initiative: &runtime.Initiative{
-		ID: "live-research", Scope: scope, Owner: owner, Title: "Live research", Purpose: "Prove governed outreach delivery", Status: runtime.InitiativeStatusActive,
+	project, _, err := engine.CreateProject(ctx, runtime.CreateProjectRequest{Project: &runtime.Project{
+		ID: "live-research", Scope: scope, Owner: owner, Title: "Live research", Purpose: "Prove governed outreach delivery", Status: runtime.ProjectStatusActive,
 		ObjectiveRefs: []string{objective.ID}, SourceMonitors: []runtime.SourceMonitorReference{{ID: "live-monitor", ObjectiveID: objective.ID, AssignedAgentID: "research-agent",
 			SkillID: "evidence-source", SkillVersion: "1", Action: "observe", SourcePolicyRef: "live-community@1", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent}},
 	}})
@@ -138,7 +138,7 @@ func seedLiveOutreach(t *testing.T, path, target string) liveOutreachFixture {
 	}
 	sourceRun, err := engine.CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner,
 		AssignedAgentID: "research-agent", Goal: "Retain live source evidence", Source: runtime.RunSourceManual,
-		Context: map[string]interface{}{"initiativeId": initiative.ID, "sourceMonitorId": "live-monitor"}})
+		Context: map[string]interface{}{"projectId": project.ID, "sourceMonitorId": "live-monitor"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func seedLiveOutreach(t *testing.T, path, target string) liveOutreachFixture {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte("A user asked for a simpler autonomous-agent setup."))
-	ingested, err := engine.IngestSourceObservation(ctx, runtime.IngestSourceObservationRequest{Scope: scope, InitiativeID: initiative.ID, MonitorID: "live-monitor", Cursor: "live-1",
+	ingested, err := engine.IngestSourceObservation(ctx, runtime.IngestSourceObservationRequest{Scope: scope, ProjectID: project.ID, MonitorID: "live-monitor", Cursor: "live-1",
 		StableSourceID: "live-thread", SourceURI: target, ContentDigest: "sha256:" + hex.EncodeToString(digest[:]), Summary: "A user asked for a simpler autonomous-agent setup.",
 		ObservedAt: time.Now().UTC(), RunID: sourceRun.ID, AgentID: "research-agent", SkillID: "evidence-source", SkillVersion: "1", Action: "observe", ActionCallID: "live-source-call"})
 	if err != nil {
@@ -156,7 +156,7 @@ func seedLiveOutreach(t *testing.T, path, target string) liveOutreachFixture {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return liveOutreachFixture{scope: scope, initiative: initiative.ID, observation: ingested.Observation.ID}
+	return liveOutreachFixture{scope: scope, project: project.ID, observation: ingested.Observation.ID}
 }
 
 type liveDaemonProcess struct {
@@ -209,20 +209,20 @@ func (p *liveDaemonProcess) stop(t *testing.T) {
 func createLiveOutreachDraft(t *testing.T, apiBase string, fixture liveOutreachFixture) *runtime.OutreachThread {
 	t.Helper()
 	disclosure := "Disclosure: I am an automated OpenSeal research agent operated for a live integration test."
-	payload := kernelapi.CreateOutreachThreadRequest{Scope: fixture.scope, InitiativeID: fixture.initiative, SourceObservationID: fixture.observation, ApprovalPolicyRef: "human-review",
+	payload := kernelapi.CreateOutreachThreadRequest{Scope: fixture.scope, ProjectID: fixture.project, SourceObservationID: fixture.observation, ApprovalPolicyRef: "human-review",
 		Identity: runtime.OutreachIdentity{ProfileRef: "profile:live-test", DisplayName: "OpenSeal Research", Affiliation: "OpenSeal", Disclosure: disclosure},
 		Message: kernelapi.CreateOutreachMessageRequest{ID: "live-message", Intent: runtime.OutreachIntentRequestFeedback,
 			Body:       "Which part of autonomous-agent setup should be simpler? " + disclosure,
 			Capability: kernelapi.OutreachCapabilitySelection{BindingID: "live-outreach", BindingRevision: 1, SkillID: outreach.SkillID, SkillVersion: outreach.SkillVersion, Action: outreach.PostReply}}}
 	var thread runtime.OutreachThread
-	requestJSON(t, http.MethodPost, apiBase+"/api/v1/initiatives/"+fixture.initiative+"/outreach", payload, map[string]string{"Idempotency-Key": "live-draft-1"}, http.StatusCreated, &thread)
+	requestJSON(t, http.MethodPost, apiBase+"/api/v1/projects/"+fixture.project+"/outreach", payload, map[string]string{"Idempotency-Key": "live-draft-1"}, http.StatusCreated, &thread)
 	return &thread
 }
 
 func deliverLiveOutreach(t *testing.T, apiBase string, thread *runtime.OutreachThread, fixture liveOutreachFixture) *runtime.AgentRun {
 	t.Helper()
 	var run runtime.AgentRun
-	requestJSON(t, http.MethodPost, fmt.Sprintf("%s/api/v1/initiatives/%s/outreach/%s/messages/%s/deliveries", apiBase, fixture.initiative, thread.ID, thread.Messages[0].ID),
+	requestJSON(t, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%s/outreach/%s/messages/%s/deliveries", apiBase, fixture.project, thread.ID, thread.Messages[0].ID),
 		kernelapi.DeliverOutreachMessageRequest{Scope: fixture.scope}, map[string]string{"Idempotency-Key": "live-delivery-1"}, http.StatusCreated, &run)
 	return &run
 }
@@ -260,7 +260,7 @@ func waitForLiveDelivery(t *testing.T, apiBase string, original *runtime.Outreac
 	t.Helper()
 	waitUntil(t, 30*time.Second, func() bool {
 		var thread runtime.OutreachThread
-		requestJSON(t, http.MethodGet, fmt.Sprintf("%s/api/v1/initiatives/%s/outreach/%s?scopeKind=%s&scopeId=%s", apiBase, fixture.initiative, original.ID, fixture.scope.Kind, fixture.scope.ID), nil, nil, http.StatusOK, &thread)
+		requestJSON(t, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%s/outreach/%s?scopeKind=%s&scopeId=%s", apiBase, fixture.project, original.ID, fixture.scope.Kind, fixture.scope.ID), nil, nil, http.StatusOK, &thread)
 		var current runtime.AgentRun
 		requestJSON(t, http.MethodGet, fmt.Sprintf("%s/api/v1/agent-runs/%s?scopeKind=%s&scopeId=%s", apiBase, run.ID, fixture.scope.Kind, fixture.scope.ID), nil, nil, http.StatusOK, &current)
 		message := thread.Messages[0]

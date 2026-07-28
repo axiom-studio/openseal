@@ -15,23 +15,23 @@ import (
 )
 
 var (
-	ErrInitiativeNotFound    = errors.New("initiative not found")
-	ErrInitiativeConflict    = errors.New("initiative revision conflict")
-	ErrInitiativeIdempotency = errors.New("initiative idempotency key was already used with different input")
-	ErrInitiativeNoChanges   = errors.New("initiative update contains no changes")
-	ErrInvalidInitiative     = errors.New("invalid initiative")
+	ErrProjectNotFound    = errors.New("project not found")
+	ErrProjectConflict    = errors.New("project revision conflict")
+	ErrProjectIdempotency = errors.New("project idempotency key was already used with different input")
+	ErrProjectNoChanges   = errors.New("project update contains no changes")
+	ErrInvalidProject     = errors.New("invalid project")
 )
 
-type InitiativeStatus string
+type ProjectStatus string
 
 const (
-	InitiativeStatusDraft     InitiativeStatus = "draft"
-	InitiativeStatusActive    InitiativeStatus = "active"
-	InitiativeStatusPaused    InitiativeStatus = "paused"
-	InitiativeStatusCompleted InitiativeStatus = "completed"
-	InitiativeStatusFailed    InitiativeStatus = "failed"
-	InitiativeStatusCanceled  InitiativeStatus = "canceled"
-	InitiativeStatusArchived  InitiativeStatus = "archived"
+	ProjectStatusDraft     ProjectStatus = "draft"
+	ProjectStatusActive    ProjectStatus = "active"
+	ProjectStatusPaused    ProjectStatus = "paused"
+	ProjectStatusCompleted ProjectStatus = "completed"
+	ProjectStatusFailed    ProjectStatus = "failed"
+	ProjectStatusCanceled  ProjectStatus = "canceled"
+	ProjectStatusArchived  ProjectStatus = "archived"
 )
 
 // ResourceReference points at a canonical kernel resource without duplicating it.
@@ -52,7 +52,7 @@ type ResourceReference struct {
 	Version  string       `json:"version,omitempty"`
 	Revision int64        `json:"revision,omitempty"`
 }
-type InitiativeMilestone struct {
+type ProjectMilestone struct {
 	ID            string          `json:"id"`
 	Title         string          `json:"title"`
 	Status        MilestoneStatus `json:"status"`
@@ -60,7 +60,7 @@ type InitiativeMilestone struct {
 	DueAt         *time.Time      `json:"dueAt,omitempty"`
 	CompletedAt   *time.Time      `json:"completedAt,omitempty"`
 }
-type InitiativeHypothesis struct {
+type ProjectHypothesis struct {
 	ID           string              `json:"id"`
 	Statement    string              `json:"statement"`
 	Confidence   float64             `json:"confidence"`
@@ -91,7 +91,7 @@ type SourceMonitorReference struct {
 	SourcePolicyRef string                     `json:"sourcePolicyRef,omitempty"`
 	Deduplication   SourceMonitorDeduplication `json:"deduplication"`
 }
-type InitiativeDeliverable struct {
+type ProjectDeliverable struct {
 	ID            string              `json:"id"`
 	Title         string              `json:"title"`
 	Status        DeliverableStatus   `json:"status"`
@@ -128,23 +128,23 @@ const (
 	DeliverableCanceled   DeliverableStatus = "canceled"
 )
 
-// Initiative is a durable coordination envelope. Objectives, Runs, Artifacts,
+// Project is a durable coordination envelope. Objectives, Runs, Artifacts,
 // schedules, Agents and Teams remain authoritative in their own stores.
-type Initiative struct {
+type Project struct {
 	ID                  string                   `json:"id"`
 	Scope               Scope                    `json:"scope"`
 	Title               string                   `json:"title"`
 	Purpose             string                   `json:"purpose"`
-	Status              InitiativeStatus         `json:"status"`
+	Status              ProjectStatus            `json:"status"`
 	Owner               ObjectiveOwner           `json:"owner"`
 	AgentRefs           []ResourceReference      `json:"agentRefs,omitempty"`
 	TeamRefs            []ResourceReference      `json:"teamRefs,omitempty"`
 	ObjectiveRefs       []string                 `json:"objectiveRefs"`
 	RunRefs             []string                 `json:"runRefs,omitempty"`
-	Milestones          []InitiativeMilestone    `json:"milestones,omitempty"`
-	Hypotheses          []InitiativeHypothesis   `json:"hypotheses,omitempty"`
+	Milestones          []ProjectMilestone       `json:"milestones,omitempty"`
+	Hypotheses          []ProjectHypothesis      `json:"hypotheses,omitempty"`
 	SourceMonitors      []SourceMonitorReference `json:"sourceMonitors,omitempty"`
-	Deliverables        []InitiativeDeliverable  `json:"deliverables,omitempty"`
+	Deliverables        []ProjectDeliverable     `json:"deliverables,omitempty"`
 	Budget              *BudgetPolicy            `json:"budget,omitempty"`
 	Policy              map[string]interface{}   `json:"policy,omitempty"`
 	Checkpoint          map[string]interface{}   `json:"checkpoint,omitempty"`
@@ -155,9 +155,9 @@ type Initiative struct {
 	CreationFingerprint string                   `json:"creationFingerprint,omitempty"`
 }
 
-func (i *Initiative) Validate() error {
+func (i *Project) Validate() error {
 	if i == nil {
-		return errors.New("initiative is required")
+		return errors.New("project is required")
 	}
 	if err := i.Scope.Validate(); err != nil {
 		return err
@@ -166,18 +166,18 @@ func (i *Initiative) Validate() error {
 		return err
 	}
 	if strings.TrimSpace(i.ID) == "" || strings.TrimSpace(i.Title) == "" || strings.TrimSpace(i.Purpose) == "" {
-		return errors.New("initiative id, title, and purpose are required")
+		return errors.New("project id, title, and purpose are required")
 	}
 	switch i.Status {
-	case InitiativeStatusDraft, InitiativeStatusActive, InitiativeStatusPaused, InitiativeStatusCompleted, InitiativeStatusFailed, InitiativeStatusCanceled, InitiativeStatusArchived:
+	case ProjectStatusDraft, ProjectStatusActive, ProjectStatusPaused, ProjectStatusCompleted, ProjectStatusFailed, ProjectStatusCanceled, ProjectStatusArchived:
 	default:
-		return errors.New("initiative status is invalid")
+		return errors.New("project status is invalid")
 	}
 	if i.Revision < 1 {
-		return errors.New("initiative revision must be positive")
+		return errors.New("project revision must be positive")
 	}
 	if len(i.ObjectiveRefs) == 0 {
-		return errors.New("initiative requires at least one objective reference")
+		return errors.New("project requires at least one objective reference")
 	}
 	if err := uniqueIDs(i.ObjectiveRefs, "objective"); err != nil {
 		return err
@@ -205,7 +205,7 @@ func (i *Initiative) Validate() error {
 		}
 		for _, id := range m.ObjectiveRefs {
 			if !objectiveSet[id] {
-				return errors.New("milestone objective must belong to initiative")
+				return errors.New("milestone objective must belong to project")
 			}
 		}
 	}
@@ -217,7 +217,7 @@ func (i *Initiative) Validate() error {
 			return errors.New("source monitors require unique portable ids, Objective, assigned Agent, and Skill action identity")
 		}
 		if !objectiveSet[m.ObjectiveID] {
-			return errors.New("source monitor objective must belong to initiative")
+			return errors.New("source monitor objective must belong to project")
 		}
 		switch m.Deduplication {
 		case SourceMonitorDeduplicateStableSource, SourceMonitorDeduplicateContentDigest, SourceMonitorDeduplicateStableSourceAndContent:
@@ -248,7 +248,7 @@ func (i *Initiative) Validate() error {
 		}
 		for _, id := range d.ObjectiveRefs {
 			if !objectiveSet[id] {
-				return errors.New("deliverable objective must belong to initiative")
+				return errors.New("deliverable objective must belong to project")
 			}
 		}
 	}
@@ -271,7 +271,7 @@ func (i *Initiative) Validate() error {
 	seen = map[string]bool{}
 	for _, h := range i.Hypotheses {
 		if strings.TrimSpace(h.ID) == "" || strings.TrimSpace(h.Statement) == "" || seen[h.ID] || h.Confidence < 0 || h.Confidence > 1 {
-			return errors.New("initiative hypothesis id, statement, and confidence [0,1] are required")
+			return errors.New("project hypothesis id, statement, and confidence [0,1] are required")
 		}
 		seen[h.ID] = true
 		switch h.Status {
@@ -289,10 +289,10 @@ func (i *Initiative) Validate() error {
 		}
 	}
 	if err := validateCredentialFreeContext(i.Policy); err != nil {
-		return fmt.Errorf("initiative policy: %w", err)
+		return fmt.Errorf("project policy: %w", err)
 	}
 	if err := validateCredentialFreeContext(i.Checkpoint); err != nil {
-		return fmt.Errorf("initiative checkpoint: %w", err)
+		return fmt.Errorf("project checkpoint: %w", err)
 	}
 	return nil
 }
@@ -327,41 +327,41 @@ func uniqueIDs(ids []string, kind string) error {
 	return nil
 }
 
-type InitiativeFilter struct {
+type ProjectFilter struct {
 	Scope         Scope
 	Owner         *ObjectiveOwner
-	Statuses      []InitiativeStatus
+	Statuses      []ProjectStatus
 	ObjectiveID   string
 	Limit, Offset int
 }
-type InitiativeStore interface {
-	CreateInitiative(context.Context, *Initiative) error
-	CreateInitiativeWithEvent(context.Context, *Initiative, *ActivityEvent) (*ActivityEvent, error)
-	GetInitiative(context.Context, Scope, string) (*Initiative, error)
-	GetInitiativeByIdempotency(context.Context, Scope, string) (*Initiative, error)
-	ListInitiatives(context.Context, InitiativeFilter) ([]*Initiative, error)
-	UpdateInitiative(context.Context, *Initiative, int64) error
-	UpdateInitiativeWithEvent(context.Context, *Initiative, int64, *ActivityEvent) (*ActivityEvent, error)
+type ProjectStore interface {
+	CreateProject(context.Context, *Project) error
+	CreateProjectWithEvent(context.Context, *Project, *ActivityEvent) (*ActivityEvent, error)
+	GetProject(context.Context, Scope, string) (*Project, error)
+	GetProjectByIdempotency(context.Context, Scope, string) (*Project, error)
+	ListProjects(context.Context, ProjectFilter) ([]*Project, error)
+	UpdateProject(context.Context, *Project, int64) error
+	UpdateProjectWithEvent(context.Context, *Project, int64, *ActivityEvent) (*ActivityEvent, error)
 }
-type CreateInitiativeRequest struct {
-	Initiative     *Initiative
+type CreateProjectRequest struct {
+	Project        *Project
 	IdempotencyKey string
 	Actor          ActivityActor
 	Visibility     ActivityVisibility
 }
-type UpdateInitiativeRequest struct {
+type UpdateProjectRequest struct {
 	ExpectedRevision int64
 	Title            *string
 	Purpose          *string
-	Status           *InitiativeStatus
+	Status           *ProjectStatus
 	AgentRefs        *[]ResourceReference
 	TeamRefs         *[]ResourceReference
 	ObjectiveRefs    *[]string
 	RunRefs          *[]string
-	Milestones       *[]InitiativeMilestone
-	Hypotheses       *[]InitiativeHypothesis
+	Milestones       *[]ProjectMilestone
+	Hypotheses       *[]ProjectHypothesis
 	SourceMonitors   *[]SourceMonitorReference
-	Deliverables     *[]InitiativeDeliverable
+	Deliverables     *[]ProjectDeliverable
 	Budget           *BudgetPolicy
 	ClearBudget      bool
 	Policy           map[string]interface{}
@@ -370,38 +370,38 @@ type UpdateInitiativeRequest struct {
 	Visibility       ActivityVisibility
 }
 
-type InitiativeService struct {
-	store     InitiativeStore
+type ProjectService struct {
+	store     ProjectStore
 	portfolio PortfolioStore
 	runbooks  RunbookActivationStore
 	now       func() time.Time
 }
 
-func NewInitiativeService(store InitiativeStore, portfolio PortfolioStore) *InitiativeService {
+func NewProjectService(store ProjectStore, portfolio PortfolioStore) *ProjectService {
 	runbooks, _ := any(store).(RunbookActivationStore)
 	if runbooks == nil {
 		runbooks, _ = any(portfolio).(RunbookActivationStore)
 	}
-	return &InitiativeService{store: store, portfolio: portfolio, runbooks: runbooks, now: time.Now}
+	return &ProjectService{store: store, portfolio: portfolio, runbooks: runbooks, now: time.Now}
 }
 
-func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequest) (*Initiative, *ActivityEvent, error) {
+func (s *ProjectService) Create(ctx context.Context, req CreateProjectRequest) (*Project, *ActivityEvent, error) {
 	if s == nil || s.store == nil {
-		return nil, nil, errors.New("initiative service is not configured")
+		return nil, nil, errors.New("project service is not configured")
 	}
-	i := cloneInitiative(req.Initiative)
+	i := cloneProject(req.Project)
 	if i == nil {
-		return nil, nil, errors.New("initiative is required")
+		return nil, nil, errors.New("project is required")
 	}
 	now := s.now().UTC()
 	if i.ID == "" {
 		i.ID = uuid.NewString()
 	}
-	i.Status = normalizeInitiativeStatus(i.Status)
+	i.Status = normalizeProjectStatus(i.Status)
 	i.Revision = 1
 	i.CreatedAt = now
 	i.UpdatedAt = now
-	fp, err := initiativeCreationFingerprint(i)
+	fp, err := projectCreationFingerprint(i)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -409,8 +409,8 @@ func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequ
 	if req.IdempotencyKey != "" {
 		sum := sha256.Sum256([]byte(req.IdempotencyKey))
 		i.IdempotencyKeyHash = hex.EncodeToString(sum[:])
-		existing, findErr := s.store.GetInitiativeByIdempotency(ctx, i.Scope, i.IdempotencyKeyHash)
-		if errors.Is(findErr, ErrInitiativeNotFound) {
+		existing, findErr := s.store.GetProjectByIdempotency(ctx, i.Scope, i.IdempotencyKeyHash)
+		if errors.Is(findErr, ErrProjectNotFound) {
 			findErr = nil
 		}
 		if findErr != nil {
@@ -418,13 +418,13 @@ func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequ
 		}
 		if existing != nil {
 			if existing.CreationFingerprint != fp {
-				return nil, nil, ErrInitiativeIdempotency
+				return nil, nil, ErrProjectIdempotency
 			}
 			return existing, nil, nil
 		}
 	}
 	if err := i.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidInitiative, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidProject, err)
 	}
 	if err := s.validateObjectives(ctx, i); err != nil {
 		return nil, nil, err
@@ -432,35 +432,35 @@ func (s *InitiativeService) Create(ctx context.Context, req CreateInitiativeRequ
 	if err := s.validateSourceMonitors(ctx, i); err != nil {
 		return nil, nil, err
 	}
-	e := initiativeEvent(i, "initiative.created", req.Actor, req.Visibility, "Initiative created")
-	e, err = s.store.CreateInitiativeWithEvent(ctx, i, e)
+	e := projectEvent(i, "project.created", req.Actor, req.Visibility, "Project created")
+	e, err = s.store.CreateProjectWithEvent(ctx, i, e)
 	if err != nil {
 		if i.IdempotencyKeyHash != "" {
-			winner, lookupErr := s.store.GetInitiativeByIdempotency(ctx, i.Scope, i.IdempotencyKeyHash)
+			winner, lookupErr := s.store.GetProjectByIdempotency(ctx, i.Scope, i.IdempotencyKeyHash)
 			if lookupErr == nil {
 				if winner.CreationFingerprint == fp {
 					return winner, nil, nil
 				}
-				return nil, nil, ErrInitiativeIdempotency
+				return nil, nil, ErrProjectIdempotency
 			}
 		}
 		return nil, nil, err
 	}
-	return cloneInitiative(i), e, nil
+	return cloneProject(i), e, nil
 }
-func (s *InitiativeService) Get(ctx context.Context, scope Scope, id string) (*Initiative, error) {
-	return s.store.GetInitiative(ctx, scope, id)
+func (s *ProjectService) Get(ctx context.Context, scope Scope, id string) (*Project, error) {
+	return s.store.GetProject(ctx, scope, id)
 }
-func (s *InitiativeService) List(ctx context.Context, f InitiativeFilter) ([]*Initiative, error) {
-	return s.store.ListInitiatives(ctx, f)
+func (s *ProjectService) List(ctx context.Context, f ProjectFilter) ([]*Project, error) {
+	return s.store.ListProjects(ctx, f)
 }
-func (s *InitiativeService) Patch(ctx context.Context, scope Scope, id string, req UpdateInitiativeRequest) (*Initiative, *ActivityEvent, error) {
-	current, err := s.store.GetInitiative(ctx, scope, id)
+func (s *ProjectService) Patch(ctx context.Context, scope Scope, id string, req UpdateProjectRequest) (*Project, *ActivityEvent, error) {
+	current, err := s.store.GetProject(ctx, scope, id)
 	if err != nil {
 		return nil, nil, err
 	}
 	if current.Revision != req.ExpectedRevision {
-		return nil, nil, ErrInitiativeConflict
+		return nil, nil, ErrProjectConflict
 	}
 	before, _ := json.Marshal(current)
 	if req.Title != nil {
@@ -509,27 +509,27 @@ func (s *InitiativeService) Patch(ctx context.Context, scope Scope, id string, r
 	}
 	after, _ := json.Marshal(current)
 	if string(before) == string(after) {
-		return nil, nil, ErrInitiativeNoChanges
+		return nil, nil, ErrProjectNoChanges
 	}
 	return s.Update(ctx, current, req.ExpectedRevision, req.Actor, req.Visibility)
 }
-func (s *InitiativeService) Update(ctx context.Context, i *Initiative, expected int64, actor ActivityActor, visibility ActivityVisibility) (*Initiative, *ActivityEvent, error) {
+func (s *ProjectService) Update(ctx context.Context, i *Project, expected int64, actor ActivityActor, visibility ActivityVisibility) (*Project, *ActivityEvent, error) {
 	if s == nil || s.store == nil {
-		return nil, nil, errors.New("initiative service is not configured")
+		return nil, nil, errors.New("project service is not configured")
 	}
-	next := cloneInitiative(i)
+	next := cloneProject(i)
 	if next == nil {
-		return nil, nil, errors.New("initiative is required")
+		return nil, nil, errors.New("project is required")
 	}
 	if next.Revision != expected {
-		return nil, nil, ErrInitiativeConflict
+		return nil, nil, ErrProjectConflict
 	}
-	current, err := s.store.GetInitiative(ctx, next.Scope, next.ID)
+	current, err := s.store.GetProject(ctx, next.Scope, next.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if current.Revision != expected {
-		return nil, nil, ErrInitiativeConflict
+		return nil, nil, ErrProjectConflict
 	}
 	// Identity, ownership and creation provenance are immutable. Updates are a
 	// replacement of mutable fields on the currently persisted aggregate.
@@ -542,7 +542,7 @@ func (s *InitiativeService) Update(ctx context.Context, i *Initiative, expected 
 	next.Revision++
 	next.UpdatedAt = s.now().UTC()
 	if err := next.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidInitiative, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidProject, err)
 	}
 	if err := s.validateObjectives(ctx, next); err != nil {
 		return nil, nil, err
@@ -550,16 +550,16 @@ func (s *InitiativeService) Update(ctx context.Context, i *Initiative, expected 
 	if err := s.validateSourceMonitors(ctx, next); err != nil {
 		return nil, nil, err
 	}
-	e := initiativeEvent(next, "initiative.updated", actor, visibility, "Initiative updated")
-	e, err = s.store.UpdateInitiativeWithEvent(ctx, next, expected, e)
+	e := projectEvent(next, "project.updated", actor, visibility, "Project updated")
+	e, err = s.store.UpdateProjectWithEvent(ctx, next, expected, e)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cloneInitiative(next), e, nil
+	return cloneProject(next), e, nil
 }
-func (s *InitiativeService) validateObjectives(ctx context.Context, i *Initiative) error {
+func (s *ProjectService) validateObjectives(ctx context.Context, i *Project) error {
 	if s.portfolio == nil {
-		return errors.New("initiative objective verifier is not configured")
+		return errors.New("project objective verifier is not configured")
 	}
 	for _, id := range i.ObjectiveRefs {
 		objective, err := s.portfolio.GetObjective(ctx, i.Scope, id)
@@ -567,18 +567,18 @@ func (s *InitiativeService) validateObjectives(ctx context.Context, i *Initiativ
 			if err == nil {
 				err = ErrObjectiveNotFound
 			}
-			return fmt.Errorf("initiative objective %s: %w", id, err)
+			return fmt.Errorf("project objective %s: %w", id, err)
 		}
 		if objective.Owner != i.Owner {
-			return fmt.Errorf("initiative objective %s owner must match Initiative owner", id)
+			return fmt.Errorf("project objective %s owner must match Project owner", id)
 		}
 	}
 	return nil
 }
 
-func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initiative) error {
+func (s *ProjectService) validateSourceMonitors(ctx context.Context, i *Project) error {
 	if len(i.SourceMonitors) > 0 && s.runbooks == nil {
-		return errors.New("initiative Runbook verifier is not configured")
+		return errors.New("project Runbook verifier is not configured")
 	}
 	for _, monitor := range i.SourceMonitors {
 		objective, err := s.portfolio.GetObjective(ctx, i.Scope, monitor.ObjectiveID)
@@ -589,7 +589,7 @@ func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initi
 			return fmt.Errorf("source monitor %s objective: %w", monitor.ID, err)
 		}
 		if objective.Owner != i.Owner {
-			return fmt.Errorf("source monitor %s objective owner must match Initiative owner", monitor.ID)
+			return fmt.Errorf("source monitor %s objective owner must match Project owner", monitor.ID)
 		}
 		runbooks, err := s.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: i.Scope, ObjectiveID: objective.ID, Limit: 500})
 		if err != nil {
@@ -597,7 +597,7 @@ func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initi
 		}
 		matched := false
 		for _, activation := range runbooks {
-			if activation.AssignedAgentID == monitor.AssignedAgentID && activation.Input["initiativeId"] == i.ID && activation.Input["sourceMonitorId"] == monitor.ID && activation.Policy["sourcePolicyRef"] == monitor.SourcePolicyRef {
+			if activation.AssignedAgentID == monitor.AssignedAgentID && activation.Input["projectId"] == i.ID && activation.Input["sourceMonitorId"] == monitor.ID && activation.Policy["sourcePolicyRef"] == monitor.SourcePolicyRef {
 				matched = true
 				break
 			}
@@ -608,11 +608,11 @@ func (s *InitiativeService) validateSourceMonitors(ctx context.Context, i *Initi
 	}
 	return nil
 }
-func initiativeEvent(i *Initiative, typ string, actor ActivityActor, v ActivityVisibility, summary string) *ActivityEvent {
+func projectEvent(i *Project, typ string, actor ActivityActor, v ActivityVisibility, summary string) *ActivityEvent {
 	if v == "" {
 		v = ActivityVisibilityScope
 	}
-	return &ActivityEvent{ID: uuid.NewString(), Scope: i.Scope, EventType: typ, Severity: ActivitySeverityInfo, InitiativeID: i.ID, TeamID: func() string {
+	return &ActivityEvent{ID: uuid.NewString(), Scope: i.Scope, EventType: typ, Severity: ActivitySeverityInfo, ProjectID: i.ID, TeamID: func() string {
 		if i.Owner.Type == OwnerTypeTeam {
 			return i.Owner.ID
 		}
@@ -624,8 +624,8 @@ func initiativeEvent(i *Initiative, typ string, actor ActivityActor, v ActivityV
 		return ""
 	}(), Actor: actor, Summary: summary, Visibility: v, Payload: map[string]interface{}{"status": i.Status, "revision": i.Revision}, CreatedAt: i.UpdatedAt}
 }
-func initiativeCreationFingerprint(i *Initiative) (string, error) {
-	c := cloneInitiative(i)
+func projectCreationFingerprint(i *Project) (string, error) {
+	c := cloneProject(i)
 	c.ID = ""
 	c.Revision = 0
 	c.CreatedAt = time.Time{}
@@ -640,18 +640,18 @@ func initiativeCreationFingerprint(i *Initiative) (string, error) {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:]), nil
 }
-func normalizeInitiativeStatus(s InitiativeStatus) InitiativeStatus {
+func normalizeProjectStatus(s ProjectStatus) ProjectStatus {
 	if s == "" {
-		return InitiativeStatusDraft
+		return ProjectStatusDraft
 	}
 	return s
 }
-func cloneInitiative(i *Initiative) *Initiative {
+func cloneProject(i *Project) *Project {
 	if i == nil {
 		return nil
 	}
 	b, _ := json.Marshal(i)
-	var out Initiative
+	var out Project
 	_ = json.Unmarshal(b, &out)
 	return &out
 }

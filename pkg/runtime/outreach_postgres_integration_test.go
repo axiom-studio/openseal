@@ -36,17 +36,17 @@ func TestPostgresOutreachIsReplicaSafeAndRestartDurable(t *testing.T) {
 		t.Fatalf("migration=%q err=%v", migration, err)
 	}
 	scope := Scope{Kind: "tenant", ID: "postgres-outreach"}
-	initiative, runs := seedExecutableMonitorInitiative(t, primary, scope)
+	project, runs := seedExecutableMonitorProject(t, primary, scope)
 	sourceService := NewSourceMonitorService(primary, primary, primary, primary)
-	observation, err := sourceService.Ingest(ctx, sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "PostgreSQL evidence"))
+	observation, err := sourceService.Ingest(ctx, sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-1", "PostgreSQL evidence"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	disclosure := "Disclosure: I work on OpenSeal."
 	body := "Which workflow was difficult? " + disclosure
 	draft := &OutreachThread{
-		Scope: scope, InitiativeID: initiative.ID, SourceObservationID: observation.Observation.ID, MonitorID: "monitor-a", StableSourceID: "thread-1",
-		TargetURI: observation.Observation.SourceURI, Owner: initiative.Owner, AssignedAgentID: "researcher", SourcePolicyRef: "approved-forums", ApprovalPolicyRef: "review-outreach",
+		Scope: scope, ProjectID: project.ID, SourceObservationID: observation.Observation.ID, MonitorID: "monitor-a", StableSourceID: "thread-1",
+		TargetURI: observation.Observation.SourceURI, Owner: project.Owner, AssignedAgentID: "researcher", SourcePolicyRef: "approved-forums", ApprovalPolicyRef: "review-outreach",
 		Identity: OutreachIdentity{ProfileRef: "profile:research", DisplayName: "Research", Affiliation: "OpenSeal", Disclosure: disclosure},
 		Messages: []OutreachMessage{{Direction: OutreachMessageOutbound, Intent: OutreachIntentRequestFeedback, Body: body, Status: OutreachMessageDraft,
 			Capability: &OutreachCapability{SkillID: "forum", SkillVersion: "1", Action: "reply", TargetArgument: "url", BodyArgument: "body", Arguments: map[string]interface{}{"url": observation.Observation.SourceURI, "body": body}}}},

@@ -20,21 +20,21 @@ import (
 )
 
 type workforceApplication struct {
-	activation                 authoring.WorkforceActivationIntent
-	agentDefinitions           []*agent.AgentDefinition
-	agentDeployments           []*agent.AgentDeployment
-	agentRunbooks              []workforceAgentRunbookApplication
-	agentActivations           []workforce.DefinitionActivation
-	skillBindings              []*capability.Binding
-	teamDefinition             *team.Definition
-	teamDeployment             *team.Deployment
-	teamActivation             workforce.DefinitionActivation
-	objectives                 []workforceObjectiveApplication
-	runbookActivations         []workforceRunbookActivationApplication
-	initiative                 *Initiative
-	initiativeExpectedRevision int64
-	conversationEndpoints      []workforceConversationEndpointApplication
-	resources                  []authoring.AppliedResourceReference
+	activation              authoring.WorkforceActivationIntent
+	agentDefinitions        []*agent.AgentDefinition
+	agentDeployments        []*agent.AgentDeployment
+	agentRunbooks           []workforceAgentRunbookApplication
+	agentActivations        []workforce.DefinitionActivation
+	skillBindings           []*capability.Binding
+	teamDefinition          *team.Definition
+	teamDeployment          *team.Deployment
+	teamActivation          workforce.DefinitionActivation
+	objectives              []workforceObjectiveApplication
+	runbookActivations      []workforceRunbookActivationApplication
+	project                 *Project
+	projectExpectedRevision int64
+	conversationEndpoints   []workforceConversationEndpointApplication
+	resources               []authoring.AppliedResourceReference
 }
 
 type workforceObjectiveApplication struct {
@@ -226,14 +226,14 @@ func finishWorkforceApplication(value *authoring.ChangeSet, application *workfor
 	for _, activation := range application.runbookActivations {
 		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "runbook", ID: activation.value.ID, Version: activation.value.DefinitionVersion, Revision: activation.value.Revision})
 	}
-	if value.Result.Candidate.Initiative != nil {
-		initiative, err := materializeInitiative(value, application, deploymentByDefinition)
+	if value.Result.Candidate.Project != nil {
+		project, err := materializeProject(value, application, deploymentByDefinition)
 		if err != nil {
 			return err
 		}
-		application.initiative = initiative
-		application.initiativeExpectedRevision = value.Placement.InitiativeExpectedRevision
-		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "initiative", ID: initiative.ID, Revision: initiative.Revision})
+		application.project = project
+		application.projectExpectedRevision = value.Placement.ProjectExpectedRevision
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "project", ID: project.ID, Revision: project.Revision})
 	}
 	if err := materializeConversationEndpoints(value, application, deploymentByDefinition); err != nil {
 		return err
@@ -974,7 +974,7 @@ func materializeRunbookActivations(value *authoring.ChangeSet, definition *agent
 			return nil, fmt.Errorf("Runbook trigger %s input: %w", triggerID, err)
 		}
 		policy := map[string]interface{}(nil)
-		if blueprint := value.Result.Candidate.Initiative; blueprint != nil {
+		if blueprint := value.Result.Candidate.Project; blueprint != nil {
 			for _, monitor := range blueprint.SourceMonitors {
 				if monitor.ObjectiveRef != trigger.ObjectiveID || monitor.AssignedAgentDefinitionID != definition.ID {
 					continue
@@ -985,7 +985,7 @@ func materializeRunbookActivations(value *authoring.ChangeSet, definition *agent
 				if input["sourceMonitorId"] != nil {
 					return nil, fmt.Errorf("Runbook trigger %s is shared by multiple source monitors", triggerID)
 				}
-				input["initiativeId"], input["sourceMonitorId"] = value.Placement.InitiativeID, monitor.ID
+				input["projectId"], input["sourceMonitorId"] = value.Placement.ProjectID, monitor.ID
 				policy = map[string]interface{}{"sourcePolicyRef": monitor.SourcePolicyRef}
 			}
 		}
@@ -1029,8 +1029,8 @@ func materializeRunbookTriggerInput(values map[string]runbook.Value) (map[string
 	return result, nil
 }
 
-func materializeInitiative(value *authoring.ChangeSet, application *workforceApplication, deploymentByDefinition map[string]string) (*Initiative, error) {
-	blueprint := value.Result.Candidate.Initiative
+func materializeProject(value *authoring.ChangeSet, application *workforceApplication, deploymentByDefinition map[string]string) (*Project, error) {
+	blueprint := value.Result.Candidate.Project
 	if blueprint == nil {
 		return nil, nil
 	}
@@ -1043,22 +1043,22 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 		for index, reference := range refs {
 			result[index] = objectiveIDs[reference]
 			if result[index] == "" {
-				return nil, fmt.Errorf("Initiative Objective reference %s has no placement", reference)
+				return nil, fmt.Errorf("Project Objective reference %s has no placement", reference)
 			}
 		}
 		return result, nil
 	}
 	ownerID := ""
 	switch blueprint.Owner.Type {
-	case authoring.InitiativeOwnerAgent:
+	case authoring.ProjectOwnerAgent:
 		ownerID = deploymentByDefinition[blueprint.Owner.DefinitionID]
-	case authoring.InitiativeOwnerTeam:
+	case authoring.ProjectOwnerTeam:
 		if application.teamDeployment != nil && application.teamDefinition.ID == blueprint.Owner.DefinitionID {
 			ownerID = application.teamDeployment.ID
 		}
 	}
 	if ownerID == "" {
-		return nil, fmt.Errorf("Initiative owner has no deployed placement")
+		return nil, fmt.Errorf("Project owner has no deployed placement")
 	}
 	objectiveRefs, err := translate(blueprint.ObjectiveRefs)
 	if err != nil {
@@ -1069,24 +1069,24 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 	if err != nil {
 		return nil, err
 	}
-	status := InitiativeStatusActive
+	status := ProjectStatusActive
 	if activation == authoring.WorkforceActivationInactive {
-		status = InitiativeStatusDraft
+		status = ProjectStatusDraft
 	}
-	initiative := &Initiative{
-		ID: value.Placement.InitiativeID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Title: blueprint.Title, Purpose: blueprint.Purpose,
+	project := &Project{
+		ID: value.Placement.ProjectID, Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, Title: blueprint.Title, Purpose: blueprint.Purpose,
 		Status: status, Owner: ObjectiveOwner{Type: OwnerType(blueprint.Owner.Type), ID: ownerID}, ObjectiveRefs: objectiveRefs,
-		Policy: cloneMap(blueprint.Policy), Revision: value.Placement.InitiativeExpectedRevision + 1, CreatedAt: now, UpdatedAt: now,
+		Policy: cloneMap(blueprint.Policy), Revision: value.Placement.ProjectExpectedRevision + 1, CreatedAt: now, UpdatedAt: now,
 	}
 	for index, definition := range application.agentDefinitions {
 		deployment := application.agentDeployments[index]
-		initiative.AgentRefs = append(initiative.AgentRefs,
+		project.AgentRefs = append(project.AgentRefs,
 			ResourceReference{Kind: ResourceKindAgentDefinition, ID: definition.ID, Version: definition.Version},
 			ResourceReference{Kind: ResourceKindAgentDeployment, ID: deployment.ID, Version: definition.Version, Revision: deployment.Revision},
 		)
 	}
 	if application.teamDefinition != nil {
-		initiative.TeamRefs = append(initiative.TeamRefs,
+		project.TeamRefs = append(project.TeamRefs,
 			ResourceReference{Kind: ResourceKindTeamDefinition, ID: application.teamDefinition.ID, Version: application.teamDefinition.Version},
 			ResourceReference{Kind: ResourceKindTeamDeployment, ID: application.teamDeployment.ID, Version: application.teamDefinition.Version, Revision: application.teamDeployment.Revision},
 		)
@@ -1096,18 +1096,18 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 		if err != nil {
 			return nil, err
 		}
-		initiative.Milestones = append(initiative.Milestones, InitiativeMilestone{ID: source.ID, Title: source.Title, Status: MilestonePending, ObjectiveRefs: refs})
+		project.Milestones = append(project.Milestones, ProjectMilestone{ID: source.ID, Title: source.Title, Status: MilestonePending, ObjectiveRefs: refs})
 	}
 	for _, source := range blueprint.Hypotheses {
-		initiative.Hypotheses = append(initiative.Hypotheses, InitiativeHypothesis{ID: source.ID, Statement: source.Statement, Confidence: source.Confidence, Status: HypothesisOpen, UpdatedAt: now})
+		project.Hypotheses = append(project.Hypotheses, ProjectHypothesis{ID: source.ID, Statement: source.Statement, Confidence: source.Confidence, Status: HypothesisOpen, UpdatedAt: now})
 	}
 	for _, source := range blueprint.SourceMonitors {
 		objectiveID := objectiveIDs[source.ObjectiveRef]
 		agentID := deploymentByDefinition[source.AssignedAgentDefinitionID]
 		if objectiveID == "" || agentID == "" {
-			return nil, fmt.Errorf("Initiative source monitor %s has unresolved Objective or Agent placement", source.ID)
+			return nil, fmt.Errorf("Project source monitor %s has unresolved Objective or Agent placement", source.ID)
 		}
-		initiative.SourceMonitors = append(initiative.SourceMonitors, SourceMonitorReference{
+		project.SourceMonitors = append(project.SourceMonitors, SourceMonitorReference{
 			ID: source.ID, ObjectiveID: objectiveID, AssignedAgentID: agentID, SkillID: source.SkillID, SkillVersion: source.SkillVersion,
 			Action: source.Action, SourcePolicyRef: source.SourcePolicyRef, Deduplication: SourceMonitorDeduplication(source.Deduplication),
 		})
@@ -1117,25 +1117,25 @@ func materializeInitiative(value *authoring.ChangeSet, application *workforceApp
 		if err != nil {
 			return nil, err
 		}
-		initiative.Deliverables = append(initiative.Deliverables, InitiativeDeliverable{ID: source.ID, Title: source.Title, Status: DeliverablePlanned, ObjectiveRefs: refs})
+		project.Deliverables = append(project.Deliverables, ProjectDeliverable{ID: source.ID, Title: source.Title, Status: DeliverablePlanned, ObjectiveRefs: refs})
 	}
-	if err := initiative.Validate(); err != nil {
-		return nil, fmt.Errorf("materialize Initiative: %w", err)
+	if err := project.Validate(); err != nil {
+		return nil, fmt.Errorf("materialize Project: %w", err)
 	}
-	if err := validateMaterializedInitiativeMonitors(initiative, application); err != nil {
+	if err := validateMaterializedProjectMonitors(project, application); err != nil {
 		return nil, err
 	}
 	idempotency := sha256.Sum256([]byte("workforce-change-set\x00" + value.ID + "\x00" + value.ApplyReceipt.IdempotencyKey))
-	initiative.IdempotencyKeyHash = hex.EncodeToString(idempotency[:])
-	fingerprint, err := initiativeCreationFingerprint(initiative)
+	project.IdempotencyKeyHash = hex.EncodeToString(idempotency[:])
+	fingerprint, err := projectCreationFingerprint(project)
 	if err != nil {
-		return nil, fmt.Errorf("fingerprint Initiative: %w", err)
+		return nil, fmt.Errorf("fingerprint Project: %w", err)
 	}
-	initiative.CreationFingerprint = fingerprint
-	return initiative, nil
+	project.CreationFingerprint = fingerprint
+	return project, nil
 }
 
-func validateMaterializedInitiativeMonitors(initiative *Initiative, application *workforceApplication) error {
+func validateMaterializedProjectMonitors(project *Project, application *workforceApplication) error {
 	byID := make(map[string]*Objective, len(application.objectives))
 	for _, objective := range application.objectives {
 		byID[objective.value.ID] = objective.value
@@ -1144,15 +1144,15 @@ func validateMaterializedInitiativeMonitors(initiative *Initiative, application 
 	for _, definition := range application.agentDefinitions {
 		definitions[definition.ID+"\x00"+definition.Version] = definition
 	}
-	for _, monitor := range initiative.SourceMonitors {
+	for _, monitor := range project.SourceMonitors {
 		objective := byID[monitor.ObjectiveID]
-		if objective == nil || objective.Owner != initiative.Owner {
-			return fmt.Errorf("Initiative source monitor %s has no matching owned Objective", monitor.ID)
+		if objective == nil || objective.Owner != project.Owner {
+			return fmt.Errorf("Project source monitor %s has no matching owned Objective", monitor.ID)
 		}
 		matched := false
 		for _, activation := range application.runbookActivations {
 			item := activation.value
-			if item.ObjectiveID != monitor.ObjectiveID || item.AssignedAgentID != monitor.AssignedAgentID || item.Input["initiativeId"] != initiative.ID || item.Input["sourceMonitorId"] != monitor.ID || item.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
+			if item.ObjectiveID != monitor.ObjectiveID || item.AssignedAgentID != monitor.AssignedAgentID || item.Input["projectId"] != project.ID || item.Input["sourceMonitorId"] != monitor.ID || item.Policy["sourcePolicyRef"] != monitor.SourcePolicyRef {
 				continue
 			}
 			definition := definitions[item.DefinitionID+"\x00"+item.DefinitionVersion]
@@ -1167,7 +1167,7 @@ func validateMaterializedInitiativeMonitors(initiative *Initiative, application 
 			}
 		}
 		if !matched {
-			return fmt.Errorf("Initiative source monitor %s has no matching Objective-owned Runbook action", monitor.ID)
+			return fmt.Errorf("Project source monitor %s has no matching Objective-owned Runbook action", monitor.ID)
 		}
 	}
 	return nil

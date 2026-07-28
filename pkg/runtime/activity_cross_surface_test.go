@@ -54,16 +54,16 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			if err != nil {
 				t.Fatal(err)
 			}
-			initiativeStore, ok := store.(InitiativeStore)
+			projectStore, ok := store.(ProjectStore)
 			if !ok {
-				t.Fatal("kernel store does not implement InitiativeStore")
+				t.Fatal("kernel store does not implement ProjectStore")
 			}
-			initiative := &Initiative{
-				ID: "initiative-launch", Scope: scope, Owner: conversation.Owner, Title: "Launch initiative",
-				Purpose: "Coordinate the product launch", Status: InitiativeStatusActive, ObjectiveRefs: []string{objective.ID},
+			project := &Project{
+				ID: "project-launch", Scope: scope, Owner: conversation.Owner, Title: "Launch project",
+				Purpose: "Coordinate the product launch", Status: ProjectStatusActive, ObjectiveRefs: []string{objective.ID},
 				Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
-			if err := initiativeStore.CreateInitiative(ctx, initiative); err != nil {
+			if err := projectStore.CreateProject(ctx, project); err != nil {
 				t.Fatal(err)
 			}
 			run := activityFeedRun("run-launch", scope, "agent-marketing", now)
@@ -78,7 +78,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			activity := NewRunActivityService(store, store)
 			appended, err := activity.AppendActivity(ctx, &ActivityEvent{
 				ID: "event-launch-published", Scope: scope, EventType: "action.succeeded",
-				AgentID: "agent-marketing", ObjectiveID: objective.ID, InitiativeID: initiative.ID,
+				AgentID: "agent-marketing", ObjectiveID: objective.ID, ProjectID: project.ID,
 				RunID: run.ID, TurnID: "turn-publish", ParentRunID: "run-development", TeamID: "team-gtm",
 				ConversationRefs: []string{conversation.ID}, Actor: ActivityActor{Type: "agent", ID: "agent-marketing"},
 				Summary: "Published the approved launch brief", Visibility: ActivityVisibilityTeam,
@@ -91,11 +91,11 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			}
 
 			selectors := map[string]ActivityFeedRequest{
-				"agent":      {Scope: scope, AgentID: appended.AgentID},
-				"team":       {Scope: scope, TeamID: appended.TeamID},
-				"objective":  {Scope: scope, ObjectiveID: appended.ObjectiveID},
-				"initiative": {Scope: scope, InitiativeID: appended.InitiativeID},
-				"run":        {Scope: scope, RunID: appended.RunID},
+				"agent":     {Scope: scope, AgentID: appended.AgentID},
+				"team":      {Scope: scope, TeamID: appended.TeamID},
+				"objective": {Scope: scope, ObjectiveID: appended.ObjectiveID},
+				"project":   {Scope: scope, ProjectID: appended.ProjectID},
+				"run":       {Scope: scope, RunID: appended.RunID},
 			}
 			var canonical *ActivityProjection
 			for name, request := range selectors {

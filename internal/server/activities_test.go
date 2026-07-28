@@ -21,14 +21,14 @@ func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateInitiative(context.Background(), &runtime.Initiative{
-		ID: "initiative-1", Scope: scope, Owner: owner, Title: "Research", Purpose: "Collect evidence", Status: runtime.InitiativeStatusActive,
+	if err := store.CreateProject(context.Background(), &runtime.Project{
+		ID: "project-1", Scope: scope, Owner: owner, Title: "Research", Purpose: "Collect evidence", Status: runtime.ProjectStatusActive,
 		ObjectiveRefs: []string{"objective-1"}, Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = runtime.NewRunActivityService(store, store).AppendActivity(context.Background(), &runtime.ActivityEvent{
-		ID: "source-policy-call-1", Scope: scope, InitiativeID: "initiative-1", RunID: run.ID,
+		ID: "source-policy-call-1", Scope: scope, ProjectID: "project-1", RunID: run.ID,
 		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo,
 		Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"}, Summary: "Source access authorized by policy",
 		Payload:    map[string]interface{}{"monitorId": "monitor-1", "policyId": "public", "policyVersion": "1", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": 5},
@@ -47,7 +47,7 @@ func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t 
 		t.Fatalf("missing selector=%d %s", missingSelector.Code, missingSelector.Body.String())
 	}
 	compact := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/activity?scopeKind=tenant&scopeId=one&runId="+run.ID+"&eventType=source_policy.authorized", "", "")
-	if compact.Code != http.StatusOK || !strings.Contains(compact.Body.String(), `"initiativeId":"initiative-1"`) || strings.Contains(compact.Body.String(), `"sourceHost"`) {
+	if compact.Code != http.StatusOK || !strings.Contains(compact.Body.String(), `"projectId":"project-1"`) || strings.Contains(compact.Body.String(), `"sourceHost"`) {
 		t.Fatalf("compact=%d %s", compact.Code, compact.Body.String())
 	}
 	detailed := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/activity?scopeKind=tenant&scopeId=one&runId="+run.ID+"&eventType=source_policy.authorized&includeDetails=true", "", "")

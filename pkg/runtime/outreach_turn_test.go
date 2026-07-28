@@ -38,7 +38,7 @@ func TestOutreachTurnRunnerUsesOnlyReviewedArgumentsEvidenceAndReceipt(t *testin
 	disclosure := "Disclosure: I work on OpenSeal."
 	body := "What made installation difficult? " + disclosure
 	lifecycle := &fixedOutreachTurnLifecycle{thread: &OutreachThread{
-		ID: "thread-1", Scope: scope, InitiativeID: "initiative-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
+		ID: "thread-1", Scope: scope, ProjectID: "project-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
 		TargetURI: "https://forum.example/thread/1", Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"},
 		AssignedAgentID: "research-agent", Status: OutreachThreadOpen,
 		Messages: []OutreachMessage{{ID: "message-1", Direction: OutreachMessageOutbound, Status: OutreachMessageDraft, Body: body,

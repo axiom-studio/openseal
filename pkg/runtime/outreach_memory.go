@@ -68,7 +68,7 @@ func (s *MemoryStore) ListOutreachThreads(_ context.Context, filter OutreachThre
 	defer s.mu.RUnlock()
 	values := make([]*OutreachThread, 0)
 	for _, value := range s.outreachThreads {
-		if value.Scope != filter.Scope || filter.InitiativeID != "" && value.InitiativeID != filter.InitiativeID ||
+		if value.Scope != filter.Scope || filter.ProjectID != "" && value.ProjectID != filter.ProjectID ||
 			filter.SourceObservationID != "" && value.SourceObservationID != filter.SourceObservationID || len(statuses) > 0 && !statuses[value.Status] {
 			continue
 		}

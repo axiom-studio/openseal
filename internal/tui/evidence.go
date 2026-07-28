@@ -54,7 +54,7 @@ func decodeEvidenceSnapshot(contextValues map[string]interface{}) (*runtime.Evid
 		return nil, true, errors.New("evidence snapshot contract contains multiple values")
 	}
 	if snapshot.APIVersion != evidenceSnapshotAPIVersion || strings.TrimSpace(snapshot.ID) == "" ||
-		strings.TrimSpace(snapshot.InitiativeID) == "" || snapshot.SelectedCount != len(snapshot.Observations) ||
+		strings.TrimSpace(snapshot.ProjectID) == "" || snapshot.SelectedCount != len(snapshot.Observations) ||
 		snapshot.ObservationLimit < snapshot.SelectedCount || snapshot.ObservationLimit < 1 ||
 		snapshot.SummaryRuneLimit < 1 || snapshot.TotalSummaryRuneLimit < 1 {
 		return nil, true, errors.New("evidence snapshot invariants are invalid")
@@ -89,17 +89,17 @@ func (m *Model) selectedEvidenceLineage() *evidenceLineage {
 		return latestEvidenceLineage(m.runs, func(run *runtime.AgentRun, _ *runtime.EvidenceSnapshot) bool {
 			return run.ObjectiveID == objective.ID
 		})
-	case sectionInitiatives:
-		initiative := m.selectedInitiativeRecord()
-		if initiative == nil {
+	case sectionProjects:
+		project := m.selectedProjectRecord()
+		if project == nil {
 			return nil
 		}
 		return latestEvidenceLineage(m.runs, func(run *runtime.AgentRun, snapshot *runtime.EvidenceSnapshot) bool {
 			if snapshot != nil {
-				return snapshot.InitiativeID == initiative.ID
+				return snapshot.ProjectID == project.ID
 			}
-			initiativeID, _ := run.Context["initiativeId"].(string)
-			return initiativeID == initiative.ID
+			projectID, _ := run.Context["projectId"].(string)
+			return projectID == project.ID
 		})
 	default:
 		return nil
@@ -178,7 +178,7 @@ func (m *Model) renderSelectedEvidence(width int) []string {
 	}
 	lines = append(lines, mutedStyle.Render(state))
 	lines = appendEvidenceField(lines, "Snapshot", snapshot.ID, width)
-	lines = appendEvidenceField(lines, "Initiative", snapshot.InitiativeID, width)
+	lines = appendEvidenceField(lines, "Project", snapshot.ProjectID, width)
 	lines = appendEvidenceField(lines, "Run", lineage.run.ID, width)
 	lines = append(lines, mutedStyle.Render(fmt.Sprintf("Bounds · %d observations · %d runes/summary · %d runes total", snapshot.ObservationLimit, snapshot.SummaryRuneLimit, snapshot.TotalSummaryRuneLimit)))
 	if !m.evidenceExpanded {

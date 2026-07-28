@@ -13,13 +13,13 @@ func (s *PostgresStore) migrateOutreach(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("outreach_threads")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
-			initiative_id TEXT NOT NULL, source_observation_id TEXT NOT NULL,
+			project_id TEXT NOT NULL, source_observation_id TEXT NOT NULL,
 			identity_profile_ref TEXT NOT NULL, status TEXT NOT NULL, revision BIGINT NOT NULL CHECK(revision>0),
 			updated_at TIMESTAMPTZ NOT NULL, idempotency_key_hash TEXT NOT NULL DEFAULT '', payload JSONB NOT NULL,
 			PRIMARY KEY(scope_kind,scope_id,id)
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS outreach_idempotency_idx ON `+s.table("outreach_threads")+`(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>'';
-		CREATE INDEX IF NOT EXISTS outreach_initiative_idx ON `+s.table("outreach_threads")+`(scope_kind,scope_id,initiative_id,status,updated_at DESC);
+		CREATE INDEX IF NOT EXISTS outreach_project_idx ON `+s.table("outreach_threads")+`(scope_kind,scope_id,project_id,status,updated_at DESC);
 		CREATE INDEX IF NOT EXISTS outreach_observation_idx ON `+s.table("outreach_threads")+`(scope_kind,scope_id,source_observation_id,updated_at DESC);
 		CREATE INDEX IF NOT EXISTS outreach_identity_idx ON `+s.table("outreach_threads")+`(scope_kind,scope_id,identity_profile_ref,updated_at DESC);
 	`); err != nil {
@@ -42,8 +42,8 @@ func (s *PostgresStore) CreateOutreachThreadWithEvent(ctx context.Context, threa
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("outreach_threads")+`(scope_kind,scope_id,id,initiative_id,source_observation_id,identity_profile_ref,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
-		thread.Scope.Kind, thread.Scope.ID, thread.ID, thread.InitiativeID, thread.SourceObservationID, thread.Identity.ProfileRef,
+	if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("outreach_threads")+`(scope_kind,scope_id,id,project_id,source_observation_id,identity_profile_ref,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+		thread.Scope.Kind, thread.Scope.ID, thread.ID, thread.ProjectID, thread.SourceObservationID, thread.Identity.ProfileRef,
 		thread.Status, thread.Revision, thread.UpdatedAt, thread.IdempotencyKeyHash, string(payload)); err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (s *PostgresStore) ListOutreachThreads(ctx context.Context, filter Outreach
 	query := `SELECT payload FROM ` + s.table("outreach_threads") + ` WHERE scope_kind=$1 AND scope_id=$2`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
 	next := 3
-	for _, selector := range []struct{ column, value string }{{"initiative_id", filter.InitiativeID}, {"source_observation_id", filter.SourceObservationID}} {
+	for _, selector := range []struct{ column, value string }{{"project_id", filter.ProjectID}, {"source_observation_id", filter.SourceObservationID}} {
 		if strings.TrimSpace(selector.value) != "" {
 			query += fmt.Sprintf(` AND %s=$%d`, selector.column, next)
 			args = append(args, strings.TrimSpace(selector.value))

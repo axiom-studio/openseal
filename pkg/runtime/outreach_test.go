@@ -28,9 +28,9 @@ func (r *fixedOutreachActionReader) GetApproval(context.Context, Scope, string) 
 func TestOutreachLifecyclePreservesEvidenceIdentityApprovalAndReceipt(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "research"}
-	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
+	project, runs := seedExecutableMonitorProject(t, store, scope)
 	sources := NewSourceMonitorService(store, store, store, store)
-	ingested, err := sources.Ingest(context.Background(), sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Setup is confusing"))
+	ingested, err := sources.Ingest(context.Background(), sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Setup is confusing"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +41,8 @@ func TestOutreachLifecyclePreservesEvidenceIdentityApprovalAndReceipt(t *testing
 	disclosure := "Disclosure: I work on OpenSeal and am seeking product feedback."
 	body := "What part of setup was hardest for you? " + disclosure
 	thread := &OutreachThread{
-		Scope: scope, InitiativeID: initiative.ID, SourceObservationID: ingested.Observation.ID, MonitorID: "monitor-a",
-		StableSourceID: "thread-7", TargetURI: ingested.Observation.SourceURI, Owner: initiative.Owner, AssignedAgentID: "researcher",
+		Scope: scope, ProjectID: project.ID, SourceObservationID: ingested.Observation.ID, MonitorID: "monitor-a",
+		StableSourceID: "thread-7", TargetURI: ingested.Observation.SourceURI, Owner: project.Owner, AssignedAgentID: "researcher",
 		SourcePolicyRef: "approved-forums", ApprovalPolicyRef: "review-outreach",
 		Identity: OutreachIdentity{ProfileRef: "profile:openseal-research", DisplayName: "OpenSeal Research", Affiliation: "OpenSeal", Disclosure: disclosure},
 		Messages: []OutreachMessage{{ID: "message-1", Direction: OutreachMessageOutbound, Intent: OutreachIntentRequestFeedback, Body: body, Status: OutreachMessageDraft,
@@ -104,17 +104,17 @@ func TestOutreachLifecyclePreservesEvidenceIdentityApprovalAndReceipt(t *testing
 func TestOutreachRejectsCovertIdentityAndDriftedEvidence(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "research"}
-	initiative, runs := seedExecutableMonitorInitiative(t, store, scope)
+	project, runs := seedExecutableMonitorProject(t, store, scope)
 	sources := NewSourceMonitorService(store, store, store, store)
-	ingested, err := sources.Ingest(context.Background(), sourceObservationRequest(scope, initiative.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Setup is confusing"))
+	ingested, err := sources.Ingest(context.Background(), sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Setup is confusing"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	disclosure := "Disclosure: I work on OpenSeal."
 	body := "Can you explain the setup issue?"
 	fixture := &OutreachThread{
-		ID: "outreach-1", Scope: scope, InitiativeID: initiative.ID, SourceObservationID: ingested.Observation.ID, MonitorID: "monitor-a",
-		StableSourceID: "thread-7", TargetURI: ingested.Observation.SourceURI, Owner: initiative.Owner, AssignedAgentID: "researcher",
+		ID: "outreach-1", Scope: scope, ProjectID: project.ID, SourceObservationID: ingested.Observation.ID, MonitorID: "monitor-a",
+		StableSourceID: "thread-7", TargetURI: ingested.Observation.SourceURI, Owner: project.Owner, AssignedAgentID: "researcher",
 		SourcePolicyRef: "approved-forums", ApprovalPolicyRef: "review-outreach",
 		Identity: OutreachIdentity{ProfileRef: "profile:research", DisplayName: "Research", Affiliation: "OpenSeal", Disclosure: disclosure},
 		Messages: []OutreachMessage{{ID: "message-1", Direction: OutreachMessageOutbound, Intent: OutreachIntentClarify, Body: body, Status: OutreachMessageDraft,
@@ -144,7 +144,7 @@ func TestOutreachSQLiteStoreIsScopedCASAndRestartDurable(t *testing.T) {
 	disclosure := "Disclosure: I work on OpenSeal."
 	body := "Could you share more detail? " + disclosure
 	thread := &OutreachThread{
-		ID: "thread-1", Scope: scope, InitiativeID: "initiative-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
+		ID: "thread-1", Scope: scope, ProjectID: "project-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
 		StableSourceID: "source-1", TargetURI: "https://forum.example/threads/source-1", Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-1"},
 		AssignedAgentID: "agent-1", SourcePolicyRef: "approved-forum", ApprovalPolicyRef: "review-outreach",
 		Identity: OutreachIdentity{ProfileRef: "profile-1", DisplayName: "Research", Affiliation: "OpenSeal", Disclosure: disclosure}, Status: OutreachThreadOpen,
@@ -176,7 +176,7 @@ func TestOutreachSQLiteStoreIsScopedCASAndRestartDurable(t *testing.T) {
 	}
 	defer store.Close()
 	got, err := store.GetOutreachThread(context.Background(), scope, thread.ID)
-	listed, listErr := store.ListOutreachThreads(context.Background(), OutreachThreadFilter{Scope: scope, InitiativeID: thread.InitiativeID, Limit: 10})
+	listed, listErr := store.ListOutreachThreads(context.Background(), OutreachThreadFilter{Scope: scope, ProjectID: thread.ProjectID, Limit: 10})
 	if err != nil || listErr != nil || got.Revision != 2 || got.Messages[0].ActionCallID != "action-1" || len(listed) != 1 {
 		t.Fatalf("got=%#v listed=%#v err=%v listErr=%v", got, listed, err, listErr)
 	}

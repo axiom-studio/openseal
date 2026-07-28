@@ -45,11 +45,11 @@ func sourcePolicyProposals(candidate *WorkforceCandidate, missing []MissingRequi
 }
 
 func candidateUsesProposedSourcePolicy(candidate *WorkforceCandidate, reference string, skillIDs []string) bool {
-	if candidate == nil || candidate.Initiative == nil {
+	if candidate == nil || candidate.Project == nil {
 		return false
 	}
 	allowed := stringSet(skillIDs)
-	for _, monitor := range candidate.Initiative.SourceMonitors {
+	for _, monitor := range candidate.Project.SourceMonitors {
 		if monitor.SourcePolicyRef == reference && allowed[monitor.SkillID] {
 			return true
 		}
@@ -58,7 +58,7 @@ func candidateUsesProposedSourcePolicy(candidate *WorkforceCandidate, reference 
 }
 
 // validateSourceActionProjection prevents an authoring candidate from placing
-// the built-in governed source action outside the Initiative monitor envelope
+// the built-in governed source action outside the Project monitor envelope
 // required by runtime policy authorization and evidence checkpoints.
 func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
@@ -72,8 +72,8 @@ func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationI
 		}
 		objectiveRef := invocation.objectiveRef
 		projected := false
-		if candidate != nil && candidate.Initiative != nil && objectiveRef != "" {
-			for _, monitor := range candidate.Initiative.SourceMonitors {
+		if candidate != nil && candidate.Project != nil && objectiveRef != "" {
+			for _, monitor := range candidate.Project.SourceMonitors {
 				if monitor.ObjectiveRef == objectiveRef && monitor.SkillID == source.SkillID && monitor.Action == source.ObserveFeed {
 					projected = true
 					break
@@ -84,7 +84,7 @@ func validateSourceActionProjection(candidate *WorkforceCandidate) []ValidationI
 			issues = append(issues, issue(
 				invocation.path,
 				"source_action_requires_monitor",
-				"The governed source observer must be projected by an exact Initiative source monitor so policy decisions, checkpoints, and evidence remain enforceable",
+				"The governed source observer must be projected by an exact Project source monitor so policy decisions, checkpoints, and evidence remain enforceable",
 			))
 		}
 	}

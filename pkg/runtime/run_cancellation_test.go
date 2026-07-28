@@ -13,7 +13,7 @@ import (
 type cancellationStore interface {
 	KernelStore
 	OutreachStore
-	InitiativeStore
+	ProjectStore
 	SourceMonitorStore
 }
 
@@ -79,7 +79,7 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	reviewedBody := "Could you share feedback? " + disclosure
 	targetURI := "https://forum.example/thread/1"
 	thread := &OutreachThread{
-		ID: "thread-1", Scope: scope, InitiativeID: "initiative-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
+		ID: "thread-1", Scope: scope, ProjectID: "project-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
 		StableSourceID: "source-1", TargetURI: targetURI, Owner: proposal.Run.Owner,
 		AssignedAgentID: proposal.Run.AssignedAgentID, SourcePolicyRef: "forum-policy", ApprovalPolicyRef: "human-review",
 		Identity: OutreachIdentity{ProfileRef: "profile-1", DisplayName: "OpenSeal Research", Affiliation: "OpenSeal", Disclosure: disclosure},

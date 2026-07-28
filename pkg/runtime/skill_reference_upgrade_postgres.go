@@ -71,12 +71,12 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return err
 		}
 	}
-	for _, mutation := range application.Initiatives {
+	for _, mutation := range application.Projects {
 		encoded, marshalErr := json.Marshal(mutation.Value)
 		if marshalErr != nil {
 			return marshalErr
 		}
-		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("initiatives")+`
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("projects")+`
 			SET owner_type=$1,owner_id=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
 			WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`,
 			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Revision,

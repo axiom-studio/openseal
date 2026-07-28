@@ -114,7 +114,7 @@ type OutreachMessage struct {
 type OutreachThread struct {
 	ID                  string               `json:"id"`
 	Scope               Scope                `json:"scope"`
-	InitiativeID        string               `json:"initiativeId"`
+	ProjectID           string               `json:"projectId"`
 	SourceObservationID string               `json:"sourceObservationId"`
 	MonitorID           string               `json:"monitorId"`
 	StableSourceID      string               `json:"stableSourceId,omitempty"`
@@ -143,10 +143,10 @@ func (t *OutreachThread) Validate() error {
 	if err := t.Owner.Validate(); err != nil {
 		return err
 	}
-	if !validOpaqueIdentifier(t.ID, 128) || !validOpaqueIdentifier(t.InitiativeID, 128) ||
+	if !validOpaqueIdentifier(t.ID, 128) || !validOpaqueIdentifier(t.ProjectID, 128) ||
 		!validOpaqueIdentifier(t.SourceObservationID, 128) || !validOpaqueIdentifier(t.MonitorID, 128) ||
 		!validOpaqueIdentifier(t.AssignedAgentID, 128) {
-		return errors.New("outreach thread, Initiative, observation, monitor, and assigned Agent ids are required")
+		return errors.New("outreach thread, Project, observation, monitor, and assigned Agent ids are required")
 	}
 	if err := validateOutreachTarget(t.TargetURI); err != nil {
 		return err
@@ -295,7 +295,7 @@ func validateOutreachTarget(raw string) error {
 
 type OutreachThreadFilter struct {
 	Scope               Scope
-	InitiativeID        string
+	ProjectID           string
 	SourceObservationID string
 	Statuses            []OutreachThreadStatus
 	Limit               int
@@ -363,12 +363,12 @@ type ReconcileOutreachActionResult struct {
 }
 
 type OutreachService struct {
-	store       OutreachStore
-	initiatives InitiativeStore
-	sources     SourceMonitorStore
-	actions     OutreachActionReader
-	now         func() time.Time
-	newID       func() string
+	store    OutreachStore
+	projects ProjectStore
+	sources  SourceMonitorStore
+	actions  OutreachActionReader
+	now      func() time.Time
+	newID    func() string
 }
 
 type OutreachActionReader interface {
@@ -376,12 +376,12 @@ type OutreachActionReader interface {
 	GetApproval(context.Context, Scope, string) (*ApprovalCheckpoint, error)
 }
 
-func NewOutreachService(store OutreachStore, initiatives InitiativeStore, sources SourceMonitorStore, actions OutreachActionReader) *OutreachService {
-	return &OutreachService{store: store, initiatives: initiatives, sources: sources, actions: actions, now: time.Now, newID: uuid.NewString}
+func NewOutreachService(store OutreachStore, projects ProjectStore, sources SourceMonitorStore, actions OutreachActionReader) *OutreachService {
+	return &OutreachService{store: store, projects: projects, sources: sources, actions: actions, now: time.Now, newID: uuid.NewString}
 }
 
 func (s *OutreachService) Create(ctx context.Context, req CreateOutreachThreadRequest) (*OutreachThread, *ActivityEvent, error) {
-	if s == nil || s.store == nil || s.initiatives == nil || s.sources == nil {
+	if s == nil || s.store == nil || s.projects == nil || s.sources == nil {
 		return nil, nil, errors.New("outreach service is not configured")
 	}
 	thread := cloneOutreachThread(req.Thread)
@@ -769,15 +769,15 @@ func (s *OutreachService) mutate(ctx context.Context, scope Scope, id string, ex
 }
 
 func (s *OutreachService) validateEvidence(ctx context.Context, thread *OutreachThread) error {
-	initiative, err := s.initiatives.GetInitiative(ctx, thread.Scope, thread.InitiativeID)
-	if err != nil || initiative == nil {
+	project, err := s.projects.GetProject(ctx, thread.Scope, thread.ProjectID)
+	if err != nil || project == nil {
 		if err == nil {
-			err = ErrInitiativeNotFound
+			err = ErrProjectNotFound
 		}
-		return fmt.Errorf("outreach Initiative: %w", err)
+		return fmt.Errorf("outreach Project: %w", err)
 	}
-	if initiative.Owner != thread.Owner {
-		return errors.New("outreach owner must match Initiative owner")
+	if project.Owner != thread.Owner {
+		return errors.New("outreach owner must match Project owner")
 	}
 	observation, err := s.sources.GetSourceObservation(ctx, thread.Scope, thread.SourceObservationID)
 	if err != nil || observation == nil {
@@ -786,18 +786,18 @@ func (s *OutreachService) validateEvidence(ctx context.Context, thread *Outreach
 		}
 		return fmt.Errorf("outreach source observation: %w", err)
 	}
-	if observation.InitiativeID != thread.InitiativeID || observation.MonitorID != thread.MonitorID || observation.SourceURI != thread.TargetURI || observation.StableSourceID != thread.StableSourceID {
+	if observation.ProjectID != thread.ProjectID || observation.MonitorID != thread.MonitorID || observation.SourceURI != thread.TargetURI || observation.StableSourceID != thread.StableSourceID {
 		return errors.New("outreach target provenance does not match the source observation")
 	}
-	for _, monitor := range initiative.SourceMonitors {
+	for _, monitor := range project.SourceMonitors {
 		if monitor.ID == thread.MonitorID {
 			if monitor.SourcePolicyRef != thread.SourcePolicyRef || monitor.AssignedAgentID != thread.AssignedAgentID {
-				return errors.New("outreach source policy or assigned Agent does not match the Initiative monitor")
+				return errors.New("outreach source policy or assigned Agent does not match the Project monitor")
 			}
 			return nil
 		}
 	}
-	return errors.New("outreach monitor does not belong to Initiative")
+	return errors.New("outreach monitor does not belong to Project")
 }
 
 func outreachEvent(thread *OutreachThread, message *OutreachMessage, eventType, summary string, actor ActivityActor, visibility ActivityVisibility, now time.Time) *ActivityEvent {
@@ -816,7 +816,7 @@ func outreachEvent(thread *OutreachThread, message *OutreachMessage, eventType, 
 		payload["externalId"] = message.Receipt.ExternalID
 	}
 	return &ActivityEvent{ID: uuid.NewString(), Scope: thread.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
-		InitiativeID: thread.InitiativeID, AgentID: thread.AssignedAgentID, TeamID: func() string {
+		ProjectID: thread.ProjectID, AgentID: thread.AssignedAgentID, TeamID: func() string {
 			if thread.Owner.Type == OwnerTypeTeam {
 				return thread.Owner.ID
 			}

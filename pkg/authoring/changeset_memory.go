@@ -21,12 +21,12 @@ type MemoryChangeSetStore struct {
 	definitions           map[string]string
 	deployments           map[string]AppliedResourceReference
 	objectives            map[string]AppliedResourceReference
-	initiatives           map[string]AppliedResourceReference
+	projects              map[string]AppliedResourceReference
 	conversationEndpoints map[string]AppliedResourceReference
 }
 
 func NewMemoryChangeSetStore() *MemoryChangeSetStore {
-	return &MemoryChangeSetStore{changeSets: map[string]*ChangeSet{}, idempotency: map[string]memoryChangeSetIdempotency{}, definitions: map[string]string{}, deployments: map[string]AppliedResourceReference{}, objectives: map[string]AppliedResourceReference{}, initiatives: map[string]AppliedResourceReference{}, conversationEndpoints: map[string]AppliedResourceReference{}}
+	return &MemoryChangeSetStore{changeSets: map[string]*ChangeSet{}, idempotency: map[string]memoryChangeSetIdempotency{}, definitions: map[string]string{}, deployments: map[string]AppliedResourceReference{}, objectives: map[string]AppliedResourceReference{}, projects: map[string]AppliedResourceReference{}, conversationEndpoints: map[string]AppliedResourceReference{}}
 }
 
 func (s *MemoryChangeSetStore) ApplyChangeSet(_ context.Context, value *ChangeSet, expectedRevision int64) (*ChangeSet, error) {
@@ -43,7 +43,7 @@ func (s *MemoryChangeSetStore) ApplyChangeSet(_ context.Context, value *ChangeSe
 	if current.Revision != expectedRevision || current.Status != ChangeSetReady || current.CandidateDigest != value.CandidateDigest {
 		return nil, ErrChangeSetRevision
 	}
-	resources, definitions, deployments, objectives, initiatives, conversationEndpoints, err := buildMemoryApplication(current)
+	resources, definitions, deployments, objectives, projects, conversationEndpoints, err := buildMemoryApplication(current)
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +64,9 @@ func (s *MemoryChangeSetStore) ApplyChangeSet(_ context.Context, value *ChangeSe
 			return nil, ErrChangeSetRevision
 		}
 	}
-	for k, proposed := range initiatives {
-		currentInitiative, exists := s.initiatives[k]
-		if proposed.Revision == 1 && exists || proposed.Revision > 1 && (!exists || currentInitiative.Revision+1 != proposed.Revision) {
+	for k, proposed := range projects {
+		currentProject, exists := s.projects[k]
+		if proposed.Revision == 1 && exists || proposed.Revision > 1 && (!exists || currentProject.Revision+1 != proposed.Revision) {
 			return nil, ErrChangeSetRevision
 		}
 	}
@@ -85,8 +85,8 @@ func (s *MemoryChangeSetStore) ApplyChangeSet(_ context.Context, value *ChangeSe
 	for k, objective := range objectives {
 		s.objectives[k] = objective
 	}
-	for k, initiative := range initiatives {
-		s.initiatives[k] = initiative
+	for k, project := range projects {
+		s.projects[k] = project
 	}
 	for k, endpoint := range conversationEndpoints {
 		s.conversationEndpoints[k] = endpoint
@@ -101,7 +101,7 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 	definitions := map[string]string{}
 	deployments := map[string]AppliedResourceReference{}
 	objectives := map[string]AppliedResourceReference{}
-	initiatives := map[string]AppliedResourceReference{}
+	projects := map[string]AppliedResourceReference{}
 	conversationEndpoints := map[string]AppliedResourceReference{}
 	resources := make([]AppliedResourceReference, 0)
 	for _, definition := range value.Result.Candidate.Agents {
@@ -121,9 +121,9 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 		}
 	}
 	if value.Result.Candidate.Team == nil {
-		resources = appendMemoryInitiative(value, resources, initiatives)
+		resources = appendMemoryProject(value, resources, projects)
 		resources = appendMemoryConversationEndpoints(value, resources, conversationEndpoints)
-		return resources, definitions, deployments, objectives, initiatives, conversationEndpoints, nil
+		return resources, definitions, deployments, objectives, projects, conversationEndpoints, nil
 	}
 	team := value.Result.Candidate.Team
 	digest, _ := digestJSON(team)
@@ -139,9 +139,9 @@ func buildMemoryApplication(value *ChangeSet) ([]AppliedResourceReference, map[s
 		objectives[changeSetKey(value.Scope, ref.ID)] = ref
 		resources = append(resources, ref)
 	}
-	resources = appendMemoryInitiative(value, resources, initiatives)
+	resources = appendMemoryProject(value, resources, projects)
 	resources = appendMemoryConversationEndpoints(value, resources, conversationEndpoints)
-	return resources, definitions, deployments, objectives, initiatives, conversationEndpoints, nil
+	return resources, definitions, deployments, objectives, projects, conversationEndpoints, nil
 }
 
 func appendMemoryConversationEndpoints(value *ChangeSet, resources []AppliedResourceReference, endpoints map[string]AppliedResourceReference) []AppliedResourceReference {
@@ -154,12 +154,12 @@ func appendMemoryConversationEndpoints(value *ChangeSet, resources []AppliedReso
 	return resources
 }
 
-func appendMemoryInitiative(value *ChangeSet, resources []AppliedResourceReference, initiatives map[string]AppliedResourceReference) []AppliedResourceReference {
-	if value.Result.Candidate.Initiative == nil {
+func appendMemoryProject(value *ChangeSet, resources []AppliedResourceReference, projects map[string]AppliedResourceReference) []AppliedResourceReference {
+	if value.Result.Candidate.Project == nil {
 		return resources
 	}
-	ref := AppliedResourceReference{Kind: "initiative", ID: value.Placement.InitiativeID, Revision: value.Placement.InitiativeExpectedRevision + 1}
-	initiatives[changeSetKey(value.Scope, ref.ID)] = ref
+	ref := AppliedResourceReference{Kind: "project", ID: value.Placement.ProjectID, Revision: value.Placement.ProjectExpectedRevision + 1}
+	projects[changeSetKey(value.Scope, ref.ID)] = ref
 	return append(resources, ref)
 }
 

@@ -534,7 +534,7 @@ func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
 				ModelProvider: "test", Model: "test-model", OutputSummary: "Delegate analysis",
 				ProposedDelegation: &TurnDelegationProposal{
 					StepID: "analyze-findings", AssignedAgentID: "analyst", Goal: "Analyze the collected evidence",
-					Context: map[string]interface{}{"initiativeId": "research-1"}, Checkpoint: map[string]interface{}{},
+					Context: map[string]interface{}{"projectId": "research-1"}, Checkpoint: map[string]interface{}{},
 					Budget: &BudgetPolicy{MaxTurns: 4},
 				},
 			},
@@ -552,8 +552,8 @@ func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
 				ProposedFork: &TurnForkProposal{
 					ForkID: "compare-products", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
 					Branches: []RunForkBranch{
-						{ID: "product-a", AssignedAgentID: "researcher-a", Goal: "Analyze product A", Context: map[string]interface{}{"initiativeId": "research-1"}, Checkpoint: map[string]interface{}{}},
-						{ID: "product-b", AssignedAgentID: "researcher-b", Goal: "Analyze product B", Context: map[string]interface{}{"initiativeId": "research-1"}, Checkpoint: map[string]interface{}{}},
+						{ID: "product-a", AssignedAgentID: "researcher-a", Goal: "Analyze product A", Context: map[string]interface{}{"projectId": "research-1"}, Checkpoint: map[string]interface{}{}},
+						{ID: "product-b", AssignedAgentID: "researcher-b", Goal: "Analyze product B", Context: map[string]interface{}{"projectId": "research-1"}, Checkpoint: map[string]interface{}{}},
 					},
 				},
 			},

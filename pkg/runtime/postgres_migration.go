@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = runbookActivationMigrationVersion
+const currentPostgresSchemaVersion int64 = projectContractMigrationVersion
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,6 +39,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		36: {"outreach_threads", "source_monitor_checkpoints", "source_observations", "projects"},
 		35: {"runbook_activations"},
 		28: {"external_conversation_gateways"},
 		26: {"external_conversation_deliveries", "external_message_mappings", "external_participant_mappings", "external_conversation_mappings", "external_conversation_inbox", "external_conversation_endpoints"},
@@ -48,7 +49,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		17: {"skill_source_artifact_references", "skill_source_artifacts"},
 		16: {"source_monitor_checkpoints", "source_observations"},
 		15: {"agent_definition_compilations"},
-		14: {"initiatives"},
+		14: {"projects"},
 		13: {"workforce_change_sets"},
 		12: {"team_definition_amendments"},
 		11: {"team_definition_activations", "team_deployments", "team_definitions"},
@@ -95,8 +96,8 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		}
 		if version == 23 {
 			if _, err := tx.ExecContext(ctx, `
-				DROP INDEX IF EXISTS `+s.table("run_activity_initiative_feed_idx")+`;
-				ALTER TABLE `+s.table("run_activity")+` DROP COLUMN IF EXISTS initiative_id
+				DROP INDEX IF EXISTS `+s.table("run_activity_project_feed_idx")+`;
+				ALTER TABLE `+s.table("run_activity")+` DROP COLUMN IF EXISTS project_id
 			`); err != nil {
 				return err
 			}

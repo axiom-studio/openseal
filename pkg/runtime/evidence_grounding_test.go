@@ -52,7 +52,7 @@ func (h *groundingTurnHost) ReviewEvidenceGrounding(_ context.Context, request E
 func groundedSnapshot(t *testing.T) (*EvidenceSnapshot, map[string]interface{}) {
 	t.Helper()
 	snapshot := &EvidenceSnapshot{
-		APIVersion: evidenceSnapshotAPIVersion, InitiativeID: "initiative-one",
+		APIVersion: evidenceSnapshotAPIVersion, ProjectID: "project-one",
 		SelectedCount: 2, ObservationLimit: 7, SummaryRuneLimit: 600, TotalSummaryRuneLimit: 4200,
 		Observations: []EvidenceSnapshotObservation{
 			{ID: "observation-transfer", SourceURI: "https://example.test/transfer", ObservedAt: time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC), ContentDigest: "sha256:transfer", Summary: "AgentTransfer loses state while moving work between agents."},

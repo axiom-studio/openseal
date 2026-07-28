@@ -264,7 +264,7 @@ func validateAnsweredCapabilityNeeds(candidate *WorkforceCandidate, request Gene
 		// Source capability choices are operational, not descriptive. Merely
 		// listing the selected Skill on an Agent while scheduling a different
 		// network capability would ignore the operator's audited choice and can
-		// bypass the Initiative monitor envelope. Require one exact executable
+		// bypass the Project monitor envelope. Require one exact executable
 		// invocation before source-scope materialization proceeds.
 		if selected.SourceScope != nil && sourceCapabilityRequiresDurableAction(request) && len(matchingSourceScopeInvocations(candidate, selected, request.Catalog)) == 0 && len(matchingSourceScopeRunbooks(candidate, selected, request.Catalog)) == 0 {
 			issues = append(issues, issue("runbooks.steps.action", "capability_need_action_not_materialized", fmt.Sprintf("Answered source capability need %s must be used by an exact durable Runbook action", need.ID)))

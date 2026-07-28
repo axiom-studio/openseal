@@ -37,7 +37,7 @@ func createInboxRequest(t *testing.T, store AgentRequestInboxStore, policy Agent
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
 		Goal: "Coordinate launch", Source: RunSourceManual, Priority: 3,
-		Context: map[string]interface{}{"initiativeId": "initiative-launch"},
+		Context: map[string]interface{}{"projectId": "project-launch"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 	inbox, _ := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
 	if run.Source != RunSourceRequestDecision || run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "recipient"}) ||
 		run.AssignedAgentID != "recipient" || fmt.Sprint(inbox["requestId"]) != request.ID ||
-		run.Budget == nil || run.Budget.MaxTurns != 3 || run.Context["initiativeId"] != "initiative-launch" {
+		run.Budget == nil || run.Budget.MaxTurns != 3 || run.Context["projectId"] != "project-launch" {
 		t.Fatalf("decision run = %#v", run)
 	}
 	persisted, err := NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)

@@ -260,7 +260,7 @@ type WorkforceCandidate struct {
 	Agents                []*agent.AgentDefinition        `json:"agents"`
 	Team                  *team.Definition                `json:"team,omitempty"`
 	Assignments           []Assignment                    `json:"assignments,omitempty"`
-	Initiative            *InitiativeBlueprint            `json:"initiative,omitempty"`
+	Project               *ProjectBlueprint               `json:"project,omitempty"`
 	ConversationEndpoints []ConversationEndpointBlueprint `json:"conversationEndpoints,omitempty"`
 	// Activation is the reviewed, digest-bound operating state that atomic
 	// apply must materialize. The Compiler derives it from typed commitments;

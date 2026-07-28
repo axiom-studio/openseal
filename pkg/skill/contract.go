@@ -237,7 +237,7 @@ func (c *Catalog) ValidateBindingCandidate(ctx context.Context, binding *Binding
 
 // ValidateDefinitionInput validates credential-free durable inputs against one
 // exact action contract without resolving a mutable binding. Scheduled
-// Objective and Initiative references use this during transactional upgrades
+// Objective and Project references use this during transactional upgrades
 // so an incompatible target can never partially advance durable work.
 func (c *Catalog) ValidateDefinitionInput(ctx context.Context, id, version, sourceIdentity, actionName string, input map[string]interface{}) error {
 	if c == nil {
