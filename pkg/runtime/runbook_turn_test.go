@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -46,6 +47,63 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	}
 	if _, exists := second.ContinuationCheckpoint["lastAction"]; exists {
 		t.Fatal("consumed action result remained in checkpoint")
+	}
+}
+
+func TestRunbookTurnThreadsActionOutputAcrossBrowserLifecycle(t *testing.T) {
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "browser", Version: "1", Name: "Browser", Entrypoints: map[string]string{"daily": "start"},
+		Steps: map[string]runbook.Step{
+			"start": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "browser", SkillVersion: "1", Action: "start", Arguments: map[string]runbook.Value{"profile": runbookLiteral("rowan")}, ResultPath: "/results/session", Next: "navigate",
+			}},
+			"navigate": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "browser", SkillVersion: "1", Action: "navigate", Arguments: map[string]runbook.Value{
+					"sessionId": {Ref: "/results/session/sessionId"}, "url": runbookLiteral("https://example.test"),
+				}, ResultPath: "/results/navigation", Next: "close",
+			}},
+			"close": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "browser", SkillVersion: "1", Action: "close", Arguments: map[string]runbook.Value{
+					"sessionId": {Ref: "/results/session/sessionId"},
+				}, ResultPath: "/results/close", Next: "done",
+			}},
+			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
+	runner, err := NewRunbookTurnRunner(definition, "daily")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run-browser", Context: map[string]interface{}{}}
+	turn := func(sequence int) *TurnOutcome {
+		outcome, runErr := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: fmt.Sprintf("turn-%d", sequence), Sequence: int64(sequence)}})
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+		return outcome
+	}
+	start := turn(1)
+	start.ContinuationCheckpoint["lastAction"] = map[string]interface{}{"actionCallId": "start-call", "status": "succeeded", "result": map[string]interface{}{"sessionId": "session-1"}}
+	run.Checkpoint = start.ContinuationCheckpoint
+
+	navigate := turn(2)
+	navigateArguments, err := resolveTurnActionInput(navigate.ContinuationCheckpoint, navigate.ProposedActions[0].InputRef)
+	if err != nil || navigateArguments["sessionId"] != "session-1" || navigateArguments["url"] != "https://example.test" {
+		t.Fatalf("navigate arguments=%#v err=%v", navigateArguments, err)
+	}
+	navigate.ContinuationCheckpoint["lastAction"] = map[string]interface{}{"actionCallId": "navigate-call", "status": "succeeded", "result": map[string]interface{}{"url": "https://example.test"}}
+	run.Checkpoint = navigate.ContinuationCheckpoint
+
+	closeOutcome := turn(3)
+	closeArguments, err := resolveTurnActionInput(closeOutcome.ContinuationCheckpoint, closeOutcome.ProposedActions[0].InputRef)
+	if err != nil || closeArguments["sessionId"] != "session-1" {
+		t.Fatalf("close arguments=%#v err=%v", closeArguments, err)
+	}
+	closeOutcome.ContinuationCheckpoint["lastAction"] = map[string]interface{}{"actionCallId": "close-call", "status": "succeeded", "result": map[string]interface{}{"closed": true}}
+	run.Checkpoint = closeOutcome.ContinuationCheckpoint
+	completed := turn(4)
+	if completed.NextRunStatus != AgentRunStatusCompleted || len(completed.ProposedActions) != 0 {
+		t.Fatalf("completed=%#v", completed)
 	}
 }
 

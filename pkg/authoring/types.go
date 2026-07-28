@@ -49,8 +49,12 @@ type SkillCapability struct {
 // SkillActionContract is the exact model-callable envelope for one authorized
 // Skill action. It contains no binding, credential, or executor details.
 type SkillActionContract struct {
-	Description       string                 `json:"description,omitempty"`
-	InputSchema       map[string]interface{} `json:"inputSchema,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	InputSchema map[string]interface{} `json:"inputSchema,omitempty"`
+	// OutputSchema remains host-owned and is used only to prove that one
+	// deterministic Runbook step can safely feed another. Provider catalog
+	// projections remove the complete ActionContracts map.
+	OutputSchema      map[string]interface{} `json:"outputSchema,omitempty"`
 	SemanticArguments map[string]string      `json:"semanticArguments,omitempty"`
 	Risk              capability.RiskLevel   `json:"risk,omitempty"`
 	SideEffect        capability.SideEffect  `json:"sideEffect,omitempty"`
