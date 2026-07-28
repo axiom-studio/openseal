@@ -480,14 +480,7 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		}
 		return source, nil
 	}
-	requestedBudget := proposal.Budget
-	if _, authoredRunbook := run.Plan["runbook"]; authoredRunbook {
-		requestedBudget, err = constrainRunbookChildBudgetAllocation(run, requestedBudget)
-		if err != nil {
-			return nil, err
-		}
-	}
-	budget, err := completeChildBudgetAllocation(run, requestedBudget)
+	budget, err := completeChildBudgetAllocation(run, proposal.Budget)
 	if err != nil {
 		return nil, err
 	}

@@ -399,31 +399,6 @@ func completeChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (
 	return &completed, nil
 }
 
-func constrainRunbookChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (*BudgetPolicy, error) {
-	if allocation == nil || parent == nil || parent.Budget == nil {
-		return cloneBudgetPolicy(allocation), nil
-	}
-	capacity, err := remainingChildBudgetCapacity(parent)
-	if err != nil {
-		return nil, err
-	}
-	constrained := *cloneBudgetPolicy(allocation)
-	constrain := func(requested *int64, available int64) {
-		if *requested > 0 && available > 0 && *requested > available {
-			*requested = available
-		}
-	}
-	constrain(&constrained.MaxAttempts, capacity.MaxAttempts)
-	constrain(&constrained.MaxTurns, capacity.MaxTurns)
-	constrain(&constrained.MaxInputTokens, capacity.MaxInputTokens)
-	constrain(&constrained.MaxOutputTokens, capacity.MaxOutputTokens)
-	constrain(&constrained.MaxTotalTokens, capacity.MaxTotalTokens)
-	constrain(&constrained.MaxCostMicros, capacity.MaxCostMicros)
-	constrain(&constrained.MaxDurationMS, capacity.MaxDurationMS)
-	constrain(&constrained.MaxActions, capacity.MaxActions)
-	return &constrained, nil
-}
-
 func remainingChildBudgetCapacity(parent *AgentRun) (BudgetPolicy, error) {
 	if parent == nil {
 		return BudgetPolicy{}, ErrRunNotFound
