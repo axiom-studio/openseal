@@ -29,7 +29,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)
 	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
 	s.mux.HandleFunc("PUT /api/v1/objectives/{id}", s.handleUpdateObjective)
-	s.mux.HandleFunc("POST /api/v1/runbook-schedules/reconciliations", s.handleReconcileRunbookSchedules)
+	s.mux.HandleFunc("GET /api/v1/runbooks", s.handleListRunbooks)
+	s.mux.HandleFunc("GET /api/v1/runbooks/{id}", s.handleGetRunbook)
+	s.mux.HandleFunc("POST /api/v1/runbooks/schedule-reconciliations", s.handleReconcileRunbookSchedules)
 	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions", s.handleCreateEventSourceSubscription)
 	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions", s.handleListEventSourceSubscriptions)
 	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions/{id}", s.handleGetEventSourceSubscription)
@@ -151,7 +153,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.agentRunCreation != nil {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
 	}
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbookSchedulesCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability()}
 	if s.sourcePolicies != nil {
 		capabilities = append(capabilities, kernelapi.SourcePoliciesCapability())
 	}

@@ -61,8 +61,8 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !eventCapability.Supports(kernelapi.OperationRoute) {
 		t.Fatalf("event routing capabilities: %#v", document)
 	}
-	scheduleCapability, ok := document.Find(kernelapi.RunbookSchedulesCapabilityID, kernelapi.RunbookSchedulesCapabilityVersion)
-	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) {
+	scheduleCapability, ok := document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
+	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) || !scheduleCapability.Supports(kernelapi.OperationList) || !scheduleCapability.Supports(kernelapi.OperationGet) {
 		t.Fatalf("Runbook schedule capabilities: %#v", document)
 	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
@@ -97,6 +97,18 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	scheduledActivation.UpdatedAt = time.Now().UTC()
 	if err := store.UpdateRunbookActivation(ctx, scheduledActivation, scheduledActivation.Revision-1); err != nil {
 		t.Fatal(err)
+	}
+	runbooks, err := client.ListRunbooks(ctx, runtime.RunbookActivationFilter{Scope: scope, ObjectiveID: scheduledObjective.ID, Statuses: []runtime.RunbookActivationStatus{runtime.RunbookActivationActive}, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule}, Limit: 10})
+	if err != nil || len(runbooks) != 1 || runbooks[0].ID != scheduledActivation.ID {
+		t.Fatalf("Runbooks=%#v err=%v", runbooks, err)
+	}
+	loadedRunbook, err := client.GetRunbook(ctx, scope, scheduledActivation.ID)
+	if err != nil || loadedRunbook.ObjectiveID != scheduledObjective.ID || loadedRunbook.TriggerID != "recurring" {
+		t.Fatalf("Runbook=%#v err=%v", loadedRunbook, err)
+	}
+	scheduledDetail, err := client.GetObjective(ctx, scope, scheduledObjective.ID)
+	if err != nil || len(scheduledDetail.Runbooks) != 1 || scheduledDetail.Runbooks[0].ID != scheduledActivation.ID {
+		t.Fatalf("Objective Runbooks=%#v err=%v", scheduledDetail, err)
 	}
 	reconciliation, err := client.ReconcileRunbookSchedules(ctx, kernelapi.ReconcileRunbookSchedulesRequest{Scope: scope, Limit: 10})
 	if err != nil || reconciliation.Result == nil || reconciliation.Result.Scheduled != 1 {

@@ -1572,6 +1572,7 @@ func (m *Model) renderObjectivesContent(width int) string {
 			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Bounded autonomy · %d run allocation(s)", allocated)))
 			lines = append(lines, renderBudgetLines(objective.Budget, nil, max(width-8, 24))...)
 		}
+		lines = append(lines, m.renderObjectiveRunbooks(objective.ID, width)...)
 		lines = append(lines, m.renderSelectedEvidence(width)...)
 		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		actions := []string{}
@@ -1581,16 +1582,50 @@ func (m *Model) renderObjectivesContent(width int) string {
 		if m.supportsObjective(kernelapi.OperationCreate) {
 			actions = append(actions, "n add objective")
 		}
-		if m.supportsRunbookSchedule(kernelapi.OperationReconcile) {
+		if m.supportsRunbook(kernelapi.OperationReconcile) {
 			actions = append(actions, "g reconcile schedules")
 		}
 		if len(actions) > 0 {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
 		}
-	} else if m.supportsRunbookSchedule(kernelapi.OperationReconcile) {
+	} else if m.supportsRunbook(kernelapi.OperationReconcile) {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("g reconcile schedules"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *Model) renderObjectiveRunbooks(objectiveID string, width int) []string {
+	values := make([]*runtime.RunbookActivation, 0)
+	for _, value := range m.runbooks {
+		if value != nil && value.ObjectiveID == objectiveID {
+			values = append(values, value)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	lines := []string{"", headerStyle.Render(fmt.Sprintf("Runbooks · %d", len(values)))}
+	for _, value := range values[:min(3, len(values))] {
+		trigger := "Manual"
+		switch value.Trigger.Kind {
+		case runbook.TriggerSchedule:
+			if value.Trigger.Schedule != nil {
+				trigger = "Schedule · " + value.Trigger.Schedule.Cron + " · " + value.Trigger.Schedule.Timezone
+			} else {
+				trigger = "Invalid schedule"
+			}
+		case runbook.TriggerEvent:
+			trigger = "Event · " + value.Trigger.EventType
+		}
+		lines = append(lines,
+			compact(fmt.Sprintf("  %s · %s@%s", value.Status, value.DefinitionID, value.DefinitionVersion), max(width-8, 24)),
+			mutedStyle.Render(compact("    "+trigger+" · "+value.AssignedAgentID, max(width-12, 20))),
+		)
+	}
+	if len(values) > 3 {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  +%d more Runbooks", len(values)-3)))
+	}
+	return lines
 }
 
 func (m *Model) renderEventSourcesContent(width int) string {
@@ -1598,7 +1633,7 @@ func (m *Model) renderEventSourcesContent(width int) string {
 	if m.loading {
 		title += mutedStyle.Render("  refreshing…")
 	}
-	lines := []string{title, "", mutedStyle.Render("Durable connectors normalize external events; Objective rules decide which work wakes.")}
+	lines := []string{title, "", mutedStyle.Render("Durable connectors normalize external events; Runbook triggers decide which work wakes.")}
 	if len(m.eventSources) == 0 {
 		lines = append(lines, "", mutedStyle.Render("No event sources configured for this Agent or Team."))
 	} else {

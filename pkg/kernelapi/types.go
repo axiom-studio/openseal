@@ -20,8 +20,8 @@ const (
 	AgentRunsCapabilityVersion                 = "1"
 	ObjectivesCapabilityID                     = "objectives"
 	ObjectivesCapabilityVersion                = "1"
-	RunbookSchedulesCapabilityID               = "runbook-schedules"
-	RunbookSchedulesCapabilityVersion          = "1"
+	RunbooksCapabilityID                       = "runbooks"
+	RunbooksCapabilityVersion                  = "1"
 	InitiativesCapabilityID                    = "initiatives"
 	InitiativesCapabilityVersion               = "1"
 	SourceMonitorsCapabilityID                 = "source-monitors"
@@ -446,10 +446,10 @@ func ObjectivesCapability() Capability {
 	}
 }
 
-func RunbookSchedulesCapability() Capability {
+func RunbooksCapability() Capability {
 	return Capability{
-		ID: RunbookSchedulesCapabilityID, Version: RunbookSchedulesCapabilityVersion, Available: true,
-		Operations: []string{OperationReconcile},
+		ID: RunbooksCapabilityID, Version: RunbooksCapabilityVersion, Available: true,
+		Operations: []string{OperationGet, OperationList, OperationReconcile},
 	}
 }
 
@@ -530,7 +530,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), RunbookSchedulesCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), InitiativesCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -775,8 +775,9 @@ type UpdateObjectiveRequest struct {
 }
 
 type ObjectiveDetail struct {
-	Objective *runtime.Objective  `json:"objective"`
-	Runs      []*runtime.AgentRun `json:"runs"`
+	Objective *runtime.Objective           `json:"objective"`
+	Runbooks  []*runtime.RunbookActivation `json:"runbooks"`
+	Runs      []*runtime.AgentRun          `json:"runs"`
 }
 
 type ReconcileRunbookSchedulesRequest struct {

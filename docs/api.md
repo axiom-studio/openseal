@@ -45,7 +45,7 @@ Use `GET /api/v1/health` for a process liveness check.
 | --- | --- | --- |
 | Capabilities | `GET /capabilities` | Discover exact server features and operations |
 | Objectives | `POST, GET /objectives`; `GET, PUT /objectives/{id}` | Create, list, inspect, and revise owner portfolios |
-| Runbook schedules | `POST /runbook-schedules/reconciliations` | Reconcile due activated Runbook triggers into bounded Runs |
+| Runbooks | `GET /runbooks`; `GET /runbooks/{id}`; `POST /runbooks/schedule-reconciliations` | Inspect Objective-owned execution methods and reconcile due schedule triggers |
 | Event sources | `POST, GET /event-source-subscriptions`; item read/update, retirement, health, and checkpoint routes | Durable event watches and connector-owned progress |
 | Agent Runs | `POST, GET /agent-runs`; `GET /agent-runs/{id}`; `POST /agent-runs/{id}/commands` | Durable work and pause/resume/cancel/intervention commands |
 | Agent turns | `GET /agent-turns`; `GET /agent-turns/{id}` | Durable model-turn lifecycle and usage projection |

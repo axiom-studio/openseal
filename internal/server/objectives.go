@@ -66,7 +66,12 @@ func (s *Server) handleGetObjective(w http.ResponseWriter, r *http.Request) {
 		s.respondObjectiveError(w, err)
 		return
 	}
-	s.respondJSON(w, http.StatusOK, kernelapi.ObjectiveDetail{Objective: objective, Runs: runs})
+	runbooks, err := s.store.ListRunbookActivations(r.Context(), runtime.RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 100})
+	if err != nil {
+		s.respondObjectiveError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, kernelapi.ObjectiveDetail{Objective: objective, Runbooks: runbooks, Runs: runs})
 }
 
 func (s *Server) handleUpdateObjective(w http.ResponseWriter, r *http.Request) {
