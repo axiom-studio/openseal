@@ -18,6 +18,7 @@ import (
 var (
 	ErrRunbookActivationNotFound    = errors.New("Runbook activation not found")
 	ErrRunbookDefinitionNotFound    = errors.New("Runbook definition not found")
+	ErrRunbookActivationInactive    = errors.New("Runbook activation is not active")
 	ErrRunbookActivationRevision    = errors.New("Runbook activation revision conflict")
 	ErrRunbookActivationIdempotency = errors.New("Runbook activation idempotency key was already used with different input")
 )
@@ -227,6 +228,62 @@ type CreateRunbookActivationRequest struct {
 type UpdateRunbookActivationRequest struct {
 	ExpectedRevision int64                   `json:"expectedRevision"`
 	Status           RunbookActivationStatus `json:"status"`
+}
+
+type StartRunbookActivationRequest struct {
+	IdempotencyKey string             `json:"idempotencyKey,omitempty"`
+	Actor          ActivityActor      `json:"actor,omitempty"`
+	Visibility     ActivityVisibility `json:"visibility,omitempty"`
+}
+
+// StartRunbookActivation creates one manual Run from the exact reviewed
+// activation. Clients never manufacture the definition pin or execution
+// policy themselves.
+func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest) (*AgentRunCommandResult, error) {
+	if store == nil {
+		return nil, errors.New("Runbook activation store is not configured")
+	}
+	activation, err := store.GetRunbookActivation(ctx, scope, strings.TrimSpace(activationID))
+	if err != nil {
+		return nil, err
+	}
+	if activation == nil {
+		return nil, ErrRunbookActivationNotFound
+	}
+	if activation.Status != RunbookActivationActive {
+		return nil, ErrRunbookActivationInactive
+	}
+	objective, err := store.GetObjective(ctx, scope, activation.ObjectiveID)
+	if err != nil {
+		return nil, err
+	}
+	if objective == nil {
+		return nil, ErrObjectiveNotFound
+	}
+	if objective.Status != ObjectiveStatusActive || objective.Owner != activation.Owner {
+		return nil, errors.New("Runbook activation requires its active owning Objective")
+	}
+	contextValues := cloneMap(activation.Input)
+	if contextValues == nil {
+		contextValues = make(map[string]interface{})
+	}
+	contextValues["runbookActivationId"] = activation.ID
+	contextValues["runbookDefinitionId"] = activation.DefinitionID
+	contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
+	contextValues["runbookTriggerId"] = activation.TriggerID
+	return NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
+		Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
+		Goal: objective.Goal, Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
+		Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
+		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey), Actor: request.Actor, Visibility: request.Visibility,
+	})
+}
+
+func runbookActivationPlan(activation *RunbookActivation) map[string]interface{} {
+	return map[string]interface{}{"runbook": map[string]interface{}{
+		"id": activation.DefinitionID, "version": activation.DefinitionVersion, "trigger": activation.TriggerID,
+	}}
 }
 
 type RunbookActivationService struct {

@@ -66,6 +66,25 @@ func (s *Server) handleUpdateRunbook(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) handleStartRunbook(w http.ResponseWriter, r *http.Request) {
+	scope, err := scopeFromQuery(r)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var request runtime.StartRunbookActivationRequest
+	if err = decodeStrictJSON(r, &request); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	value, err := runtime.StartRunbookActivation(r.Context(), s.store, scope, strings.TrimSpace(r.PathValue("id")), request)
+	if err != nil {
+		s.respondRunbookError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusCreated, value)
+}
+
 func runbookFilterFromQuery(r *http.Request) (runtime.RunbookActivationFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
@@ -117,6 +136,10 @@ func (s *Server) respondRunbookError(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, runtime.ErrRunbookActivationRevision) {
+		s.respondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, runtime.ErrRunbookActivationInactive) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}

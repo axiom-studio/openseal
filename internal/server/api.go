@@ -32,6 +32,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/runbooks", s.handleListRunbooks)
 	s.mux.HandleFunc("GET /api/v1/runbooks/{id}", s.handleGetRunbook)
 	s.mux.HandleFunc("PATCH /api/v1/runbooks/{id}", s.handleUpdateRunbook)
+	s.mux.HandleFunc("POST /api/v1/runbooks/{id}/runs", s.handleStartRunbook)
 	s.mux.HandleFunc("POST /api/v1/runbooks/schedule-reconciliations", s.handleReconcileRunbookSchedules)
 	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions", s.handleCreateEventSourceSubscription)
 	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions", s.handleListEventSourceSubscriptions)
