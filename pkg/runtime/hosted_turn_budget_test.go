@@ -104,6 +104,13 @@ func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
 	if result.Run.BudgetUsage != (BudgetUsage{}) || len(result.Run.BudgetReservations) != 0 {
 		t.Fatalf("rejected preflight consumed budget: %#v", result.Run)
 	}
+	if result.Run.BudgetState != BudgetStateExhausted || result.Run.BudgetAdmission == nil ||
+		result.Run.BudgetAdmission.Dimension != "total_tokens" || result.Run.BudgetAdmission.Required <= result.Run.BudgetAdmission.Remaining {
+		t.Fatalf("rejected preflight admission state = %#v", result.Run)
+	}
+	if result.Event == nil || result.Event.Payload["admission"] == nil {
+		t.Fatalf("rejected preflight did not expose reservation math: %#v", result.Event)
+	}
 	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +119,54 @@ func TestHostedTurnBudgetPreflightRejectsBeforeProviderDispatch(t *testing.T) {
 		if event.UsageDelta != nil {
 			t.Fatalf("rejected preflight reported usage: %#v", event)
 		}
+	}
+}
+
+func TestHostedBrowserNextTurnPersistsInadmissibleBudgetState(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "browser-multi-turn"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+		Goal: "Continue a bounded Browser run", Budget: &BudgetPolicy{MaxTurns: 3, MaxTotalTokens: 12000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := BudgetUsage{Turns: 1, InputTokens: 10000, OutputTokens: 1000}
+	run, _, err = NewRunActivityService(store, store).TransitionRun(t.Context(), scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, Summary: "Settled first Browser turn",
+		BudgetUsageDelta: &prior,
+	})
+	if err != nil || run.BudgetState == BudgetStateExhausted {
+		t.Fatalf("prior turn state = %#v, err=%v", run, err)
+	}
+	host := &countedHostedTurnHost{}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "browser-agent", DefinitionID: "browser-agent", DefinitionVersion: "1",
+		SkillPrompts: []HostedSkillPrompt{{
+			SkillID: "browser", Version: "1", Name: "Browser",
+			Instructions: "Inspect the current page and continue through one governed browser action at a time.",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "browser-worker",
+	}, runner)
+	if !errors.Is(err, ErrBudgetExhausted) || result == nil || host.calls != 0 {
+		t.Fatalf("next Browser turn result=%#v err=%v calls=%d", result, err, host.calls)
+	}
+	if result.Run.Status != AgentRunStatusPaused || result.Run.BudgetState != BudgetStateExhausted || result.Run.BudgetAdmission == nil {
+		t.Fatalf("next Browser admission was not persisted: %#v", result.Run)
+	}
+	admission := result.Run.BudgetAdmission
+	if admission.Dimension != "total_tokens" || admission.Required <= admission.Remaining || admission.Reservation.InputTokens == 0 || admission.Reservation.OutputTokens != HostedTurnMinimumOutputTokens {
+		t.Fatalf("next Browser reservation math = %#v", admission)
+	}
+	loaded, err := NewPortfolioService(store).GetAgentRun(t.Context(), scope, run.ID)
+	if err != nil || loaded.BudgetState != BudgetStateExhausted || loaded.BudgetAdmission == nil || loaded.BudgetAdmission.TurnID != result.Turn.ID {
+		t.Fatalf("persisted next-turn admission = %#v, err=%v", loaded, err)
 	}
 }
 

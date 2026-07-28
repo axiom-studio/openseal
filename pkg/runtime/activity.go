@@ -111,6 +111,7 @@ type RunTransitionRequest struct {
 	HumanInterventions        []HumanInterventionRequest
 	BudgetUsageDelta          *BudgetUsage
 	ActivityUsageDelta        *BudgetUsage
+	BudgetAdmission           *BudgetAdmission
 	BudgetReservation         *BudgetReservation
 	ReplaceBudgetReservation  *BudgetReservation
 	SettleBudgetReservationID string
@@ -278,6 +279,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 			return nil, nil, err
 		}
 		run.BudgetState = state
+		run.BudgetAdmission = nil
 	}
 	if req.ReplaceBudgetReservation != nil {
 		if run.Budget == nil {
@@ -309,6 +311,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 			return nil, nil, err
 		}
 		run.BudgetState = state
+		run.BudgetAdmission = nil
 	}
 	if req.SettleBudgetReservationID != "" {
 		if _, exists := run.BudgetReservations[req.SettleBudgetReservationID]; !exists {
@@ -334,6 +337,18 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		}
 		run.BudgetUsage = usage
 		run.BudgetState = state
+		run.BudgetAdmission = nil
+	}
+	if req.BudgetAdmission != nil {
+		if run.Budget == nil {
+			return nil, nil, errors.New("budget admission cannot be recorded without a budget policy")
+		}
+		if err := req.BudgetAdmission.Validate(); err != nil {
+			return nil, nil, err
+		}
+		admission := *req.BudgetAdmission
+		run.BudgetAdmission = &admission
+		run.BudgetState = BudgetStateExhausted
 	}
 	if run.StartedAt == nil && (req.Status == AgentRunStatusPlanning || req.Status == AgentRunStatusRunning) {
 		run.StartedAt = &now

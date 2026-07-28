@@ -243,6 +243,7 @@ type AgentRun struct {
 	Budget               *BudgetPolicy                `json:"budget,omitempty"`
 	BudgetUsage          BudgetUsage                  `json:"budgetUsage,omitempty"`
 	BudgetState          BudgetState                  `json:"budgetState,omitempty"`
+	BudgetAdmission      *BudgetAdmission             `json:"budgetAdmission,omitempty"`
 	BudgetReservations   map[string]BudgetReservation `json:"budgetReservations,omitempty"`
 	BudgetAllocations    map[string]BudgetPolicy      `json:"budgetAllocations,omitempty"`
 	Policy               map[string]interface{}       `json:"policy,omitempty"`
@@ -300,6 +301,12 @@ func (r *AgentRun) Validate() error {
 		state, _, err := EvaluateBudget(*r.Budget, effective)
 		if err != nil {
 			return err
+		}
+		if r.BudgetAdmission != nil {
+			if err := r.BudgetAdmission.Validate(); err != nil {
+				return err
+			}
+			state = BudgetStateExhausted
 		}
 		if r.BudgetState != "" && r.BudgetState != state {
 			return errors.New("run budget state does not match its policy and usage")
