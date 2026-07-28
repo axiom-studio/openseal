@@ -149,6 +149,9 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		RunbookOperations: projectCallableRunbookOperations(definition.Runbook),
 		BudgetReservation: BudgetUsage{Turns: 1},
 	}
+	if delegatedFromCurrentRunbook(run, definition.Runbook) {
+		base.RunbookOperations = nil
+	}
 	if _, requested := run.Context[OutreachInvocationContextKey]; requested {
 		runner, resolveErr := NewOutreachTurnRunner(catalog, actions)
 		if resolveErr != nil {
@@ -249,6 +252,19 @@ func projectCallableRunbookOperations(definition *runbook.Definition) []HostedRu
 		})
 	}
 	return operations
+}
+
+func delegatedFromCurrentRunbook(run *AgentRun, definition *runbook.Definition) bool {
+	if run == nil || definition == nil || run.Source != RunSourceRequest {
+		return false
+	}
+	triggerInput, ok := run.Context["triggerInput"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	definitionID, _ := triggerInput["runbookDefinitionId"].(string)
+	definitionVersion, _ := triggerInput["runbookDefinitionVersion"].(string)
+	return strings.TrimSpace(definitionID) == definition.ID && strings.TrimSpace(definitionVersion) == definition.Version
 }
 
 func resolveHostedAgentTargets(
