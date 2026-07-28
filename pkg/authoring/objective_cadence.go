@@ -23,6 +23,7 @@ type authoredObjectiveCadence struct {
 	DayOfWeek         string                        `json:"dayOfWeek,omitempty"`
 	CronExpression    string                        `json:"cronExpression,omitempty"`
 	Timezone          string                        `json:"timezone,omitempty"`
+	JitterSeconds     int64                         `json:"jitterSeconds,omitempty"`
 	AssignedAgentID   string                        `json:"assignedAgentId,omitempty"`
 	RunBudget         *authoredObjectiveRunBudget   `json:"runBudget,omitempty"`
 	RunTemplate       *authoredObjectiveRunTemplate `json:"runTemplate,omitempty"`
@@ -262,6 +263,9 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 		if err := validateAuthoredClock(cadence.TimeOfDay); err != nil {
 			return err
 		}
+		if cadence.JitterSeconds >= 24*60*60 {
+			return errors.New("daily objective cadence jitterSeconds must be less than one day")
+		}
 	case "weekly":
 		if err := validateAuthoredClock(cadence.TimeOfDay); err != nil {
 			return err
@@ -271,12 +275,26 @@ func validateAuthoredObjectiveCadence(value map[string]interface{}) error {
 		default:
 			return errors.New("weekly objective cadence requires a valid dayOfWeek")
 		}
+		if cadence.JitterSeconds >= 7*24*60*60 {
+			return errors.New("weekly objective cadence jitterSeconds must be less than one week")
+		}
 	case "cron":
 		if err := validateAuthoredCron(cadence.CronExpression); err != nil {
 			return err
 		}
 	default:
 		return fmt.Errorf("unsupported objective cadence type %q", cadence.Type)
+	}
+	if cadence.JitterSeconds < 0 {
+		return errors.New("objective cadence jitterSeconds cannot be negative")
+	}
+	if cadence.JitterSeconds > 0 {
+		if cadence.Type != "daily" && cadence.Type != "weekly" {
+			return errors.New("objective cadence jitterSeconds is supported only for daily and weekly schedules")
+		}
+		if strings.TrimSpace(cadence.Timezone) == "" {
+			return errors.New("jittered objective cadence requires an explicit timezone")
+		}
 	}
 	if cadence.Timezone != "" {
 		if _, err := time.LoadLocation(cadence.Timezone); err != nil {

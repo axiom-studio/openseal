@@ -599,14 +599,6 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 		return nil, err
 	}
 	now := s.now()
-	nextEvaluationAt := req.NextEvaluationAt
-	if nextEvaluationAt == nil && req.Cadence != nil {
-		next, nextErr := req.Cadence.Next(now)
-		if nextErr != nil {
-			return nil, nextErr
-		}
-		nextEvaluationAt = &next
-	}
 	status := req.Status
 	if status == "" {
 		status = ObjectiveStatusDraft
@@ -628,6 +620,14 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 			}
 			return &CreateObjectiveResult{Objective: current, Created: false}, nil
 		}
+	}
+	nextEvaluationAt := req.NextEvaluationAt
+	if nextEvaluationAt == nil && req.Cadence != nil {
+		next, nextErr := req.Cadence.NextFor(objectiveID, now)
+		if nextErr != nil {
+			return nil, nextErr
+		}
+		nextEvaluationAt = &next
 	}
 	objective := &Objective{
 		ID: objectiveID, Scope: req.Scope, Owner: req.Owner, Title: req.Title,
