@@ -300,7 +300,7 @@ func TestHostedTurnRunnerRejectsUnauthorizedActionProposal(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
 		ModelProvider: "test", Model: "test-model",
-		ProposedActions: []TurnAction{{Capability: "shell.exec", Summary: "run arbitrary command"}},
+		ProposedAction: &TurnAction{Capability: "shell.exec", Summary: "run arbitrary command"},
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
 	if err != nil {
@@ -314,34 +314,24 @@ func TestHostedTurnRunnerRejectsUnauthorizedActionProposal(t *testing.T) {
 	}
 }
 
-func TestHostedTurnRunnerRequiresOneRunningActionProposal(t *testing.T) {
-	for name, actions := range map[string][]TurnAction{
-		"terminal": {{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy", InputRef: "/inputs/deploy"}},
-		"multiple": {
-			{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy", InputRef: "/inputs/deploy"},
-			{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy again", InputRef: "/inputs/deploy"},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			host := &recordingTurnHost{response: &HostedTurnResponse{
-				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-				ModelProvider: "test", Model: "test-model",
-				ProposedActions: actions,
-			}}
-			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
-				AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
-				Actions: []capability.ModelAction{{Name: "release.deploy", SkillID: "release", Version: "1", Action: "deploy"}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
-				Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Deploy"}, Turn: &AgentTurn{ID: "turn"},
-			})
-			if err == nil {
-				t.Fatal("invalid action proposal lifecycle was accepted")
-			}
-		})
+func TestHostedTurnRunnerRequiresRunningActionProposal(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model",
+		ProposedAction: &TurnAction{Type: "skill_action", Capability: "release.deploy", Summary: "Deploy", InputRef: "/inputs/deploy"},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+		Actions: []capability.ModelAction{{Name: "release.deploy", SkillID: "release", Version: "1", Action: "deploy"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Deploy"}, Turn: &AgentTurn{ID: "turn"},
+	})
+	if err == nil {
+		t.Fatal("terminal action proposal lifecycle was accepted")
 	}
 }
 
@@ -362,10 +352,10 @@ func TestHostedTurnRunnerReusesSucceededSemanticActionAcrossRestart(t *testing.T
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-after-restart", NextRunStatus: AgentRunStatusRunning,
 		ModelProvider: "test", Model: "test-model", OutputSummary: "Read it again",
-		ProposedActions: []TurnAction{{
+		ProposedAction: &TurnAction{
 			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
 			Summary: "Repeat the read", IdempotencyKey: "a-new-model-key", InputRef: "/actionInputs/read",
-		}},
+		},
 		ContinuationCheckpoint: map[string]interface{}{
 			"actionInputs":             map[string]interface{}{"read": arguments},
 			actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "invented"}},
@@ -414,10 +404,10 @@ func TestHostedTurnRunnerRefreshesObservationAfterInterveningAction(t *testing.T
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "refresh-turn", NextRunStatus: AgentRunStatusRunning,
 		ModelProvider: "test", Model: "test-model", OutputSummary: "Refresh the stale snapshot",
-		ProposedActions: []TurnAction{{
+		ProposedAction: &TurnAction{
 			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
 			Summary: "Take a fresh snapshot", InputRef: "/actionInputs/snapshot",
-		}},
+		},
 		ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"snapshot": arguments}},
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
@@ -457,9 +447,9 @@ func TestHostedTurnRunnerEnforcesExternalOperationPolicy(t *testing.T) {
 			}
 			host := &recordingTurnHost{response: &HostedTurnResponse{
 				APIVersion: HostedTurnAPIVersion, InvocationID: "policy-turn", ModelProvider: "test", Model: "test-model",
-				NextRunStatus: AgentRunStatusRunning, OutputSummary: "Act", ProposedActions: []TurnAction{{
+				NextRunStatus: AgentRunStatusRunning, OutputSummary: "Act", ProposedAction: &TurnAction{
 					Type: "skill_action", Capability: action.Name, Summary: "Act", InputRef: "/actionInputs/call", ExternalOperation: test.external,
-				}}, ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"call": map[string]interface{}{}}},
+				}, ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"call": map[string]interface{}{}}},
 			}}
 			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1", Actions: []capability.ModelAction{action}})
 			if err != nil {
@@ -497,10 +487,10 @@ func TestHostedTurnRunnerSuppressesSucceededSideEffectAfterLaterObservation(t *t
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "duplicate-turn", NextRunStatus: AgentRunStatusRunning,
 		ModelProvider: "test", Model: "test-model", OutputSummary: "Submit the comment again",
-		ProposedActions: []TurnAction{{
+		ProposedAction: &TurnAction{
 			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
 			Summary: "Submit one comment", InputRef: "/actionInputs/submit",
-		}},
+		},
 		ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"submit": arguments}},
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
@@ -686,7 +676,7 @@ func TestHostedTurnRunnerRejectsInvalidWorkProposals(t *testing.T) {
 		},
 		"action and fork": func(response *HostedTurnResponse) {
 			response.ProposedFork = validFork
-			response.ProposedActions = []TurnAction{{Type: "skill_action", Capability: "research.read", Summary: "Read", InputRef: "/actionInputs/read"}}
+			response.ProposedAction = &TurnAction{Type: "skill_action", Capability: "research.read", Summary: "Read", InputRef: "/actionInputs/read"}
 		},
 		"unsafe branch context": func(response *HostedTurnResponse) {
 			fork := *validFork
@@ -708,7 +698,7 @@ func TestHostedTurnRunnerRejectsInvalidWorkProposals(t *testing.T) {
 			mutate(response)
 			host := &recordingTurnHost{response: response}
 			actions := []capability.ModelAction(nil)
-			if len(response.ProposedActions) > 0 {
+			if response.ProposedAction != nil {
 				actions = []capability.ModelAction{{Name: "research.read", SkillID: "research", Version: "1", Action: "read"}}
 			}
 			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{

@@ -22,7 +22,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v11"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v12"
 
 const maximumHostedTurnMediaBytes = 1 << 20
 
@@ -144,7 +144,7 @@ type HostedTurnResponse struct {
 	Model                  string                   `json:"model"`
 	SkillSelections        []HostedSkillSelection   `json:"skillSelections,omitempty"`
 	Decisions              []TurnDecision           `json:"decisions,omitempty"`
-	ProposedActions        []TurnAction             `json:"proposedActions,omitempty"`
+	ProposedAction         *TurnAction              `json:"proposedAction,omitempty"`
 	ProposedFork           *TurnForkProposal        `json:"proposedFork,omitempty"`
 	ProposedDelegation     *TurnDelegationProposal  `json:"proposedDelegation,omitempty"`
 	ProposedRunbook        *TurnRunbookProposal     `json:"proposedRunbook,omitempty"`
@@ -323,8 +323,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	for _, action := range request.Actions {
 		allowed[action.Name] = action
 	}
-	for index := range response.ProposedActions {
-		proposed := &response.ProposedActions[index]
+	if proposed := response.ProposedAction; proposed != nil {
 		action, ok := allowed[proposed.Capability]
 		if !ok {
 			return nil, errors.New("turn host proposed an unauthorized capability")
@@ -350,11 +349,11 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	response.ContinuationCheckpoint = preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
 	response.ContinuationCheckpoint = preserveKernelEvidenceGrounding(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
-	if len(response.ProposedActions) == 1 {
-		if reused, reuseErr := r.reuseSucceededAction(response.ProposedActions[0], response.ContinuationCheckpoint); reuseErr != nil {
+	if response.ProposedAction != nil {
+		if reused, reuseErr := r.reuseSucceededAction(*response.ProposedAction, response.ContinuationCheckpoint); reuseErr != nil {
 			return nil, reuseErr
 		} else if reused != nil {
-			response.ProposedActions = nil
+			response.ProposedAction = nil
 			response.ProposedFork = nil
 			response.ProposedDelegation = nil
 			response.ProposedRunbook = nil
@@ -368,11 +367,8 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			response.OutputSummary = "A matching succeeded action was reused; continue from its durable evidence."
 		}
 	}
-	if len(response.ProposedActions) > 1 {
-		return nil, errors.New("a bounded hosted Turn can propose at most one action")
-	}
 	proposalCount := 0
-	if len(response.ProposedActions) == 1 {
+	if response.ProposedAction != nil {
 		proposalCount++
 	}
 	if response.ProposedFork != nil {
@@ -480,10 +476,14 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if snapshot != nil && response.NextRunStatus == AgentRunStatusCompleted {
 		stageEvidenceGrounding(response, snapshot)
 	}
+	proposedActions := []TurnAction(nil)
+	if response.ProposedAction != nil {
+		proposedActions = []TurnAction{*response.ProposedAction}
+	}
 	return &TurnOutcome{
 		ModelProvider: response.ModelProvider, Model: response.Model,
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
-		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: append([]TurnAction(nil), response.ProposedActions...),
+		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: proposedActions,
 		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook,
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
