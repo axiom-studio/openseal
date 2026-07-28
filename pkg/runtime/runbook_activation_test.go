@@ -6,8 +6,59 @@ import (
 	"path/filepath"
 	"testing"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
+
+func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "3"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
+	registry := kernelagent.NewRegistryWithStore(kernelagent.NewMemoryStore())
+	for _, version := range []string{"1", "2"} {
+		_, err := registry.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+			ID: "rowan", Version: version, DisplayName: "Rowan", Purpose: "Research communities", SystemPrompt: "Research carefully.",
+			Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+			Runbook: &runbook.Definition{
+				APIVersion: runbook.APIVersion, ID: "community-review", Version: version, Name: "Community review",
+				Entrypoints: map[string]string{"review": "done"},
+				Steps:       map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: owner.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "rowan", ActiveVersion: "2",
+		RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "test"); err != nil {
+		t.Fatal(err)
+	}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		ID: "daily-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "daily",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := ResolveRunbookDetail(ctx, store, registry, scope, activation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Activation.ID != activation.ID || detail.Definition.Version != "1" {
+		t.Fatalf("detail = %#v", detail)
+	}
+}
 
 func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	ctx := context.Background()

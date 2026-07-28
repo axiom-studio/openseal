@@ -843,9 +843,20 @@ func (f *fakeKernelClient) ListRunbooks(context.Context, runtime.RunbookActivati
 	return f.runbooks, nil
 }
 
-func (f *fakeKernelClient) GetRunbook(_ context.Context, _ runtime.Scope, id string) (*runtime.RunbookActivation, error) {
+func (f *fakeKernelClient) GetRunbook(_ context.Context, _ runtime.Scope, id string) (*runtime.RunbookDetail, error) {
 	for _, value := range f.runbooks {
 		if value.ID == id {
+			return &runtime.RunbookDetail{Activation: value}, nil
+		}
+	}
+	return nil, runtime.ErrRunbookActivationNotFound
+}
+
+func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ runtime.Scope, id string, request runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+	for _, value := range f.runbooks {
+		if value.ID == id {
+			value.Status = request.Status
+			value.Revision++
 			return value, nil
 		}
 	}

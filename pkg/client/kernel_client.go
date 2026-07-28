@@ -39,7 +39,7 @@ type KernelClient interface {
 	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
 	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
 	ListRunbooks(context.Context, runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error)
-	GetRunbook(context.Context, runtime.Scope, string) (*runtime.RunbookActivation, error)
+	GetRunbook(context.Context, runtime.Scope, string) (*runtime.RunbookDetail, error)
 	UpdateRunbook(context.Context, runtime.Scope, string, runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error)
 	ReconcileRunbookSchedules(context.Context, kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error)
 	CreateEventSourceSubscription(context.Context, kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error)
@@ -737,9 +737,9 @@ func (c *KernelHTTPClient) ListRunbooks(ctx context.Context, filter runtime.Runb
 	return values, nil
 }
 
-func (c *KernelHTTPClient) GetRunbook(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookActivation, error) {
+func (c *KernelHTTPClient) GetRunbook(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookDetail, error) {
 	query := scopeQuery(scope)
-	var value runtime.RunbookActivation
+	var value runtime.RunbookDetail
 	path := "/api/v1/runbooks/" + url.PathEscape(strings.TrimSpace(activationID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
 		return nil, err
