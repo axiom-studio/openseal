@@ -122,6 +122,14 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil || len(scheduledRuns) != 1 || scheduledRuns[0].Source != runtime.RunSourceSchedule {
 		t.Fatalf("scheduled runs = %#v, %v", scheduledRuns, err)
 	}
+	loadedRunbook, err = client.GetRunbook(ctx, scope, scheduledActivation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pausedRunbook, err := client.UpdateRunbook(ctx, scope, scheduledActivation.ID, runtime.UpdateRunbookActivationRequest{ExpectedRevision: loadedRunbook.Revision, Status: runtime.RunbookActivationPaused})
+	if err != nil || pausedRunbook.Status != runtime.RunbookActivationPaused || pausedRunbook.Revision != loadedRunbook.Revision+1 {
+		t.Fatalf("paused Runbook=%#v err=%v", pausedRunbook, err)
+	}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
 		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
 		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, Budget: &runtime.BudgetPolicy{MaxTurns: 24},
