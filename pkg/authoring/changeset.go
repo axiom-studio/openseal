@@ -2011,7 +2011,8 @@ func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement Mis
 // missingRequirementAgentID maps a Project source monitor back to the
 // Agent that executes it. Source monitors do not own credentials or Skill
 // configuration independently; the assigned Agent's reviewed placement is the
-// single authority used by both the scheduled Objective and its monitor.
+// single authority used by both the Objective-owned Runbook trigger and its
+// source-monitor projection.
 func missingRequirementAgentID(candidate *WorkforceCandidate, requirement MissingRequirement) string {
 	if candidate == nil {
 		return ""
