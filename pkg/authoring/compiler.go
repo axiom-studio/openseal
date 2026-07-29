@@ -1106,9 +1106,11 @@ func validRefinementBlockingScope(scope RefinementBlockingScope) bool {
 // normalizeGeneratedRefinementProvenance accepts unambiguous provider aliases
 // only at the refinement provenance boundary. The shorthand forms "prompt"
 // and ["prompt", "catalog"] map to objects without reference or evidence. A
-// credential question with the exact credential_reference answer contract may
-// omit provenance because its category already determines the only safe,
-// opaque provenance kind; no credential identity is inferred or exposed. An
+// credential question with the exact credential_reference answer contract has
+// canonical host-owned credential provenance because its category already
+// determines the only safe, opaque provenance kind. Provider provenance is
+// discarded at this boundary so an invented kind, binding reference, or secret
+// cannot enter strict decoding or durable state. An
 // object may use "type" instead of canonical "kind" only when it contains no
 // other fields beyond reference and evidence and names a known provenance
 // kind. Unknown or ambiguous shapes remain untouched so strict decoding and
@@ -1138,7 +1140,7 @@ func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
 		if !ok {
 			continue
 		}
-		if _, present := question["provenance"]; !present && generatedCredentialReferenceQuestion(question) {
+		if generatedCredentialReferenceQuestion(question) {
 			question["provenance"] = []interface{}{map[string]interface{}{"kind": string(RefinementProvenanceCredential)}}
 			changed = true
 			continue
