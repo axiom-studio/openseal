@@ -28,6 +28,7 @@ type ReceiveExternalConversationEventRequest struct {
 
 type ReceiveExternalConversationEventResult struct {
 	Item     *ExternalConversationInboxItem `json:"item"`
+	Approval *ApprovalResolutionResult      `json:"approval,omitempty"`
 	Accepted bool                           `json:"accepted"`
 	Replayed bool                           `json:"replayed"`
 }
@@ -76,6 +77,13 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 	if !containsConversationEventType(resolved.Adapter.InboundEventTypes, req.Event.Type) {
 		return nil, fmt.Errorf("%w: adapter does not declare event type %q", ErrInvalidExternalConversation, req.Event.Type)
 	}
+	if req.Event.Type == capability.ConversationEventApprovalDecided {
+		resolution, err := s.resolveExternalApprovalDecision(ctx, endpoint, req.Event)
+		if err != nil {
+			return nil, err
+		}
+		return &ReceiveExternalConversationEventResult{Approval: resolution, Accepted: true, Replayed: !resolution.Resolved}, nil
+	}
 	if endpoint.Mode == capability.ConversationEndpointDirect && !req.Event.Direct {
 		return nil, fmt.Errorf("%w: direct endpoint received a non-direct event", ErrInvalidExternalConversation)
 	}
@@ -106,6 +114,79 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 	return &ReceiveExternalConversationEventResult{
 		Item: stored, Accepted: stored.Status != ExternalConversationInboxIgnored, Replayed: replayed,
 	}, nil
+}
+
+func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
+	ctx context.Context,
+	endpoint *ExternalConversationEndpoint,
+	event NormalizedExternalConversationEvent,
+) (*ApprovalResolutionResult, error) {
+	store, ok := s.store.(interface {
+		PortfolioStore
+		ActionStore
+	})
+	if !ok {
+		return nil, errors.New("external approval coordination is unavailable")
+	}
+	approvalID, _ := event.Attributes["approvalId"].(string)
+	actionCallID, _ := event.Attributes["actionCallId"].(string)
+	invocationDigest, _ := event.Attributes["invocationDigest"].(string)
+	decision, _ := event.Attributes["decision"].(string)
+	principalType, _ := event.Attributes["principalType"].(string)
+	principalID, _ := event.Attributes["principalId"].(string)
+	reason, _ := event.Attributes["reason"].(string)
+	revision, ok := integerAttribute(event.Attributes["approvalRevision"])
+	if strings.TrimSpace(approvalID) == "" || strings.TrimSpace(actionCallID) == "" ||
+		strings.TrimSpace(invocationDigest) == "" || revision < 1 || !ok ||
+		(decision != "approve" && decision != "reject" && decision != "request_changes") ||
+		strings.TrimSpace(principalType) == "" || strings.TrimSpace(principalID) == "" {
+		return nil, fmt.Errorf("%w: approval decision attributes are invalid", ErrInvalidExternalConversation)
+	}
+	approval, err := store.GetApproval(ctx, endpoint.Scope, approvalID)
+	if err != nil {
+		return nil, err
+	}
+	call, err := store.GetActionCall(ctx, endpoint.Scope, approval.ActionCallID)
+	if err != nil {
+		return nil, err
+	}
+	replay := approval.Status != ApprovalStatusPending && approval.DecisionID == event.ID
+	if approval.ActionCallID != actionCallID || call.InvocationDigest != invocationDigest ||
+		(!replay && approval.Revision != revision) || !approvalHasDestination(approval, endpoint.ID) {
+		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidExternalConversation)
+	}
+	if decision == "request_changes" && strings.TrimSpace(reason) == "" {
+		reason = "Changes requested through external conversation"
+	}
+	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+	return coordinator.Resolve(ctx, ResolveApprovalRequest{
+		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
+		DecisionID: event.ID, Approve: decision == "approve",
+		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
+		CorrelationID: event.ExternalMessageID,
+	})
+}
+
+func integerAttribute(value interface{}) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), typed == float64(int64(typed))
+	default:
+		return 0, false
+	}
+}
+
+func approvalHasDestination(approval *ApprovalCheckpoint, endpointID string) bool {
+	for _, destination := range approval.Destinations {
+		if destination.EndpointID == endpointID {
+			return true
+		}
+	}
+	return false
 }
 
 // Enqueue projects one canonical ChannelMessage into the durable outbox. The

@@ -45,7 +45,14 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
 	}
-	return e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
+	decision, err := e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
+	if err != nil {
+		return runtime.ActionPolicyDecision{}, err
+	}
+	for _, destination := range definition.Authority.ApprovalDestinations {
+		decision.ApprovalDestinations = append(decision.ApprovalDestinations, runtime.ApprovalDestination{EndpointID: destination.EndpointID})
+	}
+	return decision, nil
 }
 
 func (e *Engine) defaultSideEffectPolicy() runtime.ActionPolicyEvaluator {

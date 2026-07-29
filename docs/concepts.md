@@ -146,6 +146,15 @@ eligible principals, expiration, and continuation. Approval is not a general
 grant: resolving one checkpoint permits only that reviewed action and the Run
 continues under its original binding.
 
+An Agent may route pending checkpoints to one or more authorized conversation
+endpoints. OpenSeal creates one idempotent canonical approval message and uses
+the endpoint Skill adapter to render it for the provider. A returned decision
+must match the endpoint, checkpoint revision, action-call ID, invocation
+digest, and an eligible principal. Edited, stale, replayed, or unauthorized
+decisions cannot widen the reviewed action; exact retries are idempotent. The
+checkpoint remains the single state shown by APIs, TUI, Studio, and external
+conversation projections.
+
 Workforce ChangeSets and Agent/Team amendments use their own governed lifecycle
 records. They bind decisions to an exact revision and candidate digest so stale
 reviews cannot activate changed content.

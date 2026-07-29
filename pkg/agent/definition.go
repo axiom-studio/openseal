@@ -38,13 +38,21 @@ type StandingActionGrant struct {
 	ResourcePrefix    string `json:"resourcePrefix,omitempty"`
 }
 
+// ApprovalDestination selects an external conversation endpoint as a
+// notification and decision surface. Provider credentials and identity
+// mappings remain on the endpoint, outside the immutable Agent definition.
+type ApprovalDestination struct {
+	EndpointID string `json:"endpointId"`
+}
+
 type AuthorityPolicy struct {
-	MaximumRisk       capability.RiskLevel  `json:"maximumRisk"`
-	AllowedSkillIDs   []string              `json:"allowedSkillIds,omitempty"`
-	MaxConcurrentRuns int                   `json:"maxConcurrentRuns"`
-	BudgetCeilings    map[string]float64    `json:"budgetCeilings,omitempty"`
-	RequireApprovalAt capability.RiskLevel  `json:"requireApprovalAt,omitempty"`
-	StandingGrants    []StandingActionGrant `json:"standingGrants,omitempty"`
+	MaximumRisk          capability.RiskLevel  `json:"maximumRisk"`
+	AllowedSkillIDs      []string              `json:"allowedSkillIds,omitempty"`
+	MaxConcurrentRuns    int                   `json:"maxConcurrentRuns"`
+	BudgetCeilings       map[string]float64    `json:"budgetCeilings,omitempty"`
+	RequireApprovalAt    capability.RiskLevel  `json:"requireApprovalAt,omitempty"`
+	StandingGrants       []StandingActionGrant `json:"standingGrants,omitempty"`
+	ApprovalDestinations []ApprovalDestination `json:"approvalDestinations,omitempty"`
 }
 
 type MemoryPolicy struct {
@@ -123,6 +131,14 @@ func (d *AgentDefinition) Validate() error {
 		}, "authority.standingGrants"); err != nil {
 			return err
 		}
+	}
+	seenDestinations := make(map[string]bool, len(d.Authority.ApprovalDestinations))
+	for _, destination := range d.Authority.ApprovalDestinations {
+		id := strings.TrimSpace(destination.EndpointID)
+		if id == "" || len(id) > 256 || seenDestinations[id] {
+			return errors.New("agent approval destinations require unique portable endpoint ids")
+		}
+		seenDestinations[id] = true
 	}
 	if d.Memory.Retention < 0 || d.Memory.MaximumBytes < 0 || d.Escalation.AfterFailures < 0 || d.Escalation.AfterDuration < 0 {
 		return errors.New("agent definition memory and escalation limits cannot be negative")
