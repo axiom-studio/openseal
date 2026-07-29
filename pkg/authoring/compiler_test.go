@@ -897,6 +897,26 @@ func TestCompilerDerivesOpaqueCredentialQuestionProvenance(t *testing.T) {
 	}
 }
 
+func TestCompilerReplacesProviderCredentialQuestionProvenanceWithHostOwnedFact(t *testing.T) {
+	candidate := marketingCandidate("1", capability.RiskLevelRead)
+	candidateJSON, _ := json.Marshal(candidate)
+	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"credential-skill-browser","category":"credential","prompt":"Which authorized browser credential should be configured?","whyNeeded":"Browser access requires an authorized credential.","blocking":["apply"],"answer":{"kind":"credential_reference"},"provenance":[{"kind":"skill-browser","reference":"credential/opaque","evidence":"provider supplied"}],"priority":100}]}`)
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a browser Agent."})
+	if err != nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("credential refinement result=%#v err=%v", result, err)
+	}
+	provenance := result.UnresolvedQuestions[0].Provenance
+	if len(provenance) != 1 || provenance[0].Kind != RefinementProvenanceCredential || provenance[0].Reference != "" || provenance[0].Evidence != "" {
+		t.Fatalf("host-owned credential provenance=%#v", provenance)
+	}
+	encoded, _ := json.Marshal(result)
+	if strings.Contains(string(encoded), "credential/opaque") || strings.Contains(string(encoded), "provider supplied") {
+		t.Fatalf("provider credential provenance persisted: %s", encoded)
+	}
+}
+
 func TestCompilerNormalizesDefinitionProvenanceKindAlias(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	candidate.Agents[0].Provenance.Source = "prompt"
