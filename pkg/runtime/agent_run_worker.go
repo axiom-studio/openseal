@@ -450,6 +450,9 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 	if sharedContext == nil {
 		sharedContext = make(map[string]interface{})
 	}
+	if origin := delegatedRunbookOrigin(run.Context); origin != nil {
+		sharedContext["triggerInput"] = origin
+	}
 	if proposal.Mode != "" {
 		sharedContext[DelegationModeContextKey] = proposal.Mode
 	}
@@ -530,6 +533,27 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		return nil, err
 	}
 	return source, nil
+}
+
+func delegatedRunbookOrigin(contextValues map[string]interface{}) map[string]interface{} {
+	if contextValues == nil {
+		return nil
+	}
+	definitionID, _ := contextValues["runbookDefinitionId"].(string)
+	definitionVersion, _ := contextValues["runbookDefinitionVersion"].(string)
+	if strings.TrimSpace(definitionID) == "" || strings.TrimSpace(definitionVersion) == "" {
+		return nil
+	}
+	origin := map[string]interface{}{
+		"runbookDefinitionId":      strings.TrimSpace(definitionID),
+		"runbookDefinitionVersion": strings.TrimSpace(definitionVersion),
+	}
+	for _, key := range []string{"runbookActivationId", "runbookTriggerId"} {
+		if value, ok := contextValues[key].(string); ok && strings.TrimSpace(value) != "" {
+			origin[key] = strings.TrimSpace(value)
+		}
+	}
+	return origin
 }
 
 func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun) {
