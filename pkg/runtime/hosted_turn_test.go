@@ -464,6 +464,38 @@ func TestHostedTurnRunnerRefreshesObservationAfterInterveningAction(t *testing.T
 	}
 }
 
+func TestHostedTurnRunnerBoundsRegeneratedNoProgressInteraction(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "browser.click", BindingID: "browser-binding", BindingRevision: 4,
+		SkillID: "skill-browser", Version: "2", Action: "camoufox-click", SideEffect: capability.SideEffectWrite,
+		SemanticArguments: map[string]string{"intent": "intent"},
+	}
+	priorArguments := map[string]interface{}{"sessionId": "run-1", "target": "s1:e26", "intent": "Open community rules", "idempotencyKey": "first-key"}
+	prior := &ActionCall{ID: "no-progress", DeploymentID: "browser-agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision, SkillID: action.SkillID, SkillVersion: action.Version, Action: action.Action, Arguments: priorArguments, Status: ActionCallStatusSucceeded}
+	intent := computeActionProgressIntentDigest(prior, action.SemanticArguments)
+	prior.Output = map[string]interface{}{"progress": map[string]interface{}{"changed": false, "intentDigest": intent, "beforeDigest": "sha256:same", "afterDigest": "sha256:same"}}
+	checkpoint := appendActionHistory(nil, prior)
+	checkpoint = appendActionHistory(checkpoint, &ActionCall{ID: "fresh-snapshot", Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"observationDigest": "sha256:same"}})
+	regenerated := map[string]interface{}{"sessionId": "run-1", "target": "s2:e47", "intent": "Open community rules", "idempotencyKey": "second-key"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn-2", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Try again",
+		ProposedAction:         &TurnAction{Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision, Summary: "Open rules", IdempotencyKey: "second-key", InputRef: "/actionInputs/click"},
+		ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"click": regenerated}},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser-agent", DefinitionID: "browser", DefinitionVersion: "1", Actions: []capability.ModelAction{action}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Inspect rules", Checkpoint: checkpoint}, Turn: &AgentTurn{ID: "turn-2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcome.ProposedActions) != 0 || !strings.Contains(outcome.OutputSummary, "authoritative observation unchanged") {
+		t.Fatalf("no-progress action was not bounded: %#v", outcome)
+	}
+}
+
 func TestHostedTurnRunnerEnforcesExternalOperationPolicy(t *testing.T) {
 	tests := []struct {
 		name     string
