@@ -2768,6 +2768,8 @@ type OpenAICompatibleWorkforceThinkingMode = authoring.OpenAICompatibleThinkingM
 type OpenAICompatibleWorkforceStructuredOutputMode = authoring.OpenAICompatibleStructuredOutputMode
 
 const (
+	WorkforceAuthoringResultSchemaVersion = authoring.AuthoringResultSchemaVersion
+
 	OpenAICompatibleWorkforceThinkingDefault  = authoring.OpenAICompatibleThinkingDefault
 	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
 	OpenAICompatibleWorkforceThinkingDisabled = authoring.OpenAICompatibleThinkingDisabled
