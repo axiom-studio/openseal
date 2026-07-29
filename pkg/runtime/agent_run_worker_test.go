@@ -784,6 +784,20 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 	}
 }
 
+func TestDelegatedRunbookOriginPreservesImmutableIdentity(t *testing.T) {
+	origin := delegatedRunbookOrigin(map[string]interface{}{
+		"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2",
+		"runbookActivationId": "activation-one", "runbookTriggerId": "hourly",
+	})
+	if origin["runbookDefinitionId"] != "hourly-scan" || origin["runbookDefinitionVersion"] != "2.0.2" ||
+		origin["runbookActivationId"] != "activation-one" || origin["runbookTriggerId"] != "hourly" {
+		t.Fatalf("delegated Runbook origin = %#v", origin)
+	}
+	if delegatedRunbookOrigin(map[string]interface{}{"runbookDefinitionId": "hourly-scan"}) != nil {
+		t.Fatal("incomplete Runbook origin was propagated")
+	}
+}
+
 func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "delegation-recovery"}
