@@ -254,6 +254,8 @@ type ConversationAdapter struct {
 
 const CallbackAdapterProtocolV1 = "openseal.callback.adapter/v1"
 
+const CallbackEventApprovalDecided = "approval.decided"
+
 // CallbackAdapterTransport identifies the Skill-owned verifier and
 // normalizer for an inbound provider callback. Credential values are resolved
 // by the trusted host and never enter the callback registration or event.

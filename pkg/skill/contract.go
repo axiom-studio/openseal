@@ -81,6 +81,7 @@ const (
 
 	ConversationAdapterProtocolV1 = capability.ConversationAdapterProtocolV1
 	CallbackAdapterProtocolV1     = capability.CallbackAdapterProtocolV1
+	CallbackEventApprovalDecided  = capability.CallbackEventApprovalDecided
 
 	ConversationFeatureThreads     = capability.ConversationFeatureThreads
 	ConversationFeatureMentions    = capability.ConversationFeatureMentions

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = activityProjectionRepairMigrationVersion
+const currentPostgresSchemaVersion int64 = callbackRegistryMigrationVersion
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,6 +39,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		39: {"callback_events", "callback_registrations"},
 		36: {"outreach_threads", "source_monitor_checkpoints", "source_observations", "projects"},
 		35: {"runbook_activations"},
 		28: {"external_conversation_gateways"},
