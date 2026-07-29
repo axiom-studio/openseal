@@ -10,7 +10,94 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
+
+func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runbook-activation.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := kernelagent.NewRegistryWithStore(store)
+	for _, item := range []struct {
+		version string
+		turns   int64
+	}{{"1.0.0", 2}, {"1.1.0", 7}} {
+		definition := sqliteAgentDefinition(item.version)
+		definition.Runbook = sqliteAgentRunbook(item.version, item.turns)
+		if _, err := registry.RegisterDefinition(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "runbook-activation"}
+	deployment, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "operator", Scope: scope, DefinitionID: "operator", ActiveVersion: "1.0.0", RolloutStatus: kernelagent.RolloutActive,
+		Environment: "production", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitionV1, _ := registry.GetDefinition(ctx, "operator", "1.0.0")
+	trigger := definitionV1.Runbook.Triggers["hourly"]
+	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		ID: "operator-hourly", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
+		AssignedAgentID: deployment.ID, DefinitionID: definitionV1.Runbook.ID, DefinitionVersion: definitionV1.Runbook.Version,
+		TriggerID: "hourly", Trigger: trigger, Budget: runbookBudgetPolicyValue(trigger.Budget), Status: RunbookActivationActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, _, err := registry.ActivateDefinition(ctx, scope, deployment.ID, "1.1.0", deployment.Revision, "user", "admin", "increase bounded work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	advanced, err := store.GetRunbookActivation(ctx, Scope{Kind: scope.Kind, ID: scope.ID}, activation.ID)
+	if err != nil || advanced.DefinitionVersion != "1.1.0" || advanced.Budget == nil || advanced.Budget.MaxTurns != 7 || advanced.Revision != activation.Revision+1 {
+		t.Fatalf("advanced Runbook activation = %#v, %v", advanced, err)
+	}
+
+	rolledBack, _, err := registry.RollbackDefinition(ctx, scope, deployment.ID, updated.Revision, "user", "admin", "restore prior behavior")
+	if err != nil || rolledBack.ActiveVersion != "1.0.0" {
+		t.Fatalf("rollback = %#v, %v", rolledBack, err)
+	}
+	restored, err := store.GetRunbookActivation(ctx, Scope{Kind: scope.Kind, ID: scope.ID}, activation.ID)
+	if err != nil || restored.DefinitionVersion != "1.0.0" || restored.Budget == nil || restored.Budget.MaxTurns != 2 || restored.Revision != advanced.Revision+1 {
+		t.Fatalf("restored Runbook activation = %#v, %v", restored, err)
+	}
+}
+
+func TestAgentRunbookActivationSyncRetiresRemovedTriggersAndRejectsUnplacedOnes(t *testing.T) {
+	now := time.Now().UTC()
+	deployment := &kernelagent.AgentDeployment{ID: "operator", UpdatedAt: now}
+	current := &RunbookActivation{
+		ID: "daily", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"},
+		ObjectiveID: "objective-one", AssignedAgentID: "operator", DefinitionID: "operator-runbook", DefinitionVersion: "1", TriggerID: "daily",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "operate", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
+		Status:  RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	withoutTrigger := sqliteAgentDefinition("2")
+	withoutTrigger.Runbook = sqliteAgentRunbook("2", 5)
+	delete(withoutTrigger.Runbook.Triggers, "hourly")
+	retired, err := reconcileAgentRunbookActivations([]*RunbookActivation{current}, withoutTrigger, deployment, now.Add(time.Minute))
+	if err != nil || len(retired) != 1 || retired[0].Status != RunbookActivationRetired || retired[0].NextRunAt != nil {
+		t.Fatalf("retired activations = %#v, %v", retired, err)
+	}
+	withUnplacedTrigger := sqliteAgentDefinition("3")
+	withUnplacedTrigger.Runbook = sqliteAgentRunbook("3", 7)
+	if _, err := reconcileAgentRunbookActivations(nil, withUnplacedTrigger, deployment, now); err == nil {
+		t.Fatal("an unplaced Runbook trigger should not be created by a definition-only amendment")
+	}
+}
 
 func TestSQLiteAgentDefinitionsDeploymentsAndActivationsSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents.db")
@@ -180,7 +267,8 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 	}
 	registry := kernelagent.NewRegistryWithStore(store)
 	base := sqliteAgentDefinition("1")
-	base.Amendments = kernelagent.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true, ApproverPrincipals: []string{"user:admin"}}
+	base.Runbook = sqliteAgentRunbook("1", 2)
+	base.Amendments = kernelagent.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"runbook", "systemPrompt"}, RequiresApproval: true, ApproverPrincipals: []string{"user:admin"}}
 	registered, err := registry.RegisterDefinition(context.Background(), base)
 	if err != nil {
 		t.Fatal(err)
@@ -190,8 +278,25 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}
+	objective, err := NewPortfolioService(store).CreateObjective(context.Background(), CreateObjectiveRequest{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := registered.Runbook.Triggers["hourly"]
+	runbookActivation, err := NewRunbookActivationService(store).Create(context.Background(), CreateRunbookActivationRequest{
+		ID: "operator-hourly", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
+		AssignedAgentID: deployment.ID, DefinitionID: registered.Runbook.ID, DefinitionVersion: registered.Runbook.Version,
+		TriggerID: "hourly", Trigger: trigger, Budget: runbookBudgetPolicyValue(trigger.Budget), Status: RunbookActivationActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	candidate := *registered
 	candidate.Version, candidate.SystemPrompt, candidate.Digest, candidate.CreatedAt = "2", "Operate safely and cite evidence.", "", time.Time{}
+	candidate.Runbook = sqliteAgentRunbook("2", 5)
 	amendment, err := registry.ProposeAmendment(context.Background(), kernelagent.ProposeAmendmentRequest{Scope: scope, DeploymentID: deployment.ID, Candidate: &candidate, ProposerType: "agent", ProposerID: "operator", Rationale: "Evidence improves reviewability"})
 	if err != nil || amendment.Status != kernelagent.AmendmentAwaitingApproval {
 		t.Fatalf("propose amendment = %#v, %v", amendment, err)
@@ -229,11 +334,27 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 	if _, err := restarted.GetDefinition(context.Background(), "operator", "2"); err != nil {
 		t.Fatalf("activated candidate was not persisted: %v", err)
 	}
+	advancedRunbook, err := reopened.GetRunbookActivation(context.Background(), Scope{Kind: scope.Kind, ID: scope.ID}, runbookActivation.ID)
+	if err != nil || advancedRunbook.DefinitionVersion != "2" || advancedRunbook.Budget == nil || advancedRunbook.Budget.MaxTurns != 5 || advancedRunbook.ObjectiveID != objective.ID {
+		t.Fatalf("amendment Runbook activation = %#v, %v", advancedRunbook, err)
+	}
 }
 
 func sqliteAgentDefinition(version string) *kernelagent.AgentDefinition {
 	return &kernelagent.AgentDefinition{
 		ID: "operator", Version: version, DisplayName: "Operator", Purpose: "Operate", SystemPrompt: "Operate safely.",
 		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelExternal, MaxConcurrentRuns: 2},
+	}
+}
+
+func sqliteAgentRunbook(version string, turns int64) *runbook.Definition {
+	return &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "operator-runbook", Version: version, Name: "Operator runbook",
+		Entrypoints: map[string]string{"operate": "done"},
+		Triggers: map[string]runbook.Trigger{"hourly": {
+			Kind: runbook.TriggerSchedule, Entrypoint: "operate", ObjectiveID: "agent:operator:operate",
+			Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Budget: &runbook.BudgetAllocation{MaxAttempts: turns, MaxTurns: turns},
+		}},
+		Steps: map[string]runbook.Step{"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}}},
 	}
 }
