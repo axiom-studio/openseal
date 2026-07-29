@@ -45,17 +45,20 @@ func materializeAnsweredCapabilitySourceScopes(candidate *WorkforceCandidate, re
 			issues = append(issues, materializeCatalogSourceMonitor(candidate, need, actions[0])...)
 			continue
 		}
+		routes := matchingSourceScopeRunbooks(candidate, need, request.Catalog)
+		if len(routes) == 1 {
+			// A Runbook trigger is the stable boundary when several steps use the
+			// same source Skill (for example navigate, snapshot, and click). Bind
+			// the audited scope once and let exact step references consume it.
+			materializeRunbookSourceTargets(routes[0], targets, requirement.MaterializationInputKeys)
+			continue
+		}
 		if len(actions) > 1 {
 			paths := make([]string, 0, len(actions))
 			for _, action := range actions {
 				paths = append(paths, action.path)
 			}
-			issues = append(issues, issue("runbooks.steps.action.arguments", "source_scope_action_ambiguous", fmt.Sprintf("Source scope %s matches multiple Runbook actions (%s); keep one exact action", strings.Join(targets, ", "), strings.Join(paths, ", "))))
-			continue
-		}
-		routes := matchingSourceScopeRunbooks(candidate, need, request.Catalog)
-		if len(routes) == 1 {
-			materializeRunbookSourceTargets(routes[0], targets, requirement.MaterializationInputKeys)
+			issues = append(issues, issue("runbooks.steps.action.arguments", "source_scope_action_ambiguous", fmt.Sprintf("Source scope %s matches multiple Runbook actions (%s); keep one exact action or one Objective-owned Runbook trigger", strings.Join(targets, ", "), strings.Join(paths, ", "))))
 			continue
 		}
 		if len(routes) > 1 {
@@ -265,6 +268,9 @@ func materializeRunbookSourceTargets(route sourceScopeRunbook, targets, inputKey
 	trigger.Input[key] = runbook.Value{Literal: encoded}
 	route.definition.Triggers[route.triggerID] = trigger
 
+	if route.definition.Interfaces == nil {
+		route.definition.Interfaces = map[string]runbook.Interface{}
+	}
 	contract := route.definition.Interfaces[route.entrypoint]
 	if contract.InputSchema == nil {
 		contract.InputSchema = map[string]interface{}{"type": "object", "additionalProperties": false}

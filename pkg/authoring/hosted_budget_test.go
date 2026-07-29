@@ -9,19 +9,17 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-func TestHostedRunbookBudgetRejectsBrowserCatalogThatCannotStartOrFinish(t *testing.T) {
+func TestHostedRunbookBudgetRaisesBrowserCatalogToExecutableEnvelope(t *testing.T) {
 	candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{
 		MaxAttempts: 3, MaxTurns: 3, MaxActions: 3,
 		MaxInputTokens: 16000, MaxOutputTokens: 128, MaxTotalTokens: 20000,
 	})
-	issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog())
-	for _, code := range []string{
-		"hosted_budget_attempts_insufficient", "hosted_budget_turns_insufficient",
-		"hosted_budget_input_insufficient", "hosted_budget_output_insufficient", "hosted_budget_total_insufficient",
-	} {
-		if !hasValidationCode(issues, code) {
-			t.Fatalf("missing %s in issues %#v", code, issues)
-		}
+	if issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog()); len(issues) != 0 {
+		t.Fatalf("normalized Browser budget issues = %#v", issues)
+	}
+	budget := candidate.Agents[0].Runbook.Steps["work"].Delegate.Budget
+	if budget.MaxTurns < 4 || budget.MaxInputTokens <= 16000 || budget.MaxTotalTokens <= 20000 {
+		t.Fatalf("Browser budget was not normalized: %#v", budget)
 	}
 }
 
@@ -49,20 +47,12 @@ func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *te
 			}}
 			definition.Steps["done"] = runbook.Step{Kind: runbook.StepEnd, End: &runbook.EndStep{}}
 
-			issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog())
-			if !hasValidationCode(issues, "hosted_parent_attempts_insufficient") ||
-				!hasValidationCode(issues, "hosted_parent_turns_insufficient") ||
-				!hasValidationCode(issues, "hosted_parent_input_insufficient") ||
-				!hasValidationCode(issues, "hosted_parent_total_insufficient") {
-				t.Fatalf("missing parent capacity issues = %#v", issues)
-			}
-
-			definition.Triggers["operate"] = runbook.Trigger{
-				Kind: test.kind, EventType: test.eventType, Entrypoint: "operate",
-				Budget: &runbook.BudgetAllocation{MaxAttempts: 6, MaxTurns: 6, MaxInputTokens: 100000, MaxOutputTokens: 1024, MaxTotalTokens: 101024, MaxActions: 3},
-			}
 			if issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog()); len(issues) != 0 {
-				t.Fatalf("funded parent budget issues = %#v", issues)
+				t.Fatalf("normalized parent budget issues = %#v", issues)
+			}
+			budget := definition.Triggers["operate"].Budget
+			if budget.MaxAttempts < 6 || budget.MaxTurns < 6 || budget.MaxInputTokens < 100000 || budget.MaxTotalTokens < 101024 {
+				t.Fatalf("parent budget was not normalized: %#v", budget)
 			}
 		})
 	}

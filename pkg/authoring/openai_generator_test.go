@@ -269,7 +269,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	}
 	projected := modelRequest.Catalog.Skills["source"]
 	if projected.ID != "source" || projected.Version != "1.2.3" || projected.SourceIdentity != "registry::publisher/source" ||
-		projected.RuntimeIdentity != nil || len(projected.ActionContracts) != 0 ||
+		projected.RuntimeIdentity != nil || len(projected.ActionContracts) != 1 ||
 		len(projected.Actions) != 1 || projected.Actions[0] != "read" || projected.Readiness != SkillReadinessNeedsBinding ||
 		len(projected.CredentialKinds) != 1 || len(projected.Compatibility) != 1 || projected.Compatibility[0].Requirement != "credential:oauth" {
 		t.Fatalf("projected Skill = %#v", projected)

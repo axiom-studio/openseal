@@ -194,6 +194,12 @@ func promptGenerateRequest(request GenerateRequest) GenerateRequest {
 // unchanged for deterministic validation and persistence.
 func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog {
 	compact := cloneCapabilityCatalog(catalog)
+	relevantSkills := make(map[string]bool)
+	for _, need := range catalog.CapabilityNeeds {
+		for _, skillID := range need.SkillIDs {
+			relevantSkills[strings.TrimSpace(skillID)] = true
+		}
+	}
 	compact.CapabilityNeeds = nil
 	compact.AgentCredentialRequirements = nil
 	compact.AvailableCredentialGrants = nil
@@ -202,9 +208,12 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 		// Exact installed authority is server-owned placement input. The model
 		// sees the catalog id and declared contract, never this binding choice.
 		skill.RuntimeIdentity = nil
-		// Exact schemas are deterministic post-generation validation input. The
-		// model receives only the bounded action names and risks it may select.
-		skill.ActionContracts = nil
+		// Exact credential-free contracts are necessary to author executable
+		// Runbook dataflow. Keep them only for server-selected capability needs;
+		// unrelated installed Skills retain their compact name/risk projection.
+		if !relevantSkills[id] {
+			skill.ActionContracts = nil
+		}
 		skill.HostedModelInputTokens = 0
 		constraints := make([]SkillCompatibility, 0, len(skill.Compatibility))
 		for _, compatibility := range skill.Compatibility {
