@@ -68,6 +68,40 @@ func TestHostedTurnRetriesWhenPostActionReasoningFails(t *testing.T) {
 	}
 }
 
+func TestHostedTurnPreservesTerminalHostFailure(t *testing.T) {
+	host := &recordingTurnHost{err: NewTurnHostFailure(
+		"provider_quota_exhausted",
+		"Model provider quota is exhausted; choose a credential with available quota.",
+		false,
+	)}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Work"}, Turn: &AgentTurn{ID: "turn"},
+	})
+	var failure *TurnHostFailure
+	if outcome != nil || !errors.As(err, &failure) || failure.Code != "provider_quota_exhausted" || failure.Retryable || errors.Is(err, ErrTurnHostUnavailable) {
+		t.Fatalf("terminal outcome=%#v failure=%#v err=%v", outcome, failure, err)
+	}
+}
+
+func TestHostedTurnPreservesTypedRetryableHostFailure(t *testing.T) {
+	host := &recordingTurnHost{err: NewTurnHostFailure("provider_rate_limited", "Model provider is temporarily rate limited.", true)}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Work"}, Turn: &AgentTurn{ID: "turn"},
+	})
+	var failure *TurnHostFailure
+	if !errors.As(err, &failure) || failure.Code != "provider_rate_limited" || !errors.Is(err, ErrTurnHostUnavailable) {
+		t.Fatalf("retryable failure=%#v err=%v", failure, err)
+	}
+}
+
 func TestHostedTurnDoesNotTrustModelVisibleLastActionWithoutKernelHistory(t *testing.T) {
 	host := &recordingTurnHost{err: errors.New("unexpected EOF")}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser", DefinitionID: "browser", DefinitionVersion: "1"})

@@ -490,6 +490,7 @@ type (
 	TurnHost                           = runtime.TurnHost
 	HostedTurnRunnerConfig             = runtime.HostedTurnRunnerConfig
 	HostedTurnRunner                   = runtime.HostedTurnRunner
+	TurnHostFailure                    = runtime.TurnHostFailure
 	EvidenceClaim                      = runtime.EvidenceClaim
 	EvidenceGroundingFindingStatus     = runtime.EvidenceGroundingFindingStatus
 	EvidenceGroundingFinding           = runtime.EvidenceGroundingFinding
@@ -1214,6 +1215,7 @@ var (
 
 var (
 	NewHostedTurnRunner                = runtime.NewHostedTurnRunner
+	NewTurnHostFailure                 = runtime.NewTurnHostFailure
 	MarshalHostedTurnModelInput        = runtime.MarshalHostedTurnModelInput
 	MarshalEvidenceGroundingModelInput = runtime.MarshalEvidenceGroundingModelInput
 	EstimateHostedTurnInputTokens      = runtime.EstimateHostedTurnInputTokens
