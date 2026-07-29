@@ -106,6 +106,9 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 			return nil, fmt.Errorf("Agent definition is required")
 		}
 		definition := cloneJSON(source)
+		if err := resolveAgentApprovalDestinations(value, definition); err != nil {
+			return nil, err
+		}
 		deploymentID := value.Placement.AgentDeploymentIDs[definition.ID]
 		bindings, err := materializeWorkforceSkillBindings(value, definition, deploymentID, activate)
 		if err != nil {
@@ -210,6 +213,26 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 		return nil, err
 	}
 	return application, nil
+}
+
+func resolveAgentApprovalDestinations(value *authoring.ChangeSet, definition *agent.AgentDefinition) error {
+	if value == nil || definition == nil || len(definition.Authority.ApprovalDestinations) == 0 {
+		return nil
+	}
+	blueprints := make(map[string]authoring.ConversationEndpointBlueprint, len(value.Result.Candidate.ConversationEndpoints))
+	for _, endpoint := range value.Result.Candidate.ConversationEndpoints {
+		blueprints[endpoint.ID] = endpoint
+	}
+	for index := range definition.Authority.ApprovalDestinations {
+		blueprintID := strings.TrimSpace(definition.Authority.ApprovalDestinations[index].EndpointID)
+		blueprint, ok := blueprints[blueprintID]
+		placement, placed := value.Placement.ConversationEndpoints[blueprintID]
+		if !ok || !placed || blueprint.Owner.Type != authoring.ConversationEndpointOwnerAgent || blueprint.Owner.ID != definition.ID || strings.TrimSpace(placement.ID) == "" {
+			return fmt.Errorf("Agent %s approval destination %s has no reviewed owned conversation endpoint placement", definition.ID, blueprintID)
+		}
+		definition.Authority.ApprovalDestinations[index].EndpointID = strings.TrimSpace(placement.ID)
+	}
+	return nil
 }
 
 func finishWorkforceApplication(value *authoring.ChangeSet, application *workforceApplication, deploymentByDefinition map[string]string) error {

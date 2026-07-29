@@ -113,6 +113,28 @@ The candidate may contain one Agent, several Agents, a Team, objective
 templates, Skill requirements, and a Project blueprint. The compiler never
 invents a credential value, source allowlist, or approval authority.
 
+Models and product surfaces do not edit compiler-owned kernel fields. OpenSeal
+projects typed structs into a versioned authoring form whose fields carry
+labels, help, input kinds, choices, and enablement conditions. The submitted
+form contains typed values keyed by stable field and subject identifiers. A
+deterministic codec validates those values and derives the immutable runtime
+struct; the same codec projects that struct back into editable form values for
+amendment and review.
+
+```mermaid
+flowchart LR
+    S[Typed candidate] -->|ProjectWorkforceAuthoringForm| F[Form schema + values]
+    F --> E[Model, TUI, or GUI edits typed values]
+    E -->|CompileWorkforceAuthoringForm| C[Deterministic compiler]
+    C --> V[Validated immutable runtime struct]
+    V -->|project again| F
+```
+
+For example, an endpoint form exposes an **Approvals** purpose only when its
+authorized adapter accepts approval decisions. Selecting it compiles the exact
+Agent approval destination. The model never writes `approvalDestinations`,
+provider bindings, or principal mappings directly.
+
 Application is atomic in persistent stores: reviewed Agent/Team definitions,
 deployments, objective instances, Skill bindings, Project records, and the
 receipt commit together. Expected revision, candidate digest, and idempotency

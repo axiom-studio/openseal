@@ -102,7 +102,7 @@ func TestOpenAICompatibleGeneratorNegotiatesStrictSchemaTransport(t *testing.T) 
 			t.Fatal(err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"candidateJson\":\"{\\\"agents\\\":[],\\\"assignments\\\":[]}\",\"commitments\":{\"agentCount\":null,\"teamCount\":null,\"objectiveCounts\":[],\"activation\":null,\"approvalRequirements\":[]},\"assumptions\":[\"Conservative defaults\"],\"unresolvedQuestionsJson\":\"[]\"}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"candidateJson\":\"{\\\"agents\\\":[],\\\"assignments\\\":[]}\",\"authoringJson\":\"{\\\"version\\\":\\\"openseal.authoring-form/v1\\\"}\",\"commitments\":{\"agentCount\":null,\"teamCount\":null,\"objectiveCounts\":[],\"activation\":null,\"approvalRequirements\":[]},\"assumptions\":[\"Conservative defaults\"],\"unresolvedQuestionsJson\":\"[]\"}"}}]}`))
 	}))
 	defer server.Close()
 
@@ -172,7 +172,7 @@ func assertStrictAuthoringSchema(t *testing.T, value interface{}, path string) {
 func TestOpenAICompatibleStrictTransportRejectsInvalidEmbeddedDocument(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"candidateJson\":\"[]\",\"commitments\":{},\"assumptions\":[],\"unresolvedQuestionsJson\":\"[]\"}"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"candidateJson\":\"[]\",\"authoringJson\":\"{}\",\"commitments\":{},\"assumptions\":[],\"unresolvedQuestionsJson\":\"[]\"}"}}]}`))
 	}))
 	defer server.Close()
 	generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{
