@@ -407,6 +407,14 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 			if err := finishStep(traceSequence, RunbookStepTraceSucceeded, "", "Runbook completed", "", nil); err != nil {
 				return nil, err
 			}
+			outputObservations := make([]RunbookDataObservation, 0, len(outputs))
+			for name, value := range outputs {
+				outputObservations = append(outputObservations, observeRunbookValue("/output/"+escapeRunbookPointer(name), value))
+			}
+			sort.Slice(outputObservations, func(i, j int) bool { return outputObservations[i].Ref < outputObservations[j].Ref })
+			if err := replaceRunbookStepTraceOutputs(checkpoint, traceSequence, outputObservations); err != nil {
+				return nil, err
+			}
 			encodeRunbookState(checkpoint, state)
 			return &TurnOutcome{Decisions: decisions, OutputSummary: "Completed runbook " + r.definition.Name, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusCompleted, RunOutput: outputs}, nil
 		default:

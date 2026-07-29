@@ -125,23 +125,33 @@ type RunbookChildRunAudit struct {
 }
 
 type RunbookNodeExecutionAudit struct {
-	StepID     string                 `json:"stepId"`
-	StepKind   runbook.StepKind       `json:"stepKind"`
-	StepName   string                 `json:"stepName,omitempty"`
-	Status     RunbookStepTraceStatus `json:"status,omitempty"`
-	VisitCount int                    `json:"visitCount"`
-	Visits     []RunbookStepTrace     `json:"visits,omitempty"`
-	Turns      []RunbookTurnAudit     `json:"turns,omitempty"`
-	Actions    []RunbookActionAudit   `json:"actions,omitempty"`
-	Approvals  []RunbookApprovalAudit `json:"approvals,omitempty"`
-	Artifacts  []RunbookArtifactAudit `json:"artifacts,omitempty"`
-	ChildRuns  []RunbookChildRunAudit `json:"childRuns,omitempty"`
+	StepID     string                       `json:"stepId"`
+	StepKind   runbook.StepKind             `json:"stepKind"`
+	StepName   string                       `json:"stepName,omitempty"`
+	Status     RunbookStepTraceStatus       `json:"status,omitempty"`
+	VisitCount int                          `json:"visitCount"`
+	Visits     []RunbookVisitExecutionAudit `json:"visits,omitempty"`
+}
+
+// RunbookVisitExecutionAudit is the atomic operator-facing unit. Records are
+// attached to an exact node visit so retries and loops never blur together.
+type RunbookVisitExecutionAudit struct {
+	Trace     RunbookStepTrace       `json:"trace"`
+	Turns     []RunbookTurnAudit     `json:"turns,omitempty"`
+	Actions   []RunbookActionAudit   `json:"actions,omitempty"`
+	Approvals []RunbookApprovalAudit `json:"approvals,omitempty"`
+	Artifacts []RunbookArtifactAudit `json:"artifacts,omitempty"`
+	ChildRuns []RunbookChildRunAudit `json:"childRuns,omitempty"`
 }
 
 type RunbookDataLineage struct {
-	FromStepID string   `json:"fromStepId"`
-	ToStepID   string   `json:"toStepId"`
-	Refs       []string `json:"refs"`
+	Origin       string                  `json:"origin"`
+	FromStepID   string                  `json:"fromStepId,omitempty"`
+	FromSequence int64                   `json:"fromSequence,omitempty"`
+	ToStepID     string                  `json:"toStepId"`
+	ToSequence   int64                   `json:"toSequence"`
+	Ref          string                  `json:"ref"`
+	Availability RunbookDataAvailability `json:"availability"`
 }
 
 type RunbookExecutionAudit struct {
@@ -150,6 +160,9 @@ type RunbookExecutionAudit struct {
 	Trace               *RunbookExecutionTrace      `json:"trace"`
 	Nodes               []RunbookNodeExecutionAudit `json:"nodes"`
 	Lineage             []RunbookDataLineage        `json:"lineage,omitempty"`
+	UnassignedTurns     []RunbookTurnAudit          `json:"unassignedTurns,omitempty"`
+	UnassignedActions   []RunbookActionAudit        `json:"unassignedActions,omitempty"`
+	UnassignedApprovals []RunbookApprovalAudit      `json:"unassignedApprovals,omitempty"`
 	UnassignedArtifacts []RunbookArtifactAudit      `json:"unassignedArtifacts,omitempty"`
 	UnassignedChildren  []RunbookChildRunAudit      `json:"unassignedChildren,omitempty"`
 }
@@ -214,7 +227,7 @@ func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, run
 
 	result := &RunbookExecutionAudit{
 		Run: projectRunbookAuditRun(run, activationID), Runbook: detail, Trace: trace,
-		Nodes: buildRunbookNodeAudits(detail.Definition, trace), Lineage: buildRunbookLineage(detail.Definition),
+		Nodes: buildRunbookNodeAudits(detail.Definition, trace), Lineage: buildRunbookLineage(trace),
 	}
 	attachRunbookTurns(result, turns)
 	attachRunbookActions(result, actions, approvals)
@@ -262,48 +275,47 @@ func buildRunbookNodeAudits(definition *runbook.Definition, trace *RunbookExecut
 		if !ok {
 			continue
 		}
-		result[index].Visits = append(result[index].Visits, visit)
+		result[index].Visits = append(result[index].Visits, RunbookVisitExecutionAudit{Trace: visit})
 		result[index].VisitCount++
 		result[index].Status = visit.Status
 	}
 	return result
 }
 
-func buildRunbookLineage(definition *runbook.Definition) []RunbookDataLineage {
-	ids := make([]string, 0, len(definition.Steps))
-	for id := range definition.Steps {
-		ids = append(ids, id)
+func buildRunbookLineage(trace *RunbookExecutionTrace) []RunbookDataLineage {
+	if trace == nil {
+		return nil
 	}
-	sort.Strings(ids)
 	result := make([]RunbookDataLineage, 0)
-	for _, from := range ids {
-		outputs := runbookStepOutputRefs(from, definition.Steps[from])
-		if len(outputs) == 0 {
-			continue
-		}
-		for _, to := range ids {
-			if from == to {
-				continue
+	for index, consumer := range trace.Entries {
+		for _, input := range consumer.Inputs {
+			flow := RunbookDataLineage{
+				Origin: "run_input", ToStepID: consumer.StepID, ToSequence: consumer.Sequence,
+				Ref: input.Ref, Availability: input.Availability,
 			}
-			refs := matchingRunbookLineageRefs(outputs, runbookStepInputRefs(definition.Steps[to]))
-			if len(refs) > 0 {
-				result = append(result, RunbookDataLineage{FromStepID: from, ToStepID: to, Refs: refs})
+			for producerIndex := index - 1; producerIndex >= 0; producerIndex-- {
+				producer := trace.Entries[producerIndex]
+				matched := false
+				for _, output := range producer.Outputs {
+					if output.Availability != RunbookDataAvailable {
+						continue
+					}
+					if input.Ref == output.Ref || strings.HasPrefix(input.Ref, strings.TrimRight(output.Ref, "/")+"/") {
+						flow.Origin = "node"
+						flow.FromStepID = producer.StepID
+						flow.FromSequence = producer.Sequence
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
 			}
+			result = append(result, flow)
 		}
 	}
 	return result
-}
-
-func matchingRunbookLineageRefs(outputs, inputs []string) []string {
-	refs := make([]string, 0)
-	for _, output := range outputs {
-		for _, input := range inputs {
-			if input == output || strings.HasPrefix(input, strings.TrimRight(output, "/")+"/") {
-				refs = append(refs, input)
-			}
-		}
-	}
-	return uniqueSortedTraceRefs(refs)
 }
 
 func (s *RunbookExecutionAuditService) listTurns(ctx context.Context, scope Scope, runID string) ([]*AgentTurn, error) {
@@ -399,98 +411,76 @@ func (s *RunbookExecutionAuditService) listRequests(ctx context.Context, scope S
 }
 
 func attachRunbookTurns(result *RunbookExecutionAudit, turns []*AgentTurn) {
-	byTurn := make(map[string]RunbookTurnAudit, len(turns))
 	for _, turn := range turns {
 		if turn == nil {
 			continue
 		}
-		byTurn[turn.ID] = RunbookTurnAudit{
+		value := RunbookTurnAudit{
 			ID: turn.ID, Sequence: turn.Sequence, Status: turn.Status, OutputSummary: turn.OutputSummary,
 			Error: turn.Error, Usage: turn.Usage, CreatedAt: turn.CreatedAt, StartedAt: turn.StartedAt, CompletedAt: turn.CompletedAt,
 		}
-	}
-	for index := range result.Nodes {
-		seen := map[string]struct{}{}
-		for _, visit := range result.Nodes[index].Visits {
-			turn, ok := byTurn[visit.TurnID]
-			if !ok {
-				continue
+		matched := false
+		for nodeIndex := range result.Nodes {
+			for visitIndex := range result.Nodes[nodeIndex].Visits {
+				visit := &result.Nodes[nodeIndex].Visits[visitIndex]
+				if visit.Trace.TurnID == turn.ID {
+					visit.Turns = append(visit.Turns, value)
+					matched = true
+				}
 			}
-			if _, exists := seen[turn.ID]; exists {
-				continue
-			}
-			seen[turn.ID] = struct{}{}
-			result.Nodes[index].Turns = append(result.Nodes[index].Turns, turn)
+		}
+		if !matched {
+			result.UnassignedTurns = append(result.UnassignedTurns, value)
 		}
 	}
 }
 
 func attachRunbookActions(result *RunbookExecutionAudit, actions []*ActionCall, approvals []*ApprovalCheckpoint) {
-	nodeByTurn := map[string]int{}
-	nodeByAction := map[string]int{}
-	for index := range result.Nodes {
-		for _, visit := range result.Nodes[index].Visits {
-			if visit.TurnID != "" {
-				nodeByTurn[visit.TurnID] = index
-			}
-			if visit.ActionCallID != "" {
-				nodeByAction[visit.ActionCallID] = index
-			}
-		}
-	}
+	visitByTurn, visitByAction := runbookAuditVisitIndexes(result)
 	for _, call := range actions {
 		if call == nil {
 			continue
 		}
-		index, ok := nodeByAction[call.ID]
+		visit, ok := visitByAction[call.ID]
 		if !ok {
-			index, ok = nodeByTurn[call.TurnID]
+			visit, ok = visitByTurn[call.TurnID]
 		}
 		if !ok {
+			result.UnassignedActions = append(result.UnassignedActions, projectRunbookActionAudit(call))
 			continue
 		}
-		nodeByAction[call.ID] = index
-		result.Nodes[index].Actions = append(result.Nodes[index].Actions, projectRunbookActionAudit(call))
+		visitByAction[call.ID] = visit
+		entry := runbookAuditVisit(result, visit)
+		entry.Actions = append(entry.Actions, projectRunbookActionAudit(call))
 	}
 	for _, approval := range approvals {
 		if approval == nil {
 			continue
 		}
-		index, ok := nodeByAction[approval.ActionCallID]
+		visit, ok := visitByAction[approval.ActionCallID]
 		if !ok {
+			result.UnassignedApprovals = append(result.UnassignedApprovals, projectRunbookApprovalAudit(approval))
 			continue
 		}
-		result.Nodes[index].Approvals = append(result.Nodes[index].Approvals, projectRunbookApprovalAudit(approval))
+		entry := runbookAuditVisit(result, visit)
+		entry.Approvals = append(entry.Approvals, projectRunbookApprovalAudit(approval))
 	}
 }
 
 func attachRunbookArtifacts(result *RunbookExecutionAudit, artifacts []*Artifact) {
-	nodeByTurn := map[string]int{}
-	nodeByAction := map[string]int{}
-	for index := range result.Nodes {
-		for _, visit := range result.Nodes[index].Visits {
-			if visit.TurnID != "" {
-				nodeByTurn[visit.TurnID] = index
-			}
-			if visit.ActionCallID != "" {
-				nodeByAction[visit.ActionCallID] = index
-			}
-		}
-		for _, action := range result.Nodes[index].Actions {
-			nodeByAction[action.ID] = index
-		}
-	}
+	visitByTurn, visitByAction := runbookAuditVisitIndexes(result)
 	for _, artifact := range artifacts {
 		if artifact == nil {
 			continue
 		}
 		value := projectRunbookArtifactAudit(artifact)
-		index, ok := nodeByAction[artifact.Provenance.ActionID]
+		visit, ok := visitByAction[artifact.Provenance.ActionID]
 		if !ok {
-			index, ok = nodeByTurn[artifact.Provenance.TurnID]
+			visit, ok = visitByTurn[artifact.Provenance.TurnID]
 		}
 		if ok {
-			result.Nodes[index].Artifacts = append(result.Nodes[index].Artifacts, value)
+			entry := runbookAuditVisit(result, visit)
+			entry.Artifacts = append(entry.Artifacts, value)
 		} else {
 			result.UnassignedArtifacts = append(result.UnassignedArtifacts, value)
 		}
@@ -498,7 +488,6 @@ func attachRunbookArtifacts(result *RunbookExecutionAudit, artifacts []*Artifact
 }
 
 func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, requests []*AgentRequest, turns []*AgentTurn, parent *AgentRun) {
-	nodeByStep := runbookAuditNodeIndex(result)
 	stepByChild := map[string]string{}
 	for _, child := range children {
 		if child == nil {
@@ -532,20 +521,68 @@ func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, 
 			continue
 		}
 		value := projectRunbookChildAudit(child, stepByChild[child.ID])
-		if index, ok := nodeByStep[value.StepID]; ok {
-			result.Nodes[index].ChildRuns = append(result.Nodes[index].ChildRuns, value)
+		if visit, ok := runbookAuditVisitForChild(result, value.StepID, child.CreatedAt); ok {
+			entry := runbookAuditVisit(result, visit)
+			entry.ChildRuns = append(entry.ChildRuns, value)
 		} else {
 			result.UnassignedChildren = append(result.UnassignedChildren, value)
 		}
 	}
 }
 
-func runbookAuditNodeIndex(result *RunbookExecutionAudit) map[string]int {
-	values := make(map[string]int, len(result.Nodes))
-	for index := range result.Nodes {
-		values[result.Nodes[index].StepID] = index
+type runbookAuditVisitRef struct {
+	node  int
+	visit int
+}
+
+func runbookAuditVisit(result *RunbookExecutionAudit, ref runbookAuditVisitRef) *RunbookVisitExecutionAudit {
+	return &result.Nodes[ref.node].Visits[ref.visit]
+}
+
+func runbookAuditVisitIndexes(result *RunbookExecutionAudit) (map[string]runbookAuditVisitRef, map[string]runbookAuditVisitRef) {
+	byTurn := map[string]runbookAuditVisitRef{}
+	byAction := map[string]runbookAuditVisitRef{}
+	for nodeIndex := range result.Nodes {
+		for visitIndex := range result.Nodes[nodeIndex].Visits {
+			visit := result.Nodes[nodeIndex].Visits[visitIndex].Trace
+			ref := runbookAuditVisitRef{node: nodeIndex, visit: visitIndex}
+			// A Turn may execute several deterministic nodes. Its proposed action
+			// belongs to the final visit reached before the Turn yielded.
+			if visit.TurnID != "" {
+				if current, exists := byTurn[visit.TurnID]; !exists || runbookAuditVisit(result, current).Trace.Sequence < visit.Sequence {
+					byTurn[visit.TurnID] = ref
+				}
+			}
+			if visit.ActionCallID != "" {
+				byAction[visit.ActionCallID] = ref
+			}
+			for _, action := range result.Nodes[nodeIndex].Visits[visitIndex].Actions {
+				byAction[action.ID] = ref
+			}
+		}
 	}
-	return values
+	return byTurn, byAction
+}
+
+func runbookAuditVisitForChild(result *RunbookExecutionAudit, stepID string, createdAt time.Time) (runbookAuditVisitRef, bool) {
+	var selected runbookAuditVisitRef
+	found := false
+	for nodeIndex := range result.Nodes {
+		if result.Nodes[nodeIndex].StepID != stepID {
+			continue
+		}
+		for visitIndex := range result.Nodes[nodeIndex].Visits {
+			trace := result.Nodes[nodeIndex].Visits[visitIndex].Trace
+			if trace.StartedAt.After(createdAt) {
+				continue
+			}
+			if !found || runbookAuditVisit(result, selected).Trace.Sequence < trace.Sequence {
+				selected = runbookAuditVisitRef{node: nodeIndex, visit: visitIndex}
+				found = true
+			}
+		}
+	}
+	return selected, found
 }
 
 func projectRunbookActionAudit(call *ActionCall) RunbookActionAudit {
