@@ -269,6 +269,10 @@ type (
 	ObjectiveStatus                    = runtime.ObjectiveStatus
 	RunbookActivation                  = runtime.RunbookActivation
 	RunbookDetail                      = runtime.RunbookDetail
+	RunbookExecutionAudit              = runtime.RunbookExecutionAudit
+	RunbookExecutionAuditRun           = runtime.RunbookExecutionAuditRun
+	RunbookNodeExecutionAudit          = runtime.RunbookNodeExecutionAudit
+	RunbookDataLineage                 = runtime.RunbookDataLineage
 	RunbookActivationStatus            = runtime.RunbookActivationStatus
 	RunbookActivationFilter            = runtime.RunbookActivationFilter
 	CreateRunbookActivationRequest     = runtime.CreateRunbookActivationRequest
@@ -2082,6 +2086,7 @@ type Engine struct {
 	actions                       *runtime.ActionCoordinator
 	approvals                     *runtime.ApprovalCoordinator
 	artifacts                     *runtime.ArtifactCatalog
+	runbookAudits                 *runtime.RunbookExecutionAuditService
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
@@ -2396,6 +2401,11 @@ func WithStore(store runtime.KernelStore) Option {
 		}
 		if agentStore, ok := store.(kernelagent.Store); ok {
 			e.agents = kernelagent.NewRegistryWithStore(agentStore)
+		}
+		if auditStore, ok := store.(runtime.RunbookExecutionAuditStore); ok && e.agents != nil {
+			e.runbookAudits = runtime.NewRunbookExecutionAuditService(auditStore, e.agents)
+		} else {
+			e.runbookAudits = nil
 		}
 		if teamStore, ok := store.(kernelteam.Store); ok && e.agents != nil {
 			e.teams = kernelteam.NewRegistryWithStore(teamStore, e.agents)
@@ -3264,6 +3274,13 @@ func (e *Engine) GetRunbookActivation(ctx context.Context, scope runtime.Scope, 
 
 func (e *Engine) GetRunbookDetail(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookDetail, error) {
 	return runtime.ResolveRunbookDetail(ctx, e.store, e.agents, scope, activationID)
+}
+
+func (e *Engine) GetRunbookExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunbookExecutionAudit, error) {
+	if e.runbookAudits == nil {
+		return nil, errors.New("Runbook execution audit is unavailable")
+	}
+	return e.runbookAudits.Get(ctx, scope, runID)
 }
 
 func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
