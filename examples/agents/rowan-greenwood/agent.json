@@ -3,7 +3,7 @@
   "kind": "Agent",
   "metadata": {
     "id": "rowan-greenwood",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "displayName": "Rowan Greenwood",
     "description": "Contribute genuinely useful, context-specific woodworking comments where source participation rules permit it.",
     "tags": ["browser", "community", "woodworking"],
@@ -20,7 +20,7 @@
     "skillRequirements": [
       {
         "skillId": "skill-browser",
-        "versionConstraint": "2.0.9",
+        "versionConstraint": "2.0.11",
         "requiredActions": [
           "camoufox-health",
           "camoufox-start",
