@@ -528,7 +528,7 @@ func TestCompilerCanonicalizesUnambiguousRawRunbookValues(t *testing.T) {
 }
 
 func TestNormalizeGeneratedRunbookValuesCanonicalizesTransformTargets(t *testing.T) {
-	payload := []byte(`{"candidate":{"agents":[{"runbook":{"steps":{"extract":{"kind":"transform","transform":{"assignments":{"usernameRef":{"ref":"/results/snapshot/elements/0/ref"}},"next":"done"}}}}}]}}`)
+	payload := []byte(`{"candidate":{"agents":[{"runbook":{"steps":{"extract":{"kind":"transform","transform":{"assignments":{"usernameRef":{"ref":"/results/snapshot/elements/0/ref"},"/state/existing":{"literal":true},"ambiguous/target":{"literal":false}},"next":"done"}}}}}]}}`)
 
 	normalized := normalizeGeneratedRunbookValues(payload)
 	var document map[string]interface{}
@@ -543,6 +543,12 @@ func TestNormalizeGeneratedRunbookValuesCanonicalizesTransformTargets(t *testing
 	}
 	if _, ok := assignments["usernameRef"]; ok {
 		t.Fatalf("bare transform target survived normalization: %#v", assignments)
+	}
+	if _, ok := assignments["/state/existing"]; !ok {
+		t.Fatalf("valid JSON Pointer changed during normalization: %#v", assignments)
+	}
+	if _, ok := assignments["ambiguous/target"]; !ok {
+		t.Fatalf("ambiguous invalid target was guessed during normalization: %#v", assignments)
 	}
 }
 
