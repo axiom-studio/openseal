@@ -123,6 +123,9 @@ func (v *validator) validate() {
 		if err := trigger.Evidence.Validate(); err != nil {
 			v.add(path+".evidence", "trigger.evidence_invalid", "%v", err)
 		}
+		if err := trigger.Reporting.Validate(); err != nil {
+			v.add(path+".reporting", "trigger.reporting_invalid", "%v", err)
+		}
 		if strings.TrimSpace(trigger.ObjectiveID) == "" || len(trigger.ObjectiveID) > 160 {
 			v.add(path+".objectiveId", "trigger.objective_required", "Runbook trigger must belong to one Objective")
 		}

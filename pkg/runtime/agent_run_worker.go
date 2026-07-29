@@ -132,6 +132,7 @@ type AgentRunWorkerPool struct {
 	forks          *RunForkCoordinator
 	collaboration  *CollaborationService
 	requestInbox   *AgentRequestInboxReconciler
+	reportingStore ConversationStore
 	resolver       TurnRunnerResolver
 	logger         *zap.SugaredLogger
 	wake           chan struct{}
@@ -181,6 +182,9 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
 		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore)
+	}
+	if reportingStore, ok := store.(ConversationStore); ok {
+		pool.reportingStore = reportingStore
 	}
 	return pool, nil
 }
@@ -280,6 +284,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		if transitionErr != nil {
 			p.logger.Errorw("failed to persist runner resolution failure", "runId", run.ID, "error", transitionErr)
 		} else {
+			p.projectTerminalReporting(ctx, failed)
 			p.resolveCollaborationChild(ctx, failed)
 		}
 		return
@@ -352,6 +357,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			return
 		}
 		if current != nil && isTerminalAgentRunStatus(current.Status) {
+			p.projectTerminalReporting(ctx, current)
 			p.resolveForkChild(ctx, current)
 			p.resolveCollaborationChild(ctx, current)
 			return
@@ -783,9 +789,16 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	if err != nil {
 		p.logger.Errorw("failed to persist action materialization failure", "runId", run.ID, "error", err)
 	} else if isTerminalAgentRunStatus(failed.Status) {
+		p.projectTerminalReporting(ctx, failed)
 		p.resolveCollaborationChild(ctx, failed)
 	} else {
 		p.Wake()
+	}
+}
+
+func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
+	if err := projectTerminalRunReporting(ctx, p.reportingStore, run); err != nil {
+		p.logger.Warnw("failed to project terminal Run milestone", "runId", run.ID, "error", err)
 	}
 }
 
