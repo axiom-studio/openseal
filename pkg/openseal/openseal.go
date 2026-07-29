@@ -2772,13 +2772,15 @@ const (
 	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
 	OpenAICompatibleWorkforceThinkingDisabled = authoring.OpenAICompatibleThinkingDisabled
 
-	OpenAICompatibleWorkforceStructuredOutputDefault    = authoring.OpenAICompatibleStructuredOutputDefault
-	OpenAICompatibleWorkforceStructuredOutputJSONSchema = authoring.OpenAICompatibleStructuredOutputJSONSchema
+	OpenAICompatibleWorkforceStructuredOutputDefault = authoring.OpenAICompatibleStructuredOutputDefault
+	OpenAICompatibleWorkforceStructuredOutputTool    = authoring.OpenAICompatibleStructuredOutputTool
+	OpenAICompatibleWorkforceStructuredOutputJSON    = authoring.OpenAICompatibleStructuredOutputJSON
 )
 
 // NewOpenAICompatibleWorkforceGeneratorWithOptions creates the portable
-// adapter with explicit provider capabilities. The default constructor remains
-// capability-neutral and emits no vendor-specific transport fields.
+// adapter with explicit provider capabilities. The default constructor uses
+// the portable synthetic-tool contract; JSON-object mode is an explicit
+// fallback for gateways that cannot forward tool calls reliably.
 func NewOpenAICompatibleWorkforceGeneratorWithOptions(endpoint, apiKey, model string, client *http.Client, options OpenAICompatibleWorkforceGeneratorOptions) (authoring.Generator, error) {
 	return authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, client, options)
 }

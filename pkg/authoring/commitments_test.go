@@ -164,7 +164,7 @@ func TestCommitmentExtractionDoesNotClaimOpenEndedSemanticEquivalence(t *testing
 
 func TestGenerationResponseRejectsUnknownCommitmentFields(t *testing.T) {
 	_, err := decodeGenerationResponse([]byte(`{"candidate":{"agents":[]},"commitments":{"agentCount":1,"semanticIntent":"trust me"}}`))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+	if err == nil || !strings.Contains(err.Error(), "semanticIntent") || !strings.Contains(err.Error(), "additional properties") {
 		t.Fatalf("unknown commitment field error = %v", err)
 	}
 }

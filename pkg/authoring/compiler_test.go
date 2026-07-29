@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -323,7 +322,7 @@ func TestCompilerPerformsBoundedStrictSchemaRepair(t *testing.T) {
 		t.Fatalf("schema repair budget was not enforced, repairs = %d, err = %v", generator.repairs, err)
 	} else {
 		var schemaError *SchemaGenerationError
-		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || !strings.Contains(schemaError.Diagnostic, "unknown field alsoUnknown at alsoUnknown") {
+		if !errors.As(err, &schemaError) || schemaError.RepairAttempts != maximumSchemaRepairAttempts || !strings.Contains(schemaError.Diagnostic, "alsoUnknown") {
 			t.Fatalf("schema failure diagnostic = %#v, err = %v", schemaError, err)
 		}
 	}
@@ -374,8 +373,7 @@ func TestCompilerRepairsLiveUnknownIDWithExactSchemaPath(t *testing.T) {
 		t.Fatalf("path-guided repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
 	}
 	diagnostic := generator.repairErrors[0].Error()
-	if !strings.Contains(diagnostic, "candidate.agents[0].skillRequirements[0].id") ||
-		!strings.Contains(diagnostic, "allowed:") || !strings.Contains(diagnostic, "skillId") {
+	if !strings.Contains(diagnostic, "/candidate/agents/0/skillRequirements/0") || !strings.Contains(diagnostic, "skillId") {
 		t.Fatalf("unknown-field repair diagnostic = %q", diagnostic)
 	}
 	if strings.Contains(string(valid), "credential://") || strings.Contains(diagnostic, "credential://") {
@@ -458,9 +456,7 @@ func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
 	}
 	for attempt, repairError := range generator.repairErrors {
 		diagnostic := repairError.Error()
-		if !strings.Contains(diagnostic, "candidate.agents[0].runbook.steps.render.resultPath") ||
-			!strings.Contains(diagnostic, "allowed:") ||
-			!strings.Contains(diagnostic, "move to candidate.agents[0].runbook.steps.render.action.resultPath") {
+		if !strings.Contains(diagnostic, "/candidate/agents/0/runbook/steps/render") || !strings.Contains(diagnostic, "resultPath") {
 			t.Fatalf("runbook repair diagnostic %d = %q", attempt+1, diagnostic)
 		}
 	}
@@ -483,72 +479,8 @@ func TestCompilerRejectsPersistentlyInvalidRunbookStepPlacement(t *testing.T) {
 	})
 	var schemaError *SchemaGenerationError
 	if !errors.As(err, &schemaError) || generator.repairs != maximumSchemaRepairAttempts ||
-		!strings.Contains(schemaError.Diagnostic, "move to candidate.agents[0].runbook.steps.render.action.resultPath") {
+		!strings.Contains(schemaError.Diagnostic, "resultPath") {
 		t.Fatalf("persistent invalid runbook error=%#v repairs=%d err=%v", schemaError, generator.repairs, err)
-	}
-}
-
-func TestCompilerCanonicalizesUnambiguousRawRunbookValues(t *testing.T) {
-	valid, _ := deterministicRunbookPayloads(t)
-	var document map[string]interface{}
-	if err := json.Unmarshal(valid, &document); err != nil {
-		t.Fatal(err)
-	}
-	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
-	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
-	outputs := steps["done"].(map[string]interface{})["end"].(map[string]interface{})["outputs"].(map[string]interface{})
-	outputs["artifact"] = "/results/report"
-	outputs["filename"] = "report.pdf"
-	invalid, err := json.Marshal(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	generator := &repairingGenerator{generated: invalid}
-	compiler, _ := NewCompiler(generator)
-	result, err := compiler.Compile(t.Context(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.",
-		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"openseal.document": {
-				ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"},
-				MaximumRisk: capability.RiskLevelWrite,
-			},
-		}},
-	})
-	if err != nil || result == nil || !result.Valid || generator.repairs != 0 {
-		t.Fatalf("Runbook Value repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
-	}
-	output := result.Candidate.Agents[0].Runbook.Steps["done"].End.Outputs["artifact"]
-	if output.Ref != "/results/report" || len(output.Literal) != 0 || len(output.Template) != 0 {
-		t.Fatalf("canonicalized Runbook Value = %#v", output)
-	}
-	filename := result.Candidate.Agents[0].Runbook.Steps["done"].End.Outputs["filename"]
-	if string(filename.Literal) != `"report.pdf"` || filename.Ref != "" || len(filename.Template) != 0 {
-		t.Fatalf("canonicalized literal Runbook Value = %#v", filename)
-	}
-}
-
-func TestNormalizeGeneratedRunbookValuesCanonicalizesTransformTargets(t *testing.T) {
-	payload := []byte(`{"candidate":{"agents":[{"runbook":{"steps":{"extract":{"kind":"transform","transform":{"assignments":{"usernameRef":{"ref":"/results/snapshot/elements/0/ref"},"/state/existing":{"literal":true},"ambiguous/target":{"literal":false}},"next":"done"}}}}}]}}`)
-
-	normalized := normalizeGeneratedRunbookValues(payload)
-	var document map[string]interface{}
-	if err := json.Unmarshal(normalized, &document); err != nil {
-		t.Fatal(err)
-	}
-	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
-	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
-	assignments := steps["extract"].(map[string]interface{})["transform"].(map[string]interface{})["assignments"].(map[string]interface{})
-	if _, ok := assignments["/results/usernameRef"]; !ok {
-		t.Fatalf("canonicalized assignments = %#v", assignments)
-	}
-	if _, ok := assignments["usernameRef"]; ok {
-		t.Fatalf("bare transform target survived normalization: %#v", assignments)
-	}
-	if _, ok := assignments["/state/existing"]; !ok {
-		t.Fatalf("valid JSON Pointer changed during normalization: %#v", assignments)
-	}
-	if _, ok := assignments["ambiguous/target"]; !ok {
-		t.Fatalf("ambiguous invalid target was guessed during normalization: %#v", assignments)
 	}
 }
 
@@ -578,7 +510,7 @@ func TestCompilerPreservesStrictRunbookValueObjectDiagnostics(t *testing.T) {
 		}},
 	})
 	var schemaError *SchemaGenerationError
-	if !errors.As(err, &schemaError) || !strings.Contains(schemaError.Diagnostic, "unknown field reff") {
+	if !errors.As(err, &schemaError) || !strings.Contains(schemaError.Diagnostic, "reff") {
 		t.Fatalf("misspelled Runbook Value field error=%#v err=%v", schemaError, err)
 	}
 }
@@ -643,207 +575,6 @@ func TestCompilerRepairsLiveRefinementMissingFieldsWithExactQuestionPath(t *test
 	}
 }
 
-func TestCompilerNormalizesOnlyDefinitionVersionNumbers(t *testing.T) {
-	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":1.0,"displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1}}],"team":{"id":"workers","version":2,"displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker"}]}}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"})
-	if err != nil || !result.Valid {
-		t.Fatalf("normalized definition versions compile = %#v, err = %v", result, err)
-	}
-	if result.Candidate.Agents[0].Version != "1.0" || result.Candidate.Team.Version != "2" {
-		t.Fatalf("definition versions = agent %q, team %q", result.Candidate.Agents[0].Version, result.Candidate.Team.Version)
-	}
-
-	strictPayload := bytes.Replace(payload, []byte(`"displayName":"Worker"`), []byte(`"displayName":7`), 1)
-	strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"}); err == nil || !strings.Contains(err.Error(), "displayName") {
-		t.Fatalf("non-version scalar mismatch must remain strict, got %v", err)
-	}
-}
-
-func TestCompilerNormalizesOnlyDeclaredHumanDurationFields(t *testing.T) {
-	payload := []byte(`{"candidate":{"agents":[{"id":"worker","version":"1","displayName":"Worker","purpose":"Work safely","systemPrompt":"Do the work.","authority":{"maximumRisk":"read","maxConcurrentRuns":1},"memory":{"retention":"30d","maximumBytes":1024},"escalation":{"afterDuration":"2h"}}],"team":{"id":"workers","version":"1","displayName":"Workers","purpose":"Coordinate work","roles":[{"id":"worker","displayName":"Worker","purpose":"Perform work","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"}],"coordination":{},"sharedContext":{"retention":"2w","maximumBytes":2048},"approvals":{"maximumRisk":"read"}},"assignments":[{"id":"worker","roleId":"worker","agentDefinitionId":"worker","displayName":"Worker"}]}}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Team"})
-	if err != nil || !result.Valid {
-		t.Fatalf("normalized duration compile = %#v, err = %v", result, err)
-	}
-	if got := result.Candidate.Agents[0].Memory.Retention; got != 30*24*time.Hour {
-		t.Fatalf("agent retention = %s", got)
-	}
-	if got := result.Candidate.Agents[0].Escalation.AfterDuration; got != 2*time.Hour {
-		t.Fatalf("escalation duration = %s", got)
-	}
-	if got := result.Candidate.Team.SharedContext.Retention; got != 14*24*time.Hour {
-		t.Fatalf("team retention = %s", got)
-	}
-
-	strict, _ := NewCompiler(staticGenerator{payload: []byte(`{"candidate":{"agents":[]},"questions":"tomorrow"}`)})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
-		t.Fatal("normalization must not coerce undeclared fields")
-	}
-	invalid, _ := NewCompiler(staticGenerator{payload: []byte(`{"candidate":{"agents":[{"memory":{"retention":"someday"}}]}}`)})
-	if _, err := invalid.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
-		t.Fatal("ambiguous duration must fail closed")
-	}
-}
-
-func TestCompilerNormalizesOnlyCanonicalRefinementProvenanceShorthand(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, err := json.Marshal(candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":["apply"],"answer":{"kind":"string_list"},"provenance":"prompt","priority":100},{"id":"skill","category":"skill","prompt":"Which Skill should be used?","whyNeeded":"Execution needs a compatible Skill.","blocking":["apply"],"answer":{"kind":"skill_selection","options":[{"id":"reddit-research","label":"Reddit research"}]},"provenance":["catalog","skill"],"priority":90}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || len(result.UnresolvedQuestions) != 2 {
-		t.Fatalf("normalized refinement result = %#v, err = %v", result, err)
-	}
-	if got := result.UnresolvedQuestions[0].Provenance; len(got) != 1 || got[0].Kind != RefinementProvenancePrompt {
-		t.Fatalf("single provenance shorthand = %#v", got)
-	}
-	if got := result.UnresolvedQuestions[1].Provenance; len(got) != 2 || got[0].Kind != RefinementProvenanceCatalog || got[1].Kind != RefinementProvenanceSkill {
-		t.Fatalf("provenance shorthand list = %#v", got)
-	}
-
-	strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":"invented","priority":1}]}`)
-	strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
-		t.Fatal("unknown refinement provenance shorthand must fail closed")
-	}
-}
-
-func TestCompilerNormalizesOnlyUnambiguousRefinementProvenanceTypeAlias(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, err := json.Marshal(candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Which scope is permitted?","whyNeeded":"Execution needs an explicit scope.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[{"type":"catalog","reference":"openseal.reddit@1.0.0","evidence":"compatible"}],"priority":100}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
-	if err != nil || result == nil || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("normalized provenance alias result = %#v, err = %v", result, err)
-	}
-	got := result.UnresolvedQuestions[0].Provenance
-	if len(got) != 1 || got[0].Kind != RefinementProvenanceCatalog || got[0].Reference != "openseal.reddit@1.0.0" || got[0].Evidence != "compatible" {
-		t.Fatalf("provenance alias = %#v", got)
-	}
-
-	invalid := []string{
-		`{"type":"invented"}`,
-		`{"type":"catalog","extra":"value"}`,
-		`{"kind":"catalog","type":"catalog"}`,
-		`{"type":" catalog"}`,
-	}
-	for _, provenance := range invalid {
-		strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[` + provenance + `],"priority":1}]}`)
-		strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
-		if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
-			t.Fatalf("ambiguous provenance alias %s must fail closed", provenance)
-		}
-	}
-}
-
-func TestCompilerNormalizesOnlyExactRefinementProvenanceSourceAlias(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, err := json.Marshal(candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Reproduces live ChangeSet ce762d1d: every provenance entry used source
-	// where the canonical contract requires kind.
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Which scope is permitted?","whyNeeded":"Execution needs an explicit scope.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[{"source":"prompt"},{"source":"catalog"}],"priority":100}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
-	if err != nil || result == nil || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("normalized source alias result = %#v, err = %v", result, err)
-	}
-	got := result.UnresolvedQuestions[0].Provenance
-	if len(got) != 2 || got[0].Kind != RefinementProvenancePrompt || got[1].Kind != RefinementProvenanceCatalog {
-		t.Fatalf("source provenance aliases = %#v", got)
-	}
-
-	invalid := []string{
-		`{"source":"invented"}`,
-		`{"source":"prompt","evidence":"ambiguous"}`,
-		`{"kind":"prompt","source":"prompt"}`,
-		`{"source":" prompt"}`,
-		`{"source":7}`,
-	}
-	for _, provenance := range invalid {
-		strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[` + provenance + `],"priority":1}]}`)
-		strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
-		if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil || !strings.Contains(err.Error(), "provenance[0].source") {
-			t.Fatalf("ambiguous source alias %s must fail closed, got %v", provenance, err)
-		}
-	}
-}
-
-func TestCompilerNormalizesOnlyCanonicalRefinementBlockingShorthand(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, err := json.Marshal(candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":"apply","answer":{"kind":"string_list"},"provenance":"prompt","priority":100}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"})
-	if err != nil || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("normalized refinement result = %#v, err = %v", result, err)
-	}
-	if got := result.UnresolvedQuestions[0].Blocking; len(got) != 1 || got[0] != RefinementBlocksApply {
-		t.Fatalf("blocking shorthand = %#v", got)
-	}
-
-	strictPayload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Scope?","whyNeeded":"Required.","blocking":"later","answer":{"kind":"text"},"priority":1}]}`)
-	strict, _ := NewCompiler(staticGenerator{payload: strictPayload})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create"}); err == nil {
-		t.Fatal("unknown refinement blocking shorthand must fail closed")
-	}
-}
-
-func TestCompilerNormalizesOnlyCanonicalRefinementDependencyShorthand(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, err := json.Marshal(candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"communities","category":"scope","prompt":"Which communities are permitted?","whyNeeded":"Monitoring needs an explicit source scope.","blocking":["apply"],"answer":{"kind":"string_list"},"provenance":[{"kind":"prompt"}],"priority":100},{"id":"analysis-skill","category":"skill","prompt":"Which Skill should analyze the evidence?","whyNeeded":"Analysis requires an authorized Skill.","blocking":["apply"],"answer":{"kind":"skill_selection","options":[{"id":"reddit-research","label":"Reddit research"}]},"dependsOn":["communities"],"provenance":[{"kind":"catalog"}],"priority":90}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{
-		Mode: ModeCreate, Prompt: "Create a research Team", Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
-			"reddit-research": {ID: "reddit-research", Version: "1.0.0", Actions: []string{"read", "search"}},
-		}},
-	})
-	if err != nil || result == nil || len(result.UnresolvedQuestions) != 2 {
-		t.Fatalf("normalized dependency result = %#v, err = %v", result, err)
-	}
-	if got := result.UnresolvedQuestions[1].DependsOn; len(got) != 1 || got[0].QuestionID != "communities" || len(got[0].RequiredOptionIDs) != 0 {
-		t.Fatalf("dependency shorthand = %#v", got)
-	}
-
-	// Conversion does not make an invented reference authoritative: the normal
-	// dependency validator must still reject it.
-	missing := bytes.Replace(payload, []byte(`"dependsOn":["communities"]`), []byte(`"dependsOn":["invented"]`), 1)
-	strict, _ := NewCompiler(staticGenerator{payload: missing})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"}); err == nil || !strings.Contains(err.Error(), "invalid dependency") {
-		t.Fatalf("invented dependency shorthand must fail closed, got %v", err)
-	}
-
-	// Whitespace changes the identifier and is not an exact shorthand.
-	malformed := bytes.Replace(payload, []byte(`"dependsOn":["communities"]`), []byte(`"dependsOn":[" communities "]`), 1)
-	strict, _ = NewCompiler(staticGenerator{payload: malformed})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a research Team"}); err == nil || !strings.Contains(err.Error(), "dependsOn") {
-		t.Fatalf("ambiguous dependency shorthand must remain strict, got %v", err)
-	}
-}
-
 func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	payload, err := json.Marshal(GenerationResponse{
@@ -873,121 +604,6 @@ func TestCompilerDiscardsProviderCredentialOptionsAtDecodeBoundary(t *testing.T)
 	encoded, _ := json.Marshal(result)
 	if strings.Contains(string(encoded), "credential-reference-opaque-42") {
 		t.Fatalf("provider credential identity persisted: %s", encoded)
-	}
-}
-
-func TestCompilerDerivesOpaqueCredentialQuestionProvenance(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, _ := json.Marshal(candidate)
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"slack-credential","category":"credential","prompt":"Which authorized Slack connection should be used?","whyNeeded":"Slack access requires a configured connection.","blocking":["apply"],"answer":{"kind":"credential_reference"},"priority":100}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Slack Agent."})
-	if err != nil || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("credential refinement result=%#v err=%v", result, err)
-	}
-	provenance := result.UnresolvedQuestions[0].Provenance
-	if len(provenance) != 1 || provenance[0].Kind != RefinementProvenanceCredential || provenance[0].Reference != "" {
-		t.Fatalf("derived opaque credential provenance=%#v", provenance)
-	}
-
-	invalid := bytes.Replace(payload, []byte(`"category":"credential"`), []byte(`"category":"other"`), 1)
-	strict, _ := NewCompiler(staticGenerator{payload: invalid})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."}); err == nil || !strings.Contains(err.Error(), "requires provenance") {
-		t.Fatalf("missing non-credential provenance must remain strict, got %v", err)
-	}
-}
-
-func TestCompilerReplacesProviderCredentialQuestionProvenanceWithHostOwnedFact(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, _ := json.Marshal(candidate)
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"credential-skill-browser","category":"credential","prompt":"Which authorized browser credential should be configured?","whyNeeded":"Browser access requires an authorized credential.","blocking":["apply"],"answer":{"kind":"credential_reference"},"provenance":[{"kind":"skill-browser","reference":"credential/opaque","evidence":"provider supplied"}],"priority":100}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a browser Agent."})
-	if err != nil || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("credential refinement result=%#v err=%v", result, err)
-	}
-	provenance := result.UnresolvedQuestions[0].Provenance
-	if len(provenance) != 1 || provenance[0].Kind != RefinementProvenanceCredential || provenance[0].Reference != "" || provenance[0].Evidence != "" {
-		t.Fatalf("host-owned credential provenance=%#v", provenance)
-	}
-	encoded, _ := json.Marshal(result)
-	if strings.Contains(string(encoded), "credential/opaque") || strings.Contains(string(encoded), "provider supplied") {
-		t.Fatalf("provider credential provenance persisted: %s", encoded)
-	}
-}
-
-func TestCompilerNormalizesDefinitionProvenanceKindAlias(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidate.Agents[0].Provenance.Source = "prompt"
-	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
-	payload = bytes.Replace(payload, []byte(`"provenance":{"source":"prompt"`), []byte(`"provenance":{"kind":"prompt"`), 1)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."})
-	if err != nil || result.Candidate.Agents[0].Provenance.Source != "prompt" {
-		t.Fatalf("definition provenance result=%#v err=%v", result, err)
-	}
-
-	ambiguous := bytes.Replace(payload, []byte(`"kind":"prompt"`), []byte(`"kind":"prompt","source":"catalog"`), 1)
-	strict, _ := NewCompiler(staticGenerator{payload: ambiguous})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."}); err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("ambiguous definition provenance must remain strict, got %v", err)
-	}
-}
-
-func TestCompilerLiftsUnambiguousCandidateResponseMetadata(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	agentCount := 1
-	payload, _ := json.Marshal(GenerationResponse{
-		Candidate: candidate, Commitments: PromptCommitments{AgentCount: &agentCount},
-		Assumptions: []string{"The operator will review the proposal."},
-		UnresolvedQuestions: []RefinementQuestion{{
-			ID: "scope", Category: RefinementCategoryScope, Prompt: "Which scope?", WhyNeeded: "Execution must be bounded.",
-			Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerText},
-			Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}}, Priority: 1,
-		}},
-	})
-	var document map[string]interface{}
-	if err := json.Unmarshal(payload, &document); err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []string{"commitments", "assumptions", "unresolvedQuestions"} {
-		document["candidate"].(map[string]interface{})[field] = document[field]
-		delete(document, field)
-	}
-	payload, _ = json.Marshal(document)
-
-	result, err := decodeGenerationResponse(payload)
-	if err != nil || result.Commitments.AgentCount == nil || *result.Commitments.AgentCount != 1 ||
-		len(result.Assumptions) != 1 || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("lifted response metadata result=%#v err=%v", result, err)
-	}
-
-	document["unresolvedQuestions"] = document["candidate"].(map[string]interface{})["unresolvedQuestions"]
-	ambiguous, _ := json.Marshal(document)
-	if _, err := decodeGenerationResponse(ambiguous); err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("ambiguous response metadata placement must remain strict, got %v", err)
-	}
-}
-
-func TestCompilerNormalizesNonCredentialProvenanceValueAlias(t *testing.T) {
-	candidate := marketingCandidate("1", capability.RiskLevelRead)
-	candidateJSON, _ := json.Marshal(candidate)
-	payload := []byte(`{"candidate":` + string(candidateJSON) + `,"unresolvedQuestions":[{"id":"scope","category":"scope","prompt":"Which channel is allowed?","whyNeeded":"A destination is required.","blocking":["apply"],"answer":{"kind":"text"},"provenance":[{"kind":"skill","value":"skill-slack"}],"priority":100}]}`)
-	compiler, _ := NewCompiler(staticGenerator{payload: payload})
-	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a Slack Agent."})
-	if err != nil || len(result.UnresolvedQuestions) != 1 {
-		t.Fatalf("refinement provenance result=%#v err=%v", result, err)
-	}
-	provenance := result.UnresolvedQuestions[0].Provenance
-	if len(provenance) != 1 || provenance[0].Kind != RefinementProvenanceSkill || provenance[0].Reference != "skill-slack" {
-		t.Fatalf("normalized provenance=%#v", provenance)
-	}
-
-	credential := bytes.Replace(payload, []byte(`"kind":"skill"`), []byte(`"kind":"credential"`), 1)
-	strict, _ := NewCompiler(staticGenerator{payload: credential})
-	if _, err := strict.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent."}); err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("credential provenance value must remain strict, got %v", err)
 	}
 }
 

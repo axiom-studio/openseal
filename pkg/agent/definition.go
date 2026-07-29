@@ -93,8 +93,8 @@ type AgentDefinition struct {
 	Runbook             *runbook.Definition    `json:"runbook,omitempty"`
 	Amendments          AmendmentPolicy        `json:"amendments,omitempty"`
 	Provenance          DefinitionProvenance   `json:"provenance,omitempty"`
-	Digest              string                 `json:"digest"`
-	CreatedAt           time.Time              `json:"createdAt"`
+	Digest              string                 `json:"digest,omitempty"`
+	CreatedAt           time.Time              `json:"createdAt,omitempty"`
 }
 
 func (d *AgentDefinition) Validate() error {
