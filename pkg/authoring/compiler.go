@@ -144,6 +144,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		materializeDefaultAgentSkillAuthority(&generated.Candidate)
 		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
+		normalizeUnboundAmendmentPolicies(&generated.Candidate)
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 		applyActivationCommitment(&generated.Candidate, commitments)
 		deferInactiveCredentialRefinements(&generated)
@@ -219,6 +220,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		Candidate: generated.Candidate, Commitments: commitments, Assumptions: assumptions,
 		UnresolvedQuestions: append([]RefinementQuestion(nil), generated.UnresolvedQuestions...),
 	}
+	normalizeUnboundAmendmentPolicies(&result.Candidate)
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
 	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, request)...)
 	result.Validation = append(result.Validation, materializationIssues...)
