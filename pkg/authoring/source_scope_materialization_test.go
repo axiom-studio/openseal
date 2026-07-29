@@ -146,6 +146,27 @@ func TestCompilerBlocksAmbiguousSourceScopeMaterialization(t *testing.T) {
 	}
 }
 
+func TestCompilerBindsSourceScopeToSingleRunbookWhenSeveralSkillActionsParticipate(t *testing.T) {
+	definition := sourceScopeAgent("1.0.0", true)
+	definition.Runbook.Steps["snapshot"] = runbook.Step{Kind: runbook.StepAction, Action: &runbook.ActionStep{
+		SkillID: "reddit-search", SkillVersion: "2.0.0", Action: "search",
+		Arguments: map[string]runbook.Value{"query": literalActionValue("recent")}, ResultPath: "/results/snapshot", Next: "done",
+	}}
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{definition}}
+	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Monitor Reddit every 5 minutes", Catalog: sourceScopeCatalog(), Refinement: sourceScopeRequest(nil).Refinement,
+	})
+	if err != nil || hasValidationCode(result.Validation, "source_scope_action_ambiguous") {
+		t.Fatalf("single Runbook source boundary result=%#v err=%v", result, err)
+	}
+	trigger := result.Candidate.Agents[0].Runbook.Triggers["every-five-minutes"]
+	if got := trigger.Input["subreddit"]; len(got.Literal) == 0 {
+		t.Fatalf("Runbook trigger did not receive audited source scope: %#v", trigger.Input)
+	}
+}
+
 func TestCompilerBlocksSourceScopeWithoutMatchingRunbook(t *testing.T) {
 	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{sourceScopeAgent("1.0.0", false)}}
 	payload, _ := json.Marshal(GenerationResponse{Candidate: candidate})
