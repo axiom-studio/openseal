@@ -294,6 +294,19 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	}
 }
 
+func TestAuthoringPromptKeepsDynamicBrowserWorkInsideHostedAgentTurn(t *testing.T) {
+	prompt := authoringModelSystemPrompt()
+	for _, expected := range []string{
+		"Interactive browser work is runtime-cognitive",
+		"schedule or wake one bounded Agent delegate",
+		"Never hard-code guessed DOM targets",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("authoring prompt omitted Browser composition rule %q", expected)
+		}
+	}
+}
+
 func TestAuthoringSchemaMakesObjectiveMetadataObjectTyped(t *testing.T) {
 	for _, expected := range []string{
 		"domainContext, successCriteria, and constraints are JSON objects",
