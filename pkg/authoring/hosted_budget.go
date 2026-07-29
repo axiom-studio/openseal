@@ -168,8 +168,13 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 	}
 	requiredOutput := saturatingMultiply(perTurnOutput, turns)
 	requiredTotal := saturatingAdd(requiredInput, requiredOutput)
+	// A materialized action wakes the parent Run for a separate durable claim
+	// before the next model Turn. Attempts therefore fund both model advances
+	// and action-result continuations; treating attempts as synonymous with
+	// Turns makes every multi-action Run pause before its reviewed final Turn.
+	attempts := saturatingAdd(turns, actions)
 	required := runbook.BudgetAllocation{
-		MaxAttempts: turns, MaxTurns: turns, MaxActions: actions,
+		MaxAttempts: attempts, MaxTurns: turns, MaxActions: actions,
 		MaxInputTokens: requiredInput, MaxOutputTokens: requiredOutput, MaxTotalTokens: requiredTotal,
 	}
 	budget := delegate.Budget
@@ -177,7 +182,7 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 		field, code, message string
 		actual, required     int64
 	}{
-		{"maxAttempts", "hosted_budget_attempts_insufficient", "hosted workflow attempts", budget.MaxAttempts, turns},
+		{"maxAttempts", "hosted_budget_attempts_insufficient", "hosted workflow attempts", budget.MaxAttempts, attempts},
 		{"maxTurns", "hosted_budget_turns_insufficient", "hosted workflow turns", budget.MaxTurns, turns},
 		{"maxActions", "hosted_budget_actions_insufficient", "hosted workflow actions", budget.MaxActions, actions},
 		{"maxInputTokens", "hosted_budget_input_insufficient", "hosted model input tokens", budget.MaxInputTokens, requiredInput},
