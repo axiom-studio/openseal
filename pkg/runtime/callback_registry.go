@@ -288,6 +288,13 @@ func (r *CallbackRegistry) Get(ctx context.Context, scope Scope, id string) (*Ca
 	return value, nil
 }
 
+func (r *CallbackRegistry) List(ctx context.Context, filter CallbackRegistrationFilter) ([]*CallbackRegistration, error) {
+	if r == nil || r.store == nil {
+		return nil, errors.New("callback registry is not configured")
+	}
+	return r.store.ListCallbackRegistrations(ctx, filter)
+}
+
 func (r *CallbackRegistry) Update(ctx context.Context, scope Scope, id string, request UpdateCallbackRegistrationRequest) (*CallbackRegistration, error) {
 	current, err := r.Get(ctx, scope, id)
 	if err != nil {

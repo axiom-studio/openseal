@@ -579,6 +579,9 @@ type (
 	ConversationDestinationDiscovery   = capability.ConversationDestinationDiscovery
 	ConversationAdapter                = capability.ConversationAdapter
 	BoundConversationAdapter           = capability.BoundConversationAdapter
+	CallbackAdapterTransport           = capability.CallbackAdapterTransport
+	CallbackAdapter                    = capability.CallbackAdapter
+	BoundCallbackAdapter               = capability.BoundCallbackAdapter
 	SkillTransportReference            = skill.TransportReference
 	SkillTransportArgument             = skill.TransportArgument
 	SkillArgumentRule                  = skill.ArgumentRule
@@ -728,6 +731,29 @@ type (
 // External conversation aliases are isolated so their intentionally explicit
 // names do not reformat the facade's larger compatibility catalog.
 type (
+	CallbackRegistrationStatus                      = runtime.CallbackRegistrationStatus
+	CallbackAdapterReference                        = runtime.CallbackAdapterReference
+	CallbackSubscription                            = runtime.CallbackSubscription
+	CallbackRegistration                            = runtime.CallbackRegistration
+	CallbackRegistrationFilter                      = runtime.CallbackRegistrationFilter
+	CreateCallbackRegistrationRequest               = runtime.CreateCallbackRegistrationRequest
+	UpdateCallbackRegistrationRequest               = runtime.UpdateCallbackRegistrationRequest
+	CallbackRegistrationStore                       = runtime.CallbackRegistrationStore
+	CallbackAdapterResolver                         = runtime.CallbackAdapterResolver
+	CallbackRegistry                                = runtime.CallbackRegistry
+	CallbackPublicRequest                           = runtime.CallbackPublicRequest
+	NormalizedCallbackEvent                         = runtime.NormalizedCallbackEvent
+	CallbackHostRequest                             = runtime.CallbackHostRequest
+	CallbackHostResult                              = runtime.CallbackHostResult
+	CallbackAdapterHost                             = runtime.CallbackAdapterHost
+	CallbackEventReceiptStatus                      = runtime.CallbackEventReceiptStatus
+	CallbackEventReceipt                            = runtime.CallbackEventReceipt
+	CallbackEventStore                              = runtime.CallbackEventStore
+	CallbackEventConsumer                           = runtime.CallbackEventConsumer
+	CallbackEventConsumerFunc                       = runtime.CallbackEventConsumerFunc
+	CallbackIngressResult                           = runtime.CallbackIngressResult
+	CallbackIngressService                          = runtime.CallbackIngressService
+	ApprovalCallbackConsumer                        = runtime.ApprovalCallbackConsumer
 	ExternalConversationEndpointStatus              = runtime.ExternalConversationEndpointStatus
 	ExternalConversationHandlerKind                 = runtime.ExternalConversationHandlerKind
 	ExternalConversationHandler                     = runtime.ExternalConversationHandler
@@ -1213,6 +1239,7 @@ var (
 	NormalizeOAuth2GrantSummary  = capability.NormalizeOAuth2GrantSummary
 	OAuth2GrantSatisfies         = capability.OAuth2GrantSatisfies
 	NormalizeConversationAdapter = capability.NormalizeConversationAdapter
+	NormalizeCallbackAdapter     = capability.NormalizeCallbackAdapter
 )
 
 var (
@@ -1257,6 +1284,9 @@ var (
 )
 
 var NewExternalConversationEndpointService = runtime.NewExternalConversationEndpointService
+var NewCallbackRegistry = runtime.NewCallbackRegistry
+var NewCallbackIngressService = runtime.NewCallbackIngressService
+var NewApprovalCallbackConsumer = runtime.NewApprovalCallbackConsumer
 var ConversationDestinationDiscoveryArguments = runtime.ConversationDestinationDiscoveryArguments
 var ProjectConversationDestinationPage = runtime.ProjectConversationDestinationPage
 var NewExternalConversationGatewayService = runtime.NewExternalConversationGatewayService
@@ -1856,6 +1886,8 @@ const (
 	ConversationEndpointDirect  = capability.ConversationEndpointDirect
 
 	ConversationAdapterProtocolV1 = capability.ConversationAdapterProtocolV1
+	CallbackAdapterProtocolV1     = capability.CallbackAdapterProtocolV1
+	CallbackEventApprovalDecided  = capability.CallbackEventApprovalDecided
 
 	ConversationFeatureThreads     = capability.ConversationFeatureThreads
 	ConversationFeatureMentions    = capability.ConversationFeatureMentions
@@ -1887,6 +1919,7 @@ const (
 
 const (
 	MaximumExternalConversationIngressBytes = runtime.MaximumExternalConversationIngressBytes
+	MaximumCallbackIngressBytes             = runtime.MaximumCallbackIngressBytes
 
 	ExternalConversationEndpointActive  = runtime.ExternalConversationEndpointActive
 	ExternalConversationEndpointPaused  = runtime.ExternalConversationEndpointPaused
@@ -1894,6 +1927,11 @@ const (
 	ExternalConversationGatewayActive   = runtime.ExternalConversationGatewayActive
 	ExternalConversationGatewayPaused   = runtime.ExternalConversationGatewayPaused
 	ExternalConversationGatewayRetired  = runtime.ExternalConversationGatewayRetired
+	CallbackRegistrationActive          = runtime.CallbackRegistrationActive
+	CallbackRegistrationPaused          = runtime.CallbackRegistrationPaused
+	CallbackRegistrationRetired         = runtime.CallbackRegistrationRetired
+	CallbackEventPending                = runtime.CallbackEventPending
+	CallbackEventApplied                = runtime.CallbackEventApplied
 
 	ExternalConversationHandlerAgent   = runtime.ExternalConversationHandlerAgent
 	ExternalConversationHandlerTeam    = runtime.ExternalConversationHandlerTeam
@@ -1937,6 +1975,9 @@ var (
 	ErrExternalOperationClaimed             = runtime.ErrExternalOperationClaimed
 	ErrExternalConversationEndpointNotFound = runtime.ErrExternalConversationEndpointNotFound
 	ErrExternalConversationGatewayNotFound  = runtime.ErrExternalConversationGatewayNotFound
+	ErrCallbackRegistrationNotFound         = runtime.ErrCallbackRegistrationNotFound
+	ErrInvalidCallbackRegistration          = runtime.ErrInvalidCallbackRegistration
+	ErrCallbackRegistrationConflict         = runtime.ErrCallbackRegistrationConflict
 	ErrExternalConversationConflict         = runtime.ErrExternalConversationConflict
 	ErrInvalidExternalConversation          = runtime.ErrInvalidExternalConversation
 )
@@ -2083,6 +2124,7 @@ type Engine struct {
 	conversationRunConfig         *ConversationRunConfig
 	conversationRunScopes         runtime.WorkerScopeSource
 	externalConversations         externalConversationRuntime
+	callbacks                     callbackRuntime
 	conversationChanges           *runtime.ConversationChangeService
 	collaboration                 *runtime.CollaborationService
 	turns                         *runtime.AgentTurnService
@@ -2156,6 +2198,11 @@ type externalConversationRuntime struct {
 	config     *runtime.ExternalConversationSupervisorConfig
 	scopes     runtime.WorkerScopeSource
 	host       runtime.ExternalConversationAdapterHost
+}
+
+type callbackRuntime struct {
+	registry *runtime.CallbackRegistry
+	ingress  *runtime.CallbackIngressService
 }
 
 type actionWorkerSpec struct {
@@ -2233,6 +2280,9 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if err := e.rebuildExternalConversations(); err != nil {
 		return nil, fmt.Errorf("external conversation configuration: %w", err)
+	}
+	if err := e.rebuildCallbacks(); err != nil {
+		return nil, fmt.Errorf("callback registry configuration: %w", err)
 	}
 	if err := e.restoreClawHubSkills(); err != nil {
 		return nil, fmt.Errorf("restore ClawHub skills: %w", err)
@@ -2632,6 +2682,28 @@ func (e *Engine) rebuildExternalConversations() error {
 		inbox, replies, delivery, approvals, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
 	)
 	return err
+}
+
+func (e *Engine) rebuildCallbacks() error {
+	e.callbacks.registry = nil
+	e.callbacks.ingress = nil
+	store, ok := e.store.(interface {
+		runtime.CallbackRegistrationStore
+		runtime.CallbackEventStore
+		runtime.PortfolioStore
+		runtime.ActionStore
+		runtime.RunCommandStore
+		runtime.RunbookActivationStore
+	})
+	if !ok || e.skills == nil {
+		return nil
+	}
+	e.callbacks.registry = runtime.NewCallbackRegistry(store, e.skills)
+	e.callbacks.ingress = runtime.NewCallbackIngressService(store, e.skills, map[string]runtime.CallbackEventConsumer{
+		"approvals": runtime.NewApprovalCallbackConsumer(store),
+		"runbooks":  runtime.NewRunbookEventRouter(store),
+	})
+	return nil
 }
 
 // WithLogger replaces the default logger.
@@ -3862,6 +3934,64 @@ func (e *Engine) UpdateExternalConversationGateway(
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
 	return e.externalConversations.gateways.Update(ctx, scope, id, request)
+}
+
+func (e *Engine) CreateCallbackRegistration(
+	ctx context.Context,
+	request runtime.CreateCallbackRegistrationRequest,
+) (*runtime.CallbackRegistration, error) {
+	if e == nil || e.callbacks.registry == nil {
+		return nil, fmt.Errorf("callback registry is not configured")
+	}
+	return e.callbacks.registry.Create(ctx, request)
+}
+
+func (e *Engine) GetCallbackRegistration(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+) (*runtime.CallbackRegistration, error) {
+	if e == nil || e.callbacks.registry == nil {
+		return nil, fmt.Errorf("callback registry is not configured")
+	}
+	return e.callbacks.registry.Get(ctx, scope, id)
+}
+
+func (e *Engine) ListCallbackRegistrations(
+	ctx context.Context,
+	filter runtime.CallbackRegistrationFilter,
+) ([]*runtime.CallbackRegistration, error) {
+	if e == nil || e.callbacks.registry == nil {
+		return nil, fmt.Errorf("callback registry is not configured")
+	}
+	return e.callbacks.registry.List(ctx, filter)
+}
+
+func (e *Engine) UpdateCallbackRegistration(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+	request runtime.UpdateCallbackRegistrationRequest,
+) (*runtime.CallbackRegistration, error) {
+	if e == nil || e.callbacks.registry == nil {
+		return nil, fmt.Errorf("callback registry is not configured")
+	}
+	return e.callbacks.registry.Update(ctx, scope, id, request)
+}
+
+func (e *Engine) ReceiveCallback(
+	ctx context.Context,
+	request runtime.CallbackPublicRequest,
+	host runtime.CallbackAdapterHost,
+) (*runtime.CallbackIngressResult, error) {
+	if e == nil || e.callbacks.ingress == nil {
+		return nil, fmt.Errorf("callback ingress is not configured")
+	}
+	return e.callbacks.ingress.Receive(ctx, request, host)
+}
+
+func (e *Engine) CallbackRegistryAvailable() bool {
+	return e != nil && e.callbacks.registry != nil && e.callbacks.ingress != nil
 }
 
 func (e *Engine) EnqueueExternalConversationDelivery(
