@@ -273,7 +273,7 @@ func compileConversationEndpointPurposes(candidate *WorkforceCandidate, form Aut
 	}
 	issues := make([]ValidationIssue, 0)
 	if len(form.Fields) == 0 {
-		if len(submission.Values) > 0 || submission.Version != "" {
+		if len(submission.Values) > 0 || (submission.Version != "" && submission.Version != AuthoringFormVersionV1) {
 			return []ValidationIssue{issue("authoring", "unexpected_authoring_form_submission", "Authoring values were submitted when no form fields were enabled")}
 		}
 		return nil
