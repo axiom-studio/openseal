@@ -6,11 +6,20 @@ import (
 	"sort"
 )
 
-// HostedMinimumChildOutputTokens is the portable protocol floor required for
-// one complete hosted child response envelope, including bounded repair. Both
-// authoring and execution must enforce this value so a reviewed Run cannot be
-// activated with less output capacity than the runtime can safely use.
-const HostedMinimumChildOutputTokens int64 = 16384
+const (
+	// HostedMinimumChildOutputTokens is the portable protocol floor required
+	// for one complete hosted Turn response envelope. A multi-Turn Run must
+	// fund this floor for every reviewed Turn.
+	HostedMinimumChildOutputTokens int64 = 16384
+	// HostedMaximumProviderAttempts includes the initial provider exchange and
+	// one bounded schema-repair exchange. Authoring and execution reserve the
+	// same complete envelope so an activated Run cannot exhaust itself merely
+	// by following the reviewed recovery protocol.
+	HostedMaximumProviderAttempts int64 = 2
+	// HostedRepairInputReserveTokens covers the bounded validation message
+	// appended to a schema-repair request.
+	HostedRepairInputReserveTokens int64 = 1024
+)
 
 const hostedSkillBindingMetadataReserveTokens int64 = 1024
 

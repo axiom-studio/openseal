@@ -154,11 +154,19 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 	if turns < 1 {
 		turns = 1
 	}
-	requiredInput := saturatingMultiply(perTurn, turns)
-	requiredOutput := saturatingMultiply(catalog.HostedExecution.MinimumOutputTokens, turns)
-	if requiredOutput < capability.HostedMinimumChildOutputTokens {
-		requiredOutput = capability.HostedMinimumChildOutputTokens
+	// Each hosted Turn may consume an initial provider exchange and one schema
+	// repair. Runtime admission reserves both atomically; authoring must fund the
+	// same lifetime envelope for every reviewed Turn rather than only the first
+	// attempt. Otherwise a valid multi-action workflow pauses midway despite
+	// using exactly its reviewed recovery protocol.
+	perTurnInput := saturatingMultiply(perTurn, capability.HostedMaximumProviderAttempts)
+	perTurnInput = saturatingAdd(perTurnInput, capability.HostedRepairInputReserveTokens)
+	requiredInput := saturatingMultiply(perTurnInput, turns)
+	perTurnOutput := catalog.HostedExecution.MinimumOutputTokens
+	if perTurnOutput < capability.HostedMinimumChildOutputTokens {
+		perTurnOutput = capability.HostedMinimumChildOutputTokens
 	}
+	requiredOutput := saturatingMultiply(perTurnOutput, turns)
 	requiredTotal := saturatingAdd(requiredInput, requiredOutput)
 	required := runbook.BudgetAllocation{
 		MaxAttempts: turns, MaxTurns: turns, MaxActions: actions,
