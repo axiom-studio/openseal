@@ -16,6 +16,32 @@ var (
 	ErrTurnHostConfiguration = errors.New("turn host configuration is invalid")
 )
 
+// TurnHostFailure is a safe, stable failure disposition returned by a hosted
+// turn boundary. Retryable failures participate in bounded backoff; terminal
+// failures end the Run immediately so operator action is not misrepresented as
+// an unavailable worker. Message must never contain provider credentials or a
+// raw provider response.
+type TurnHostFailure struct {
+	Code      string
+	Message   string
+	Retryable bool
+}
+
+func (e *TurnHostFailure) Error() string {
+	if e == nil || strings.TrimSpace(e.Message) == "" {
+		return "hosted agent turn failed"
+	}
+	return strings.TrimSpace(e.Message)
+}
+
+func (e *TurnHostFailure) Is(target error) bool {
+	return e != nil && e.Retryable && target == ErrTurnHostUnavailable
+}
+
+func NewTurnHostFailure(code, message string, retryable bool) error {
+	return &TurnHostFailure{Code: strings.TrimSpace(code), Message: strings.TrimSpace(message), Retryable: retryable}
+}
+
 type retryableTurnHostError struct{ cause error }
 
 func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavailable.Error() }
@@ -285,6 +311,10 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
 		if errors.Is(err, ErrTurnHostConfiguration) {
+			return nil, err
+		}
+		var failure *TurnHostFailure
+		if errors.As(err, &failure) {
 			return nil, err
 		}
 		return nil, retryableTurnHostError{cause: err}
