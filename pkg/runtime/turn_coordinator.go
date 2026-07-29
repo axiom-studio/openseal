@@ -522,6 +522,9 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if step := runbookStepFromCheckpoint(turn.ContinuationCheckpoint); step != "" {
 		activityPayload["runbookStep"] = step
 	}
+	if traceDelta := runbookTraceDelta(run.Checkpoint, turn.ContinuationCheckpoint); len(traceDelta) > 0 {
+		activityPayload["runbookTraceDelta"] = traceDelta
+	}
 	if len(turn.RequestedActions) > 0 {
 		activityPayload["requestedActions"] = append([]TurnAction(nil), turn.RequestedActions...)
 	}

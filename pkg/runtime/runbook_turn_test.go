@@ -3,6 +3,8 @@ package runtime
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +38,11 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	if err != nil || arguments["url"] != "https://example.test/health" {
 		t.Fatalf("arguments=%#v err=%v", arguments, err)
 	}
-	first.ContinuationCheckpoint["lastAction"] = map[string]interface{}{"actionCallId": "call-1", "status": "succeeded", "result": map[string]interface{}{"content": "ok"}}
+	firstTrace, err := RunbookTraceFromCheckpoint(first.ContinuationCheckpoint)
+	if err != nil || len(firstTrace.Entries) != 1 || firstTrace.Entries[0].StepID != "fetch" || firstTrace.Entries[0].Status != RunbookStepTraceWaiting || firstTrace.Entries[0].Visit != 1 || firstTrace.Entries[0].TurnID != "turn-1" || !reflect.DeepEqual(firstTrace.Entries[0].InputRefs, []string{"/input/url"}) || !reflect.DeepEqual(firstTrace.Entries[0].OutputRefs, []string{"/steps/fetch"}) {
+		t.Fatalf("first trace=%#v err=%v", firstTrace, err)
+	}
+	first.ContinuationCheckpoint["lastAction"] = map[string]interface{}{"actionCallId": "call-1", "approvalId": "approval-1", "status": "succeeded", "result": map[string]interface{}{"content": "ok"}}
 	run.Checkpoint = first.ContinuationCheckpoint
 	second, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2", Sequence: 2}})
 	if err != nil {
@@ -47,6 +53,14 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	}
 	if _, exists := second.ContinuationCheckpoint["lastAction"]; exists {
 		t.Fatal("consumed action result remained in checkpoint")
+	}
+	trace, err := RunbookTraceFromCheckpoint(second.ContinuationCheckpoint)
+	if err != nil || len(trace.Entries) != 2 || trace.Entries[0].Status != RunbookStepTraceSucceeded || trace.Entries[0].ActionCallID != "call-1" || trace.Entries[0].ApprovalID != "approval-1" || trace.Entries[0].SelectedNext != "done" || trace.Entries[1].StepID != "done" || trace.Entries[1].Status != RunbookStepTraceSucceeded {
+		t.Fatalf("completed trace=%#v err=%v", trace, err)
+	}
+	encodedTrace, _ := json.Marshal(trace)
+	if strings.Contains(string(encodedTrace), "https://example.test/health") || strings.Contains(string(encodedTrace), `"content":"ok"`) {
+		t.Fatalf("trace copied governed values: %s", encodedTrace)
 	}
 }
 
@@ -156,11 +170,16 @@ func TestRunbookTurnValidatesCallableOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
 		Run:  &AgentRun{ID: "run", Context: map[string]interface{}{}},
 		Turn: &AgentTurn{ID: "turn"},
-	}); err == nil {
-		t.Fatal("expected output schema mismatch to fail")
+	})
+	if err != nil || outcome.NextRunStatus != AgentRunStatusFailed || outcome.RunError == "" {
+		t.Fatalf("output mismatch outcome=%#v err=%v", outcome, err)
+	}
+	trace, traceErr := RunbookTraceFromCheckpoint(outcome.ContinuationCheckpoint)
+	if traceErr != nil || len(trace.Entries) != 1 || trace.Entries[0].StepID != "done" || trace.Entries[0].Status != RunbookStepTraceFailed || trace.Entries[0].Error == "" {
+		t.Fatalf("failure trace=%#v err=%v", trace, traceErr)
 	}
 }
 
@@ -192,6 +211,10 @@ func TestRunbookTurnProposesConcurrentForkAndRunsBoundedForEach(t *testing.T) {
 		if err != nil || child.NextRunStatus != AgentRunStatusCompleted || child.RunOutput["branchId"] != branch.ID {
 			t.Fatalf("branch %d=%#v error=%v", index, child, err)
 		}
+		trace, traceErr := RunbookTraceFromCheckpoint(child.ContinuationCheckpoint)
+		if traceErr != nil || len(trace.Entries) != 2 || trace.Entries[0].StepID != branch.ID || trace.Entries[1].StepID != "join" {
+			t.Fatalf("branch %d trace=%#v error=%v", index, trace, traceErr)
+		}
 	}
 	loop, _ := NewRunbookTurnRunner(definition, "manual")
 	outcome, err = loop.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "loop", Context: map[string]interface{}{"parallel": false, "items": []interface{}{"one", "two"}}}, Turn: &AgentTurn{ID: "turn", Sequence: 1}})
@@ -221,12 +244,20 @@ func TestRunbookTurnWaitsOnceAndResumesFromCheckpoint(t *testing.T) {
 	if first.NextRunStatus != AgentRunStatusSleeping || first.WakeCondition == nil || !first.WakeCondition.WakeAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("first=%#v", first)
 	}
+	firstTrace, err := RunbookTraceFromCheckpoint(first.ContinuationCheckpoint)
+	if err != nil || len(firstTrace.Entries) != 1 || firstTrace.Entries[0].StepID != "wait" || firstTrace.Entries[0].Status != RunbookStepTraceWaiting {
+		t.Fatalf("waiting trace=%#v err=%v", firstTrace, err)
+	}
 	second, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "run", Checkpoint: first.ContinuationCheckpoint}, Turn: &AgentTurn{ID: "two", Sequence: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if second.NextRunStatus != AgentRunStatusCompleted {
 		t.Fatalf("second=%#v", second)
+	}
+	trace, err := RunbookTraceFromCheckpoint(second.ContinuationCheckpoint)
+	if err != nil || len(trace.Entries) != 2 || trace.Entries[0].Status != RunbookStepTraceSucceeded || trace.Entries[1].StepID != "done" || trace.Entries[1].Status != RunbookStepTraceSucceeded {
+		t.Fatalf("resumed trace=%#v err=%v", trace, err)
 	}
 }
 

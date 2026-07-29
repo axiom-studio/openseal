@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T) {
@@ -25,16 +27,28 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 	forcedCrash := errors.New("forced crash after persisted turn")
 	coordinator.afterTurnPersisted = func() error { return forcedCrash }
 	calls := 0
+	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "event", Version: "1", Name: "Event", Entrypoints: map[string]string{"manual": "await-event"}, Steps: map[string]runbook.Step{
+		"await-event": {Kind: runbook.StepWait, Wait: &runbook.WaitStep{Event: "work.ready", Next: "done"}},
+		"done":        {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+	}}
 	runner := TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 		calls++
 		if input.Run.ID != run.ID || input.Turn.Sequence != 1 {
 			t.Fatalf("unexpected turn input: %#v", input)
 		}
+		checkpoint := map[string]interface{}{"phase": "waiting", "runbook": map[string]interface{}{"current": "await-event"}}
+		sequence, traceErr := beginRunbookStepTrace(checkpoint, definition, "await-event", input.Turn.ID, time.Now())
+		if traceErr != nil {
+			return nil, traceErr
+		}
+		if traceErr := updateRunbookStepTrace(checkpoint, sequence, RunbookStepTraceWaiting, "", "Waiting for condition", "", nil, time.Now()); traceErr != nil {
+			return nil, traceErr
+		}
 		return &TurnOutcome{
 			OutputSummary: "Waiting for the next event", NextRunStatus: AgentRunStatusWaitingForEvent,
 			SkillSelections:        []HostedSkillSelection{{SkillRef: "skill:events@1", Disposition: HostedSkillApplied, Summary: "Applied event monitoring"}},
 			WakeCondition:          &WakeCondition{Type: "event", Reference: "work.ready"},
-			ContinuationCheckpoint: map[string]interface{}{"phase": "waiting", "runbook": map[string]interface{}{"current": "await-event"}},
+			ContinuationCheckpoint: checkpoint,
 			Decisions:              []TurnDecision{{Summary: "Use the event monitor", EvidenceRefs: []string{"skill:events@1"}}},
 		}, nil
 	})
@@ -73,7 +87,7 @@ func TestTurnCoordinatorReconcilesPersistedTurnWithoutReinvocation(t *testing.T)
 		t.Fatalf("activity is not linked to turn: %#v", result.Event)
 	}
 	auditPayload, marshalErr := json.Marshal(result.Event.Payload)
-	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || !strings.Contains(string(auditPayload), `"disposition":"applied"`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" ||
+	if marshalErr != nil || !strings.Contains(string(auditPayload), `"evidenceRefs":["skill:events@1"]`) || !strings.Contains(string(auditPayload), `"disposition":"applied"`) || !strings.Contains(string(auditPayload), `"runbookTraceDelta"`) || !strings.Contains(string(auditPayload), `"status":"waiting"`) || fmt.Sprint(result.Event.Payload["turnSequence"]) != "1" ||
 		result.Event.Payload["definitionId"] != "event-agent" || result.Event.Payload["definitionVersion"] != "7" || result.Event.Payload["runbookStep"] != "await-event" {
 		t.Fatalf("activity does not expose bounded-turn audit evidence: %#v", result.Event.Payload)
 	}
