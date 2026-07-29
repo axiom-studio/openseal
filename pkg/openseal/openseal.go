@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -3508,6 +3509,23 @@ func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunR
 func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
 	if err := e.ValidateAgentRunEntrypoint(ctx, req.Scope, req.AssignedAgentID, req.Entrypoint); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(req.Entrypoint) != "" {
+		deployment, err := e.GetAgentDeployment(ctx, skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, strings.TrimSpace(req.AssignedAgentID))
+		if err != nil || deployment == nil {
+			return nil, fmt.Errorf("resolve Agent Runbook identity: deployment is unavailable")
+		}
+		definition, err := e.GetAgentDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+		if err != nil || definition == nil || definition.Runbook == nil {
+			return nil, fmt.Errorf("resolve Agent Runbook identity: active definition is unavailable")
+		}
+		if req.Context == nil {
+			req.Context = make(map[string]interface{})
+		} else {
+			req.Context = maps.Clone(req.Context)
+		}
+		req.Context["runbookDefinitionId"] = definition.Runbook.ID
+		req.Context["runbookDefinitionVersion"] = definition.Runbook.Version
 	}
 	return runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
 }
