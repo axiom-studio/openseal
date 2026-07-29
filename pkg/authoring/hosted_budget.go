@@ -11,6 +11,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
+const (
+	// DefaultHostedRunMaxTurns and DefaultHostedRunMaxActions give cognitive
+	// hosted work enough room to recover from ordinary navigation and tool-use
+	// mistakes without requiring every authoring provider to guess an execution
+	// envelope. Activated definitions still snapshot these finite limits, and a
+	// host may impose stricter policy before activation.
+	DefaultHostedRunMaxTurns   int64 = 100
+	DefaultHostedRunMaxActions int64 = 100
+)
+
 // HostedSkillModelInputTokenCeiling returns a credential-free conservative
 // ceiling for one activated binding of definition. Hosts publish only this
 // scalar in authoring catalogs; private prompt instructions remain outside the
@@ -97,6 +107,12 @@ func normalizeHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabi
 				step.Delegate.Budget = &runbook.BudgetAllocation{}
 			}
 			required, _ := validateHostedBudget("", target, step.Delegate, catalog)
+			required.MaxTurns = maximumInt64(required.MaxTurns, DefaultHostedRunMaxTurns)
+			required.MaxActions = maximumInt64(required.MaxActions, DefaultHostedRunMaxActions)
+			// Each model Turn consumes one attempt, and every materialized action
+			// wakes the Run for a separate continuation attempt.
+			required.MaxAttempts = maximumInt64(required.MaxAttempts,
+				saturatingAdd(required.MaxTurns, required.MaxActions))
 			raiseHostedBudget(step.Delegate.Budget, required, 0)
 			owner.Runbook.Steps[stepID] = step
 			for triggerID, trigger := range owner.Runbook.Triggers {
