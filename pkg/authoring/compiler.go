@@ -97,6 +97,11 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	reportCompileProgress(observe, CompilePhaseCapabilityResolve, 1, 1)
 	request.CompositionRequirements = deriveRuntimeCompositionRequirements(request.Prompt, request.Catalog)
+	form, err := ProjectWorkforceAuthoringForm(request.Catalog, request.Existing)
+	if err != nil {
+		return nil, fmt.Errorf("project workforce authoring form: %w", err)
+	}
+	request.Form = form
 	reportCompileProgress(observe, CompilePhaseProviderRequest, 1, 1)
 	payload, err := c.generator.Generate(ctx, request)
 	if err != nil {
@@ -141,6 +146,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
+		formIssues := CompileWorkforceAuthoringForm(&generated.Candidate, request.Form, generated.Authoring)
 		materializeDefaultAgentSkillAuthority(&generated.Candidate)
 		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
@@ -149,6 +155,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		applyActivationCommitment(&generated.Candidate, commitments)
 		deferInactiveCredentialRefinements(&generated)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
+		validation = append(validation, formIssues...)
 		validation = append(validation, validateConversationComposition(&generated.Candidate, request)...)
 		validation = append(validation, materializationIssues...)
 		validation = append(validation, scheduleIntentIssues...)

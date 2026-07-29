@@ -15,6 +15,88 @@ import (
 
 const conversationMessageReceivedEvent = "conversation.message.received"
 
+const conversationEndpointPurposesFieldID = "conversation_endpoint_purposes"
+
+// ProjectWorkforceAuthoringForm converts a typed candidate into the same
+// model-safe form schema and values used by human authoring surfaces. This is
+// the struct-to-form half of the authoring codec.
+func ProjectWorkforceAuthoringForm(catalog CapabilityCatalog, candidate *WorkforceCandidate) (AuthoringForm, error) {
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		return AuthoringForm{}, err
+	}
+	return canonicalAuthoringForm(catalog, candidate), nil
+}
+
+// CompileWorkforceAuthoringForm applies one typed form submission and derives
+// compiler-owned runtime fields. It never accepts arbitrary JSON paths. This
+// is the form-to-struct half of the authoring codec.
+func CompileWorkforceAuthoringForm(candidate *WorkforceCandidate, form AuthoringForm, submission AuthoringFormSubmission) []ValidationIssue {
+	return compileConversationEndpointPurposes(candidate, form, submission)
+}
+
+func canonicalAuthoringForm(catalog CapabilityCatalog, existing *WorkforceCandidate) AuthoringForm {
+	form := AuthoringForm{Version: AuthoringFormVersionV1}
+	if catalogSupportsApprovalDecisions(catalog) {
+		form.Fields = append(form.Fields, AuthoringFormField{
+			ID:    conversationEndpointPurposesFieldID,
+			Path:  "candidate.conversationEndpoints[].purposes",
+			Label: "Endpoint responsibilities",
+			Help:  "Select approvals only when this endpoint should receive approval requests and accept authorized decisions. Leave it off for ordinary chat-only endpoints.",
+			Input: AuthoringInputMultiSelect,
+			Options: []AuthoringFormOption{
+				{ID: string(ConversationEndpointPurposeConversation), Label: "Conversation", Description: "Receive messages and deliver canonical replies."},
+				{ID: string(ConversationEndpointPurposeApprovals), Label: "Approvals", Description: "Deliver pending approval cards and accept signed decisions from mapped principals."},
+			},
+			EnableWhen:     []AuthoringFormCondition{{Path: "candidate.conversationEndpoints[].adapterId", Operator: "supports_event", Values: []string{string(capability.ConversationEventApprovalDecided)}}},
+			CompilerOutput: "candidate.agents[].authority.approvalDestinations",
+		})
+		if existing != nil {
+			for _, endpoint := range existing.ConversationEndpoints {
+				purposes := append([]ConversationEndpointPurpose(nil), endpoint.Purposes...)
+				if len(purposes) == 0 {
+					purposes = []ConversationEndpointPurpose{ConversationEndpointPurposeConversation}
+					if candidateAgentRoutesApprovalTo(existing, endpoint.Owner.ID, endpoint.ID) {
+						purposes = append(purposes, ConversationEndpointPurposeApprovals)
+					}
+				}
+				optionIDs := make([]string, 0, len(purposes))
+				for _, purpose := range purposes {
+					optionIDs = append(optionIDs, string(purpose))
+				}
+				form.Values = append(form.Values, AuthoringFormValue{FieldID: conversationEndpointPurposesFieldID, SubjectID: endpoint.ID, OptionIDs: optionIDs})
+			}
+		}
+	}
+	return form
+}
+
+func candidateAgentRoutesApprovalTo(candidate *WorkforceCandidate, agentID, endpointID string) bool {
+	for _, definition := range candidate.Agents {
+		if definition == nil || definition.ID != agentID {
+			continue
+		}
+		for _, destination := range definition.Authority.ApprovalDestinations {
+			if destination.EndpointID == endpointID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func catalogSupportsApprovalDecisions(catalog CapabilityCatalog) bool {
+	for _, skill := range catalog.Skills {
+		for _, adapter := range skill.ConversationAdapters {
+			for _, eventType := range adapter.InboundEventTypes {
+				if eventType == string(capability.ConversationEventApprovalDecided) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func CanonicalRuntimeCompositionCapability() *RuntimeCompositionCapability {
 	return &RuntimeCompositionCapability{
 		ProtocolVersion: RuntimeCompositionProtocolV1,
@@ -144,6 +226,19 @@ func validateConversationEndpointBlueprints(candidate *WorkforceCandidate) []Val
 		if endpoint.Mode == capability.ConversationEndpointDirect && endpoint.Policy.MessageSelection == ConversationSelectMentions {
 			issues = append(issues, issue(path+".policy.messageSelection", "invalid_conversation_policy", "Direct endpoints cannot require mentions"))
 		}
+		seenPurposes := map[ConversationEndpointPurpose]bool{}
+		for purposeIndex, purpose := range endpoint.Purposes {
+			purposePath := fmt.Sprintf("%s.purposes[%d]", path, purposeIndex)
+			if seenPurposes[purpose] {
+				issues = append(issues, issue(purposePath, "duplicate_conversation_endpoint_purpose", "Conversation endpoint purposes must be unique"))
+			}
+			seenPurposes[purpose] = true
+			switch purpose {
+			case ConversationEndpointPurposeConversation, ConversationEndpointPurposeApprovals:
+			default:
+				issues = append(issues, issue(purposePath, "invalid_conversation_endpoint_purpose", "Conversation endpoint purpose is not supported"))
+			}
+		}
 		switch endpoint.Owner.Type {
 		case ConversationEndpointOwnerAgent:
 			if agents[endpoint.Owner.ID] == nil {
@@ -159,6 +254,83 @@ func validateConversationEndpointBlueprints(candidate *WorkforceCandidate) []Val
 		issues = append(issues, validateConversationHandlerBlueprint(path+".handler", endpoint, agents)...)
 	}
 	return issues
+}
+
+// compileConversationEndpointPurposes is the trusted form-to-spec boundary.
+// The planner selects semantic endpoint purposes; it never authors kernel
+// authority links. Re-running this function is idempotent.
+func compileConversationEndpointPurposes(candidate *WorkforceCandidate, form AuthoringForm, submission AuthoringFormSubmission) []ValidationIssue {
+	if candidate == nil {
+		return nil
+	}
+	for _, definition := range candidate.Agents {
+		if definition != nil {
+			definition.Authority.ApprovalDestinations = nil
+		}
+	}
+	for index := range candidate.ConversationEndpoints {
+		candidate.ConversationEndpoints[index].Purposes = nil
+	}
+	issues := make([]ValidationIssue, 0)
+	if len(form.Fields) == 0 {
+		if len(submission.Values) > 0 || submission.Version != "" {
+			return []ValidationIssue{issue("authoring", "unexpected_authoring_form_submission", "Authoring values were submitted when no form fields were enabled")}
+		}
+		return nil
+	}
+	if submission.Version != AuthoringFormVersionV1 {
+		return []ValidationIssue{issue("authoring.version", "invalid_authoring_form_version", "Authoring form submission version is required and must match the supplied form")}
+	}
+	endpointIndexes := make(map[string]int, len(candidate.ConversationEndpoints))
+	for index, endpoint := range candidate.ConversationEndpoints {
+		endpointIndexes[endpoint.ID] = index
+	}
+	seen := map[string]bool{}
+	for valueIndex, value := range submission.Values {
+		path := fmt.Sprintf("authoring.values[%d]", valueIndex)
+		key := value.FieldID + "\x00" + value.SubjectID
+		if value.FieldID != conversationEndpointPurposesFieldID || strings.TrimSpace(value.SubjectID) == "" || seen[key] {
+			issues = append(issues, issue(path, "invalid_authoring_form_value", "Authoring form value must reference one unique supplied field and subject"))
+			continue
+		}
+		seen[key] = true
+		endpointIndex, ok := endpointIndexes[value.SubjectID]
+		if !ok || value.Text != nil || value.Boolean != nil {
+			issues = append(issues, issue(path, "invalid_authoring_form_value", "Endpoint purpose value must target one candidate endpoint and use option ids"))
+			continue
+		}
+		purposes := make([]ConversationEndpointPurpose, 0, len(value.OptionIDs))
+		for _, optionID := range value.OptionIDs {
+			purpose := ConversationEndpointPurpose(optionID)
+			if purpose != ConversationEndpointPurposeConversation && purpose != ConversationEndpointPurposeApprovals {
+				issues = append(issues, issue(path+".optionIds", "invalid_authoring_form_option", "Authoring form option is not declared by the supplied field"))
+				continue
+			}
+			purposes = append(purposes, purpose)
+		}
+		candidate.ConversationEndpoints[endpointIndex].Purposes = purposes
+	}
+	agents := candidateAgentsByID(candidate)
+	for _, endpoint := range candidate.ConversationEndpoints {
+		if endpoint.Owner.Type != ConversationEndpointOwnerAgent || !hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals) {
+			continue
+		}
+		definition := agents[endpoint.Owner.ID]
+		if definition == nil {
+			continue
+		}
+		definition.Authority.ApprovalDestinations = append(definition.Authority.ApprovalDestinations, agent.ApprovalDestination{EndpointID: endpoint.ID})
+	}
+	return issues
+}
+
+func hasConversationEndpointPurpose(values []ConversationEndpointPurpose, expected ConversationEndpointPurpose) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func validateConversationHandlerBlueprint(

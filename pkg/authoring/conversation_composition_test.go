@@ -230,6 +230,61 @@ func TestCompilerCreatesExecutableSlackChatbotComposition(t *testing.T) {
 	}
 }
 
+func TestApprovalEndpointFormCompilesKernelAuthorityDeterministically(t *testing.T) {
+	candidate := directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
+	// A provider attempting to author this compiler-owned field cannot widen
+	// the result: compilation discards it and rebuilds exact owned links.
+	candidate.Agents[0].Authority.ApprovalDestinations = []agent.ApprovalDestination{{EndpointID: "invented-endpoint"}}
+	catalog := slackChatbotCatalog()
+	catalog.Skills["slack"].ConversationAdapters[0].InboundEventTypes = []string{
+		capability.ConversationEventApprovalDecided,
+		capability.ConversationEventMessageReceived,
+	}
+	payload, err := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		Authoring: AuthoringFormSubmission{Version: AuthoringFormVersionV1, Values: []AuthoringFormValue{{
+			FieldID: conversationEndpointPurposesFieldID, SubjectID: candidate.ConversationEndpoints[0].ID,
+			OptionIDs: []string{string(ConversationEndpointPurposeConversation), string(ConversationEndpointPurposeApprovals)},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &compositionCaptureGenerator{payload: payload}
+	compiler, err := NewCompiler(generator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generator.request.Form.Fields) != 1 || generator.request.Form.Fields[0].Input != AuthoringInputMultiSelect ||
+		generator.request.Form.Fields[0].CompilerOutput != "candidate.agents[].authority.approvalDestinations" {
+		t.Fatalf("authoring form = %#v", generator.request.Form)
+	}
+	destinations := result.Candidate.Agents[0].Authority.ApprovalDestinations
+	if len(destinations) != 1 || destinations[0].EndpointID != candidate.ConversationEndpoints[0].ID {
+		t.Fatalf("compiled approval destinations = %#v", destinations)
+	}
+	projected, err := ProjectWorkforceAuthoringForm(catalog, &result.Candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected.Values) != 1 || len(projected.Values[0].OptionIDs) != 2 {
+		t.Fatalf("projected form values = %#v", projected.Values)
+	}
+	roundTrip := directChatbotCandidate("slack", capability.ConversationEndpointChannel, ConversationReplyThread)
+	issues := CompileWorkforceAuthoringForm(&roundTrip, projected, AuthoringFormSubmission{
+		Version: projected.Version,
+		Values:  projected.Values,
+	})
+	if len(issues) != 0 || len(roundTrip.Agents[0].Authority.ApprovalDestinations) != 1 ||
+		roundTrip.Agents[0].Authority.ApprovalDestinations[0].EndpointID != roundTrip.ConversationEndpoints[0].ID {
+		t.Fatalf("form round trip = %#v, issues %#v", roundTrip.Agents[0].Authority.ApprovalDestinations, issues)
+	}
+}
+
 func TestConversationEndpointDeterministicallyFulfillsCapabilityNeed(t *testing.T) {
 	catalog := slackChatbotCatalog()
 	catalog.Skills["slack-actions"] = SkillCapability{

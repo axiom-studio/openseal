@@ -321,6 +321,17 @@ const (
 	ConversationReplyChannel         ConversationReplyMode = "channel"
 )
 
+// ConversationEndpointPurpose is authoring intent, not runtime authority. It
+// is deliberately small enough to render as a checkbox/select in any authoring
+// surface. The deterministic compiler turns selected purposes into the exact
+// kernel policy and bindings required at apply time.
+type ConversationEndpointPurpose string
+
+const (
+	ConversationEndpointPurposeConversation ConversationEndpointPurpose = "conversation"
+	ConversationEndpointPurposeApprovals    ConversationEndpointPurpose = "approvals"
+)
+
 type ConversationEndpointOwner struct {
 	Type ConversationEndpointOwnerType `json:"type"`
 	ID   string                        `json:"id"`
@@ -355,6 +366,7 @@ type ConversationEndpointBlueprint struct {
 	Handler            ConversationHandlerBlueprint        `json:"handler"`
 	Policy             ConversationEndpointPolicyBlueprint `json:"policy"`
 	CanonicalReply     bool                                `json:"canonicalReply"`
+	Purposes           []ConversationEndpointPurpose       `json:"purposes,omitempty"`
 	ArchitectureReason string                              `json:"architectureReason"`
 }
 
@@ -384,9 +396,70 @@ type GenerateRequest struct {
 	Prompt                  string                          `json:"prompt"`
 	Existing                *WorkforceCandidate             `json:"existing,omitempty"`
 	Catalog                 CapabilityCatalog               `json:"catalog"`
+	Form                    AuthoringForm                   `json:"authoringForm"`
 	CompositionRequirements *RuntimeCompositionRequirements `json:"compositionRequirements,omitempty"`
 	Refinement              *RefinementContext              `json:"refinement,omitempty"`
 	InvocationKey           string                          `json:"invocationKey,omitempty"`
+}
+
+const AuthoringFormVersionV1 = "openseal.authoring-form/v1"
+
+type AuthoringInputKind string
+
+const (
+	AuthoringInputText         AuthoringInputKind = "text"
+	AuthoringInputBoolean      AuthoringInputKind = "boolean"
+	AuthoringInputSingleSelect AuthoringInputKind = "single_select"
+	AuthoringInputMultiSelect  AuthoringInputKind = "multi_select"
+)
+
+// AuthoringForm is the model-safe equivalent of a product form. A planner
+// supplies only these semantic inputs. CompilerOutput documents the immutable
+// runtime field produced by trusted compilation and is never model-writable.
+type AuthoringForm struct {
+	Version string               `json:"version"`
+	Fields  []AuthoringFormField `json:"fields,omitempty"`
+	Values  []AuthoringFormValue `json:"values,omitempty"`
+}
+
+type AuthoringFormField struct {
+	ID             string                   `json:"id"`
+	Path           string                   `json:"path"`
+	Label          string                   `json:"label"`
+	Help           string                   `json:"help"`
+	Input          AuthoringInputKind       `json:"input"`
+	Required       bool                     `json:"required,omitempty"`
+	Options        []AuthoringFormOption    `json:"options,omitempty"`
+	EnableWhen     []AuthoringFormCondition `json:"enableWhen,omitempty"`
+	CompilerOutput string                   `json:"compilerOutput,omitempty"`
+}
+
+// AuthoringFormValue is deliberately a typed union rather than arbitrary JSON.
+// SubjectID identifies one item in a repeated form section, such as an
+// endpoint. Exactly the value member appropriate for the field input is set.
+type AuthoringFormValue struct {
+	FieldID   string   `json:"fieldId"`
+	SubjectID string   `json:"subjectId,omitempty"`
+	Text      *string  `json:"text,omitempty"`
+	Boolean   *bool    `json:"boolean,omitempty"`
+	OptionIDs []string `json:"optionIds,omitempty"`
+}
+
+type AuthoringFormSubmission struct {
+	Version string               `json:"version"`
+	Values  []AuthoringFormValue `json:"values,omitempty"`
+}
+
+type AuthoringFormOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type AuthoringFormCondition struct {
+	Path     string   `json:"path"`
+	Operator string   `json:"operator"`
+	Values   []string `json:"values"`
 }
 
 // RuntimeCompositionRequirements are deterministic, server-owned obligations
@@ -446,10 +519,11 @@ type CompileProgress struct {
 type CompileProgressObserver func(CompileProgress)
 
 type GenerationResponse struct {
-	Candidate           WorkforceCandidate   `json:"candidate"`
-	Commitments         PromptCommitments    `json:"commitments"`
-	Assumptions         []string             `json:"assumptions,omitempty"`
-	UnresolvedQuestions []RefinementQuestion `json:"unresolvedQuestions,omitempty"`
+	Candidate           WorkforceCandidate      `json:"candidate"`
+	Authoring           AuthoringFormSubmission `json:"authoring"`
+	Commitments         PromptCommitments       `json:"commitments"`
+	Assumptions         []string                `json:"assumptions,omitempty"`
+	UnresolvedQuestions []RefinementQuestion    `json:"unresolvedQuestions,omitempty"`
 }
 
 // PromptCommitments is the generator's typed, reviewable account of concrete
