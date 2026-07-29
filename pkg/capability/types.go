@@ -171,6 +171,7 @@ const (
 	ConversationEventReactionRemoved   = "conversation.reaction.removed"
 	ConversationEventParticipantJoined = "conversation.participant.joined"
 	ConversationEventParticipantLeft   = "conversation.participant.left"
+	ConversationEventApprovalDecided   = "conversation.approval.decided"
 )
 
 type ConversationDeliveryOperation string

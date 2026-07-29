@@ -267,7 +267,7 @@ func normalizeConversationEventTypes(values []string) ([]string, error) {
 		switch value {
 		case ConversationEventMessageReceived, ConversationEventMessageUpdated, ConversationEventMessageDeleted,
 			ConversationEventReactionAdded, ConversationEventReactionRemoved,
-			ConversationEventParticipantJoined, ConversationEventParticipantLeft:
+			ConversationEventParticipantJoined, ConversationEventParticipantLeft, ConversationEventApprovalDecided:
 		default:
 			return nil, errors.New("conversation adapter inbound event type is invalid")
 		}

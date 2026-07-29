@@ -36,6 +36,7 @@ type ExternalConversationSupervisor struct {
 	inbox     *ExternalConversationInboxWorker
 	replies   *ExternalConversationReplyWorker
 	delivery  *ExternalConversationDeliveryWorker
+	approvals *ApprovalNotificationWorker
 	scopes    WorkerScopeSource
 	config    ExternalConversationSupervisorConfig
 	logger    *zap.SugaredLogger
@@ -50,11 +51,12 @@ func NewExternalConversationSupervisor(
 	inbox *ExternalConversationInboxWorker,
 	replies *ExternalConversationReplyWorker,
 	delivery *ExternalConversationDeliveryWorker,
+	approvals *ApprovalNotificationWorker,
 	scopes WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config ExternalConversationSupervisorConfig,
 ) (*ExternalConversationSupervisor, error) {
-	if inbox == nil || replies == nil || delivery == nil || scopes == nil {
+	if inbox == nil || replies == nil || delivery == nil || approvals == nil || scopes == nil {
 		return nil, errors.New("external conversation workers and scope source are required")
 	}
 	if err := config.applyDefaults(); err != nil {
@@ -64,7 +66,7 @@ func NewExternalConversationSupervisor(
 		logger = zap.NewNop().Sugar()
 	}
 	return &ExternalConversationSupervisor{
-		inbox: inbox, replies: replies, delivery: delivery, scopes: scopes,
+		inbox: inbox, replies: replies, delivery: delivery, approvals: approvals, scopes: scopes,
 		config: config, logger: logger, wake: make(chan struct{}, 1),
 	}, nil
 }
@@ -101,6 +103,9 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 		return err
 	}
 	for _, scope := range normalizedConversationRunScopes(scopes) {
+		if _, err := s.approvals.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
+			return err
+		}
 		for range s.config.BatchSize {
 			item, processErr := s.inbox.ProcessOne(ctx, scope)
 			if processErr != nil {

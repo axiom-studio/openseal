@@ -2623,8 +2623,13 @@ func (e *Engine) rebuildExternalConversations() error {
 	if err != nil {
 		return err
 	}
+	approvalStore, ok := e.store.(runtime.ApprovalNotificationStore)
+	if !ok {
+		return fmt.Errorf("persistent store does not implement approval notification storage")
+	}
+	approvals := runtime.NewApprovalNotificationWorker(approvalStore, e.externalConversations.transport)
 	e.externalConversations.supervisor, err = runtime.NewExternalConversationSupervisor(
-		inbox, replies, delivery, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
+		inbox, replies, delivery, approvals, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
 	)
 	return err
 }
