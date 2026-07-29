@@ -17,6 +17,27 @@ func runbookLiteral(value interface{}) runbook.Value {
 }
 func runbookRef(pointer string) *runbook.Value { value := runbook.Value{Ref: pointer}; return &value }
 
+func TestRunbookTurnReportsDelegatedAgentFailureReason(t *testing.T) {
+	runner := &RunbookTurnRunner{}
+	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "1"}, Output: map[string]interface{}{}}
+	stepID := "perform-hourly"
+	requestKey := strings.Join([]string{"delegation", run.ID, stepID}, ":")
+	requestID := stableCollaborationID(run.Scope, requestKey, "request")
+	run.Output["collaborationResults"] = map[string]interface{}{
+		requestID: map[string]interface{}{
+			"status": string(AgentRequestStatusFailed),
+			"reason": "Model provider quota is exhausted; choose a credential with available quota.",
+		},
+	}
+	checkpoint := map[string]interface{}{}
+	state := &runbookExecutionState{PendingDelegation: stepID}
+	consumed, outcome, err := runner.consumeDelegationResult(checkpoint, state, run)
+	if err != nil || consumed || outcome == nil || outcome.NextRunStatus != AgentRunStatusFailed ||
+		!strings.Contains(outcome.RunError, "provider quota is exhausted") {
+		t.Fatalf("consumed=%t outcome=%#v err=%v", consumed, outcome, err)
+	}
+}
+
 func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "health", Version: "1", Name: "Health", Entrypoints: map[string]string{"manual": "fetch"}, Steps: map[string]runbook.Step{
 		"fetch": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "web", SkillVersion: "1", Action: "fetch", Arguments: map[string]runbook.Value{"url": {Ref: "/input/url"}}, ResultPath: "/steps/fetch", Next: "done"}},
