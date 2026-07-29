@@ -64,6 +64,71 @@ func TestPublicFacadeExposesConversationGatewayChoices(t *testing.T) {
 	}
 }
 
+func TestEngineExposesExternalConversationEndpointLifecycle(t *testing.T) {
+	ctx := context.Background()
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := &SkillDefinition{
+		ID: "slack", Version: "1.0.0", Name: "Slack",
+		ConversationAdapters: map[string]ConversationAdapter{"conversations": {
+			ProtocolVersion: ConversationAdapterProtocolV1,
+			Name:            "Slack conversations", Description: "Deliver governed messages.", Provider: "slack",
+			EndpointModes:     []ConversationEndpointMode{ConversationEndpointChannel},
+			InboundEventTypes: []string{ConversationEventMessageReceived},
+			Features:          []ConversationAdapterFeature{ConversationFeatureThreads},
+			Delivery: ConversationDeliveryCapabilities{
+				Operations: []ConversationDeliveryOperation{ConversationDeliveryMessageSend},
+				Ordering:   ConversationDeliveryOrderThread, Idempotency: SkillIdempotencyRequired,
+			},
+			Transport: ConversationAdapterTransport{
+				Kind: "plugin", IngressEndpoint: "slack.conversation.ingress", DeliveryEndpoint: "slack.conversation.deliver",
+			},
+		}},
+	}
+	if err := engine.RegisterSkill(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	if err := engine.BindSkill(ctx, &SkillBinding{
+		ID: "slack-primary", Scope: scope, DeploymentID: "agent-one", SkillID: definition.ID,
+		SkillVersion: definition.Version, EnabledConversationAdapters: []string{"conversations"},
+		MaximumRisk: SkillRiskExternal, Revision: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := engine.CreateExternalConversationEndpoint(ctx, CreateExternalConversationEndpointRequest{
+		ID: "approval-slack", Scope: Scope(scope), Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-one"},
+		DeploymentID: "agent-one", Name: "Approval channel",
+		Adapter: ExternalConversationAdapterReference{
+			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: "slack-primary",
+			BindingRevision: 1, AdapterID: "conversations",
+		},
+		Mode: ConversationEndpointChannel, Address: "C012345",
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "agent-one"},
+		Policy: ExternalConversationPolicy{
+			MessageSelection: ExternalConversationSelectDirectOrMention,
+			ReplyMode:        ExternalConversationReplyThread, IgnoreBots: true,
+		},
+		Status: ExternalConversationEndpointPaused,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := ExternalConversationEndpointActive
+	endpoint, err = engine.UpdateExternalConversationEndpoint(ctx, endpoint.Scope, endpoint.ID, UpdateExternalConversationEndpointRequest{
+		ExpectedRevision: endpoint.Revision, Status: &active,
+	})
+	if err != nil || endpoint.Status != active || endpoint.Revision != 2 {
+		t.Fatalf("active endpoint = %#v, %v", endpoint, err)
+	}
+	items, err := engine.ListExternalConversationEndpoints(ctx, ExternalConversationEndpointFilter{Scope: endpoint.Scope, Limit: 10})
+	if err != nil || len(items) != 1 || items[0].ID != endpoint.ID {
+		t.Fatalf("endpoints = %#v, %v", items, err)
+	}
+}
+
 func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := runtime.NewSQLiteStore(path)

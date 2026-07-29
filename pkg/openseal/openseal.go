@@ -2193,6 +2193,7 @@ type ExternalConversationSupervisorConfig = runtime.ExternalConversationSupervis
 
 type externalConversationRuntime struct {
 	transport  *runtime.ExternalConversationTransportService
+	endpoints  *runtime.ExternalConversationEndpointService
 	gateways   *runtime.ExternalConversationGatewayService
 	supervisor *runtime.ExternalConversationSupervisor
 	config     *runtime.ExternalConversationSupervisorConfig
@@ -2631,6 +2632,7 @@ func (e *Engine) rebuildConversationRuns() error {
 
 func (e *Engine) rebuildExternalConversations() error {
 	e.externalConversations.transport = nil
+	e.externalConversations.endpoints = nil
 	e.externalConversations.gateways = nil
 	e.externalConversations.supervisor = nil
 	store, ok := e.store.(runtime.ExternalConversationReplyStore)
@@ -2641,6 +2643,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		return nil
 	}
 	e.externalConversations.transport = runtime.NewExternalConversationTransportService(store, e.skills)
+	e.externalConversations.endpoints = runtime.NewExternalConversationEndpointService(store, e.skills)
 	e.externalConversations.gateways = runtime.NewExternalConversationGatewayService(store, e.skills)
 	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
 		return nil
@@ -3901,6 +3904,56 @@ func (e *Engine) CreateExternalConversationGateway(
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
 	return e.externalConversations.gateways.Create(ctx, request)
+}
+
+// CreateExternalConversationEndpoint registers one provider-neutral
+// conversation destination against an exact, reviewed Skill binding revision.
+func (e *Engine) CreateExternalConversationEndpoint(
+	ctx context.Context,
+	request runtime.CreateExternalConversationEndpointRequest,
+) (*runtime.ExternalConversationEndpoint, error) {
+	if e == nil || e.externalConversations.endpoints == nil {
+		return nil, fmt.Errorf("external conversation endpoints are not configured")
+	}
+	return e.externalConversations.endpoints.Create(ctx, request)
+}
+
+// GetExternalConversationEndpoint returns one tenant-scoped endpoint.
+func (e *Engine) GetExternalConversationEndpoint(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+) (*runtime.ExternalConversationEndpoint, error) {
+	if e == nil || e.externalConversations.endpoints == nil {
+		return nil, fmt.Errorf("external conversation endpoints are not configured")
+	}
+	return e.externalConversations.endpoints.Get(ctx, scope, id)
+}
+
+// ListExternalConversationEndpoints returns endpoints visible in one exact
+// scope. Provider credentials never enter this portable desired-state API.
+func (e *Engine) ListExternalConversationEndpoints(
+	ctx context.Context,
+	filter runtime.ExternalConversationEndpointFilter,
+) ([]*runtime.ExternalConversationEndpoint, error) {
+	if e == nil || e.externalConversations.endpoints == nil {
+		return nil, fmt.Errorf("external conversation endpoints are not configured")
+	}
+	return e.externalConversations.endpoints.List(ctx, filter)
+}
+
+// UpdateExternalConversationEndpoint applies a revision-checked lifecycle or
+// configuration change without changing the pinned Skill adapter revision.
+func (e *Engine) UpdateExternalConversationEndpoint(
+	ctx context.Context,
+	scope runtime.Scope,
+	id string,
+	request runtime.UpdateExternalConversationEndpointRequest,
+) (*runtime.ExternalConversationEndpoint, error) {
+	if e == nil || e.externalConversations.endpoints == nil {
+		return nil, fmt.Errorf("external conversation endpoints are not configured")
+	}
+	return e.externalConversations.endpoints.Update(ctx, scope, id, request)
 }
 
 func (e *Engine) GetExternalConversationGateway(
