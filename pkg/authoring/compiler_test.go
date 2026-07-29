@@ -527,6 +527,25 @@ func TestCompilerCanonicalizesUnambiguousRawRunbookValues(t *testing.T) {
 	}
 }
 
+func TestNormalizeGeneratedRunbookValuesCanonicalizesTransformTargets(t *testing.T) {
+	payload := []byte(`{"candidate":{"agents":[{"runbook":{"steps":{"extract":{"kind":"transform","transform":{"assignments":{"usernameRef":{"ref":"/results/snapshot/elements/0/ref"}},"next":"done"}}}}}]}}`)
+
+	normalized := normalizeGeneratedRunbookValues(payload)
+	var document map[string]interface{}
+	if err := json.Unmarshal(normalized, &document); err != nil {
+		t.Fatal(err)
+	}
+	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
+	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	assignments := steps["extract"].(map[string]interface{})["transform"].(map[string]interface{})["assignments"].(map[string]interface{})
+	if _, ok := assignments["/results/usernameRef"]; !ok {
+		t.Fatalf("canonicalized assignments = %#v", assignments)
+	}
+	if _, ok := assignments["usernameRef"]; ok {
+		t.Fatalf("bare transform target survived normalization: %#v", assignments)
+	}
+}
+
 func TestCompilerPreservesStrictRunbookValueObjectDiagnostics(t *testing.T) {
 	valid, _ := deterministicRunbookPayloads(t)
 	var document map[string]interface{}
