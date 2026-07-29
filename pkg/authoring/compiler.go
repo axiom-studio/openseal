@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,14 +17,14 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
 const (
 	maximumGenerationBytes        = 1 << 20
-	maximumSchemaRepairAttempts   = 2
-	maximumContractRepairAttempts = 2
+	maximumRepairAttempts         = 2
+	maximumSchemaRepairAttempts   = maximumRepairAttempts
+	maximumContractRepairAttempts = maximumRepairAttempts
 	maximumPublicSchemaDiagnostic = 256
 )
 
@@ -112,22 +111,24 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	reportCompileProgress(observe, CompilePhaseCandidateValidate, 1, 1)
 	generated, decodeErr := decodeGenerationResponse(payload)
-	for attempt := 1; decodeErr != nil; attempt++ {
+	repairAttempts := 0
+	for decodeErr != nil {
 		repairer, ok := c.generator.(RepairGenerator)
 		if !ok {
 			return nil, fmt.Errorf("decode workforce candidate: %w", decodeErr)
 		}
-		if attempt > maximumSchemaRepairAttempts {
-			return nil, &SchemaGenerationError{RepairAttempts: maximumSchemaRepairAttempts, Diagnostic: publicSchemaDiagnostic(decodeErr)}
+		if repairAttempts >= maximumRepairAttempts {
+			return nil, &SchemaGenerationError{RepairAttempts: repairAttempts, Diagnostic: publicSchemaDiagnostic(decodeErr)}
 		}
+		repairAttempts++
 		repairRequest := request
 		if repairRequest.InvocationKey != "" {
-			repairRequest.InvocationKey = fmt.Sprintf("%s:schema:%d", repairRequest.InvocationKey, attempt)
+			repairRequest.InvocationKey = fmt.Sprintf("%s:repair:%d", repairRequest.InvocationKey, repairAttempts)
 		}
-		reportCompileProgress(observe, CompilePhaseSchemaRepair, attempt, maximumSchemaRepairAttempts)
+		reportCompileProgress(observe, CompilePhaseSchemaRepair, repairAttempts, maximumRepairAttempts)
 		payload, err = repairer.Repair(ctx, repairRequest, payload, decodeErr)
 		if err != nil {
-			return nil, fmt.Errorf("repair workforce candidate schema attempt %d: %w", attempt, err)
+			return nil, fmt.Errorf("repair workforce candidate schema attempt %d: %w", repairAttempts, err)
 		}
 		if len(payload) == 0 || len(payload) > maximumGenerationBytes {
 			return nil, errors.New("repaired workforce candidate must be between 1 byte and 1 MiB")
@@ -179,20 +180,19 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	commitments, validation, missing := validateGenerated()
 	repairableMissing := providerRepairableMissingRequirements(&generated.Candidate, missing, request)
-	// Structural schema repair and deterministic contract repair have separate,
-	// bounded budgets. Every semantic repair is revalidated before it can replace
-	// the canonical result; a second bounded attempt receives the new diagnostic
-	// instead of persisting a still-invalid typed refinement.
-	contractRepairAttempts := 0
+	// Schema and semantic repair share one two-attempt budget. Every repair is
+	// revalidated from the raw AuthoringResult before it may replace the proposal.
+	contractRepairAttempts := repairAttempts
 	if repairer, ok := c.generator.(RepairGenerator); ok {
 		repairReason := deterministicContractError(validation, repairableMissing)
-		for attempt := 1; attempt <= maximumContractRepairAttempts && (len(validation) > 0 || len(repairableMissing) > 0); attempt++ {
-			contractRepairAttempts = attempt
+		for repairAttempts < maximumRepairAttempts && (len(validation) > 0 || len(repairableMissing) > 0) {
+			repairAttempts++
+			contractRepairAttempts = repairAttempts
 			repairRequest := request
 			if repairRequest.InvocationKey != "" {
-				repairRequest.InvocationKey = fmt.Sprintf("%s:contract:%d", repairRequest.InvocationKey, attempt)
+				repairRequest.InvocationKey = fmt.Sprintf("%s:repair:%d", repairRequest.InvocationKey, repairAttempts)
 			}
-			reportCompileProgress(observe, CompilePhaseContractRepair, attempt, maximumContractRepairAttempts)
+			reportCompileProgress(observe, CompilePhaseContractRepair, repairAttempts, maximumRepairAttempts)
 			repaired, repairErr := repairer.Repair(ctx, repairRequest, payload, repairReason)
 			if repairErr != nil || len(repaired) == 0 || len(repaired) > maximumGenerationBytes {
 				break
@@ -440,9 +440,9 @@ func publicContractDiagnostic(validation []ValidationIssue) string {
 }
 
 func publicSchemaDiagnostic(err error) string {
-	var contextual *strictJSONSchemaError
-	if errors.As(err, &contextual) {
-		return truncateSchemaDiagnostic(contextual.diagnostic)
+	var schemaValidation *AuthoringSchemaValidationError
+	if errors.As(err, &schemaValidation) {
+		return truncateSchemaDiagnostic(schemaValidation.Error())
 	}
 	switch value := err.(type) {
 	case *json.SyntaxError:
@@ -498,19 +498,14 @@ func deterministicContractError(validation []ValidationIssue, missing []MissingR
 }
 
 func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
-	payload = normalizeGeneratedResponseMetadataPlacement(payload)
-	payload = normalizeGeneratedDefinitionVersions(payload)
-	payload = normalizeGeneratedDurations(payload)
-	payload = normalizeGeneratedDefinitionProvenance(payload)
-	payload = normalizeGeneratedRefinementBlocking(payload)
-	payload = normalizeGeneratedRefinementProvenance(payload)
-	payload = normalizeGeneratedRefinementDependencies(payload)
-	payload = normalizeGeneratedRunbookValues(payload)
+	if err := validateAuthoringResultDocument(payload); err != nil {
+		return GenerationResponse{}, err
+	}
 	var generated GenerationResponse
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&generated); err != nil {
-		return GenerationResponse{}, contextualizeStrictJSONError(payload, err)
+		return GenerationResponse{}, fmt.Errorf("strict decode authoring result: %w", err)
 	}
 	var trailing interface{}
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
@@ -519,525 +514,13 @@ func decodeGenerationResponse(payload []byte) (GenerationResponse, error) {
 		}
 		return GenerationResponse{}, errors.New("generated workforce candidate must contain one JSON object")
 	}
+	if generated.SchemaVersion != AuthoringResultSchemaVersion {
+		return GenerationResponse{}, fmt.Errorf("unsupported authoring result schema version %q", generated.SchemaVersion)
+	}
 	normalizeGeneratedCredentialReferenceOptions(&generated)
 	return generated, nil
 }
 
-// normalizeGeneratedResponseMetadataPlacement lifts exact response-level
-// metadata when a provider has placed it under candidate. This is a lossless
-// structural correction for the three known fields and their exact JSON
-// shapes. Existing response-level values, invalid shapes, a non-object
-// candidate, and every other unknown candidate field remain untouched and are
-// rejected by strict decoding.
-func normalizeGeneratedResponseMetadataPlacement(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document map[string]interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	candidate, ok := document["candidate"].(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	validShape := map[string]func(interface{}) bool{
-		"commitments": func(value interface{}) bool {
-			_, valid := value.(map[string]interface{})
-			return valid
-		},
-		"assumptions": func(value interface{}) bool {
-			_, valid := value.([]interface{})
-			return valid
-		},
-		"unresolvedQuestions": func(value interface{}) bool {
-			_, valid := value.([]interface{})
-			return valid
-		},
-	}
-	changed := false
-	for _, field := range []string{"commitments", "assumptions", "unresolvedQuestions"} {
-		if _, exists := document[field]; exists {
-			continue
-		}
-		value, exists := candidate[field]
-		if !exists || !validShape[field](value) {
-			continue
-		}
-		delete(candidate, field)
-		document[field] = value
-		changed = true
-	}
-	if !changed {
-		return payload
-	}
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-// normalizeGeneratedDefinitionProvenance accepts the common provider alias
-// provenance.kind only where the portable Agent/Team definition contract uses
-// provenance.source. The alias is lossless because Source is descriptive
-// provenance rather than authority. Existing source, unknown siblings,
-// whitespace changes, and non-string values remain untouched for strict JSON
-// decoding to reject.
-func normalizeGeneratedDefinitionProvenance(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	root, ok := document.(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	candidate, ok := root["candidate"].(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	changed := false
-	if agents, ok := candidate["agents"].([]interface{}); ok {
-		for _, rawAgent := range agents {
-			agent, ok := rawAgent.(map[string]interface{})
-			if ok && normalizeDefinitionProvenanceKindAlias(agent["provenance"]) {
-				changed = true
-			}
-		}
-	}
-	if team, ok := candidate["team"].(map[string]interface{}); ok && normalizeDefinitionProvenanceKindAlias(team["provenance"]) {
-		changed = true
-	}
-	if !changed {
-		return payload
-	}
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-func normalizeDefinitionProvenanceKindAlias(raw interface{}) bool {
-	provenance, ok := raw.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	if _, exists := provenance["source"]; exists {
-		return false
-	}
-	kind, ok := provenance["kind"].(string)
-	if !ok || kind == "" || kind != strings.TrimSpace(kind) {
-		return false
-	}
-	for key := range provenance {
-		switch key {
-		case "kind", "reference", "createdBy", "derivedFrom":
-		default:
-			return false
-		}
-	}
-	delete(provenance, "kind")
-	provenance["source"] = kind
-	return true
-}
-
-// normalizeGeneratedRunbookValues canonicalizes unambiguous scalar shorthand
-// only at fields whose declared portable type is runbook.Value. A JSON Pointer
-// string becomes a ref and every other primitive becomes a literal. Objects
-// remain untouched so misspelled Value fields still fail strict decoding.
-func normalizeGeneratedRunbookValues(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	normalized, changed := normalizeRunbookValuesAtType(document, reflect.TypeOf(GenerationResponse{}), 0)
-	if !changed {
-		return payload
-	}
-	encoded, err := json.Marshal(normalized)
-	if err != nil {
-		return payload
-	}
-	return encoded
-}
-
-func normalizeRunbookValuesAtType(value interface{}, expected reflect.Type, depth int) (interface{}, bool) {
-	if expected == nil || depth > 64 {
-		return value, false
-	}
-	for expected.Kind() == reflect.Pointer {
-		expected = expected.Elem()
-	}
-	if expected == reflect.TypeOf(runbook.Value{}) {
-		if _, isObject := value.(map[string]interface{}); isObject {
-			return value, false
-		}
-		if reference, ok := value.(string); ok && generatedRunbookReferenceShorthand(reference) {
-			return map[string]interface{}{"ref": reference}, true
-		}
-		return map[string]interface{}{"literal": value}, true
-	}
-	if expected == reflect.TypeOf(runbook.TransformStep{}) {
-		object, ok := value.(map[string]interface{})
-		if !ok {
-			return value, false
-		}
-		assignments, ok := object["assignments"].(map[string]interface{})
-		if !ok {
-			return value, false
-		}
-		changed := false
-		for target, assignment := range assignments {
-			if !generatedRunbookAssignmentShorthand(target) {
-				continue
-			}
-			delete(assignments, target)
-			assignments["/results/"+target] = assignment
-			changed = true
-		}
-		// Continue through the ordinary typed walk so assignment values are
-		// canonicalized in the same pass.
-		if normalized, childChanged := normalizeRunbookValuesAtType(object, reflect.TypeOf(struct {
-			Assignments map[string]runbook.Value `json:"assignments"`
-			Next        string                   `json:"next"`
-		}{}), depth+1); childChanged {
-			return normalized, true
-		}
-		return object, changed
-	}
-	switch expected.Kind() {
-	case reflect.Struct:
-		object, ok := value.(map[string]interface{})
-		if !ok {
-			return value, false
-		}
-		fields := jsonStructFields(expected)
-		changed := false
-		for name, child := range object {
-			childType, known := fields[name]
-			if !known {
-				continue
-			}
-			normalized, childChanged := normalizeRunbookValuesAtType(child, childType, depth+1)
-			if childChanged {
-				object[name] = normalized
-				changed = true
-			}
-		}
-		return object, changed
-	case reflect.Slice, reflect.Array:
-		items, ok := value.([]interface{})
-		if !ok {
-			return value, false
-		}
-		changed := false
-		for index, child := range items {
-			normalized, childChanged := normalizeRunbookValuesAtType(child, expected.Elem(), depth+1)
-			if childChanged {
-				items[index] = normalized
-				changed = true
-			}
-		}
-		return items, changed
-	case reflect.Map:
-		object, ok := value.(map[string]interface{})
-		if !ok || expected.Key().Kind() != reflect.String {
-			return value, false
-		}
-		changed := false
-		for name, child := range object {
-			normalized, childChanged := normalizeRunbookValuesAtType(child, expected.Elem(), depth+1)
-			if childChanged {
-				object[name] = normalized
-				changed = true
-			}
-		}
-		return object, changed
-	default:
-		return value, false
-	}
-}
-
-// generatedRunbookAssignmentShorthand recognizes the only unambiguous target
-// shorthand accepted from an authoring model. Transform outputs conventionally
-// live under /results, and a bare stable key cannot name any valid JSON Pointer.
-// Runtime-authored Runbooks remain strict; this normalization is confined to
-// provider output before strict decoding.
-func generatedRunbookAssignmentShorthand(value string) bool {
-	if value == "" || strings.TrimSpace(value) != value {
-		return false
-	}
-	for _, character := range value {
-		if (character >= 'a' && character <= 'z') ||
-			(character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') || character == '_' || character == '-' || character == '.' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func generatedRunbookReferenceShorthand(value string) bool {
-	for _, root := range []string{"/input", "/results", "/context"} {
-		if value == root || strings.HasPrefix(value, root+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-// strictJSONSchemaError preserves the decoder failure for errors.Is/As while
-// giving the bounded repair provider an exact, value-free location. Go's JSON
-// decoder reports only an unknown field name, which is ambiguous in a deeply
-// nested workforce document (for example, "id" is valid in many objects but
-// not in Agent skill requirements).
-type strictJSONSchemaError struct {
-	cause      error
-	diagnostic string
-}
-
-func (e *strictJSONSchemaError) Error() string { return e.diagnostic }
-func (e *strictJSONSchemaError) Unwrap() error { return e.cause }
-
-type unknownJSONFieldLocation struct {
-	path       string
-	allowed    []string
-	correction string
-}
-
-func contextualizeStrictJSONError(payload []byte, decodeErr error) error {
-	if decodeErr == nil {
-		return nil
-	}
-	var typeError *json.UnmarshalTypeError
-	if errors.As(decodeErr, &typeError) && typeError.Type == reflect.TypeOf(runbook.Value{}) {
-		field := strings.TrimSpace(typeError.Field)
-		if field == "" {
-			field = "unknown"
-		}
-		diagnostic := fmt.Sprintf(
-			"field %s expects a Runbook Value object, not %s; use exactly one of {\"ref\":\"<JSON Pointer>\"}, {\"literal\":<JSON value>}, or {\"template\":[{\"text\":\"...\"} or {\"ref\":\"<JSON Pointer>\"}]}",
-			field, typeError.Value,
-		)
-		return &strictJSONSchemaError{cause: decodeErr, diagnostic: diagnostic}
-	}
-	message := strings.TrimSpace(decodeErr.Error())
-	const unknownPrefix = "json: unknown field \""
-	if !strings.HasPrefix(message, unknownPrefix) || !strings.HasSuffix(message, "\"") {
-		return decodeErr
-	}
-	field := strings.TrimSuffix(strings.TrimPrefix(message, unknownPrefix), "\"")
-	if !validSchemaFieldName(field) {
-		return decodeErr
-	}
-	locations := locateUnknownJSONFields(payload, field, reflect.TypeOf(GenerationResponse{}))
-	if len(locations) == 0 {
-		return decodeErr
-	}
-	sort.Slice(locations, func(i, j int) bool { return locations[i].path < locations[j].path })
-	parts := make([]string, 0, len(locations))
-	for _, location := range locations {
-		part := location.path
-		if len(location.allowed) > 0 {
-			part += " (allowed: " + strings.Join(location.allowed, ", ") + ")"
-		}
-		if location.correction != "" {
-			part += "; move to " + location.correction
-		}
-		parts = append(parts, part)
-	}
-	diagnostic := "unknown field " + field + " at " + strings.Join(parts, "; ")
-	return &strictJSONSchemaError{cause: decodeErr, diagnostic: diagnostic}
-}
-
-// locateUnknownJSONFields walks only statically typed JSON values. Map keys are
-// permitted by the portable contract, but map values may still have a declared
-// schema (for example, named runbook steps). Interface values remain opaque. It
-// returns paths and field names, never values.
-func locateUnknownJSONFields(payload []byte, field string, rootType reflect.Type) []unknownJSONFieldLocation {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return nil
-	}
-	locations := make([]unknownJSONFieldLocation, 0, 2)
-	var walk func(interface{}, reflect.Type, string, int)
-	walk = func(value interface{}, expected reflect.Type, path string, depth int) {
-		if depth > 64 || len(locations) >= 8 || expected == nil {
-			return
-		}
-		for expected.Kind() == reflect.Pointer {
-			expected = expected.Elem()
-		}
-		switch expected.Kind() {
-		case reflect.Struct:
-			object, ok := value.(map[string]interface{})
-			if !ok {
-				return
-			}
-			fields := jsonStructFields(expected)
-			allowed := make([]string, 0, len(fields))
-			for name := range fields {
-				allowed = append(allowed, name)
-			}
-			sort.Strings(allowed)
-			for name, child := range object {
-				childType, known := fields[name]
-				childPath := name
-				if path != "" {
-					childPath = path + "." + name
-				}
-				if !known {
-					if name == field {
-						locations = append(locations, unknownJSONFieldLocation{
-							path:       childPath,
-							allowed:    allowed,
-							correction: strictJSONFieldCorrection(expected, object, path, name),
-						})
-					}
-					continue
-				}
-				walk(child, childType, childPath, depth+1)
-			}
-		case reflect.Slice, reflect.Array:
-			items, ok := value.([]interface{})
-			if !ok {
-				return
-			}
-			for index, child := range items {
-				walk(child, expected.Elem(), fmt.Sprintf("%s[%d]", path, index), depth+1)
-			}
-		case reflect.Map:
-			object, ok := value.(map[string]interface{})
-			if !ok || expected.Key().Kind() != reflect.String {
-				return
-			}
-			for name, child := range object {
-				childPath := name
-				if path != "" {
-					childPath = path + "." + name
-				}
-				walk(child, expected.Elem(), childPath, depth+1)
-			}
-		case reflect.Interface:
-			// Arbitrary values are part of this field's declared schema.
-			return
-		}
-	}
-	walk(document, rootType, "", 0)
-	return locations
-}
-
-func strictJSONFieldCorrection(expected reflect.Type, object map[string]interface{}, path, field string) string {
-	if expected != reflect.TypeOf(runbook.Step{}) {
-		return ""
-	}
-	kindValue, ok := object["kind"].(string)
-	if !ok {
-		return ""
-	}
-	payloadField, ok := runbook.StepPayloadFieldForJSONField(runbook.StepKind(kindValue), field)
-	if !ok {
-		return ""
-	}
-	if path == "" {
-		return payloadField + "." + field
-	}
-	return path + "." + payloadField + "." + field
-}
-
-func jsonStructFields(structType reflect.Type) map[string]reflect.Type {
-	fields := make(map[string]reflect.Type, structType.NumField())
-	for index := 0; index < structType.NumField(); index++ {
-		field := structType.Field(index)
-		if field.PkgPath != "" { // unexported
-			continue
-		}
-		name := strings.Split(field.Tag.Get("json"), ",")[0]
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			name = field.Name
-		}
-		fields[name] = field.Type
-	}
-	return fields
-}
-
-// normalizeGeneratedDefinitionVersions accepts JSON numbers only at the two
-// immutable definition-version fields authored by the provider. A JSON number
-// has one lossless textual representation under UseNumber, while the runtime
-// contract deliberately models versions as opaque strings. All other scalar
-// mismatches remain untouched and fail strict decoding.
-func normalizeGeneratedDefinitionVersions(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	root, ok := document.(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	candidate, ok := root["candidate"].(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	changed := false
-	if agents, ok := candidate["agents"].([]interface{}); ok {
-		for _, rawAgent := range agents {
-			agent, ok := rawAgent.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if version, ok := agent["version"].(json.Number); ok {
-				agent["version"] = version.String()
-				changed = true
-			}
-		}
-	}
-	if team, ok := candidate["team"].(map[string]interface{}); ok {
-		if version, ok := team["version"].(json.Number); ok {
-			team["version"] = version.String()
-			changed = true
-		}
-	}
-	if !changed {
-		return payload
-	}
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-// normalizeGeneratedCredentialReferenceOptions removes provider-authored
-// credential choices at the strict decode boundary. A model can identify the
-// credential kind that work requires, but only the authorized host may resolve
-// that requirement to an opaque credential reference. Retaining option IDs here would
-// let untrusted output invent or disclose credential identities.
 func normalizeGeneratedCredentialReferenceOptions(generated *GenerationResponse) {
 	if generated == nil {
 		return
@@ -1055,383 +538,6 @@ func normalizeGeneratedCredentialReferenceOptions(generated *GenerationResponse)
 // lossless and deliberately limited to known scope values; unknown strings and
 // all other shapes remain untouched so strict decoding and validation fail
 // closed.
-func normalizeGeneratedRefinementBlocking(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	root, ok := document.(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	questions, ok := root["unresolvedQuestions"].([]interface{})
-	if !ok {
-		return payload
-	}
-	changed := false
-	for _, rawQuestion := range questions {
-		question, ok := rawQuestion.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		value, ok := question["blocking"].(string)
-		if !ok {
-			continue
-		}
-		scope := RefinementBlockingScope(strings.TrimSpace(value))
-		if !validRefinementBlockingScope(scope) {
-			continue
-		}
-		question["blocking"] = []interface{}{string(scope)}
-		changed = true
-	}
-	if !changed {
-		return payload
-	}
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-func validRefinementBlockingScope(scope RefinementBlockingScope) bool {
-	switch scope {
-	case RefinementBlocksCandidate, RefinementBlocksEvaluation, RefinementBlocksApply:
-		return true
-	default:
-		return false
-	}
-}
-
-// normalizeGeneratedRefinementProvenance accepts unambiguous provider aliases
-// only at the refinement provenance boundary. The shorthand forms "prompt"
-// and ["prompt", "catalog"] map to objects without reference or evidence. A
-// credential question with the exact credential_reference answer contract has
-// canonical host-owned credential provenance because its category already
-// determines the only safe, opaque provenance kind. Provider provenance is
-// discarded at this boundary so an invented kind, binding reference, or secret
-// cannot enter strict decoding or durable state. An
-// object may use "type" instead of canonical "kind" only when it contains no
-// other fields beyond reference and evidence and names a known provenance
-// kind. Unknown or ambiguous shapes remain untouched so strict decoding and
-// refinement validation continue to fail closed.
-func normalizeGeneratedRefinementProvenance(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	root, ok := document.(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	questions, ok := root["unresolvedQuestions"].([]interface{})
-	if !ok {
-		return payload
-	}
-	changed := false
-	for _, rawQuestion := range questions {
-		question, ok := rawQuestion.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if generatedCredentialReferenceQuestion(question) {
-			question["provenance"] = []interface{}{map[string]interface{}{"kind": string(RefinementProvenanceCredential)}}
-			changed = true
-			continue
-		}
-		normalized, ok := normalizedRefinementProvenanceShorthand(question["provenance"])
-		if ok {
-			question["provenance"] = normalized
-			changed = true
-			continue
-		}
-		provenance, ok := question["provenance"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, rawEntry := range provenance {
-			entry, ok := rawEntry.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			entryChanged := false
-			if normalizeRefinementProvenanceSourceAlias(entry) || normalizeRefinementProvenanceTypeAlias(entry) {
-				entryChanged = true
-			}
-			if normalizeRefinementProvenanceValueAlias(entry) {
-				entryChanged = true
-			}
-			if entryChanged {
-				changed = true
-			}
-		}
-	}
-	if !changed {
-		return payload
-	}
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-func generatedCredentialReferenceQuestion(question map[string]interface{}) bool {
-	category, ok := question["category"].(string)
-	if !ok || category != string(RefinementCategoryCredential) {
-		return false
-	}
-	answer, ok := question["answer"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-	kind, ok := answer["kind"].(string)
-	return ok && kind == string(RefinementAnswerCredentialReference)
-}
-
-// normalizeRefinementProvenanceSourceAlias handles the exact live provider
-// shape {"source":"prompt"}. Unlike the older type alias, source is accepted
-// only as a single-field object: reference/evidence or any other sibling would
-// make the provider's intended semantics ambiguous and must remain a strict
-// unknown-field failure.
-func normalizeRefinementProvenanceSourceAlias(entry map[string]interface{}) bool {
-	if len(entry) != 1 {
-		return false
-	}
-	if _, hasKind := entry["kind"]; hasKind {
-		return false
-	}
-	rawSource, hasSource := entry["source"]
-	if !hasSource {
-		return false
-	}
-	source, ok := rawSource.(string)
-	if !ok || source != strings.TrimSpace(source) {
-		return false
-	}
-	kind := RefinementProvenanceKind(source)
-	if !validRefinementProvenanceKind(kind) {
-		return false
-	}
-	delete(entry, "source")
-	entry["kind"] = string(kind)
-	return true
-}
-
-func normalizeRefinementProvenanceTypeAlias(entry map[string]interface{}) bool {
-	if _, hasKind := entry["kind"]; hasKind {
-		return false
-	}
-	rawType, hasType := entry["type"]
-	if !hasType || len(entry) > 3 {
-		return false
-	}
-	for key := range entry {
-		switch key {
-		case "type", "reference", "evidence":
-		default:
-			return false
-		}
-	}
-	typeName, ok := rawType.(string)
-	if !ok || typeName != strings.TrimSpace(typeName) {
-		return false
-	}
-	kind := RefinementProvenanceKind(typeName)
-	if !validRefinementProvenanceKind(kind) {
-		return false
-	}
-	delete(entry, "type")
-	entry["kind"] = string(kind)
-	return true
-}
-
-// normalizeRefinementProvenanceValueAlias accepts the provider's common
-// `value` spelling for the portable `reference` field only after a known,
-// non-credential provenance kind is present. Credential provenance never
-// accepts model-supplied references because they could contain an opaque host
-// binding identifier.
-func normalizeRefinementProvenanceValueAlias(entry map[string]interface{}) bool {
-	if _, hasReference := entry["reference"]; hasReference {
-		return false
-	}
-	kindText, ok := entry["kind"].(string)
-	if !ok {
-		return false
-	}
-	kind := RefinementProvenanceKind(kindText)
-	if !validRefinementProvenanceKind(kind) || kind == RefinementProvenanceCredential {
-		return false
-	}
-	value, ok := entry["value"].(string)
-	if !ok || value == "" || value != strings.TrimSpace(value) {
-		return false
-	}
-	for key := range entry {
-		switch key {
-		case "kind", "value", "evidence":
-		default:
-			return false
-		}
-	}
-	delete(entry, "value")
-	entry["reference"] = value
-	return true
-}
-
-func normalizedRefinementProvenanceShorthand(raw interface{}) ([]interface{}, bool) {
-	values := make([]string, 0, 1)
-	switch value := raw.(type) {
-	case string:
-		values = append(values, value)
-	case []interface{}:
-		for _, item := range value {
-			text, ok := item.(string)
-			if !ok {
-				return nil, false
-			}
-			values = append(values, text)
-		}
-	default:
-		return nil, false
-	}
-	if len(values) == 0 {
-		return nil, false
-	}
-	result := make([]interface{}, 0, len(values))
-	for _, value := range values {
-		kind := RefinementProvenanceKind(strings.TrimSpace(value))
-		if !validRefinementProvenanceKind(kind) {
-			return nil, false
-		}
-		result = append(result, map[string]interface{}{"kind": string(kind)})
-	}
-	return result, true
-}
-
-func validRefinementProvenanceKind(kind RefinementProvenanceKind) bool {
-	switch kind {
-	case RefinementProvenancePrompt, RefinementProvenanceCatalog, RefinementProvenanceSkill,
-		RefinementProvenanceCredential, RefinementProvenancePolicy, RefinementProvenanceRuntime:
-		return true
-	default:
-		return false
-	}
-}
-
-// normalizeGeneratedRefinementDependencies accepts the provider shorthand
-// dependsOn:["scope"] only at the typed dependency-array boundary. Each
-// non-empty string maps losslessly to {"questionId":"scope"}. Dependency
-// existence, option constraints, and cycle checks remain authoritative in the
-// refinement validator; unknown and mixed invalid shapes still fail closed.
-func normalizeGeneratedRefinementDependencies(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	root, ok := document.(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	questions, ok := root["unresolvedQuestions"].([]interface{})
-	if !ok {
-		return payload
-	}
-	changed := false
-	for _, rawQuestion := range questions {
-		question, ok := rawQuestion.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		dependencies, ok := question["dependsOn"].([]interface{})
-		if !ok {
-			continue
-		}
-		for index, rawDependency := range dependencies {
-			questionID, ok := rawDependency.(string)
-			if !ok || strings.TrimSpace(questionID) == "" || questionID != strings.TrimSpace(questionID) {
-				continue
-			}
-			dependencies[index] = map[string]interface{}{"questionId": questionID}
-			changed = true
-		}
-	}
-	if !changed {
-		return payload
-	}
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-// normalizeGeneratedDurations accepts unambiguous human duration strings only
-// at the portable schema's duration fields. Providers commonly emit values such
-// as "24h" or "30d" despite an integer nanosecond contract. The canonical
-// candidate remains numeric, while every other field still passes through the
-// strict decoder unchanged and therefore fails closed on a type mismatch.
-func normalizeGeneratedDurations(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	var document interface{}
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-	var trailing interface{}
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return payload
-	}
-	root, ok := document.(map[string]interface{})
-	if !ok {
-		return payload
-	}
-	candidate, _ := root["candidate"].(map[string]interface{})
-	agents, _ := candidate["agents"].([]interface{})
-	for _, rawAgent := range agents {
-		agentDefinition, _ := rawAgent.(map[string]interface{})
-		normalizeDurationField(agentDefinition, "memory", "retention")
-		normalizeDurationField(agentDefinition, "escalation", "afterDuration")
-	}
-	teamDefinition, _ := candidate["team"].(map[string]interface{})
-	normalizeDurationField(teamDefinition, "sharedContext", "retention")
-	normalized, err := json.Marshal(document)
-	if err != nil {
-		return payload
-	}
-	return normalized
-}
-
-func normalizeDurationField(parent map[string]interface{}, objectKey, fieldKey string) {
-	object, _ := parent[objectKey].(map[string]interface{})
-	raw, ok := object[fieldKey].(string)
-	if !ok {
-		return
-	}
-	duration, err := parseGeneratedDuration(raw)
-	if err == nil {
-		object[fieldKey] = duration.Nanoseconds()
-	}
-}
 
 func parseGeneratedDuration(raw string) (time.Duration, error) {
 	raw = strings.TrimSpace(raw)

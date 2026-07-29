@@ -24,7 +24,7 @@ import (
 type authoringFixtureGenerator struct{}
 
 func (authoringFixtureGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
-	return []byte(`{"candidate":{"agents":[],"assignments":[]},"unresolvedQuestions":[{"id":"team-responsibilities","category":"other","prompt":"Which responsibilities should this Team own?","whyNeeded":"The Team needs an explicit purpose.","blocking":["candidate"],"answer":{"kind":"text"},"provenance":[{"kind":"prompt"}],"priority":1}]}`), nil
+	return []byte(`{"schemaVersion":"openseal.authoring-result/v1","candidate":{"agents":[],"assignments":[]},"authoring":{"version":"openseal.authoring-form/v1"},"commitments":{},"unresolvedQuestions":[{"id":"team-responsibilities","category":"other","prompt":"Which responsibilities should this Team own?","whyNeeded":"The Team needs an explicit purpose.","blocking":["candidate"],"answer":{"kind":"text"},"provenance":[{"kind":"prompt"}],"priority":1}]}`), nil
 }
 
 type failingAuthoringGenerator struct{}
