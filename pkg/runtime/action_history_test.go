@@ -26,6 +26,63 @@ func TestActionSemanticDigestIgnoresIdempotencyAndEvidence(t *testing.T) {
 	}
 }
 
+func TestActionProgressIntentIgnoresRegeneratedReferencesAndKeys(t *testing.T) {
+	base := &ActionCall{
+		DeploymentID: "agent", BindingID: "browser", BindingRevision: 2,
+		SkillID: "skill-browser", SkillVersion: "2", Action: "camoufox-click",
+		Arguments: map[string]interface{}{
+			"sessionId": "run-1", "target": "s1:e26", "intent": " Open   the Community Rules ", "idempotencyKey": "first-key",
+		},
+	}
+	changed := cloneActionCall(base)
+	changed.Arguments["target"] = "s9:e47"
+	changed.Arguments["idempotencyKey"] = "second-key"
+	semantic := map[string]string{"intent": "intent"}
+	first, second := computeActionProgressIntentDigest(base, semantic), computeActionProgressIntentDigest(changed, semantic)
+	if first == "" || first != second {
+		t.Fatalf("progress intent digests differ: %q != %q", first, second)
+	}
+	changed.Arguments["intent"] = "Open account settings"
+	if computeActionProgressIntentDigest(base, semantic) == computeActionProgressIntentDigest(changed, semantic) {
+		t.Fatal("different purposes shared a progress intent digest")
+	}
+}
+
+func TestMatchingNoProgressActionRequiresSameCurrentObservation(t *testing.T) {
+	call := &ActionCall{DeploymentID: "agent", BindingID: "browser", BindingRevision: 1, SkillID: "skill-browser", SkillVersion: "2", Action: "camoufox-click", Arguments: map[string]interface{}{"intent": "Open rules"}}
+	intent := computeActionProgressIntentDigest(call, map[string]string{"intent": "intent"})
+	call.ID, call.Status = "stagnant", ActionCallStatusSucceeded
+	call.Output = map[string]interface{}{"progress": map[string]interface{}{"changed": false, "intentDigest": intent, "afterDigest": "sha256:same"}}
+	checkpoint := appendActionHistory(nil, call)
+	checkpoint = appendActionHistory(checkpoint, &ActionCall{ID: "snapshot-same", Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"observationDigest": "sha256:same"}})
+	if matchingNoProgressAction(checkpoint, intent) == nil {
+		t.Fatal("regenerated observation did not retain no-progress backpressure")
+	}
+	checkpoint = appendActionHistory(checkpoint, &ActionCall{ID: "snapshot-changed", Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"observationDigest": "sha256:changed"}})
+	if matchingNoProgressAction(checkpoint, intent) != nil {
+		t.Fatal("stale no-progress evidence blocked an action after state changed")
+	}
+}
+
+func TestAnnotateActionProgressUsesKernelComputedIntent(t *testing.T) {
+	call := &ActionCall{
+		DeploymentID: "agent", BindingID: "browser", BindingRevision: 1,
+		SkillID: "skill-browser", SkillVersion: "2", Action: "camoufox-click",
+		Arguments: map[string]interface{}{"intent": "Open rules"},
+	}
+	output := map[string]interface{}{"progress": map[string]interface{}{
+		"changed": false, "beforeDigest": "sha256:same", "afterDigest": "sha256:same", "intentDigest": "untrusted",
+	}}
+	annotated := annotateActionProgress(output, call, map[string]string{"intent": "intent"})
+	progress := annotated["progress"].(map[string]interface{})
+	if progress["intentDigest"] == "" || progress["intentDigest"] == "untrusted" {
+		t.Fatalf("kernel intent digest was not authoritative: %#v", progress)
+	}
+	if output["progress"].(map[string]interface{})["intentDigest"] != "untrusted" {
+		t.Fatal("dispatcher output was mutated in place")
+	}
+}
+
 func TestActionHistoryPreservesStructuredOversizedEvidenceAndBoundsEntries(t *testing.T) {
 	events := make([]interface{}, 96)
 	for index := range events {

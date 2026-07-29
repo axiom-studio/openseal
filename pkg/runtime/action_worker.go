@@ -282,7 +282,7 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		updatedCall.CompletedAt = &completedAt
 		if executionErr == nil {
 			updatedCall.Status = ActionCallStatusSucceeded
-			updatedCall.Output = sanitizeActionOutput(output, credentials)
+			updatedCall.Output = sanitizeActionOutput(annotateActionProgress(output, updatedCall, bound.Action.SemanticArguments), credentials)
 			updatedCall.Error = ""
 		} else {
 			updatedCall.Status = ActionCallStatusFailed

@@ -1,10 +1,114 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 )
+
+const actionProgressIntentRole = "intent"
+
+// computeActionProgressIntentDigest identifies the durable purpose of an
+// interaction independently of volatile snapshot references and model-chosen
+// idempotency keys. Skills opt in through the portable semantic argument role
+// "intent"; actions without that role retain the existing exact semantic
+// identity behavior.
+func computeActionProgressIntentDigest(call *ActionCall, semanticArguments map[string]string) string {
+	if call == nil {
+		return ""
+	}
+	argument := strings.TrimSpace(semanticArguments[actionProgressIntentRole])
+	value, ok := call.Arguments[argument].(string)
+	value = strings.Join(strings.Fields(strings.ToLower(value)), " ")
+	if argument == "" || !ok || value == "" {
+		return ""
+	}
+	canonical := struct {
+		DeploymentID    string `json:"deploymentId"`
+		BindingID       string `json:"bindingId"`
+		BindingRevision int64  `json:"bindingRevision"`
+		SkillID         string `json:"skillId"`
+		SkillVersion    string `json:"skillVersion"`
+		Action          string `json:"action"`
+		Intent          string `json:"intent"`
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, value}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+func annotateActionProgress(output map[string]interface{}, call *ActionCall, semanticArguments map[string]string) map[string]interface{} {
+	result := deepCloneCheckpointMap(output)
+	progress, ok := result["progress"].(map[string]interface{})
+	if !ok {
+		return result
+	}
+	changed, ok := progress["changed"].(bool)
+	if !ok {
+		return result
+	}
+	progress = deepCloneCheckpointMap(progress)
+	delete(progress, "intentDigest")
+	if digest := computeActionProgressIntentDigest(call, semanticArguments); digest != "" {
+		progress["intentDigest"] = digest
+	}
+	progress["changed"] = changed
+	result["progress"] = progress
+	return result
+}
+
+func actionProgress(output interface{}) (changed bool, intentDigest, afterDigest string, ok bool) {
+	result, resultOK := output.(map[string]interface{})
+	if !resultOK {
+		return false, "", "", false
+	}
+	progress, progressOK := result["progress"].(map[string]interface{})
+	if !progressOK {
+		return false, "", "", false
+	}
+	changed, ok = progress["changed"].(bool)
+	intentDigest, _ = progress["intentDigest"].(string)
+	afterDigest, _ = progress["afterDigest"].(string)
+	return changed, intentDigest, afterDigest, ok
+}
+
+func latestObservationDigest(checkpoint map[string]interface{}) string {
+	entries := actionHistoryEntries(checkpoint)
+	for index := len(entries) - 1; index >= 0; index-- {
+		result, _ := entries[index]["result"].(map[string]interface{})
+		if value, _ := result["observationDigest"].(string); value != "" {
+			return value
+		}
+		if _, _, value, ok := actionProgress(result); ok && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func matchingNoProgressAction(checkpoint map[string]interface{}, intentDigest string) map[string]interface{} {
+	if intentDigest == "" {
+		return nil
+	}
+	currentObservation := latestObservationDigest(checkpoint)
+	if currentObservation == "" {
+		return nil
+	}
+	entries := actionHistoryEntries(checkpoint)
+	for index := len(entries) - 1; index >= 0; index-- {
+		changed, candidateIntent, afterDigest, ok := actionProgress(entries[index]["result"])
+		if ok && !changed && candidateIntent == intentDigest && afterDigest == currentObservation {
+			return entries[index]
+		}
+	}
+	return nil
+}
 
 const (
 	actionHistoryCheckpointKey         = "_opensealActionHistory"
