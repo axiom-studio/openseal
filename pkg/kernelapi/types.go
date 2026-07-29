@@ -432,7 +432,7 @@ func AgentRunsCapability(operations ...string) Capability {
 	if len(operations) == 0 {
 		operations = []string{
 			OperationCreate, OperationGet, OperationList, OperationPause,
-			OperationResume, OperationCancel, OperationIntervene,
+			OperationResume, OperationCancel, OperationIntervene, OperationAudit,
 		}
 	}
 	return Capability{

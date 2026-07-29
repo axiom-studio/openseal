@@ -37,10 +37,14 @@ type RunbookDefinitionCatalog interface {
 	ListDefinitionVersions(context.Context, string) ([]*kernelagent.AgentDefinition, error)
 }
 
+type RunbookActivationReader interface {
+	GetRunbookActivation(context.Context, Scope, string) (*RunbookActivation, error)
+}
+
 // ResolveRunbookDetail follows the activation's tenant-scoped Agent deployment
 // to find the exact historic Agent definition containing the pinned Runbook.
 // It never substitutes the Agent's current version for the activation's pin.
-func ResolveRunbookDetail(ctx context.Context, store RunbookActivationStore, catalog RunbookDefinitionCatalog, scope Scope, activationID string) (*RunbookDetail, error) {
+func ResolveRunbookDetail(ctx context.Context, store RunbookActivationReader, catalog RunbookDefinitionCatalog, scope Scope, activationID string) (*RunbookDetail, error) {
 	if store == nil || catalog == nil {
 		return nil, errors.New("Runbook detail dependencies are not configured")
 	}
