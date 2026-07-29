@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -137,16 +138,53 @@ func compactHostedTurnActionHistory(checkpoint map[string]interface{}) {
 		}
 		actionCallID := strings.TrimSpace(fmt.Sprint(entry["actionCallId"]))
 		encoded, err := json.Marshal(result)
-		if actionCallID == lastActionID || err != nil || len(encoded) > HostedTurnHistoricalActionResultBytes {
+		if actionCallID == lastActionID {
 			entry["result"] = map[string]interface{}{
-				"compacted":   true,
-				"evidenceRef": "action-call:" + actionCallID,
+				"compacted": true, "evidenceRef": "action-call:" + actionCallID,
+				"currentResultRef": "continuationCheckpoint.lastAction.result",
 			}
-			if actionCallID == lastActionID {
-				entry["result"].(map[string]interface{})["currentResultRef"] = "continuationCheckpoint.lastAction.result"
-			}
+			continue
+		}
+		if err != nil || len(encoded) > HostedTurnHistoricalActionResultBytes {
+			entry["result"] = compactHostedTurnActionResult(result, actionCallID)
 		}
 	}
+}
+
+func compactHostedTurnActionResult(result interface{}, actionCallID string) map[string]interface{} {
+	compacted := map[string]interface{}{
+		"compacted": true, "evidenceRef": "action-call:" + actionCallID,
+	}
+	object, ok := result.(map[string]interface{})
+	if !ok {
+		return compacted
+	}
+	for _, key := range []string{"url", "title", "status", "outcome", "requiresHuman", "generation", "sessionId"} {
+		if value, exists := object[key]; exists {
+			compacted[key] = deepCloneCheckpointValue(value)
+		}
+	}
+	if value, ok := object["text"].(string); ok && strings.TrimSpace(value) != "" {
+		compacted["text"] = boundedHostedTurnEvidenceText(value, HostedTurnHistoricalActionResultBytes)
+	}
+	if value, exists := object["challenges"]; exists {
+		if encoded, err := json.Marshal(value); err == nil && len(encoded) <= 512 {
+			compacted["challenges"] = deepCloneCheckpointValue(value)
+		}
+	}
+	return compacted
+}
+
+func boundedHostedTurnEvidenceText(value string, maximumBytes int) string {
+	value = strings.ToValidUTF8(value, "")
+	if maximumBytes <= 0 || len(value) <= maximumBytes {
+		return value
+	}
+	end := maximumBytes
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return strings.TrimSpace(value[:end]) + "…"
 }
 
 func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
