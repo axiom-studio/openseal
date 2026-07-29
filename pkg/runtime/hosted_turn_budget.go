@@ -48,7 +48,7 @@ const (
 	HostedTurnMinimumChildAttempts     int64 = 3
 	HostedTurnMinimumChildTurns        int64 = 2
 	HostedTurnMinimumChildInputTokens  int64 = 16384
-	HostedTurnMinimumChildOutputTokens int64 = 4096
+	HostedTurnMinimumChildOutputTokens int64 = capability.HostedMinimumChildOutputTokens
 	HostedTurnMinimumChildTotalTokens  int64 = HostedTurnMinimumChildInputTokens + HostedTurnMinimumChildOutputTokens
 	HostedTurnMinimumChildDurationMS   int64 = 180000
 	HostedTurnMinimumChildActions      int64 = 1

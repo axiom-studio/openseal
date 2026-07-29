@@ -6,6 +6,12 @@ import (
 	"sort"
 )
 
+// HostedMinimumChildOutputTokens is the portable protocol floor required for
+// one complete hosted child response envelope, including bounded repair. Both
+// authoring and execution must enforce this value so a reviewed Run cannot be
+// activated with less output capacity than the runtime can safely use.
+const HostedMinimumChildOutputTokens int64 = 4096
+
 const hostedSkillBindingMetadataReserveTokens int64 = 1024
 
 // HostedSkillModelInputTokenCeiling returns a credential-free conservative

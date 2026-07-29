@@ -51,7 +51,7 @@ func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *te
 				t.Fatalf("normalized parent budget issues = %#v", issues)
 			}
 			budget := definition.Triggers["operate"].Budget
-			if budget.MaxAttempts < 6 || budget.MaxTurns < 6 || budget.MaxInputTokens < 100000 || budget.MaxTotalTokens < 101024 {
+			if budget.MaxAttempts < 6 || budget.MaxTurns < 6 || budget.MaxInputTokens < 100000 || budget.MaxOutputTokens < capability.HostedMinimumChildOutputTokens || budget.MaxTotalTokens < 104096 {
 				t.Fatalf("parent budget was not normalized: %#v", budget)
 			}
 		})
@@ -61,7 +61,7 @@ func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *te
 func TestHostedRunbookBudgetAcceptsCompleteBrowserWorkflowEnvelope(t *testing.T) {
 	candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{
 		MaxAttempts: 4, MaxTurns: 4, MaxActions: 3,
-		MaxInputTokens: 100000, MaxOutputTokens: 1024, MaxTotalTokens: 101024,
+		MaxInputTokens: 100000, MaxOutputTokens: capability.HostedMinimumChildOutputTokens, MaxTotalTokens: 104096,
 	})
 	if issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog()); len(issues) != 0 {
 		t.Fatalf("complete Browser budget issues = %#v", issues)
