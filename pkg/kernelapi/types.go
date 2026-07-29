@@ -45,7 +45,7 @@ const (
 	ClawHubLifecycleCapabilityID               = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion          = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID               = "agent-definitions"
-	AgentDefinitionsCapabilityVersion          = "7"
+	AgentDefinitionsCapabilityVersion          = "8"
 	AgentRequestsCapabilityID                  = "agent-requests"
 	AgentRequestsCapabilityVersion             = "1"
 	ActionApprovalsCapabilityID                = "action-approvals"
@@ -182,8 +182,9 @@ type TeamDefinitionCapabilityFeatures struct {
 // backed by the same immutable definition and deployment registry. Hosts still
 // remove individual operations after composing tenant authorization.
 type AgentDefinitionCapabilityFeatures struct {
-	Lifecycle  bool
-	Amendments bool
+	Lifecycle            bool
+	Amendments           bool
+	PortableInstallation bool
 }
 
 // WorkforceAuthoringCapabilityFeatures describes host-wide authoring services.
@@ -549,6 +550,9 @@ func SourcePoliciesCapability() Capability {
 
 func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) Capability {
 	operations := []string{OperationGet, OperationList, OperationUpdate, OperationListCompilations}
+	if len(features) > 0 && features[0].PortableInstallation {
+		operations = append(operations, OperationDeploy)
+	}
 	if len(features) > 0 && features[0].Lifecycle {
 		operations = append(operations, OperationActivate, OperationRollback, OperationListActivations)
 	}

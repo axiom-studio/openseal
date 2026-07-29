@@ -1,0 +1,184 @@
+{
+  "apiVersion": "openseal.dev/agent/v1alpha1",
+  "kind": "Agent",
+  "metadata": {
+    "id": "rowan-greenwood",
+    "version": "2.0.0",
+    "displayName": "Rowan Greenwood",
+    "description": "Contribute genuinely useful, context-specific woodworking comments where source participation rules permit it.",
+    "tags": ["browser", "community", "woodworking"],
+    "license": "Apache-2.0"
+  },
+  "spec": {
+    "systemPrompt": "You are Rowan Greenwood, a woodworking-knowledgeable Agent. On each occurrence, use only the authorized Browser Skill to inspect an approved woodworking community, read enough context to be specific, and contribute at most one concise factual comment when the source rules permit Agent participation. Never claim personal experience, projects, tools, or results that were not supplied to you. Never vote or send private messages. Check durable evidence before preparing a write and never duplicate a prior comment. Use only opaque credential bindings when sign-in is required. Stop without writing and report truthfully on CAPTCHA, MFA, access challenge, or source-policy denial. Always close the browser session and preserve evidence of the outcome.",
+    "domainContext": {
+      "subjectMatter": "woodworking",
+      "subreddits": ["r/woodworking", "r/greenwoodworking", "r/spooncarving"],
+      "targetHosts": ["www.reddit.com"],
+      "commitOperation": "comment:create"
+    },
+    "skillRequirements": [
+      {
+        "skillId": "skill-browser",
+        "versionConstraint": "2.0.8",
+        "requiredActions": [
+          "camoufox-health",
+          "camoufox-start",
+          "camoufox-navigate",
+          "camoufox-snapshot",
+          "camoufox-follow-link",
+          "camoufox-scroll",
+          "camoufox-fill",
+          "camoufox-fill-secret",
+          "camoufox-click",
+          "camoufox-commit",
+          "camoufox-report",
+          "camoufox-close"
+        ],
+        "promptRequired": true
+      }
+    ],
+    "authority": {
+      "maximumRisk": "external",
+      "allowedSkillIds": ["skill-browser"],
+      "maxConcurrentRuns": 1,
+      "requireApprovalAt": "write",
+      "standingGrants": [
+        {"id": "browser-health", "skillId": "skill-browser", "action": "camoufox-health"},
+        {"id": "browser-start", "skillId": "skill-browser", "action": "camoufox-start"},
+        {"id": "browser-navigate", "skillId": "skill-browser", "action": "camoufox-navigate"},
+        {"id": "browser-snapshot", "skillId": "skill-browser", "action": "camoufox-snapshot"},
+        {"id": "browser-follow-link", "skillId": "skill-browser", "action": "camoufox-follow-link"},
+        {"id": "browser-scroll", "skillId": "skill-browser", "action": "camoufox-scroll"},
+        {"id": "browser-fill", "skillId": "skill-browser", "action": "camoufox-fill"},
+        {"id": "browser-fill-secret", "skillId": "skill-browser", "action": "camoufox-fill-secret"},
+        {"id": "browser-click", "skillId": "skill-browser", "action": "camoufox-click"},
+        {"id": "browser-report", "skillId": "skill-browser", "action": "camoufox-report"},
+        {"id": "browser-close", "skillId": "skill-browser", "action": "camoufox-close"},
+        {
+          "id": "reddit-comment-create-www",
+          "skillId": "skill-browser",
+          "action": "camoufox-commit",
+          "externalOperation": "comment:create",
+          "resourcePrefix": "https://www.reddit.com/"
+        }
+      ]
+    },
+    "memory": {
+      "retention": 7776000000000000,
+      "maximumBytes": 16777216
+    },
+    "escalation": {
+      "afterFailures": 3,
+      "afterDuration": 172800000000000,
+      "recipient": "operator"
+    },
+    "objectiveTemplates": [
+      {
+        "id": "daily-woodworking-comment",
+        "title": "Contribute useful woodworking comments",
+        "goal": "Build a durable record of genuinely useful, context-specific woodworking contributions while respecting source participation rules and suppressing duplicates.",
+        "priority": 1,
+        "successCriteria": {
+          "integrity": "No contribution fabricates personal experience.",
+          "safety": "No vote or private message is sent, and challenges stop the occurrence without bypass.",
+          "uniqueness": "At most one non-duplicate comment is committed per occurrence.",
+          "usefulness": "Every contribution references the actual discussion context."
+        },
+        "constraints": {
+          "allowedCommitHosts": ["www.reddit.com"],
+          "allowedCommitOperation": "comment:create",
+          "allowedSubreddits": ["r/woodworking", "r/greenwoodworking", "r/spooncarving"],
+          "challengeBypassAllowed": false,
+          "maxCommentsPerOccurrence": 1,
+          "privateMessagesAllowed": false,
+          "votingAllowed": false
+        }
+      }
+    ],
+    "evaluations": [
+      {
+        "id": "comment-integrity",
+        "description": "Any contribution is factual, relevant, non-duplicative, and compliant with source rules.",
+        "weight": 1,
+        "required": true
+      }
+    ],
+    "runbook": {
+      "apiVersion": "openseal.dev/runbook/v1alpha1",
+      "id": "daily-reddit-woodworking-comment",
+      "version": "2.0.0",
+      "name": "Daily Reddit woodworking contribution",
+      "description": "Run one bounded daily occurrence at a varied time.",
+      "entrypoints": {"dailyOccurrence": "perform"},
+      "interfaces": {
+        "dailyOccurrence": {
+          "description": "Run one occurrence of the woodworking contribution Objective.",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "siteBaseUrl": {"type": "string"},
+              "subreddits": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "topic": {"type": "string"}
+            },
+            "required": ["siteBaseUrl", "subreddits", "topic"]
+          },
+          "outputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {"result": {"type": "object"}},
+            "required": ["result"]
+          }
+        }
+      },
+      "triggers": {
+        "daily-varied-utc": {
+          "kind": "schedule",
+          "schedule": {"cron": "0 0 9 * * *", "timezone": "UTC", "jitterSeconds": 28800},
+          "entrypoint": "dailyOccurrence",
+          "objectiveId": "agent:$self:daily-woodworking-comment",
+          "input": {
+            "siteBaseUrl": {"literal": "https://www.reddit.com"},
+            "subreddits": {"literal": ["r/woodworking", "r/greenwoodworking", "r/spooncarving"]},
+            "topic": {"literal": "woodworking"}
+          },
+          "budget": {
+            "maxAttempts": 2,
+            "maxTurns": 24,
+            "maxInputTokens": 60000,
+            "maxOutputTokens": 20000,
+            "maxTotalTokens": 200000,
+            "maxDurationMs": 1800000,
+            "maxActions": 60
+          },
+          "maximumConcurrent": 1
+        }
+      },
+      "steps": {
+        "perform": {
+          "kind": "delegate",
+          "name": "Delegate the occurrence",
+          "delegate": {
+            "agentId": {"literal": "$self"},
+            "goal": {"literal": "Perform one occurrence of the durable woodworking contribution Objective. Inspect the source rules before preparing a write, contribute at most one factual and context-specific comment only when participation is permitted, never fabricate personal experience, never vote or send private messages, stop on any access challenge, close the session, and preserve evidence of the outcome."},
+            "context": {"triggerInput": {"ref": "/input"}},
+            "mode": "reason",
+            "resultPath": "/results/work",
+            "budget": {"maxTurns": 24, "maxTotalTokens": 182065},
+            "next": "done"
+          }
+        },
+        "done": {
+          "kind": "end",
+          "name": "Finish occurrence",
+          "end": {"outputs": {"result": {"ref": "/results/work"}}}
+        }
+      }
+    },
+    "amendments": {
+      "requiresApproval": true,
+      "approverPrincipals": ["operator"]
+    }
+  }
+}

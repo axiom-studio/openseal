@@ -82,6 +82,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/action-calls", s.handleListActionCalls)
 	s.mux.HandleFunc("GET /api/v1/action-calls/{id}", s.handleGetActionCall)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments", s.handleListAgentDeployments)
+	s.mux.HandleFunc("POST /api/v1/agent-installations", s.handleInstallAgentManifest)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}", s.handleGetAgentDeployment)
 	s.mux.HandleFunc("PUT /api/v1/agent-deployments/{id}", s.handleUpdateAgentDeployment)
 	s.mux.HandleFunc("GET /api/v1/agent-deployments/{id}/compilations", s.handleListAgentDefinitionCompilations)
@@ -200,7 +201,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
-		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true}))
+		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true, PortableInstallation: true}))
 		if _, teamsOK := s.store.(kernelteam.Store); teamsOK {
 			capabilities = append(capabilities, kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{Amendments: true}))
 		}

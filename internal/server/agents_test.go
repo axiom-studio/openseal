@@ -40,7 +40,7 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 	}
 	server := NewServer(store, zap.NewNop().Sugar())
 	capabilities := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
-	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"id":"agent-definitions","version":"7"`) ||
+	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"id":"agent-definitions","version":"8"`) ||
 		!strings.Contains(capabilities.Body.String(), `"update"`) || !strings.Contains(capabilities.Body.String(), `"rollback"`) ||
 		!strings.Contains(capabilities.Body.String(), `"propose-amendment"`) {
 		t.Fatalf("capabilities = %d %s", capabilities.Code, capabilities.Body.String())
@@ -90,6 +90,50 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 	unknown := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/agent-deployments/operator-live", `{"deployment":null,"expectedRevision":2,"actorType":"system","actorId":"reconciler","reason":"update","credential":"raw"}`, "")
 	if unknown.Code != http.StatusBadRequest || !strings.Contains(unknown.Body.String(), "unknown field") || strings.Contains(unknown.Body.String(), "raw") {
 		t.Fatalf("unknown field = %d %s", unknown.Code, unknown.Body.String())
+	}
+}
+
+func TestPortableAgentManifestInstallationCreatesReplaysAndRejectsDrift(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-install.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := NewServer(store, zap.NewNop().Sugar())
+	request := kernelagent.ManifestInstallationRequest{
+		Manifest: &kernelagent.Manifest{
+			APIVersion: kernelagent.ManifestAPIVersion, Kind: kernelagent.ManifestKind,
+			Metadata: kernelagent.ManifestMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
+			Spec:     kernelagent.ManifestSpec{SystemPrompt: "Research permitted sources.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}},
+		},
+		Deployment: &kernelagent.AgentDeployment{
+			ID: "agent:researcher", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"},
+			RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+		},
+		ActorType: "user", ActorID: "one", IdempotencyKey: "researcher-v1",
+	}
+	payload, _ := json.Marshal(request)
+	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-installations", string(payload), "")
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"definitionId":"tenant/one/researcher"`) {
+		t.Fatalf("created = %d %s", created.Code, created.Body.String())
+	}
+	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-installations", string(payload), "")
+	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), `"replayed":true`) {
+		t.Fatalf("replayed = %d %s", replayed.Code, replayed.Body.String())
+	}
+	request.Deployment.Environment = "other"
+	payload, _ = json.Marshal(request)
+	drift := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-installations", string(payload), "")
+	if drift.Code != http.StatusConflict {
+		t.Fatalf("drift = %d %s", drift.Code, drift.Body.String())
+	}
+	request.Deployment.Environment = "default"
+	request.Manifest.Metadata.Version = "2.0.0"
+	request.Manifest.Spec.DomainContext = map[string]interface{}{"apiKey": "plaintext-secret"}
+	payload, _ = json.Marshal(request)
+	secret := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-installations", string(payload), "")
+	if secret.Code == http.StatusCreated || secret.Code == http.StatusOK || strings.Contains(secret.Body.String(), "plaintext-secret") {
+		t.Fatalf("secret = %d %s", secret.Code, secret.Body.String())
 	}
 }
 

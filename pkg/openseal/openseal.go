@@ -74,6 +74,9 @@ type (
 	AgentManifest                             = kernelagent.Manifest
 	AgentManifestMetadata                     = kernelagent.ManifestMetadata
 	AgentManifestSpec                         = kernelagent.ManifestSpec
+	AgentManifestInstallationRequest          = kernelagent.ManifestInstallationRequest
+	AgentManifestInstallationResult           = kernelagent.ManifestInstallationResult
+	AgentManifestInstallationRegistry         = kernelagent.ManifestInstallationRegistry
 	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
 	AgentCompilationSource                    = kernelagent.CompilationSource
 	AgentCompilationDiagnostic                = kernelagent.CompilationDiagnostic
@@ -838,6 +841,10 @@ func DecodeAgentManifestYAML(data []byte) (*AgentManifest, error) {
 	return kernelagent.DecodeManifestYAML(data)
 }
 
+func InstallAgentManifest(ctx context.Context, registry AgentManifestInstallationRegistry, request AgentManifestInstallationRequest) (*AgentManifestInstallationResult, error) {
+	return kernelagent.InstallManifest(ctx, registry, request)
+}
+
 func CompileTeamManifest(manifest *TeamManifest, definitionID string, provenance WorkforceDefinitionProvenance) (*TeamDefinition, error) {
 	return kernelteam.CompileManifest(manifest, definitionID, provenance)
 }
@@ -1361,6 +1368,7 @@ var (
 	ErrAgentDeploymentNotFound              = kernelagent.ErrDeploymentNotFound
 	ErrAgentAmendmentNotFound               = kernelagent.ErrAmendmentNotFound
 	ErrAgentDeploymentRevisionConflict      = kernelagent.ErrRevisionConflict
+	ErrAgentManifestInstallationConflict    = kernelagent.ErrManifestInstallationConflict
 	ErrTeamDefinitionNotFound               = kernelteam.ErrDefinitionNotFound
 	ErrTeamDeploymentNotFound               = kernelteam.ErrDeploymentNotFound
 	ErrTeamDeploymentRevisionConflict       = kernelteam.ErrRevisionConflict
