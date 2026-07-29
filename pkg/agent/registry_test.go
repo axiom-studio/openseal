@@ -385,6 +385,15 @@ func TestAmendmentsRequireAllowedDiffEvaluationApprovalAndAtomicActivation(t *te
 	}
 }
 
+func TestDefinitionAmendmentOwnerPrincipalResolvesFromProvenance(t *testing.T) {
+	if !definitionAmendmentApproverEligible("user:1", "user:1", []string{"owner"}) {
+		t.Fatal("definition owner was not eligible for semantic owner approval")
+	}
+	if definitionAmendmentApproverEligible("user:2", "user:1", []string{"owner"}) {
+		t.Fatal("non-owner was eligible for semantic owner approval")
+	}
+}
+
 func TestDefinitionChangesIgnoreCanonicalizationForWorkforceAuthoredDefinition(t *testing.T) {
 	base := &AgentDefinition{
 		ID: "tenant/1/self-amendment-acceptance-agent", Version: "1.0.0",
