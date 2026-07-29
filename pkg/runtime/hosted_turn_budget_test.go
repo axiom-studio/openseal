@@ -16,7 +16,7 @@ func TestHostedTurnModelInputCompactsHistoricalActionEvidenceWithoutMutatingChec
 	largeEvidence := strings.Repeat("semantic browser snapshot ", 400)
 	checkpoint := map[string]interface{}{
 		"_opensealActionHistory": []interface{}{
-			map[string]interface{}{"actionCallId": "older", "status": "succeeded", "result": map[string]interface{}{"snapshot": largeEvidence}},
+			map[string]interface{}{"actionCallId": "older", "status": "succeeded", "result": map[string]interface{}{"url": "https://example.test/rules", "text": largeEvidence, "elements": []interface{}{largeEvidence}}},
 			map[string]interface{}{"actionCallId": "latest", "status": "succeeded", "result": map[string]interface{}{"snapshot": largeEvidence}},
 		},
 		"lastAction": map[string]interface{}{"actionCallId": "latest", "status": "succeeded", "result": map[string]interface{}{"snapshot": largeEvidence}},
@@ -33,10 +33,13 @@ func TestHostedTurnModelInputCompactsHistoricalActionEvidenceWithoutMutatingChec
 		t.Fatal(err)
 	}
 	history := projected.ContinuationCheckpoint[actionHistoryCheckpointKey].([]interface{})
-	for _, value := range history {
+	for index, value := range history {
 		result := value.(map[string]interface{})["result"].(map[string]interface{})
 		if result["compacted"] != true || !strings.HasPrefix(result["evidenceRef"].(string), "action-call:") {
 			t.Fatalf("projected historical result = %#v", result)
+		}
+		if index == 0 && (result["url"] != "https://example.test/rules" || !strings.Contains(result["text"].(string), "semantic browser snapshot") || result["elements"] != nil) {
+			t.Fatalf("concise historical findings were not retained: %#v", result)
 		}
 	}
 	latest := projected.ContinuationCheckpoint["lastAction"].(map[string]interface{})["result"].(map[string]interface{})
@@ -44,7 +47,7 @@ func TestHostedTurnModelInputCompactsHistoricalActionEvidenceWithoutMutatingChec
 		t.Fatal("latest action evidence was not preserved for the model")
 	}
 	original := checkpoint[actionHistoryCheckpointKey].([]interface{})[0].(map[string]interface{})["result"].(map[string]interface{})
-	if original["snapshot"] != largeEvidence || original["compacted"] != nil {
+	if original["text"] != largeEvidence || original["compacted"] != nil || len(original["elements"].([]interface{})) != 1 {
 		t.Fatalf("durable checkpoint was mutated: %#v", checkpoint)
 	}
 }
