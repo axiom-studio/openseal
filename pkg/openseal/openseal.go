@@ -951,6 +951,7 @@ const (
 	KernelOperationResume                    = kernelapi.OperationResume
 	KernelOperationRetire                    = kernelapi.OperationRetire
 	KernelOperationListCompilations          = kernelapi.OperationListCompilations
+	KernelOperationDeploy                    = kernelapi.OperationDeploy
 	KernelOperationActivate                  = kernelapi.OperationActivate
 	KernelOperationRollback                  = kernelapi.OperationRollback
 	KernelOperationListActivations           = kernelapi.OperationListActivations
