@@ -319,6 +319,15 @@ func TestRegistryGovernsEvaluatesApprovesAndAtomicallyActivatesTeamAmendment(t *
 	}
 }
 
+func TestTeamAmendmentOwnerPrincipalResolvesFromProvenance(t *testing.T) {
+	if !teamAmendmentApproverEligible("user:1", "user:1", []string{"owner"}) {
+		t.Fatal("Team owner was not eligible for semantic owner approval")
+	}
+	if teamAmendmentApproverEligible("user:2", "user:1", []string{"owner"}) {
+		t.Fatal("non-owner was eligible for semantic owner approval")
+	}
+}
+
 func TestRegistryRecoversLegacyListeningOnlyTeamThroughAuditedImmutableAmendment(t *testing.T) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}

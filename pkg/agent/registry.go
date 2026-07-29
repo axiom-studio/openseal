@@ -500,7 +500,7 @@ func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentReq
 		return nil, err
 	}
 	principal := strings.TrimSpace(req.ActorType) + ":" + strings.TrimSpace(req.ActorID)
-	if !isSubset([]string{principal}, base.Amendments.ApproverPrincipals) {
+	if !definitionAmendmentApproverEligible(principal, base.Provenance.CreatedBy, base.Amendments.ApproverPrincipals) {
 		return nil, errors.New("principal is not eligible to approve this amendment")
 	}
 	updated := cloneAmendment(current)
@@ -517,6 +517,13 @@ func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentReq
 		return nil, err
 	}
 	return cloneAmendment(updated), nil
+}
+
+func definitionAmendmentApproverEligible(principal, owner string, allowed []string) bool {
+	if isSubset([]string{principal}, allowed) {
+		return true
+	}
+	return strings.TrimSpace(principal) != "" && strings.TrimSpace(principal) == strings.TrimSpace(owner) && isSubset([]string{"owner"}, allowed)
 }
 
 func (r *Registry) ActivateAmendment(ctx context.Context, scope capability.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*DefinitionAmendment, *AgentDeployment, *DefinitionActivation, error) {
