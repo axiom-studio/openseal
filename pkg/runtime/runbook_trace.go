@@ -88,6 +88,9 @@ func (t *RunbookExecutionTrace) Validate() error {
 		if err := validateRunbookDataObservations(entry.Outputs); err != nil {
 			return err
 		}
+		if !runbookObservationRefsMatch(entry.InputRefs, entry.Inputs) || !runbookObservationRefsMatch(entry.OutputRefs, entry.Outputs) {
+			return errors.New("Runbook data observations do not match the node contract")
+		}
 		switch entry.Status {
 		case RunbookStepTraceRunning, RunbookStepTraceWaiting:
 			if entry.CompletedAt != nil {
@@ -283,6 +286,19 @@ func validateRunbookDataObservations(values []RunbookDataObservation) error {
 		}
 	}
 	return nil
+}
+
+func runbookObservationRefsMatch(refs []string, observations []RunbookDataObservation) bool {
+	// Revision-one traces persisted before observations existed remain readable;
+	// once observations are present they must cover the declared refs exactly.
+	if len(observations) == 0 {
+		return true
+	}
+	observed := make([]string, 0, len(observations))
+	for _, observation := range observations {
+		observed = append(observed, observation.Ref)
+	}
+	return reflect.DeepEqual(uniqueSortedTraceRefs(refs), uniqueSortedTraceRefs(observed))
 }
 
 func pendingRunbookStepTrace(checkpoint map[string]interface{}, stepID string) (int64, error) {
