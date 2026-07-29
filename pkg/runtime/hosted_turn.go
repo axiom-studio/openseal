@@ -353,6 +353,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if reused, reuseErr := r.reuseSucceededAction(*response.ProposedAction, response.ContinuationCheckpoint); reuseErr != nil {
 			return nil, reuseErr
 		} else if reused != nil {
+			changed, _, _, hasProgress := actionProgress(reused["result"])
 			response.ProposedAction = nil
 			response.ProposedFork = nil
 			response.ProposedDelegation = nil
@@ -360,11 +361,16 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			response.NextRunStatus = AgentRunStatusRunning
 			response.WakeCondition = nil
 			response.ContinuationCheckpoint["lastAction"] = deepCloneCheckpointMap(reused)
+			decisionSummary := "Reused the matching succeeded action instead of executing it again."
+			response.OutputSummary = "A matching succeeded action was reused; continue from its durable evidence."
+			if hasProgress && !changed {
+				decisionSummary = "Blocked a repeated action that previously made no observable progress. Choose a different action, request intervention, or fail truthfully."
+				response.OutputSummary = "The repeated action was not executed because the same intent previously left the authoritative observation unchanged."
+			}
 			response.Decisions = append(response.Decisions, TurnDecision{
-				Summary:      "Reused the matching succeeded action instead of executing it again.",
+				Summary:      decisionSummary,
 				EvidenceRefs: []string{"action:" + fmt.Sprint(reused["actionCallId"])},
 			})
-			response.OutputSummary = "A matching succeeded action was reused; continue from its durable evidence."
 		}
 	}
 	proposalCount := 0
@@ -518,6 +524,9 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 	call := &ActionCall{
 		DeploymentID: actionDeploymentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
+	}
+	if entry := matchingNoProgressAction(checkpoint, computeActionProgressIntentDigest(call, selected.SemanticArguments)); entry != nil {
+		return entry, nil
 	}
 	digest := ComputeActionSemanticDigest(call)
 	if selected.SideEffect == capability.SideEffectRead || selected.SideEffect == capability.SideEffectNone {
