@@ -300,6 +300,19 @@ func (s *PostgresStore) UpdateDeployment(ctx context.Context, deployment *kernel
 	if err := s.insertDefinitionActivation(ctx, tx, activation, activationPayload); err != nil {
 		return err
 	}
+	if activation.FromVersion != activation.ToVersion {
+		var definitionPayload string
+		if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_definitions")+` WHERE id=$1 AND version=$2`, deployment.DefinitionID, deployment.ActiveVersion).Scan(&definitionPayload); err != nil {
+			return err
+		}
+		var definition kernelagent.AgentDefinition
+		if err := json.Unmarshal([]byte(definitionPayload), &definition); err != nil {
+			return err
+		}
+		if err := s.synchronizeAgentRunbookActivations(ctx, tx, &definition, deployment); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -456,7 +469,55 @@ func (s *PostgresStore) ActivateAmendment(ctx context.Context, amendment *kernel
 		}
 		return kernelagent.ErrRevisionConflict
 	}
+	if err := s.synchronizeAgentRunbookActivations(ctx, tx, definition, deployment); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (s *PostgresStore) synchronizeAgentRunbookActivations(ctx context.Context, tx *sql.Tx, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment) error {
+	rows, err := tx.QueryContext(ctx, `SELECT payload::text FROM `+s.table("runbook_activations")+` WHERE scope_kind=$1 AND scope_id=$2 AND assigned_agent_id=$3 FOR UPDATE`, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID)
+	if err != nil {
+		return err
+	}
+	var current []*RunbookActivation
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return err
+		}
+		var activation RunbookActivation
+		if err := json.Unmarshal([]byte(payload), &activation); err != nil {
+			rows.Close()
+			return err
+		}
+		current = append(current, &activation)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	next, err := reconcileAgentRunbookActivations(current, definition, deployment, deployment.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	for _, activation := range next {
+		payload, err := json.Marshal(activation)
+		if err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE `+s.table("runbook_activations")+` SET owner_type=$1,owner_id=$2,objective_id=$3,assigned_agent_id=$4,status=$5,next_run_at=$6,revision=$7,updated_at=$8,payload=$9::jsonb WHERE scope_kind=$10 AND scope_id=$11 AND id=$12 AND revision=$13`, activation.Owner.Type, activation.Owner.ID, activation.ObjectiveID, activation.AssignedAgentID, activation.Status, activation.NextRunAt, activation.Revision, activation.UpdatedAt, string(payload), activation.Scope.Kind, activation.Scope.ID, activation.ID, activation.Revision-1)
+		if err != nil {
+			return err
+		}
+		if count, err := result.RowsAffected(); err != nil || count != 1 {
+			if err != nil {
+				return err
+			}
+			return ErrRunbookActivationRevision
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) CreateSkillDefinition(ctx context.Context, definition *skill.Definition) error {

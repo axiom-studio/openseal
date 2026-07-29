@@ -241,6 +241,9 @@ func (s *SQLiteStore) ActivateAmendment(ctx context.Context, amendment *kernelag
 	if amendmentRows != 1 {
 		return kernelagent.ErrRevisionConflict
 	}
+	if err := s.synchronizeAgentRunbookActivations(ctx, tx, definition, deployment); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -368,7 +371,65 @@ func (s *SQLiteStore) UpdateDeployment(ctx context.Context, deployment *kernelag
 	if err := insertActivation(ctx, tx, activation, activationPayload); err != nil {
 		return err
 	}
+	if activation.FromVersion != activation.ToVersion {
+		var definitionPayload string
+		if err := tx.QueryRowContext(ctx, `SELECT payload FROM agent_definitions WHERE id=? AND version=?`, deployment.DefinitionID, deployment.ActiveVersion).Scan(&definitionPayload); err != nil {
+			return err
+		}
+		var definition kernelagent.AgentDefinition
+		if err := json.Unmarshal([]byte(definitionPayload), &definition); err != nil {
+			return err
+		}
+		if err := s.synchronizeAgentRunbookActivations(ctx, tx, &definition, deployment); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+func (s *SQLiteStore) synchronizeAgentRunbookActivations(ctx context.Context, tx *sql.Tx, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment) error {
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND assigned_agent_id=?`, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID)
+	if err != nil {
+		return err
+	}
+	var current []*RunbookActivation
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return err
+		}
+		var activation RunbookActivation
+		if err := json.Unmarshal([]byte(payload), &activation); err != nil {
+			rows.Close()
+			return err
+		}
+		current = append(current, &activation)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	next, err := reconcileAgentRunbookActivations(current, definition, deployment, deployment.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	for _, activation := range next {
+		payload, err := json.Marshal(activation)
+		if err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE runbook_activations SET owner_type=?,owner_id=?,objective_id=?,assigned_agent_id=?,status=?,next_run_at=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, activation.Owner.Type, activation.Owner.ID, activation.ObjectiveID, activation.AssignedAgentID, activation.Status, activation.NextRunAt, activation.Revision, activation.UpdatedAt, string(payload), activation.Scope.Kind, activation.Scope.ID, activation.ID, activation.Revision-1)
+		if err != nil {
+			return err
+		}
+		if count, err := result.RowsAffected(); err != nil || count != 1 {
+			if err != nil {
+				return err
+			}
+			return ErrRunbookActivationRevision
+		}
+	}
+	return nil
 }
 
 func (s *SQLiteStore) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
