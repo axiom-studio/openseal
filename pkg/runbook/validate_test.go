@@ -92,6 +92,9 @@ func TestValidatePortableScheduledTriggers(t *testing.T) {
 	definition.Triggers = map[string]Trigger{"daily": {
 		Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399}, Entrypoint: "start",
 		ObjectiveID: "useful-participation", Input: map[string]Value{"communities": literal([]string{"r/woodworking"})}, MaximumConcurrent: 1,
+		Reporting: &ReportingPolicy{Channel: "community-work", Title: "Community work", Milestones: []ReportingMilestone{
+			ReportingStarted, ReportingApprovalRequired, ReportingCompleted, ReportingFailed,
+		}},
 	}}
 	if diagnostics := Validate(definition); len(diagnostics) != 0 {
 		t.Fatalf("scheduled trigger diagnostics = %#v", diagnostics)
@@ -105,6 +108,30 @@ func TestValidatePortableScheduledTriggers(t *testing.T) {
 	}
 	if !codes["trigger.event_type_forbidden"] || !codes["trigger.schedule_invalid"] || !codes["trigger.objective_required"] {
 		t.Fatalf("invalid scheduled trigger diagnostics = %#v", diagnostics)
+	}
+}
+
+func TestValidateRunbookTriggerReportingPolicy(t *testing.T) {
+	definition := &Definition{
+		APIVersion: APIVersion, ID: "reporting", Version: "1", Name: "Reporting",
+		Entrypoints: map[string]string{"start": "done"},
+		Triggers: map[string]Trigger{"daily": {
+			Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}, Entrypoint: "start",
+			ObjectiveID: "daily-work", Reporting: &ReportingPolicy{Channel: "Work Channel", Title: "", Milestones: []ReportingMilestone{ReportingStarted, ReportingStarted}},
+		}},
+		Steps: map[string]Step{"done": {Kind: StepEnd, End: &EndStep{}}},
+	}
+	diagnostics := Validate(definition)
+	if len(diagnostics) != 1 || diagnostics[0].Code != "trigger.reporting_invalid" || diagnostics[0].Path != "triggers.daily.reporting" {
+		t.Fatalf("reporting diagnostics = %#v", diagnostics)
+	}
+	definition.Triggers["daily"] = Trigger{
+		Kind: TriggerSchedule, Schedule: &Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}, Entrypoint: "start",
+		ObjectiveID: "daily-work", Reporting: &ReportingPolicy{Channel: "work", Title: "Work", Milestones: []ReportingMilestone{"tool_call"}},
+	}
+	diagnostics = Validate(definition)
+	if len(diagnostics) != 1 || diagnostics[0].Code != "trigger.reporting_invalid" {
+		t.Fatalf("unsupported reporting diagnostics = %#v", diagnostics)
 	}
 }
 

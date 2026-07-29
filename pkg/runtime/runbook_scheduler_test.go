@@ -28,6 +28,9 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "daily", MaximumConcurrent: 2,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{
 			Cron: "0 0 0 * * *", Timezone: "UTC", JitterSeconds: 86399,
+		}, Reporting: &runbook.ReportingPolicy{
+			Channel: "community-work", Title: "Community work",
+			Milestones: []runbook.ReportingMilestone{runbook.ReportingStarted, runbook.ReportingCompleted, runbook.ReportingFailed},
 		}}, Input: map[string]interface{}{"communities": []interface{}{"r/woodworking"}},
 	})
 	if err != nil {
@@ -62,6 +65,21 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if communities, ok := created.Context["communities"].([]interface{}); !ok || len(communities) != 1 {
 		t.Fatalf("Runbook input=%#v", created.Context)
 	}
+	conversations, err := store.ListConversations(ctx, ConversationFilter{Scope: scope, Owner: &owner, Limit: 10})
+	if err != nil || len(conversations) != 1 || conversations[0].Title != "Community work" {
+		t.Fatalf("reporting conversations=%#v err=%v", conversations, err)
+	}
+	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
+	if err != nil || len(messages) != 1 || messages[0].Content != "Started: Contribute useful advice" || len(messages[0].References) != 1 || messages[0].References[0].ID != created.ID {
+		t.Fatalf("reporting messages=%#v err=%v", messages, err)
+	}
+	if err := projectRunReportingStartForRun(ctx, store, created); err != nil {
+		t.Fatal(err)
+	}
+	messages, _ = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
+	if len(messages) != 1 {
+		t.Fatalf("replayed start duplicated reporting messages=%#v", messages)
+	}
 	replayed, err := scheduler.ReconcileScope(ctx, scope, 50)
 	if err != nil || replayed.Scheduled != 0 {
 		t.Fatalf("reconcile replay=%#v err=%v", replayed, err)
@@ -69,6 +87,41 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	runs, _ = store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
 	if len(runs) != 1 {
 		t.Fatalf("duplicate Runs=%#v", runs)
+	}
+}
+
+func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "reporting"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-one"}
+	run := &AgentRun{
+		ID: "run-one", Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Publish the weekly brief",
+		Status: AgentRunStatusCompleted, Context: map[string]interface{}{},
+	}
+	policy := &runbook.ReportingPolicy{
+		Channel: "work", Title: "Work",
+		Milestones: []runbook.ReportingMilestone{runbook.ReportingStarted, runbook.ReportingCompleted},
+	}
+	channel, startKey, err := prepareRunReporting(ctx, store, scope, owner, policy, run.ID, run.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := projectRunReportingStart(ctx, store, channel, startKey, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectTerminalRunReporting(ctx, store, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectTerminalRunReporting(ctx, store, run); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: channel.ID, Limit: 10})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages=%#v err=%v", messages, err)
+	}
+	if messages[1].Content != "Completed: Publish the weekly brief" || messages[1].ReplyToMessageID != messages[0].ID || !messages[1].BroadcastToChannel {
+		t.Fatalf("terminal message=%#v", messages[1])
 	}
 }
 

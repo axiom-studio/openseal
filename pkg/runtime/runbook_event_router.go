@@ -48,6 +48,7 @@ type RunbookEventRouter struct {
 		RunbookActivationStore
 		PortfolioStore
 	}
+	reportingStore ConversationStore
 }
 
 func NewRunbookEventRouter(store interface {
@@ -55,7 +56,11 @@ func NewRunbookEventRouter(store interface {
 	RunbookActivationStore
 	PortfolioStore
 }) *RunbookEventRouter {
-	return &RunbookEventRouter{store: store}
+	router := &RunbookEventRouter{store: store}
+	if reportingStore, ok := store.(ConversationStore); ok {
+		router.reportingStore = reportingStore
+	}
+	return router
 }
 
 func (e *EventEnvelope) Validate() error {
@@ -123,6 +128,12 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 		contextValues["runbookDefinitionId"] = activation.DefinitionID
 		contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
 		contextValues["runbookTriggerId"] = activation.TriggerID
+		idempotencyKey := runbookEventRouteKey(activation.ID, event.Source, event.ID)
+		runID := runIDForIdempotencyKey(event.Scope, idempotencyKey)
+		channel, messageKey, err := prepareRunReporting(ctx, r.reportingStore, event.Scope, activation.Owner, activation.Trigger.Reporting, runID, contextValues)
+		if err != nil {
+			return nil, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
+		}
 		actor := event.Actor
 		if strings.TrimSpace(actor.Type) == "" {
 			actor = ActivityActor{Type: "event", ID: event.Source}
@@ -133,11 +144,14 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 			ConcurrencyKey: "runbook:" + activation.ID, Goal: objective.Goal, Priority: objective.Priority,
 			Source: RunSourceEvent, Context: contextValues, Plan: runbookActivationPlan(activation),
 			Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
-			IdempotencyKey: runbookEventRouteKey(activation.ID, event.Source, event.ID), Actor: actor,
+			IdempotencyKey: idempotencyKey, Actor: actor,
 			Visibility: ActivityVisibilityScope,
 		})
 		if err != nil {
 			return nil, err
+		}
+		if err := projectRunReportingStart(ctx, r.reportingStore, channel, messageKey, created.Run); err != nil {
+			return nil, fmt.Errorf("project Runbook activation %s start: %w", activation.ID, err)
 		}
 		result.Routes = append(result.Routes, EventRoute{
 			ObjectiveID: activation.ObjectiveID, RunbookID: activation.ID, TriggerID: activation.TriggerID,
