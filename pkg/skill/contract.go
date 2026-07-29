@@ -104,6 +104,7 @@ const (
 	ConversationEventReactionRemoved   = capability.ConversationEventReactionRemoved
 	ConversationEventParticipantJoined = capability.ConversationEventParticipantJoined
 	ConversationEventParticipantLeft   = capability.ConversationEventParticipantLeft
+	ConversationEventApprovalDecided   = capability.ConversationEventApprovalDecided
 
 	BindingLifecycleCreated  = capability.BindingLifecycleCreated
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated

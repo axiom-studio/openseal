@@ -186,6 +186,10 @@ type ApprovalPrincipal struct {
 	ID   string `json:"id"`
 }
 
+type ApprovalDestination struct {
+	EndpointID string `json:"endpointId"`
+}
+
 type ApprovalCheckpoint struct {
 	ID                     string                 `json:"id"`
 	Scope                  Scope                  `json:"scope"`
@@ -198,6 +202,7 @@ type ApprovalCheckpoint struct {
 	ProposedAction         map[string]interface{} `json:"proposedAction"`
 	EvidenceRefs           []string               `json:"evidenceRefs,omitempty"`
 	EligibleApprovers      []ApprovalPrincipal    `json:"eligibleApprovers"`
+	Destinations           []ApprovalDestination  `json:"destinations,omitempty"`
 	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
 	ExpiresAt              time.Time              `json:"expiresAt"`
 	DecisionBy             *ApprovalPrincipal     `json:"decisionBy,omitempty"`
@@ -227,6 +232,14 @@ func (a *ApprovalCheckpoint) Validate() error {
 		if strings.TrimSpace(principal.Type) == "" || strings.TrimSpace(principal.ID) == "" {
 			return errors.New("approval principals require type and id")
 		}
+	}
+	seenDestinations := make(map[string]bool, len(a.Destinations))
+	for _, destination := range a.Destinations {
+		id := strings.TrimSpace(destination.EndpointID)
+		if id == "" || len(id) > 256 || seenDestinations[id] {
+			return errors.New("approval destinations require unique portable endpoint ids")
+		}
+		seenDestinations[id] = true
 	}
 	return nil
 }

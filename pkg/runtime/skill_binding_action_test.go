@@ -437,7 +437,7 @@ func slackConversationSkillDefinition() *skill.Definition {
 			ProtocolVersion: skill.ConversationAdapterProtocolV1,
 			Name:            "Slack conversations", Description: "Receive and deliver Slack conversations.", Provider: "slack",
 			EndpointModes:     []skill.ConversationEndpointMode{skill.ConversationEndpointChannel},
-			InboundEventTypes: []string{skill.ConversationEventMessageReceived},
+			InboundEventTypes: []string{skill.ConversationEventApprovalDecided, skill.ConversationEventMessageReceived},
 			Features:          []skill.ConversationAdapterFeature{skill.ConversationFeatureMentions, skill.ConversationFeatureThreads},
 			Credentials: []skill.CredentialRequirement{{
 				Name: "SLACK_CONNECTION", Kind: "slack-oauth",

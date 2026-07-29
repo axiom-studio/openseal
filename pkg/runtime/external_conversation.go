@@ -471,6 +471,11 @@ func (e *NormalizedExternalConversationEvent) Validate() error {
 		if !validExternalConversationReference(e.ExternalParticipantID, 1024) {
 			return ErrInvalidExternalConversation
 		}
+	case capability.ConversationEventApprovalDecided:
+		if !validExternalConversationReference(e.ExternalParticipantID, 1024) ||
+			!validExternalConversationReference(e.ExternalMessageID, 1024) {
+			return ErrInvalidExternalConversation
+		}
 	default:
 		return ErrInvalidExternalConversation
 	}

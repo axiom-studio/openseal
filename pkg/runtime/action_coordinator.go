@@ -29,10 +29,11 @@ type ActionPolicyInput struct {
 }
 
 type ActionPolicyDecision struct {
-	Disposition       ActionDisposition
-	Reason            string
-	EligibleApprovers []ApprovalPrincipal
-	ApprovalTTL       time.Duration
+	Disposition          ActionDisposition
+	Reason               string
+	EligibleApprovers    []ApprovalPrincipal
+	ApprovalTTL          time.Duration
+	ApprovalDestinations []ApprovalDestination
 }
 
 type ActionPolicyEvaluator interface {
@@ -301,6 +302,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			ID: approvalID, Scope: req.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
 			Risk: bound.Action.Risk, Summary: eventSummary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
 			EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
+			Destinations:           append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
 			ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		updatedRun.Status = AgentRunStatusWaitingForApproval
