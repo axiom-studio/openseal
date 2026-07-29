@@ -683,6 +683,34 @@ func normalizeRunbookValuesAtType(value interface{}, expected reflect.Type, dept
 		}
 		return map[string]interface{}{"literal": value}, true
 	}
+	if expected == reflect.TypeOf(runbook.TransformStep{}) {
+		object, ok := value.(map[string]interface{})
+		if !ok {
+			return value, false
+		}
+		assignments, ok := object["assignments"].(map[string]interface{})
+		if !ok {
+			return value, false
+		}
+		changed := false
+		for target, assignment := range assignments {
+			if !generatedRunbookAssignmentShorthand(target) {
+				continue
+			}
+			delete(assignments, target)
+			assignments["/results/"+target] = assignment
+			changed = true
+		}
+		// Continue through the ordinary typed walk so assignment values are
+		// canonicalized in the same pass.
+		if normalized, childChanged := normalizeRunbookValuesAtType(object, reflect.TypeOf(struct {
+			Assignments map[string]runbook.Value `json:"assignments"`
+			Next        string                   `json:"next"`
+		}{}), depth+1); childChanged {
+			return normalized, true
+		}
+		return object, changed
+	}
 	switch expected.Kind() {
 	case reflect.Struct:
 		object, ok := value.(map[string]interface{})
@@ -734,6 +762,26 @@ func normalizeRunbookValuesAtType(value interface{}, expected reflect.Type, dept
 	default:
 		return value, false
 	}
+}
+
+// generatedRunbookAssignmentShorthand recognizes the only unambiguous target
+// shorthand accepted from an authoring model. Transform outputs conventionally
+// live under /results, and a bare stable key cannot name any valid JSON Pointer.
+// Runtime-authored Runbooks remain strict; this normalization is confined to
+// provider output before strict decoding.
+func generatedRunbookAssignmentShorthand(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '_' || character == '-' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func generatedRunbookReferenceShorthand(value string) bool {
