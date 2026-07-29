@@ -171,6 +171,10 @@ var (
 	_ client.SkillBindingClient                = (*fakeKernelClient)(nil)
 )
 
+func (f *fakeKernelClient) InstallAgentManifest(context.Context, kernelagent.ManifestInstallationRequest, string) (*kernelagent.ManifestInstallationResult, error) {
+	return nil, errors.New("agent manifest installation is not configured in this TUI test")
+}
+
 func (f *fakeKernelClient) CreateExternalConversationGateway(_ context.Context, request kernelapi.CreateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error) {
 	f.conversationGatewayCreates = append(f.conversationGatewayCreates, request)
 	now := time.Now().UTC()
