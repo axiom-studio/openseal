@@ -52,4 +52,7 @@ func TestAgentRunEntrypointIsValidatedBeforePersistence(t *testing.T) {
 	if created.Run.Entrypoint != "manual:start" {
 		t.Fatalf("entrypoint = %q", created.Run.Entrypoint)
 	}
+	if created.Run.Context["runbookDefinitionId"] != "operator-runbook" || created.Run.Context["runbookDefinitionVersion"] != "1" {
+		t.Fatalf("Runbook identity context = %#v", created.Run.Context)
+	}
 }
