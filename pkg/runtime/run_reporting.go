@@ -35,11 +35,7 @@ func prepareRunReporting(
 	if store == nil {
 		return nil, "", errors.New("run reporting requires a conversation store")
 	}
-	service := NewConversationService(store)
-	channel, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: owner, Title: strings.TrimSpace(policy.Title),
-		IdempotencyKey: runReportingChannelKey(owner, policy),
-	})
+	channel, err := ensureRunReportingChannel(ctx, store, scope, owner, policy)
 	if err != nil {
 		return nil, "", err
 	}
@@ -54,6 +50,30 @@ func prepareRunReporting(
 	}
 	contextValues[runReportingContextMilestones] = milestones
 	return channel, messageKey, nil
+}
+
+// ensureRunReportingChannel materializes the durable work channel selected by
+// an active Runbook. Activations and Runs both call this boundary so accepted
+// compositions expose their channel immediately while execution safely reuses
+// the same owner-scoped Conversation.
+func ensureRunReportingChannel(
+	ctx context.Context,
+	store ConversationStore,
+	scope Scope,
+	owner ObjectiveOwner,
+	policy *runbook.ReportingPolicy,
+) (*Conversation, error) {
+	if policy == nil {
+		return nil, nil
+	}
+	if store == nil {
+		return nil, errors.New("run reporting requires a conversation store")
+	}
+	channel, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: owner, Title: strings.TrimSpace(policy.Title),
+		IdempotencyKey: runReportingChannelKey(owner, policy),
+	})
+	return channel, err
 }
 
 func projectRunReportingStart(
