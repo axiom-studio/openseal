@@ -181,6 +181,7 @@ type HostedTurnResponse struct {
 	WakeCondition          *WakeCondition           `json:"wakeCondition,omitempty"`
 	RunOutput              map[string]interface{}   `json:"runOutput,omitempty"`
 	RunError               string                   `json:"runError,omitempty"`
+	CompletionEvidenceRefs []string                 `json:"completionEvidenceRefs,omitempty"`
 	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
 	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
 }
@@ -482,6 +483,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		return nil, errors.New("a hosted Turn proposal must remain running until the kernel materializes it")
 	}
 	if err := ValidateHostedSkillSelections(request.SkillPrompts, response.SkillSelections); err != nil {
+		return nil, err
+	}
+	if err := ValidateHostedTurnCompletion(request, response); err != nil {
 		return nil, err
 	}
 	allowedSkillRefs := make(map[string]struct{}, len(request.SkillPrompts))
