@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -10,6 +11,43 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
+
+func TestHostedTurnModelInputCompactsHistoricalActionEvidenceWithoutMutatingCheckpoint(t *testing.T) {
+	largeEvidence := strings.Repeat("semantic browser snapshot ", 400)
+	checkpoint := map[string]interface{}{
+		"_opensealActionHistory": []interface{}{
+			map[string]interface{}{"actionCallId": "older", "status": "succeeded", "result": map[string]interface{}{"snapshot": largeEvidence}},
+			map[string]interface{}{"actionCallId": "latest", "status": "succeeded", "result": map[string]interface{}{"snapshot": largeEvidence}},
+		},
+		"lastAction": map[string]interface{}{"actionCallId": "latest", "status": "succeeded", "result": map[string]interface{}{"snapshot": largeEvidence}},
+	}
+	input, err := MarshalHostedTurnModelInput(HostedTurnRequest{Goal: "Continue", ContinuationCheckpoint: checkpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input) >= len(largeEvidence)*2 {
+		t.Fatalf("model input retained duplicated historical evidence: %d bytes", len(input))
+	}
+	var projected HostedTurnModelInput
+	if err := json.Unmarshal(input, &projected); err != nil {
+		t.Fatal(err)
+	}
+	history := projected.ContinuationCheckpoint[actionHistoryCheckpointKey].([]interface{})
+	for _, value := range history {
+		result := value.(map[string]interface{})["result"].(map[string]interface{})
+		if result["compacted"] != true || !strings.HasPrefix(result["evidenceRef"].(string), "action-call:") {
+			t.Fatalf("projected historical result = %#v", result)
+		}
+	}
+	latest := projected.ContinuationCheckpoint["lastAction"].(map[string]interface{})["result"].(map[string]interface{})
+	if latest["snapshot"] != largeEvidence {
+		t.Fatal("latest action evidence was not preserved for the model")
+	}
+	original := checkpoint[actionHistoryCheckpointKey].([]interface{})[0].(map[string]interface{})["result"].(map[string]interface{})
+	if original["snapshot"] != largeEvidence || original["compacted"] != nil {
+		t.Fatalf("durable checkpoint was mutated: %#v", checkpoint)
+	}
+}
 
 type countedHostedTurnHost struct {
 	calls   int
