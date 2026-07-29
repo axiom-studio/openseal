@@ -63,6 +63,21 @@ func NewRunbookEventRouter(store interface {
 	return router
 }
 
+// ConsumeCallbackEvent lets signed provider callbacks reuse the canonical
+// event-trigger path without a parallel webhook scheduler.
+func (r *RunbookEventRouter) ConsumeCallbackEvent(
+	ctx context.Context,
+	_ *CallbackRegistration,
+	subscription CallbackSubscription,
+	event EventEnvelope,
+) error {
+	if strings.TrimSpace(subscription.TargetID) != "" {
+		return errors.New("Runbook callback subscriptions do not accept a fixed target")
+	}
+	_, err := r.Route(ctx, event)
+	return err
+}
+
 func (e *EventEnvelope) Validate() error {
 	if e == nil {
 		return errors.New("event is required")
