@@ -413,7 +413,11 @@ func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentReq
 		return nil, err
 	}
 	principal := strings.TrimSpace(req.ActorType) + ":" + strings.TrimSpace(req.ActorID)
-	if !teamAmendmentApproverEligible(principal, base.Provenance.CreatedBy, base.Amendments.ApproverPrincipals) {
+	owner := strings.TrimSpace(base.Provenance.CreatedBy)
+	if owner == "" {
+		owner = strings.TrimSpace(current.Candidate.Provenance.CreatedBy)
+	}
+	if !teamAmendmentApproverEligible(principal, owner, base.Amendments.ApproverPrincipals) {
 		return nil, errors.New("principal is not eligible to approve Team amendment")
 	}
 	updated := cloneAmendment(current)
