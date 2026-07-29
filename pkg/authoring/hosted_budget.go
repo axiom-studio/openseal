@@ -27,6 +27,11 @@ func validateHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabil
 	if candidate == nil || catalog.HostedExecution == nil {
 		return nil
 	}
+	// Provider-authored budgets are planning hints, not trusted execution
+	// limits. Raise them deterministically to the smallest envelope that can
+	// execute the exact reviewed catalog; the resulting values remain visible
+	// in the proposal before activation.
+	normalizeHostedRunbookBudgets(candidate, catalog)
 	agents := make(map[string]*agent.AgentDefinition, len(candidate.Agents))
 	for _, definition := range candidate.Agents {
 		if definition != nil {
@@ -63,6 +68,68 @@ func validateHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabil
 		}
 	}
 	return issues
+}
+
+func normalizeHostedRunbookBudgets(candidate *WorkforceCandidate, catalog CapabilityCatalog) {
+	agents := make(map[string]*agent.AgentDefinition, len(candidate.Agents))
+	for _, definition := range candidate.Agents {
+		if definition != nil {
+			agents[strings.TrimSpace(definition.ID)] = definition
+		}
+	}
+	for _, owner := range candidate.Agents {
+		if owner == nil || owner.Runbook == nil {
+			continue
+		}
+		for stepID, step := range owner.Runbook.Steps {
+			if step.Kind != runbook.StepDelegate || step.Delegate == nil || step.Delegate.Mode != runbook.DelegateReason {
+				continue
+			}
+			var targetID string
+			if len(step.Delegate.AgentID.Literal) == 0 || json.Unmarshal(step.Delegate.AgentID.Literal, &targetID) != nil {
+				continue
+			}
+			target := agents[strings.TrimSpace(targetID)]
+			if target == nil {
+				continue
+			}
+			if step.Delegate.Budget == nil {
+				step.Delegate.Budget = &runbook.BudgetAllocation{}
+			}
+			required, _ := validateHostedBudget("", target, step.Delegate, catalog)
+			raiseHostedBudget(step.Delegate.Budget, required, 0)
+			owner.Runbook.Steps[stepID] = step
+			for triggerID, trigger := range owner.Runbook.Triggers {
+				if !runbookStepReachable(owner.Runbook, trigger.Entrypoint, stepID) {
+					continue
+				}
+				if trigger.Budget == nil {
+					trigger.Budget = &runbook.BudgetAllocation{}
+				}
+				raiseHostedBudget(trigger.Budget, *step.Delegate.Budget, 2)
+				owner.Runbook.Triggers[triggerID] = trigger
+			}
+		}
+	}
+}
+
+func raiseHostedBudget(current *runbook.BudgetAllocation, required runbook.BudgetAllocation, orchestrationOverhead int64) {
+	if current == nil {
+		return
+	}
+	current.MaxAttempts = maximumInt64(current.MaxAttempts, saturatingAdd(required.MaxAttempts, orchestrationOverhead))
+	current.MaxTurns = maximumInt64(current.MaxTurns, saturatingAdd(required.MaxTurns, orchestrationOverhead))
+	current.MaxInputTokens = maximumInt64(current.MaxInputTokens, required.MaxInputTokens)
+	current.MaxOutputTokens = maximumInt64(current.MaxOutputTokens, required.MaxOutputTokens)
+	current.MaxTotalTokens = maximumInt64(current.MaxTotalTokens, required.MaxTotalTokens)
+	current.MaxActions = maximumInt64(current.MaxActions, required.MaxActions)
+}
+
+func maximumInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *runbook.DelegateStep, catalog CapabilityCatalog) (runbook.BudgetAllocation, []ValidationIssue) {
