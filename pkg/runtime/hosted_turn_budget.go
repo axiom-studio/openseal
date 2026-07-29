@@ -55,6 +55,11 @@ const (
 	// for one bounded browser screenshot. Providers report actual usage, which
 	// is still settled against the Run budget after the Turn.
 	HostedTurnMediaReserveTokens int64 = 4096
+	// HostedTurnHistoricalActionResultBytes keeps concise earlier findings in
+	// model context while projecting large durable outputs by canonical ActionCall
+	// reference. The full evidence remains in the ActionCall store and the most
+	// recent result remains available through continuationCheckpoint.lastAction.
+	HostedTurnHistoricalActionResultBytes = 2 << 10
 )
 
 // HostedTurnModelInput is the credential-free data envelope presented to the
@@ -88,7 +93,11 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 }
 
 func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {
-	result := cloneMap(checkpoint)
+	// The model projection is allowed to compact and redact, while the durable
+	// checkpoint is immutable evidence. A shallow map copy would alias nested
+	// action history and media values back into stored Run state.
+	result := deepCloneCheckpointMap(checkpoint)
+	compactHostedTurnActionHistory(result)
 	last, ok := result["lastAction"].(map[string]interface{})
 	if !ok {
 		return result
@@ -103,6 +112,41 @@ func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]inte
 		"detail":    strings.TrimSpace(fmt.Sprint(media["detail"])),
 	}
 	return result
+}
+
+func compactHostedTurnActionHistory(checkpoint map[string]interface{}) {
+	if checkpoint == nil {
+		return
+	}
+	lastActionID := ""
+	if last, ok := checkpoint["lastAction"].(map[string]interface{}); ok {
+		lastActionID = strings.TrimSpace(fmt.Sprint(last["actionCallId"]))
+	}
+	history, ok := checkpoint[actionHistoryCheckpointKey].([]interface{})
+	if !ok {
+		return
+	}
+	for _, value := range history {
+		entry, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		result, exists := entry["result"]
+		if !exists {
+			continue
+		}
+		actionCallID := strings.TrimSpace(fmt.Sprint(entry["actionCallId"]))
+		encoded, err := json.Marshal(result)
+		if actionCallID == lastActionID || err != nil || len(encoded) > HostedTurnHistoricalActionResultBytes {
+			entry["result"] = map[string]interface{}{
+				"compacted":   true,
+				"evidenceRef": "action-call:" + actionCallID,
+			}
+			if actionCallID == lastActionID {
+				entry["result"].(map[string]interface{})["currentResultRef"] = "continuationCheckpoint.lastAction.result"
+			}
+		}
+	}
 }
 
 func EstimateHostedTurnInputTokens(request HostedTurnRequest) (int64, error) {
