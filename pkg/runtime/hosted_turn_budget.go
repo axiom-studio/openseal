@@ -64,27 +64,82 @@ const (
 // model. Keeping it portable lets the kernel reserve the same immutable input
 // that an enterprise host dispatches.
 type HostedTurnModelInput struct {
-	Goal                   string                   `json:"goal"`
-	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
-	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
-	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
-	RunbookOperations      []HostedRunbookOperation `json:"runbookOperations,omitempty"`
-	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
-	Actions                []capability.ModelAction `json:"actions,omitempty"`
-	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
-	DependencyResults      map[string]interface{}   `json:"dependencyResults,omitempty"`
-	CollaborationResults   map[string]interface{}   `json:"collaborationResults,omitempty"`
-	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
-	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
+	Goal                      string                           `json:"goal"`
+	InputContext              map[string]interface{}           `json:"inputContext,omitempty"`
+	SystemInstructions        []string                         `json:"systemInstructions,omitempty"`
+	EligibleAgents            []HostedAgentTarget              `json:"eligibleAgents,omitempty"`
+	RunbookOperations         []HostedRunbookOperation         `json:"runbookOperations,omitempty"`
+	SkillPrompts              []HostedSkillPrompt              `json:"skillPrompts,omitempty"`
+	Actions                   []capability.ModelAction         `json:"actions,omitempty"`
+	ActionInvocationContracts []HostedActionInvocationContract `json:"actionInvocationContracts,omitempty"`
+	Budget                    *HostedRunBudget                 `json:"budget,omitempty"`
+	DependencyResults         map[string]interface{}           `json:"dependencyResults,omitempty"`
+	CollaborationResults      map[string]interface{}           `json:"collaborationResults,omitempty"`
+	ContinuationCheckpoint    map[string]interface{}           `json:"continuationCheckpoint,omitempty"`
+	PendingInterventions      []AgentRunIntervention           `json:"pendingInterventions,omitempty"`
+}
+
+// HostedActionInvocationContract makes the complete model-authored Turn
+// envelope explicit for one authorized action. Action inputSchema describes
+// only the referenced capability arguments; it cannot describe sibling Turn
+// fields such as externalOperation, which models otherwise tend to overlook.
+// Keeping this projection in OpenSeal prevents every host from inventing a
+// subtly different calling convention.
+type HostedActionInvocationContract struct {
+	Capability          string                              `json:"capability"`
+	ModelAuthoredFields []string                            `json:"modelAuthoredFields"`
+	HostOwnedFields     []string                            `json:"hostOwnedFields"`
+	ExternalOperation   HostedExternalOperationInstructions `json:"externalOperation"`
+	CompletionEvidence  string                              `json:"completionEvidence,omitempty"`
+}
+
+type HostedExternalOperationInstructions struct {
+	Policy         capability.ExternalOperationPolicy `json:"policy"`
+	RequiredFields []string                           `json:"requiredFields,omitempty"`
+	Instruction    string                             `json:"instruction"`
+	Example        *ExternalOperationIdentity         `json:"example,omitempty"`
+}
+
+func ProjectHostedActionInvocationContracts(actions []capability.ModelAction) []HostedActionInvocationContract {
+	contracts := make([]HostedActionInvocationContract, 0, len(actions))
+	for _, action := range actions {
+		fields := []string{"type", "capability", "summary", "idempotencyKey", "inputRef"}
+		external := HostedExternalOperationInstructions{Policy: action.ExternalOperationPolicy}
+		switch action.ExternalOperationPolicy {
+		case capability.ExternalOperationRequired:
+			fields = append(fields, "externalOperation")
+			external.RequiredFields = []string{"resource", "operation"}
+			external.Instruction = "Required on proposedAction. resource is the stable canonical target URL or opaque resource ID; operation is the stable semantic effect. Never use a DOM reference, session ID, Run ID, timestamp, credential, or model wording."
+			external.Example = &ExternalOperationIdentity{Resource: "https://service.example/resources/42", Operation: "resource:update"}
+		case capability.ExternalOperationForbidden:
+			external.Instruction = "Forbidden. Omit externalOperation from proposedAction because this action does not commit a durable external business operation."
+		default:
+			external.Instruction = "Optional. Include externalOperation only when this action commits an externally observable business operation."
+		}
+		contract := HostedActionInvocationContract{
+			Capability:          action.Name,
+			ModelAuthoredFields: fields,
+			HostOwnedFields:     []string{"bindingId", "bindingRevision", "preparedRuntime"},
+			ExternalOperation:   external,
+		}
+		if action.ExternalOperationPolicy == capability.ExternalOperationRequired {
+			contract.CompletionEvidence = "After the action succeeds, any completion claim about its external effect must cite action-call:<durable actionCallId> in completionEvidenceRefs."
+		}
+		contracts = append(contracts, contract)
+	}
+	return contracts
 }
 
 func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 	return json.Marshal(HostedTurnModelInput{
 		Goal: request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
-		EligibleAgents:    request.EligibleAgents,
-		RunbookOperations: request.RunbookOperations,
-		SkillPrompts:      request.SkillPrompts, Actions: request.Actions, Budget: request.Budget,
-		DependencyResults: request.DependencyResults, CollaborationResults: request.CollaborationResults,
+		EligibleAgents:            request.EligibleAgents,
+		RunbookOperations:         request.RunbookOperations,
+		SkillPrompts:              request.SkillPrompts,
+		Actions:                   request.Actions,
+		ActionInvocationContracts: ProjectHostedActionInvocationContracts(request.Actions),
+		Budget:                    request.Budget,
+		DependencyResults:         request.DependencyResults, CollaborationResults: request.CollaborationResults,
 		ContinuationCheckpoint: hostedTurnTextCheckpoint(request.ContinuationCheckpoint),
 		PendingInterventions:   request.PendingInterventions,
 	})
