@@ -613,8 +613,14 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	if err != nil {
 		return nil, err
 	}
-	if proposal == nil || proposal.Run == nil || proposal.Call == nil {
+	if proposal == nil || proposal.Call == nil {
 		return nil, errors.New("governed action proposal returned no durable Run or ActionCall")
+	}
+	if !proposal.Created {
+		return p.resumeReplayedTurnAction(ctx, workerID, run, turn, proposal.Call)
+	}
+	if proposal.Run == nil {
+		return nil, errors.New("governed action proposal returned no durable Run")
 	}
 	if p.actionObserver != nil {
 		if observeErr := p.actionObserver.ObserveActionProposal(ctx, run, turn, proposal); observeErr != nil {
@@ -622,6 +628,46 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		}
 	}
 	return proposal.Run, nil
+}
+
+func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, call *ActionCall) (*AgentRun, error) {
+	if run == nil || turn == nil || call == nil || call.RunID != run.ID {
+		return nil, errors.New("governed action replay identity is invalid")
+	}
+	status := AgentRunStatusQueued
+	var wake *WakeCondition
+	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
+	switch call.Status {
+	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled, ActionCallStatusCompensated:
+		checkpoint = checkpointTerminalAction(checkpoint, call, map[string]interface{}{"idempotentReplay": true})
+	case ActionCallStatusReady, ActionCallStatusRunning, ActionCallStatusCompensating:
+		status = AgentRunStatusWaitingForDependency
+		wake = &WakeCondition{Type: "action", Reference: call.ID}
+	case ActionCallStatusWaitingApproval:
+		if strings.TrimSpace(call.ApprovalID) == "" {
+			return nil, errors.New("governed action replay is waiting for an approval without an approval identity")
+		}
+		status = AgentRunStatusWaitingForApproval
+		wake = &WakeCondition{Type: "approval", Reference: call.ApprovalID}
+	default:
+		return nil, fmt.Errorf("governed action replay has unsupported status %q", call.Status)
+	}
+	resumed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: status, WakeCondition: wake, Checkpoint: checkpoint,
+		LeaseOwner: workerID, Summary: "Reused an existing governed action result",
+		EventType: "action.replayed", Actor: ActivityActor{Type: "worker", ID: workerID},
+		TurnID: turn.ID, CausationID: call.ID, Payload: map[string]interface{}{
+			"actionCallId": call.ID, "skillId": call.SkillID, "skillVersion": call.SkillVersion,
+			"action": call.Action, "status": call.Status,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if status == AgentRunStatusQueued {
+		p.Wake()
+	}
+	return resumed, nil
 }
 
 type preparedRuntimeTurnRunner struct{ binding *TurnRunnerBinding }

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -339,6 +340,87 @@ func TestAgentRunWorkerMaterializesOneGovernedAction(t *testing.T) {
 	if err != nil || len(turns) != 1 || turns[0].RequestedActions[0].Capability != "release.deploy" ||
 		turns[0].RequestedActions[0].PreparedRuntime == nil || turns[0].RequestedActions[0].PreparedRuntime.RuntimeID != prepared.RuntimeID {
 		t.Fatalf("durable proposal Turn mismatch: %#v, %v", turns, err)
+	}
+}
+
+func TestAgentRunWorkerResumesCompletedIdempotentActionReplay(t *testing.T) {
+	store := NewMemoryStore()
+	catalog, scope := governedActionCatalog(t)
+	now := time.Now().UTC()
+	claimed := claimedActionRun(t, store, scope, now, "worker")
+	actions := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionDeny, Reason: "test denial"}, nil
+	}))
+	actions.now = func() time.Time { return now }
+	first, err := actions.Propose(t.Context(), ProposeActionRequest{
+		Scope: scope, RunID: claimed.ID, TurnID: "turn-1", WorkerID: "worker", DeploymentID: "release-agent",
+		BindingID: "release-binding", BindingRevision: 1, SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
+		Arguments: map[string]interface{}{"environment": "staging"}, IdempotencyKey: "deploy-staging", Summary: "Deploy staging",
+	})
+	if err != nil || first == nil || first.Call == nil || first.Run == nil || first.Call.Status != ActionCallStatusDenied {
+		t.Fatalf("first proposal = %#v, %v", first, err)
+	}
+	claimed, err = store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
+		Scope: scope, WorkerID: "worker", Now: now.Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("reclaimed Run = %#v, %v", claimed, err)
+	}
+	modelActions, err := catalog.ListModelActions(t.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, errors.New("unused")
+	}), nil, AgentRunWorkerConfig{
+		Scope: scope, AssignedAgentID: "release-agent", Concurrency: 1, MaxTurnsPerClaim: 1,
+		PollInterval: time.Second, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.SetActionCoordinator(actions)
+	turn := &AgentTurn{
+		ID: "turn-2", RequestedActions: []TurnAction{{
+			Type: "skill_action", Capability: "release.deploy", Summary: "Deploy staging",
+			IdempotencyKey: "deploy-staging", InputRef: "/actionInputs/call",
+		}},
+		ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{
+			"call": map[string]interface{}{"environment": "staging"},
+		}},
+	}
+	resumed, err := pool.materializeTurnAction(t.Context(), "worker", claimed, turn, &TurnRunnerBinding{
+		DeploymentID: "release-agent", ActionDeploymentID: "release-agent", ModelActions: modelActions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, _ := resumed.Checkpoint["lastAction"].(map[string]interface{})
+	if resumed.Status != AgentRunStatusQueued || fmt.Sprint(last["actionCallId"]) != first.Call.ID || last["idempotentReplay"] != true {
+		t.Fatalf("replayed Run = %#v", resumed)
+	}
+	calls, err := store.ListActionCalls(t.Context(), ActionFilter{Scope: scope, RunID: claimed.ID})
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("replay created duplicate calls = %#v, %v", calls, err)
+	}
+	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: scope, RunID: claimed.ID, EventTypes: []string{"action.replayed"}})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("replay activity = %#v, %v", events, err)
+	}
+	claimed, err = store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
+		Scope: scope, WorkerID: "worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("claimed conflicting replay Run = %#v, %v", claimed, err)
+	}
+	turn.ID = "turn-3"
+	turn.ContinuationCheckpoint = map[string]interface{}{"actionInputs": map[string]interface{}{
+		"call": map[string]interface{}{"environment": "production"},
+	}}
+	if _, err := pool.materializeTurnAction(t.Context(), "worker", claimed, turn, &TurnRunnerBinding{
+		DeploymentID: "release-agent", ActionDeploymentID: "release-agent", ModelActions: modelActions,
+	}); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("conflicting replay error = %v", err)
 	}
 }
 
