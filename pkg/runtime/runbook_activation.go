@@ -377,6 +377,9 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 			if current.CreationFingerprint != activation.CreationFingerprint {
 				return nil, ErrRunbookActivationIdempotency
 			}
+			if err := s.ensureReportingChannel(ctx, current); err != nil {
+				return nil, err
+			}
 			return current, nil
 		}
 	}
@@ -384,6 +387,9 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		return nil, err
 	}
 	if err := s.store.CreateRunbookActivation(ctx, activation); err != nil {
+		return nil, err
+	}
+	if err := s.ensureReportingChannel(ctx, activation); err != nil {
 		return nil, err
 	}
 	return cloneRunbookActivation(activation), nil
@@ -418,6 +424,9 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 		return nil, errors.New("retired Runbook activation cannot be resumed")
 	}
 	if current.Status == request.Status {
+		if err := s.ensureReportingChannel(ctx, current); err != nil {
+			return nil, err
+		}
 		return cloneRunbookActivation(current), nil
 	}
 	next := cloneRunbookActivation(current)
@@ -429,7 +438,22 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	if err := s.store.UpdateRunbookActivation(ctx, next, current.Revision); err != nil {
 		return nil, err
 	}
+	if err := s.ensureReportingChannel(ctx, next); err != nil {
+		return nil, err
+	}
 	return cloneRunbookActivation(next), nil
+}
+
+func (s *RunbookActivationService) ensureReportingChannel(ctx context.Context, activation *RunbookActivation) error {
+	if activation == nil || activation.Status != RunbookActivationActive || activation.Trigger.Reporting == nil {
+		return nil
+	}
+	store, ok := s.store.(ConversationStore)
+	if !ok {
+		return errors.New("active Runbook reporting requires a conversation store")
+	}
+	_, err := ensureRunReportingChannel(ctx, store, activation.Scope, activation.Owner, activation.Trigger.Reporting)
+	return err
 }
 
 func matchesRunbookActivationFilter(value *RunbookActivation, filter RunbookActivationFilter) bool {
