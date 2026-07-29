@@ -32,11 +32,11 @@ const (
 	// hosted Turn invocation, including a single deterministic schema repair.
 	// The kernel reserves the complete envelope before dispatch so a repair can
 	// never consume unreserved lifetime budget.
-	HostedTurnMaximumProviderAttempts int64 = 2
+	HostedTurnMaximumProviderAttempts int64 = capability.HostedMaximumProviderAttempts
 	// HostedTurnRepairInputReserveTokens covers the bounded validation message
 	// appended to the second provider request. The rejected model response is
 	// not replayed into the repair prompt.
-	HostedTurnRepairInputReserveTokens int64 = 1024
+	HostedTurnRepairInputReserveTokens int64 = capability.HostedRepairInputReserveTokens
 	HostedTurnMinimumOutputTokens      int64 = 64
 	// HostedTurnMaximumOutputReservationTokens bounds one provider exchange;
 	// the Run's output policy remains a lifetime budget shared by many Turns.

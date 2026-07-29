@@ -18,7 +18,14 @@ func TestHostedRunbookBudgetRaisesBrowserCatalogToExecutableEnvelope(t *testing.
 		t.Fatalf("normalized Browser budget issues = %#v", issues)
 	}
 	budget := candidate.Agents[0].Runbook.Steps["work"].Delegate.Budget
-	if budget.MaxTurns < 4 || budget.MaxInputTokens <= 16000 || budget.MaxTotalTokens <= 20000 {
+	target := candidate.Agents[1]
+	delegate := candidate.Agents[0].Runbook.Steps["work"].Delegate
+	perTurnInput := hostedBrowserBudgetCatalog().HostedExecution.BaseInputTokens +
+		hostedAgentDefinitionTokens(target, delegate) + hostedBrowserBudgetCatalog().Skills["skill-browser"].HostedModelInputTokens
+	wantInput := (perTurnInput*capability.HostedMaximumProviderAttempts + capability.HostedRepairInputReserveTokens) * 4
+	wantOutput := capability.HostedMinimumChildOutputTokens * 4
+	if budget.MaxTurns != 4 || budget.MaxInputTokens != wantInput || budget.MaxOutputTokens != wantOutput ||
+		budget.MaxTotalTokens != wantInput+wantOutput {
 		t.Fatalf("Browser budget was not normalized: %#v", budget)
 	}
 }
