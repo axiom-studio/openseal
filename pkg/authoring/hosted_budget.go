@@ -122,6 +122,7 @@ func raiseHostedBudget(current *runbook.BudgetAllocation, required runbook.Budge
 	current.MaxInputTokens = maximumInt64(current.MaxInputTokens, required.MaxInputTokens)
 	current.MaxOutputTokens = maximumInt64(current.MaxOutputTokens, required.MaxOutputTokens)
 	current.MaxTotalTokens = maximumInt64(current.MaxTotalTokens, required.MaxTotalTokens)
+	current.MaxTotalTokens = maximumInt64(current.MaxTotalTokens, saturatingAdd(current.MaxInputTokens, current.MaxOutputTokens))
 	current.MaxActions = maximumInt64(current.MaxActions, required.MaxActions)
 }
 
@@ -155,6 +156,9 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 	}
 	requiredInput := saturatingMultiply(perTurn, turns)
 	requiredOutput := saturatingMultiply(catalog.HostedExecution.MinimumOutputTokens, turns)
+	if requiredOutput < capability.HostedMinimumChildOutputTokens {
+		requiredOutput = capability.HostedMinimumChildOutputTokens
+	}
 	requiredTotal := saturatingAdd(requiredInput, requiredOutput)
 	required := runbook.BudgetAllocation{
 		MaxAttempts: turns, MaxTurns: turns, MaxActions: actions,
