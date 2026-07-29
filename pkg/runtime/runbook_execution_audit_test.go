@@ -68,6 +68,9 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}
 	checkpoint := map[string]interface{}{}
 	browseSequence, _ := beginRunbookStepTrace(checkpoint, definition, "browse", "turn-browse", now)
+	if err := setRunbookPointer(checkpoint, "/steps/browse", map[string]interface{}{"title": "A useful finding"}); err != nil {
+		t.Fatal(err)
+	}
 	_ = updateRunbookStepTrace(checkpoint, browseSequence, RunbookStepTraceSucceeded, "review", "Governed action completed", "", map[string]string{"actionCallId": "action-browse", "approvalId": "approval-browse"}, now.Add(time.Minute))
 	reviewSequence, _ := beginRunbookStepTrace(checkpoint, definition, "review", "turn-review", now.Add(2*time.Minute))
 	_ = updateRunbookStepTrace(checkpoint, reviewSequence, RunbookStepTraceWaiting, "", "Waiting for delegated Agent work", "", nil, now.Add(2*time.Minute))
@@ -102,7 +105,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}}
 	store.agentRuns[portfolioKey(scope, childID)] = &AgentRun{
 		ID: childID, Scope: scope, ObjectiveID: objective.ID, ParentRunID: run.ID, RootRunID: run.ID, Owner: owner, AssignedAgentID: "reviewer",
-		Goal: "Review findings", Source: RunSourceRequest, Status: AgentRunStatusRunning, AvailableAt: now, QueueEnteredAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Goal: "Review findings", Source: RunSourceRequest, Status: AgentRunStatusRunning, AvailableAt: now.Add(2 * time.Minute), QueueEnteredAt: now.Add(2 * time.Minute), Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
 	}
 	store.requests[requestStoreKey(scope, requestID)] = &AgentRequest{
 		ID: requestID, Scope: scope, Kind: AgentRequestKindRequest, Status: AgentRequestStatusAccepted,
@@ -116,23 +119,63 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if audit.Run.ActivationID != activation.ID || audit.Run.PendingApprovals != 1 || audit.Run.PendingChildRuns != 1 || len(audit.Nodes) != 3 || len(audit.Lineage) != 2 {
+	if audit.Run.ActivationID != activation.ID || audit.Run.PendingApprovals != 1 || audit.Run.PendingChildRuns != 1 || len(audit.Nodes) != 3 || len(audit.Lineage) != 1 {
 		t.Fatalf("audit summary=%#v lineage=%#v", audit.Run, audit.Lineage)
 	}
 	nodes := map[string]RunbookNodeExecutionAudit{}
 	for _, node := range audit.Nodes {
 		nodes[node.StepID] = node
 	}
-	if nodes["browse"].Status != RunbookStepTraceSucceeded || len(nodes["browse"].Actions) != 1 || len(nodes["browse"].Approvals) != 1 || len(nodes["browse"].Artifacts) != 1 {
+	browseVisit := nodes["browse"].Visits[0]
+	if nodes["browse"].Status != RunbookStepTraceSucceeded || len(browseVisit.Actions) != 1 || len(browseVisit.Approvals) != 1 || len(browseVisit.Artifacts) != 1 || len(browseVisit.Trace.Outputs) != 1 || browseVisit.Trace.Outputs[0].Shape != "object" {
 		t.Fatalf("browse node=%#v", nodes["browse"])
 	}
-	if nodes["review"].Status != RunbookStepTraceWaiting || len(nodes["review"].ChildRuns) != 1 || nodes["review"].ChildRuns[0].ID != childID {
+	reviewVisit := nodes["review"].Visits[0]
+	if nodes["review"].Status != RunbookStepTraceWaiting || len(reviewVisit.ChildRuns) != 1 || reviewVisit.ChildRuns[0].ID != childID || len(reviewVisit.Trace.Inputs) != 1 || reviewVisit.Trace.Inputs[0].Availability != RunbookDataAvailable {
 		t.Fatalf("review node=%#v", nodes["review"])
+	}
+	if audit.Lineage[0].FromSequence != browseSequence || audit.Lineage[0].ToSequence != reviewSequence || audit.Lineage[0].Ref != "/steps/browse/title" {
+		t.Fatalf("actual lineage=%#v", audit.Lineage)
 	}
 	encoded, _ := json.Marshal(audit)
 	for _, forbidden := range []string{"never-project-this", "nor-this", "also-never-project-this", "opaque-secret-storage-ref"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("audit exposed governed value %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestRunbookExecutionAuditKeepsRetryRecordsOnExactVisits(t *testing.T) {
+	now := time.Date(2026, 7, 29, 13, 0, 0, 0, time.UTC)
+	definition := &runbook.Definition{
+		Steps: map[string]runbook.Step{
+			"browse": {Kind: runbook.StepAction, Name: "Browse", Action: &runbook.ActionStep{ResultPath: "/steps/browse"}},
+		},
+	}
+	trace := &RunbookExecutionTrace{Revision: runbookTraceRevision, NextSequence: 3, Entries: []RunbookStepTrace{
+		{Sequence: 1, StepID: "browse", StepKind: runbook.StepAction, Visit: 1, Status: RunbookStepTraceFailed, TurnID: "turn-1", ActionCallID: "action-1", StartedAt: now, CompletedAt: timePointer(now.Add(time.Second))},
+		{Sequence: 2, StepID: "browse", StepKind: runbook.StepAction, Visit: 2, Status: RunbookStepTraceSucceeded, TurnID: "turn-2", ActionCallID: "action-2", StartedAt: now.Add(time.Minute), CompletedAt: timePointer(now.Add(time.Minute + time.Second))},
+	}}
+	result := &RunbookExecutionAudit{Nodes: buildRunbookNodeAudits(definition, trace), Trace: trace}
+	attachRunbookTurns(result, []*AgentTurn{
+		{ID: "turn-1", Sequence: 1, Status: AgentTurnStatusFailed, StartedAt: now},
+		{ID: "turn-2", Sequence: 2, Status: AgentTurnStatusCompleted, StartedAt: now.Add(time.Minute)},
+		{ID: "turn-unassigned", Sequence: 3, Status: AgentTurnStatusCompleted, StartedAt: now.Add(2 * time.Minute)},
+	})
+	attachRunbookActions(result, []*ActionCall{
+		{ID: "action-1", TurnID: "turn-1", SkillID: "browser", SkillVersion: "1", Action: "browse", Status: ActionCallStatusFailed},
+		{ID: "action-2", TurnID: "turn-2", SkillID: "browser", SkillVersion: "1", Action: "browse", Status: ActionCallStatusSucceeded},
+		{ID: "action-unassigned", TurnID: "turn-unassigned", SkillID: "browser", SkillVersion: "1", Action: "browse", Status: ActionCallStatusSucceeded},
+	}, []*ApprovalCheckpoint{
+		{ID: "approval-2", ActionCallID: "action-2", Status: ApprovalStatusApproved, Summary: "Approved"},
+		{ID: "approval-unassigned", ActionCallID: "missing", Status: ApprovalStatusPending, Summary: "Unassigned"},
+	})
+
+	visits := result.Nodes[0].Visits
+	if len(visits) != 2 || visits[0].Actions[0].ID != "action-1" || visits[1].Actions[0].ID != "action-2" || len(visits[0].Approvals) != 0 || visits[1].Approvals[0].ID != "approval-2" {
+		t.Fatalf("visit-scoped records=%#v", visits)
+	}
+	if len(result.UnassignedTurns) != 1 || len(result.UnassignedActions) != 1 || len(result.UnassignedApprovals) != 1 {
+		t.Fatalf("unassigned turns=%#v actions=%#v approvals=%#v", result.UnassignedTurns, result.UnassignedActions, result.UnassignedApprovals)
 	}
 }

@@ -19,34 +19,52 @@ const (
 
 type RunbookStepTraceStatus string
 
+type RunbookDataAvailability string
+
 const (
 	RunbookStepTraceRunning   RunbookStepTraceStatus = "running"
 	RunbookStepTraceWaiting   RunbookStepTraceStatus = "waiting"
 	RunbookStepTraceSucceeded RunbookStepTraceStatus = "succeeded"
 	RunbookStepTraceFailed    RunbookStepTraceStatus = "failed"
+
+	RunbookDataAvailable RunbookDataAvailability = "available"
+	RunbookDataMissing   RunbookDataAvailability = "missing"
 )
+
+// RunbookDataObservation records what an operator may safely know about a
+// referenced value at the instant a node reads or writes it. Values, object
+// keys, digests, and content never enter the trace; presence and coarse shape
+// are sufficient to explain whether data actually reached the node.
+type RunbookDataObservation struct {
+	Ref          string                  `json:"ref"`
+	Availability RunbookDataAvailability `json:"availability"`
+	Shape        string                  `json:"shape,omitempty"`
+	Count        int                     `json:"count,omitempty"`
+}
 
 // RunbookStepTrace is the credential-free, operator-facing record of one
 // visit to one immutable Runbook node. InputRefs and OutputRefs describe data
 // lineage by JSON Pointer; values remain in their governed stores and are not
 // copied into the audit trail.
 type RunbookStepTrace struct {
-	Sequence     int64                  `json:"sequence"`
-	StepID       string                 `json:"stepId"`
-	StepKind     runbook.StepKind       `json:"stepKind"`
-	StepName     string                 `json:"stepName,omitempty"`
-	Visit        int                    `json:"visit"`
-	Status       RunbookStepTraceStatus `json:"status"`
-	TurnID       string                 `json:"turnId,omitempty"`
-	InputRefs    []string               `json:"inputRefs,omitempty"`
-	OutputRefs   []string               `json:"outputRefs,omitempty"`
-	SelectedNext string                 `json:"selectedNext,omitempty"`
-	ActionCallID string                 `json:"actionCallId,omitempty"`
-	ApprovalID   string                 `json:"approvalId,omitempty"`
-	Summary      string                 `json:"summary,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	StartedAt    time.Time              `json:"startedAt"`
-	CompletedAt  *time.Time             `json:"completedAt,omitempty"`
+	Sequence     int64                    `json:"sequence"`
+	StepID       string                   `json:"stepId"`
+	StepKind     runbook.StepKind         `json:"stepKind"`
+	StepName     string                   `json:"stepName,omitempty"`
+	Visit        int                      `json:"visit"`
+	Status       RunbookStepTraceStatus   `json:"status"`
+	TurnID       string                   `json:"turnId,omitempty"`
+	InputRefs    []string                 `json:"inputRefs,omitempty"`
+	OutputRefs   []string                 `json:"outputRefs,omitempty"`
+	Inputs       []RunbookDataObservation `json:"inputs,omitempty"`
+	Outputs      []RunbookDataObservation `json:"outputs,omitempty"`
+	SelectedNext string                   `json:"selectedNext,omitempty"`
+	ActionCallID string                   `json:"actionCallId,omitempty"`
+	ApprovalID   string                   `json:"approvalId,omitempty"`
+	Summary      string                   `json:"summary,omitempty"`
+	Error        string                   `json:"error,omitempty"`
+	StartedAt    time.Time                `json:"startedAt"`
+	CompletedAt  *time.Time               `json:"completedAt,omitempty"`
 }
 
 type RunbookExecutionTrace struct {
@@ -63,6 +81,12 @@ func (t *RunbookExecutionTrace) Validate() error {
 	for _, entry := range t.Entries {
 		if entry.Sequence <= last || strings.TrimSpace(entry.StepID) == "" || entry.Visit < 1 || entry.StartedAt.IsZero() {
 			return errors.New("Runbook execution trace entry is invalid")
+		}
+		if err := validateRunbookDataObservations(entry.Inputs); err != nil {
+			return err
+		}
+		if err := validateRunbookDataObservations(entry.Outputs); err != nil {
+			return err
 		}
 		switch entry.Status {
 		case RunbookStepTraceRunning, RunbookStepTraceWaiting:
@@ -147,6 +171,9 @@ func beginRunbookStepTrace(checkpoint map[string]interface{}, definition *runboo
 		Status: RunbookStepTraceRunning, TurnID: strings.TrimSpace(turnID), InputRefs: runbookStepInputRefs(step),
 		OutputRefs: runbookStepOutputRefs(stepID, step), StartedAt: now.UTC(),
 	})
+	entry := &trace.Entries[len(trace.Entries)-1]
+	entry.Inputs = observeRunbookData(checkpoint, entry.InputRefs)
+	entry.Outputs = observeRunbookData(checkpoint, entry.OutputRefs)
 	return sequence, encodeRunbookTrace(checkpoint, trace)
 }
 
@@ -166,6 +193,7 @@ func updateRunbookStepTrace(checkpoint map[string]interface{}, sequence int64, s
 		entry.Error = strings.TrimSpace(runError)
 		entry.ActionCallID = strings.TrimSpace(metadata["actionCallId"])
 		entry.ApprovalID = strings.TrimSpace(metadata["approvalId"])
+		entry.Outputs = observeRunbookData(checkpoint, entry.OutputRefs)
 		if status == RunbookStepTraceSucceeded || status == RunbookStepTraceFailed {
 			completed := now.UTC()
 			entry.CompletedAt = &completed
@@ -175,6 +203,86 @@ func updateRunbookStepTrace(checkpoint map[string]interface{}, sequence int64, s
 		return encodeRunbookTrace(checkpoint, trace)
 	}
 	return errors.New("Runbook trace entry is not found")
+}
+
+func replaceRunbookStepTraceOutputs(checkpoint map[string]interface{}, sequence int64, outputs []RunbookDataObservation) error {
+	if err := validateRunbookDataObservations(outputs); err != nil {
+		return err
+	}
+	trace, err := RunbookTraceFromCheckpoint(checkpoint)
+	if err != nil {
+		return err
+	}
+	for index := range trace.Entries {
+		if trace.Entries[index].Sequence != sequence {
+			continue
+		}
+		trace.Entries[index].Outputs = append([]RunbookDataObservation(nil), outputs...)
+		return encodeRunbookTrace(checkpoint, trace)
+	}
+	return errors.New("Runbook trace entry is not found")
+}
+
+func observeRunbookData(checkpoint map[string]interface{}, refs []string) []RunbookDataObservation {
+	observations := make([]RunbookDataObservation, 0, len(refs))
+	for _, ref := range refs {
+		observation := RunbookDataObservation{Ref: ref, Availability: RunbookDataMissing}
+		value, err := getRunbookPointer(checkpoint, ref)
+		if err == nil {
+			observation = observeRunbookValue(ref, value)
+		}
+		observations = append(observations, observation)
+	}
+	return observations
+}
+
+func observeRunbookValue(ref string, value interface{}) RunbookDataObservation {
+	observation := RunbookDataObservation{Ref: ref, Availability: RunbookDataAvailable}
+	switch typed := value.(type) {
+	case nil:
+		observation.Shape = "null"
+	case map[string]interface{}:
+		observation.Shape = "object"
+		observation.Count = len(typed)
+	case []interface{}:
+		observation.Shape = "array"
+		observation.Count = len(typed)
+	case string:
+		observation.Shape = "string"
+	case bool:
+		observation.Shape = "boolean"
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, json.Number:
+		observation.Shape = "number"
+	default:
+		observation.Shape = "value"
+	}
+	return observation
+}
+
+func validateRunbookDataObservations(values []RunbookDataObservation) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value.Ref) == "" || value.Count < 0 {
+			return errors.New("Runbook data observation is invalid")
+		}
+		if _, exists := seen[value.Ref]; exists {
+			return errors.New("Runbook data observation is duplicated")
+		}
+		seen[value.Ref] = struct{}{}
+		switch value.Availability {
+		case RunbookDataAvailable:
+			if strings.TrimSpace(value.Shape) == "" {
+				return errors.New("available Runbook data observation requires a shape")
+			}
+		case RunbookDataMissing:
+			if value.Shape != "" || value.Count != 0 {
+				return errors.New("missing Runbook data observation cannot describe a value")
+			}
+		default:
+			return errors.New("Runbook data observation availability is invalid")
+		}
+	}
+	return nil
 }
 
 func pendingRunbookStepTrace(checkpoint map[string]interface{}, stepID string) (int64, error) {

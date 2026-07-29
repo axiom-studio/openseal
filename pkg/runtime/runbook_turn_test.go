@@ -42,6 +42,9 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	if err != nil || len(firstTrace.Entries) != 1 || firstTrace.Entries[0].StepID != "fetch" || firstTrace.Entries[0].Status != RunbookStepTraceWaiting || firstTrace.Entries[0].Visit != 1 || firstTrace.Entries[0].TurnID != "turn-1" || !reflect.DeepEqual(firstTrace.Entries[0].InputRefs, []string{"/input/url"}) || !reflect.DeepEqual(firstTrace.Entries[0].OutputRefs, []string{"/steps/fetch"}) {
 		t.Fatalf("first trace=%#v err=%v", firstTrace, err)
 	}
+	if len(firstTrace.Entries[0].Inputs) != 1 || firstTrace.Entries[0].Inputs[0].Shape != "string" || len(firstTrace.Entries[0].Outputs) != 1 || firstTrace.Entries[0].Outputs[0].Availability != RunbookDataMissing {
+		t.Fatalf("first data observations=%#v", firstTrace.Entries[0])
+	}
 	first.ContinuationCheckpoint["lastAction"] = map[string]interface{}{"actionCallId": "call-1", "approvalId": "approval-1", "status": "succeeded", "result": map[string]interface{}{"content": "ok"}}
 	run.Checkpoint = first.ContinuationCheckpoint
 	second, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2", Sequence: 2}})
@@ -57,6 +60,9 @@ func TestRunbookTurnExecutesGovernedActionAndConsumesDurableResult(t *testing.T)
 	trace, err := RunbookTraceFromCheckpoint(second.ContinuationCheckpoint)
 	if err != nil || len(trace.Entries) != 2 || trace.Entries[0].Status != RunbookStepTraceSucceeded || trace.Entries[0].ActionCallID != "call-1" || trace.Entries[0].ApprovalID != "approval-1" || trace.Entries[0].SelectedNext != "done" || trace.Entries[1].StepID != "done" || trace.Entries[1].Status != RunbookStepTraceSucceeded {
 		t.Fatalf("completed trace=%#v err=%v", trace, err)
+	}
+	if trace.Entries[0].Outputs[0].Shape != "object" || trace.Entries[1].Inputs[0].Shape != "string" || trace.Entries[1].Outputs[0].Shape != "string" {
+		t.Fatalf("completed data observations=%#v", trace.Entries)
 	}
 	encodedTrace, _ := json.Marshal(trace)
 	if strings.Contains(string(encodedTrace), "https://example.test/health") || strings.Contains(string(encodedTrace), `"content":"ok"`) {
