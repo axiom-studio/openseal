@@ -252,6 +252,30 @@ type ConversationAdapter struct {
 	Transport            ConversationAdapterTransport       `json:"transport"`
 }
 
+const CallbackAdapterProtocolV1 = "openseal.callback.adapter/v1"
+
+// CallbackAdapterTransport identifies the Skill-owned verifier and
+// normalizer for an inbound provider callback. Credential values are resolved
+// by the trusted host and never enter the callback registration or event.
+type CallbackAdapterTransport struct {
+	Kind               string   `json:"kind"`
+	IngressEndpoint    string   `json:"ingressEndpoint"`
+	IngressCredentials []string `json:"ingressCredentials,omitempty"`
+}
+
+// CallbackAdapter declares one provider-neutral inbound callback surface.
+// EventTypes are the credential-free EventEnvelope types the adapter may emit
+// after it authenticates the raw provider request.
+type CallbackAdapter struct {
+	ProtocolVersion string                   `json:"protocolVersion"`
+	Name            string                   `json:"name"`
+	Description     string                   `json:"description"`
+	Provider        string                   `json:"provider"`
+	EventTypes      []string                 `json:"eventTypes"`
+	Credentials     []CredentialRequirement  `json:"credentials,omitempty"`
+	Transport       CallbackAdapterTransport `json:"transport"`
+}
+
 type Requirements struct {
 	OperatingSystems []string             `json:"operatingSystems,omitempty"`
 	Executables      []string             `json:"executables,omitempty"`
@@ -372,6 +396,7 @@ type Definition struct {
 	Transport            TransportReference             `json:"transport"`
 	Prompt               *PromptModule                  `json:"prompt,omitempty"`
 	ConversationAdapters map[string]ConversationAdapter `json:"conversationAdapters,omitempty"`
+	CallbackAdapters     map[string]CallbackAdapter     `json:"callbackAdapters,omitempty"`
 	Requirements         Requirements                   `json:"requirements,omitempty"`
 	Installers           []Installer                    `json:"installers,omitempty"`
 	Resources            []Resource                     `json:"resources,omitempty"`
@@ -399,6 +424,7 @@ type Binding struct {
 	AllowedActions              []string                           `json:"allowedActions"`
 	EnablePrompt                bool                               `json:"enablePrompt,omitempty"`
 	EnabledConversationAdapters []string                           `json:"enabledConversationAdapters,omitempty"`
+	EnabledCallbackAdapters     []string                           `json:"enabledCallbackAdapters,omitempty"`
 	MaximumRisk                 RiskLevel                          `json:"maximumRisk"`
 	ArgumentRestrictions        map[string]map[string]ArgumentRule `json:"argumentRestrictions,omitempty"`
 	Credentials                 map[string]CredentialReference     `json:"credentials,omitempty"`
@@ -483,5 +509,12 @@ type BoundConversationAdapter struct {
 	Definition *Definition
 	AdapterID  string
 	Adapter    ConversationAdapter
+	Binding    *Binding
+}
+
+type BoundCallbackAdapter struct {
+	Definition *Definition
+	AdapterID  string
+	Adapter    CallbackAdapter
 	Binding    *Binding
 }

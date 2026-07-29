@@ -31,6 +31,9 @@ type ConversationAdapterTransport = capability.ConversationAdapterTransport
 type ConversationDestinationDiscovery = capability.ConversationDestinationDiscovery
 type ConversationAdapter = capability.ConversationAdapter
 type BoundConversationAdapter = capability.BoundConversationAdapter
+type CallbackAdapterTransport = capability.CallbackAdapterTransport
+type CallbackAdapter = capability.CallbackAdapter
+type BoundCallbackAdapter = capability.BoundCallbackAdapter
 type ActionRetryPolicy = capability.ActionRetryPolicy
 type ExternalOperationPolicy = capability.ExternalOperationPolicy
 type Duration = capability.Duration
@@ -77,6 +80,7 @@ const (
 	ConversationEndpointDirect  = capability.ConversationEndpointDirect
 
 	ConversationAdapterProtocolV1 = capability.ConversationAdapterProtocolV1
+	CallbackAdapterProtocolV1     = capability.CallbackAdapterProtocolV1
 
 	ConversationFeatureThreads     = capability.ConversationFeatureThreads
 	ConversationFeatureMentions    = capability.ConversationFeatureMentions
@@ -535,6 +539,59 @@ func (c *Catalog) ResolveConversationAdapter(ctx context.Context, scope ScopeRef
 	return nil, errors.New("bound conversation adapter not found")
 }
 
+// ResolveCallbackAdapter resolves one exact Skill-owned inbound callback
+// verifier. The result contains only immutable metadata and opaque credential
+// references; the trusted host resolves values out of band.
+func (c *Catalog) ResolveCallbackAdapter(ctx context.Context, scope ScopeReference, deploymentID, skillID, version, adapterID string, selected ...BindingReference) (*BoundCallbackAdapter, error) {
+	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
+		return nil, err
+	}
+	adapterID = strings.TrimSpace(adapterID)
+	if adapterID == "" || len(selected) > 1 || (len(selected) == 1 && (strings.TrimSpace(selected[0].ID) == "" || selected[0].Revision < 1)) {
+		return nil, errors.New("callback adapter and at most one exact binding reference are required")
+	}
+	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	var resolved *BoundCallbackAdapter
+	for _, binding := range bindings {
+		if binding.Disabled || binding.SkillID != skillID || binding.SkillVersion != version ||
+			!containsString(binding.EnabledCallbackAdapters, adapterID) {
+			continue
+		}
+		if len(selected) == 1 && (binding.ID != selected[0].ID || binding.Revision != selected[0].Revision) {
+			continue
+		}
+		definition, err := c.definitionFor(ctx, skillID, version, binding.SourceIdentity)
+		if err != nil {
+			return nil, err
+		}
+		if definition == nil {
+			continue
+		}
+		if _, ok := definition.CallbackAdapters[adapterID]; !ok || validateBindingAgainstDefinition(binding, definition) != nil {
+			continue
+		}
+		copy := cloneDefinition(definition)
+		candidate := &BoundCallbackAdapter{
+			Definition: copy, AdapterID: adapterID,
+			Adapter: copy.CallbackAdapters[adapterID], Binding: cloneBinding(binding),
+		}
+		if resolved != nil && len(selected) == 0 {
+			return nil, ErrBindingAmbiguous
+		}
+		resolved = candidate
+	}
+	if resolved != nil {
+		return resolved, nil
+	}
+	if len(selected) == 1 {
+		return nil, errors.New("selected callback adapter binding is unavailable or stale")
+	}
+	return nil, errors.New("bound callback adapter not found")
+}
+
 // NeedsActionAdapter reports whether an imported OpenClaw instruction module
 // declares access to tools or credentials without defining any governed action
 // that could consume them. Such a module remains inspectable and exportable,
@@ -815,8 +872,8 @@ func validateDefinition(definition *Definition) error {
 	if definition == nil || strings.TrimSpace(definition.ID) == "" || strings.TrimSpace(definition.Version) == "" || strings.TrimSpace(definition.Name) == "" {
 		return errors.New("skill id, version, and name are required")
 	}
-	if len(definition.Actions) == 0 && definition.Prompt == nil && len(definition.ConversationAdapters) == 0 {
-		return errors.New("skill must declare at least one action, prompt module, or conversation adapter")
+	if len(definition.Actions) == 0 && definition.Prompt == nil && len(definition.ConversationAdapters) == 0 && len(definition.CallbackAdapters) == 0 {
+		return errors.New("skill must declare at least one action, prompt module, conversation adapter, or callback adapter")
 	}
 	if definition.Category != strings.TrimSpace(definition.Category) || len(definition.Tags) > 32 {
 		return errors.New("skill category or tags are invalid")
@@ -881,6 +938,18 @@ func validateDefinition(definition *Definition) error {
 			if err := validateConversationDestinationDiscoverySchema(action, discovery); err != nil {
 				return fmt.Errorf("skill conversation adapter %s destination discovery action %s is invalid: %w", id, discovery.Action, err)
 			}
+		}
+	}
+	for id, adapter := range definition.CallbackAdapters {
+		if id == "" || id != strings.TrimSpace(id) || len(id) > 128 {
+			return fmt.Errorf("skill callback adapter id %q is invalid", id)
+		}
+		normalized, err := capability.NormalizeCallbackAdapter(adapter)
+		if err != nil {
+			return fmt.Errorf("skill callback adapter %s is invalid: %w", id, err)
+		}
+		if !reflect.DeepEqual(normalized, adapter) {
+			return fmt.Errorf("skill callback adapter %s must use canonical ordering and values", id)
 		}
 	}
 	for name, action := range definition.Actions {
@@ -1071,8 +1140,8 @@ func validateBindingShape(binding *Binding) error {
 	if err := validateBindingManagementShape(binding); err != nil {
 		return err
 	}
-	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt && len(binding.EnabledConversationAdapters) == 0) || !validRisk(binding.MaximumRisk) {
-		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions or conversation adapters and set maximum risk", ErrBindingInvalid)
+	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt && len(binding.EnabledConversationAdapters) == 0 && len(binding.EnabledCallbackAdapters) == 0) || !validRisk(binding.MaximumRisk) {
+		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions, conversation adapters, or callback adapters and set maximum risk", ErrBindingInvalid)
 	}
 	seenAdapters := make(map[string]bool, len(binding.EnabledConversationAdapters))
 	for _, adapterID := range binding.EnabledConversationAdapters {
@@ -1080,6 +1149,13 @@ func validateBindingShape(binding *Binding) error {
 			return fmt.Errorf("%w: enabled conversation adapter ids must be unique and non-empty", ErrBindingInvalid)
 		}
 		seenAdapters[adapterID] = true
+	}
+	seenCallbackAdapters := make(map[string]bool, len(binding.EnabledCallbackAdapters))
+	for _, adapterID := range binding.EnabledCallbackAdapters {
+		if adapterID == "" || adapterID != strings.TrimSpace(adapterID) || len(adapterID) > 128 || seenCallbackAdapters[adapterID] {
+			return fmt.Errorf("%w: enabled callback adapter ids must be unique and non-empty", ErrBindingInvalid)
+		}
+		seenCallbackAdapters[adapterID] = true
 	}
 	return nil
 }
@@ -1198,6 +1274,21 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 			}
 			if !exists || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
 				return fmt.Errorf("binding conversation adapter %s is missing credential %s of kind %s", adapterID, requirement.Name, requirement.Kind)
+			}
+		}
+	}
+	for _, adapterID := range binding.EnabledCallbackAdapters {
+		adapter, ok := definition.CallbackAdapters[adapterID]
+		if !ok {
+			return fmt.Errorf("binding callback adapter %s does not exist", adapterID)
+		}
+		for _, requirement := range adapter.Credentials {
+			ref, exists := binding.Credentials[requirement.Name]
+			if requirement.Optional && !exists {
+				continue
+			}
+			if !exists || strings.TrimSpace(ref.ID) == "" || ref.Kind != requirement.Kind {
+				return fmt.Errorf("binding callback adapter %s is missing credential %s of kind %s", adapterID, requirement.Name, requirement.Kind)
 			}
 		}
 	}
