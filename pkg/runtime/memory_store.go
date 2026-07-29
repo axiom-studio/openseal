@@ -45,6 +45,7 @@ type MemoryStore struct {
 	externalEndpoints        map[string]*ExternalConversationEndpoint
 	externalGateways         map[string]*ExternalConversationGatewayRegistration
 	callbackRegistrations    map[string]*CallbackRegistration
+	callbackEvents           map[string]*CallbackEventReceipt
 	externalInbox            map[string]*ExternalConversationInboxItem
 	externalInboxKeys        map[string]string
 	externalMappings         map[string]*ExternalConversationMapping
@@ -95,6 +96,7 @@ func NewMemoryStore() *MemoryStore {
 		externalEndpoints:        make(map[string]*ExternalConversationEndpoint),
 		externalGateways:         make(map[string]*ExternalConversationGatewayRegistration),
 		callbackRegistrations:    make(map[string]*CallbackRegistration),
+		callbackEvents:           make(map[string]*CallbackEventReceipt),
 		externalInbox:            make(map[string]*ExternalConversationInboxItem),
 		externalInboxKeys:        make(map[string]string),
 		externalMappings:         make(map[string]*ExternalConversationMapping),
