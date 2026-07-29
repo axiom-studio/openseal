@@ -2769,6 +2769,7 @@ type OpenAICompatibleWorkforceStructuredOutputMode = authoring.OpenAICompatibleS
 
 const (
 	WorkforceAuthoringResultSchemaVersion = authoring.AuthoringResultSchemaVersion
+	WorkforceAuthoringFormVersion         = authoring.AuthoringFormVersionV1
 
 	OpenAICompatibleWorkforceThinkingDefault  = authoring.OpenAICompatibleThinkingDefault
 	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
