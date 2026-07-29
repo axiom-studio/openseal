@@ -100,8 +100,8 @@ type Definition struct {
 	Evaluations         []workforce.EvaluationCriterion `json:"evaluations,omitempty"`
 	Amendments          workforce.AmendmentPolicy       `json:"amendments,omitempty"`
 	Provenance          workforce.DefinitionProvenance  `json:"provenance,omitempty"`
-	Digest              string                          `json:"digest"`
-	CreatedAt           time.Time                       `json:"createdAt"`
+	Digest              string                          `json:"digest,omitempty"`
+	CreatedAt           time.Time                       `json:"createdAt,omitempty"`
 }
 
 func (d *Definition) Validate() error {

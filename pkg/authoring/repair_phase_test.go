@@ -32,7 +32,7 @@ func TestCompilerSeparatelyRepairsSchemaThenRefinementContract(t *testing.T) {
 	if got := result.UnresolvedQuestions[0].Answer.Kind; got != RefinementAnswerSkillSelection {
 		t.Fatalf("answer kind=%q", got)
 	}
-	wantKeys := []string{"change-set:81631653:0:schema:1", "change-set:81631653:0:contract:1"}
+	wantKeys := []string{"change-set:81631653:0:repair:1", "change-set:81631653:0:repair:2"}
 	if len(generator.repairInvocationKeys) != len(wantKeys) || generator.repairInvocationKeys[0] != wantKeys[0] || generator.repairInvocationKeys[1] != wantKeys[1] {
 		t.Fatalf("repair invocation keys=%#v want=%#v", generator.repairInvocationKeys, wantKeys)
 	}
@@ -54,7 +54,7 @@ func TestCompilerRevalidatesAndRepairsStillInvalidSemanticResponse(t *testing.T)
 	if err != nil || generator.repairs != 2 || len(result.UnresolvedQuestions) != 1 || result.UnresolvedQuestions[0].Answer.Kind != RefinementAnswerSkillSelection {
 		t.Fatalf("result=%#v repairs=%d err=%v", result, generator.repairs, err)
 	}
-	wantKeys := []string{"change-set:01548b54:0:contract:1", "change-set:01548b54:0:contract:2"}
+	wantKeys := []string{"change-set:01548b54:0:repair:1", "change-set:01548b54:0:repair:2"}
 	if len(generator.repairInvocationKeys) != 2 || generator.repairInvocationKeys[0] != wantKeys[0] || generator.repairInvocationKeys[1] != wantKeys[1] {
 		t.Fatalf("repair invocation keys=%#v want=%#v", generator.repairInvocationKeys, wantKeys)
 	}
@@ -106,7 +106,7 @@ func TestCompilerRejectsQuestionThatFailsBoundedContractRepairBeforePersistence(
 		Catalog: repairPhaseCatalog(), Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "invalid-after-contract-repair",
 	})
 	var contractError *ContractGenerationError
-	if !errors.As(err, &contractError) || replay || created != nil || generator.repairs != 3 {
+	if !errors.As(err, &contractError) || replay || created != nil || generator.repairs != 2 {
 		t.Fatalf("created=%#v replay=%t repairs=%d err=%v", created, replay, generator.repairs, err)
 	}
 	if contractError.RepairAttempts != 2 || !strings.Contains(contractError.Diagnostic, "invalid_refinement_question") {

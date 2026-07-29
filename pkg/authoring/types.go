@@ -4,6 +4,7 @@ package authoring
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -287,7 +288,7 @@ type WorkforceCandidate struct {
 	// Activation is the reviewed, digest-bound operating state that atomic
 	// apply must materialize. The Compiler derives it from typed commitments;
 	// apply never infers it from prompt prose.
-	Activation WorkforceActivationIntent `json:"activation"`
+	Activation WorkforceActivationIntent `json:"activation,omitempty"`
 }
 
 type ConversationEndpointOwnerType string
@@ -518,12 +519,30 @@ type CompileProgress struct {
 
 type CompileProgressObserver func(CompileProgress)
 
+const AuthoringResultSchemaVersion = "openseal.authoring-result/v1"
+
+// AuthoringResult is the canonical model-produced proposal envelope. OpenSeal
+// generates the provider-facing JSON Schema from this type and validates the
+// raw provider document against that schema before strict Go decoding.
 type GenerationResponse struct {
+	SchemaVersion       string                  `json:"schemaVersion" jsonschema:"Version of the OpenSeal authoring-result contract used by this proposal."`
 	Candidate           WorkforceCandidate      `json:"candidate"`
 	Authoring           AuthoringFormSubmission `json:"authoring"`
 	Commitments         PromptCommitments       `json:"commitments"`
 	Assumptions         []string                `json:"assumptions,omitempty"`
 	UnresolvedQuestions []RefinementQuestion    `json:"unresolvedQuestions,omitempty"`
+}
+
+// AuthoringResult is the public name for the canonical result. The legacy Go
+// name remains an alias so existing embedders do not need a parallel shape.
+type AuthoringResult = GenerationResponse
+
+func (r GenerationResponse) MarshalJSON() ([]byte, error) {
+	type wire GenerationResponse
+	if r.SchemaVersion == "" {
+		r.SchemaVersion = AuthoringResultSchemaVersion
+	}
+	return json.Marshal(wire(r))
 }
 
 // PromptCommitments is the generator's typed, reviewable account of concrete
