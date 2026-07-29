@@ -80,6 +80,7 @@ type KernelClient interface {
 	GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
 	ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error)
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
+	InstallAgentManifest(context.Context, kernelagent.ManifestInstallationRequest, string) (*kernelagent.ManifestInstallationResult, error)
 	GetAgentDeployment(context.Context, capability.ScopeReference, string) (*kernelapi.AgentDeploymentCatalogEntry, error)
 	ListAgentDeployments(context.Context, capability.ScopeReference) (*kernelapi.AgentDeploymentList, error)
 	UpdateAgentDeployment(context.Context, string, kernelapi.UpdateAgentDeploymentRequest) (*kernelapi.AgentDeploymentUpdateResult, error)
@@ -428,6 +429,28 @@ func (c *KernelHTTPClient) ListAgentDefinitionCompilations(ctx context.Context, 
 		return nil, fmt.Errorf("unsupported Agent compilation history contract %q", history.APIVersion)
 	}
 	return history.Items, nil
+}
+
+func (c *KernelHTTPClient) InstallAgentManifest(ctx context.Context, request kernelagent.ManifestInstallationRequest, idempotencyKey string) (*kernelagent.ManifestInstallationResult, error) {
+	if request.Manifest == nil || request.Deployment == nil {
+		return nil, errors.New("agent manifest and deployment are required")
+	}
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	}
+	if idempotencyKey == "" {
+		return nil, errors.New("agent manifest installation idempotency key is required")
+	}
+	request.IdempotencyKey = idempotencyKey
+	var result kernelagent.ManifestInstallationResult
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent-installations", request, idempotencyKey, &result); err != nil {
+		return nil, err
+	}
+	if result.Definition == nil || result.Deployment == nil {
+		return nil, errors.New("agent manifest installation omitted canonical resources")
+	}
+	return &result, nil
 }
 
 func (c *KernelHTTPClient) GetAgentDeployment(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.AgentDeploymentCatalogEntry, error) {

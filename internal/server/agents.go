@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,6 +10,32 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 )
+
+type manifestInstallationRegistry struct{ registry *kernelagent.Registry }
+
+func (r manifestInstallationRegistry) ListAgentDefinitionVersions(ctx context.Context, id string) ([]*kernelagent.AgentDefinition, error) {
+	return r.registry.ListDefinitionVersions(ctx, id)
+}
+
+func (r manifestInstallationRegistry) GetAgentDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
+	return r.registry.GetDefinition(ctx, id, version)
+}
+
+func (r manifestInstallationRegistry) RegisterAgentDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) (*kernelagent.AgentDefinition, error) {
+	return r.registry.RegisterDefinition(ctx, definition)
+}
+
+func (r manifestInstallationRegistry) GetAgentDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
+	return r.registry.GetDeployment(ctx, scope, id)
+}
+
+func (r manifestInstallationRegistry) CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return r.registry.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+}
+
+func (r manifestInstallationRegistry) ActivateAgentDefinition(ctx context.Context, scope capability.ScopeReference, id, version string, revision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	return r.registry.ActivateDefinition(ctx, scope, id, version, revision, actorType, actorID, reason)
+}
 
 func (s *Server) agentRegistry() (*kernelagent.Registry, error) {
 	store, ok := s.store.(kernelagent.Store)
@@ -68,6 +95,40 @@ func (s *Server) handleListAgentDeployments(w http.ResponseWriter, r *http.Reque
 		items = append(items, kernelapi.AgentDeploymentCatalogEntry{Deployment: deployment, Definition: definition})
 	}
 	s.respondJSON(w, http.StatusOK, kernelapi.AgentDeploymentList{Items: items})
+}
+
+func (s *Server) handleInstallAgentManifest(w http.ResponseWriter, r *http.Request) {
+	registry, err := s.agentRegistry()
+	if err != nil {
+		s.respondError(w, http.StatusNotImplemented, err.Error())
+		return
+	}
+	var payload kernelagent.ManifestInstallationRequest
+	if err = decodeStrictJSON(r, &payload); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if header := strings.TrimSpace(r.Header.Get("Idempotency-Key")); header != "" {
+		if payload.IdempotencyKey != "" && strings.TrimSpace(payload.IdempotencyKey) != header {
+			s.respondError(w, http.StatusConflict, "idempotency header and payload differ")
+			return
+		}
+		payload.IdempotencyKey = header
+	}
+	result, err := kernelagent.InstallManifest(r.Context(), manifestInstallationRegistry{registry: registry}, payload)
+	if err != nil {
+		if errors.Is(err, kernelagent.ErrManifestInstallationConflict) {
+			s.respondError(w, http.StatusConflict, err.Error())
+			return
+		}
+		s.respondAgentDeploymentError(w, err)
+		return
+	}
+	status := http.StatusCreated
+	if result.Replayed {
+		status = http.StatusOK
+	}
+	s.respondJSON(w, status, result)
 }
 
 func (s *Server) handleUpdateAgentDeployment(w http.ResponseWriter, r *http.Request) {
