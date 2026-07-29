@@ -46,7 +46,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCapability, ok := document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
-	if !ok || !runCapability.Supports(kernelapi.OperationCreate) || !runCapability.Supports(kernelapi.OperationIntervene) {
+	if !ok || !runCapability.Supports(kernelapi.OperationCreate) || !runCapability.Supports(kernelapi.OperationIntervene) || !runCapability.Supports(kernelapi.OperationAudit) {
 		t.Fatalf("unexpected capabilities: %#v", document)
 	}
 	objectiveCapability, ok := document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
@@ -144,6 +144,10 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	scheduledRuns, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, ObjectiveID: scheduledObjective.ID})
 	if err != nil || len(scheduledRuns) != 1 || scheduledRuns[0].Source != runtime.RunSourceSchedule {
 		t.Fatalf("scheduled runs = %#v, %v", scheduledRuns, err)
+	}
+	executionAudit, err := client.GetRunbookExecutionAudit(ctx, scope, scheduledRuns[0].ID)
+	if err != nil || executionAudit.Run.ActivationID != scheduledActivation.ID || executionAudit.Runbook.Definition.ID != "research" || len(executionAudit.Nodes) != 1 || executionAudit.Nodes[0].StepID != "done" {
+		t.Fatalf("Runbook execution audit=%#v err=%v", executionAudit, err)
 	}
 	manual, err := client.StartRunbook(ctx, scope, scheduledActivation.ID, runtime.StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
 	if err != nil || manual.Run == nil || manual.Run.Source != runtime.RunSourceManual {

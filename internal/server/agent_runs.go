@@ -74,6 +74,30 @@ func (s *Server) handleGetAgentRun(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, run)
 }
 
+func (s *Server) handleGetRunbookExecutionAudit(w http.ResponseWriter, r *http.Request) {
+	scope, err := scopeFromQuery(r)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	registry, err := s.agentRegistry()
+	if err != nil {
+		s.respondError(w, http.StatusNotImplemented, err.Error())
+		return
+	}
+	auditStore, ok := s.store.(runtime.RunbookExecutionAuditStore)
+	if !ok {
+		s.respondError(w, http.StatusNotImplemented, "Runbook execution audit is unavailable")
+		return
+	}
+	value, err := runtime.NewRunbookExecutionAuditService(auditStore, registry).Get(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
+	if err != nil {
+		s.respondAgentRunError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, value)
+}
+
 func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {

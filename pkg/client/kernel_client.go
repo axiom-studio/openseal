@@ -97,6 +97,15 @@ type KernelClient interface {
 	ApplyWorkforceChangeSet(context.Context, authoring.ApplyChangeSetRequest, string) (*authoring.ChangeSet, error)
 }
 
+// RunbookExecutionAuditClient exposes the optional Runbook-first audit read.
+// Interactive surfaces capability-gate it with agent-runs.audit so clients
+// connected to an older or deliberately minimal kernel remain valid.
+type RunbookExecutionAuditClient interface {
+	GetRunbookExecutionAudit(context.Context, runtime.Scope, string) (*runtime.RunbookExecutionAudit, error)
+}
+
+var _ RunbookExecutionAuditClient = (*KernelHTTPClient)(nil)
+
 // ExternalConversationGatewayClient is the narrow lifecycle surface used by
 // hosts that advertise conversation-gateways/v2. Keeping it separate from the
 // base KernelClient lets older or read-only embedding surfaces remain honest.
@@ -1231,6 +1240,16 @@ func (c *KernelHTTPClient) GetAgentRun(ctx context.Context, scope runtime.Scope,
 		return nil, err
 	}
 	return &run, nil
+}
+
+func (c *KernelHTTPClient) GetRunbookExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunbookExecutionAudit, error) {
+	query := scopeQuery(scope)
+	var value runtime.RunbookExecutionAudit
+	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/runbook-audit?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope runtime.Scope, runID string, request kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
