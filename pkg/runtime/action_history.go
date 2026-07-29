@@ -151,6 +151,9 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 		"action": call.Action, "arguments": deepCloneCheckpointMap(call.Arguments),
 		"status": call.Status,
 	}
+	if call.ExternalOperationDigest != "" {
+		entry["externalOperationDigest"] = call.ExternalOperationDigest
+	}
 	if call.CompletedAt != nil {
 		entry["completedAt"] = call.CompletedAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -183,6 +186,9 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		"skillId": call.SkillID, "skillVersion": call.SkillVersion,
 		"action": call.Action, "status": call.Status,
 		"arguments": deepCloneCheckpointMap(call.Arguments),
+	}
+	if call.ExternalOperationDigest != "" {
+		lastAction["externalOperationDigest"] = call.ExternalOperationDigest
 	}
 	if call.ApprovalID != "" {
 		lastAction["approvalId"] = call.ApprovalID
