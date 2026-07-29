@@ -271,13 +271,37 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 	contextValues["runbookDefinitionId"] = activation.DefinitionID
 	contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
 	contextValues["runbookTriggerId"] = activation.TriggerID
-	return NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
+	if activation.Trigger.Reporting != nil && idempotencyKey == "" {
+		idempotencyKey = "runbook-manual:" + activation.ID + ":" + uuid.NewString()
+	}
+	var reportingStore ConversationStore
+	if value, ok := store.(ConversationStore); ok {
+		reportingStore = value
+	}
+	var channel *Conversation
+	messageKey := ""
+	if activation.Trigger.Reporting != nil {
+		var err error
+		channel, messageKey, err = prepareRunReporting(ctx, reportingStore, scope, activation.Owner, activation.Trigger.Reporting, runIDForIdempotencyKey(scope, idempotencyKey), contextValues)
+		if err != nil {
+			return nil, err
+		}
+	}
+	result, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 		Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
 		Goal: objective.Goal, Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
 		Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
-		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey), Actor: request.Actor, Visibility: request.Visibility,
+		IdempotencyKey: idempotencyKey, Actor: request.Actor, Visibility: request.Visibility,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := projectRunReportingStart(ctx, reportingStore, channel, messageKey, result.Run); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func runbookActivationPlan(activation *RunbookActivation) map[string]interface{} {

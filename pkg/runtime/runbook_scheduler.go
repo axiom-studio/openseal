@@ -31,7 +31,8 @@ type RunbookScheduler struct {
 		RunbookActivationStore
 		SourceMonitorStore
 	}
-	now func() time.Time
+	reportingStore ConversationStore
+	now            func() time.Time
 }
 
 func NewRunbookScheduler(store interface {
@@ -40,7 +41,11 @@ func NewRunbookScheduler(store interface {
 	RunbookActivationStore
 	SourceMonitorStore
 }) *RunbookScheduler {
-	return &RunbookScheduler{store: store, now: time.Now}
+	scheduler := &RunbookScheduler{store: store, now: time.Now}
+	if reportingStore, ok := store.(ConversationStore); ok {
+		scheduler.reportingStore = reportingStore
+	}
+	return scheduler
 }
 
 func (s *RunbookScheduler) ReconcileAll(ctx context.Context, limitPerScope int) (*RunbookScheduleResult, error) {
@@ -99,11 +104,15 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		}
 		base := activation.NextOccurrenceBase.UTC()
 		idempotencyKey := fmt.Sprintf("runbook-schedule:%s:%s", activation.ID, base.Format(time.RFC3339Nano))
-		existing, err := s.store.GetAgentRun(ctx, scope, runIDForIdempotencyKey(scope, idempotencyKey))
+		runID := runIDForIdempotencyKey(scope, idempotencyKey)
+		existing, err := s.store.GetAgentRun(ctx, scope, runID)
 		if err != nil {
 			return result, err
 		}
 		if existing != nil {
+			if err := projectRunReportingStartForRun(ctx, s.reportingStore, existing); err != nil {
+				return result, fmt.Errorf("restore Runbook activation %s reporting: %w", activation.ID, err)
+			}
 			result.Replayed++
 			if err := s.advance(ctx, activation, base); err != nil && !errors.Is(err, ErrRunbookActivationRevision) {
 				return result, err
@@ -165,6 +174,10 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 				contextValues[EvidenceSnapshotContextKey] = projected
 			}
 		}
+		channel, messageKey, err := prepareRunReporting(ctx, s.reportingStore, scope, activation.Owner, activation.Trigger.Reporting, runID, contextValues)
+		if err != nil {
+			return result, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
+		}
 		created, err := NewRunCommandService(s.store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 			Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
@@ -174,6 +187,9 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		})
 		if err != nil {
 			return result, fmt.Errorf("schedule Runbook activation %s: %w", activation.ID, err)
+		}
+		if err := projectRunReportingStart(ctx, s.reportingStore, channel, messageKey, created.Run); err != nil {
+			return result, fmt.Errorf("project Runbook activation %s start: %w", activation.ID, err)
 		}
 		if created.Event == nil {
 			result.Replayed++

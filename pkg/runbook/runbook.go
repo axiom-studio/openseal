@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 )
 
 const APIVersion = "openseal.dev/runbook/v1alpha1"
+
+var reportingChannelPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Definition struct {
 	APIVersion  string               `json:"apiVersion"`
@@ -56,7 +59,57 @@ type Trigger struct {
 	Input             map[string]Value    `json:"input,omitempty"`
 	Budget            *BudgetAllocation   `json:"budget,omitempty"`
 	Evidence          *EvidenceProjection `json:"evidence,omitempty"`
+	Reporting         *ReportingPolicy    `json:"reporting,omitempty"`
 	MaximumConcurrent int                 `json:"maximumConcurrent,omitempty"`
+}
+
+type ReportingMilestone string
+
+const (
+	ReportingStarted          ReportingMilestone = "started"
+	ReportingApprovalRequired ReportingMilestone = "approval_required"
+	ReportingCompleted        ReportingMilestone = "completed"
+	ReportingFailed           ReportingMilestone = "failed"
+)
+
+// ReportingPolicy declares the durable owner-channel projection for Runs
+// created by this trigger. Channel is a portable logical key, not a transport
+// address or database identity: activation resolves it to an existing owner
+// channel or creates it idempotently. Milestones deliberately exclude raw
+// tool and Turn events so normal operation remains calm while full detail
+// stays available in the canonical activity log.
+type ReportingPolicy struct {
+	Channel    string               `json:"channel"`
+	Title      string               `json:"title"`
+	Milestones []ReportingMilestone `json:"milestones"`
+}
+
+func (p *ReportingPolicy) Validate() error {
+	if p == nil {
+		return nil
+	}
+	if !reportingChannelPattern.MatchString(p.Channel) {
+		return errors.New("reporting channel must be a lowercase portable key of 1-64 characters")
+	}
+	if title := strings.TrimSpace(p.Title); title == "" || len(title) > 240 {
+		return errors.New("reporting title must be 1-240 characters")
+	}
+	if len(p.Milestones) == 0 {
+		return errors.New("reporting must select at least one milestone")
+	}
+	seen := make(map[ReportingMilestone]bool, len(p.Milestones))
+	for _, milestone := range p.Milestones {
+		switch milestone {
+		case ReportingStarted, ReportingApprovalRequired, ReportingCompleted, ReportingFailed:
+		default:
+			return fmt.Errorf("reporting milestone %q is unsupported", milestone)
+		}
+		if seen[milestone] {
+			return fmt.Errorf("reporting milestone %q is duplicated", milestone)
+		}
+		seen[milestone] = true
+	}
+	return nil
 }
 
 // EvidenceProjection bounds the immutable, credential-free evidence snapshot
