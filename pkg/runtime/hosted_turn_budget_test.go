@@ -79,6 +79,44 @@ func (h reservationBoundaryHostedTurnHost) ExecuteHostedTurn(_ context.Context, 
 	}, nil
 }
 
+type reportedOutputHostedTurnHost struct{ outputTokens int }
+
+func (h reportedOutputHostedTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
+	return &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID,
+		ModelProvider: "test", Model: "reasoning-model", NextRunStatus: AgentRunStatusCompleted,
+		OutputSummary: "done", Usage: TurnUsage{InputTokens: 100, OutputTokens: h.outputTokens},
+	}, nil
+}
+
+func TestHostedTurnReasoningUsageSettlesAgainstRemainingRunBudget(t *testing.T) {
+	const turnID = "turn-reasoning-usage"
+	run := &AgentRun{
+		ID: "run-reasoning-usage", Scope: Scope{Kind: "tenant", ID: "7"}, AssignedAgentID: "agent", Goal: "Do bounded work",
+		Budget: &BudgetPolicy{MaxInputTokens: 100000, MaxOutputTokens: 250000, MaxTotalTokens: 350000},
+	}
+	runner, err := NewHostedTurnRunner(reportedOutputHostedTurnHost{outputTokens: 33550}, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := &AgentTurn{ID: turnID, RunID: run.ID}
+	reservation, err := runner.PlanTurnBudget(t.Context(), TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reservation.OutputTokens != run.Budget.MaxOutputTokens {
+		t.Fatalf("output reservation = %d, want %d", reservation.OutputTokens, run.Budget.MaxOutputTokens)
+	}
+	run.BudgetReservations = map[string]BudgetReservation{turnID: {
+		ID: turnID, Usage: reservation, CreatedAt: time.Now(),
+	}}
+	if _, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err != nil {
+		t.Fatalf("reasoning usage inside the Run budget was rejected: %v", err)
+	}
+}
+
 func TestHostedTurnProviderUsageCannotExceedConservativeReservation(t *testing.T) {
 	const turnID = "turn-reservation-boundary"
 	run := &AgentRun{
@@ -302,7 +340,7 @@ func TestHostedTurnBudgetReservationCapsProviderOutputAndSettlesActualUsage(t *t
 	}
 }
 
-func TestHostedTurnBudgetReservationDoesNotSpendLifetimeOutputBudgetOnOneTurn(t *testing.T) {
+func TestHostedTurnBudgetReservationUsesRemainingRunOutputBudget(t *testing.T) {
 	runner, err := NewHostedTurnRunner(&countedHostedTurnHost{}, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
 	if err != nil {
 		t.Fatal(err)
@@ -315,8 +353,8 @@ func TestHostedTurnBudgetReservationDoesNotSpendLifetimeOutputBudgetOnOneTurn(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reservation.OutputTokens != HostedTurnMaximumOutputReservationTokens {
-		t.Fatalf("output reservation = %d, want %d", reservation.OutputTokens, HostedTurnMaximumOutputReservationTokens)
+	if reservation.OutputTokens != run.Budget.MaxOutputTokens {
+		t.Fatalf("output reservation = %d, want remaining Run output budget %d", reservation.OutputTokens, run.Budget.MaxOutputTokens)
 	}
 }
 
