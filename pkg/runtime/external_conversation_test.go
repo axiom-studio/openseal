@@ -167,6 +167,64 @@ func TestExternalConversationMemoryInboxIsIdempotentAndLeaseRecoverable(t *testi
 	}
 }
 
+func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgrade(t *testing.T) {
+	ctx := context.Background()
+	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	delivery := &ExternalConversationDelivery{
+		ID: "delivery-rebind", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-1",
+		OrderingKey: "order-1", Parameters: map[string]interface{}{"text": "approve this"}, IdempotencyKey: "approval:one",
+		Status: ExternalConversationDeliveryRetry, Attempt: 1, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute),
+		ErrorCode: "endpoint_or_adapter_conflict", Summary: "The exact adapter changed.",
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, replayed, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil || replayed {
+		t.Fatalf("enqueue = replayed %v, %v", replayed, err)
+	}
+	upgraded := cloneExternalConversationEndpoint(endpoint)
+	upgraded.Adapter.SkillVersion = "1.0.1"
+	upgraded.Adapter.BindingRevision = 2
+	upgraded.Revision++
+	upgraded.UpdatedAt = now.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, upgraded, endpoint.Revision); err != nil {
+		t.Fatal(err)
+	}
+	replay := cloneExternalConversationDelivery(delivery)
+	replay.ID = "ignored-replay-id"
+	replay.EndpointRevision = upgraded.Revision
+	replay.Adapter = upgraded.Adapter
+	replay.Status = ExternalConversationDeliveryPending
+	replay.Attempt = 0
+	replay.AvailableAt = now.Add(2 * time.Second)
+	replay.ErrorCode, replay.Summary = "", ""
+	replay.UpdatedAt = now.Add(2 * time.Second)
+	rebound, replayed, err := store.EnqueueExternalConversationDelivery(ctx, replay)
+	if err != nil || !replayed {
+		t.Fatalf("rebind = %#v, replayed %v, %v", rebound, replayed, err)
+	}
+	if rebound.ID != delivery.ID || rebound.EndpointRevision != upgraded.Revision || rebound.Adapter != upgraded.Adapter ||
+		rebound.Status != ExternalConversationDeliveryPending || rebound.Attempt != delivery.Attempt || rebound.Revision != 2 ||
+		rebound.ErrorCode != "" || rebound.Summary != "" {
+		t.Fatalf("rebound delivery = %#v", rebound)
+	}
+
+	delivered := cloneExternalConversationDelivery(rebound)
+	delivered.Status = ExternalConversationDeliveryDelivered
+	delivered.ProviderMessageID = "provider-message-1"
+	delivered.DeliveredAt, delivered.UpdatedAt = now.Add(3*time.Second), now.Add(3*time.Second)
+	if _, ok := rebindExternalConversationDelivery(delivered, replay); ok {
+		t.Fatal("provider-confirmed delivery was rebound")
+	}
+	leased := cloneExternalConversationDelivery(rebound)
+	leased.Status = ExternalConversationDeliveryLeased
+	leased.LeaseOwner = "worker-one"
+	leased.LeaseExpiresAt = now.Add(time.Minute)
+	if _, ok := rebindExternalConversationDelivery(leased, replay); ok {
+		t.Fatal("leased delivery was rebound")
+	}
+}
+
 func TestExternalConversationMemoryMappingsAndOutboxSurviveRetry(t *testing.T) {
 	ctx := context.Background()
 	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)

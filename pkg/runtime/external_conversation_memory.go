@@ -358,10 +358,15 @@ func (s *MemoryStore) EnqueueExternalConversationDelivery(_ context.Context, del
 	deduplicationKey := externalConversationDeliveryDeduplicationKey(delivery.Scope, delivery.EndpointID, delivery.IdempotencyKey)
 	if existingID := s.externalDeliveryKeys[deduplicationKey]; existingID != "" {
 		existing := s.externalDeliveries[externalConversationDeliveryKey(delivery.Scope, existingID)]
-		if !sameExternalConversationDeliveryIntent(existing, delivery) {
+		if sameExternalConversationDeliveryIntent(existing, delivery) {
+			return cloneExternalConversationDelivery(existing), true, nil
+		}
+		rebound, ok := rebindExternalConversationDelivery(existing, delivery)
+		if !ok {
 			return nil, false, ErrExternalConversationConflict
 		}
-		return cloneExternalConversationDelivery(existing), true, nil
+		s.externalDeliveries[externalConversationDeliveryKey(delivery.Scope, existingID)] = rebound
+		return cloneExternalConversationDelivery(rebound), true, nil
 	}
 	key := externalConversationDeliveryKey(delivery.Scope, delivery.ID)
 	if _, exists := s.externalDeliveries[key]; exists {
@@ -510,6 +515,31 @@ func sameExternalConversationDeliveryIntent(existing, candidate *ExternalConvers
 		existing.ConversationID == candidate.ConversationID && existing.ChannelMessageID == candidate.ChannelMessageID &&
 		existing.ExternalThreadID == candidate.ExternalThreadID && existing.OrderingKey == candidate.OrderingKey &&
 		reflect.DeepEqual(existing.Parameters, candidate.Parameters) && existing.IdempotencyKey == candidate.IdempotencyKey
+}
+
+func rebindExternalConversationDelivery(existing, candidate *ExternalConversationDelivery) (*ExternalConversationDelivery, bool) {
+	if existing == nil || candidate == nil || existing.Scope != candidate.Scope ||
+		existing.EndpointID != candidate.EndpointID || existing.Operation != candidate.Operation ||
+		existing.ConversationID != candidate.ConversationID || existing.ChannelMessageID != candidate.ChannelMessageID ||
+		existing.ExternalThreadID != candidate.ExternalThreadID || existing.OrderingKey != candidate.OrderingKey ||
+		!reflect.DeepEqual(existing.Parameters, candidate.Parameters) || existing.IdempotencyKey != candidate.IdempotencyKey ||
+		(existing.Status != ExternalConversationDeliveryPending && existing.Status != ExternalConversationDeliveryRetry) ||
+		existing.ProviderMessageID != "" || !existing.DeliveredAt.IsZero() || existing.LeaseOwner != "" || !existing.LeaseExpiresAt.IsZero() {
+		return nil, false
+	}
+	rebound := cloneExternalConversationDelivery(existing)
+	rebound.EndpointRevision = candidate.EndpointRevision
+	rebound.Adapter = candidate.Adapter
+	rebound.Status = ExternalConversationDeliveryPending
+	rebound.AvailableAt = candidate.AvailableAt
+	rebound.ErrorCode = ""
+	rebound.Summary = ""
+	rebound.Revision++
+	rebound.UpdatedAt = candidate.UpdatedAt
+	if rebound.Validate() != nil {
+		return nil, false
+	}
+	return rebound, true
 }
 
 func externalConversationInboxOrderingLeased(
