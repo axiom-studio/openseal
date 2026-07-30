@@ -24,6 +24,8 @@ type ApprovalNotificationWorker struct {
 	transport     *ExternalConversationTransportService
 }
 
+const approvalNotificationPostAttempts = 5
+
 func NewApprovalNotificationWorker(store ApprovalNotificationStore, transport *ExternalConversationTransportService) *ApprovalNotificationWorker {
 	return &ApprovalNotificationWorker{store: store, conversations: NewConversationService(store), transport: transport}
 }
@@ -72,25 +74,7 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		return err
 	}
 	messageKey := "approval-request:" + approval.ID
-	posted, err := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
-		Scope: approval.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
-		SenderDisplayName: "Approval coordinator", Intent: MessageIntentApprovalRequest,
-		Content: approvalNotificationText(approval, call), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		RequiresResponse: true, IdempotencyKey: messageKey,
-	})
-	if errors.Is(err, ErrRevisionConflict) {
-		conversation, err = w.conversations.GetConversation(ctx, approval.Scope, conversation.ID)
-		if err == nil {
-			posted, err = w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
-				Scope: approval.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
-				SenderDisplayName: "Approval coordinator", Intent: MessageIntentApprovalRequest,
-				Content: approvalNotificationText(approval, call), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-				RequiresResponse: true, IdempotencyKey: messageKey,
-			})
-		}
-	}
+	posted, err := w.postApprovalMessage(ctx, approval, call, conversation.ID, messageKey)
 	if err != nil {
 		return err
 	}
@@ -106,6 +90,37 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		IdempotencyKey: "approval-delivery:" + approval.ID + ":" + endpoint.ID,
 	})
 	return err
+}
+
+func (w *ApprovalNotificationWorker) postApprovalMessage(
+	ctx context.Context,
+	approval *ApprovalCheckpoint,
+	call *ActionCall,
+	conversationID string,
+	messageKey string,
+) (*ChannelMessageCommitResult, error) {
+	request := PostChannelMessageRequest{
+		Scope: approval.Scope, ConversationID: conversationID,
+		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
+		SenderDisplayName: "Approval coordinator", Intent: MessageIntentApprovalRequest,
+		Content: approvalNotificationText(approval, call), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		RequiresResponse: true, IdempotencyKey: messageKey,
+	}
+	for range approvalNotificationPostAttempts {
+		conversation, err := w.conversations.GetConversation(ctx, approval.Scope, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		request.ExpectedRevision = conversation.Revision
+		posted, err := w.conversations.PostChannelMessage(ctx, request)
+		if err == nil {
+			return posted, nil
+		}
+		if !errors.Is(err, ErrRevisionConflict) {
+			return nil, err
+		}
+	}
+	return nil, ErrRevisionConflict
 }
 
 func approvalNotificationText(approval *ApprovalCheckpoint, call *ActionCall) string {
