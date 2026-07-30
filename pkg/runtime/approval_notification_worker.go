@@ -76,7 +76,7 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 	messageKey := "approval-request:" + approval.ID
 	posted, err := w.postApprovalMessage(ctx, approval, call, conversation.ID, messageKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("post canonical approval message: %w", err)
 	}
 	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
@@ -89,7 +89,10 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		}},
 		IdempotencyKey: "approval-delivery:" + approval.ID + ":" + endpoint.ID,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("enqueue approval delivery: %w", err)
+	}
+	return nil
 }
 
 func (w *ApprovalNotificationWorker) postApprovalMessage(

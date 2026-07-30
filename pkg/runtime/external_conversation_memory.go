@@ -523,7 +523,8 @@ func rebindExternalConversationDelivery(existing, candidate *ExternalConversatio
 		existing.ConversationID != candidate.ConversationID || existing.ChannelMessageID != candidate.ChannelMessageID ||
 		existing.ExternalThreadID != candidate.ExternalThreadID || existing.OrderingKey != candidate.OrderingKey ||
 		!reflect.DeepEqual(existing.Parameters, candidate.Parameters) || existing.IdempotencyKey != candidate.IdempotencyKey ||
-		(existing.Status != ExternalConversationDeliveryPending && existing.Status != ExternalConversationDeliveryRetry) ||
+		(existing.Status != ExternalConversationDeliveryPending && existing.Status != ExternalConversationDeliveryRetry &&
+			existing.Status != ExternalConversationDeliveryFailed) ||
 		existing.ProviderMessageID != "" || !existing.DeliveredAt.IsZero() || existing.LeaseOwner != "" || !existing.LeaseExpiresAt.IsZero() {
 		return nil, false
 	}
