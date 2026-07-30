@@ -11,12 +11,6 @@ import (
 func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheckpoint(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	policy := endpoint.Policy
-	policy.ReplyMode = ExternalConversationReplyProviderDefault
-	endpoint, err := NewExternalConversationEndpointService(store, catalog).Update(ctx, endpoint.Scope, endpoint.ID, UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Policy: &policy})
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }

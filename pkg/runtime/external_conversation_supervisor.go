@@ -102,33 +102,36 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var reconcileErrors []error
 	for _, scope := range normalizedConversationRunScopes(scopes) {
 		if _, err := s.approvals.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
-			return err
+			reconcileErrors = append(reconcileErrors, err)
 		}
 		for range s.config.BatchSize {
 			item, processErr := s.inbox.ProcessOne(ctx, scope)
 			if processErr != nil {
-				return processErr
+				reconcileErrors = append(reconcileErrors, processErr)
+				break
 			}
 			if item == nil {
 				break
 			}
 		}
 		if _, err := s.replies.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
-			return err
+			reconcileErrors = append(reconcileErrors, err)
 		}
 		for range s.config.BatchSize {
 			delivery, processErr := s.delivery.ProcessOne(ctx, scope)
 			if processErr != nil {
-				return processErr
+				reconcileErrors = append(reconcileErrors, processErr)
+				break
 			}
 			if delivery == nil {
 				break
 			}
 		}
 	}
-	return nil
+	return errors.Join(reconcileErrors...)
 }
 
 func (s *ExternalConversationSupervisor) loop(ctx context.Context) {

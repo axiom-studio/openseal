@@ -214,7 +214,11 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 	if req.Operation != capability.ConversationDeliveryMessageSend && len(req.Parameters) == 0 {
 		return nil, fmt.Errorf("%w: non-send delivery requires operation parameters", ErrInvalidExternalConversation)
 	}
-	if endpoint.Policy.ReplyMode == ExternalConversationReplyThread && strings.TrimSpace(req.ExternalThreadID) == "" {
+	// A thread-oriented endpoint may still originate a new channel message (for
+	// example, an approval card). Only canonical replies require an existing
+	// provider thread mapping; the provider response to a root send establishes
+	// the mapping used by subsequent replies.
+	if endpoint.Policy.ReplyMode == ExternalConversationReplyThread && message.ThreadRootID != "" && strings.TrimSpace(req.ExternalThreadID) == "" {
 		return nil, fmt.Errorf("%w: thread reply requires an external thread mapping", ErrInvalidExternalConversation)
 	}
 	if err := validateExternalConversationConfiguration(req.Parameters); err != nil {
