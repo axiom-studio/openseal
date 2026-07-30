@@ -487,6 +487,7 @@ type (
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
 	HostedTurnForm                     = runtime.HostedTurnForm
+	HostedTurnFormAuthority            = runtime.HostedTurnFormAuthority
 	HostedTurnActionForm               = runtime.HostedTurnActionForm
 	HostedTurnModelInput               = runtime.HostedTurnModelInput
 	HostedActionInvocationContract     = runtime.HostedActionInvocationContract
