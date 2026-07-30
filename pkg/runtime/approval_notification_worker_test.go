@@ -31,7 +31,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
-		Goal: "post reviewed comment", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxActions: 1},
+		Goal: "post reviewed comment", Source: RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +70,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 
 	transport := NewExternalConversationTransportService(store, catalog)
 	worker := NewApprovalNotificationWorker(store, transport)
+	worker.now = func() time.Time { return now }
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
 		t.Fatalf("notify = %d, %v", count, err)
 	}
@@ -169,6 +170,7 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 	conflicts := &approvalNotificationConflictStore{ApprovalNotificationStore: store}
 	conflicts.remaining.Store(2)
 	worker := NewApprovalNotificationWorker(conflicts, NewExternalConversationTransportService(store, catalog))
+	worker.now = func() time.Time { return now }
 	var group sync.WaitGroup
 	errorsByPass := make(chan error, 2)
 	for range 2 {
@@ -189,5 +191,101 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 1 {
 		t.Fatalf("deliveries = %#v, %v", deliveries, err)
+	}
+}
+
+func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *testing.T) {
+	ctx := t.Context()
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
+		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
+	})
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
+		Goal: "post reviewed comment", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	call := &ActionCall{
+		ID: "call-expiry", Scope: endpoint.Scope, RunID: claimed.ID, DeploymentID: endpoint.DeploymentID,
+		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
+		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
+		ApprovalID: "approval-expiry", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	call.InvocationDigest = ComputeActionInvocationDigest(call)
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	approval := &ApprovalCheckpoint{
+		ID: "approval-expiry", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
+		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(15 * time.Minute), Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	waiting := cloneAgentRun(claimed)
+	waiting.Status = AgentRunStatusWaitingForApproval
+	waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	waiting.LeaseOwner, waiting.LeaseExpiresAt = "", nil
+	waiting.Revision++
+	waiting.UpdatedAt = now
+	if _, err = store.CreateActionProposal(ctx, ActionProposalRecord{
+		Call: call, Approval: approval, Run: waiting, ExpectedRunRevision: claimed.Revision,
+		Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now},
+		Event: &ActivityEvent{ID: "approval-expiry-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
+			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
+			Visibility: ActivityVisibilityScope, CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	transport := NewExternalConversationTransportService(store, catalog)
+	worker := NewApprovalNotificationWorker(store, transport)
+	worker.now = func() time.Time { return now }
+	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
+		t.Fatalf("initial notification = %d, %v", count, err)
+	}
+	original, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-worker", now, time.Minute)
+	if err != nil || original == nil {
+		t.Fatalf("claim notification = %#v, %v", original, err)
+	}
+	delivered := cloneExternalConversationDelivery(original)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = "1720000000.123", now.Add(time.Second), now.Add(time.Second)
+	delivered.Revision++
+	if err = store.SaveExternalConversationDelivery(ctx, delivered, original.Revision, "delivery-worker"); err != nil {
+		t.Fatal(err)
+	}
+	worker.now = func() time.Time { return approval.ExpiresAt.Add(time.Second) }
+	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 0 {
+		t.Fatalf("expiry pass = %d, %v", count, err)
+	}
+	expired, err := store.GetApproval(ctx, endpoint.Scope, approval.ID)
+	if err != nil || expired.Status != ApprovalStatusExpired {
+		t.Fatalf("expired approval = %#v, %v", expired, err)
+	}
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	if err != nil || len(deliveries) != 2 {
+		t.Fatalf("deliveries = %#v, %v", deliveries, err)
+	}
+	var update *ExternalConversationDelivery
+	for _, delivery := range deliveries {
+		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
+			update = delivery
+			break
+		}
+	}
+	if update == nil {
+		t.Fatalf("expiry update missing: %#v", deliveries)
+	}
+	if update.Operation != capability.ConversationDeliveryMessageUpdate || update.Parameters["providerMessageId"] != delivered.ProviderMessageID {
+		t.Fatalf("expiry update = %#v", update)
+	}
+	card, _ := update.Parameters["approval"].(map[string]interface{})
+	if card["status"] != ApprovalStatusExpired {
+		t.Fatalf("expiry card = %#v", card)
 	}
 }

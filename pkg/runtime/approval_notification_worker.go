@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -22,12 +23,13 @@ type ApprovalNotificationWorker struct {
 	store         ApprovalNotificationStore
 	conversations *ConversationService
 	transport     *ExternalConversationTransportService
+	now           func() time.Time
 }
 
 const approvalNotificationPostAttempts = 5
 
 func NewApprovalNotificationWorker(store ApprovalNotificationStore, transport *ExternalConversationTransportService) *ApprovalNotificationWorker {
-	return &ApprovalNotificationWorker{store: store, conversations: NewConversationService(store), transport: transport}
+	return &ApprovalNotificationWorker{store: store, conversations: NewConversationService(store), transport: transport, now: time.Now}
 }
 
 // ProcessScope idempotently materializes pending approvals as canonical
@@ -42,7 +44,14 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 	}
 	processed := 0
 	var processErrors []error
+	now := w.now().UTC()
 	for _, approval := range approvals {
+		if !now.Before(approval.ExpiresAt) {
+			if err := w.expire(ctx, approval, now); err != nil {
+				processErrors = append(processErrors, fmt.Errorf("expire approval %s: %w", approval.ID, err))
+			}
+			continue
+		}
 		for _, destination := range approval.Destinations {
 			if err := w.notify(ctx, approval, destination); err != nil {
 				processErrors = append(processErrors, fmt.Errorf("notify approval %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
@@ -52,6 +61,60 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 		}
 	}
 	return processed, errors.Join(processErrors...)
+}
+
+func (w *ApprovalNotificationWorker) expire(ctx context.Context, approval *ApprovalCheckpoint, now time.Time) error {
+	coordinator := NewApprovalCoordinator(w.store, w.store, EligibleApprovalAuthorizer{})
+	coordinator.now = func() time.Time { return now }
+	resolved, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+		Scope: approval.Scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
+		DecisionID: "approval-expiry:" + approval.ID + ":" + approval.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		Approve:    false, Principal: ApprovalPrincipal{Type: "system", ID: "approval-expiry-worker"},
+		Reason: "Approval deadline elapsed", CorrelationID: approval.ID,
+	})
+	if err != nil {
+		return err
+	}
+	if resolved == nil || resolved.Approval == nil || resolved.Approval.Status != ApprovalStatusExpired {
+		return errors.New("approval expiry did not reach the terminal expired state")
+	}
+	for _, destination := range approval.Destinations {
+		if err := w.updateExpiredCard(ctx, resolved.Approval, destination); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *ApprovalNotificationWorker) updateExpiredCard(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
+	deliveries, err := w.store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+		Scope: approval.Scope, EndpointID: destination.EndpointID,
+		Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 1000,
+	})
+	if err != nil {
+		return err
+	}
+	for _, delivery := range deliveries {
+		projected, _ := delivery.Parameters["approval"].(map[string]interface{})
+		if projected == nil || projected["id"] != approval.ID || strings.TrimSpace(delivery.ProviderMessageID) == "" {
+			continue
+		}
+		_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+			Scope: approval.Scope, EndpointID: destination.EndpointID,
+			Operation:      capability.ConversationDeliveryMessageUpdate,
+			ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
+			ExternalThreadID: delivery.ExternalThreadID,
+			Parameters: map[string]interface{}{
+				"providerMessageId": delivery.ProviderMessageID,
+				"approval":          approvalNotificationPayload(approval, nil),
+			},
+			IdempotencyKey: "approval-expiry-delivery:" + approval.ID + ":" + destination.EndpointID,
+		})
+		return err
+	}
+	// An approval can expire before its original notification reaches the
+	// provider. Canonical state is still terminal; there is no remote card to update.
+	return nil
 }
 
 func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
@@ -81,18 +144,26 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
-		Parameters: map[string]interface{}{"approval": map[string]interface{}{
-			"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
-			"invocationDigest": call.InvocationDigest, "risk": approval.Risk, "summary": approval.Summary,
-			"policyReason": approval.PolicyReason, "proposedAction": cloneMap(approval.ProposedAction),
-			"expiresAt": approval.ExpiresAt,
-		}},
+		Parameters:     map[string]interface{}{"approval": approvalNotificationPayload(approval, call)},
 		IdempotencyKey: "approval-delivery:" + approval.ID + ":" + endpoint.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("enqueue approval delivery: %w", err)
 	}
 	return nil
+}
+
+func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
+	payload := map[string]interface{}{
+		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
+		"risk": approval.Risk, "summary": approval.Summary, "status": approval.Status,
+		"policyReason": approval.PolicyReason, "proposedAction": cloneMap(approval.ProposedAction),
+		"expiresAt": approval.ExpiresAt,
+	}
+	if call != nil {
+		payload["invocationDigest"] = call.InvocationDigest
+	}
+	return payload
 }
 
 func (w *ApprovalNotificationWorker) postApprovalMessage(
