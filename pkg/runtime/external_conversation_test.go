@@ -175,8 +175,8 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 		ID: "delivery-rebind", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-1",
 		OrderingKey: "order-1", Parameters: map[string]interface{}{"text": "approve this"}, IdempotencyKey: "approval:one",
-		Status: ExternalConversationDeliveryRetry, Attempt: 1, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute),
-		ErrorCode: "endpoint_or_adapter_conflict", Summary: "The exact adapter changed.",
+		Status: ExternalConversationDeliveryFailed, Attempt: 8, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute),
+		ErrorCode: "adapter_delivery_unconfirmed", Summary: "The adapter could not confirm delivery.",
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, replayed, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil || replayed {
