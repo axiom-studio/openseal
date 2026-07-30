@@ -112,6 +112,7 @@ func matchingNoProgressAction(checkpoint map[string]interface{}, intentDigest st
 
 const (
 	actionHistoryCheckpointKey         = "_opensealActionHistory"
+	approvalRecoveryCheckpointKey      = "_opensealApprovalRecovery"
 	maximumActionHistoryEntries        = 16
 	maximumActionHistoryResultBytes    = 16 << 10
 	maximumCheckpointActionResultBytes = 64 << 10
@@ -126,11 +127,38 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 		result = make(map[string]interface{})
 	}
 	delete(result, actionHistoryCheckpointKey)
+	delete(result, approvalRecoveryCheckpointKey)
 	if current != nil {
 		if history, ok := current[actionHistoryCheckpointKey]; ok {
 			result[actionHistoryCheckpointKey] = deepCloneCheckpointValue(history)
 		}
+		if recovery, ok := current[approvalRecoveryCheckpointKey]; ok {
+			result[approvalRecoveryCheckpointKey] = deepCloneCheckpointValue(recovery)
+		}
 	}
+	return result
+}
+
+func checkpointApprovedActionFailure(checkpoint map[string]interface{}, approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
+	result := deepCloneCheckpointMap(checkpoint)
+	if result == nil {
+		result = make(map[string]interface{})
+	}
+	if approval == nil || call == nil || approval.Status != ApprovalStatusApproved || approval.ActionCallID != call.ID {
+		return result
+	}
+	result[approvalRecoveryCheckpointKey] = map[string]interface{}{
+		"approvalId": approval.ID, "approvalStatus": approval.Status,
+		"actionCallId": call.ID, "actionStatus": call.Status, "error": call.Error,
+		"proposedAction":         deepCloneCheckpointMap(approval.ProposedAction),
+		"continuationCheckpoint": hostedTurnTextCheckpoint(approval.ContinuationCheckpoint),
+	}
+	return result
+}
+
+func clearApprovedActionFailure(checkpoint map[string]interface{}) map[string]interface{} {
+	result := deepCloneCheckpointMap(checkpoint)
+	delete(result, approvalRecoveryCheckpointKey)
 	return result
 }
 
