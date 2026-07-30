@@ -87,7 +87,33 @@ func (w *ApprovalNotificationWorker) expire(ctx context.Context, approval *Appro
 }
 
 func (w *ApprovalNotificationWorker) updateExpiredCard(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
-	deliveries, err := w.store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+	if err != nil {
+		return err
+	}
+	return enqueueApprovalCardUpdate(ctx, w.store, w.transport, approval, call, destination, "")
+}
+
+func enqueueApprovalCardUpdate(
+	ctx context.Context,
+	store ApprovalNotificationStore,
+	transport *ExternalConversationTransportService,
+	approval *ApprovalCheckpoint,
+	call *ActionCall,
+	destination ApprovalDestination,
+	providerApproverID string,
+) error {
+	if approval == nil || call == nil {
+		return errors.New("approval and action are required")
+	}
+	_, resolved, err := transport.resolveActiveEndpoint(ctx, approval.Scope, destination.EndpointID)
+	if err != nil {
+		return err
+	}
+	if !containsConversationDeliveryOperation(resolved.Adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
+		return nil
+	}
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
 		Scope: approval.Scope, EndpointID: destination.EndpointID,
 		Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 1000,
 	})
@@ -95,26 +121,51 @@ func (w *ApprovalNotificationWorker) updateExpiredCard(ctx context.Context, appr
 		return err
 	}
 	for _, delivery := range deliveries {
+		if delivery.Operation != capability.ConversationDeliveryMessageSend {
+			continue
+		}
 		projected, _ := delivery.Parameters["approval"].(map[string]interface{})
 		if projected == nil || projected["id"] != approval.ID || strings.TrimSpace(delivery.ProviderMessageID) == "" {
 			continue
 		}
-		_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		parameters := map[string]interface{}{
+			"providerMessageId": delivery.ProviderMessageID,
+			"approval":          approvalNotificationPayload(approval, call),
+		}
+		if strings.TrimSpace(providerApproverID) != "" {
+			parameters["providerApproverId"] = strings.TrimSpace(providerApproverID)
+			parameters["approval"].(map[string]interface{})["providerApproverId"] = strings.TrimSpace(providerApproverID)
+		}
+		_, err = transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 			Scope: approval.Scope, EndpointID: destination.EndpointID,
 			Operation:      capability.ConversationDeliveryMessageUpdate,
 			ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
 			ExternalThreadID: delivery.ExternalThreadID,
-			Parameters: map[string]interface{}{
-				"providerMessageId": delivery.ProviderMessageID,
-				"approval":          approvalNotificationPayload(approval, nil),
-			},
-			IdempotencyKey: "approval-expiry-delivery:" + approval.ID + ":" + destination.EndpointID,
+			Parameters:       parameters,
+			IdempotencyKey:   "approval-card-update:" + approval.ID + ":" + destination.EndpointID + ":" + approvalCardPhase(approval, call),
 		})
 		return err
 	}
-	// An approval can expire before its original notification reaches the
-	// provider. Canonical state is still terminal; there is no remote card to update.
+	// A decision can arrive only after the provider has rendered the original
+	// message, but expiry can race its delivery. Canonical state remains
+	// authoritative when there is not yet a remote card to update.
 	return nil
+}
+
+func approvalCardPhase(approval *ApprovalCheckpoint, call *ActionCall) string {
+	if approval.Status != ApprovalStatusApproved {
+		return string(approval.Status)
+	}
+	switch call.Status {
+	case ActionCallStatusSucceeded:
+		return "succeeded"
+	case ActionCallStatusFailed, ActionCallStatusDenied:
+		return "failed"
+	case ActionCallStatusCanceled, ActionCallStatusCompensated:
+		return "canceled"
+	default:
+		return "going-ahead"
+	}
 }
 
 func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
@@ -162,6 +213,19 @@ func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall)
 	}
 	if call != nil {
 		payload["invocationDigest"] = call.InvocationDigest
+		payload["actionStatus"] = call.Status
+		if strings.TrimSpace(call.Error) != "" {
+			payload["actionError"] = call.Error
+		}
+	}
+	if approval.DecisionBy != nil {
+		payload["decisionBy"] = map[string]interface{}{"type": approval.DecisionBy.Type, "id": approval.DecisionBy.ID}
+	}
+	if approval.DecidedAt != nil {
+		payload["decidedAt"] = approval.DecidedAt.UTC()
+	}
+	if strings.TrimSpace(approval.DecisionReason) != "" {
+		payload["decisionReason"] = approval.DecisionReason
 	}
 	return payload
 }
