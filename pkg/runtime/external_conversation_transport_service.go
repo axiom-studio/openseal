@@ -159,12 +159,27 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		reason = "Changes requested through external conversation"
 	}
 	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-	return coordinator.Resolve(ctx, ResolveApprovalRequest{
+	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Approve: decision == "approve",
 		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
 		CorrelationID: event.ExternalMessageID,
 	})
+	if err != nil {
+		return nil, err
+	}
+	notificationStore, ok := s.store.(ApprovalNotificationStore)
+	if !ok {
+		return nil, errors.New("external approval notification coordination is unavailable")
+	}
+	providerApproverID, _ := event.Attributes["providerUserId"].(string)
+	if err := enqueueApprovalCardUpdate(
+		ctx, notificationStore, s, resolution.Approval, resolution.Call,
+		ApprovalDestination{EndpointID: endpoint.ID}, providerApproverID,
+	); err != nil {
+		return nil, fmt.Errorf("enqueue approval card update: %w", err)
+	}
+	return resolution, nil
 }
 
 func integerAttribute(value interface{}) (int64, bool) {
