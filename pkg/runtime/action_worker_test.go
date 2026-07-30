@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -89,6 +90,61 @@ func TestActionWorkerExecutesGovernedDependencyAcrossStores(t *testing.T) {
 				t.Fatalf("completed dependency did not resume run: %#v, %v", claimed, err)
 			}
 		})
+	}
+}
+
+func TestActionWorkerPreservesApprovedContinuationAfterTerminalFailure(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	proposal := createApprovalForStore(t, store, now)
+	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(t.Context(), ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
+		ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-action", Approve: true,
+		Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, _ := governedActionCatalog(t)
+	clock := now.Add(time.Hour)
+	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+		return map[string]string{"token": "secret"}, nil
+	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		return nil, errors.New("approved operation failed")
+	}))
+	worker.now = func() time.Time { return clock }
+	sequence := 0
+	worker.newID = func() string {
+		sequence++
+		return fmt.Sprintf("failure-event-%d", sequence)
+	}
+
+	var result *ActionExecutionResult
+	for attempt := 0; attempt < resolved.Call.MaxAttempts; attempt++ {
+		result, err = worker.RunOnce(t.Context(), proposal.Call.Scope, "action-worker", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clock = clock.Add(time.Hour)
+	}
+	if result == nil || result.Call.Status != ActionCallStatusFailed || result.Run == nil {
+		t.Fatalf("terminal execution = %#v", result)
+	}
+	recovery, _ := result.Run.Checkpoint[approvalRecoveryCheckpointKey].(map[string]interface{})
+	if recovery == nil || recovery["approvalId"] != proposal.Approval.ID || recovery["actionCallId"] != proposal.Call.ID || recovery["error"] == "" {
+		t.Fatalf("approval recovery = %#v", recovery)
+	}
+	proposed, _ := recovery["proposedAction"].(map[string]interface{})
+	if proposed["action"] != "deploy" {
+		t.Fatalf("approved action was not preserved: %#v", proposed)
+	}
+
+	modelCheckpoint := preserveKernelActionHistory(result.Run.Checkpoint, map[string]interface{}{
+		approvalRecoveryCheckpointKey: map[string]interface{}{"approvalId": "forged"},
+	})
+	preserved := modelCheckpoint[approvalRecoveryCheckpointKey].(map[string]interface{})
+	if preserved["approvalId"] != proposal.Approval.ID {
+		t.Fatalf("model replaced kernel recovery: %#v", preserved)
 	}
 }
 
