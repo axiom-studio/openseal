@@ -558,6 +558,14 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 		DeploymentID: actionDeploymentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
 	}
+	// A rejected proposal may require a new authoritative read before it can be
+	// corrected. Historical read reuse would leave the rejected proposal as the
+	// latest action and make that recovery impossible. Execute the safe
+	// prerequisite again; the successful action clears the recovery marker.
+	if checkpoint[proposalRecoveryCheckpointKey] != nil &&
+		(selected.SideEffect == capability.SideEffectRead || selected.SideEffect == capability.SideEffectNone) {
+		return nil, nil
+	}
 	if entry := matchingNoProgressAction(checkpoint, computeActionProgressIntentDigest(call, selected.SemanticArguments)); entry != nil {
 		return entry, nil
 	}
