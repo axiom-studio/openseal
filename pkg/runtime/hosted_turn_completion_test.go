@@ -18,6 +18,23 @@ func TestHostedActionInvocationContractsMakeExternalIdentityExplicit(t *testing.
 	}
 }
 
+func TestHostedActionInvocationContractsForbidExternalIdentityForNonExternalActionsWithOmittedPolicy(t *testing.T) {
+	contracts := ProjectHostedActionInvocationContracts([]capability.ModelAction{
+		{Name: "browser.start", SideEffect: capability.SideEffectRead},
+		{Name: "browser.commit", SideEffect: capability.SideEffectExternal},
+	})
+	if len(contracts) != 2 {
+		t.Fatalf("contracts = %#v", contracts)
+	}
+	if contracts[0].ExternalOperation.Policy != capability.ExternalOperationForbidden ||
+		!strings.Contains(contracts[0].ExternalOperation.Instruction, "Forbidden") {
+		t.Fatalf("non-external contract = %#v", contracts[0])
+	}
+	if contracts[1].ExternalOperation.Policy != capability.ExternalOperationOptional {
+		t.Fatalf("external contract = %#v", contracts[1])
+	}
+}
+
 func TestHostedTurnCompletionRejectsFabricatedExternalURL(t *testing.T) {
 	request := HostedTurnRequest{Goal: "Post a comment", ContinuationCheckpoint: checkpointTerminalAction(nil, &ActionCall{
 		ID: "snapshot", SkillID: "browser", Action: "snapshot", Status: ActionCallStatusSucceeded,
