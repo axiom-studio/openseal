@@ -25,7 +25,9 @@ func (s *approvalNotificationConflictStore) CommitChannelMessage(ctx context.Con
 
 func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheckpoint(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
+		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
+	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
@@ -52,7 +54,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		ID: "approval-1", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
 		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
-		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(24 * time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	waiting := cloneAgentRun(claimed)
 	waiting.Status = AgentRunStatusWaitingForApproval
@@ -69,6 +71,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 
 	transport := NewExternalConversationTransportService(store, catalog)
+	transport.now = func() time.Time { return now }
 	worker := NewApprovalNotificationWorker(store, transport)
 	worker.now = func() time.Time { return now }
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
@@ -85,13 +88,24 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if card["id"] != approval.ID || card["invocationDigest"] != call.InvocationDigest {
 		t.Fatalf("card = %#v", card)
 	}
+	original, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-worker", now, time.Minute)
+	if err != nil || original == nil {
+		t.Fatalf("claim notification = %#v, %v", original, err)
+	}
+	delivered := cloneExternalConversationDelivery(original)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = "1720000000.123", now.Add(time.Second), now.Add(time.Second)
+	delivered.Revision++
+	if err = store.SaveExternalConversationDelivery(ctx, delivered, original.Revision, "delivery-worker"); err != nil {
+		t.Fatal(err)
+	}
 
 	decision := NormalizedExternalConversationEvent{
 		ID: "slack:approval:T1:1720000000.1:U1", Type: capability.ConversationEventApprovalDecided,
 		ExternalConversationID: endpoint.Address, ExternalMessageID: "1720000000.0", ExternalParticipantID: "U1",
 		OrderingKey: endpoint.Address + ":1720000000.0", OccurredAt: now,
 		Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID,
-			"invocationDigest": call.InvocationDigest, "decision": "approve", "principalType": "role", "principalId": "operator"},
+			"invocationDigest": call.InvocationDigest, "decision": "approve", "principalType": "role", "principalId": "operator", "providerUserId": "U1"},
 	}
 	tampered := decision
 	tampered.ID = "slack:approval:T1:1720000000.2:U1"
@@ -115,6 +129,24 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	resolved, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: decision})
 	if err != nil || resolved.Approval == nil || !resolved.Approval.Resolved || resolved.Approval.Approval.Status != ApprovalStatusApproved || resolved.Approval.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolution = %#v, %v", resolved, err)
+	}
+	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	if err != nil || len(deliveries) != 2 {
+		t.Fatalf("decision deliveries = %#v, %v", deliveries, err)
+	}
+	var decisionDelivery *ExternalConversationDelivery
+	for _, delivery := range deliveries {
+		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
+			decisionDelivery = delivery
+			break
+		}
+	}
+	if decisionDelivery == nil {
+		t.Fatalf("decision update missing: %#v", deliveries)
+	}
+	decisionCard, _ := decisionDelivery.Parameters["approval"].(map[string]interface{})
+	if decisionCard["status"] != ApprovalStatusApproved || decisionCard["actionStatus"] != ActionCallStatusReady || decisionCard["providerApproverId"] != "U1" {
+		t.Fatalf("decision card = %#v in %#v", decisionCard, decisionDelivery)
 	}
 	replay, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: decision})
 	if err != nil || replay.Approval == nil || !replay.Replayed {
@@ -243,6 +275,7 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 		t.Fatal(err)
 	}
 	transport := NewExternalConversationTransportService(store, catalog)
+	transport.now = func() time.Time { return now }
 	worker := NewApprovalNotificationWorker(store, transport)
 	worker.now = func() time.Time { return now }
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
