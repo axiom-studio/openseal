@@ -33,6 +33,7 @@ type ActionPolicyDecision struct {
 	Reason               string
 	EligibleApprovers    []ApprovalPrincipal
 	ApprovalTTL          time.Duration
+	ApprovalTimeout      ApprovalTimeoutDecision
 	ApprovalDestinations []ApprovalDestination
 }
 
@@ -306,7 +307,8 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			Risk: bound.Action.Risk, Summary: eventSummary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
 			EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
 			Destinations:           append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
-			ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), Revision: 1, CreatedAt: now, UpdatedAt: now,
+			ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), TimeoutDecision: decision.ApprovalTimeout,
+			Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		updatedRun.Status = AgentRunStatusWaitingForApproval
 		updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: approvalID}

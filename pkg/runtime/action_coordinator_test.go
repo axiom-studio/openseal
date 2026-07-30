@@ -24,6 +24,7 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 		return ActionPolicyDecision{
 			Disposition: ActionDispositionRequireApproval, Reason: "production change",
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "release-manager"}}, ApprovalTTL: time.Hour,
+			ApprovalTimeout: ApprovalTimeoutApprove,
 		}, nil
 	})
 	coordinator := NewActionCoordinator(store, store, catalog, policy)
@@ -47,6 +48,9 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	}
 	if result.Call.Status != ActionCallStatusWaitingApproval || result.Approval == nil || result.Approval.ID != "approval" {
 		t.Fatalf("approval proposal mismatch: %#v", result)
+	}
+	if result.Approval.TimeoutDecision != ApprovalTimeoutApprove {
+		t.Fatalf("approval timeout policy was not persisted: %#v", result.Approval)
 	}
 	if result.Call.BindingID != "release-binding" || result.Call.BindingRevision != 1 {
 		t.Fatalf("action did not persist its exact binding: %#v", result.Call)
