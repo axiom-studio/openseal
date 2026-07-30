@@ -363,6 +363,9 @@ func (s *MemoryStore) EnqueueExternalConversationDelivery(_ context.Context, del
 		if sameExternalConversationDeliveryIntent(existing, delivery) {
 			return cloneExternalConversationDelivery(existing), true, nil
 		}
+		if sameExternalConversationDeliveryEffect(existing, delivery) && existing.Status == ExternalConversationDeliveryDelivered {
+			return cloneExternalConversationDelivery(existing), true, nil
+		}
 		rebound, ok := rebindExternalConversationDelivery(existing, delivery)
 		if !ok {
 			return nil, false, ErrExternalConversationConflict
@@ -513,7 +516,17 @@ func sameExternalConversationInboxIntent(existing, candidate *ExternalConversati
 func sameExternalConversationDeliveryIntent(existing, candidate *ExternalConversationDelivery) bool {
 	return existing != nil && candidate != nil && existing.Scope == candidate.Scope &&
 		existing.EndpointID == candidate.EndpointID && existing.EndpointRevision == candidate.EndpointRevision &&
-		existing.Adapter == candidate.Adapter && existing.Operation == candidate.Operation &&
+		existing.Adapter == candidate.Adapter && sameExternalConversationDeliveryEffect(existing, candidate)
+}
+
+// sameExternalConversationDeliveryEffect compares the externally observable
+// operation selected by an idempotency key. Endpoint and adapter revisions are
+// execution snapshots, not part of that operation: once a provider confirms a
+// delivery, a compatible endpoint upgrade must replay the immutable receipt
+// instead of attempting the same side effect again.
+func sameExternalConversationDeliveryEffect(existing, candidate *ExternalConversationDelivery) bool {
+	return existing != nil && candidate != nil && existing.Scope == candidate.Scope &&
+		existing.EndpointID == candidate.EndpointID && existing.Operation == candidate.Operation &&
 		existing.ConversationID == candidate.ConversationID && existing.ChannelMessageID == candidate.ChannelMessageID &&
 		existing.ExternalThreadID == candidate.ExternalThreadID && existing.OrderingKey == candidate.OrderingKey &&
 		sameExternalConversationJSON(existing.Parameters, candidate.Parameters) && existing.IdempotencyKey == candidate.IdempotencyKey
