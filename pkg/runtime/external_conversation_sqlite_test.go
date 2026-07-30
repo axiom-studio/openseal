@@ -166,6 +166,56 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 	}
 }
 
+func TestSQLiteExternalConversationDeliveryRebindsAfterEndpointUpgrade(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "delivery-rebind.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	scope := Scope{Kind: "tenant", ID: "one"}
+	adapter := ExternalConversationAdapterReference{
+		SkillID: "skill-slack", SkillVersion: "1.0.0", BindingID: "slack-binding", BindingRevision: 1, AdapterID: "conversations",
+	}
+	endpoint := &ExternalConversationEndpoint{
+		ID: "slack-endpoint", IngressRoute: "opaque-route", Scope: scope,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"}, DeploymentID: "slack-agent",
+		Name: "Slack approvals", Adapter: adapter, Provider: "slack", Mode: capability.ConversationEndpointChannel,
+		Address: "C012345", Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: ExternalConversationPolicy{MessageSelection: ExternalConversationSelectAllMessages, ReplyMode: ExternalConversationReplyChannel, IgnoreBots: true},
+		Status: ExternalConversationEndpointActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	delivery := &ExternalConversationDelivery{
+		ID: "delivery-rebind", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: 1, Adapter: adapter,
+		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-1",
+		OrderingKey: "order-1", IdempotencyKey: "approval:one", Status: ExternalConversationDeliveryRetry,
+		Attempt: 1, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute), ErrorCode: "endpoint_or_adapter_conflict",
+		Summary: "The exact adapter changed.", Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, replayed, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil || replayed {
+		t.Fatalf("enqueue = replayed %v, %v", replayed, err)
+	}
+	upgraded := cloneExternalConversationEndpoint(endpoint)
+	upgraded.Adapter.SkillVersion, upgraded.Adapter.BindingRevision = "1.0.1", 2
+	upgraded.Revision, upgraded.UpdatedAt = 2, now.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, upgraded, 1); err != nil {
+		t.Fatal(err)
+	}
+	replay := cloneExternalConversationDelivery(delivery)
+	replay.EndpointRevision, replay.Adapter = 2, upgraded.Adapter
+	replay.Status, replay.AvailableAt, replay.UpdatedAt = ExternalConversationDeliveryPending, now.Add(2*time.Second), now.Add(2*time.Second)
+	replay.ErrorCode, replay.Summary = "", ""
+	rebound, replayed, err := store.EnqueueExternalConversationDelivery(ctx, replay)
+	if err != nil || !replayed || rebound.ID != delivery.ID || rebound.EndpointRevision != 2 ||
+		rebound.Adapter != upgraded.Adapter || rebound.Status != ExternalConversationDeliveryPending || rebound.Attempt != 1 || rebound.Revision != 2 {
+		t.Fatalf("rebind = %#v, replayed %v, %v", rebound, replayed, err)
+	}
+}
+
 func TestSQLiteExternalConversationClaimsPreserveOrderingPartitions(t *testing.T) {
 	ctx := context.Background()
 	_, endpoint := activeExternalConversationTestEndpoint(t, ctx)

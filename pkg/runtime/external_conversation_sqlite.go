@@ -636,13 +636,36 @@ func (s *SQLiteStore) EnqueueExternalConversationDelivery(ctx context.Context, d
 		return nil, false, err
 	}
 	if existing != nil {
-		if !sameExternalConversationDeliveryIntent(existing, delivery) {
+		if sameExternalConversationDeliveryIntent(existing, delivery) {
+			if err := commitSQLiteConn(ctx, conn, &committed); err != nil {
+				return nil, false, err
+			}
+			return existing, true, nil
+		}
+		rebound, ok := rebindExternalConversationDelivery(existing, delivery)
+		if !ok {
+			return nil, false, ErrExternalConversationConflict
+		}
+		payload, marshalErr := json.Marshal(rebound)
+		if marshalErr != nil {
+			return nil, false, marshalErr
+		}
+		result, updateErr := conn.ExecContext(ctx, `UPDATE external_conversation_deliveries
+			SET endpoint_revision=?,status=?,available_at=?,lease_owner=?,lease_expires_at=?,revision=?,payload=?
+			WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
+			rebound.EndpointRevision, rebound.Status, rebound.AvailableAt, rebound.LeaseOwner,
+			nullableSQLiteTime(rebound.LeaseExpiresAt), rebound.Revision, string(payload),
+			rebound.Scope.Kind, rebound.Scope.ID, rebound.ID, existing.Revision)
+		if updateErr != nil {
+			return nil, false, updateErr
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
 			return nil, false, ErrExternalConversationConflict
 		}
 		if err := commitSQLiteConn(ctx, conn, &committed); err != nil {
 			return nil, false, err
 		}
-		return existing, true, nil
+		return rebound, true, nil
 	}
 	payload, err := json.Marshal(delivery)
 	if err != nil {
