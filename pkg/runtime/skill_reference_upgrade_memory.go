@@ -28,6 +28,18 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(_ context.Context, application 
 			return ErrSkillReferenceUpgradeConflict
 		}
 	}
+	for _, mutation := range application.ConversationEndpoints {
+		current := s.externalEndpoints[externalConversationEndpointKey(mutation.Value.Scope, mutation.Value.ID)]
+		if current == nil || current.Revision != mutation.ExpectedRevision || mutation.Value.Revision != mutation.ExpectedRevision+1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
+	}
+	for _, mutation := range application.CallbackRegistrations {
+		current := s.callbackRegistrations[callbackRegistrationKey(mutation.Value.Scope, mutation.Value.ID)]
+		if current == nil || current.Revision != mutation.ExpectedRevision || mutation.Value.Revision != mutation.ExpectedRevision+1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
+	}
 	s.skillBindings[bindingKey] = cloneMemorySkillBinding(application.Binding)
 	for _, mutation := range application.Objectives {
 		s.objectives[portfolioKey(mutation.Value.Scope, mutation.Value.ID)] = cloneObjective(mutation.Value)
@@ -36,6 +48,12 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(_ context.Context, application 
 	for _, mutation := range application.Projects {
 		s.projects[projectKey(mutation.Value.Scope, mutation.Value.ID)] = cloneProject(mutation.Value)
 		appendMemoryActivityLocked(s, mutation.Event)
+	}
+	for _, mutation := range application.ConversationEndpoints {
+		s.externalEndpoints[externalConversationEndpointKey(mutation.Value.Scope, mutation.Value.ID)] = cloneExternalConversationEndpoint(mutation.Value)
+	}
+	for _, mutation := range application.CallbackRegistrations {
+		s.callbackRegistrations[callbackRegistrationKey(mutation.Value.Scope, mutation.Value.ID)] = cloneCallbackRegistration(mutation.Value)
 	}
 	return nil
 }
