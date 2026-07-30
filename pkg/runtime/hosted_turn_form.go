@@ -64,6 +64,18 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 	if form.SchemaVersion != HostedTurnFormSchemaVersion {
 		return nil, fmt.Errorf("hosted turn form schemaVersion must be %q", HostedTurnFormSchemaVersion)
 	}
+	decisions := append([]TurnDecision(nil), form.Decisions...)
+	// Models can request governed actions, but they cannot mint approval IDs or
+	// place a Run into approval lifecycle state. Action materialization and the
+	// ApprovalCoordinator derive the exact wait condition when policy requires
+	// one. Until then, approval language is only continuation intent.
+	if form.NextRunStatus == AgentRunStatusWaitingForApproval {
+		form.NextRunStatus = AgentRunStatusRunning
+		form.WakeCondition = nil
+		decisions = append(decisions, TurnDecision{
+			Summary: "Continued the Run because approval state is derived from a governed action, not model output.",
+		})
+	}
 	if err := ValidateHostedTurnLifecycle(form.NextRunStatus, form.WakeCondition); err != nil {
 		return nil, err
 	}
@@ -72,7 +84,7 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 		return nil, err
 	}
 	response := &HostedTurnResponse{
-		SkillSelections: form.SkillSelections, Decisions: form.Decisions,
+		SkillSelections: form.SkillSelections, Decisions: decisions,
 		ProposedFork: form.ProposedFork, ProposedDelegation: form.ProposedDelegation, ProposedRunbook: form.ProposedRunbook,
 		OutputSummary: form.OutputSummary, ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
 		WakeCondition: form.WakeCondition, RunOutput: form.RunOutput, RunError: form.RunError,
