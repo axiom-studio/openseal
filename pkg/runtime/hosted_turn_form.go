@@ -52,8 +52,9 @@ type HostedTurnActionForm struct {
 // impossible choices from the model-facing form while the kernel remains the
 // final authority during compilation and materialization.
 type HostedTurnFormAuthority struct {
-	CanDelegate      bool
-	CanInvokeRunbook bool
+	CanDelegate           bool
+	CanInvokeRunbook      bool
+	SkillPromptReferences []string
 }
 
 // CompileHostedTurnForm validates the selected action against the exact
@@ -162,6 +163,38 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		return nil, errors.New("hosted turn form schema has no object properties")
 	}
 	properties["schemaVersion"] = map[string]interface{}{"type": "string", "const": HostedTurnFormSchemaVersion}
+	if len(authority) > 0 {
+		promptBranches := make([]interface{}, 0, len(authority[0].SkillPromptReferences))
+		seen := make(map[string]struct{}, len(authority[0].SkillPromptReferences))
+		for _, raw := range authority[0].SkillPromptReferences {
+			reference := strings.TrimSpace(raw)
+			if reference == "" {
+				return nil, errors.New("hosted turn form Skill prompt reference is required")
+			}
+			if _, duplicate := seen[reference]; duplicate {
+				return nil, fmt.Errorf("hosted turn form Skill prompt reference %q is duplicated", reference)
+			}
+			seen[reference] = struct{}{}
+			promptBranches = append(promptBranches, map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{
+					"skillRef":    map[string]interface{}{"type": "string", "const": reference},
+					"disposition": map[string]interface{}{"type": "string", "enum": []string{string(HostedSkillApplied), string(HostedSkillNotApplied)}},
+					"summary":     map[string]interface{}{"type": "string", "minLength": 1},
+				},
+				"required": []string{"skillRef", "disposition", "summary"},
+			})
+		}
+		skillSelections := map[string]interface{}{
+			"type": "array", "minItems": len(promptBranches), "maxItems": len(promptBranches),
+		}
+		if len(promptBranches) == 0 {
+			skillSelections["items"] = false
+		} else {
+			skillSelections["items"] = map[string]interface{}{"oneOf": promptBranches}
+		}
+		properties["skillSelections"] = skillSelections
+	}
 	branches := make([]interface{}, 0, len(actions))
 	for _, action := range actions {
 		branchProperties := map[string]interface{}{
