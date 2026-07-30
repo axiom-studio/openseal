@@ -45,14 +45,22 @@ type ApprovalDestination struct {
 	EndpointID string `json:"endpointId"`
 }
 
+// ApprovalTimeoutPolicy defines the reviewed fallback for an unanswered
+// approval. It is opt-in: omitting it preserves fail-closed expiration.
+type ApprovalTimeoutPolicy struct {
+	AfterSeconds int64  `json:"afterSeconds" jsonschema:"Seconds a pending approval remains open before applying its reviewed timeout decision."`
+	Decision     string `json:"decision" jsonschema:"Reviewed timeout outcome. Use approve only when the user explicitly requested automatic approval; otherwise omit this policy."`
+}
+
 type AuthorityPolicy struct {
-	MaximumRisk          capability.RiskLevel  `json:"maximumRisk"`
-	AllowedSkillIDs      []string              `json:"allowedSkillIds,omitempty"`
-	MaxConcurrentRuns    int                   `json:"maxConcurrentRuns"`
-	BudgetCeilings       map[string]float64    `json:"budgetCeilings,omitempty"`
-	RequireApprovalAt    capability.RiskLevel  `json:"requireApprovalAt,omitempty"`
-	StandingGrants       []StandingActionGrant `json:"standingGrants,omitempty"`
-	ApprovalDestinations []ApprovalDestination `json:"approvalDestinations,omitempty"`
+	MaximumRisk          capability.RiskLevel   `json:"maximumRisk"`
+	AllowedSkillIDs      []string               `json:"allowedSkillIds,omitempty"`
+	MaxConcurrentRuns    int                    `json:"maxConcurrentRuns"`
+	BudgetCeilings       map[string]float64     `json:"budgetCeilings,omitempty"`
+	RequireApprovalAt    capability.RiskLevel   `json:"requireApprovalAt,omitempty"`
+	StandingGrants       []StandingActionGrant  `json:"standingGrants,omitempty"`
+	ApprovalDestinations []ApprovalDestination  `json:"approvalDestinations,omitempty"`
+	ApprovalTimeout      *ApprovalTimeoutPolicy `json:"approvalTimeout,omitempty"`
 }
 
 type MemoryPolicy struct {
@@ -139,6 +147,11 @@ func (d *AgentDefinition) Validate() error {
 			return errors.New("agent approval destinations require unique portable endpoint ids")
 		}
 		seenDestinations[id] = true
+	}
+	if timeout := d.Authority.ApprovalTimeout; timeout != nil {
+		if timeout.AfterSeconds <= 0 || timeout.AfterSeconds > int64((30*24*time.Hour)/time.Second) || (timeout.Decision != "expire" && timeout.Decision != "approve") {
+			return errors.New("agent approval timeout requires a positive duration and an expire or approve decision")
+		}
 	}
 	if d.Memory.Retention < 0 || d.Memory.MaximumBytes < 0 || d.Escalation.AfterFailures < 0 || d.Escalation.AfterDuration < 0 {
 		return errors.New("agent definition memory and escalation limits cannot be negative")

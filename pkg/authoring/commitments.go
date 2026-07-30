@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -43,6 +44,9 @@ func effectivePromptCommitments(prompt string, declared PromptCommitments) (Prom
 			effective.ApprovalRequirements = upsertApprovalCommitment(effective.ApprovalRequirements, commitment)
 		}
 	}
+	// An approval timeout can authorize a side effect without a human decision,
+	// so only the portable grammar—not a provider assertion—may introduce it.
+	effective.ApprovalTimeouts = append([]ApprovalTimeoutCommitment(nil), extracted.ApprovalTimeouts...)
 	return normalizedPromptCommitments(effective), issues
 }
 
@@ -91,6 +95,11 @@ func extractExplicitPromptCommitments(prompt string) PromptCommitments {
 		// means ordinary dispatch cannot bypass the user's approval commitment.
 		result.ApprovalRequirements = []ApprovalCommitment{{
 			OwnerType: CommitmentOwnerAgent, RequireApprovalAt: capability.RiskLevelWrite,
+		}}
+	}
+	if seconds, ok := explicitAutoApprovalTimeout(tokens); ok {
+		result.ApprovalTimeouts = []ApprovalTimeoutCommitment{{
+			OwnerType: CommitmentOwnerAgent, AfterSeconds: seconds, Decision: "approve",
 		}}
 	}
 	return normalizedPromptCommitments(result)
@@ -210,6 +219,62 @@ func explicitSideEffectApproval(tokens []string) bool {
 	return false
 }
 
+func explicitAutoApprovalTimeout(tokens []string) (int64, bool) {
+	for index, token := range tokens {
+		if token != "after" {
+			continue
+		}
+		approved, automatic := false, false
+		for cursor := index - 1; cursor >= 0 && index-cursor <= 7 && tokens[cursor] != "|"; cursor-- {
+			switch tokens[cursor] {
+			case "approve", "approves", "approved", "approval":
+				approved = true
+			case "auto", "automatically", "automatic":
+				automatic = true
+			}
+		}
+		if !approved || !automatic || index+1 >= len(tokens) {
+			continue
+		}
+		if seconds, ok := explicitDurationSeconds(tokens[index+1:]); ok {
+			return seconds, true
+		}
+	}
+	return 0, false
+}
+
+func explicitDurationSeconds(tokens []string) (int64, bool) {
+	if len(tokens) == 0 {
+		return 0, false
+	}
+	value, unit := tokens[0], ""
+	if len(tokens) > 1 {
+		unit = tokens[1]
+	}
+	countText := value
+	for index, char := range value {
+		if !unicode.IsDigit(char) {
+			countText, unit = value[:index], value[index:]
+			break
+		}
+	}
+	count, err := strconv.ParseInt(countText, 10, 64)
+	if err != nil || count <= 0 {
+		return 0, false
+	}
+	multiplier := int64(0)
+	switch unit {
+	case "second", "seconds", "sec", "secs":
+		multiplier = 1
+	case "minute", "minutes", "min", "mins":
+		multiplier = 60
+	case "hour", "hours", "hr", "hrs":
+		multiplier = 60 * 60
+	}
+	seconds := count * multiplier
+	return seconds, multiplier > 0 && seconds <= int64((30*24*time.Hour)/time.Second)
+}
+
 // applyExtractedApprovalCommitments repairs only a safety threshold that the
 // compiler can prove directly from the prompt. It never invents an Agent or
 // widens authority; it only makes an existing Agent require approval earlier.
@@ -234,6 +299,28 @@ func applyExtractedApprovalCommitments(candidate *WorkforceCandidate, extracted 
 			current := definition.Authority.RequireApprovalAt
 			if current == "" || riskRank(current) > riskRank(commitment.RequireApprovalAt) {
 				definition.Authority.RequireApprovalAt = commitment.RequireApprovalAt
+			}
+		}
+	}
+}
+
+func applyExtractedApprovalTimeouts(candidate *WorkforceCandidate, extracted PromptCommitments) {
+	if candidate == nil {
+		return
+	}
+	agents := candidateAgentsByID(candidate)
+	for _, commitment := range extracted.ApprovalTimeouts {
+		targets := candidate.Agents
+		if commitment.OwnerID != "" {
+			if target := agents[commitment.OwnerID]; target != nil {
+				targets = []*agent.AgentDefinition{target}
+			} else {
+				continue
+			}
+		}
+		for _, definition := range targets {
+			if definition != nil {
+				definition.Authority.ApprovalTimeout = &agent.ApprovalTimeoutPolicy{AfterSeconds: commitment.AfterSeconds, Decision: commitment.Decision}
 			}
 		}
 	}
@@ -271,6 +358,11 @@ func validateDeclaredCommitmentCoverage(declared, extracted PromptCommitments) [
 	for _, expected := range extracted.ApprovalRequirements {
 		if !approvalCommitmentCovered(declared.ApprovalRequirements, expected, commitmentOwnerIsSingleton(extracted, expected.OwnerType)) {
 			issues = append(issues, issue("commitments.approvalRequirements", "prompt_commitment_missing", fmt.Sprintf("Generator must declare approval at %s risk for the requested side effect", expected.RequireApprovalAt)))
+		}
+	}
+	for _, expected := range extracted.ApprovalTimeouts {
+		if !approvalTimeoutCommitmentCovered(declared.ApprovalTimeouts, expected, commitmentOwnerIsSingleton(extracted, expected.OwnerType)) {
+			issues = append(issues, issue("commitments.approvalTimeouts", "prompt_commitment_missing", fmt.Sprintf("Generator must declare the %d-second automatic approval timeout", expected.AfterSeconds)))
 		}
 	}
 	return issues
@@ -352,6 +444,55 @@ func validatePromptCommitments(commitments PromptCommitments, candidate *Workfor
 			}
 		}
 	}
+	seenTimeouts := make(map[string]bool)
+	for index, commitment := range commitments.ApprovalTimeouts {
+		path := fmt.Sprintf("commitments.approvalTimeouts[%d]", index)
+		key := string(commitment.OwnerType) + ":" + strings.TrimSpace(commitment.OwnerID)
+		if seenTimeouts[key] {
+			issues = append(issues, issue(path, "duplicate_prompt_commitment", "Approval timeout commitments must have unique owners"))
+			continue
+		}
+		seenTimeouts[key] = true
+		if commitment.OwnerType != CommitmentOwnerAgent || commitment.AfterSeconds <= 0 || commitment.AfterSeconds > int64((30*24*time.Hour)/time.Second) || commitment.Decision != "approve" {
+			issues = append(issues, issue(path, "invalid_prompt_commitment", "Approval timeout commitment must target candidate Agents with a bounded automatic approval delay"))
+			continue
+		}
+		targets := candidate.Agents
+		if commitment.OwnerID != "" {
+			target := agents[commitment.OwnerID]
+			if target == nil {
+				issues = append(issues, issue(path+".ownerId", "invalid_prompt_commitment", "Approval timeout commitment Agent is not in the candidate"))
+				continue
+			}
+			targets = []*agent.AgentDefinition{target}
+		}
+		for _, definition := range targets {
+			if definition == nil || definition.Authority.ApprovalTimeout == nil || definition.Authority.ApprovalTimeout.AfterSeconds != commitment.AfterSeconds || definition.Authority.ApprovalTimeout.Decision != commitment.Decision {
+				ownerID := commitment.OwnerID
+				if definition != nil {
+					ownerID = definition.ID
+				}
+				issues = append(issues, issue("agents."+ownerID+".authority.approvalTimeout", "prompt_approval_timeout_mismatch", "Agent approval timeout must exactly match the user's request"))
+			}
+		}
+	}
+	// A model cannot invent delayed authority. If no extracted commitment owns
+	// the policy, fail before preview or activation.
+	for _, definition := range candidate.Agents {
+		if definition == nil || definition.Authority.ApprovalTimeout == nil {
+			continue
+		}
+		covered := false
+		for _, commitment := range commitments.ApprovalTimeouts {
+			if commitment.OwnerID == "" || commitment.OwnerID == definition.ID {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			issues = append(issues, issue("agents."+definition.ID+".authority.approvalTimeout", "uncommitted_approval_timeout", "Automatic approval requires an explicit user commitment"))
+		}
+	}
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Path == issues[j].Path {
 			return issues[i].Code < issues[j].Code
@@ -426,6 +567,9 @@ func normalizedPromptCommitments(commitments PromptCommitments) PromptCommitment
 	for index := range commitments.ApprovalRequirements {
 		commitments.ApprovalRequirements[index].OwnerID = strings.TrimSpace(commitments.ApprovalRequirements[index].OwnerID)
 	}
+	for index := range commitments.ApprovalTimeouts {
+		commitments.ApprovalTimeouts[index].OwnerID = strings.TrimSpace(commitments.ApprovalTimeouts[index].OwnerID)
+	}
 	sort.Slice(commitments.ObjectiveCounts, func(i, j int) bool {
 		left, right := commitments.ObjectiveCounts[i], commitments.ObjectiveCounts[j]
 		if left.OwnerType == right.OwnerType {
@@ -435,6 +579,13 @@ func normalizedPromptCommitments(commitments PromptCommitments) PromptCommitment
 	})
 	sort.Slice(commitments.ApprovalRequirements, func(i, j int) bool {
 		left, right := commitments.ApprovalRequirements[i], commitments.ApprovalRequirements[j]
+		if left.OwnerType == right.OwnerType {
+			return left.OwnerID < right.OwnerID
+		}
+		return left.OwnerType < right.OwnerType
+	})
+	sort.Slice(commitments.ApprovalTimeouts, func(i, j int) bool {
+		left, right := commitments.ApprovalTimeouts[i], commitments.ApprovalTimeouts[j]
 		if left.OwnerType == right.OwnerType {
 			return left.OwnerID < right.OwnerID
 		}
@@ -478,6 +629,16 @@ func approvalCommitmentCovered(values []ApprovalCommitment, expected ApprovalCom
 		ownerCovered := value.OwnerID == expected.OwnerID || expected.OwnerID == "" && singleton && value.OwnerID != ""
 		if value.OwnerType == expected.OwnerType && ownerCovered &&
 			riskRank(value.RequireApprovalAt) >= 0 && riskRank(value.RequireApprovalAt) <= riskRank(expected.RequireApprovalAt) {
+			return true
+		}
+	}
+	return false
+}
+
+func approvalTimeoutCommitmentCovered(values []ApprovalTimeoutCommitment, expected ApprovalTimeoutCommitment, singleton bool) bool {
+	for _, value := range values {
+		ownerCovered := value.OwnerID == expected.OwnerID || expected.OwnerID == "" && singleton && value.OwnerID != ""
+		if value.OwnerType == expected.OwnerType && ownerCovered && value.AfterSeconds == expected.AfterSeconds && value.Decision == expected.Decision {
 			return true
 		}
 	}

@@ -68,6 +68,53 @@ func TestCompilerDeterministicallyRepairsShippedSingleAgentSREApproval(t *testin
 	}
 }
 
+func TestCompilerOwnsExplicitAutomaticApprovalTimeout(t *testing.T) {
+	agentCount := 1
+	candidate := releaseNotesCandidate(nil, capability.RiskLevelWrite)
+	commitment := ApprovalTimeoutCommitment{OwnerType: CommitmentOwnerAgent, AfterSeconds: 15 * 60, Decision: "approve"}
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		Commitments: PromptCommitments{
+			AgentCount:           &agentCount,
+			ApprovalRequirements: []ApprovalCommitment{{OwnerType: CommitmentOwnerAgent, RequireApprovalAt: capability.RiskLevelWrite}},
+			ApprovalTimeouts:     []ApprovalTimeoutCommitment{commitment},
+		},
+	})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{
+		Mode:   ModeCreate,
+		Prompt: "Create one agent that asks for approval before posting and automatically approves itself after 15minutes.",
+	})
+	if err != nil || !result.Valid {
+		t.Fatalf("automatic timeout candidate = %#v, %v", result, err)
+	}
+	timeout := result.Candidate.Agents[0].Authority.ApprovalTimeout
+	if timeout == nil || timeout.AfterSeconds != 900 || timeout.Decision != "approve" || len(result.Commitments.ApprovalTimeouts) != 1 {
+		t.Fatalf("automatic timeout = %#v; commitments = %#v", timeout, result.Commitments)
+	}
+}
+
+func TestCompilerRejectsProviderInventedAutomaticApprovalTimeout(t *testing.T) {
+	agentCount := 1
+	candidate := releaseNotesCandidate(nil, capability.RiskLevelWrite)
+	candidate.Agents[0].Authority.ApprovalTimeout = &agent.ApprovalTimeoutPolicy{AfterSeconds: 900, Decision: "approve"}
+	payload, _ := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		Commitments: PromptCommitments{
+			AgentCount:       &agentCount,
+			ApprovalTimeouts: []ApprovalTimeoutCommitment{{OwnerType: CommitmentOwnerAgent, AfterSeconds: 900, Decision: "approve"}},
+		},
+	})
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create one release notes agent."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || !hasValidationCode(result.Validation, "uncommitted_approval_timeout") || len(result.Commitments.ApprovalTimeouts) != 0 {
+		t.Fatalf("invented timeout candidate = %#v", result)
+	}
+}
+
 func TestCompilerRepairsLiveReleaseNotesCommitmentsOnce(t *testing.T) {
 	generated, _ := json.Marshal(GenerationResponse{Candidate: releaseNotesCandidate(nil, ""), Commitments: PromptCommitments{}})
 	repairedCandidate := releaseNotesCandidate([]workforce.ObjectiveTemplate{{

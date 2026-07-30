@@ -84,6 +84,7 @@ type (
 	AgentCompilationStatus                    = kernelagent.CompilationStatus
 	AgentSkillRequirement                     = kernelagent.SkillRequirement
 	AgentAuthorityPolicy                      = kernelagent.AuthorityPolicy
+	AgentApprovalTimeoutPolicy                = kernelagent.ApprovalTimeoutPolicy
 	AgentMemoryPolicy                         = kernelagent.MemoryPolicy
 	AgentEscalationPolicy                     = kernelagent.EscalationPolicy
 	AgentObjectiveTemplate                    = kernelagent.ObjectiveTemplate
@@ -2011,6 +2012,9 @@ const (
 	ApprovalStatusApproved = runtime.ApprovalStatusApproved
 	ApprovalStatusRejected = runtime.ApprovalStatusRejected
 	ApprovalStatusExpired  = runtime.ApprovalStatusExpired
+
+	ApprovalTimeoutExpire  = runtime.ApprovalTimeoutExpire
+	ApprovalTimeoutApprove = runtime.ApprovalTimeoutApprove
 
 	SkillSourceWorkspace    = skillsource.RootWorkspace
 	SkillSourceProjectAgent = skillsource.RootProjectAgent

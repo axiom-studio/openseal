@@ -65,8 +65,8 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 			continue
 		}
 		if !now.Before(approval.ExpiresAt) {
-			if err := w.expire(ctx, approval, now); err != nil {
-				processErrors = append(processErrors, fmt.Errorf("expire approval %s: %w", approval.ID, err))
+			if err := w.resolveTimeout(ctx, approval, now); err != nil {
+				processErrors = append(processErrors, fmt.Errorf("resolve approval timeout %s: %w", approval.ID, err))
 			}
 			continue
 		}
@@ -122,30 +122,25 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 	return err
 }
 
-func (w *ApprovalNotificationWorker) expire(ctx context.Context, approval *ApprovalCheckpoint, now time.Time) error {
+func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approval *ApprovalCheckpoint, now time.Time) error {
 	coordinator := NewApprovalCoordinator(w.store, w.store, EligibleApprovalAuthorizer{})
 	coordinator.now = func() time.Time { return now }
-	resolved, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
-		Scope: approval.Scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
-		DecisionID: "approval-expiry:" + approval.ID + ":" + approval.ExpiresAt.UTC().Format(time.RFC3339Nano),
-		Approve:    false, Principal: ApprovalPrincipal{Type: "system", ID: "approval-expiry-worker"},
-		Reason: "Approval deadline elapsed", CorrelationID: approval.ID,
-	})
+	resolved, err := coordinator.ResolveTimeout(ctx, approval.Scope, approval.ID, approval.Revision, approval.ID)
 	if err != nil {
 		return err
 	}
-	if resolved == nil || resolved.Approval == nil || resolved.Approval.Status != ApprovalStatusExpired {
-		return errors.New("approval expiry did not reach the terminal expired state")
+	if resolved == nil || resolved.Approval == nil || (resolved.Approval.Status != ApprovalStatusExpired && resolved.Approval.Status != ApprovalStatusApproved) {
+		return errors.New("approval timeout did not reach a terminal state")
 	}
 	for _, destination := range approval.Destinations {
-		if err := w.updateExpiredCard(ctx, resolved.Approval, destination); err != nil {
+		if err := w.updateTimeoutCard(ctx, resolved.Approval, destination); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (w *ApprovalNotificationWorker) updateExpiredCard(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
+func (w *ApprovalNotificationWorker) updateTimeoutCard(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
 	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
 	if err != nil {
 		return err
@@ -270,6 +265,9 @@ func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall)
 		"policyReason": approval.PolicyReason, "proposedAction": cloneMap(approval.ProposedAction),
 		"expiresAt": approval.ExpiresAt,
 	}
+	if approval.TimeoutDecision != "" {
+		payload["timeoutDecision"] = approval.TimeoutDecision
+	}
 	if call != nil {
 		payload["invocationDigest"] = call.InvocationDigest
 		payload["actionStatus"] = call.Status
@@ -359,6 +357,10 @@ func (w *ApprovalNotificationWorker) postOutcomeMessage(
 }
 
 func approvalNotificationText(approval *ApprovalCheckpoint, call *ActionCall) string {
-	return fmt.Sprintf("Approval required: %s (%s.%s, risk %s). Expires %s.",
-		approval.Summary, call.SkillID, call.Action, approval.Risk, approval.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"))
+	deadline := "Expires"
+	if approval.TimeoutDecision == ApprovalTimeoutApprove {
+		deadline = "Auto-approves"
+	}
+	return fmt.Sprintf("Approval required: %s (%s.%s, risk %s). %s %s.",
+		approval.Summary, call.SkillID, call.Action, approval.Risk, deadline, approval.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"))
 }

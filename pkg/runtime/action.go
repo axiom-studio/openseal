@@ -181,6 +181,16 @@ const (
 	ApprovalStatusCanceled ApprovalStatus = "canceled"
 )
 
+// ApprovalTimeoutDecision is the reviewed outcome applied when an approval
+// remains pending through its deadline. The zero value is deliberately the
+// safe expire behavior for approvals created before this policy existed.
+type ApprovalTimeoutDecision string
+
+const (
+	ApprovalTimeoutExpire  ApprovalTimeoutDecision = "expire"
+	ApprovalTimeoutApprove ApprovalTimeoutDecision = "approve"
+)
+
 type ApprovalPrincipal struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
@@ -191,27 +201,28 @@ type ApprovalDestination struct {
 }
 
 type ApprovalCheckpoint struct {
-	ID                     string                 `json:"id"`
-	Scope                  Scope                  `json:"scope"`
-	RunID                  string                 `json:"runId"`
-	ActionCallID           string                 `json:"actionCallId"`
-	Status                 ApprovalStatus         `json:"status"`
-	Risk                   skill.RiskLevel        `json:"risk"`
-	Summary                string                 `json:"summary"`
-	PolicyReason           string                 `json:"policyReason,omitempty"`
-	ProposedAction         map[string]interface{} `json:"proposedAction"`
-	EvidenceRefs           []string               `json:"evidenceRefs,omitempty"`
-	EligibleApprovers      []ApprovalPrincipal    `json:"eligibleApprovers"`
-	Destinations           []ApprovalDestination  `json:"destinations,omitempty"`
-	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint,omitempty"`
-	ExpiresAt              time.Time              `json:"expiresAt"`
-	DecisionBy             *ApprovalPrincipal     `json:"decisionBy,omitempty"`
-	DecisionID             string                 `json:"decisionId,omitempty"`
-	DecisionReason         string                 `json:"decisionReason,omitempty"`
-	Revision               int64                  `json:"revision"`
-	CreatedAt              time.Time              `json:"createdAt"`
-	UpdatedAt              time.Time              `json:"updatedAt"`
-	DecidedAt              *time.Time             `json:"decidedAt,omitempty"`
+	ID                     string                  `json:"id"`
+	Scope                  Scope                   `json:"scope"`
+	RunID                  string                  `json:"runId"`
+	ActionCallID           string                  `json:"actionCallId"`
+	Status                 ApprovalStatus          `json:"status"`
+	Risk                   skill.RiskLevel         `json:"risk"`
+	Summary                string                  `json:"summary"`
+	PolicyReason           string                  `json:"policyReason,omitempty"`
+	ProposedAction         map[string]interface{}  `json:"proposedAction"`
+	EvidenceRefs           []string                `json:"evidenceRefs,omitempty"`
+	EligibleApprovers      []ApprovalPrincipal     `json:"eligibleApprovers"`
+	Destinations           []ApprovalDestination   `json:"destinations,omitempty"`
+	ContinuationCheckpoint map[string]interface{}  `json:"continuationCheckpoint,omitempty"`
+	ExpiresAt              time.Time               `json:"expiresAt"`
+	TimeoutDecision        ApprovalTimeoutDecision `json:"timeoutDecision,omitempty"`
+	DecisionBy             *ApprovalPrincipal      `json:"decisionBy,omitempty"`
+	DecisionID             string                  `json:"decisionId,omitempty"`
+	DecisionReason         string                  `json:"decisionReason,omitempty"`
+	Revision               int64                   `json:"revision"`
+	CreatedAt              time.Time               `json:"createdAt"`
+	UpdatedAt              time.Time               `json:"updatedAt"`
+	DecidedAt              *time.Time              `json:"decidedAt,omitempty"`
 }
 
 func (a *ApprovalCheckpoint) Validate() error {
@@ -227,6 +238,9 @@ func (a *ApprovalCheckpoint) Validate() error {
 	}
 	if !validApprovalStatus(a.Status) {
 		return errors.New("approval status is invalid")
+	}
+	if a.TimeoutDecision != "" && a.TimeoutDecision != ApprovalTimeoutExpire && a.TimeoutDecision != ApprovalTimeoutApprove {
+		return errors.New("approval timeout decision is invalid")
 	}
 	for _, principal := range a.EligibleApprovers {
 		if strings.TrimSpace(principal.Type) == "" || strings.TrimSpace(principal.ID) == "" {

@@ -151,6 +151,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		materializeDefaultAgentSkillAuthority(&generated.Candidate)
 		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
+		applyExtractedApprovalTimeouts(&generated.Candidate, extractedCommitments)
 		normalizeUnboundAmendmentPolicies(&generated.Candidate)
 		commitments, commitmentIssues := effectivePromptCommitments(request.Prompt, generated.Commitments)
 		applyActivationCommitment(&generated.Candidate, commitments)

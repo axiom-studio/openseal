@@ -552,11 +552,12 @@ func (r GenerationResponse) MarshalJSON() ([]byte, error) {
 // and approval clauses. Open-ended semantic equivalence remains outside this
 // deterministic contract.
 type PromptCommitments struct {
-	AgentCount           *int                       `json:"agentCount,omitempty"`
-	TeamCount            *int                       `json:"teamCount,omitempty"`
-	ObjectiveCounts      []ObjectiveCountCommitment `json:"objectiveCounts,omitempty"`
-	Activation           ActivationCommitment       `json:"activation,omitempty"`
-	ApprovalRequirements []ApprovalCommitment       `json:"approvalRequirements,omitempty"`
+	AgentCount           *int                        `json:"agentCount,omitempty"`
+	TeamCount            *int                        `json:"teamCount,omitempty"`
+	ObjectiveCounts      []ObjectiveCountCommitment  `json:"objectiveCounts,omitempty"`
+	Activation           ActivationCommitment        `json:"activation,omitempty"`
+	ApprovalRequirements []ApprovalCommitment        `json:"approvalRequirements,omitempty"`
+	ApprovalTimeouts     []ApprovalTimeoutCommitment `json:"approvalTimeouts,omitempty"`
 }
 
 type CommitmentOwnerType string
@@ -581,6 +582,13 @@ type ApprovalCommitment struct {
 	OwnerType         CommitmentOwnerType  `json:"ownerType"`
 	OwnerID           string               `json:"ownerId,omitempty"`
 	RequireApprovalAt capability.RiskLevel `json:"requireApprovalAt"`
+}
+
+type ApprovalTimeoutCommitment struct {
+	OwnerType    CommitmentOwnerType `json:"ownerType"`
+	OwnerID      string              `json:"ownerId,omitempty"`
+	AfterSeconds int64               `json:"afterSeconds"`
+	Decision     string              `json:"decision"`
 }
 
 type ValidationIssue struct {
