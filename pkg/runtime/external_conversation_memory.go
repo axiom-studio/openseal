@@ -129,7 +129,7 @@ func (s *MemoryStore) UpdateExternalConversationEndpoint(_ context.Context, endp
 	}
 	if current.Revision != expectedRevision || endpoint.Revision != expectedRevision+1 ||
 		current.Scope != endpoint.Scope || current.Owner != endpoint.Owner || current.DeploymentID != endpoint.DeploymentID ||
-		current.Adapter != endpoint.Adapter || current.Provider != endpoint.Provider || current.Mode != endpoint.Mode ||
+		current.Provider != endpoint.Provider || current.Mode != endpoint.Mode ||
 		current.IngressRoute != endpoint.IngressRoute ||
 		!current.CreatedAt.Equal(endpoint.CreatedAt) {
 		return ErrExternalConversationConflict
