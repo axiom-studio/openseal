@@ -192,7 +192,8 @@ func TestSQLiteExternalConversationDeliveryRebindsAfterEndpointUpgrade(t *testin
 	delivery := &ExternalConversationDelivery{
 		ID: "delivery-rebind", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: 1, Adapter: adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-1",
-		OrderingKey: "order-1", IdempotencyKey: "approval:one", Status: ExternalConversationDeliveryRetry,
+		OrderingKey: "order-1", Parameters: map[string]interface{}{"approval": map[string]interface{}{"revision": int64(1)}},
+		IdempotencyKey: "approval:one", Status: ExternalConversationDeliveryRetry,
 		Attempt: 1, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute), ErrorCode: "endpoint_or_adapter_conflict",
 		Summary: "The exact adapter changed.", Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
