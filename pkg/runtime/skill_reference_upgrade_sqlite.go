@@ -101,6 +101,40 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return err
 		}
 	}
+	for _, mutation := range application.ConversationEndpoints {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = conn.ExecContext(ctx, `UPDATE external_conversation_endpoints
+			SET ingress_route=?,provider=?,status=?,revision=?,updated_at=?,payload=?
+			WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, mutation.Value.IngressRoute,
+			mutation.Value.Provider, mutation.Value.Status, mutation.Value.Revision, mutation.Value.UpdatedAt,
+			string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
+	}
+	for _, mutation := range application.CallbackRegistrations {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = conn.ExecContext(ctx, `UPDATE callback_registrations
+			SET ingress_route=?,provider=?,status=?,revision=?,updated_at=?,payload=?
+			WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, mutation.Value.IngressRoute,
+			mutation.Value.Provider, mutation.Value.Status, mutation.Value.Revision, mutation.Value.UpdatedAt,
+			string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
+	}
 	if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return err
 	}

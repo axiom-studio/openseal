@@ -92,5 +92,39 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return err
 		}
 	}
+	for _, mutation := range application.ConversationEndpoints {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("external_conversation_endpoints")+`
+			SET ingress_route=$1,provider=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
+			WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, mutation.Value.IngressRoute,
+			mutation.Value.Provider, mutation.Value.Status, mutation.Value.Revision, mutation.Value.UpdatedAt,
+			string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
+	}
+	for _, mutation := range application.CallbackRegistrations {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("callback_registrations")+`
+			SET ingress_route=$1,provider=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
+			WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, mutation.Value.IngressRoute,
+			mutation.Value.Provider, mutation.Value.Status, mutation.Value.Revision, mutation.Value.UpdatedAt,
+			string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
+	}
 	return tx.Commit()
 }

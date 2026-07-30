@@ -58,6 +58,18 @@ type SkillReferenceTeamAuthorityImpact struct {
 	AuthorizedRoleIDs []string `json:"authorizedRoleIds"`
 }
 
+type SkillReferenceConversationEndpointImpact struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+	AdapterID        string `json:"adapterId"`
+}
+
+type SkillReferenceCallbackRegistrationImpact struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+	AdapterID        string `json:"adapterId"`
+}
+
 type SkillReferenceUpgradeFinding struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -67,20 +79,22 @@ type SkillReferenceUpgradeFinding struct {
 // durable reference that must move together. Historical Runs and ActionCalls
 // are deliberately absent and remain immutable.
 type SkillReferenceUpgradePlan struct {
-	APIVersion              string                             `json:"apiVersion"`
-	Scope                   Scope                              `json:"scope"`
-	DeploymentID            string                             `json:"deploymentId"`
-	BindingID               string                             `json:"bindingId"`
-	ExpectedBindingRevision int64                              `json:"expectedBindingRevision"`
-	From                    SkillReferenceIdentity             `json:"from"`
-	To                      SkillReferenceIdentity             `json:"to"`
-	Objectives              []SkillReferenceObjectiveImpact    `json:"objectives,omitempty"`
-	Projects                []SkillReferenceProjectImpact      `json:"projects,omitempty"`
-	TeamAuthority           *SkillReferenceTeamAuthorityImpact `json:"teamAuthority,omitempty"`
-	Findings                []SkillReferenceUpgradeFinding     `json:"findings,omitempty"`
-	ApprovalRequired        bool                               `json:"approvalRequired"`
-	Digest                  string                             `json:"digest"`
-	GeneratedAt             time.Time                          `json:"generatedAt"`
+	APIVersion              string                                     `json:"apiVersion"`
+	Scope                   Scope                                      `json:"scope"`
+	DeploymentID            string                                     `json:"deploymentId"`
+	BindingID               string                                     `json:"bindingId"`
+	ExpectedBindingRevision int64                                      `json:"expectedBindingRevision"`
+	From                    SkillReferenceIdentity                     `json:"from"`
+	To                      SkillReferenceIdentity                     `json:"to"`
+	Objectives              []SkillReferenceObjectiveImpact            `json:"objectives,omitempty"`
+	Projects                []SkillReferenceProjectImpact              `json:"projects,omitempty"`
+	ConversationEndpoints   []SkillReferenceConversationEndpointImpact `json:"conversationEndpoints,omitempty"`
+	CallbackRegistrations   []SkillReferenceCallbackRegistrationImpact `json:"callbackRegistrations,omitempty"`
+	TeamAuthority           *SkillReferenceTeamAuthorityImpact         `json:"teamAuthority,omitempty"`
+	Findings                []SkillReferenceUpgradeFinding             `json:"findings,omitempty"`
+	ApprovalRequired        bool                                       `json:"approvalRequired"`
+	Digest                  string                                     `json:"digest"`
+	GeneratedAt             time.Time                                  `json:"generatedAt"`
 }
 
 type PlanSkillReferenceUpgradeRequest struct {
@@ -104,21 +118,23 @@ type ApplySkillReferenceUpgradeRequest struct {
 }
 
 type SkillReferenceUpgradeReceipt struct {
-	APIVersion      string                          `json:"apiVersion"`
-	PlanDigest      string                          `json:"planDigest"`
-	Scope           Scope                           `json:"scope"`
-	DeploymentID    string                          `json:"deploymentId"`
-	BindingID       string                          `json:"bindingId"`
-	BindingRevision int64                           `json:"bindingRevision"`
-	From            SkillReferenceIdentity          `json:"from"`
-	To              SkillReferenceIdentity          `json:"to"`
-	Objectives      []SkillReferenceObjectiveImpact `json:"objectives,omitempty"`
-	Projects        []SkillReferenceProjectImpact   `json:"projects,omitempty"`
-	Actor           ActivityActor                   `json:"actor"`
-	Reason          string                          `json:"reason"`
-	Approval        *SkillReferenceUpgradeApproval  `json:"approval,omitempty"`
-	ActivityIDs     []string                        `json:"activityIds,omitempty"`
-	AppliedAt       time.Time                       `json:"appliedAt"`
+	APIVersion            string                                     `json:"apiVersion"`
+	PlanDigest            string                                     `json:"planDigest"`
+	Scope                 Scope                                      `json:"scope"`
+	DeploymentID          string                                     `json:"deploymentId"`
+	BindingID             string                                     `json:"bindingId"`
+	BindingRevision       int64                                      `json:"bindingRevision"`
+	From                  SkillReferenceIdentity                     `json:"from"`
+	To                    SkillReferenceIdentity                     `json:"to"`
+	Objectives            []SkillReferenceObjectiveImpact            `json:"objectives,omitempty"`
+	Projects              []SkillReferenceProjectImpact              `json:"projects,omitempty"`
+	ConversationEndpoints []SkillReferenceConversationEndpointImpact `json:"conversationEndpoints,omitempty"`
+	CallbackRegistrations []SkillReferenceCallbackRegistrationImpact `json:"callbackRegistrations,omitempty"`
+	Actor                 ActivityActor                              `json:"actor"`
+	Reason                string                                     `json:"reason"`
+	Approval              *SkillReferenceUpgradeApproval             `json:"approval,omitempty"`
+	ActivityIDs           []string                                   `json:"activityIds,omitempty"`
+	AppliedAt             time.Time                                  `json:"appliedAt"`
 }
 
 type SkillReferenceObjectiveMutation struct {
@@ -133,21 +149,35 @@ type SkillReferenceProjectMutation struct {
 	Event            *ActivityEvent
 }
 
+type SkillReferenceConversationEndpointMutation struct {
+	Value            *ExternalConversationEndpoint
+	ExpectedRevision int64
+}
+
+type SkillReferenceCallbackRegistrationMutation struct {
+	Value            *CallbackRegistration
+	ExpectedRevision int64
+}
+
 // SkillReferenceUpgradeMutation is validated and materialized by the portable
 // service. Store implementations must apply all records in one transaction or
 // leave every record unchanged.
 type SkillReferenceUpgradeMutation struct {
-	Plan       *SkillReferenceUpgradePlan
-	Binding    *skill.Binding
-	Objectives []SkillReferenceObjectiveMutation
-	Projects   []SkillReferenceProjectMutation
-	Receipt    *SkillReferenceUpgradeReceipt
+	Plan                  *SkillReferenceUpgradePlan
+	Binding               *skill.Binding
+	Objectives            []SkillReferenceObjectiveMutation
+	Projects              []SkillReferenceProjectMutation
+	ConversationEndpoints []SkillReferenceConversationEndpointMutation
+	CallbackRegistrations []SkillReferenceCallbackRegistrationMutation
+	Receipt               *SkillReferenceUpgradeReceipt
 }
 
 type SkillReferenceUpgradeStore interface {
 	skill.CatalogStore
 	PortfolioStore
 	ProjectStore
+	ExternalConversationEndpointStore
+	CallbackRegistrationStore
 	ApplySkillReferenceUpgrade(context.Context, *SkillReferenceUpgradeMutation) error
 }
 
@@ -163,7 +193,9 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 		mutation.Binding.DeploymentID != mutation.Plan.DeploymentID ||
 		mutation.Binding.Revision != mutation.Plan.ExpectedBindingRevision+1 ||
 		len(mutation.Objectives) != len(mutation.Plan.Objectives) ||
-		len(mutation.Projects) != len(mutation.Plan.Projects) {
+		len(mutation.Projects) != len(mutation.Plan.Projects) ||
+		len(mutation.ConversationEndpoints) != len(mutation.Plan.ConversationEndpoints) ||
+		len(mutation.CallbackRegistrations) != len(mutation.Plan.CallbackRegistrations) {
 		return ErrSkillReferenceUpgradeInvalid
 	}
 	objectiveRevisions := make(map[string]int64, len(mutation.Plan.Objectives))
@@ -196,6 +228,32 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 		}
 		if err := item.Event.Validate(); err != nil {
 			return fmt.Errorf("%w: project activity: %v", ErrSkillReferenceUpgradeInvalid, err)
+		}
+	}
+	endpointRevisions := make(map[string]int64, len(mutation.Plan.ConversationEndpoints))
+	for _, impact := range mutation.Plan.ConversationEndpoints {
+		endpointRevisions[impact.ID] = impact.ExpectedRevision
+	}
+	for _, item := range mutation.ConversationEndpoints {
+		if item.Value == nil || item.ExpectedRevision != endpointRevisions[item.Value.ID] ||
+			item.Value.Revision != item.ExpectedRevision+1 || item.Value.Scope != mutation.Plan.Scope {
+			return ErrSkillReferenceUpgradeInvalid
+		}
+		if err := item.Value.Validate(); err != nil {
+			return fmt.Errorf("%w: conversation endpoint %s: %v", ErrSkillReferenceUpgradeInvalid, item.Value.ID, err)
+		}
+	}
+	callbackRevisions := make(map[string]int64, len(mutation.Plan.CallbackRegistrations))
+	for _, impact := range mutation.Plan.CallbackRegistrations {
+		callbackRevisions[impact.ID] = impact.ExpectedRevision
+	}
+	for _, item := range mutation.CallbackRegistrations {
+		if item.Value == nil || item.ExpectedRevision != callbackRevisions[item.Value.ID] ||
+			item.Value.Revision != item.ExpectedRevision+1 || item.Value.Scope != mutation.Plan.Scope {
+			return ErrSkillReferenceUpgradeInvalid
+		}
+		if err := item.Value.Validate(); err != nil {
+			return fmt.Errorf("%w: callback registration %s: %v", ErrSkillReferenceUpgradeInvalid, item.Value.ID, err)
 		}
 	}
 	return nil
@@ -281,6 +339,45 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, fmt.Errorf("%w: current Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
 	}
 
+	conversationEndpoints, err := listUpgradeConversationEndpoints(ctx, s.store, req.Scope)
+	if err != nil {
+		return nil, err
+	}
+	conversationImpacts := make([]SkillReferenceConversationEndpointImpact, 0)
+	for _, endpoint := range conversationEndpoints {
+		if endpoint == nil || endpoint.DeploymentID != req.DeploymentID ||
+			!upgradeConversationReferenceMatches(endpoint.Adapter, current) {
+			continue
+		}
+		adapter, ok := target.ConversationAdapters[endpoint.Adapter.AdapterID]
+		if !ok || adapter.Provider != endpoint.Provider || !containsConversationEndpointMode(adapter.EndpointModes, endpoint.Mode) ||
+			endpoint.Policy.Validate(endpoint.Mode, adapter.Features) != nil {
+			return nil, fmt.Errorf("%w: conversation endpoint %s is incompatible with target adapter %s", ErrSkillReferenceUpgradeInvalid, endpoint.ID, endpoint.Adapter.AdapterID)
+		}
+		conversationImpacts = append(conversationImpacts, SkillReferenceConversationEndpointImpact{
+			ID: endpoint.ID, ExpectedRevision: endpoint.Revision, AdapterID: endpoint.Adapter.AdapterID,
+		})
+	}
+	callbackRegistrations, err := listUpgradeCallbackRegistrations(ctx, s.store, req.Scope)
+	if err != nil {
+		return nil, err
+	}
+	callbackImpacts := make([]SkillReferenceCallbackRegistrationImpact, 0)
+	for _, registration := range callbackRegistrations {
+		if registration == nil || registration.DeploymentID != req.DeploymentID ||
+			!upgradeCallbackReferenceMatches(registration.Adapter, current) {
+			continue
+		}
+		adapter, ok := target.CallbackAdapters[registration.Adapter.AdapterID]
+		if !ok || adapter.Provider != registration.Provider || strings.TrimSpace(adapter.Transport.IngressEndpoint) == "" ||
+			!callbackSubscriptionsSupported(registration.Subscriptions, adapter.EventTypes) {
+			return nil, fmt.Errorf("%w: callback registration %s is incompatible with target adapter %s", ErrSkillReferenceUpgradeInvalid, registration.ID, registration.Adapter.AdapterID)
+		}
+		callbackImpacts = append(callbackImpacts, SkillReferenceCallbackRegistrationImpact{
+			ID: registration.ID, ExpectedRevision: registration.Revision, AdapterID: registration.Adapter.AdapterID,
+		})
+	}
+
 	objectiveImpacts := make([]SkillReferenceObjectiveImpact, 0)
 	referencedActions := make(map[string]bool)
 	projects, err := s.store.ListProjects(ctx, ProjectFilter{Scope: req.Scope})
@@ -310,6 +407,8 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	}
 	sort.Slice(objectiveImpacts, func(i, j int) bool { return objectiveImpacts[i].ID < objectiveImpacts[j].ID })
 	sort.Slice(projectImpacts, func(i, j int) bool { return projectImpacts[i].ID < projectImpacts[j].ID })
+	sort.Slice(conversationImpacts, func(i, j int) bool { return conversationImpacts[i].ID < conversationImpacts[j].ID })
+	sort.Slice(callbackImpacts, func(i, j int) bool { return callbackImpacts[i].ID < callbackImpacts[j].ID })
 
 	findings := compareUpgradeContracts(previous, target, current.AllowedActions, referencedActions)
 	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, target)
@@ -321,7 +420,8 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		BindingID: current.ID, ExpectedBindingRevision: current.Revision,
 		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
-		Objectives: objectiveImpacts, Projects: projectImpacts, TeamAuthority: teamAuthority, Findings: findings,
+		Objectives: objectiveImpacts, Projects: projectImpacts, ConversationEndpoints: conversationImpacts,
+		CallbackRegistrations: callbackImpacts, TeamAuthority: teamAuthority, Findings: findings,
 		ApprovalRequired: len(findings) > 0, GeneratedAt: s.now().UTC(),
 	}
 	plan.Digest, err = skillReferenceUpgradeDigest(plan)
@@ -389,6 +489,39 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	objectiveCandidates := make([]SkillReferenceObjectiveMutation, 0, len(current.Objectives))
 	activityIDs := make([]string, 0, len(current.Objectives)+len(current.Projects))
 	projectCandidates := make([]SkillReferenceProjectMutation, 0, len(current.Projects))
+	conversationCandidates := make([]SkillReferenceConversationEndpointMutation, 0, len(current.ConversationEndpoints))
+	for _, impact := range current.ConversationEndpoints {
+		endpoint, loadErr := s.store.GetExternalConversationEndpoint(ctx, current.Scope, impact.ID)
+		if loadErr != nil || endpoint == nil || endpoint.Revision != impact.ExpectedRevision ||
+			!upgradeConversationReferenceMatches(endpoint.Adapter, bindingBeforeUpgrade(binding, current)) {
+			return nil, ErrSkillReferenceUpgradeConflict
+		}
+		next := cloneExternalConversationEndpoint(endpoint)
+		next.Adapter.SkillVersion = current.To.Version
+		next.Adapter.SourceIdentity = current.To.SourceIdentity
+		next.Adapter.BindingRevision = binding.Revision
+		next.Revision++
+		next.UpdatedAt = now
+		conversationCandidates = append(conversationCandidates, SkillReferenceConversationEndpointMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
+	}
+	callbackCandidates := make([]SkillReferenceCallbackRegistrationMutation, 0, len(current.CallbackRegistrations))
+	for _, impact := range current.CallbackRegistrations {
+		registration, loadErr := s.store.GetCallbackRegistration(ctx, current.Scope, impact.ID)
+		if loadErr != nil || registration == nil || registration.Revision != impact.ExpectedRevision ||
+			!upgradeCallbackReferenceMatches(registration.Adapter, bindingBeforeUpgrade(binding, current)) {
+			return nil, ErrSkillReferenceUpgradeConflict
+		}
+		next := cloneCallbackRegistration(registration)
+		next.Adapter.SkillVersion = current.To.Version
+		next.Adapter.SourceIdentity = current.To.SourceIdentity
+		next.Adapter.BindingRevision = binding.Revision
+		next.Revision++
+		next.UpdatedAt = now
+		next.Lifecycle = append(next.Lifecycle, CallbackRegistrationLifecycleEntry{
+			Revision: next.Revision, Action: CallbackRegistrationUpdated, Actor: req.Actor, Reason: req.Reason, At: now,
+		})
+		callbackCandidates = append(callbackCandidates, SkillReferenceCallbackRegistrationMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
+	}
 	for _, impact := range current.Projects {
 		project, loadErr := s.store.GetProject(ctx, current.Scope, impact.ID)
 		if loadErr != nil || project == nil || project.Revision != impact.ExpectedRevision {
@@ -418,14 +551,79 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: current.Digest, Scope: current.Scope,
 		DeploymentID: current.DeploymentID, BindingID: current.BindingID, BindingRevision: binding.Revision,
 		From: current.From, To: current.To, Objectives: current.Objectives, Projects: current.Projects,
+		ConversationEndpoints: current.ConversationEndpoints, CallbackRegistrations: current.CallbackRegistrations,
 		Actor: req.Actor, Reason: req.Reason, Approval: req.Approval, ActivityIDs: activityIDs, AppliedAt: now,
 	}
 	if err := s.store.ApplySkillReferenceUpgrade(ctx, &SkillReferenceUpgradeMutation{
-		Plan: current, Binding: binding, Objectives: objectiveCandidates, Projects: projectCandidates, Receipt: receipt,
+		Plan: current, Binding: binding, Objectives: objectiveCandidates, Projects: projectCandidates,
+		ConversationEndpoints: conversationCandidates, CallbackRegistrations: callbackCandidates, Receipt: receipt,
 	}); err != nil {
 		return nil, err
 	}
 	return receipt, nil
+}
+
+func upgradeConversationReferenceMatches(ref ExternalConversationAdapterReference, binding *skill.Binding) bool {
+	return binding != nil && ref.SkillID == binding.SkillID && ref.SkillVersion == binding.SkillVersion &&
+		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID && ref.BindingRevision == binding.Revision
+}
+
+func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePlan) *skill.Binding {
+	previous := cloneUpgradeBinding(binding)
+	previous.SkillVersion = plan.From.Version
+	previous.SourceIdentity = plan.From.SourceIdentity
+	previous.Revision = plan.ExpectedBindingRevision
+	return previous
+}
+
+func upgradeCallbackReferenceMatches(ref CallbackAdapterReference, binding *skill.Binding) bool {
+	return binding != nil && ref.SkillID == binding.SkillID && ref.SkillVersion == binding.SkillVersion &&
+		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID && ref.BindingRevision == binding.Revision
+}
+
+func callbackSubscriptionsSupported(subscriptions []CallbackSubscription, eventTypes []string) bool {
+	supported := make(map[string]bool, len(eventTypes))
+	for _, eventType := range eventTypes {
+		supported[eventType] = true
+	}
+	for _, subscription := range subscriptions {
+		if !supported[subscription.EventType] {
+			return false
+		}
+	}
+	return true
+}
+
+func listUpgradeConversationEndpoints(ctx context.Context, store ExternalConversationEndpointStore, scope Scope) ([]*ExternalConversationEndpoint, error) {
+	result := make([]*ExternalConversationEndpoint, 0)
+	for offset := 0; ; offset += 500 {
+		page, err := store.ListExternalConversationEndpoints(ctx, ExternalConversationEndpointFilter{
+			Scope: scope, Statuses: []ExternalConversationEndpointStatus{ExternalConversationEndpointActive, ExternalConversationEndpointPaused}, Limit: 500, Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page...)
+		if len(page) < 500 {
+			return result, nil
+		}
+	}
+}
+
+func listUpgradeCallbackRegistrations(ctx context.Context, store CallbackRegistrationStore, scope Scope) ([]*CallbackRegistration, error) {
+	result := make([]*CallbackRegistration, 0)
+	for offset := 0; ; offset += 500 {
+		page, err := store.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{
+			Scope: scope, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive, CallbackRegistrationPaused}, Limit: 500, Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page...)
+		if len(page) < 500 {
+			return result, nil
+		}
+	}
 }
 
 func referenceOwnedOrAssigned(owner ObjectiveOwner, assignedID, deploymentID string) bool {
