@@ -64,6 +64,9 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 	if form.SchemaVersion != HostedTurnFormSchemaVersion {
 		return nil, fmt.Errorf("hosted turn form schemaVersion must be %q", HostedTurnFormSchemaVersion)
 	}
+	if err := ValidateHostedTurnLifecycle(form.NextRunStatus, form.WakeCondition); err != nil {
+		return nil, err
+	}
 	checkpoint, err := cloneHostedTurnObject(form.ContinuationCheckpoint)
 	if err != nil {
 		return nil, err
@@ -163,6 +166,20 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		return nil, errors.New("hosted turn form schema has no object properties")
 	}
 	properties["schemaVersion"] = map[string]interface{}{"type": "string", "const": HostedTurnFormSchemaVersion}
+	properties["nextRunStatus"] = map[string]interface{}{
+		"type": "string",
+		"enum": []string{
+			string(AgentRunStatusRunning),
+			string(AgentRunStatusPaused),
+			string(AgentRunStatusSleeping),
+			string(AgentRunStatusWaitingForDependency),
+			string(AgentRunStatusWaitingForAgent),
+			string(AgentRunStatusWaitingForApproval),
+			string(AgentRunStatusWaitingForEvent),
+			string(AgentRunStatusCompleted),
+			string(AgentRunStatusFailed),
+		},
+	}
 	if len(authority) > 0 {
 		promptBranches := make([]interface{}, 0, len(authority[0].SkillPromptReferences))
 		seen := make(map[string]struct{}, len(authority[0].SkillPromptReferences))
@@ -230,6 +247,28 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		}
 	}
 	return schema, nil
+}
+
+// ValidateHostedTurnLifecycle keeps model-authored lifecycle intent inside the
+// canonical durable Run state machine. A generic "waiting" state is
+// deliberately unsupported: the model must select the exact wait reason and
+// supply the wake source the kernel will persist.
+func ValidateHostedTurnLifecycle(status AgentRunStatus, wake *WakeCondition) error {
+	switch status {
+	case AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusCompleted, AgentRunStatusFailed:
+		if wake != nil {
+			return fmt.Errorf("hosted turn status %s cannot include a wakeCondition", status)
+		}
+		return nil
+	case AgentRunStatusSleeping, AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent,
+		AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent:
+		if wake == nil || strings.TrimSpace(wake.Type) == "" {
+			return fmt.Errorf("hosted turn status %s requires a concrete wakeCondition", status)
+		}
+		return nil
+	default:
+		return fmt.Errorf("hosted turn nextRunStatus %q is not a supported model outcome", status)
+	}
 }
 
 func exactHostedTurnAction(actions []capability.ModelAction, name string) (capability.ModelAction, bool) {
