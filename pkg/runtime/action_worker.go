@@ -317,6 +317,9 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		} else if updatedCall.Status == ActionCallStatusSucceeded && updatedRun.Checkpoint[approvalRecoveryCheckpointKey] != nil {
 			updatedRun.Checkpoint = clearApprovedActionFailure(updatedRun.Checkpoint)
 		}
+		if updatedCall.Status == ActionCallStatusSucceeded && updatedRun.Checkpoint[proposalRecoveryCheckpointKey] != nil {
+			updatedRun.Checkpoint = clearProposalFailure(updatedRun.Checkpoint)
+		}
 		if updatedCall.Status == ActionCallStatusSucceeded {
 			if request := humanInterventionFromAction(updatedCall, now, w.newID); request != nil {
 				updatedRun.Status = AgentRunStatusWaitingForEvent

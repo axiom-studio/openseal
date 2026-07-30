@@ -484,6 +484,58 @@ func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t
 	}
 }
 
+func TestAgentRunWorkerRequeuesAgentProposalFailureWithinBoundedRecovery(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "agent-proposal-recovery"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "Post one reviewed comment", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workerID = "agent-worker"
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindAgentWork, WorkerID: workerID, Now: time.Now(),
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claimed Run = %#v, %v", claimed, err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := &AgentTurn{ID: "turn-commit", ContinuationCheckpoint: map[string]interface{}{
+		"actionInputs": map[string]interface{}{"call": map[string]interface{}{"target": "s4:e9"}},
+	}, RequestedActions: []TurnAction{{
+		Type: "skill_action", Capability: "skill-browser.camoufox-commit", Summary: "Publish comment", InputRef: "/actionInputs/call",
+	}}}
+	pool.failMaterialization(ctx, workerID, claimed, turn, errors.New("target requires a current observation"))
+
+	requeued, err := store.GetAgentRun(ctx, scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery, _ := requeued.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{})
+	if requeued.Status != AgentRunStatusQueued || requeued.Error != "" || requeued.LeaseOwner != "" ||
+		fmt.Sprint(recovery["attempt"]) != "1" || recovery["capability"] != "skill-browser.camoufox-commit" ||
+		recovery["error"] != "target requires a current observation" {
+		t.Fatalf("requeued proposal recovery = %#v", requeued)
+	}
+	second, ok := checkpointGovernedAgentProposalFailure(requeued, turn, "target still requires a current observation")
+	if !ok || fmt.Sprint(second[proposalRecoveryCheckpointKey].(map[string]interface{})["attempt"]) != "2" {
+		t.Fatalf("second proposal recovery = %#v, ok=%v", second, ok)
+	}
+	requeued.Checkpoint = second
+	if _, ok = checkpointGovernedAgentProposalFailure(requeued, turn, "target still invalid"); ok {
+		t.Fatal("proposal recovery exceeded its bounded allowance")
+	}
+}
+
 func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "fork-worker"}
