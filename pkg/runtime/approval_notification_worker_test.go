@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -168,6 +169,33 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("replay deliveries = %#v, %v", deliveries, err)
+	}
+	completedCall := cloneActionCall(resolvedCall)
+	completedCall.Status = ActionCallStatusSucceeded
+	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
+		t.Fatalf("outcome replay = %v", err)
+	}
+	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	if err != nil || len(deliveries) != 4 {
+		t.Fatalf("outcome deliveries = %#v, %v", deliveries, err)
+	}
+	var outcomeMessage, outcomeCard bool
+	for _, delivery := range deliveries {
+		if strings.HasPrefix(delivery.IdempotencyKey, "approval-outcome-delivery:") {
+			outcomeMessage = true
+		}
+		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
+			projected, _ := delivery.Parameters["approval"].(map[string]interface{})
+			if projected["actionStatus"] == ActionCallStatusSucceeded {
+				outcomeCard = true
+			}
+		}
+	}
+	if !outcomeMessage || !outcomeCard {
+		t.Fatalf("terminal channel projection missing: %#v", deliveries)
 	}
 }
 
