@@ -359,11 +359,12 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if !ok {
 			return nil, errors.New("turn host proposed an unauthorized capability")
 		}
-		if action.ExternalOperationPolicy == capability.ExternalOperationRequired && proposed.ExternalOperation == nil {
+		externalOperationPolicy := effectiveExternalOperationPolicy(action.SideEffect, action.ExternalOperationPolicy)
+		if externalOperationPolicy == capability.ExternalOperationRequired && proposed.ExternalOperation == nil {
 			return nil, errors.New("action requires an external operation identity")
 		}
 		if proposed.ExternalOperation != nil {
-			if action.ExternalOperationPolicy == capability.ExternalOperationForbidden {
+			if externalOperationPolicy == capability.ExternalOperationForbidden {
 				return nil, errors.New("action forbids an external operation identity")
 			}
 			if action.SideEffect != capability.SideEffectExternal {
