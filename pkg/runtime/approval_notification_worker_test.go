@@ -107,28 +107,42 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID,
 			"invocationDigest": call.InvocationDigest, "decision": "approve", "principalType": "role", "principalId": "operator", "providerUserId": "U1"},
 	}
-	tampered := decision
+	registration := &CallbackRegistration{Scope: endpoint.Scope}
+	subscription := CallbackSubscription{TargetID: endpoint.ID}
+	callbackEvent := EventEnvelope{
+		ID: decision.ID, Scope: endpoint.Scope, Type: capability.CallbackEventApprovalDecided,
+		Source: "slack", Subject: decision.ExternalMessageID, OccurredAt: now,
+		Attributes: cloneMap(decision.Attributes), Actor: ActivityActor{Type: "callback", ID: "slack-approval"},
+	}
+	consumer := NewApprovalCallbackConsumer(store, transport)
+	tampered := callbackEvent
 	tampered.ID = "slack:approval:T1:1720000000.2:U1"
-	tampered.Attributes = cloneMap(decision.Attributes)
+	tampered.Attributes = cloneMap(callbackEvent.Attributes)
 	tampered.Attributes["invocationDigest"] = "edited-after-review"
-	if _, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: tampered}); err == nil {
+	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, tampered); err == nil {
 		t.Fatal("tampered approval decision was accepted")
 	}
-	unauthorized := decision
+	unauthorized := callbackEvent
 	unauthorized.ID = "slack:approval:T1:1720000000.3:U2"
-	unauthorized.ExternalParticipantID = "U2"
-	unauthorized.Attributes = cloneMap(decision.Attributes)
+	unauthorized.Attributes = cloneMap(callbackEvent.Attributes)
 	unauthorized.Attributes["principalId"] = "viewer"
-	if _, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: unauthorized}); err == nil {
+	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, unauthorized); err == nil {
 		t.Fatal("ineligible approval principal was accepted")
 	}
 	pending, err := store.GetApproval(ctx, endpoint.Scope, approval.ID)
 	if err != nil || pending.Status != ApprovalStatusPending {
 		t.Fatalf("approval after rejected decisions = %#v, %v", pending, err)
 	}
-	resolved, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: decision})
-	if err != nil || resolved.Approval == nil || !resolved.Approval.Resolved || resolved.Approval.Approval.Status != ApprovalStatusApproved || resolved.Approval.Call.Status != ActionCallStatusReady {
-		t.Fatalf("resolution = %#v, %v", resolved, err)
+	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, callbackEvent); err != nil {
+		t.Fatal(err)
+	}
+	resolvedApproval, err := store.GetApproval(ctx, endpoint.Scope, approval.ID)
+	if err != nil || resolvedApproval.Status != ApprovalStatusApproved {
+		t.Fatalf("resolution = %#v, %v", resolvedApproval, err)
+	}
+	resolvedCall, err := store.GetActionCall(ctx, endpoint.Scope, call.ID)
+	if err != nil || resolvedCall.Status != ActionCallStatusReady {
+		t.Fatalf("resolved call = %#v, %v", resolvedCall, err)
 	}
 	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 2 {
@@ -148,9 +162,12 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if decisionCard["status"] != ApprovalStatusApproved || decisionCard["actionStatus"] != ActionCallStatusReady || decisionCard["providerApproverId"] != "U1" {
 		t.Fatalf("decision card = %#v in %#v", decisionCard, decisionDelivery)
 	}
-	replay, err := transport.Receive(ctx, ReceiveExternalConversationEventRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: decision})
-	if err != nil || replay.Approval == nil || !replay.Replayed {
-		t.Fatalf("replay = %#v, %v", replay, err)
+	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, callbackEvent); err != nil {
+		t.Fatalf("replay = %v", err)
+	}
+	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
+	if err != nil || len(deliveries) != 2 {
+		t.Fatalf("replay deliveries = %#v, %v", deliveries, err)
 	}
 }
 

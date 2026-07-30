@@ -18,13 +18,20 @@ type ApprovalCallbackConsumer struct {
 		PortfolioStore
 		ActionStore
 	}
+	notifications ApprovalNotificationStore
+	transport     *ExternalConversationTransportService
 }
 
 func NewApprovalCallbackConsumer(store interface {
 	PortfolioStore
 	ActionStore
-}) *ApprovalCallbackConsumer {
-	return &ApprovalCallbackConsumer{store: store}
+}, transport ...*ExternalConversationTransportService) *ApprovalCallbackConsumer {
+	consumer := &ApprovalCallbackConsumer{store: store}
+	consumer.notifications, _ = store.(ApprovalNotificationStore)
+	if len(transport) > 0 {
+		consumer.transport = transport[0]
+	}
+	return consumer
 }
 
 func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
@@ -71,11 +78,27 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 		reason = "Changes requested through callback"
 	}
 	coordinator := NewApprovalCoordinator(c.store, c.store, EligibleApprovalAuthorizer{})
-	_, err = coordinator.Resolve(ctx, ResolveApprovalRequest{
+	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Approve: decision == "approve",
 		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
 		CorrelationID: event.Subject,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if c.transport == nil {
+		return nil
+	}
+	if c.notifications == nil {
+		return errors.New("external approval notification coordination is unavailable")
+	}
+	providerApproverID, _ := event.Attributes["providerUserId"].(string)
+	if err := enqueueApprovalCardUpdate(
+		ctx, c.notifications, c.transport, resolution.Approval, resolution.Call,
+		ApprovalDestination{EndpointID: subscription.TargetID}, providerApproverID,
+	); err != nil {
+		return fmt.Errorf("enqueue approval card update: %w", err)
+	}
+	return nil
 }

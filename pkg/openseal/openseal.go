@@ -2710,7 +2710,7 @@ func (e *Engine) rebuildCallbacks() error {
 	}
 	e.callbacks.registry = runtime.NewCallbackRegistry(store, e.skills)
 	e.callbacks.ingress = runtime.NewCallbackIngressService(store, e.skills, map[string]runtime.CallbackEventConsumer{
-		"approvals": runtime.NewApprovalCallbackConsumer(store),
+		"approvals": runtime.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
 		"runbooks":  runtime.NewRunbookEventRouter(store),
 	})
 	return nil
