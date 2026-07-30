@@ -61,16 +61,18 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 		return nil, err
 	}
 	deliveries := make([]*ExternalConversationDelivery, 0, len(items))
+	var projectErrors []error
 	for _, item := range items {
 		delivery, projectErr := w.project(ctx, item)
 		if projectErr != nil {
-			return deliveries, projectErr
+			projectErrors = append(projectErrors, fmt.Errorf("project external conversation inbox item %s: %w", item.ID, projectErr))
+			continue
 		}
 		if delivery != nil {
 			deliveries = append(deliveries, delivery)
 		}
 	}
-	return deliveries, nil
+	return deliveries, errors.Join(projectErrors...)
 }
 
 func (w *ExternalConversationReplyWorker) project(
