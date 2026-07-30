@@ -576,13 +576,36 @@ func (s *PostgresStore) EnqueueExternalConversationDelivery(ctx context.Context,
 		return nil, false, err
 	}
 	if existing != nil {
-		if !sameExternalConversationDeliveryIntent(existing, delivery) {
+		if sameExternalConversationDeliveryIntent(existing, delivery) {
+			if err := tx.Commit(); err != nil {
+				return nil, false, err
+			}
+			return existing, true, nil
+		}
+		rebound, ok := rebindExternalConversationDelivery(existing, delivery)
+		if !ok {
+			return nil, false, ErrExternalConversationConflict
+		}
+		payload, marshalErr := json.Marshal(rebound)
+		if marshalErr != nil {
+			return nil, false, marshalErr
+		}
+		result, updateErr := tx.ExecContext(ctx, `UPDATE `+s.table("external_conversation_deliveries")+`
+			SET endpoint_revision=$1,status=$2,available_at=$3,lease_owner=$4,lease_expires_at=$5,revision=$6,payload=$7::jsonb
+			WHERE scope_kind=$8 AND scope_id=$9 AND id=$10 AND revision=$11`,
+			rebound.EndpointRevision, rebound.Status, rebound.AvailableAt, rebound.LeaseOwner,
+			nullablePostgresTime(rebound.LeaseExpiresAt), rebound.Revision, string(payload),
+			rebound.Scope.Kind, rebound.Scope.ID, rebound.ID, existing.Revision)
+		if updateErr != nil {
+			return nil, false, updateErr
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
 			return nil, false, ErrExternalConversationConflict
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, false, err
 		}
-		return existing, true, nil
+		return rebound, true, nil
 	}
 	payload, err := json.Marshal(delivery)
 	if err != nil {
