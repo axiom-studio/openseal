@@ -81,3 +81,27 @@ func TestHostedTurnFormSchemaUsesExactAuthorizedActionInputs(t *testing.T) {
 		t.Fatalf("arguments schema = %#v", arguments)
 	}
 }
+
+func TestHostedTurnFormSchemaOmitsUnavailableProposalFamilies(t *testing.T) {
+	schema, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]interface{})
+	for _, name := range []string{"proposedAction", "proposedDelegation", "proposedFork", "proposedRunbook"} {
+		if _, exists := properties[name]; exists {
+			t.Fatalf("unavailable proposal %s remains in schema", name)
+		}
+	}
+
+	schema, err = HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{CanDelegate: true, CanInvokeRunbook: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties = schema["properties"].(map[string]interface{})
+	for _, name := range []string{"proposedDelegation", "proposedFork", "proposedRunbook"} {
+		if _, exists := properties[name]; !exists {
+			t.Fatalf("authorized proposal %s was removed from schema", name)
+		}
+	}
+}

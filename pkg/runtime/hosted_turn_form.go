@@ -47,6 +47,15 @@ type HostedTurnActionForm struct {
 	ExternalOperation *ExternalOperationIdentity `json:"externalOperation,omitempty"`
 }
 
+// HostedTurnFormAuthority describes which non-Skill proposal families are
+// actually available during one Turn. Supplying it lets a host remove
+// impossible choices from the model-facing form while the kernel remains the
+// final authority during compilation and materialization.
+type HostedTurnFormAuthority struct {
+	CanDelegate      bool
+	CanInvokeRunbook bool
+}
+
 // CompileHostedTurnForm validates the selected action against the exact
 // authorized contract and compiles its inline form into the canonical kernel
 // response. It never supplies missing model values or widens authority.
@@ -128,9 +137,9 @@ func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, er
 }
 
 // HostedTurnFormJSONSchema generates the provider-facing form schema from the
-// Go contract and replaces only the action union with the exact authorized
-// input schemas for this Turn.
-func HostedTurnFormJSONSchema(actions []capability.ModelAction) (map[string]interface{}, error) {
+// Go contract, replaces the action union with the exact authorized input
+// schemas, and can omit proposal families unavailable to this Turn.
+func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...HostedTurnFormAuthority) (map[string]interface{}, error) {
 	inferred := (&inferschema.Reflector{
 		Anonymous: true, ExpandedStruct: true,
 		Namer: func(value reflect.Type) string {
@@ -177,6 +186,15 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction) (map[string]inte
 		delete(properties, "proposedAction")
 	} else {
 		properties["proposedAction"] = map[string]interface{}{"oneOf": branches}
+	}
+	if len(authority) > 0 {
+		if !authority[0].CanDelegate {
+			delete(properties, "proposedDelegation")
+			delete(properties, "proposedFork")
+		}
+		if !authority[0].CanInvokeRunbook {
+			delete(properties, "proposedRunbook")
+		}
 	}
 	return schema, nil
 }
