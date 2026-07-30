@@ -246,6 +246,7 @@ type CreateExternalConversationEndpointRequest struct {
 
 type UpdateExternalConversationEndpointRequest struct {
 	ExpectedRevision int64
+	Adapter          *ExternalConversationAdapterReference
 	Name             *string
 	Address          *string
 	Handler          *ExternalConversationHandler
@@ -364,6 +365,9 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 		return nil, ErrExternalConversationConflict
 	}
 	next := cloneExternalConversationEndpoint(current)
+	if req.Adapter != nil {
+		next.Adapter = normalizeExternalConversationAdapterReference(*req.Adapter)
+	}
 	if req.Name != nil {
 		next.Name = strings.TrimSpace(*req.Name)
 	}

@@ -209,6 +209,7 @@ type CreateCallbackRegistrationRequest struct {
 
 type UpdateCallbackRegistrationRequest struct {
 	ExpectedRevision int64
+	Adapter          *CallbackAdapterReference
 	Name             *string
 	Subscriptions    []CallbackSubscription
 	Configuration    map[string]interface{}
@@ -307,6 +308,9 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope Scope, id string, r
 		return nil, err
 	}
 	previousStatus := current.Status
+	if request.Adapter != nil {
+		current.Adapter = *request.Adapter
+	}
 	if request.Name != nil {
 		current.Name = strings.TrimSpace(*request.Name)
 	}
