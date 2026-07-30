@@ -136,12 +136,22 @@ func externalConversationDeliveryFixture(
 	ctx context.Context,
 	provider string,
 ) (*MemoryStore, *skill.Catalog, *ExternalConversationEndpoint) {
+	return externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend})
+}
+
+func externalConversationDeliveryFixtureWithOperations(
+	t *testing.T,
+	ctx context.Context,
+	provider string,
+	operations []skill.ConversationDeliveryOperation,
+) (*MemoryStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	store := NewMemoryStore()
 	catalog := skill.NewCatalog()
 	definition := slackConversationSkillDefinition()
 	definition.ID, definition.Name = provider, provider
 	adapter := definition.ConversationAdapters["conversations"]
+	adapter.Delivery.Operations = append([]skill.ConversationDeliveryOperation(nil), operations...)
 	adapter.Provider = provider
 	adapter.Name = provider + " conversations"
 	adapter.Transport.IngressEndpoint = provider + ".conversation.ingress"
