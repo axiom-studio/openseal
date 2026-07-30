@@ -111,6 +111,32 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	}
 }
 
+func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	proposal := createApprovalForStore(t, store, now)
+	paused, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{
+		Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: AgentRunCommandPause,
+		Actor: ActivityActor{Type: "user", ID: "operator"},
+	})
+	if err != nil || paused.Run.Status != AgentRunStatusPaused {
+		t.Fatalf("pause pending approval run = %#v, %v", paused, err)
+	}
+	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+	coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
+	expired, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		DecisionID: "orphan-expiry", Principal: ApprovalPrincipal{Type: "system", ID: "expiry-worker"}, Reason: "deadline elapsed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Approval.Status != ApprovalStatusExpired || expired.Call.Status != ActionCallStatusDenied ||
+		expired.Run.Status != AgentRunStatusPaused || len(expired.Run.BudgetReservations) != 0 {
+		t.Fatalf("orphan expiry = %#v", expired)
+	}
+}
+
 func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
