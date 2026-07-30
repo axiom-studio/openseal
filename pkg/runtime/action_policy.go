@@ -10,8 +10,9 @@ import (
 )
 
 type DefaultActionPolicy struct {
-	Approvers   []ApprovalPrincipal
-	ApprovalTTL time.Duration
+	Approvers       []ApprovalPrincipal
+	ApprovalTTL     time.Duration
+	ApprovalTimeout ApprovalTimeoutDecision
 }
 
 func NewDefaultActionPolicy() *DefaultActionPolicy {
@@ -37,6 +38,7 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 		Disposition:       ActionDispositionRequireApproval,
 		Reason:            fmt.Sprintf("%s risk action with %s side effects", action.Risk, action.SideEffect),
 		EligibleApprovers: append([]ApprovalPrincipal(nil), p.Approvers...), ApprovalTTL: ttl,
+		ApprovalTimeout: p.ApprovalTimeout,
 	}, nil
 }
 

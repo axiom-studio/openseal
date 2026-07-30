@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -51,6 +52,10 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	}
 	for _, destination := range definition.Authority.ApprovalDestinations {
 		decision.ApprovalDestinations = append(decision.ApprovalDestinations, runtime.ApprovalDestination{EndpointID: destination.EndpointID})
+	}
+	if timeout := definition.Authority.ApprovalTimeout; timeout != nil {
+		decision.ApprovalTTL = time.Duration(timeout.AfterSeconds) * time.Second
+		decision.ApprovalTimeout = runtime.ApprovalTimeoutDecision(timeout.Decision)
 	}
 	return decision, nil
 }

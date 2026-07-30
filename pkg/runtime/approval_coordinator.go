@@ -44,6 +44,21 @@ func NewApprovalCoordinator(portfolio PortfolioStore, actions ActionStore, autho
 }
 
 func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRequest) (*ApprovalResolutionResult, error) {
+	return c.resolve(ctx, req, false)
+}
+
+// ResolveTimeout applies only the timeout rule durably captured on the
+// approval. It cannot resolve an approval early and does not accept a caller-
+// supplied decision, preventing a worker from widening reviewed authority.
+func (c *ApprovalCoordinator) ResolveTimeout(ctx context.Context, scope Scope, approvalID string, expectedRevision int64, correlationID string) (*ApprovalResolutionResult, error) {
+	return c.resolve(ctx, ResolveApprovalRequest{
+		Scope: scope, ApprovalID: approvalID, ExpectedRevision: expectedRevision,
+		DecisionID: "approval-timeout:" + approvalID, Principal: ApprovalPrincipal{Type: "system", ID: "approval-timeout-worker"},
+		Reason: "Approval deadline elapsed", CorrelationID: correlationID,
+	}, true)
+}
+
+func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRequest, timeout bool) (*ApprovalResolutionResult, error) {
 	if c == nil || c.portfolio == nil || c.actions == nil || c.authorize == nil {
 		return nil, errors.New("approval coordinator is not configured")
 	}
@@ -79,6 +94,9 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 	}
 	now := c.now().UTC()
 	expired := !now.Before(approval.ExpiresAt)
+	if timeout && !expired {
+		return nil, errors.New("approval timeout deadline has not elapsed")
+	}
 	runWaiting := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
 		run.WakeCondition.Type == "approval" && run.WakeCondition.Reference == approval.ID
 	callWaiting := call.Status == ActionCallStatusWaitingApproval && call.ApprovalID == approval.ID
@@ -93,10 +111,16 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 	eventType := "approval.rejected"
 	callStatus := ActionCallStatusDenied
 	if expired {
-		status = ApprovalStatusExpired
-		eventType = "approval.expired"
-		if !callWaiting {
-			callStatus = call.Status
+		if timeout && approval.TimeoutDecision == ApprovalTimeoutApprove && waitingPair {
+			status = ApprovalStatusApproved
+			eventType = "approval.auto_approved"
+			callStatus = ActionCallStatusReady
+		} else {
+			status = ApprovalStatusExpired
+			eventType = "approval.expired"
+			if !callWaiting {
+				callStatus = call.Status
+			}
 		}
 	} else {
 		if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {

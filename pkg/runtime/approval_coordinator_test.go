@@ -111,6 +111,55 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	}
 }
 
+func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "approval-timeout.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, cleanup := testCase.open(t)
+			defer cleanup()
+			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+			proposal := createApprovalForStoreWithTimeout(t, store, now, ApprovalTimeoutApprove)
+			stored, err := store.GetApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID)
+			if err != nil || stored.TimeoutDecision != ApprovalTimeoutApprove {
+				t.Fatalf("persisted timeout policy = %#v, %v", stored, err)
+			}
+
+			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+			coordinator.now = func() time.Time { return stored.ExpiresAt.Add(-time.Second) }
+			if _, err = coordinator.ResolveTimeout(t.Context(), stored.Scope, stored.ID, stored.Revision, stored.ID); err == nil || !strings.Contains(err.Error(), "deadline has not elapsed") {
+				t.Fatalf("early timeout resolution = %v", err)
+			}
+			coordinator.now = func() time.Time { return stored.ExpiresAt.Add(time.Second) }
+			result, err := coordinator.ResolveTimeout(t.Context(), stored.Scope, stored.ID, stored.Revision, stored.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady ||
+				result.Run.Status != AgentRunStatusWaitingForDependency || result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != result.Call.ID {
+				t.Fatalf("timeout approval = %#v", result)
+			}
+			if result.Event == nil || result.Event.EventType != "approval.auto_approved" || result.Event.Actor.ID != "approval-timeout-worker" {
+				t.Fatalf("timeout audit = %#v", result.Event)
+			}
+			retry, err := coordinator.ResolveTimeout(t.Context(), stored.Scope, stored.ID, stored.Revision, stored.ID)
+			if err != nil || retry.Resolved {
+				t.Fatalf("timeout retry = %#v, %v", retry, err)
+			}
+		})
+	}
+}
+
 func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -178,6 +227,10 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 }
 
 func createApprovalForStore(t *testing.T, store KernelStore, now time.Time) *ActionProposalResult {
+	return createApprovalForStoreWithTimeout(t, store, now, "")
+}
+
+func createApprovalForStoreWithTimeout(t *testing.T, store KernelStore, now time.Time, timeout ApprovalTimeoutDecision) *ActionProposalResult {
 	t.Helper()
 	ctx := context.Background()
 	catalog, scope := governedActionCatalog(t)
@@ -195,7 +248,7 @@ func createApprovalForStore(t *testing.T, store KernelStore, now time.Time) *Act
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "alice"}}, ApprovalTTL: time.Hour}, nil
+		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "alice"}}, ApprovalTTL: time.Hour, ApprovalTimeout: timeout}, nil
 	}))
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	ids := []string{"call", "approval", "proposal-event"}
