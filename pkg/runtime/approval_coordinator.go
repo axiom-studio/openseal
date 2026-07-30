@@ -77,19 +77,27 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 	if approval.Revision != req.ExpectedRevision {
 		return nil, ErrRevisionConflict
 	}
-	if run.Status != AgentRunStatusWaitingForApproval || run.WakeCondition == nil || run.WakeCondition.Type != "approval" || run.WakeCondition.Reference != approval.ID {
+	now := c.now().UTC()
+	expired := !now.Before(approval.ExpiresAt)
+	runWaiting := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
+		run.WakeCondition.Type == "approval" && run.WakeCondition.Reference == approval.ID
+	callWaiting := call.Status == ActionCallStatusWaitingApproval && call.ApprovalID == approval.ID
+	waitingPair := runWaiting && callWaiting
+	if !expired && !runWaiting {
 		return nil, fmt.Errorf("%w: run is not waiting on this approval", ErrInvalidRunTransition)
 	}
-	if call.Status != ActionCallStatusWaitingApproval || call.ApprovalID != approval.ID {
+	if !expired && !callWaiting {
 		return nil, fmt.Errorf("%w: action is not waiting on this approval", ErrApprovalResolved)
 	}
-	now := c.now().UTC()
 	status := ApprovalStatusRejected
 	eventType := "approval.rejected"
 	callStatus := ActionCallStatusDenied
-	if !now.Before(approval.ExpiresAt) {
+	if expired {
 		status = ApprovalStatusExpired
 		eventType = "approval.expired"
+		if !callWaiting {
+			callStatus = call.Status
+		}
 	} else {
 		if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {
 			return nil, fmt.Errorf("authorize approval: %w", err)
@@ -113,7 +121,7 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 	updatedCall.AvailableAt = now
 	updatedCall.UpdatedAt = now
 	updatedCall.Revision++
-	if callStatus == ActionCallStatusDenied {
+	if callStatus == ActionCallStatusDenied && callWaiting {
 		updatedCall.Error = string(status)
 		if req.Reason != "" {
 			updatedCall.Error += ": " + req.Reason
@@ -121,25 +129,27 @@ func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRe
 		updatedCall.CompletedAt = &now
 	}
 	updatedRun := cloneAgentRun(run)
-	if callStatus == ActionCallStatusDenied && updatedRun.Budget != nil {
+	if callStatus == ActionCallStatusDenied && callWaiting && updatedRun.Budget != nil {
 		if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
 			return nil, err
 		}
 	}
-	if callStatus == ActionCallStatusReady {
-		updatedRun.Status = AgentRunStatusWaitingForDependency
-		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
-	} else {
-		updatedRun.Status = AgentRunStatusQueued
-		updatedRun.WakeCondition = nil
-		updatedRun.AvailableAt = now
-		updatedRun.QueueEnteredAt = now
-		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, map[string]interface{}{
-			"approvalId": approval.ID, "approvalStatus": status,
-		})
+	if waitingPair {
+		if callStatus == ActionCallStatusReady {
+			updatedRun.Status = AgentRunStatusWaitingForDependency
+			updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
+		} else {
+			updatedRun.Status = AgentRunStatusQueued
+			updatedRun.WakeCondition = nil
+			updatedRun.AvailableAt = now
+			updatedRun.QueueEnteredAt = now
+			updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, map[string]interface{}{
+				"approvalId": approval.ID, "approvalStatus": status,
+			})
+		}
+		updatedRun.LeaseOwner = ""
+		updatedRun.LeaseExpiresAt = nil
 	}
-	updatedRun.LeaseOwner = ""
-	updatedRun.LeaseExpiresAt = nil
 	updatedRun.LastWakeSignalID = req.DecisionID
 	updatedRun.UpdatedAt = now
 	updatedRun.Revision++
