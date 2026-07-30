@@ -582,6 +582,12 @@ func (s *PostgresStore) EnqueueExternalConversationDelivery(ctx context.Context,
 			}
 			return existing, true, nil
 		}
+		if sameExternalConversationDeliveryEffect(existing, delivery) && existing.Status == ExternalConversationDeliveryDelivered {
+			if err := tx.Commit(); err != nil {
+				return nil, false, err
+			}
+			return existing, true, nil
+		}
 		rebound, ok := rebindExternalConversationDelivery(existing, delivery)
 		if !ok {
 			return nil, false, ErrExternalConversationConflict
