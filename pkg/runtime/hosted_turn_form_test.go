@@ -105,3 +105,23 @@ func TestHostedTurnFormSchemaOmitsUnavailableProposalFamilies(t *testing.T) {
 		}
 	}
 }
+
+func TestHostedTurnFormSchemaRequiresExactOfferedSkillDispositions(t *testing.T) {
+	schema, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{
+		SkillPromptReferences: []string{"skill:summarize@1", "skill:research@2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selections := schema["properties"].(map[string]interface{})["skillSelections"].(map[string]interface{})
+	if selections["minItems"] != 2 || selections["maxItems"] != 2 {
+		t.Fatalf("selection cardinality = %#v", selections)
+	}
+	branches := selections["items"].(map[string]interface{})["oneOf"].([]interface{})
+	if got := branches[0].(map[string]interface{})["properties"].(map[string]interface{})["skillRef"].(map[string]interface{})["const"]; got != "skill:summarize@1" {
+		t.Fatalf("first Skill reference = %#v", got)
+	}
+	if _, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{SkillPromptReferences: []string{"skill:summarize@1", "skill:summarize@1"}}); err == nil {
+		t.Fatal("duplicate Skill prompt references were accepted")
+	}
+}
