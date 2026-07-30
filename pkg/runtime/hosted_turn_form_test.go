@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -75,10 +76,30 @@ func TestHostedTurnFormSchemaUsesExactAuthorizedActionInputs(t *testing.T) {
 	if properties["schemaVersion"].(map[string]interface{})["const"] != HostedTurnFormSchemaVersion {
 		t.Fatalf("schema version = %#v", properties["schemaVersion"])
 	}
+	statuses := properties["nextRunStatus"].(map[string]interface{})["enum"].([]string)
+	if slices.Contains(statuses, "waiting") || !slices.Contains(statuses, string(AgentRunStatusWaitingForDependency)) {
+		t.Fatalf("lifecycle statuses = %#v", statuses)
+	}
 	branches := properties["proposedAction"].(map[string]interface{})["oneOf"].([]interface{})
 	arguments := branches[0].(map[string]interface{})["properties"].(map[string]interface{})["arguments"].(map[string]interface{})
 	if arguments["additionalProperties"] != false || arguments["properties"].(map[string]interface{})["target"].(map[string]interface{})["pattern"] != "^s[1-9]" {
 		t.Fatalf("arguments schema = %#v", arguments)
+	}
+}
+
+func TestHostedTurnFormRejectsAmbiguousOrUnwakeableWaitingStatus(t *testing.T) {
+	base := HostedTurnForm{SchemaVersion: HostedTurnFormSchemaVersion, OutputSummary: "wait"}
+	base.NextRunStatus = AgentRunStatus("waiting")
+	if _, err := CompileHostedTurnForm(base, nil); err == nil {
+		t.Fatal("ambiguous waiting status was accepted")
+	}
+	base.NextRunStatus = AgentRunStatusWaitingForDependency
+	if _, err := CompileHostedTurnForm(base, nil); err == nil {
+		t.Fatal("waiting status without a wake condition was accepted")
+	}
+	base.WakeCondition = &WakeCondition{Type: "dependency", Reference: "child-run"}
+	if _, err := CompileHostedTurnForm(base, nil); err != nil {
+		t.Fatalf("typed waiting status was rejected: %v", err)
 	}
 }
 
