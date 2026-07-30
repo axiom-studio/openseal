@@ -87,27 +87,28 @@ const (
 // binds its exact trigger, target, inputs, policy, and operational limits.
 // Scheduling state therefore belongs to the Runbook and never to the outcome.
 type RunbookActivation struct {
-	ID                  string                  `json:"id"`
-	Scope               Scope                   `json:"scope"`
-	Owner               ObjectiveOwner          `json:"owner"`
-	ObjectiveID         string                  `json:"objectiveId"`
-	AssignedAgentID     string                  `json:"assignedAgentId"`
-	DefinitionID        string                  `json:"definitionId"`
-	DefinitionVersion   string                  `json:"definitionVersion"`
-	TriggerID           string                  `json:"triggerId"`
-	Trigger             runbook.Trigger         `json:"trigger"`
-	Input               map[string]interface{}  `json:"input,omitempty"`
-	Policy              map[string]interface{}  `json:"policy,omitempty"`
-	Budget              *BudgetPolicy           `json:"budget,omitempty"`
-	MaximumConcurrent   int                     `json:"maximumConcurrent,omitempty"`
-	Status              RunbookActivationStatus `json:"status"`
-	NextOccurrenceBase  *time.Time              `json:"nextOccurrenceBase,omitempty"`
-	NextRunAt           *time.Time              `json:"nextRunAt,omitempty"`
-	Revision            int64                   `json:"revision"`
-	CreatedAt           time.Time               `json:"createdAt"`
-	UpdatedAt           time.Time               `json:"updatedAt"`
-	IdempotencyKeyHash  string                  `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint string                  `json:"creationFingerprint,omitempty"`
+	ID                   string                  `json:"id"`
+	Scope                Scope                   `json:"scope"`
+	Owner                ObjectiveOwner          `json:"owner"`
+	ObjectiveID          string                  `json:"objectiveId"`
+	AssignedAgentID      string                  `json:"assignedAgentId"`
+	DefinitionID         string                  `json:"definitionId"`
+	DefinitionVersion    string                  `json:"definitionVersion"`
+	TriggerID            string                  `json:"triggerId"`
+	Trigger              runbook.Trigger         `json:"trigger"`
+	Input                map[string]interface{}  `json:"input,omitempty"`
+	Policy               map[string]interface{}  `json:"policy,omitempty"`
+	Budget               *BudgetPolicy           `json:"budget,omitempty"`
+	MaximumConcurrent    int                     `json:"maximumConcurrent,omitempty"`
+	Status               RunbookActivationStatus `json:"status"`
+	NextOccurrenceBase   *time.Time              `json:"nextOccurrenceBase,omitempty"`
+	NextRunAt            *time.Time              `json:"nextRunAt,omitempty"`
+	OccurrencesProcessed int64                   `json:"occurrencesProcessed,omitempty"`
+	Revision             int64                   `json:"revision"`
+	CreatedAt            time.Time               `json:"createdAt"`
+	UpdatedAt            time.Time               `json:"updatedAt"`
+	IdempotencyKeyHash   string                  `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint  string                  `json:"creationFingerprint,omitempty"`
 }
 
 func (a *RunbookActivation) Validate() error {
@@ -166,6 +167,9 @@ func (a *RunbookActivation) Validate() error {
 	if a.MaximumConcurrent < 0 {
 		return errors.New("Runbook activation maximumConcurrent cannot be negative")
 	}
+	if a.OccurrencesProcessed < 0 || a.Trigger.Schedule != nil && a.Trigger.Schedule.MaximumOccurrences > 0 && a.OccurrencesProcessed > a.Trigger.Schedule.MaximumOccurrences {
+		return errors.New("Runbook activation occurrence progress is invalid")
+	}
 	switch a.Status {
 	case RunbookActivationActive, RunbookActivationPaused, RunbookActivationRetired:
 	default:
@@ -176,6 +180,9 @@ func (a *RunbookActivation) Validate() error {
 	}
 	if a.Trigger.Kind == runbook.TriggerEvent && (a.NextOccurrenceBase != nil || a.NextRunAt != nil) {
 		return errors.New("event Runbook activation cannot have a schedule cursor")
+	}
+	if a.Trigger.Kind == runbook.TriggerEvent && a.OccurrencesProcessed != 0 {
+		return errors.New("event Runbook activation cannot have schedule occurrence progress")
 	}
 	if (a.NextOccurrenceBase == nil) != (a.NextRunAt == nil) {
 		return errors.New("Runbook activation schedule cursor requires both base occurrence and due time")

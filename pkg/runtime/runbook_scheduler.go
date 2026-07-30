@@ -18,6 +18,7 @@ type RunbookScheduleResult struct {
 	Backpressured int `json:"backpressured"`
 	Suspended     int `json:"suspended"`
 	Initialized   int `json:"initialized"`
+	Retired       int `json:"retired"`
 }
 
 // RunbookScheduler projects due Runbook trigger occurrences into durable Runs.
@@ -68,6 +69,7 @@ func (s *RunbookScheduler) ReconcileAll(ctx context.Context, limitPerScope int) 
 		total.Backpressured += result.Backpressured
 		total.Suspended += result.Suspended
 		total.Initialized += result.Initialized
+		total.Retired += result.Retired
 	}
 	return total, nil
 }
@@ -114,8 +116,12 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 				return result, fmt.Errorf("restore Runbook activation %s reporting: %w", activation.ID, err)
 			}
 			result.Replayed++
-			if err := s.advance(ctx, activation, base); err != nil && !errors.Is(err, ErrRunbookActivationRevision) {
-				return result, err
+			retired, advanceErr := s.advance(ctx, activation, base)
+			if advanceErr != nil && !errors.Is(advanceErr, ErrRunbookActivationRevision) {
+				return result, advanceErr
+			}
+			if retired {
+				result.Retired++
 			}
 			continue
 		}
@@ -196,8 +202,12 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		} else {
 			result.Scheduled++
 		}
-		if err := s.advance(ctx, activation, base); err != nil && !errors.Is(err, ErrRunbookActivationRevision) {
-			return result, err
+		retired, advanceErr := s.advance(ctx, activation, base)
+		if advanceErr != nil && !errors.Is(advanceErr, ErrRunbookActivationRevision) {
+			return result, advanceErr
+		}
+		if retired {
+			result.Retired++
 		}
 	}
 	return result, nil
@@ -219,20 +229,26 @@ func (s *RunbookScheduler) initialize(ctx context.Context, activation *RunbookAc
 	return s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
 }
 
-func (s *RunbookScheduler) advance(ctx context.Context, activation *RunbookActivation, base time.Time) error {
+func (s *RunbookScheduler) advance(ctx context.Context, activation *RunbookActivation, base time.Time) (bool, error) {
+	updated := cloneRunbookActivation(activation)
+	updated.OccurrencesProcessed++
+	updated.Revision++
+	updated.UpdatedAt = s.now().UTC()
+	if maximum := activation.Trigger.Schedule.MaximumOccurrences; maximum > 0 && updated.OccurrencesProcessed >= maximum {
+		updated.Status = RunbookActivationRetired
+		updated.NextOccurrenceBase, updated.NextRunAt = nil, nil
+		return true, s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
+	}
 	nextBase, err := activation.Trigger.Schedule.NextBase(base)
 	if err != nil {
-		return fmt.Errorf("Runbook activation %s next schedule: %w", activation.ID, err)
+		return false, fmt.Errorf("Runbook activation %s next schedule: %w", activation.ID, err)
 	}
 	nextDue, err := activation.Trigger.Schedule.DueAt(runbookTriggerKey(activation), nextBase)
 	if err != nil {
-		return err
+		return false, err
 	}
-	updated := cloneRunbookActivation(activation)
 	updated.NextOccurrenceBase, updated.NextRunAt = &nextBase, &nextDue
-	updated.Revision++
-	updated.UpdatedAt = s.now().UTC()
-	return s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
+	return false, s.store.UpdateRunbookActivation(ctx, updated, activation.Revision)
 }
 
 func (s *RunbookScheduler) backpressured(ctx context.Context, activation *RunbookActivation) (bool, error) {
