@@ -46,6 +46,32 @@ func TestExternalConversationEndpointPinsExactSkillOwnedAdapter(t *testing.T) {
 	if err != nil || stored.Configuration["locale"] != "en-US" {
 		t.Fatalf("stored endpoint was not isolated: %#v, %v", stored, err)
 	}
+	nextDefinition := *slackConversationSkillDefinition()
+	nextDefinition.Version = "1.0.1"
+	if err := catalog.Register(ctx, &nextDefinition); err != nil {
+		t.Fatal(err)
+	}
+	nextBinding := &skill.Binding{
+		ID: "slack", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "slack-agent",
+		SkillID: nextDefinition.ID, SkillVersion: nextDefinition.Version,
+		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{
+			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/one/slack"},
+		},
+		Revision: 2,
+	}
+	if err := catalog.Bind(ctx, nextBinding); err != nil {
+		t.Fatal(err)
+	}
+	nextAdapter := adapter
+	nextAdapter.SkillVersion = nextDefinition.Version
+	nextAdapter.BindingRevision = nextBinding.Revision
+	upgraded, err := service.Update(ctx, scope, endpoint.ID, UpdateExternalConversationEndpointRequest{
+		ExpectedRevision: stored.Revision, Adapter: &nextAdapter,
+	})
+	if err != nil || upgraded.Adapter != nextAdapter || upgraded.Revision != stored.Revision+1 {
+		t.Fatalf("upgraded endpoint = %#v, %v", upgraded, err)
+	}
 
 	_, err = service.Create(ctx, CreateExternalConversationEndpointRequest{
 		ID: "stale", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},

@@ -49,6 +49,29 @@ func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 	if updated.Status != CallbackRegistrationActive || updated.Revision != 2 || updated.Lifecycle[1].Action != CallbackRegistrationActivated {
 		t.Fatalf("active callback = %#v", updated)
 	}
+	nextDefinition := *definition
+	nextDefinition.Version = "2.2.1"
+	if err := catalog.Register(ctx, &nextDefinition); err != nil {
+		t.Fatal(err)
+	}
+	nextBinding := *binding
+	nextBinding.SkillVersion = nextDefinition.Version
+	nextBinding.Revision = 2
+	if err := catalog.Bind(ctx, &nextBinding); err != nil {
+		t.Fatal(err)
+	}
+	nextAdapter := updated.Adapter
+	nextAdapter.SkillVersion = nextDefinition.Version
+	nextAdapter.BindingRevision = nextBinding.Revision
+	clock = clock.Add(time.Minute)
+	upgraded, err := registry.Update(ctx, created.Scope, created.ID, UpdateCallbackRegistrationRequest{
+		ExpectedRevision: updated.Revision, Adapter: &nextAdapter,
+		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "upgrade the exact callback adapter",
+	})
+	if err != nil || upgraded.Adapter != nextAdapter || upgraded.Revision != updated.Revision+1 ||
+		upgraded.Lifecycle[len(upgraded.Lifecycle)-1].Action != CallbackRegistrationUpdated {
+		t.Fatalf("upgraded callback = %#v, %v", upgraded, err)
+	}
 	byRoute, err := store.GetCallbackRegistrationByIngressRoute(ctx, "opaque-route")
 	if err != nil || byRoute.ID != created.ID {
 		t.Fatalf("route lookup = %#v, %v", byRoute, err)
