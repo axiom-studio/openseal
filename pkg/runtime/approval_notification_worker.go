@@ -38,7 +38,7 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 	if w == nil || w.store == nil || w.transport == nil {
 		return 0, errors.New("approval notification worker is not configured")
 	}
-	approvals, err := w.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Status: []ApprovalStatus{ApprovalStatusPending}, Limit: limit})
+	approvals, err := w.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Status: []ApprovalStatus{ApprovalStatusPending, ApprovalStatusApproved}, Limit: limit})
 	if err != nil {
 		return 0, err
 	}
@@ -46,6 +46,24 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 	var processErrors []error
 	now := w.now().UTC()
 	for _, approval := range approvals {
+		if approval.Status == ApprovalStatusApproved {
+			call, callErr := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+			if callErr != nil {
+				processErrors = append(processErrors, fmt.Errorf("load approved action %s: %w", approval.ActionCallID, callErr))
+				continue
+			}
+			if !terminalApprovalActionStatus(call.Status) {
+				continue
+			}
+			for _, destination := range approval.Destinations {
+				if err := w.notifyOutcome(ctx, approval, call, destination); err != nil {
+					processErrors = append(processErrors, fmt.Errorf("notify approval outcome %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
+					continue
+				}
+				processed++
+			}
+			continue
+		}
 		if !now.Before(approval.ExpiresAt) {
 			if err := w.expire(ctx, approval, now); err != nil {
 				processErrors = append(processErrors, fmt.Errorf("expire approval %s: %w", approval.ID, err))
@@ -61,6 +79,47 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 		}
 	}
 	return processed, errors.Join(processErrors...)
+}
+
+func terminalApprovalActionStatus(status ActionCallStatus) bool {
+	switch status {
+	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied,
+		ActionCallStatusCanceled, ActionCallStatusCompensated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval *ApprovalCheckpoint, call *ActionCall, destination ApprovalDestination) error {
+	if err := enqueueApprovalCardUpdate(ctx, w.store, w.transport, approval, call, destination, ""); err != nil {
+		return err
+	}
+	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, strings.TrimSpace(destination.EndpointID))
+	if err != nil {
+		return err
+	}
+	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive {
+		return fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
+	}
+	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: approval.Scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals",
+		IdempotencyKey: "approval-notifications:" + endpoint.ID,
+	})
+	if err != nil {
+		return err
+	}
+	phase := approvalCardPhase(approval, call)
+	posted, err := w.postOutcomeMessage(ctx, approval, call, conversation.ID, "approval-outcome:"+approval.ID+":"+phase)
+	if err != nil {
+		return err
+	}
+	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
+		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
+		IdempotencyKey: "approval-outcome-delivery:" + approval.ID + ":" + endpoint.ID + ":" + phase,
+	})
+	return err
 }
 
 func (w *ApprovalNotificationWorker) expire(ctx context.Context, approval *ApprovalCheckpoint, now time.Time) error {
@@ -243,6 +302,44 @@ func (w *ApprovalNotificationWorker) postApprovalMessage(
 		SenderDisplayName: "Approval coordinator", Intent: MessageIntentApprovalRequest,
 		Content: approvalNotificationText(approval, call), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: messageKey,
+	}
+	for range approvalNotificationPostAttempts {
+		conversation, err := w.conversations.GetConversation(ctx, approval.Scope, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		request.ExpectedRevision = conversation.Revision
+		posted, err := w.conversations.PostChannelMessage(ctx, request)
+		if err == nil {
+			return posted, nil
+		}
+		if !errors.Is(err, ErrRevisionConflict) {
+			return nil, err
+		}
+	}
+	return nil, ErrRevisionConflict
+}
+
+func (w *ApprovalNotificationWorker) postOutcomeMessage(
+	ctx context.Context,
+	approval *ApprovalCheckpoint,
+	call *ActionCall,
+	conversationID string,
+	messageKey string,
+) (*ChannelMessageCommitResult, error) {
+	content := "Completed: " + strings.TrimSpace(approval.Summary) + "."
+	if call.Status != ActionCallStatusSucceeded {
+		content = "Failed: " + strings.TrimSpace(approval.Summary) + "."
+		if strings.TrimSpace(call.Error) != "" {
+			content += " " + strings.TrimSpace(call.Error)
+		}
+	}
+	request := PostChannelMessageRequest{
+		Scope: approval.Scope, ConversationID: conversationID,
+		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
+		SenderDisplayName: "Approval coordinator", Intent: MessageIntentUpdate,
+		Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		IdempotencyKey: messageKey,
 	}
 	for range approvalNotificationPostAttempts {
 		conversation, err := w.conversations.GetConversation(ctx, approval.Scope, conversationID)
