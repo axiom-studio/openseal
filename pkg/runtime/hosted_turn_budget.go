@@ -104,8 +104,9 @@ func ProjectHostedActionInvocationContracts(actions []capability.ModelAction) []
 	contracts := make([]HostedActionInvocationContract, 0, len(actions))
 	for _, action := range actions {
 		fields := []string{"type", "capability", "summary", "idempotencyKey", "inputRef"}
-		external := HostedExternalOperationInstructions{Policy: action.ExternalOperationPolicy}
-		switch action.ExternalOperationPolicy {
+		policy := effectiveExternalOperationPolicy(action.SideEffect, action.ExternalOperationPolicy)
+		external := HostedExternalOperationInstructions{Policy: policy}
+		switch policy {
 		case capability.ExternalOperationRequired:
 			fields = append(fields, "externalOperation")
 			external.RequiredFields = []string{"resource", "operation"}
@@ -122,12 +123,27 @@ func ProjectHostedActionInvocationContracts(actions []capability.ModelAction) []
 			HostOwnedFields:     []string{"bindingId", "bindingRevision", "preparedRuntime"},
 			ExternalOperation:   external,
 		}
-		if action.ExternalOperationPolicy == capability.ExternalOperationRequired {
+		if policy == capability.ExternalOperationRequired {
 			contract.CompletionEvidence = "After the action succeeds, any completion claim about its external effect must cite action-call:<durable actionCallId> in completionEvidenceRefs."
 		}
 		contracts = append(contracts, contract)
 	}
 	return contracts
+}
+
+// effectiveExternalOperationPolicy preserves the documented empty-policy
+// behavior only for genuinely external actions. Session-local and preparatory
+// actions cannot own a durable cross-Run external-operation identity, so an
+// omitted policy is forbidden for them and must be presented that way to the
+// model as well as enforced by the kernel.
+func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy capability.ExternalOperationPolicy) capability.ExternalOperationPolicy {
+	if policy != "" {
+		return policy
+	}
+	if sideEffect == capability.SideEffectExternal {
+		return capability.ExternalOperationOptional
+	}
+	return capability.ExternalOperationForbidden
 }
 
 func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {

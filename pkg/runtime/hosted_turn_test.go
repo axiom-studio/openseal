@@ -532,20 +532,23 @@ func TestHostedTurnRunnerBoundsRegeneratedNoProgressInteraction(t *testing.T) {
 
 func TestHostedTurnRunnerEnforcesExternalOperationPolicy(t *testing.T) {
 	tests := []struct {
-		name     string
-		policy   capability.ExternalOperationPolicy
-		external *ExternalOperationIdentity
-		wantErr  string
+		name       string
+		sideEffect capability.SideEffect
+		policy     capability.ExternalOperationPolicy
+		external   *ExternalOperationIdentity
+		wantErr    string
 	}{
-		{name: "forbidden", policy: capability.ExternalOperationForbidden, external: &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}, wantErr: "forbids an external operation identity"},
-		{name: "required", policy: capability.ExternalOperationRequired, wantErr: "requires an external operation identity"},
-		{name: "required present", policy: capability.ExternalOperationRequired, external: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}},
+		{name: "omitted non-external", sideEffect: capability.SideEffectRead, external: &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}, wantErr: "forbids an external operation identity"},
+		{name: "omitted external", sideEffect: capability.SideEffectExternal, external: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}},
+		{name: "forbidden", sideEffect: capability.SideEffectExternal, policy: capability.ExternalOperationForbidden, external: &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}, wantErr: "forbids an external operation identity"},
+		{name: "required", sideEffect: capability.SideEffectExternal, policy: capability.ExternalOperationRequired, wantErr: "requires an external operation identity"},
+		{name: "required present", sideEffect: capability.SideEffectExternal, policy: capability.ExternalOperationRequired, external: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			action := capability.ModelAction{
 				Name: "browser.action", BindingID: "browser-binding", BindingRevision: 1, SkillID: "skill-browser", Version: "1.0.0",
-				Action: "browser-action", SideEffect: capability.SideEffectExternal, ExternalOperationPolicy: test.policy,
+				Action: "browser-action", SideEffect: test.sideEffect, ExternalOperationPolicy: test.policy,
 			}
 			host := &recordingTurnHost{response: &HostedTurnResponse{
 				APIVersion: HostedTurnAPIVersion, InvocationID: "policy-turn", ModelProvider: "test", Model: "test-model",
