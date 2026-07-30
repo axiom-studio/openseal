@@ -103,6 +103,27 @@ func TestHostedTurnFormRejectsAmbiguousOrUnwakeableWaitingStatus(t *testing.T) {
 	}
 }
 
+func TestHostedTurnFormDerivesApprovalWaitFromGovernedAction(t *testing.T) {
+	form := HostedTurnForm{
+		SchemaVersion: HostedTurnFormSchemaVersion, OutputSummary: "Waiting for approval",
+		NextRunStatus: AgentRunStatusWaitingForApproval,
+		WakeCondition: &WakeCondition{Type: "approval", Reference: "model-invented-approval"},
+	}
+	response, err := CompileHostedTurnForm(form, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.NextRunStatus != AgentRunStatusRunning || response.WakeCondition != nil {
+		t.Fatalf("model-authored approval wait was trusted: %#v", response)
+	}
+	if len(response.Decisions) != 1 || response.Decisions[0].Summary != "Continued the Run because approval state is derived from a governed action, not model output." {
+		t.Fatalf("approval normalization was not audited: %#v", response.Decisions)
+	}
+	if form.NextRunStatus != AgentRunStatusWaitingForApproval || form.WakeCondition == nil {
+		t.Fatalf("compiler mutated the caller form: %#v", form)
+	}
+}
+
 func TestHostedTurnFormSchemaOmitsUnavailableProposalFamilies(t *testing.T) {
 	schema, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{})
 	if err != nil {
