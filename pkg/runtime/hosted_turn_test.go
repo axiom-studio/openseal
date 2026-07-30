@@ -487,6 +487,55 @@ func TestHostedTurnRunnerPreservesAndExplainsProposalRecovery(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerExecutesFreshReadDuringProposalRecovery(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "browser.snapshot", BindingID: "browser-binding", BindingRevision: 2,
+		SkillID: "browser", Version: "1", Action: "snapshot", SideEffect: capability.SideEffectRead,
+	}
+	arguments := map[string]interface{}{"sessionId": "session-1"}
+	call := &ActionCall{
+		ID: "stale-snapshot", DeploymentID: "agent", BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+		SkillID: action.SkillID, SkillVersion: action.Version, Action: action.Action, Arguments: arguments,
+		Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"generation": 1},
+	}
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	checkpoint := appendActionHistory(map[string]interface{}{
+		proposalRecoveryCheckpointKey: map[string]interface{}{
+			"attempt": 1, "capability": "browser.commit", "error": "take a new observation",
+		},
+	}, call)
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "repair-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Take a fresh snapshot",
+		ProposedAction: &TurnAction{
+			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID, BindingRevision: action.BindingRevision,
+			Summary: "Refresh browser observation", IdempotencyKey: "fresh-snapshot", InputRef: "/actionInputs/snapshot",
+		},
+		ContinuationCheckpoint: map[string]interface{}{
+			"actionInputs": map[string]interface{}{"snapshot": arguments},
+		},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1", Actions: []capability.ModelAction{action},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "post", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "repair-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcome.ProposedActions) != 1 || outcome.ProposedActions[0].Capability != action.Name {
+		t.Fatalf("recovery read was incorrectly reused: %#v", outcome)
+	}
+	if !reflect.DeepEqual(outcome.ContinuationCheckpoint[proposalRecoveryCheckpointKey], checkpoint[proposalRecoveryCheckpointKey]) {
+		t.Fatalf("proposal recovery marker was not preserved: %#v", outcome.ContinuationCheckpoint)
+	}
+}
+
 func TestHostedTurnRunnerRefreshesObservationAfterInterveningAction(t *testing.T) {
 	action := capability.ModelAction{
 		Name: "browser.snapshot", BindingID: "browser-binding", BindingRevision: 4,
