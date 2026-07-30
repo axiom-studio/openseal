@@ -308,6 +308,15 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
+		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
+			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
+			if approvalErr != nil {
+				return nil, approvalErr
+			}
+			updatedRun.Checkpoint = checkpointApprovedActionFailure(updatedRun.Checkpoint, approval, updatedCall)
+		} else if updatedCall.Status == ActionCallStatusSucceeded && updatedRun.Checkpoint[approvalRecoveryCheckpointKey] != nil {
+			updatedRun.Checkpoint = clearApprovedActionFailure(updatedRun.Checkpoint)
+		}
 		if updatedCall.Status == ActionCallStatusSucceeded {
 			if request := humanInterventionFromAction(updatedCall, now, w.newID); request != nil {
 				updatedRun.Status = AgentRunStatusWaitingForEvent

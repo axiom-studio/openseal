@@ -609,6 +609,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
+	if input.Run.Checkpoint != nil && input.Run.Checkpoint[approvalRecoveryCheckpointKey] != nil {
+		request.SystemInstructions = append(request.SystemInstructions,
+			"A previously approved exact action failed. Continue from continuationCheckpoint._opensealApprovalRecovery and its approval-owned continuationCheckpoint. The prior approval authorizes only the recorded proposedAction. Reuse its durable context; any materially changed action is a new proposal and must pass policy and approval independently. Do not restart completed setup unless the recorded failure requires replacing that setup.")
+	}
 	for _, media := range request.ModelMedia {
 		if err := validateHostedTurnMedia(media); err != nil {
 			return HostedTurnRequest{}, err

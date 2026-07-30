@@ -111,7 +111,9 @@ type ActionCoordinator struct {
 }
 
 func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
-	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: append([]ActionProposalValidator(nil), validators...), now: time.Now, newID: uuid.NewString}
+	portable := []ActionProposalValidator{ObservationRefActionProposalValidator{}}
+	portable = append(portable, validators...)
+	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString}
 }
 
 func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionRequest) (*ActionProposalResult, error) {
