@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -450,6 +451,39 @@ func TestHostedTurnRunnerReusesSucceededSemanticActionAcrossRestart(t *testing.T
 	last := outcome.ContinuationCheckpoint["lastAction"].(map[string]interface{})
 	if last["actionCallId"] != "completed-call" || actionHistoryEntries(outcome.ContinuationCheckpoint)[0]["actionCallId"] != "completed-call" {
 		t.Fatalf("authoritative evidence was not restored: %#v", outcome.ContinuationCheckpoint)
+	}
+}
+
+func TestHostedTurnRunnerPreservesAndExplainsProposalRecovery(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "repair-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Take the missing observation",
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := map[string]interface{}{
+		"attempt": 1, "capability": "skill-browser.camoufox-commit", "error": "target requires a current observation",
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "post", Checkpoint: map[string]interface{}{
+			proposalRecoveryCheckpointKey: recovery,
+		}},
+		Turn: &AgentTurn{ID: "repair-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.SystemInstructions) == 0 ||
+		!strings.Contains(host.request.SystemInstructions[len(host.request.SystemInstructions)-1], proposalRecoveryCheckpointKey) {
+		t.Fatalf("proposal recovery instruction = %#v", host.request.SystemInstructions)
+	}
+	if !reflect.DeepEqual(outcome.ContinuationCheckpoint[proposalRecoveryCheckpointKey], recovery) {
+		t.Fatalf("proposal recovery checkpoint = %#v", outcome.ContinuationCheckpoint)
 	}
 }
 

@@ -803,6 +803,10 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 		status = AgentRunStatusQueued
 		runError = ""
 		checkpoint = conversationalCheckpoint
+	} else if recoveryCheckpoint, ok := checkpointGovernedAgentProposalFailure(run, turn, safeCause); ok {
+		status = AgentRunStatusQueued
+		runError = ""
+		checkpoint = recoveryCheckpoint
 	}
 	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
@@ -818,6 +822,33 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	} else {
 		p.Wake()
 	}
+}
+
+func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, safeCause string) (map[string]interface{}, bool) {
+	if run == nil || turn == nil || run.Kind != RunKindAgentWork || len(turn.RequestedActions) != 1 || strings.TrimSpace(safeCause) == "" {
+		return nil, false
+	}
+	attempt := 1
+	if current, ok := run.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{}); ok {
+		switch value := current["attempt"].(type) {
+		case int:
+			attempt = value + 1
+		case int64:
+			attempt = int(value) + 1
+		case float64:
+			attempt = int(value) + 1
+		}
+	}
+	if attempt > maximumProposalRecoveryAttempts {
+		return nil, false
+	}
+	request := turn.RequestedActions[0]
+	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
+	checkpoint[proposalRecoveryCheckpointKey] = map[string]interface{}{
+		"attempt": attempt, "turnId": turn.ID, "capability": request.Capability,
+		"summary": strings.TrimSpace(request.Summary), "inputRef": request.InputRef, "error": safeCause,
+	}
+	return checkpoint, true
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {

@@ -613,6 +613,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		request.SystemInstructions = append(request.SystemInstructions,
 			"A previously approved exact action failed. Continue from continuationCheckpoint._opensealApprovalRecovery and its approval-owned continuationCheckpoint. The prior approval authorizes only the recorded proposedAction. Reuse its durable context; any materially changed action is a new proposal and must pass policy and approval independently. Do not restart completed setup unless the recorded failure requires replacing that setup.")
 	}
+	if input.Run.Checkpoint != nil && input.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
+		request.SystemInstructions = append(request.SystemInstructions,
+			"The previous proposed action was rejected before execution. Read continuationCheckpoint._opensealProposalRecovery, correct the exact validation error, and choose only the next authorized prerequisite action needed to obtain missing authoritative input. Do not repeat the rejected proposal unchanged. The rejected action was never approved or executed.")
+	}
 	for _, media := range request.ModelMedia {
 		if err := validateHostedTurnMedia(media); err != nil {
 			return HostedTurnRequest{}, err
