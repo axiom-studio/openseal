@@ -39,15 +39,17 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 		return 0, err
 	}
 	processed := 0
+	var processErrors []error
 	for _, approval := range approvals {
 		for _, destination := range approval.Destinations {
 			if err := w.notify(ctx, approval, destination); err != nil {
-				return processed, err
+				processErrors = append(processErrors, fmt.Errorf("notify approval %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
+				continue
 			}
 			processed++
 		}
 	}
-	return processed, nil
+	return processed, errors.Join(processErrors...)
 }
 
 func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
