@@ -111,6 +111,20 @@ func TestScheduleIntentExactDailyTimezoneIsPreserved(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentPreservesExactBoundedHourlyOccurrences(t *testing.T) {
+	schedule := &runbook.Schedule{Cron: "0 0 */1 * * *", Timezone: "UTC", MaximumOccurrences: 5}
+	result := compileScheduledCandidate(t, "Create one Agent that runs hourly for 5 hours", scheduledAuthoringCandidate(schedule), nil, nil)
+	if !result.Valid || !reflect.DeepEqual(candidateSchedule(result), schedule) {
+		t.Fatalf("bounded hourly candidate = %#v", result)
+	}
+
+	unbounded := &runbook.Schedule{Cron: "0 0 */1 * * *", Timezone: "UTC"}
+	mismatch := compileScheduledCandidate(t, "Create one Agent that runs hourly for 5 hours", scheduledAuthoringCandidate(unbounded), nil, nil)
+	if mismatch.Valid || !hasValidationCode(mismatch.Validation, "schedule_intent_mismatch") {
+		t.Fatalf("unbounded mismatch = %#v", mismatch)
+	}
+}
+
 func TestScheduleIntentExactWeekdaysUsesPortableCronTrigger(t *testing.T) {
 	schedule := weekdaySchedule("09:00", "UTC")
 	result := compileScheduledCandidate(t, "Create one Agent that runs every weekday at 09:00 UTC", scheduledAuthoringCandidate(schedule), nil, nil)

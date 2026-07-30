@@ -138,9 +138,10 @@ func (p *EvidenceProjection) Validate() error {
 // trigger itself and selects one restart-stable instant after each cron
 // occurrence; it is never a detached Objective setting or a worker timer.
 type Schedule struct {
-	Cron          string `json:"cron"`
-	Timezone      string `json:"timezone"`
-	JitterSeconds int64  `json:"jitterSeconds,omitempty"`
+	Cron               string `json:"cron"`
+	Timezone           string `json:"timezone"`
+	JitterSeconds      int64  `json:"jitterSeconds,omitempty"`
+	MaximumOccurrences int64  `json:"maximumOccurrences,omitempty"`
 }
 
 const maximumScheduleJitterSeconds = 31 * 24 * 60 * 60
@@ -151,6 +152,9 @@ func (s *Schedule) Validate() error {
 	}
 	if s.JitterSeconds < 0 || s.JitterSeconds > maximumScheduleJitterSeconds {
 		return fmt.Errorf("schedule jitterSeconds must be between 0 and %d", maximumScheduleJitterSeconds)
+	}
+	if s.MaximumOccurrences < 0 || s.MaximumOccurrences > 1_000_000 {
+		return errors.New("schedule maximumOccurrences must be between 0 and 1000000")
 	}
 	if strings.TrimSpace(s.Timezone) == "" {
 		return errors.New("schedule timezone is required")

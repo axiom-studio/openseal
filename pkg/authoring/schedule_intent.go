@@ -23,20 +23,23 @@ const (
 )
 
 type scheduleIntent struct {
-	kind            scheduleIntentKind
-	cadenceType     string
-	intervalSeconds int64
-	timeOfDay       string
-	dayOfWeek       string
-	cronExpression  string
-	timezone        string
-	jitterSeconds   int64
+	kind               scheduleIntentKind
+	cadenceType        string
+	intervalSeconds    int64
+	timeOfDay          string
+	dayOfWeek          string
+	cronExpression     string
+	timezone           string
+	jitterSeconds      int64
+	maximumOccurrences int64
 }
 
 var (
-	scheduleClockPattern    = regexp.MustCompile(`(?i)\b([01]?\d|2[0-3]):([0-5]\d)\b`)
-	scheduleTimezonePattern = regexp.MustCompile(`\b(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+.-]*/[A-Za-z][A-Za-z0-9_+./-]*)\b`)
-	scheduleIntervalPattern = regexp.MustCompile(`(?i)\bevery\s+(\d{1,7})\s+(second|seconds|minute|minutes|hour|hours|day|days)\b`)
+	scheduleClockPattern      = regexp.MustCompile(`(?i)\b([01]?\d|2[0-3]):([0-5]\d)\b`)
+	scheduleTimezonePattern   = regexp.MustCompile(`\b(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+.-]*/[A-Za-z][A-Za-z0-9_+./-]*)\b`)
+	scheduleIntervalPattern   = regexp.MustCompile(`(?i)\bevery\s+(\d{1,7})\s+(second|seconds|minute|minutes|hour|hours|day|days)\b`)
+	scheduleDurationPattern   = regexp.MustCompile(`(?i)\bfor\s+(\d{1,7})\s*(second|seconds|minute|minutes|hour|hours|day|days)\b`)
+	scheduleOccurrencePattern = regexp.MustCompile(`(?i)\bfor\s+(\d{1,7})\s+(run|runs|occurrence|occurrences|time|times)\b`)
 )
 
 // enforceScheduleIntentAuthority is the deterministic authority boundary for
@@ -103,11 +106,12 @@ func parseScheduleIntent(value string) scheduleIntent {
 		count, err := strconv.ParseInt(match[1], 10, 64)
 		if err == nil && count > 0 {
 			multipliers := map[string]int64{"second": 1, "seconds": 1, "minute": 60, "minutes": 60, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}
-			return scheduleIntent{kind: scheduleIntentExact, cadenceType: "interval", intervalSeconds: count * multipliers[strings.ToLower(match[2])]}
+			interval := count * multipliers[strings.ToLower(match[2])]
+			return scheduleIntent{kind: scheduleIntentExact, cadenceType: "interval", intervalSeconds: interval, maximumOccurrences: boundedScheduleOccurrences(value, interval)}
 		}
 	}
 	if containsWord(lower, "hourly") || containsSchedulePhrase(lower, "every hour") {
-		return scheduleIntent{kind: scheduleIntentExact, cadenceType: "interval", intervalSeconds: 3600}
+		return scheduleIntent{kind: scheduleIntentExact, cadenceType: "interval", intervalSeconds: 3600, maximumOccurrences: boundedScheduleOccurrences(value, 3600)}
 	}
 
 	if containsWord(lower, "weekday") || containsWord(lower, "weekdays") {
@@ -169,6 +173,29 @@ func parseScheduleIntent(value string) scheduleIntent {
 		return scheduleIntent{kind: scheduleIntentAmbiguous}
 	}
 	return scheduleIntent{kind: scheduleIntentAbsent}
+}
+
+func boundedScheduleOccurrences(value string, intervalSeconds int64) int64 {
+	if match := scheduleOccurrencePattern.FindStringSubmatch(value); len(match) == 3 {
+		count, _ := strconv.ParseInt(match[1], 10, 64)
+		if count > 0 && count <= 1_000_000 {
+			return count
+		}
+	}
+	if intervalSeconds <= 0 {
+		return 0
+	}
+	match := scheduleDurationPattern.FindStringSubmatch(value)
+	if len(match) != 3 {
+		return 0
+	}
+	count, _ := strconv.ParseInt(match[1], 10, 64)
+	multipliers := map[string]int64{"second": 1, "seconds": 1, "minute": 60, "minutes": 60, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}
+	duration := count * multipliers[strings.ToLower(match[2])]
+	if count <= 0 || duration <= 0 || duration%intervalSeconds != 0 || duration/intervalSeconds > 1_000_000 {
+		return 0
+	}
+	return duration / intervalSeconds
 }
 
 func validScheduleTimezone(value string) string {
@@ -337,7 +364,8 @@ func scheduleMatchesIntent(schedule *runbook.Schedule, intent scheduleIntent) bo
 	}
 	expected, err := scheduleForIntent(intent)
 	return err == nil && normalizeWhitespace(schedule.Cron) == expected.Cron &&
-		strings.TrimSpace(schedule.Timezone) == expected.Timezone && schedule.JitterSeconds == expected.JitterSeconds
+		strings.TrimSpace(schedule.Timezone) == expected.Timezone && schedule.JitterSeconds == expected.JitterSeconds &&
+		schedule.MaximumOccurrences == expected.MaximumOccurrences
 }
 
 func normalizeWhitespace(value string) string {
@@ -374,7 +402,7 @@ func scheduleForIntent(intent scheduleIntent) (*runbook.Schedule, error) {
 	default:
 		return nil, fmt.Errorf("unsupported schedule intent %q", intent.cadenceType)
 	}
-	result := &runbook.Schedule{Cron: cronExpression, Timezone: timezone, JitterSeconds: intent.jitterSeconds}
+	result := &runbook.Schedule{Cron: cronExpression, Timezone: timezone, JitterSeconds: intent.jitterSeconds, MaximumOccurrences: intent.maximumOccurrences}
 	return result, result.Validate()
 }
 
