@@ -642,6 +642,12 @@ func (s *SQLiteStore) EnqueueExternalConversationDelivery(ctx context.Context, d
 			}
 			return existing, true, nil
 		}
+		if sameExternalConversationDeliveryEffect(existing, delivery) && existing.Status == ExternalConversationDeliveryDelivered {
+			if err := commitSQLiteConn(ctx, conn, &committed); err != nil {
+				return nil, false, err
+			}
+			return existing, true, nil
+		}
 		rebound, ok := rebindExternalConversationDelivery(existing, delivery)
 		if !ok {
 			return nil, false, ErrExternalConversationConflict

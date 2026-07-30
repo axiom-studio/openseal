@@ -209,12 +209,39 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 		t.Fatalf("rebound delivery = %#v", rebound)
 	}
 
-	delivered := cloneExternalConversationDelivery(rebound)
+	leasedForDelivery, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-worker", now.Add(3*time.Second), time.Minute)
+	if err != nil || leasedForDelivery == nil || leasedForDelivery.ID != delivery.ID {
+		t.Fatalf("claim rebound delivery = %#v, %v", leasedForDelivery, err)
+	}
+	delivered := cloneExternalConversationDelivery(leasedForDelivery)
 	delivered.Status = ExternalConversationDeliveryDelivered
 	delivered.ProviderMessageID = "provider-message-1"
-	delivered.DeliveredAt, delivered.UpdatedAt = now.Add(3*time.Second), now.Add(3*time.Second)
+	delivered.DeliveredAt, delivered.UpdatedAt = now.Add(4*time.Second), now.Add(4*time.Second)
+	delivered.LeaseOwner, delivered.LeaseExpiresAt = "", time.Time{}
+	delivered.Revision++
+	if err := store.SaveExternalConversationDelivery(ctx, delivered, leasedForDelivery.Revision, "delivery-worker"); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := rebindExternalConversationDelivery(delivered, replay); ok {
 		t.Fatal("provider-confirmed delivery was rebound")
+	}
+	upgradedAgain := cloneExternalConversationEndpoint(upgraded)
+	upgradedAgain.Adapter.SkillVersion = "1.0.2"
+	upgradedAgain.Adapter.BindingRevision = 3
+	upgradedAgain.Revision++
+	upgradedAgain.UpdatedAt = now.Add(5 * time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, upgradedAgain, upgraded.Revision); err != nil {
+		t.Fatal(err)
+	}
+	deliveredReplay := cloneExternalConversationDelivery(replay)
+	deliveredReplay.EndpointRevision = upgradedAgain.Revision
+	deliveredReplay.Adapter = upgradedAgain.Adapter
+	deliveredReplay.AvailableAt, deliveredReplay.UpdatedAt = now.Add(6*time.Second), now.Add(6*time.Second)
+	receipt, replayed, err := store.EnqueueExternalConversationDelivery(ctx, deliveredReplay)
+	if err != nil || !replayed || receipt.Status != ExternalConversationDeliveryDelivered ||
+		receipt.ProviderMessageID != delivered.ProviderMessageID || receipt.EndpointRevision != delivered.EndpointRevision ||
+		receipt.Revision != delivered.Revision {
+		t.Fatalf("delivered replay after endpoint upgrade = %#v, replayed %v, %v", receipt, replayed, err)
 	}
 	leased := cloneExternalConversationDelivery(rebound)
 	leased.Status = ExternalConversationDeliveryLeased
