@@ -337,13 +337,11 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		reserved := request.Budget.TurnReservation
 		if reserved.InputTokens > 0 && int64(response.Usage.InputTokens) > reserved.InputTokens {
 			actualInput := int64(response.Usage.InputTokens)
-			drift := actualInput - reserved.InputTokens
 			remaining := request.Budget.Remaining
 			actualTotal := actualInput + int64(response.Usage.OutputTokens)
-			if drift > HostedTurnInputSettlementToleranceTokens ||
-				(remaining.MaxInputTokens > 0 && actualInput > remaining.MaxInputTokens) ||
+			if (remaining.MaxInputTokens > 0 && actualInput > remaining.MaxInputTokens) ||
 				(remaining.MaxTotalTokens > 0 && actualTotal > remaining.MaxTotalTokens) {
-				return nil, fmt.Errorf("turn host reported %d input tokens beyond the reserved %d", response.Usage.InputTokens, reserved.InputTokens)
+				return nil, fmt.Errorf("turn host reported %d input tokens beyond the remaining Run budget", response.Usage.InputTokens)
 			}
 		}
 		if reserved.OutputTokens > 0 && int64(response.Usage.OutputTokens) > reserved.OutputTokens {

@@ -135,7 +135,7 @@ func TestHostedTurnProviderUsageCannotExceedConservativeReservation(t *testing.T
 		{name: "at reservation", over: 0},
 		{name: "bounded provider envelope drift", over: 89},
 		{name: "bounded drift beyond user budget", over: 89, inputLimit: 12050, wantErr: true},
-		{name: "beyond settlement tolerance", over: HostedTurnInputSettlementToleranceTokens + 1, wantErr: true},
+		{name: "estimate drift inside Run budget", over: 4096},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			testRun := *run
@@ -151,7 +151,7 @@ func TestHostedTurnProviderUsageCannotExceedConservativeReservation(t *testing.T
 				t.Fatal(err)
 			}
 			_, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: &testRun, Turn: &AgentTurn{ID: turnID}})
-			if test.wantErr != (err != nil) || (test.wantErr && !strings.Contains(err.Error(), "beyond the reserved")) {
+			if test.wantErr != (err != nil) || (test.wantErr && !strings.Contains(err.Error(), "beyond the remaining Run budget")) {
 				t.Fatalf("error = %v, wantErr=%t", err, test.wantErr)
 			}
 		})
