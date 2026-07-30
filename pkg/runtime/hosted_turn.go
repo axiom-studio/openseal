@@ -330,6 +330,14 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if response.ModelProvider == "" || response.Model == "" {
 		return nil, errors.New("turn host must report the actual model provider and model")
 	}
+	if response.NextRunStatus == AgentRunStatusWaitingForAgent && response.WakeCondition != nil &&
+		strings.TrimSpace(response.WakeCondition.Reference) == strings.TrimSpace(r.config.AgentID) {
+		response.NextRunStatus = AgentRunStatusRunning
+		response.WakeCondition = nil
+		response.Decisions = append(response.Decisions, TurnDecision{
+			Summary: "Continued the Run because an Agent cannot wait on itself.",
+		})
+	}
 	if err := response.Usage.Validate(); err != nil {
 		return nil, err
 	}

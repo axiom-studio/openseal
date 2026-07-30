@@ -536,6 +536,61 @@ func TestHostedTurnRunnerExecutesFreshReadDuringProposalRecovery(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerContinuesSelfReferentialAgentWait(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "self-wait-turn",
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Wait for myself",
+		NextRunStatus:          AgentRunStatusWaitingForAgent,
+		WakeCondition:          &WakeCondition{Type: "agent_request", Reference: "agent-1"},
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent-1", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "continue"},
+		Turn: &AgentTurn{ID: "self-wait-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.NextRunStatus != AgentRunStatusRunning || outcome.WakeCondition != nil {
+		t.Fatalf("self-referential wait was not continued: %#v", outcome)
+	}
+	if len(outcome.Decisions) != 1 || outcome.Decisions[0].Summary != "Continued the Run because an Agent cannot wait on itself." {
+		t.Fatalf("self-wait normalization was not audited: %#v", outcome.Decisions)
+	}
+}
+
+func TestHostedTurnRunnerPreservesWaitOnDifferentAgent(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "peer-wait-turn",
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Wait for a peer",
+		NextRunStatus:          AgentRunStatusWaitingForAgent,
+		WakeCondition:          &WakeCondition{Type: "agent_request", Reference: "agent-2"},
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent-1", DefinitionID: "definition", DefinitionVersion: "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "collaborate"},
+		Turn: &AgentTurn{ID: "peer-wait-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.NextRunStatus != AgentRunStatusWaitingForAgent || outcome.WakeCondition == nil || outcome.WakeCondition.Reference != "agent-2" {
+		t.Fatalf("peer wait was not preserved: %#v", outcome)
+	}
+}
+
 func TestHostedTurnRunnerRefreshesObservationAfterInterveningAction(t *testing.T) {
 	action := capability.ModelAction{
 		Name: "browser.snapshot", BindingID: "browser-binding", BindingRevision: 4,
