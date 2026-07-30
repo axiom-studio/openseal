@@ -486,6 +486,8 @@ type (
 	HostedTurnMedia                    = runtime.HostedTurnMedia
 	HostedTurnRequest                  = runtime.HostedTurnRequest
 	HostedTurnResponse                 = runtime.HostedTurnResponse
+	HostedTurnForm                     = runtime.HostedTurnForm
+	HostedTurnActionForm               = runtime.HostedTurnActionForm
 	HostedTurnModelInput               = runtime.HostedTurnModelInput
 	HostedActionInvocationContract     = runtime.HostedActionInvocationContract
 	HostedRunBudget                    = runtime.HostedRunBudget
@@ -944,6 +946,7 @@ type (
 const (
 	DeploymentChangeConfigurationUpdated     = workforce.DeploymentChangeConfigurationUpdated
 	HostedTurnAPIVersion                     = runtime.HostedTurnAPIVersion
+	HostedTurnFormSchemaVersion              = runtime.HostedTurnFormSchemaVersion
 	HostedTurnProtocolInputReserveTokens     = runtime.HostedTurnProtocolInputReserveTokens
 	HostedTurnBudgetEnvelopeReserveTokens    = runtime.HostedTurnBudgetEnvelopeReserveTokens
 	HostedTurnInputSettlementToleranceTokens = runtime.HostedTurnInputSettlementToleranceTokens
@@ -1247,6 +1250,9 @@ var (
 	NewTurnHostFailure                     = runtime.NewTurnHostFailure
 	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
 	ProjectHostedActionInvocationContracts = runtime.ProjectHostedActionInvocationContracts
+	CompileHostedTurnForm                  = runtime.CompileHostedTurnForm
+	HostedTurnFormFromResponse             = runtime.HostedTurnFormFromResponse
+	HostedTurnFormJSONSchema               = runtime.HostedTurnFormJSONSchema
 	ValidateHostedTurnCompletion           = runtime.ValidateHostedTurnCompletion
 	MarshalEvidenceGroundingModelInput     = runtime.MarshalEvidenceGroundingModelInput
 	EstimateHostedTurnInputTokens          = runtime.EstimateHostedTurnInputTokens
