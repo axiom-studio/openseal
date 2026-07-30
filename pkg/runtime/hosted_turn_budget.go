@@ -24,10 +24,6 @@ const (
 	// preflight. EstimateHostedTurnInputTokens intentionally normalizes that
 	// self-referential field so kernel and host calculate one stable estimate.
 	HostedTurnBudgetEnvelopeReserveTokens int64 = 256
-	// HostedTurnInputSettlementToleranceTokens covers bounded provider
-	// tokenizer drift after the kernel reserves its immutable envelope. The
-	// exact usage is still charged and must fit the user's remaining budget.
-	HostedTurnInputSettlementToleranceTokens int64 = 256
 	// HostedTurnMaximumProviderAttempts is the portable upper bound for one
 	// hosted Turn invocation, including a single deterministic schema repair.
 	// The kernel reserves the complete envelope before dispatch so a repair can
