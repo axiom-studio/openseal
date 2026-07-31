@@ -17,6 +17,14 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
+	store.actions[portfolioKey(scope, "prepared-comment")] = &ActionCall{
+		ID: "prepared-comment", Scope: scope, RunID: run.ID, DeploymentID: "release-agent",
+		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: ActionCallStatusSucceeded,
+		Arguments: map[string]interface{}{
+			"value": "The exact reviewed comment.", "target": "comment-box", "apiToken": "legacy-secret",
+		},
+		Attempt: 1, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
 	policy := ActionPolicyEvaluatorFunc(func(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
 		if input.Bound.Action.Name != "deploy" || input.Run.ID != run.ID {
 			t.Fatalf("policy input mismatch: %#v", input)
@@ -40,7 +48,7 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
 		Arguments:      map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
 		IdempotencyKey: "deploy-production-v1", Summary: "Deploy release to production",
-		Actor: ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan"},
+		Actor: ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan", "action-call:prepared-comment"},
 		ContinuationCheckpoint: map[string]interface{}{"step": "await-release-approval"},
 	})
 	if err != nil {
@@ -58,6 +66,12 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	previewArgs := result.Approval.ProposedAction["arguments"].(map[string]interface{})
 	if previewArgs["apiToken"] != "[REDACTED]" || previewArgs["credentialField"] != "username" || previewArgs["environment"] != "production" || previewArgs["nested"].(map[string]interface{})["password"] != "[REDACTED]" {
 		t.Fatalf("approval preview was not sanitized: %#v", previewArgs)
+	}
+	prepared := result.Approval.ProposedAction["preparedEvidence"].([]interface{})
+	preparedArgs := prepared[0].(map[string]interface{})["arguments"].(map[string]interface{})
+	if len(prepared) != 1 || preparedArgs["value"] != "The exact reviewed comment." ||
+		preparedArgs["apiToken"] != "[REDACTED]" {
+		t.Fatalf("prepared approval evidence was not exact and secret-safe: %#v", prepared)
 	}
 	if result.Call.CredentialRefs["token"].ID != "release-secret" {
 		t.Fatalf("opaque credential binding missing: %#v", result.Call.CredentialRefs)
