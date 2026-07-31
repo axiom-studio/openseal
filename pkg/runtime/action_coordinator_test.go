@@ -49,6 +49,10 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 		Arguments:      map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
 		IdempotencyKey: "deploy-production-v1", Summary: "Deploy release to production",
 		Actor: ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan", "action-call:prepared-comment"},
+		ReviewContext: &ApprovalReviewContext{
+			Summary: "Deploy release 42", Target: "production", Audience: "All customers",
+			Purpose: "Ship the reviewed release", Consequences: []string{"Updates the production service"},
+		},
 		ContinuationCheckpoint: map[string]interface{}{"step": "await-release-approval"},
 	})
 	if err != nil {
@@ -59,6 +63,10 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	}
 	if result.Approval.TimeoutDecision != ApprovalTimeoutApprove {
 		t.Fatalf("approval timeout policy was not persisted: %#v", result.Approval)
+	}
+	review := result.Approval.ProposedAction["reviewContext"].(map[string]interface{})
+	if review["summary"] != "Deploy release 42" || review["target"] != "production" || review["audience"] != "All customers" {
+		t.Fatalf("approval review context was not persisted: %#v", review)
 	}
 	if result.Call.BindingID != "release-binding" || result.Call.BindingRevision != 1 {
 		t.Fatalf("action did not persist its exact binding: %#v", result.Call)

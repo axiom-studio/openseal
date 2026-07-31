@@ -87,6 +87,53 @@ func TestHostedTurnFormSchemaUsesExactAuthorizedActionInputs(t *testing.T) {
 	}
 }
 
+func TestHostedTurnFormRequiresAndRoundTripsExternalApprovalReviewContext(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "browser.commit", SideEffect: capability.SideEffectExternal,
+		InputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{"target": map[string]interface{}{"type": "string"}},
+			"required":   []interface{}{"target"},
+		},
+	}
+	form := HostedTurnForm{
+		SchemaVersion: HostedTurnFormSchemaVersion, OutputSummary: "Publish", NextRunStatus: AgentRunStatusRunning,
+		ProposedAction: &HostedTurnActionForm{
+			Capability: action.Name, Summary: "Publish reviewed comment", IdempotencyKey: "comment-42",
+			Arguments: map[string]interface{}{"target": "s5:e67"},
+		},
+	}
+	if _, err := CompileHostedTurnForm(form, []capability.ModelAction{action}); err == nil {
+		t.Fatal("external action without approval review context was accepted")
+	}
+	form.ProposedAction.ReviewContext = &ApprovalReviewContext{
+		Summary: "Post this exact comment", Target: "https://forum.example/posts/42",
+		Audience: "Public forum readers", Content: "The exact proposed comment.", Purpose: "Answer the question",
+		Consequences: []string{"Creates a public comment"},
+		Facts:        []ApprovalReviewFact{{Label: "Community", Value: "example"}},
+	}
+	response, err := CompileHostedTurnForm(form, []capability.ModelAction{action})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := HostedTurnFormFromResponse(*response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(roundTrip.ProposedAction.ReviewContext, form.ProposedAction.ReviewContext) {
+		t.Fatalf("review context = %#v", roundTrip.ProposedAction.ReviewContext)
+	}
+	schema, err := HostedTurnFormJSONSchema([]capability.ModelAction{action})
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch := schema["properties"].(map[string]interface{})["proposedAction"].(map[string]interface{})["oneOf"].([]interface{})[0].(map[string]interface{})
+	required := branch["required"].([]string)
+	if !slices.Contains(required, "reviewContext") {
+		t.Fatalf("external action schema does not require reviewContext: %#v", required)
+	}
+}
+
 func TestHostedTurnFormRejectsAmbiguousOrUnwakeableWaitingStatus(t *testing.T) {
 	base := HostedTurnForm{SchemaVersion: HostedTurnFormSchemaVersion, OutputSummary: "wait"}
 	base.NextRunStatus = AgentRunStatus("waiting")

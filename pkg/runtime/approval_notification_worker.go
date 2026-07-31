@@ -296,7 +296,18 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
 	proposedAction := cloneMap(approval.ProposedAction)
 	if reviewContext := approvalReviewContext(approval.ContinuationCheckpoint); len(reviewContext) > 0 {
-		proposedAction["reviewContext"] = reviewContext
+		explicit, _ := proposedAction["reviewContext"].(map[string]interface{})
+		for key, value := range reviewContext {
+			if _, exists := explicit[key]; !exists {
+				if explicit == nil {
+					explicit = make(map[string]interface{})
+				}
+				explicit[key] = value
+			}
+		}
+		if len(explicit) > 0 {
+			proposedAction["reviewContext"] = explicit
+		}
 	}
 	payload := map[string]interface{}{
 		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
