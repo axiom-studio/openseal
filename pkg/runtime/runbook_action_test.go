@@ -9,6 +9,33 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
+	ctx := context.Background()
+	catalog := skill.NewCatalog()
+	definition := RunbookManagementSkill()
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &skill.Binding{
+		ID: "runbooks", Revision: 1, Scope: skill.ScopeReference{Kind: "tenant", ID: "3"}, DeploymentID: "rowan",
+		SkillID: definition.ID, SkillVersion: definition.Version,
+		AllowedActions: []string{RunbookActionReplaceSchedule}, MaximumRisk: skill.RiskLevelWrite,
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, definition.ID, definition.Version, RunbookActionReplaceSchedule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "resume hourly work"}); err == nil {
+		t.Fatal("replacement without a timing change must fail schema validation")
+	}
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "run five times", "maximumOccurrences": float64(5)}); err != nil {
+		t.Fatalf("replacement with a timing change: %v", err)
+	}
+}
+
 func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

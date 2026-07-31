@@ -14,7 +14,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.1.0"
+	RunbookManagementSkillVersion = "1.1.1"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -62,6 +62,12 @@ func RunbookManagementSkill() *skill.Definition {
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
+					"anyOf": []interface{}{
+						map[string]interface{}{"required": []interface{}{"cron"}},
+						map[string]interface{}{"required": []interface{}{"timezone"}},
+						map[string]interface{}{"required": []interface{}{"jitterSeconds"}},
+						map[string]interface{}{"required": []interface{}{"maximumOccurrences"}},
+					},
 					"properties": map[string]interface{}{
 						"activationId":       map[string]interface{}{"type": "string", "minLength": 1},
 						"cron":               map[string]interface{}{"type": "string", "minLength": 1, "description": "Optional six-field cron expression; omit to preserve the reviewed cadence."},
