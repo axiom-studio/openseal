@@ -320,6 +320,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if approval != nil && approval.ProposedAction == nil {
 		approval.ProposedAction = approvalPreview(bound, arguments)
 	}
+	if approval != nil {
+		approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)
+	}
 	actor := req.Actor
 	if actor.Type == "" {
 		actor = ActivityActor{Type: "worker", ID: req.WorkerID}
@@ -443,6 +446,84 @@ func approvalPreview(bound *skill.BoundAction, arguments map[string]interface{})
 		"skillId": bound.Definition.ID, "skillVersion": bound.Definition.Version, "action": bound.Action.Name,
 		"risk": bound.Action.Risk, "sideEffect": bound.Action.SideEffect,
 		"arguments": sanitizeApprovalValue(arguments, bound.Action.InputSchema).(map[string]interface{}),
+	}
+}
+
+// enrichApprovalPreview carries the exact, already-persisted inputs that
+// prepared an approval-backed effect into its immutable review record. Action
+// arguments have already crossed the Skill schema's persistence boundary, so
+// credential values are absent. The additional conservative scrub protects
+// records created by older hosts before that boundary was enforced.
+//
+// Keeping this in the kernel means Studio, a TUI, Slack, and future approval
+// destinations all review the same proposal instead of provider adapters
+// guessing what a preceding Skill action meant.
+func (c *ActionCoordinator) enrichApprovalPreview(
+	ctx context.Context,
+	preview map[string]interface{},
+	run *AgentRun,
+	evidenceRefs []string,
+	externalOperation *ExternalOperationIdentity,
+) map[string]interface{} {
+	result := cloneMap(preview)
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	if externalOperation != nil {
+		resource, err := canonicalExternalOperationResource(externalOperation.Resource)
+		if err == nil {
+			result["externalOperation"] = map[string]interface{}{
+				"resource": resource, "operation": strings.ToLower(strings.TrimSpace(externalOperation.Operation)),
+			}
+		}
+	}
+	if c == nil || c.actions == nil || run == nil {
+		return result
+	}
+	prepared := make([]interface{}, 0, len(evidenceRefs))
+	for _, reference := range evidenceRefs {
+		actionID, ok := strings.CutPrefix(strings.TrimSpace(reference), "action-call:")
+		if !ok || strings.TrimSpace(actionID) == "" {
+			continue
+		}
+		call, err := c.actions.GetActionCall(ctx, run.Scope, strings.TrimSpace(actionID))
+		if err != nil || call == nil || call.RunID != run.ID || call.Status != ActionCallStatusSucceeded {
+			continue
+		}
+		prepared = append(prepared, map[string]interface{}{
+			"actionCallId": call.ID,
+			"skillId":      call.SkillID,
+			"skillVersion": call.SkillVersion,
+			"action":       call.Action,
+			"arguments":    sanitizePersistedApprovalValue(call.Arguments),
+		})
+	}
+	if len(prepared) > 0 {
+		result["preparedEvidence"] = prepared
+	}
+	return result
+}
+
+func sanitizePersistedApprovalValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(typed))
+		for key, child := range typed {
+			if sensitiveFieldName(key) {
+				result[key] = "[REDACTED]"
+				continue
+			}
+			result[key] = sanitizePersistedApprovalValue(child)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, child := range typed {
+			result[index] = sanitizePersistedApprovalValue(child)
+		}
+		return result
+	default:
+		return typed
 	}
 }
 
