@@ -335,15 +335,26 @@ func approvalReviewContext(checkpoint map[string]interface{}) map[string]interfa
 	if len(checkpoint) == 0 {
 		return nil
 	}
-	state, _ := checkpoint["state"].(map[string]interface{})
-	if len(state) == 0 {
+	review := make(map[string]interface{})
+	for _, field := range []string{"state", "output"} {
+		facts, _ := checkpoint[field].(map[string]interface{})
+		if len(facts) == 0 {
+			continue
+		}
+		projected, _ := boundedApprovalReviewValue(facts, 0, new(int)).(map[string]interface{})
+		for key, value := range projected {
+			// State is the canonical approval-owned value when both
+			// projections use the same field name. Output fills facts that
+			// are otherwise absent, such as a prepared artifact or draft.
+			if _, exists := review[key]; !exists {
+				review[key] = value
+			}
+		}
+	}
+	if len(review) == 0 {
 		return nil
 	}
-	projected, _ := boundedApprovalReviewValue(state, 0, new(int)).(map[string]interface{})
-	if len(projected) == 0 {
-		return nil
-	}
-	return projected
+	return review
 }
 
 const (
