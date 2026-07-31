@@ -121,6 +121,11 @@ const (
 	// requested from the model or user. Model action projections remove these
 	// fields while the canonical Skill schema remains strict.
 	SchemaExtensionKernelResolved = "x-openseal-kernel-resolved"
+	// SchemaExtensionKernelSource identifies the trusted durable context used
+	// to populate a kernel-resolved argument. It is meaningful only when
+	// SchemaExtensionKernelResolved is true.
+	SchemaExtensionKernelSource = "x-openseal-kernel-source"
+	KernelSourceAgentSessionID  = "agent_session_id"
 )
 
 type Catalog struct {

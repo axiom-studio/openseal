@@ -145,7 +145,7 @@ func projectModelSchemaValue(value interface{}) interface{} {
 		}
 		result := make(map[string]interface{}, len(typed))
 		for key, child := range typed {
-			if key == SchemaExtensionKernelResolved {
+			if key == SchemaExtensionKernelResolved || key == SchemaExtensionKernelSource {
 				continue
 			}
 			switch key {
