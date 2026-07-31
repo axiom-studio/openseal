@@ -81,6 +81,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 			ActionCallID: historyCall.ID, Status: ApprovalStatusApproved, Revision: 1,
 			CreatedAt: now.Add(-time.Hour).Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(-time.Hour),
 		}
+		if index == 0 {
+			historical.Destinations = []ApprovalDestination{{EndpointID: endpoint.ID}}
+		}
 		store.approvals[portfolioKey(endpoint.Scope, historical.ID)] = historical
 	}
 	store.mu.Unlock()

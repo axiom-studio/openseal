@@ -101,6 +101,17 @@ func terminalApprovalActionStatus(status ActionCallStatus) bool {
 }
 
 func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval *ApprovalCheckpoint, call *ActionCall, destination ApprovalDestination) error {
+	original, err := findDeliveredApprovalNotification(ctx, w.store, approval, destination)
+	if err != nil {
+		return err
+	}
+	// A destination that never received the request must not receive a
+	// context-free terminal message during recovery or historical backfill.
+	// Once the request delivery succeeds, a later idempotent pass will project
+	// the outcome.
+	if original == nil {
+		return nil
+	}
 	if err := enqueueApprovalCardUpdate(ctx, w.store, w.transport, approval, call, destination, ""); err != nil {
 		return err
 	}
@@ -176,43 +187,58 @@ func enqueueApprovalCardUpdate(
 	if !containsConversationDeliveryOperation(resolved.Adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
 		return nil
 	}
+	delivery, err := findDeliveredApprovalNotification(ctx, store, approval, destination)
+	if err != nil {
+		return err
+	}
+	if delivery == nil {
+		// A decision can arrive only after the provider has rendered the original
+		// message, but expiry can race its delivery. Canonical state remains
+		// authoritative when there is not yet a remote card to update.
+		return nil
+	}
+	parameters := map[string]interface{}{
+		"providerMessageId": delivery.ProviderMessageID,
+		"approval":          approvalNotificationPayload(approval, call),
+	}
+	if strings.TrimSpace(providerApproverID) != "" {
+		parameters["providerApproverId"] = strings.TrimSpace(providerApproverID)
+		parameters["approval"].(map[string]interface{})["providerApproverId"] = strings.TrimSpace(providerApproverID)
+	}
+	_, err = transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: approval.Scope, EndpointID: destination.EndpointID,
+		Operation:      capability.ConversationDeliveryMessageUpdate,
+		ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
+		ExternalThreadID: delivery.ExternalThreadID,
+		Parameters:       parameters,
+		IdempotencyKey:   "approval-card-update:" + approval.ID + ":" + destination.EndpointID + ":" + approvalCardPhase(approval, call),
+	})
+	return err
+}
+
+func findDeliveredApprovalNotification(
+	ctx context.Context,
+	store ApprovalNotificationStore,
+	approval *ApprovalCheckpoint,
+	destination ApprovalDestination,
+) (*ExternalConversationDelivery, error) {
 	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
 		Scope: approval.Scope, EndpointID: destination.EndpointID,
 		Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 1000,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, delivery := range deliveries {
 		if delivery.Operation != capability.ConversationDeliveryMessageSend {
 			continue
 		}
 		projected, _ := delivery.Parameters["approval"].(map[string]interface{})
-		if projected == nil || projected["id"] != approval.ID || strings.TrimSpace(delivery.ProviderMessageID) == "" {
-			continue
+		if projected != nil && projected["id"] == approval.ID && strings.TrimSpace(delivery.ProviderMessageID) != "" {
+			return delivery, nil
 		}
-		parameters := map[string]interface{}{
-			"providerMessageId": delivery.ProviderMessageID,
-			"approval":          approvalNotificationPayload(approval, call),
-		}
-		if strings.TrimSpace(providerApproverID) != "" {
-			parameters["providerApproverId"] = strings.TrimSpace(providerApproverID)
-			parameters["approval"].(map[string]interface{})["providerApproverId"] = strings.TrimSpace(providerApproverID)
-		}
-		_, err = transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
-			Scope: approval.Scope, EndpointID: destination.EndpointID,
-			Operation:      capability.ConversationDeliveryMessageUpdate,
-			ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
-			ExternalThreadID: delivery.ExternalThreadID,
-			Parameters:       parameters,
-			IdempotencyKey:   "approval-card-update:" + approval.ID + ":" + destination.EndpointID + ":" + approvalCardPhase(approval, call),
-		})
-		return err
 	}
-	// A decision can arrive only after the provider has rendered the original
-	// message, but expiry can race its delivery. Canonical state remains
-	// authoritative when there is not yet a remote card to update.
-	return nil
+	return nil, nil
 }
 
 func approvalCardPhase(approval *ApprovalCheckpoint, call *ActionCall) string {
