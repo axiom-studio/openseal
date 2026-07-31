@@ -294,10 +294,14 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 }
 
 func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
+	proposedAction := cloneMap(approval.ProposedAction)
+	if reviewContext := approvalReviewContext(approval.ContinuationCheckpoint); len(reviewContext) > 0 {
+		proposedAction["reviewContext"] = reviewContext
+	}
 	payload := map[string]interface{}{
 		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
 		"risk": approval.Risk, "summary": approval.Summary, "status": approval.Status,
-		"policyReason": approval.PolicyReason, "proposedAction": cloneMap(approval.ProposedAction),
+		"policyReason": approval.PolicyReason, "proposedAction": proposedAction,
 		"expiresAt": approval.ExpiresAt,
 	}
 	if approval.TimeoutDecision != "" {
@@ -320,6 +324,76 @@ func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall)
 		payload["decisionReason"] = approval.DecisionReason
 	}
 	return payload
+}
+
+// approvalReviewContext projects the explicit, approval-owned state that the
+// Agent persisted alongside the proposed action. This is where a prepared
+// public draft can remain when the final external action only addresses an
+// already-filled UI control. The projection is capability-neutral, bounded,
+// and secret-safe so every approval surface receives the same review facts.
+func approvalReviewContext(checkpoint map[string]interface{}) map[string]interface{} {
+	if len(checkpoint) == 0 {
+		return nil
+	}
+	state, _ := checkpoint["state"].(map[string]interface{})
+	if len(state) == 0 {
+		return nil
+	}
+	projected, _ := boundedApprovalReviewValue(state, 0, new(int)).(map[string]interface{})
+	if len(projected) == 0 {
+		return nil
+	}
+	return projected
+}
+
+const (
+	maxApprovalReviewDepth = 4
+	maxApprovalReviewItems = 64
+	maxApprovalReviewText  = 20_000
+)
+
+func boundedApprovalReviewValue(value interface{}, depth int, items *int) interface{} {
+	if depth > maxApprovalReviewDepth || items == nil || *items >= maxApprovalReviewItems {
+		return nil
+	}
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for key, child := range typed {
+			if *items >= maxApprovalReviewItems {
+				break
+			}
+			*items++
+			if sensitiveFieldName(key) {
+				continue
+			}
+			if projected := boundedApprovalReviewValue(child, depth+1, items); projected != nil {
+				result[key] = projected
+			}
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, 0, len(typed))
+		for _, child := range typed {
+			if *items >= maxApprovalReviewItems {
+				break
+			}
+			*items++
+			if projected := boundedApprovalReviewValue(child, depth+1, items); projected != nil {
+				result = append(result, projected)
+			}
+		}
+		return result
+	case string:
+		if len(typed) > maxApprovalReviewText {
+			return typed[:maxApprovalReviewText] + "…"
+		}
+		return typed
+	case bool, float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, nil:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 func (w *ApprovalNotificationWorker) postApprovalMessage(
