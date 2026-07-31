@@ -486,7 +486,7 @@ func (c *Catalog) resolvePrompt(ctx context.Context, scope ScopeReference, deplo
 		return resolved, nil
 	}
 	if selected != nil {
-		return nil, errors.New("selected skill binding is unavailable or stale")
+		return nil, ErrBindingUnavailable
 	}
 	return nil, errors.New("bound skill prompt not found")
 }
@@ -540,7 +540,7 @@ func (c *Catalog) ResolveConversationAdapter(ctx context.Context, scope ScopeRef
 		return resolved, nil
 	}
 	if len(selected) == 1 {
-		return nil, errors.New("selected conversation adapter binding is unavailable or stale")
+		return nil, fmt.Errorf("%w: selected conversation adapter binding is unavailable or stale", ErrBindingUnavailable)
 	}
 	return nil, errors.New("bound conversation adapter not found")
 }
@@ -593,7 +593,7 @@ func (c *Catalog) ResolveCallbackAdapter(ctx context.Context, scope ScopeReferen
 		return resolved, nil
 	}
 	if len(selected) == 1 {
-		return nil, errors.New("selected callback adapter binding is unavailable or stale")
+		return nil, fmt.Errorf("%w: selected callback adapter binding is unavailable or stale", ErrBindingUnavailable)
 	}
 	return nil, errors.New("bound callback adapter not found")
 }
@@ -648,7 +648,7 @@ func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentI
 		return resolved, nil
 	}
 	if len(selected) == 1 {
-		return nil, errors.New("selected skill binding is unavailable or stale")
+		return nil, ErrBindingUnavailable
 	}
 	return nil, errors.New("bound skill action not found")
 }

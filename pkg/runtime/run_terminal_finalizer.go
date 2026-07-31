@@ -11,7 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const runResourcesReleasedEvent = "run.resources_released"
+const (
+	runResourcesReleasedEvent    = "run.resources_released"
+	runResourcesQuarantinedEvent = "run.resources_release_quarantined"
+)
 
 // RunTerminalFinalizer releases temporary capability resources after a Run
 // reaches any terminal state. Implementations must be idempotent because the
@@ -50,7 +53,8 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		return errors.New("only terminal Runs can be finalized")
 	}
 	events, err := f.store.ListActivity(ctx, ActivityFilter{
-		Scope: run.Scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Descending: true, Limit: 1,
+		Scope: run.Scope, RunID: run.ID,
+		EventTypes: []string{runResourcesReleasedEvent, runResourcesQuarantinedEvent}, Descending: true, Limit: 1,
 	})
 	if err != nil {
 		return err
@@ -77,6 +81,9 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		acquisition, err := f.catalog.Resolve(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID},
 			call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 		if err != nil {
+			if errors.Is(err, skill.ErrBindingUnavailable) {
+				return f.quarantine(ctx, run, call, finalized, "exact historical Skill binding is unavailable")
+			}
 			return fmt.Errorf("resolve acquisition action %s: %w", call.ID, err)
 		}
 		finalizerName := strings.TrimSpace(acquisition.Action.FinalizerAction)
@@ -86,6 +93,9 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		finalizer, err := f.catalog.Resolve(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID},
 			call.DeploymentID, call.SkillID, call.SkillVersion, finalizerName, selection...)
 		if err != nil {
+			if errors.Is(err, skill.ErrBindingUnavailable) {
+				return f.quarantine(ctx, run, call, finalized, "exact historical Skill finalizer binding is unavailable")
+			}
 			return fmt.Errorf("resolve finalizer for action %s: %w", call.ID, err)
 		}
 		arguments := terminalFinalizerArguments(finalizer.Action.InputSchema, call)
@@ -119,6 +129,22 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		Actor:      ActivityActor{Type: "runtime", ID: "run-finalizer"},
 		Visibility: ActivityVisibilityScope, CreatedAt: f.now().UTC(),
 		Payload: map[string]interface{}{"finalizersExecuted": finalized, "terminalStatus": run.Status},
+	})
+	return err
+}
+
+func (f *ActionRunTerminalFinalizer) quarantine(ctx context.Context, run *AgentRun, call *ActionCall, finalized int, reason string) error {
+	_, err := f.store.AppendActivity(ctx, &ActivityEvent{
+		ID: f.newID(), Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID,
+		ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
+		EventType: runResourcesQuarantinedEvent, Severity: ActivitySeverityWarning,
+		Summary:    "Stopped terminal resource cleanup for an unavailable historical binding",
+		Actor:      ActivityActor{Type: "runtime", ID: "run-finalizer"},
+		Visibility: ActivityVisibilityScope, CreatedAt: f.now().UTC(),
+		Payload: map[string]interface{}{
+			"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision,
+			"finalizersExecuted": finalized, "reason": reason, "terminalStatus": run.Status,
+		},
 	})
 	return err
 }

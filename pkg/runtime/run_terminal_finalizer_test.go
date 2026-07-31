@@ -108,13 +108,75 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatalf("activity filters = %d, want one per finalization attempt", len(store.activityFilters))
 	}
 	for _, filter := range store.activityFilters {
-		if !filter.Descending || len(filter.EventTypes) != 1 || filter.EventTypes[0] != runResourcesReleasedEvent {
+		if !filter.Descending || len(filter.EventTypes) != 2 || filter.EventTypes[0] != runResourcesReleasedEvent || filter.EventTypes[1] != runResourcesQuarantinedEvent {
 			t.Fatalf("terminal finalizer activity filter = %#v", filter)
 		}
 	}
 	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("cleanup events = %#v, %v", events, err)
+	}
+}
+
+func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalog()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	definition := &skill.Definition{
+		ID: "session", Version: "1.0.0", Name: "Session", Transport: skill.TransportReference{Kind: "test"},
+		Actions: map[string]skill.Action{
+			"start": {
+				Name: "start", Description: "Acquire session", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead,
+				InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{}},
+				OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"sessionId": map[string]interface{}{"type": "string"}}, "required": []interface{}{"sessionId"}},
+				Retry:        skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported, FinalizerAction: "release",
+			},
+			"release": {
+				Name: "release", Description: "Release session", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone,
+				InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"sessionId": map[string]interface{}{"type": "string"}}, "required": []interface{}{"sessionId"}},
+				OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"released": map[string]interface{}{"type": "boolean"}}, "required": []interface{}{"released"}},
+				Retry:        skill.ActionRetryPolicy{MaxAttempts: 1}, Idempotency: skill.IdempotencySupported,
+			},
+		},
+	}
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &skill.Binding{ID: "binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"start", "release"}, MaximumRisk: skill.RiskLevelRead, Revision: 1}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	updated := *binding
+	updated.Revision = 2
+	if err := catalog.Bind(ctx, &updated); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 31, 19, 0, 0, 0, time.UTC)
+	run := &AgentRun{ID: "historical", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled, CreatedAt: now, UpdatedAt: now}
+	store.agentRuns[portfolioKey(scope, run.ID)] = cloneAgentRun(run)
+	store.actions[portfolioKey(scope, "start-call")] = &ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	dispatches := 0
+	finalizer := NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		dispatches++
+		return map[string]interface{}{"released": true}, nil
+	}))
+	finalizer.now = func() time.Time { return now.Add(time.Second) }
+	if err := finalizer.FinalizeRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := finalizer.FinalizeRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if dispatches != 0 {
+		t.Fatalf("stale finalizer dispatched %d times", dispatches)
+	}
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{runResourcesQuarantinedEvent}, Limit: 10})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("quarantine events = %#v, %v", events, err)
+	}
+	if fmt.Sprint(events[0].Payload["bindingRevision"]) != "1" {
+		t.Fatalf("quarantine payload = %#v", events[0].Payload)
 	}
 }
 
