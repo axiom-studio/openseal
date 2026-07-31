@@ -946,7 +946,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	p.lastFinalizationScan = now
 	const pageSize = 100
 	runs, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: p.config.Scope, Statuses: []AgentRunStatus{
+		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []AgentRunStatus{
 			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
 		}, Order: AgentRunOrderCreatedDesc, Limit: pageSize, Offset: p.finalizationOffset,
 	})
