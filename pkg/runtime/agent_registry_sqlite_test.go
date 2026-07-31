@@ -99,6 +99,32 @@ func TestAgentRunbookActivationSyncRetiresRemovedTriggersAndRejectsUnplacedOnes(
 	}
 }
 
+func TestAgentRunbookActivationSyncUsesActiveScheduleReplacement(t *testing.T) {
+	now := time.Now().UTC()
+	deployment := &kernelagent.AgentDeployment{ID: "operator", UpdatedAt: now}
+	definition := sqliteAgentDefinition("2")
+	definition.Runbook = sqliteAgentRunbook("2", 5)
+	retired := &RunbookActivation{
+		ID: "hourly-original", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"},
+		ObjectiveID: "objective-one", AssignedAgentID: "operator", DefinitionID: definition.Runbook.ID, DefinitionVersion: "1", TriggerID: "hourly",
+		Trigger: definition.Runbook.Triggers["hourly"], Status: RunbookActivationRetired, Revision: 3, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+	}
+	replacement := cloneRunbookActivation(retired)
+	replacement.ID = "hourly-replacement"
+	replacement.Status = RunbookActivationActive
+	replacement.Revision = 1
+	replacement.CreatedAt = now
+	replacement.UpdatedAt = now
+
+	synchronized, err := reconcileAgentRunbookActivations([]*RunbookActivation{retired, replacement}, definition, deployment, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(synchronized) != 1 || synchronized[0].ID != replacement.ID || synchronized[0].Status != RunbookActivationActive || synchronized[0].DefinitionVersion != "2" {
+		t.Fatalf("synchronized replacement = %#v", synchronized)
+	}
+}
+
 func TestSQLiteAgentDefinitionsDeploymentsAndActivationsSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents.db")
 	store, err := NewSQLiteStore(path)
