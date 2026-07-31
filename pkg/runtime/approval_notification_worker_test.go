@@ -56,6 +56,11 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
 		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
 		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(24 * time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		ContinuationCheckpoint: map[string]interface{}{"state": map[string]interface{}{
+			"commentDraft": "The exact proposed public comment.",
+			"destination":  "https://forum.example/posts/42",
+			"apiToken":     "must-never-leave-the-kernel",
+		}},
 	}
 	waiting := cloneAgentRun(claimed)
 	waiting.Status = AgentRunStatusWaitingForApproval
@@ -105,6 +110,12 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	card := deliveries[0].Parameters["approval"].(map[string]interface{})
 	if card["id"] != approval.ID || card["invocationDigest"] != call.InvocationDigest {
 		t.Fatalf("card = %#v", card)
+	}
+	review := card["proposedAction"].(map[string]interface{})["reviewContext"].(map[string]interface{})
+	if review["commentDraft"] != "The exact proposed public comment." ||
+		review["destination"] != "https://forum.example/posts/42" ||
+		review["apiToken"] != nil {
+		t.Fatalf("review context = %#v", review)
 	}
 	original, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-worker", now, time.Minute)
 	if err != nil || original == nil {
