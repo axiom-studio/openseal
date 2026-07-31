@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -646,5 +647,52 @@ func TestAgentRequestDecisionTurnFailsClosedOnWorkOrMalformedDecision(t *testing
 				t.Fatalf("outcome unexpectedly accepted: %#v", tc.outcome)
 			}
 		})
+	}
+}
+
+func TestAcceptedAgentRequestExecutionRepairsOneRepeatedIntakeDecision(t *testing.T) {
+	outcome := &TurnOutcome{
+		NextRunStatus: AgentRunStatusCompleted,
+		RunOutput: map[string]interface{}{
+			AgentRequestDecisionOutputKey: map[string]interface{}{
+				"decision": "accept",
+				"message":  "This is relevant.",
+			},
+		},
+		ProposedActions: []TurnAction{{Capability: "browser.start"}},
+	}
+	runner := &acceptedAgentRequestExecutionTurnRunner{inner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return outcome, nil
+	})}
+	repaired, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "execution", Checkpoint: map[string]interface{}{}},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.NextRunStatus != AgentRunStatusRunning || repaired.RunOutput != nil ||
+		len(repaired.ProposedActions) != 0 || acceptedAgentRequestExecutionRecoveryAttempt(repaired.ContinuationCheckpoint) != 1 {
+		t.Fatalf("repaired execution = %#v", repaired)
+	}
+}
+
+func TestAcceptedAgentRequestExecutionFailsAfterRepeatedIntakeDecision(t *testing.T) {
+	runner := &acceptedAgentRequestExecutionTurnRunner{inner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusCompleted,
+			RunOutput: map[string]interface{}{
+				AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "accept", "message": "again"},
+			},
+		}, nil
+	})}
+	_, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "execution", Checkpoint: map[string]interface{}{
+			acceptedAgentRequestExecutionRecoveryKey: map[string]interface{}{"attempt": 1},
+		}},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "repeatedly emitted") {
+		t.Fatalf("repeated intake decision error = %v", err)
 	}
 }
