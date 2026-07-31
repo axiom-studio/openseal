@@ -80,6 +80,7 @@ type AgentRunWorkerSupervisor struct {
 	logger         *zap.SugaredLogger
 	actions        *ActionCoordinator
 	actionObserver ActionProposalObserver
+	runFinalizer   RunTerminalFinalizer
 	limiter        *WorkerLimiter
 
 	mu     sync.RWMutex
@@ -94,6 +95,15 @@ func (s *AgentRunWorkerSupervisor) SetActionProposalObserver(observer ActionProp
 	s.actionObserver = observer
 	for _, pool := range s.pools {
 		pool.SetActionProposalObserver(observer)
+	}
+}
+
+func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runFinalizer = finalizer
+	for _, pool := range s.pools {
+		pool.SetRunTerminalFinalizer(finalizer)
 	}
 }
 
@@ -248,6 +258,7 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 		}
 		pool.SetActionCoordinator(s.actions)
 		pool.SetActionProposalObserver(s.actionObserver)
+		pool.SetRunTerminalFinalizer(s.runFinalizer)
 		pool.SetWorkerLimiter(s.limiter)
 		s.pools[key] = pool
 		pool.Start(ctx)

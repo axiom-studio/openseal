@@ -121,27 +121,29 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 // AgentRunWorkerPool autonomously claims and advances canonical Runs. The
 // durable store is authoritative; the wake channel is only a latency hint.
 type AgentRunWorkerPool struct {
-	config         AgentRunWorkerConfig
-	scheduler      *AgentRunScheduler
-	portfolio      PortfolioStore
-	coordinator    *TurnCoordinator
-	wakeService    *AgentRunWakeService
-	activity       *RunActivityService
-	actions        *ActionCoordinator
-	actionObserver ActionProposalObserver
-	forks          *RunForkCoordinator
-	collaboration  *CollaborationService
-	requestInbox   *AgentRequestInboxReconciler
-	reportingStore ConversationStore
-	resolver       TurnRunnerResolver
-	logger         *zap.SugaredLogger
-	wake           chan struct{}
-	poolID         string
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	startOnce      sync.Once
-	stopOnce       sync.Once
-	limiter        *WorkerLimiter
+	config               AgentRunWorkerConfig
+	scheduler            *AgentRunScheduler
+	portfolio            PortfolioStore
+	coordinator          *TurnCoordinator
+	wakeService          *AgentRunWakeService
+	activity             *RunActivityService
+	actions              *ActionCoordinator
+	actionObserver       ActionProposalObserver
+	runFinalizer         RunTerminalFinalizer
+	lastFinalizationScan time.Time
+	forks                *RunForkCoordinator
+	collaboration        *CollaborationService
+	requestInbox         *AgentRequestInboxReconciler
+	reportingStore       ConversationStore
+	resolver             TurnRunnerResolver
+	logger               *zap.SugaredLogger
+	wake                 chan struct{}
+	poolID               string
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	startOnce            sync.Once
+	stopOnce             sync.Once
+	limiter              *WorkerLimiter
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
@@ -152,6 +154,10 @@ func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
 
 func (p *AgentRunWorkerPool) SetActionProposalObserver(observer ActionProposalObserver) {
 	p.actionObserver = observer
+}
+
+func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
+	p.runFinalizer = finalizer
 }
 
 func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
@@ -284,6 +290,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		if transitionErr != nil {
 			p.logger.Errorw("failed to persist runner resolution failure", "runId", run.ID, "error", transitionErr)
 		} else {
+			p.finalizeTerminalRun(ctx, failed)
 			p.projectTerminalReporting(ctx, failed)
 			p.resolveCollaborationChild(ctx, failed)
 		}
@@ -357,6 +364,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			return
 		}
 		if current != nil && isTerminalAgentRunStatus(current.Status) {
+			p.finalizeTerminalRun(ctx, current)
 			p.projectTerminalReporting(ctx, current)
 			p.resolveForkChild(ctx, current)
 			p.resolveCollaborationChild(ctx, current)
@@ -817,6 +825,7 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	if err != nil {
 		p.logger.Errorw("failed to persist action materialization failure", "runId", run.ID, "error", err)
 	} else if isTerminalAgentRunStatus(failed.Status) {
+		p.finalizeTerminalRun(ctx, failed)
 		p.projectTerminalReporting(ctx, failed)
 		p.resolveCollaborationChild(ctx, failed)
 	} else {
@@ -854,6 +863,17 @@ func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, safe
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
 	if err := projectTerminalRunReporting(ctx, p.reportingStore, run); err != nil {
 		p.logger.Warnw("failed to project terminal Run milestone", "runId", run.ID, "error", err)
+	}
+}
+
+func (p *AgentRunWorkerPool) finalizeTerminalRun(ctx context.Context, run *AgentRun) {
+	if p.runFinalizer == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := p.runFinalizer.FinalizeRun(cleanupCtx, cloneAgentRun(run)); err != nil {
+		p.logger.Warnw("failed to finalize terminal Run resources", "runId", run.ID, "status", run.Status, "error", err)
 	}
 }
 
@@ -908,7 +928,31 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 		}
 		p.reconcileAgentRequestInbox(ctx)
 		p.reconcileForkChildren(ctx)
+		p.reconcileTerminalRunFinalizers(ctx)
 		release()
+	}
+}
+
+func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context) {
+	if p.runFinalizer == nil {
+		return
+	}
+	now := time.Now().UTC()
+	if !p.lastFinalizationScan.IsZero() && now.Sub(p.lastFinalizationScan) < 10*time.Second {
+		return
+	}
+	p.lastFinalizationScan = now
+	runs, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: p.config.Scope, Statuses: []AgentRunStatus{
+			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
+		}, Limit: 100,
+	})
+	if err != nil {
+		p.logger.Warnw("failed to list terminal Runs for resource finalization", "error", err)
+		return
+	}
+	for _, run := range runs {
+		p.finalizeTerminalRun(ctx, run)
 	}
 }
 
