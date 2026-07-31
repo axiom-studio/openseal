@@ -38,10 +38,19 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 	if w == nil || w.store == nil || w.transport == nil {
 		return 0, errors.New("approval notification worker is not configured")
 	}
-	approvals, err := w.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Status: []ApprovalStatus{ApprovalStatusPending, ApprovalStatusApproved}, Limit: limit})
+	// Pending checkpoints are deadline-bearing work and must never queue behind
+	// historical approved checkpoints. Approved outcomes are read newest-first
+	// so a fresh decision is projected even when the tenant has a large audit
+	// history. Delivery idempotency makes repeated reconciliation safe.
+	pending, err := w.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Status: []ApprovalStatus{ApprovalStatusPending}, Limit: limit})
 	if err != nil {
 		return 0, err
 	}
+	approved, err := w.store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Status: []ApprovalStatus{ApprovalStatusApproved}, Limit: limit, NewestFirst: true})
+	if err != nil {
+		return 0, err
+	}
+	approvals := append(pending, approved...)
 	processed := 0
 	var processErrors []error
 	now := w.now().UTC()

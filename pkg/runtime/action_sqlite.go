@@ -291,7 +291,11 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 		query += ` AND json_extract(r.payload, '$.owner.type') = ? AND json_extract(r.payload, '$.owner.id') = ?`
 		args = append(args, filter.Owner.Type, filter.Owner.ID)
 	}
-	query += ` ORDER BY a.created_at ASC, a.id ASC`
+	if filter.NewestFirst {
+		query += ` ORDER BY a.created_at DESC, a.id DESC`
+	} else {
+		query += ` ORDER BY a.created_at ASC, a.id ASC`
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -314,7 +318,12 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sort.SliceStable(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
+	sort.SliceStable(result, func(i, j int) bool {
+		if filter.NewestFirst {
+			return result[i].CreatedAt.After(result[j].CreatedAt)
+		}
+		return result[i].CreatedAt.Before(result[j].CreatedAt)
+	})
 	return pageApprovals(result, filter.Offset, filter.Limit), nil
 }
 
