@@ -97,7 +97,9 @@ func TestActionWorkerPreservesApprovedContinuationAfterTerminalFailure(t *testin
 	store := NewMemoryStore()
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
-	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(t.Context(), ResolveApprovalRequest{
+	approvalCoordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+	approvalCoordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+	resolved, err := approvalCoordinator.Resolve(t.Context(), ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
 		ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-action", Approve: true,
 		Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
