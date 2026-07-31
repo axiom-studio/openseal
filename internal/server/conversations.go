@@ -32,7 +32,8 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	}
 	key := requestIdempotencyKey(r, payload.IdempotencyKey)
 	conversation, replayed, err := service.CreateConversation(r.Context(), runtime.CreateConversationRequest{
-		ID: payload.ID, Scope: payload.Scope, Owner: payload.Owner, Title: payload.Title, IdempotencyKey: key,
+		ID: payload.ID, Scope: payload.Scope, Owner: payload.Owner, Title: payload.Title, Origin: payload.Origin,
+		IdempotencyKey: key,
 	})
 	if err != nil {
 		s.respondConversationError(w, err)
