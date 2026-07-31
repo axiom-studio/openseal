@@ -939,7 +939,8 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return
 	}
 	now := time.Now().UTC()
-	if !p.lastFinalizationScan.IsZero() && now.Sub(p.lastFinalizationScan) < 10*time.Second {
+	firstScan := p.lastFinalizationScan.IsZero()
+	if !firstScan && now.Sub(p.lastFinalizationScan) < 10*time.Second {
 		return
 	}
 	p.lastFinalizationScan = now
@@ -952,6 +953,11 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	if err != nil {
 		p.logger.Warnw("failed to list terminal Runs for resource finalization", "error", err)
 		return
+	}
+	if firstScan {
+		p.logger.Infow("started terminal Run resource reconciliation",
+			"scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID,
+			"runKind", p.config.Kind, "candidates", len(runs))
 	}
 	for _, run := range runs {
 		p.finalizeTerminalRun(ctx, run)
