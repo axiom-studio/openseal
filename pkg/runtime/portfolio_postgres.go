@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -260,7 +261,50 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+` WHERE scope_kind = $1 AND scope_id = $2`, filter.Scope.Kind, filter.Scope.ID)
+	query := `SELECT payload FROM ` + s.table("agent_runs") + ` WHERE scope_kind = $1 AND scope_id = $2`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	add := func(clause string, value interface{}) {
+		args = append(args, value)
+		query += fmt.Sprintf(clause, len(args))
+	}
+	if filter.Kind != "" {
+		add(` AND COALESCE(payload->>'kind', 'agent_work') = $%d`, filter.Kind)
+	}
+	if filter.Owner != nil {
+		add(` AND payload->'owner'->>'type' = $%d`, filter.Owner.Type)
+		add(` AND payload->'owner'->>'id' = $%d`, filter.Owner.ID)
+	}
+	if filter.ObjectiveID != "" {
+		add(` AND objective_id = $%d`, filter.ObjectiveID)
+	}
+	if filter.ParentRunID != "" {
+		add(` AND parent_run_id = $%d`, filter.ParentRunID)
+	}
+	if filter.RootRunID != "" {
+		add(` AND root_run_id = $%d`, filter.RootRunID)
+	}
+	if filter.AssignedAgentID != "" {
+		add(` AND assigned_agent_id = $%d`, filter.AssignedAgentID)
+	}
+	if len(filter.Statuses) > 0 {
+		statuses := make([]string, 0, len(filter.Statuses))
+		for _, status := range filter.Statuses {
+			statuses = append(statuses, string(status))
+		}
+		add(` AND status = ANY($%d)`, pq.Array(statuses))
+	}
+	if filter.Order == AgentRunOrderCreatedDesc {
+		query += ` ORDER BY created_at DESC, id DESC`
+	} else {
+		query += ` ORDER BY priority DESC, created_at ASC, id ASC`
+	}
+	if filter.Limit > 0 {
+		add(` LIMIT $%d`, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		add(` OFFSET $%d`, filter.Offset)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -275,15 +319,12 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 		if err != nil {
 			return nil, err
 		}
-		if matchesRunFilter(run, filter) {
-			result = append(result, run)
-		}
+		result = append(result, run)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sortAgentRuns(result, filter.Order)
-	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
+	return result, nil
 }
 
 func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
