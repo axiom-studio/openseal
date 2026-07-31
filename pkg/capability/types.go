@@ -80,6 +80,15 @@ type ActionRetryPolicy struct {
 	MaxBackoff     Duration `json:"maxBackoff,omitempty"`
 }
 
+// ActionEvidenceRequirement declares a successful preparatory action that
+// must already exist in the same Run before this action may be proposed. The
+// kernel verifies durable action history; model-authored summaries and review
+// facts never satisfy the requirement.
+type ActionEvidenceRequirement struct {
+	Action            string   `json:"action"`
+	MatchingArguments []string `json:"matchingArguments,omitempty"`
+}
+
 // ExternalOperationPolicy controls whether an Action may claim a durable,
 // cross-Run receipt for an externally observable business operation. Empty is
 // the legacy-compatible optional policy for external side effects.
@@ -121,7 +130,8 @@ type Action struct {
 	// SemanticArguments maps portable roles such as "target", "body", or
 	// "artifact" to exact input-schema property names. Product surfaces use
 	// these roles to compose actions without guessing connector-specific fields.
-	SemanticArguments map[string]string `json:"semanticArguments,omitempty"`
+	SemanticArguments map[string]string           `json:"semanticArguments,omitempty"`
+	RequiredEvidence  []ActionEvidenceRequirement `json:"requiredEvidence,omitempty"`
 }
 
 type TransportReference struct {
