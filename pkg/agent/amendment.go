@@ -65,6 +65,11 @@ type ProposeAmendmentRequest struct {
 	EvidenceRefs               []string
 	IdempotencyKey             string
 	ExpectedDeploymentRevision int64
+	// AdditionalAllowedFields is authority granted by the calling governed
+	// capability, beyond the definition's autonomous self-amendment policy.
+	// Callers must keep this list narrow and must independently require the
+	// configured review checkpoint before activation.
+	AdditionalAllowedFields []string
 }
 
 type SubmitAmendmentEvaluationRequest struct {

@@ -184,7 +184,7 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 	if err := decodeAgentBehaviorArguments(input.Arguments, &args); err != nil {
 		return nil, err
 	}
-	_, deployment, definition, _, err := resolveAgentBehaviorAction(ctx, d.agents, run, input.Arguments)
+	_, deployment, definition, changes, err := resolveAgentBehaviorAction(ctx, d.agents, run, input.Arguments)
 	if errors.Is(err, kernelagent.ErrRevisionConflict) {
 		return d.replayedResult(ctx, input.Call, run)
 	}
@@ -200,6 +200,20 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 		return nil, err
 	}
 	if amendment == nil {
+		additionalAllowedFields := make([]string, 0, len(changes))
+		for field := range changes {
+			if !containsString(definition.Amendments.AllowedFields, field) {
+				additionalAllowedFields = append(additionalAllowedFields, field)
+			}
+		}
+		if len(additionalAllowedFields) > 0 {
+			if input.Call.ApprovalID == "" {
+				return nil, errors.New("Agent behavior fields outside its autonomous amendment policy require an approved action checkpoint")
+			}
+			if _, approvalErr := approvedAgentBehaviorCheckpoint(ctx, d.store, input.Call); approvalErr != nil {
+				return nil, approvalErr
+			}
+		}
 		candidate := cloneAgentDefinitionForAction(definition)
 		candidate.Version = candidateVersion
 		applyAgentBehaviorArguments(candidate, args)
@@ -208,13 +222,11 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 			Candidate: candidate, ProposerType: "agent", ProposerID: deploymentID,
 			Rationale: strings.TrimSpace(args.Rationale), EvidenceRefs: append([]string(nil), input.Call.EvidenceRefs...),
 			IdempotencyKey: input.Call.ID, ExpectedDeploymentRevision: deployment.Revision,
+			AdditionalAllowedFields: additionalAllowedFields,
 		})
 		if err != nil {
 			return nil, err
 		}
-	}
-	if amendment.Status == kernelagent.AmendmentEvaluating {
-		return nil, errors.New("agent behavior action requires definition evaluations and cannot be activated by this conversation action")
 	}
 	actorType, actorID := "agent", deploymentID
 	if input.Call.ApprovalID != "" {
@@ -286,9 +298,6 @@ func resolveAgentBehaviorAction(
 	if !definition.Amendments.AgentMayPropose {
 		return args, nil, nil, nil, errors.New("agent definition policy does not allow Agent-proposed amendments")
 	}
-	if len(definition.Evaluations) > 0 {
-		return args, nil, nil, nil, errors.New("agent behavior action requires definition evaluations and cannot be proposed as an immediate conversation action")
-	}
 	candidate := cloneAgentDefinitionForAction(definition)
 	applyAgentBehaviorArguments(candidate, args)
 	if err := candidate.Validate(); err != nil {
@@ -297,11 +306,6 @@ func resolveAgentBehaviorAction(
 	changes := agentBehaviorChanges(definition, candidate)
 	if len(changes) == 0 {
 		return args, nil, nil, nil, errors.New("agent behavior amendment requires at least one changed field")
-	}
-	for field := range changes {
-		if !containsString(definition.Amendments.AllowedFields, field) {
-			return args, nil, nil, nil, fmt.Errorf("agent definition policy does not allow changing %s", field)
-		}
 	}
 	return args, deployment, definition, changes, nil
 }

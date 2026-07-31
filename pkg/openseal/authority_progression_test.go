@@ -43,7 +43,7 @@ func TestEngineExposesGovernedAgentAuthorityProgression(t *testing.T) {
 		Ceiling:      AgentAuthorityProgressionCeiling{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 2},
 		ProposerType: "agent", ProposerID: deployment.ID,
 	})
-	if err != nil || amendment.IdempotencyKey != recommendation.IdempotencyKey || amendment.Status != AgentAmendmentEvaluating {
+	if err != nil || amendment.IdempotencyKey != recommendation.IdempotencyKey || amendment.Status != AgentAmendmentAwaitingApproval {
 		t.Fatalf("amendment = %#v, %v", amendment, err)
 	}
 }

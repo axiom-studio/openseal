@@ -323,7 +323,7 @@ func TestUpdateDeploymentEnforcesTerminalLifecycle(t *testing.T) {
 	}
 }
 
-func TestAmendmentsRequireAllowedDiffEvaluationApprovalAndAtomicActivation(t *testing.T) {
+func TestAmendmentsRequireAllowedDiffApprovalAndAtomicActivation(t *testing.T) {
 	registry := NewRegistry()
 	base := testDefinition("1.0.0", capability.RiskLevelExternal, 4)
 	base.Amendments = AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true, ApproverPrincipals: []string{"user:admin"}}
@@ -352,24 +352,17 @@ func TestAmendmentsRequireAllowedDiffEvaluationApprovalAndAtomicActivation(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if amendment.Status != AmendmentEvaluating || len(amendment.Changes) != 1 || amendment.Changes[0].Field != "systemPrompt" || amendment.Candidate.Provenance.DerivedFrom != registered.Digest {
+	if amendment.Status != AmendmentAwaitingApproval || len(amendment.Changes) != 1 || amendment.Changes[0].Field != "systemPrompt" || amendment.Candidate.Provenance.DerivedFrom != registered.Digest {
 		t.Fatalf("amendment proposal = %#v", amendment)
 	}
-	evaluated, err := registry.SubmitAmendmentEvaluation(context.Background(), SubmitAmendmentEvaluationRequest{
-		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision,
-		Evaluations: []AmendmentEvaluation{{CriterionID: "accuracy", Passed: true, Score: 1, Summary: "All claims remain evidence-bound", EvidenceRefs: []string{"artifact:evaluation"}}},
-	})
-	if err != nil || evaluated.Status != AmendmentAwaitingApproval {
-		t.Fatalf("amendment evaluation = %#v, %v", evaluated, err)
-	}
 	if _, err := registry.ResolveAmendment(context.Background(), ResolveAmendmentRequest{
-		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: evaluated.Revision, Approved: true,
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: true,
 		ActorType: "agent", ActorID: "operator", Reason: "Self-approved",
 	}); err == nil {
 		t.Fatal("ineligible principal should not approve an amendment")
 	}
 	approved, err := registry.ResolveAmendment(context.Background(), ResolveAmendmentRequest{
-		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: evaluated.Revision, Approved: true,
+		Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: true,
 		ActorType: "user", ActorID: "admin", Reason: "Evaluation passed",
 	})
 	if err != nil || approved.Status != AmendmentApproved || approved.Decision == nil {
@@ -458,12 +451,14 @@ func TestAmendmentsFailClosedOnPolicyEvaluationAndStaleState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := registry.SubmitAmendmentEvaluation(context.Background(), SubmitAmendmentEvaluationRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Evaluations: []AmendmentEvaluation{{CriterionID: "safety", Passed: false, Summary: "Regression"}}})
-	if err != nil || failed.Status != AmendmentEvaluationFailed {
-		t.Fatalf("failed evaluation = %#v, %v", failed, err)
+	if amendment.Status != AmendmentReady {
+		t.Fatalf("definition outcome criteria incorrectly blocked amendment: %#v", amendment)
 	}
-	if _, _, _, err := registry.ActivateAmendment(context.Background(), scope, amendment.ID, failed.Revision, "user", "admin", ""); err == nil {
-		t.Fatal("failed evaluation must not activate")
+	if _, err := registry.SubmitAmendmentEvaluation(context.Background(), SubmitAmendmentEvaluationRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Evaluations: []AmendmentEvaluation{{CriterionID: "safety", Passed: false, Summary: "Regression"}}}); err == nil {
+		t.Fatal("runtime outcome criteria were accepted as an amendment evaluation")
+	}
+	if _, _, _, err := registry.ActivateAmendment(context.Background(), scope, amendment.ID, amendment.Revision, "user", "admin", "reviewed behavior amendment"); err != nil {
+		t.Fatalf("ready amendment activation failed: %v", err)
 	}
 
 	riskRegistry := NewRegistry()
