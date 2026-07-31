@@ -120,9 +120,12 @@ const (
 	maximumCheckpointActionResultBytes = 64 << 10
 )
 
-// preserveKernelActionHistory makes the action evidence journal kernel-owned:
-// a hosted model may read it, but omitting or rewriting it cannot erase the
-// authoritative evidence accumulated by earlier action workers.
+// preserveKernelActionHistory makes action evidence kernel-owned: a hosted
+// model may read its bounded projection, but omitting or rewriting it cannot
+// erase the authoritative journal or latest terminal ActionCall accumulated by
+// action workers. In particular, the model-visible lastAction result may be
+// compacted; accepting that projection back would discard observation elements
+// required to validate the next action proposal.
 func preserveKernelActionHistory(current, proposed map[string]interface{}) map[string]interface{} {
 	result := deepCloneCheckpointMap(proposed)
 	if result == nil {
@@ -131,6 +134,7 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, actionHistoryCheckpointKey)
 	delete(result, approvalRecoveryCheckpointKey)
 	delete(result, proposalRecoveryCheckpointKey)
+	delete(result, "lastAction")
 	if current != nil {
 		if history, ok := current[actionHistoryCheckpointKey]; ok {
 			result[actionHistoryCheckpointKey] = deepCloneCheckpointValue(history)
@@ -140,6 +144,9 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 		}
 		if recovery, ok := current[proposalRecoveryCheckpointKey]; ok {
 			result[proposalRecoveryCheckpointKey] = deepCloneCheckpointValue(recovery)
+		}
+		if lastAction, ok := current["lastAction"]; ok {
+			result["lastAction"] = deepCloneCheckpointValue(lastAction)
 		}
 	}
 	return result
