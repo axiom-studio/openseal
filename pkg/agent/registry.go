@@ -486,6 +486,19 @@ func (r *Registry) SubmitAmendmentEvaluation(ctx context.Context, req SubmitAmen
 }
 
 func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentRequest) (*DefinitionAmendment, error) {
+	return r.resolveAmendment(ctx, req, false)
+}
+
+// ResolveAmendmentFromGovernedApproval resolves an amendment after a durable
+// runtime approval checkpoint has already authenticated and authorized the
+// decision principal. This keeps the checkpoint as the single approval
+// authority while preserving the actual decision principal in the amendment
+// audit record. Callers must verify the checkpoint before invoking this method.
+func (r *Registry) ResolveAmendmentFromGovernedApproval(ctx context.Context, req ResolveAmendmentRequest) (*DefinitionAmendment, error) {
+	return r.resolveAmendment(ctx, req, true)
+}
+
+func (r *Registry) resolveAmendment(ctx context.Context, req ResolveAmendmentRequest, governedApproval bool) (*DefinitionAmendment, error) {
 	current, err := r.store.GetAmendment(ctx, req.Scope, req.AmendmentID)
 	if err != nil {
 		return nil, err
@@ -505,7 +518,7 @@ func (r *Registry) ResolveAmendment(ctx context.Context, req ResolveAmendmentReq
 	if owner == "" {
 		owner = strings.TrimSpace(current.Candidate.Provenance.CreatedBy)
 	}
-	if !definitionAmendmentApproverEligible(principal, owner, base.Amendments.ApproverPrincipals) {
+	if !governedApproval && !definitionAmendmentApproverEligible(principal, owner, base.Amendments.ApproverPrincipals) {
 		return nil, errors.New("principal is not eligible to approve this amendment")
 	}
 	updated := cloneAmendment(current)

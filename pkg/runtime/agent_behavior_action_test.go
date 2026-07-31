@@ -118,6 +118,76 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	}
 }
 
+func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	agents := agentBehaviorActionRegistry(t, ctx, scope, &workforce.AmendmentPolicy{
+		AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true,
+		ApproverPrincipals: []string{"user:definition-owner"},
+	})
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		AssignedAgentID: "researcher", Goal: "Rename the Agent", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	catalog := agentBehaviorActionCatalog(t, ctx, scope, "researcher")
+	validator, err := NewAgentBehaviorActionValidator(agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{
+			Disposition: ActionDispositionRequireApproval, Reason: "Agent behavior changes require review",
+			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: time.Hour,
+		}, nil
+	})
+	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
+		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
+		Arguments:      map[string]interface{}{"displayName": "Agent 008", "rationale": "The user approved the rename"},
+		IdempotencyKey: "rename-agent-008", Summary: "Rename the Agent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
+		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		DecisionID: "decision-rename", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Looks good",
+	})
+	if err != nil || resolved.Call.Status != ActionCallStatusReady {
+		t.Fatalf("resolve = %#v, %v", resolved, err)
+	}
+	dispatcher, err := NewAgentBehaviorActionDispatcher(store, agents, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded {
+		t.Fatalf("execution = %#v, %v", executed, err)
+	}
+	deployment, err := agents.GetDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "researcher")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil || definition.DisplayName != "Agent 008" {
+		t.Fatalf("definition = %#v, %v", definition, err)
+	}
+	amendments, err := agents.ListAmendments(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deployment.ID)
+	if err != nil || len(amendments) != 1 || amendments[0].Decision == nil || amendments[0].Decision.ActorType != "role" || amendments[0].Decision.ActorID != "operator" {
+		t.Fatalf("amendments = %#v, %v", amendments, err)
+	}
+}
+
 func TestAgentBehaviorActionRejectsForeignStaleAndInvalidChanges(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
