@@ -244,7 +244,7 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 		if approvalErr != nil {
 			return nil, approvalErr
 		}
-		amendment, err = d.agents.ResolveAmendment(ctx, kernelagent.ResolveAmendmentRequest{
+		amendment, err = d.agents.ResolveAmendmentFromGovernedApproval(ctx, kernelagent.ResolveAmendmentRequest{
 			Scope: capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, AmendmentID: amendment.ID,
 			ExpectedRevision: amendment.Revision, Approved: true,
 			ActorType: approval.DecisionBy.Type, ActorID: approval.DecisionBy.ID, Reason: approval.DecisionReason,
