@@ -25,10 +25,20 @@ func reconcileAgentRunbookActivations(current []*RunbookActivation, definition *
 		if activation == nil || activation.AssignedAgentID != deployment.ID {
 			continue
 		}
-		if existing := byTrigger[activation.TriggerID]; existing != nil {
+		existing := byTrigger[activation.TriggerID]
+		if existing == nil || (existing.Status == RunbookActivationRetired && activation.Status != RunbookActivationRetired) {
+			byTrigger[activation.TriggerID] = activation
+			continue
+		}
+		// A replaced schedule intentionally preserves the trigger identity in
+		// its lineage. Its retired predecessor is history, not a second live
+		// projection of the Agent definition.
+		if activation.Status == RunbookActivationRetired {
+			continue
+		}
+		if existing.Status != RunbookActivationRetired {
 			return nil, fmt.Errorf("Agent %s has duplicate Runbook activation trigger %s", deployment.ID, activation.TriggerID)
 		}
-		byTrigger[activation.TriggerID] = activation
 	}
 
 	desiredTriggers := make(map[string]bool)
