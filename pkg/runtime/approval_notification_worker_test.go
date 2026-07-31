@@ -213,6 +213,12 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
 		t.Fatal(err)
 	}
+	// Reconciliation may later observe more review context for the same durable
+	// terminal phase. The already-enqueued projection owns retries and must not
+	// conflict with a newly rendered payload under the same idempotency key.
+	resolvedApproval.ContinuationCheckpoint = map[string]interface{}{
+		"state": map[string]interface{}{"additionalContext": "arrived after terminal projection"},
+	}
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
 		t.Fatalf("outcome replay = %v", err)
 	}
