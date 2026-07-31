@@ -302,12 +302,13 @@ type ActionFilter struct {
 }
 
 type ApprovalFilter struct {
-	Scope  Scope
-	Owner  *ObjectiveOwner
-	RunID  string
-	Status []ApprovalStatus
-	Limit  int
-	Offset int
+	Scope       Scope
+	Owner       *ObjectiveOwner
+	RunID       string
+	Status      []ApprovalStatus
+	Limit       int
+	Offset      int
+	NewestFirst bool
 }
 
 type ActionClaim struct {

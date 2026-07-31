@@ -70,6 +70,20 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: waiting, Event: event, ExpectedRunRevision: claimed.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now}}); err != nil {
 		t.Fatal(err)
 	}
+	// A tenant's immutable approval history must not starve current,
+	// deadline-bearing work when the worker uses a bounded page.
+	historyCall := &ActionCall{ID: "historical-call", Scope: endpoint.Scope, RunID: claimed.ID, Status: ActionCallStatusSucceeded, Revision: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
+	store.mu.Lock()
+	store.actions[portfolioKey(endpoint.Scope, historyCall.ID)] = cloneActionCall(historyCall)
+	for index := range 11 {
+		historical := &ApprovalCheckpoint{
+			ID: "historical-approval-" + string(rune('a'+index)), Scope: endpoint.Scope, RunID: claimed.ID,
+			ActionCallID: historyCall.ID, Status: ApprovalStatusApproved, Revision: 1,
+			CreatedAt: now.Add(-time.Hour).Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(-time.Hour),
+		}
+		store.approvals[portfolioKey(endpoint.Scope, historical.ID)] = historical
+	}
+	store.mu.Unlock()
 
 	transport := NewExternalConversationTransportService(store, catalog)
 	transport.now = func() time.Time { return now }
