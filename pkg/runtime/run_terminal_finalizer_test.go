@@ -234,3 +234,59 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 		t.Fatalf("finalization offset = %d, want reset after final page", pool.finalizationOffset)
 	}
 }
+
+func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "canceled-child"}
+	portfolio := NewPortfolioService(store)
+	parent, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "scheduler"}, AssignedAgentID: "scheduler",
+		Goal: "run scheduled delegated work", Source: RunSourceSchedule,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collaboration := NewCollaborationService(store)
+	created, err := collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: parent.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "scheduler"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"}, Goal: "perform delegated work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: accepted.Child.ID, ExpectedRevision: accepted.Child.Revision, Kind: AgentRunCommandCancel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := &AgentRunWorkerPool{
+		config: AgentRunWorkerConfig{Scope: scope}, portfolio: store, collaboration: collaboration,
+		logger: zap.NewNop().Sugar(),
+	}
+	pool.reconcileTerminalRunFinalizers(ctx)
+	request, err := collaboration.GetAgentRequest(ctx, scope, created.Request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedParent, err := portfolio.GetAgentRun(ctx, scope, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Run.Status != AgentRunStatusCanceled || request.Status != AgentRequestStatusCanceled ||
+		resolvedParent.Status == AgentRunStatusWaitingForDependency {
+		t.Fatalf("canceled=%s request=%s parent=%s", canceled.Run.Status, request.Status, resolvedParent.Status)
+	}
+	// Reconciliation is replay-safe after the request and parent are resolved.
+	pool.lastFinalizationScan = time.Time{}
+	pool.reconcileTerminalRunFinalizers(ctx)
+}
