@@ -20,6 +20,14 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 		(input.Bound.Action.SideEffect == capability.SideEffectNone || input.Bound.Action.SideEffect == capability.SideEffectRead) {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "read-only action"}, nil
 	}
+	// Starting an already reviewed Runbook does not widen authority: the
+	// activation pins its owner, Objective, definition, policy, budget, and
+	// downstream approval requirements. The Runbook validator has proved those
+	// facts before policy evaluation, so a conversational start is equivalent
+	// to the existing manual Start operation.
+	if input.Bound.Definition.ID == runtime.RunbookManagementSkillID && input.Bound.Action.Name == runtime.RunbookActionStart {
+		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "start reviewed Runbook activation"}, nil
+	}
 
 	deploymentID := strings.TrimSpace(input.Run.AssignedAgentID)
 	if deploymentID == "" && input.Run.Owner.Type == runtime.OwnerTypeAgent {

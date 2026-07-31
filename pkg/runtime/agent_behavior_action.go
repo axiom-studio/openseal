@@ -16,7 +16,7 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.0.0"
+	AgentManagementSkillVersion   = "1.1.0"
 	AgentActionAmendBehavior      = "amend_behavior"
 	AgentManagementEndpoint       = "kernel://agents"
 	agentBehaviorResourceType     = "agent_definition"
@@ -43,6 +43,7 @@ func AgentManagementSkill() *skill.Definition {
 						"expectedDeploymentRevision": map[string]interface{}{
 							"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true,
 						},
+						"displayName":         map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 200},
 						"purpose":             map[string]interface{}{"type": "string", "minLength": 1},
 						"systemPrompt":        map[string]interface{}{"type": "string", "minLength": 1},
 						"personality":         map[string]interface{}{"type": "string"},
@@ -70,6 +71,7 @@ func AgentManagementSkill() *skill.Definition {
 
 type agentBehaviorActionArguments struct {
 	ExpectedDeploymentRevision int64     `json:"expectedDeploymentRevision"`
+	DisplayName                *string   `json:"displayName,omitempty"`
 	Purpose                    *string   `json:"purpose,omitempty"`
 	SystemPrompt               *string   `json:"systemPrompt,omitempty"`
 	Personality                *string   `json:"personality,omitempty"`
@@ -329,6 +331,9 @@ func decodeAgentBehaviorArguments(arguments map[string]interface{}, target inter
 }
 
 func applyAgentBehaviorArguments(candidate *kernelagent.AgentDefinition, args agentBehaviorActionArguments) {
+	if args.DisplayName != nil {
+		candidate.DisplayName = strings.TrimSpace(*args.DisplayName)
+	}
 	if args.Purpose != nil {
 		candidate.Purpose = strings.TrimSpace(*args.Purpose)
 	}
@@ -345,6 +350,9 @@ func applyAgentBehaviorArguments(candidate *kernelagent.AgentDefinition, args ag
 
 func agentBehaviorChanges(base, candidate *kernelagent.AgentDefinition) map[string]interface{} {
 	changes := make(map[string]interface{})
+	if base.DisplayName != candidate.DisplayName {
+		changes["displayName"] = candidate.DisplayName
+	}
 	if base.Purpose != candidate.Purpose {
 		changes["purpose"] = candidate.Purpose
 	}
@@ -364,6 +372,8 @@ func agentBehaviorCurrentValues(definition *kernelagent.AgentDefinition, changes
 	current := make(map[string]interface{}, len(changes))
 	for field := range changes {
 		switch field {
+		case "displayName":
+			current[field] = definition.DisplayName
 		case "purpose":
 			current[field] = definition.Purpose
 		case "systemPrompt":
