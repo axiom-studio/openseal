@@ -110,9 +110,14 @@ type Action struct {
 	ExternalOperationPolicy ExternalOperationPolicy `json:"externalOperationPolicy,omitempty"`
 	DryRunAction            string                  `json:"dryRunAction,omitempty"`
 	CompensationAction      string                  `json:"compensationAction,omitempty"`
-	EmittedArtifactTypes    []string                `json:"emittedArtifactTypes,omitempty"`
-	EmittedEventTypes       []string                `json:"emittedEventTypes,omitempty"`
-	Transport               *TransportReference     `json:"transport,omitempty"`
+	// FinalizerAction releases temporary resources acquired by this action
+	// when its owning Run reaches any terminal state. The finalizer receives
+	// same-named values projected from the succeeded action output first and
+	// its persisted non-secret arguments second.
+	FinalizerAction      string              `json:"finalizerAction,omitempty"`
+	EmittedArtifactTypes []string            `json:"emittedArtifactTypes,omitempty"`
+	EmittedEventTypes    []string            `json:"emittedEventTypes,omitempty"`
+	Transport            *TransportReference `json:"transport,omitempty"`
 	// SemanticArguments maps portable roles such as "target", "body", or
 	// "artifact" to exact input-schema property names. Product surfaces use
 	// these roles to compose actions without guessing connector-specific fields.

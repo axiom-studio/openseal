@@ -979,6 +979,21 @@ func validateDefinition(definition *Definition) error {
 				return fmt.Errorf("skill action %s references missing compensation action", name)
 			}
 		}
+		if action.FinalizerAction != "" {
+			finalizer, ok := definition.Actions[action.FinalizerAction]
+			if !ok {
+				return fmt.Errorf("skill action %s references missing finalizer action", name)
+			}
+			if finalizer.SideEffect != SideEffectNone || finalizer.Risk != RiskLevelRead {
+				return fmt.Errorf("skill action %s finalizer %s must be a read-risk action without external side effects", name, action.FinalizerAction)
+			}
+			if len(finalizer.Credentials) > 0 {
+				return fmt.Errorf("skill action %s finalizer %s cannot require credentials", name, action.FinalizerAction)
+			}
+			if finalizer.Idempotency != IdempotencySupported && finalizer.Idempotency != IdempotencyRequired {
+				return fmt.Errorf("skill action %s finalizer %s must be idempotent", name, action.FinalizerAction)
+			}
+		}
 		transport := definition.Transport
 		if action.Transport != nil {
 			transport = *action.Transport

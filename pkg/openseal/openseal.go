@@ -2165,6 +2165,7 @@ type Engine struct {
 	actionPools                   []*runtime.ActionWorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
 	actionSupervisors             []*runtime.ActionWorkerSupervisor
+	runTerminalFinalization       bool
 	skills                        *skill.Catalog
 	skillReferenceUpgrades        *runtime.SkillReferenceUpgradeService
 	agents                        *kernelagent.Registry
@@ -2773,6 +2774,17 @@ func WithDynamicAgentRunWorkers(
 	}
 }
 
+// WithRunTerminalFinalization makes terminal Run cleanup runtime-owned. Skill
+// acquisition actions may declare a hidden finalizer action; the kernel
+// invokes it automatically on completed, failed, and canceled Runs and
+// reconciles missed cleanup after restarts.
+func WithRunTerminalFinalization() Option {
+	return func(e *Engine) error {
+		e.runTerminalFinalization = true
+		return nil
+	}
+}
+
 func WithSkillCatalog(catalog *skill.Catalog) Option {
 	return func(e *Engine) error {
 		if catalog == nil {
@@ -3285,6 +3297,10 @@ func (e *Engine) rebuildActionWorkerSupervisors() error {
 }
 
 func (e *Engine) rebuildAgentWorkerPools() error {
+	finalizer, err := e.newRunTerminalFinalizer()
+	if err != nil {
+		return err
+	}
 	e.agentPools = make([]*runtime.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
 	for _, spec := range e.agentPoolSpecs {
 		pool, err := runtime.NewAgentRunWorkerPool(e.store, spec.resolver, e.logger, spec.config)
@@ -3293,6 +3309,7 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 		}
 		pool.SetWorkerLimiter(e.workerLimiter)
 		pool.SetActionCoordinator(e.actions)
+		pool.SetRunTerminalFinalizer(finalizer)
 		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
 		if observerErr != nil {
 			return observerErr
@@ -3304,6 +3321,10 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 }
 
 func (e *Engine) rebuildAgentWorkerSupervisors() error {
+	finalizer, err := e.newRunTerminalFinalizer()
+	if err != nil {
+		return err
+	}
 	e.agentSupervisors = make([]*runtime.AgentRunWorkerSupervisor, 0, len(e.agentSupervisorSpecs))
 	for _, spec := range e.agentSupervisorSpecs {
 		supervisor, err := runtime.NewAgentRunWorkerSupervisor(e.store, spec.resolver, spec.source, e.logger, spec.config)
@@ -3312,6 +3333,7 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 		}
 		supervisor.SetWorkerLimiter(e.workerLimiter)
 		supervisor.SetActionCoordinator(e.actions)
+		supervisor.SetRunTerminalFinalizer(finalizer)
 		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
 		if observerErr != nil {
 			return observerErr
@@ -3320,6 +3342,22 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 		e.agentSupervisors = append(e.agentSupervisors, supervisor)
 	}
 	return nil
+}
+
+func (e *Engine) newRunTerminalFinalizer() (runtime.RunTerminalFinalizer, error) {
+	if !e.runTerminalFinalization {
+		return nil, nil
+	}
+	if len(e.actionSupervisorSpecs) == 0 && len(e.actionPoolSpecs) == 0 {
+		return nil, errors.New("Run terminal finalization requires an action dispatcher")
+	}
+	var dispatcher runtime.ActionDispatcher
+	if len(e.actionSupervisorSpecs) > 0 {
+		dispatcher = e.actionSupervisorSpecs[0].dispatcher
+	} else {
+		dispatcher = e.actionPoolSpecs[0].dispatcher
+	}
+	return runtime.NewActionRunTerminalFinalizer(e.store, e.skills, dispatcher), nil
 }
 
 func (e *Engine) WakeAgentWorkers() {
