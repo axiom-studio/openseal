@@ -238,7 +238,12 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 		}
 		trigger := source.Trigger
 		trigger.Schedule = schedule
-		idempotencyKey := "conversation-runbook-replace-schedule:" + input.Call.ID
+		// A retired activation is one immutable schedule generation. Key its
+		// successor by that generation rather than by the conversation ActionCall:
+		// delayed, retried, or concurrent proposals must converge on one successor.
+		// Once that successor is retired it has its own ID, so a later generation
+		// remains independently replaceable.
+		idempotencyKey := "conversation-runbook-replace-schedule:" + source.ID
 		activationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(source.Scope.Kind+"\x00"+source.Scope.ID+"\x00runbook-activation\x00"+hashString(idempotencyKey))).String()
 		existing, err := d.store.GetRunbookActivation(ctx, source.Scope, activationID)
 		if err != nil {

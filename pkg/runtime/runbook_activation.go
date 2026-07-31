@@ -394,6 +394,24 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		return nil, err
 	}
 	if err := s.store.CreateRunbookActivation(ctx, activation); err != nil {
+		// Idempotent creates can race after the pre-insert lookup. Re-read the
+		// deterministic resource and converge when the winning request persisted
+		// the same reviewed contract. A different contract remains a conflict.
+		if key != "" {
+			current, getErr := s.store.GetRunbookActivation(ctx, request.Scope, id)
+			if getErr != nil {
+				return nil, getErr
+			}
+			if current != nil {
+				if current.CreationFingerprint != activation.CreationFingerprint {
+					return nil, ErrRunbookActivationIdempotency
+				}
+				if err := s.ensureReportingChannel(ctx, current); err != nil {
+					return nil, err
+				}
+				return current, nil
+			}
+		}
 		return nil, err
 	}
 	if err := s.ensureReportingChannel(ctx, activation); err != nil {
