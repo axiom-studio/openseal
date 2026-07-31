@@ -50,7 +50,7 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		return errors.New("only terminal Runs can be finalized")
 	}
 	events, err := f.store.ListActivity(ctx, ActivityFilter{
-		Scope: run.Scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Limit: 1,
+		Scope: run.Scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Descending: true, Limit: 1,
 	})
 	if err != nil {
 		return err

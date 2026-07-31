@@ -10,9 +10,19 @@ import (
 	"go.uber.org/zap"
 )
 
+type terminalFinalizerStore struct {
+	*MemoryStore
+	activityFilters []ActivityFilter
+}
+
+func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
+	s.activityFilters = append(s.activityFilters, filter)
+	return s.MemoryStore.ListActivity(ctx, filter)
+}
+
 func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := &terminalFinalizerStore{MemoryStore: NewMemoryStore()}
 	catalog := skill.NewCatalog()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -93,6 +103,14 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 	}
 	if dispatches != 1 {
 		t.Fatalf("finalizer dispatched %d times", dispatches)
+	}
+	if len(store.activityFilters) != 2 {
+		t.Fatalf("activity filters = %d, want one per finalization attempt", len(store.activityFilters))
+	}
+	for _, filter := range store.activityFilters {
+		if !filter.Descending || len(filter.EventTypes) != 1 || filter.EventTypes[0] != runResourcesReleasedEvent {
+			t.Fatalf("terminal finalizer activity filter = %#v", filter)
+		}
 	}
 	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Limit: 10})
 	if err != nil || len(events) != 1 {
