@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -380,6 +381,9 @@ func compactCheckpointValue(value interface{}, depth, entries, text int) interfa
 			}
 			return result
 		}
+		if prioritized := compactObservationElements(typed, depth, entries, text); prioritized != nil {
+			return prioritized
+		}
 		head := (entries + 1) / 2
 		tail := entries - head
 		result := make([]interface{}, 0, entries+1)
@@ -399,6 +403,92 @@ func compactCheckpointValue(value interface{}, depth, entries, text int) interfa
 	default:
 		return typed
 	}
+}
+
+// compactObservationElements keeps actionable controls from large browser-like
+// observations. A pure head/tail sample can omit a form in the middle of a
+// document, leaving an Agent able to see prose about the form but unable to
+// reference its textbox or submit button on the next bounded turn.
+func compactObservationElements(values []interface{}, depth, entries, text int) []interface{} {
+	if entries < 3 {
+		return nil
+	}
+	observation := false
+	priority := make([]int, 0, entries/2)
+	for index, value := range values {
+		item, ok := value.(map[string]interface{})
+		if !ok || strings.TrimSpace(fmt.Sprint(item["ref"])) == "" || strings.TrimSpace(fmt.Sprint(item["role"])) == "" {
+			continue
+		}
+		observation = true
+		if priorityObservationElement(item) {
+			priority = append(priority, index)
+		}
+	}
+	if !observation || len(priority) == 0 {
+		return nil
+	}
+	selected := make(map[int]struct{}, entries)
+	priorityLimit := max(1, entries/2)
+	for _, index := range priority[:min(len(priority), priorityLimit)] {
+		selected[index] = struct{}{}
+	}
+	remaining := entries - len(selected)
+	for offset := 0; offset < remaining; offset++ {
+		var index int
+		if offset%2 == 0 {
+			index = offset / 2
+		} else {
+			index = len(values) - 1 - offset/2
+		}
+		if _, exists := selected[index]; exists {
+			remaining++
+			continue
+		}
+		selected[index] = struct{}{}
+	}
+	indices := make([]int, 0, len(selected))
+	for index := range selected {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	result := make([]interface{}, 0, len(indices)+1)
+	omissionAdded := false
+	previous := -1
+	for _, index := range indices {
+		if !omissionAdded && index > previous+1 {
+			result = append(result, map[string]interface{}{"_opensealOmittedItems": len(values) - len(indices)})
+			omissionAdded = true
+		}
+		result = append(result, compactCheckpointValue(values[index], depth-1, entries, text))
+		previous = index
+	}
+	if !omissionAdded {
+		result = append(result, map[string]interface{}{"_opensealOmittedItems": len(values) - len(indices)})
+	}
+	return result
+}
+
+func priorityObservationElement(item map[string]interface{}) bool {
+	role := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["role"])))
+	if role == "textbox" || role == "combobox" || role == "textarea" || role == "checkbox" || role == "radio" || role == "option" {
+		return true
+	}
+	if role != "button" {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["name"])))
+	state, _ := item["state"].(map[string]interface{})
+	typeName := strings.ToLower(strings.TrimSpace(fmt.Sprint(state["type"])))
+	if typeName == "submit" {
+		return true
+	}
+	for _, token := range []string{"submit", "save", "send", "post", "publish", "comment", "reply", "approve", "confirm"} {
+		if strings.Contains(name, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func deepCloneCheckpointMap(value map[string]interface{}) map[string]interface{} {
