@@ -12,7 +12,7 @@ import (
 
 func TestObjectiveManagementSkillVersionsRunbookOnlyContract(t *testing.T) {
 	definition := ObjectiveManagementSkill()
-	if definition.Version != "1.0.2" {
+	if definition.Version != "1.0.3" {
 		t.Fatalf("Objective management Skill version = %q", definition.Version)
 	}
 	for _, actionName := range []string{ObjectiveActionCreate, ObjectiveActionUpdate} {

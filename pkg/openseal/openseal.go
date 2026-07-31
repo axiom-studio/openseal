@@ -673,6 +673,8 @@ type (
 	ToolActionDispatcher               = runtime.ToolActionDispatcher
 	AgentBehaviorActionValidator       = runtime.AgentBehaviorActionValidator
 	AgentBehaviorActionDispatcher      = runtime.AgentBehaviorActionDispatcher
+	RunbookActionValidator             = runtime.RunbookActionValidator
+	RunbookActionDispatcher            = runtime.RunbookActionDispatcher
 	TeamRoleActionValidator            = runtime.TeamRoleActionValidator
 	TeamRoleActionDispatcher           = runtime.TeamRoleActionDispatcher
 	TeamSkillActionValidator           = runtime.TeamSkillActionValidator
@@ -1278,6 +1280,9 @@ var (
 	AgentManagementSkill                   = runtime.AgentManagementSkill
 	NewAgentBehaviorActionValidator        = runtime.NewAgentBehaviorActionValidator
 	NewAgentBehaviorActionDispatcher       = runtime.NewAgentBehaviorActionDispatcher
+	RunbookManagementSkill                 = runtime.RunbookManagementSkill
+	NewRunbookActionValidator              = runtime.NewRunbookActionValidator
+	NewRunbookActionDispatcher             = runtime.NewRunbookActionDispatcher
 	TeamManagementSkill                    = runtime.TeamManagementSkill
 	NewTeamRoleActionValidator             = runtime.NewTeamRoleActionValidator
 	NewTeamRoleActionDispatcher            = runtime.NewTeamRoleActionDispatcher
@@ -1594,6 +1599,9 @@ const (
 	AgentManagementSkillID          = runtime.AgentManagementSkillID
 	AgentManagementSkillVersion     = runtime.AgentManagementSkillVersion
 	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
+	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
+	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
+	RunbookActionStart              = runtime.RunbookActionStart
 	TeamManagementSkillID           = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole            = runtime.TeamActionUpdateRole
@@ -2148,6 +2156,7 @@ type Engine struct {
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
+	runbookManagementActions      bool
 	teamManagementActions         bool
 	skillManagementActions        bool
 	skillDiscovery                skill.DiscoveryProvider
@@ -2322,6 +2331,9 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if err := e.configureAgentManagementActions(); err != nil {
 		return nil, fmt.Errorf("Agent management action configuration: %w", err)
+	}
+	if err := e.configureRunbookManagementActions(); err != nil {
+		return nil, fmt.Errorf("Runbook management action configuration: %w", err)
 	}
 	if err := e.configureTeamManagementActions(); err != nil {
 		return nil, fmt.Errorf("Team management action configuration: %w", err)
@@ -2919,6 +2931,16 @@ func WithAgentManagementActions() Option {
 	}
 }
 
+// WithRunbookManagementActions enables conversational starts of existing,
+// reviewed Runbook activations. It does not allow models to create or alter
+// Runbook definitions, triggers, policy, authority, or budgets.
+func WithRunbookManagementActions() Option {
+	return func(e *Engine) error {
+		e.runbookManagementActions = true
+		return nil
+	}
+}
+
 // WithTeamManagementActions enables the portable, governed Team action layer.
 // The Engine owns its Team registry, so embedding hosts never need to import
 // internal registry implementations or duplicate dispatcher composition.
@@ -3005,6 +3027,42 @@ func (e *Engine) configureAgentManagementActions() error {
 	}
 	for index := range e.actionSupervisorSpecs {
 		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionSupervisorSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionSupervisorSpecs[index].dispatcher = dispatcher
+	}
+	return nil
+}
+
+func (e *Engine) configureRunbookManagementActions() error {
+	if !e.runbookManagementActions {
+		return nil
+	}
+	if err := e.skills.Register(context.Background(), runtime.RunbookManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+		return err
+	}
+	store, ok := e.store.(interface {
+		runtime.KernelStore
+		runtime.ConversationStore
+	})
+	if !ok {
+		return errors.New("Runbook management actions require conversation-aware kernel storage")
+	}
+	validator, err := runtime.NewRunbookActionValidator(store)
+	if err != nil {
+		return err
+	}
+	e.actionValidators = append(e.actionValidators, validator)
+	for index := range e.actionPoolSpecs {
+		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionPoolSpecs[index].dispatcher = dispatcher
+	}
+	for index := range e.actionSupervisorSpecs {
+		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}

@@ -47,6 +47,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 		Arguments: map[string]interface{}{
+			"displayName":         "Evidence Researcher",
 			"personality":         "Calm, curious, and evidence focused",
 			"operatingPrinciples": []interface{}{"Separate facts from inference.", "Cite durable evidence."},
 			"rationale":           "Improve research quality",
@@ -94,7 +95,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 		t.Fatalf("deployment = %#v, %v", deployment, err)
 	}
 	definition, err := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
-	if err != nil || definition.Personality != "Calm, curious, and evidence focused" ||
+	if err != nil || definition.DisplayName != "Evidence Researcher" || definition.Personality != "Calm, curious, and evidence focused" ||
 		len(definition.OperatingPrinciples) != 2 || definition.Provenance.DerivedFrom == "" {
 		t.Fatalf("definition = %#v, %v", definition, err)
 	}
@@ -233,7 +234,7 @@ func agentBehaviorActionRegistry(
 	t.Helper()
 	amendments := workforce.AmendmentPolicy{
 		AgentMayPropose:  true,
-		AllowedFields:    []string{"purpose", "systemPrompt", "personality", "operatingPrinciples"},
+		AllowedFields:    []string{"displayName", "purpose", "systemPrompt", "personality", "operatingPrinciples"},
 		RequiresApproval: true, ApproverPrincipals: []string{"user:operator"},
 	}
 	if policy != nil {
