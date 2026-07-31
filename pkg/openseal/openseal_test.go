@@ -8,12 +8,36 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestPublicFacadeExposesCanonicalActivityCapability(t *testing.T) {
 	capability := ActivityCapability()
 	if capability.ID != ActivityCapabilityID || capability.Version != ActivityCapabilityVersion || !capability.Supports(KernelOperationList) {
 		t.Fatalf("activity capability = %#v", capability)
+	}
+}
+
+func TestRunTerminalFinalizationIsAutomaticWhenActionsCanExecute(t *testing.T) {
+	store := runtime.NewMemoryStore()
+	engine := &Engine{
+		store:  store,
+		skills: skill.NewCatalog(),
+		actionPoolSpecs: []actionWorkerSpec{{
+			dispatcher: ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+				return map[string]interface{}{}, nil
+			}),
+		}},
+	}
+	finalizer, err := engine.newRunTerminalFinalizer()
+	if err != nil || finalizer == nil {
+		t.Fatalf("automatic Run terminal finalizer = %#v, %v", finalizer, err)
+	}
+
+	engine.actionPoolSpecs = nil
+	finalizer, err = engine.newRunTerminalFinalizer()
+	if err != nil || finalizer != nil {
+		t.Fatalf("non-executing engine finalizer = %#v, %v", finalizer, err)
 	}
 }
 
