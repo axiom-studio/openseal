@@ -35,6 +35,7 @@ type CallbackAdapterTransport = capability.CallbackAdapterTransport
 type CallbackAdapter = capability.CallbackAdapter
 type BoundCallbackAdapter = capability.BoundCallbackAdapter
 type ActionRetryPolicy = capability.ActionRetryPolicy
+type ActionEvidenceRequirement = capability.ActionEvidenceRequirement
 type ExternalOperationPolicy = capability.ExternalOperationPolicy
 type Duration = capability.Duration
 type Action = capability.Action
@@ -1016,6 +1017,30 @@ func validateDefinition(definition *Definition) error {
 				return fmt.Errorf("skill action %s semantic argument %s references unknown input %s", name, role, argument)
 			}
 			seenSemanticArguments[argument] = true
+		}
+		seenEvidence := make(map[string]bool, len(action.RequiredEvidence))
+		for _, requirement := range action.RequiredEvidence {
+			requiredName := strings.TrimSpace(requirement.Action)
+			required, ok := definition.Actions[requiredName]
+			if !ok || requiredName == name || seenEvidence[requiredName] {
+				return fmt.Errorf("skill action %s has invalid required evidence action %q", name, requirement.Action)
+			}
+			seenEvidence[requiredName] = true
+			requiredProperties, _ := required.InputSchema["properties"].(map[string]interface{})
+			seenArguments := make(map[string]bool, len(requirement.MatchingArguments))
+			for _, argument := range requirement.MatchingArguments {
+				argument = strings.TrimSpace(argument)
+				if argument == "" || seenArguments[argument] {
+					return fmt.Errorf("skill action %s required evidence %s has invalid matching argument", name, requiredName)
+				}
+				if _, ok := properties[argument]; !ok {
+					return fmt.Errorf("skill action %s required evidence matching argument %s is absent from the action", name, argument)
+				}
+				if _, ok := requiredProperties[argument]; !ok {
+					return fmt.Errorf("skill action %s required evidence matching argument %s is absent from %s", name, argument, requiredName)
+				}
+				seenArguments[argument] = true
+			}
 		}
 		for argument, mapping := range transport.Arguments {
 			if strings.TrimSpace(argument) == "" || (mapping.SourceArgument == "" && mapping.Literal == nil) || (mapping.SourceArgument != "" && mapping.Literal != nil) {
