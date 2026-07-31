@@ -78,9 +78,6 @@ func (c *Conversation) Validate() error {
 		return fmt.Errorf("%w: portable id and title of at most 240 characters are required", ErrInvalidConversation)
 	}
 	if c.Origin != nil {
-		if c.Origin.Kind != ConversationReferenceExternalSource {
-			return fmt.Errorf("%w: conversation origin must be an external source reference", ErrInvalidConversation)
-		}
 		if err := c.Origin.Validate(); err != nil {
 			return err
 		}
