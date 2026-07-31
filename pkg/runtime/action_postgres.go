@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 func (s *PostgresStore) migrateActions(ctx context.Context, tx *sql.Tx) error {
@@ -157,7 +160,30 @@ func (s *PostgresStore) ListActionCalls(ctx context.Context, filter ActionFilter
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("action_calls")+` WHERE scope_kind = $1 AND scope_id = $2 ORDER BY created_at, id`, filter.Scope.Kind, filter.Scope.ID)
+	query := `SELECT payload FROM ` + s.table("action_calls") + ` WHERE scope_kind = $1 AND scope_id = $2`
+	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	if filter.RunID != "" {
+		args = append(args, filter.RunID)
+		query += ` AND run_id = $` + strconv.Itoa(len(args))
+	}
+	if len(filter.Status) > 0 {
+		statuses := make([]string, 0, len(filter.Status))
+		for _, status := range filter.Status {
+			statuses = append(statuses, string(status))
+		}
+		args = append(args, pq.Array(statuses))
+		query += ` AND status = ANY($` + strconv.Itoa(len(args)) + `)`
+	}
+	query += ` ORDER BY created_at, id`
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += ` LIMIT $` + strconv.Itoa(len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += ` OFFSET $` + strconv.Itoa(len(args))
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -172,11 +198,9 @@ func (s *PostgresStore) ListActionCalls(ctx context.Context, filter ActionFilter
 		if err != nil {
 			return nil, err
 		}
-		if (filter.RunID == "" || call.RunID == filter.RunID) && (len(filter.Status) == 0 || containsActionStatus(filter.Status, call.Status)) {
-			result = append(result, call)
-		}
+		result = append(result, call)
 	}
-	return pageActionCalls(result, filter.Offset, filter.Limit), rows.Err()
+	return result, rows.Err()
 }
 
 func (s *PostgresStore) GetActionCallByExternalOperation(ctx context.Context, scope Scope, digest string) (*ActionCall, error) {
