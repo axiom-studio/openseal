@@ -631,7 +631,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	}
 	if input.Run.Checkpoint != nil && input.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
 		request.SystemInstructions = append(request.SystemInstructions,
-			"The previous proposed action was rejected before execution. Read continuationCheckpoint._opensealProposalRecovery, correct the exact validation error, and choose only the next authorized prerequisite action needed to obtain missing authoritative input. Do not repeat the rejected proposal unchanged. The rejected action was never approved or executed.")
+			"The previous proposed action was rejected before execution. Read continuationCheckpoint._opensealProposalRecovery and the rejected arguments in continuationCheckpoint.actionInputs, then correct the exact validation error. Do not propose the same capability again with the same semantically invalid argument. If an observed value does not satisfy that capability's authorized schema or description, choose the authorized action that matches the observed value's role, complete any prerequisite, obtain fresh authoritative input, and only then retry the original operation. The rejected action was never approved or executed.")
 	}
 	for _, media := range request.ModelMedia {
 		if err := validateHostedTurnMedia(media); err != nil {
