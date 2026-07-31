@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"go.uber.org/zap"
 )
 
 func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *testing.T) {
@@ -95,5 +97,46 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("cleanup events = %#v, %v", events, err)
+	}
+}
+
+func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	start := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
+	for index := range 205 {
+		run := &AgentRun{
+			ID: fmt.Sprintf("run-%03d", index), Scope: scope,
+			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+			Goal: "terminal cleanup", Source: RunSourceObjective, Status: AgentRunStatusCompleted,
+			CreatedAt: start.Add(time.Duration(index) * time.Second),
+			UpdatedAt: start.Add(time.Duration(index) * time.Second),
+		}
+		store.agentRuns[portfolioKey(scope, run.ID)] = run
+	}
+	finalized := make([]string, 0, 205)
+	pool := &AgentRunWorkerPool{
+		config:    AgentRunWorkerConfig{Scope: scope},
+		portfolio: store,
+		runFinalizer: RunTerminalFinalizerFunc(func(_ context.Context, run *AgentRun) error {
+			finalized = append(finalized, run.ID)
+			return nil
+		}),
+		logger: zap.NewNop().Sugar(),
+	}
+	for range 3 {
+		pool.lastFinalizationScan = time.Time{}
+		pool.reconcileTerminalRunFinalizers(ctx)
+	}
+	if len(finalized) != 205 {
+		t.Fatalf("finalized %d Runs, want 205", len(finalized))
+	}
+	if finalized[0] != "run-204" || finalized[99] != "run-105" ||
+		finalized[100] != "run-104" || finalized[204] != "run-000" {
+		t.Fatalf("unexpected finalization order: first=%s page2=%s last=%s", finalized[0], finalized[100], finalized[204])
+	}
+	if pool.finalizationOffset != 0 {
+		t.Fatalf("finalization offset = %d, want reset after final page", pool.finalizationOffset)
 	}
 }

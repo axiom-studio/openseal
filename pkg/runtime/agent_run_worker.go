@@ -131,6 +131,7 @@ type AgentRunWorkerPool struct {
 	actionObserver       ActionProposalObserver
 	runFinalizer         RunTerminalFinalizer
 	lastFinalizationScan time.Time
+	finalizationOffset   int
 	forks                *RunForkCoordinator
 	collaboration        *CollaborationService
 	requestInbox         *AgentRequestInboxReconciler
@@ -942,10 +943,11 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return
 	}
 	p.lastFinalizationScan = now
+	const pageSize = 100
 	runs, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: p.config.Scope, Statuses: []AgentRunStatus{
 			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
-		}, Limit: 100,
+		}, Order: AgentRunOrderCreatedDesc, Limit: pageSize, Offset: p.finalizationOffset,
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list terminal Runs for resource finalization", "error", err)
@@ -953,6 +955,11 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	}
 	for _, run := range runs {
 		p.finalizeTerminalRun(ctx, run)
+	}
+	if len(runs) < pageSize {
+		p.finalizationOffset = 0
+	} else {
+		p.finalizationOffset += len(runs)
 	}
 }
 
