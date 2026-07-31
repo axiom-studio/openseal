@@ -124,15 +124,40 @@ func TestActionHistoryPreservesStructuredOversizedEvidenceAndBoundsEntries(t *te
 }
 
 func TestPreserveKernelActionHistoryRejectsModelRewrite(t *testing.T) {
-	current := map[string]interface{}{actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "trusted"}}, "phase": "old"}
-	proposed := map[string]interface{}{actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "invented"}}, "phase": "new"}
+	current := map[string]interface{}{
+		actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "trusted"}},
+		"lastAction": map[string]interface{}{
+			"actionCallId": "trusted", "status": ActionCallStatusSucceeded,
+			"result": map[string]interface{}{"generation": 6, "elements": []interface{}{map[string]interface{}{"ref": "s6:e57"}}},
+		},
+		"phase": "old",
+	}
+	proposed := map[string]interface{}{
+		actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "invented"}},
+		"lastAction": map[string]interface{}{
+			"actionCallId": "trusted", "status": ActionCallStatusSucceeded,
+			"result": map[string]interface{}{"compacted": true, "generation": 6},
+		},
+		"phase": "new",
+	}
 	merged := preserveKernelActionHistory(current, proposed)
 	if merged["phase"] != "new" || actionHistoryEntries(merged)[0]["actionCallId"] != "trusted" {
 		t.Fatalf("merged checkpoint = %#v", merged)
 	}
+	last := merged["lastAction"].(map[string]interface{})
+	elements := last["result"].(map[string]interface{})["elements"].([]interface{})
+	if last["actionCallId"] != "trusted" || elements[0].(map[string]interface{})["ref"] != "s6:e57" {
+		t.Fatalf("kernel-owned latest action was replaced: %#v", last)
+	}
+	if _, err := currentObservationElement(&AgentRun{Checkpoint: merged}, "s6:e57"); err != nil {
+		t.Fatalf("current observation reference was lost across hosted turn: %v", err)
+	}
 	withoutHistory := preserveKernelActionHistory(nil, proposed)
 	if len(actionHistoryEntries(withoutHistory)) != 0 {
 		t.Fatalf("model invented kernel action history: %#v", withoutHistory)
+	}
+	if _, invented := withoutHistory["lastAction"]; invented {
+		t.Fatalf("model invented kernel latest action: %#v", withoutHistory)
 	}
 }
 
