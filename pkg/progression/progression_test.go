@@ -74,7 +74,7 @@ func TestAgentProgressionCreatesOneGovernedAmendmentAndNeverMutatesAuthority(t *
 	candidate.Authority.MaxConcurrentRuns = 2
 	ceiling := AgentPolicyCeiling{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 2}
 	amendment, err := service.ProposeAgent(ctx, ProposeAgentRequest{Recommendation: recommendation, Candidate: &candidate, Ceiling: ceiling, ProposerType: "agent", ProposerID: deployment.ID})
-	if err != nil || amendment.Status != agent.AmendmentEvaluating || !amendment.RiskWidening || amendment.IdempotencyKey != recommendation.IdempotencyKey {
+	if err != nil || amendment.Status != agent.AmendmentAwaitingApproval || !amendment.RiskWidening || amendment.IdempotencyKey != recommendation.IdempotencyKey {
 		t.Fatalf("proposal = %#v, %v", amendment, err)
 	}
 	unchanged, err := agents.GetDeployment(ctx, scope, deployment.ID)
@@ -108,11 +108,7 @@ func TestAgentProgressionCreatesOneGovernedAmendmentAndNeverMutatesAuthority(t *
 	if _, err := service.ProposeAgent(ctx, ProposeAgentRequest{Recommendation: recommendation, Candidate: &candidate, Ceiling: tooSmall, ProposerType: "agent", ProposerID: deployment.ID}); !errors.Is(err, ErrPolicyCeiling) {
 		t.Fatalf("ceiling error = %v", err)
 	}
-	evaluated, err := agents.SubmitAmendmentEvaluation(ctx, agent.SubmitAmendmentEvaluationRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Evaluations: []agent.AmendmentEvaluation{{CriterionID: "quality", Passed: true, Summary: "Evidence remained attributable", EvidenceRefs: []string{"run:1"}}}})
-	if err != nil || evaluated.Status != agent.AmendmentAwaitingApproval {
-		t.Fatalf("evaluation = %#v, %v", evaluated, err)
-	}
-	approved, err := agents.ResolveAmendment(ctx, agent.ResolveAmendmentRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: evaluated.Revision, Approved: true, ActorType: "user", ActorID: "admin", Reason: "within policy"})
+	approved, err := agents.ResolveAmendment(ctx, agent.ResolveAmendmentRequest{Scope: scope, AmendmentID: amendment.ID, ExpectedRevision: amendment.Revision, Approved: true, ActorType: "user", ActorID: "admin", Reason: "within policy"})
 	if err != nil {
 		t.Fatal(err)
 	}

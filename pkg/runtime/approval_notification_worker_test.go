@@ -153,6 +153,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		Attributes: cloneMap(decision.Attributes), Actor: ActivityActor{Type: "callback", ID: "slack-approval"},
 	}
 	consumer := NewApprovalCallbackConsumer(store, transport)
+	consumer.now = func() time.Time { return now }
 	tampered := callbackEvent
 	tampered.ID = "slack:approval:T1:1720000000.2:U1"
 	tampered.Attributes = cloneMap(callbackEvent.Attributes)

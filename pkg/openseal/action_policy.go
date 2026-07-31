@@ -51,12 +51,24 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 		return e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	}
 
-	if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
-		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
+	// Agent behavior amendments are proposals about the durable worker itself.
+	// Even when the Agent has broad standing authority for ordinary work, an
+	// amendment requested in chat must cross an explicit review checkpoint.
+	// This also lets the narrow management capability propose fields outside
+	// the Agent's autonomous self-amendment allowlist without silently widening
+	// what the Agent may change on its own.
+	requiresBehaviorReview := input.Bound.Definition.ID == runtime.AgentManagementSkillID && input.Bound.Action.Name == runtime.AgentActionAmendBehavior
+	if !requiresBehaviorReview {
+		if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
+			return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
+		}
 	}
 	decision, err := e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	if err != nil {
 		return runtime.ActionPolicyDecision{}, err
+	}
+	if requiresBehaviorReview {
+		decision.Reason = "Agent behavior amendments require explicit review"
 	}
 	for _, destination := range definition.Authority.ApprovalDestinations {
 		decision.ApprovalDestinations = append(decision.ApprovalDestinations, runtime.ApprovalDestination{EndpointID: destination.EndpointID})
