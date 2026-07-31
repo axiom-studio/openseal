@@ -945,7 +945,10 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return
 	}
 	p.lastFinalizationScan = now
-	const pageSize = 100
+	// Terminal cleanup is maintenance behind timer wakes. Keep each slice small
+	// so a large historical backlog cannot hold this pool's scheduler loop for
+	// minutes while it probes already-finalized Runs.
+	const pageSize = 10
 	newest, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []AgentRunStatus{
 			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
