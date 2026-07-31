@@ -118,7 +118,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	}
 }
 
-func TestAgentBehaviorActionRejectsForeignStaleDisallowedAndEvaluationChanges(t *testing.T) {
+func TestAgentBehaviorActionRejectsForeignStaleAndInvalidChanges(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	baseRun := &AgentRun{
@@ -154,10 +154,6 @@ func TestAgentBehaviorActionRejectsForeignStaleDisallowedAndEvaluationChanges(t 
 		"stale revision": {
 			arguments: map[string]interface{}{"expectedDeploymentRevision": 9, "personality": "Curious", "rationale": "Improve"},
 		},
-		"disallowed field": {
-			arguments: map[string]interface{}{"expectedDeploymentRevision": 1, "systemPrompt": "A changed prompt.", "rationale": "Improve"},
-			policy:    &workforce.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"personality"}},
-		},
 		"unknown credential field": {
 			arguments: map[string]interface{}{"expectedDeploymentRevision": 1, "personality": "Curious", "rationale": "Improve", "apiKey": "secret"},
 		},
@@ -177,7 +173,7 @@ func TestAgentBehaviorActionRejectsForeignStaleDisallowedAndEvaluationChanges(t 
 		})
 	}
 
-	t.Run("evaluation required", func(t *testing.T) {
+	t.Run("definition outcome evaluations do not block a reviewed amendment proposal", func(t *testing.T) {
 		agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
 		current, err := agents.GetDefinition(ctx, "researcher-definition", "1.0.0")
 		if err != nil {
@@ -194,12 +190,12 @@ func TestAgentBehaviorActionRejectsForeignStaleDisallowedAndEvaluationChanges(t 
 			t.Fatal(err)
 		}
 		validator, _ := NewAgentBehaviorActionValidator(agents)
-		_, err = validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		preview, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
 			Run: baseRun, Bound: agentBehaviorBoundAction("researcher"),
-			Arguments: map[string]interface{}{"expectedDeploymentRevision": 2, "personality": "Curious", "rationale": "Improve"},
+			Arguments: map[string]interface{}{"expectedDeploymentRevision": 2, "personality": "Analytical", "rationale": "Improve"},
 		})
-		if err == nil || !strings.Contains(err.Error(), "evaluations") {
-			t.Fatalf("evaluation-required error = %v", err)
+		if err != nil || preview["operation"] != AgentActionAmendBehavior {
+			t.Fatalf("reviewable evaluated-definition amendment = %#v, %v", preview, err)
 		}
 	})
 }
@@ -234,7 +230,7 @@ func agentBehaviorActionRegistry(
 	t.Helper()
 	amendments := workforce.AmendmentPolicy{
 		AgentMayPropose:  true,
-		AllowedFields:    []string{"displayName", "purpose", "systemPrompt", "personality", "operatingPrinciples"},
+		AllowedFields:    []string{"systemPrompt"},
 		RequiresApproval: true, ApproverPrincipals: []string{"user:operator"},
 	}
 	if policy != nil {
@@ -245,6 +241,7 @@ func agentBehaviorActionRegistry(
 		ID: "researcher-definition", Version: "1.0.0", DisplayName: "Researcher", Purpose: "Research product pain points",
 		SystemPrompt: "Research carefully.", Personality: "Curious",
 		OperatingPrinciples: []string{"Separate facts from inference."},
+		Evaluations:         []workforce.EvaluationCriterion{{ID: "quality", Description: "Work remains high quality", Required: true}},
 		Authority:           kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1},
 		Amendments:          amendments,
 	})

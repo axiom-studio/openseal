@@ -343,7 +343,8 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	candidate.Digest = definitionDigest(candidate)
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	evidenceRefs := normalizedStrings(req.EvidenceRefs)
-	requestDigest := amendmentRequestDigest(deployment.ID, base.Digest, candidate.Digest, req.ProposerType, req.ProposerID, req.Rationale, evidenceRefs)
+	additionalAllowedFields := normalizedStrings(req.AdditionalAllowedFields)
+	requestDigest := amendmentRequestDigest(deployment.ID, base.Digest, candidate.Digest, req.ProposerType, req.ProposerID, req.Rationale, evidenceRefs, additionalAllowedFields)
 	amendmentID := r.newID()
 	if idempotencyKey != "" {
 		amendmentID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+deployment.ID+"\x00"+idempotencyKey)).String()
@@ -369,7 +370,8 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	for index := range changes {
 		changedFields[index] = changes[index].Field
 	}
-	if !isSubset(changedFields, base.Amendments.AllowedFields) {
+	allowedFields := append(append([]string(nil), base.Amendments.AllowedFields...), additionalAllowedFields...)
+	if !isSubset(changedFields, allowedFields) {
 		return nil, errors.New("amendment changes fields outside the definition policy")
 	}
 	riskWidening := riskRank(candidate.Authority.MaximumRisk) > riskRank(base.Authority.MaximumRisk) || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !isSubset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs)
@@ -377,9 +379,7 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 		return nil, errors.New("risk-widening amendments require eligible approver principals")
 	}
 	status := AmendmentReady
-	if len(base.Evaluations) > 0 {
-		status = AmendmentEvaluating
-	} else if base.Amendments.RequiresApproval || riskWidening {
+	if base.Amendments.RequiresApproval || riskWidening {
 		status = AmendmentAwaitingApproval
 	}
 	now := r.now().UTC()
@@ -403,11 +403,12 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	return cloneAmendment(amendment), nil
 }
 
-func amendmentRequestDigest(deploymentID, baseDigest, candidateDigest, proposerType, proposerID, rationale string, evidenceRefs []string) string {
+func amendmentRequestDigest(deploymentID, baseDigest, candidateDigest, proposerType, proposerID, rationale string, evidenceRefs, additionalAllowedFields []string) string {
 	payload, _ := json.Marshal(struct {
 		DeploymentID, BaseDigest, CandidateDigest, ProposerType, ProposerID, Rationale string
 		EvidenceRefs                                                                   []string
-	}{strings.TrimSpace(deploymentID), strings.TrimSpace(baseDigest), strings.TrimSpace(candidateDigest), strings.TrimSpace(proposerType), strings.TrimSpace(proposerID), strings.TrimSpace(rationale), evidenceRefs})
+		AdditionalAllowedFields                                                        []string
+	}{strings.TrimSpace(deploymentID), strings.TrimSpace(baseDigest), strings.TrimSpace(candidateDigest), strings.TrimSpace(proposerType), strings.TrimSpace(proposerID), strings.TrimSpace(rationale), evidenceRefs, normalizedStrings(additionalAllowedFields)})
 	digest := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(digest[:])
 }

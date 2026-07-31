@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -20,13 +21,14 @@ type ApprovalCallbackConsumer struct {
 	}
 	notifications ApprovalNotificationStore
 	transport     *ExternalConversationTransportService
+	now           func() time.Time
 }
 
 func NewApprovalCallbackConsumer(store interface {
 	PortfolioStore
 	ActionStore
 }, transport ...*ExternalConversationTransportService) *ApprovalCallbackConsumer {
-	consumer := &ApprovalCallbackConsumer{store: store}
+	consumer := &ApprovalCallbackConsumer{store: store, now: time.Now}
 	consumer.notifications, _ = store.(ApprovalNotificationStore)
 	if len(transport) > 0 {
 		consumer.transport = transport[0]
@@ -78,6 +80,9 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 		reason = "Changes requested through callback"
 	}
 	coordinator := NewApprovalCoordinator(c.store, c.store, EligibleApprovalAuthorizer{})
+	if c.now != nil {
+		coordinator.now = c.now
+	}
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Approve: decision == "approve",
