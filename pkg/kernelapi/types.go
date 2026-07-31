@@ -60,6 +60,8 @@ const (
 	EventRoutingCapabilityVersion              = "1"
 	ConversationGatewaysCapabilityID           = "conversation-gateways"
 	ConversationGatewaysCapabilityVersion      = "2"
+	CallbacksCapabilityID                      = "callbacks"
+	CallbacksCapabilityVersion                 = "1"
 	SourcePoliciesCapabilityID                 = "source-policies"
 	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
 )
@@ -233,6 +235,22 @@ type ConversationGatewayAdapterChoice struct {
 	AdapterID       string `json:"adapterId"`
 }
 
+// CallbackAdapterChoice is a secret-free, exact callback adapter binding that
+// the current principal may use to create a public callback registration.
+type CallbackAdapterChoice struct {
+	ID              string   `json:"id"`
+	DisplayName     string   `json:"displayName"`
+	DeploymentID    string   `json:"deploymentId"`
+	Provider        string   `json:"provider"`
+	SkillID         string   `json:"skillId"`
+	SkillVersion    string   `json:"skillVersion"`
+	SourceIdentity  string   `json:"sourceIdentity,omitempty"`
+	BindingID       string   `json:"bindingId"`
+	BindingRevision int64    `json:"bindingRevision"`
+	AdapterID       string   `json:"adapterId"`
+	EventTypes      []string `json:"eventTypes"`
+}
+
 type ActionApprovalCapabilityFeatures struct {
 	Resolution bool
 }
@@ -258,6 +276,7 @@ type CapabilityContext struct {
 	BindingConfigurationFields   []capability.BindingConfigurationFieldChoice `json:"bindingConfigurationFields,omitempty"`
 	BlockingRequirements         []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
 	ConversationGatewayAdapters  []ConversationGatewayAdapterChoice           `json:"conversationGatewayAdapters,omitempty"`
+	CallbackAdapters             []CallbackAdapterChoice                      `json:"callbackAdapters,omitempty"`
 }
 
 type ClawHubVersionRequest struct {
@@ -476,6 +495,24 @@ func ConversationGatewaysCapability(management bool, choices ...[]ConversationGa
 	}
 	if len(choices) > 0 && len(choices[0]) > 0 {
 		result.Context = &CapabilityContext{ConversationGatewayAdapters: choices[0]}
+	}
+	return result
+}
+
+// CallbacksCapability describes lifecycle management for durable callback
+// registrations. Public ingress is a transport boundary, not an operator
+// command, so it is intentionally absent from the operation list.
+func CallbacksCapability(management bool, choices ...[]CallbackAdapterChoice) Capability {
+	operations := []string{OperationGet, OperationList}
+	if management {
+		operations = append(operations, OperationCreate, OperationUpdate)
+	}
+	result := Capability{
+		ID: CallbacksCapabilityID, Version: CallbacksCapabilityVersion,
+		Available: true, Operations: operations,
+	}
+	if len(choices) > 0 && len(choices[0]) > 0 {
+		result.Context = &CapabilityContext{CallbackAdapters: choices[0]}
 	}
 	return result
 }
