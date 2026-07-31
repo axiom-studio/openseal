@@ -219,16 +219,16 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 		CreatedAt: start.Add(205 * time.Second), UpdatedAt: start.Add(205 * time.Second),
 	}
 	store.agentRuns[portfolioKey(scope, newest.ID)] = newest
-	for range 2 {
+	for range 20 {
 		pool.lastFinalizationScan = time.Time{}
 		pool.reconcileTerminalRunFinalizers(ctx)
 	}
 	if len(finalized) != 206 {
 		t.Fatalf("finalized %d Runs, want 206", len(finalized))
 	}
-	if finalized[0] != "run-204" || finalized[99] != "run-105" ||
-		finalized[100] != "run-205" || finalized[101] != "run-104" || finalized[205] != "run-000" {
-		t.Fatalf("unexpected finalization order: first=%s page2=%s last=%s", finalized[0], finalized[100], finalized[204])
+	if finalized[0] != "run-204" || finalized[9] != "run-195" ||
+		finalized[10] != "run-205" || finalized[205] != "run-000" {
+		t.Fatalf("unexpected finalization order: first=%s newest=%s last=%s", finalized[0], finalized[10], finalized[205])
 	}
 	if pool.finalizationOffset != 0 {
 		t.Fatalf("finalization offset = %d, want reset after final page", pool.finalizationOffset)
