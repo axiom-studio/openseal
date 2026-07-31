@@ -352,8 +352,10 @@ func validateChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) e
 // fully bounded allocation when its source Run is bounded. An omitted child
 // dimension cannot remain unbounded beneath a bounded parent, so the child is
 // capped at the capacity that is still available after committed usage,
-// reservations, and prior child allocations. Explicit child limits are never
-// widened here and remain subject to validateChildBudgetAllocation.
+// reservations, and prior child allocations. Explicit limits are also capped
+// at that remaining capacity: a parent may spend orchestration budget before
+// materializing the delegated work, and that bookkeeping must not make an
+// otherwise valid bounded delegation fail by requesting the original ceiling.
 func completeChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (*BudgetPolicy, error) {
 	if parent == nil {
 		return nil, ErrRunNotFound
@@ -369,34 +371,25 @@ func completeChildBudgetAllocation(parent *AgentRun, allocation *BudgetPolicy) (
 		return nil, err
 	}
 	completed := *cloneBudgetPolicy(allocation)
-	if completed.MaxAttempts == 0 {
-		completed.MaxAttempts = capacity.MaxAttempts
-	}
-	if completed.MaxTurns == 0 {
-		completed.MaxTurns = capacity.MaxTurns
-	}
-	if completed.MaxInputTokens == 0 {
-		completed.MaxInputTokens = capacity.MaxInputTokens
-	}
-	if completed.MaxOutputTokens == 0 {
-		completed.MaxOutputTokens = capacity.MaxOutputTokens
-	}
-	if completed.MaxTotalTokens == 0 {
-		completed.MaxTotalTokens = capacity.MaxTotalTokens
-	}
-	if completed.MaxCostMicros == 0 {
-		completed.MaxCostMicros = capacity.MaxCostMicros
-	}
-	if completed.MaxDurationMS == 0 {
-		completed.MaxDurationMS = capacity.MaxDurationMS
-	}
-	if completed.MaxActions == 0 {
-		completed.MaxActions = capacity.MaxActions
-	}
+	completed.MaxAttempts = boundedChildLimit(completed.MaxAttempts, capacity.MaxAttempts)
+	completed.MaxTurns = boundedChildLimit(completed.MaxTurns, capacity.MaxTurns)
+	completed.MaxInputTokens = boundedChildLimit(completed.MaxInputTokens, capacity.MaxInputTokens)
+	completed.MaxOutputTokens = boundedChildLimit(completed.MaxOutputTokens, capacity.MaxOutputTokens)
+	completed.MaxTotalTokens = boundedChildLimit(completed.MaxTotalTokens, capacity.MaxTotalTokens)
+	completed.MaxCostMicros = boundedChildLimit(completed.MaxCostMicros, capacity.MaxCostMicros)
+	completed.MaxDurationMS = boundedChildLimit(completed.MaxDurationMS, capacity.MaxDurationMS)
+	completed.MaxActions = boundedChildLimit(completed.MaxActions, capacity.MaxActions)
 	if err := validateChildBudgetAllocation(parent, &completed); err != nil {
 		return nil, err
 	}
 	return &completed, nil
+}
+
+func boundedChildLimit(requested, remaining int64) int64 {
+	if requested == 0 || requested > remaining {
+		return remaining
+	}
+	return requested
 }
 
 func remainingChildBudgetCapacity(parent *AgentRun) (BudgetPolicy, error) {
