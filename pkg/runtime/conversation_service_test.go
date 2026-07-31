@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
+	t.Parallel()
+	service := NewConversationService(NewMemoryStore())
+	origin := &ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-reddit-research"}
+
+	conversation, replayed, err := service.CreateConversation(context.Background(), CreateConversationRequest{
+		Scope:          Scope{Kind: "tenant", ID: "one"},
+		Owner:          ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		Title:          "Monitor Reddit pain points",
+		Origin:         origin,
+		IdempotencyKey: "objective-conversation",
+	})
+	if err != nil || replayed {
+		t.Fatalf("create objective conversation: replayed=%v err=%v", replayed, err)
+	}
+	if conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceObjective || conversation.Origin.ID != origin.ID {
+		t.Fatalf("objective origin = %#v", conversation.Origin)
+	}
+}
+
 func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryStore()

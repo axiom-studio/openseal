@@ -948,11 +948,12 @@ type ResolveArtifactContentRequest struct {
 }
 
 type CreateConversationRequest struct {
-	ID             string                 `json:"id,omitempty"`
-	Scope          runtime.Scope          `json:"scope"`
-	Owner          runtime.ObjectiveOwner `json:"owner"`
-	Title          string                 `json:"title"`
-	IdempotencyKey string                 `json:"idempotencyKey,omitempty"`
+	ID             string                         `json:"id,omitempty"`
+	Scope          runtime.Scope                  `json:"scope"`
+	Owner          runtime.ObjectiveOwner         `json:"owner"`
+	Title          string                         `json:"title"`
+	Origin         *runtime.ConversationReference `json:"origin,omitempty"`
+	IdempotencyKey string                         `json:"idempotencyKey,omitempty"`
 }
 
 type PostChannelMessageRequest struct {
