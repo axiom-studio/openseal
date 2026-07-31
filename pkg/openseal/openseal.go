@@ -2882,6 +2882,7 @@ const (
 	OpenAICompatibleWorkforceStructuredOutputDefault = authoring.OpenAICompatibleStructuredOutputDefault
 	OpenAICompatibleWorkforceStructuredOutputTool    = authoring.OpenAICompatibleStructuredOutputTool
 	OpenAICompatibleWorkforceStructuredOutputJSON    = authoring.OpenAICompatibleStructuredOutputJSON
+	OpenAICompatibleWorkforceStructuredOutputPlain   = authoring.OpenAICompatibleStructuredOutputPlain
 )
 
 // NewOpenAICompatibleWorkforceGeneratorWithOptions creates the portable
