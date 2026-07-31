@@ -936,7 +936,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 }
 
 func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context) {
-	if p.runFinalizer == nil {
+	if p.runFinalizer == nil && p.collaboration == nil && p.requestInbox == nil {
 		return
 	}
 	now := time.Now().UTC()
@@ -964,6 +964,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 			"runKind", p.config.Kind, "candidates", len(newest))
 	}
 	for _, run := range newest {
+		p.resolveCollaborationChild(ctx, run)
 		p.finalizeTerminalRun(ctx, run)
 	}
 	if len(newest) < pageSize {
@@ -984,6 +985,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return
 	}
 	for _, run := range historical {
+		p.resolveCollaborationChild(ctx, run)
 		p.finalizeTerminalRun(ctx, run)
 	}
 	if len(historical) < pageSize {
