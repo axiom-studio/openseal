@@ -134,10 +134,16 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 	if err != nil {
 		return err
 	}
+	deliveryKey := "approval-outcome-delivery:" + approval.ID + ":" + endpoint.ID + ":" + phase
+	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, endpoint.ID, deliveryKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
 	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
-		IdempotencyKey: "approval-outcome-delivery:" + approval.ID + ":" + endpoint.ID + ":" + phase,
+		IdempotencyKey: deliveryKey,
 	})
 	return err
 }
@@ -205,15 +211,37 @@ func enqueueApprovalCardUpdate(
 		parameters["providerApproverId"] = strings.TrimSpace(providerApproverID)
 		parameters["approval"].(map[string]interface{})["providerApproverId"] = strings.TrimSpace(providerApproverID)
 	}
+	idempotencyKey := "approval-card-update:" + approval.ID + ":" + destination.EndpointID + ":" + approvalCardPhase(approval, call)
+	if exists, err := approvalDeliveryExists(ctx, store, approval.Scope, destination.EndpointID, idempotencyKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
 	_, err = transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: approval.Scope, EndpointID: destination.EndpointID,
 		Operation:      capability.ConversationDeliveryMessageUpdate,
 		ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
 		ExternalThreadID: delivery.ExternalThreadID,
 		Parameters:       parameters,
-		IdempotencyKey:   "approval-card-update:" + approval.ID + ":" + destination.EndpointID + ":" + approvalCardPhase(approval, call),
+		IdempotencyKey:   idempotencyKey,
 	})
 	return err
+}
+
+// approvalDeliveryExists treats a durable delivery intent as the ownership
+// boundary for one approval projection phase. The delivery worker owns retries
+// after enqueue; reconciliation must not recreate that phase from later state
+// and turn an idempotent replay into a permanent conflict loop.
+func approvalDeliveryExists(
+	ctx context.Context,
+	store ApprovalNotificationStore,
+	scope Scope,
+	endpointID string,
+	idempotencyKey string,
+) (bool, error) {
+	id := stableExternalConversationID(scope, strings.TrimSpace(endpointID), "delivery", strings.TrimSpace(idempotencyKey))
+	delivery, err := store.GetExternalConversationDelivery(ctx, scope, id)
+	return delivery != nil, err
 }
 
 func findDeliveredApprovalNotification(
