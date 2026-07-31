@@ -915,6 +915,7 @@ type (
 	KernelCapabilityContext               = kernelapi.CapabilityContext
 	KernelCapabilityBlockingRequirement   = kernelapi.CapabilityBlockingRequirement
 	ConversationGatewayAdapterChoice      = kernelapi.ConversationGatewayAdapterChoice
+	CallbackAdapterChoice                 = kernelapi.CallbackAdapterChoice
 	CredentialBindingChoice               = capability.CredentialBindingChoice
 	CredentialExternalIdentity            = capability.CredentialExternalIdentity
 	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
@@ -1087,6 +1088,8 @@ const (
 	EventSourceSubscriptionsCapabilityVersion = kernelapi.EventSourceSubscriptionsCapabilityVersion
 	ConversationGatewaysCapabilityID          = kernelapi.ConversationGatewaysCapabilityID
 	ConversationGatewaysCapabilityVersion     = kernelapi.ConversationGatewaysCapabilityVersion
+	CallbacksCapabilityID                     = kernelapi.CallbacksCapabilityID
+	CallbacksCapabilityVersion                = kernelapi.CallbacksCapabilityVersion
 	KernelOperationReportHealth               = kernelapi.OperationReportHealth
 	KernelOperationGetCheckpoint              = kernelapi.OperationGetCheckpoint
 	KernelOperationAdvanceCheckpoint          = kernelapi.OperationAdvanceCheckpoint
@@ -1125,6 +1128,10 @@ func EventSourceSubscriptionsCapability() KernelCapability {
 
 func ConversationGatewaysCapability(management bool, choices ...[]ConversationGatewayAdapterChoice) KernelCapability {
 	return kernelapi.ConversationGatewaysCapability(management, choices...)
+}
+
+func CallbacksCapability(management bool, choices ...[]CallbackAdapterChoice) KernelCapability {
+	return kernelapi.CallbacksCapability(management, choices...)
 }
 
 func EventRoutingCapability() KernelCapability {

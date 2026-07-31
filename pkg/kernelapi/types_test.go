@@ -128,6 +128,25 @@ func TestConversationGatewaysAdvertiseOnlyLifecycleCommands(t *testing.T) {
 	}
 }
 
+func TestCallbacksAdvertiseOnlyLifecycleCommands(t *testing.T) {
+	readOnly := CallbacksCapability(false)
+	if readOnly.ID != CallbacksCapabilityID || readOnly.Version != "1" ||
+		!readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) ||
+		readOnly.Supports(OperationCreate) || readOnly.Supports(OperationUpdate) {
+		t.Fatalf("read-only callback capability = %#v", readOnly)
+	}
+	choice := CallbackAdapterChoice{ID: "choice", DeploymentID: "agent:one", Provider: "slack", EventTypes: []string{"approval.decided"}}
+	managed := CallbacksCapability(true, []CallbackAdapterChoice{choice})
+	for _, operation := range []string{OperationCreate, OperationGet, OperationList, OperationUpdate} {
+		if !managed.Supports(operation) {
+			t.Fatalf("callback operation %q not advertised: %#v", operation, managed.Operations)
+		}
+	}
+	if managed.Context == nil || len(managed.Context.CallbackAdapters) != 1 || managed.Context.CallbackAdapters[0].ID != choice.ID {
+		t.Fatalf("callback choices were not advertised: %#v", managed.Context)
+	}
+}
+
 func TestActivityCapabilityIsReadOnlyAndSelectorBounded(t *testing.T) {
 	capability := ActivityCapability()
 	if capability.ID != ActivityCapabilityID || capability.Version != ActivityCapabilityVersion || !capability.Supports(OperationList) {
