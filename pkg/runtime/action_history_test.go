@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +121,31 @@ func TestActionHistoryPreservesStructuredOversizedEvidenceAndBoundsEntries(t *te
 	checkpointJSON, _ := json.Marshal(checkpoint)
 	if strings.Contains(string(checkpointJSON), "call-a") || !strings.Contains(string(checkpointJSON), "_opensealActionHistory") {
 		t.Fatalf("history retention was not bounded: %s", checkpointJSON)
+	}
+}
+
+func TestCompactActionResultPreservesMiddleFormControls(t *testing.T) {
+	elements := make([]interface{}, 180)
+	for index := range elements {
+		elements[index] = map[string]interface{}{
+			"ref": fmt.Sprintf("s4:e%d", index+1), "role": "link", "name": fmt.Sprintf("ordinary link %d", index+1),
+		}
+	}
+	elements[57] = map[string]interface{}{
+		"ref": "s4:e58", "role": "textbox", "name": "comment", "state": map[string]interface{}{"filled": false},
+	}
+	elements[58] = map[string]interface{}{
+		"ref": "s4:e59", "role": "button", "name": "save", "state": map[string]interface{}{"type": "submit"},
+	}
+	compacted := compactActionResult(map[string]interface{}{
+		"url": "https://example.test/thread", "elements": elements, "text": strings.Repeat("thread context ", 5000),
+	}, maximumActionHistoryResultBytes)
+	encoded, err := json.Marshal(compacted)
+	if err != nil || len(encoded) > maximumActionHistoryResultBytes {
+		t.Fatalf("compacted observation bytes=%d err=%v", len(encoded), err)
+	}
+	if !strings.Contains(string(encoded), `"ref":"s4:e58"`) || !strings.Contains(string(encoded), `"ref":"s4:e59"`) {
+		t.Fatalf("middle form controls were omitted: %s", encoded)
 	}
 }
 
