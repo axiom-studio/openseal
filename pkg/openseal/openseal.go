@@ -2165,7 +2165,6 @@ type Engine struct {
 	actionPools                   []*runtime.ActionWorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
 	actionSupervisors             []*runtime.ActionWorkerSupervisor
-	runTerminalFinalization       bool
 	skills                        *skill.Catalog
 	skillReferenceUpgrades        *runtime.SkillReferenceUpgradeService
 	agents                        *kernelagent.Registry
@@ -2774,17 +2773,6 @@ func WithDynamicAgentRunWorkers(
 	}
 }
 
-// WithRunTerminalFinalization makes terminal Run cleanup runtime-owned. Skill
-// acquisition actions may declare a hidden finalizer action; the kernel
-// invokes it automatically on completed, failed, and canceled Runs and
-// reconciles missed cleanup after restarts.
-func WithRunTerminalFinalization() Option {
-	return func(e *Engine) error {
-		e.runTerminalFinalization = true
-		return nil
-	}
-}
-
 func WithSkillCatalog(catalog *skill.Catalog) Option {
 	return func(e *Engine) error {
 		if catalog == nil {
@@ -3345,11 +3333,8 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 }
 
 func (e *Engine) newRunTerminalFinalizer() (runtime.RunTerminalFinalizer, error) {
-	if !e.runTerminalFinalization {
-		return nil, nil
-	}
 	if len(e.actionSupervisorSpecs) == 0 && len(e.actionPoolSpecs) == 0 {
-		return nil, errors.New("Run terminal finalization requires an action dispatcher")
+		return nil, nil
 	}
 	var dispatcher runtime.ActionDispatcher
 	if len(e.actionSupervisorSpecs) > 0 {
