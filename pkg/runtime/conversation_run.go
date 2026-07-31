@@ -1074,13 +1074,27 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 	resourceType := strings.TrimSpace(fmt.Sprint(result["resourceType"]))
 	if resourceType == runbookActivationResourceType {
 		activation := conversationResultMap(result["activation"])
-		startedRun := conversationResultMap(result["run"])
 		activationID := conversationResultString(activation, "id")
-		runID := conversationResultString(startedRun, "id")
-		if !validOpaqueIdentifier(activationID, 256) || !validOpaqueIdentifier(runID, 256) {
+		if !validOpaqueIdentifier(activationID, 256) {
 			return nil, false
 		}
 		definitionID := conversationResultString(activation, "definitionId")
+		operation := strings.TrimSpace(fmt.Sprint(result["operation"]))
+		if operation == RunbookActionReplaceSchedule {
+			content := "The reviewed Runbook schedule was replaced successfully."
+			if definitionID != "" {
+				content = "Runbook “" + definitionID + "” now has a fresh reviewed schedule."
+			}
+			return &governedConversationCompletion{
+				Content: content, ResourceType: resourceType, ResourceID: activationID,
+				References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			}, true
+		}
+		startedRun := conversationResultMap(result["run"])
+		runID := conversationResultString(startedRun, "id")
+		if !validOpaqueIdentifier(runID, 256) {
+			return nil, false
+		}
 		content := "The reviewed Runbook was started successfully."
 		if definitionID != "" {
 			content = "Runbook “" + definitionID + "” was started successfully."
@@ -1200,7 +1214,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	}
 	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
 	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause &&
-		operation != AgentActionAmendBehavior && operation != RunbookActionStart {
+		operation != AgentActionAmendBehavior && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule {
 		return nil, false
 	}
 	actionDescription := label + " " + strings.ReplaceAll(operation, "_", " ")
