@@ -160,7 +160,12 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 		}
 		result = append(result, cloneApprovalCheckpoint(approval))
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
+	sort.Slice(result, func(i, j int) bool {
+		if filter.NewestFirst {
+			return result[i].CreatedAt.After(result[j].CreatedAt)
+		}
+		return result[i].CreatedAt.Before(result[j].CreatedAt)
+	})
 	return pageApprovals(result, filter.Offset, filter.Limit), nil
 }
 
