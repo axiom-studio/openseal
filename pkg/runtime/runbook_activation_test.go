@@ -4,12 +4,71 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
+
+func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "3"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Hourly research", Goal: "Research once per hour", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := CreateRunbookActivationRequest{
+		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly", Status: RunbookActivationActive,
+		Trigger:        runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC", MaximumOccurrences: 5}},
+		IdempotencyKey: "replacement-for-retired-generation",
+	}
+	const callers = 16
+	start := make(chan struct{})
+	results := make(chan *RunbookActivation, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			activation, createErr := NewRunbookActivationService(store).Create(ctx, request)
+			results <- activation
+			errs <- createErr
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for createErr := range errs {
+		if createErr != nil {
+			t.Fatalf("concurrent idempotent create failed: %v", createErr)
+		}
+	}
+	var id string
+	for activation := range results {
+		if activation == nil {
+			t.Fatal("concurrent idempotent create returned nil activation")
+		}
+		if id == "" {
+			id = activation.ID
+		} else if activation.ID != id {
+			t.Fatalf("concurrent idempotent creates produced %q and %q", id, activation.ID)
+		}
+	}
+	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})
+	if err != nil || len(activations) != 1 {
+		t.Fatalf("concurrent idempotent creates persisted %#v err=%v", activations, err)
+	}
+}
 
 func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	ctx := context.Background()

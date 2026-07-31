@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -214,6 +215,20 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	replayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: call, Run: conversationRun, Bound: bound, Arguments: resolved})
 	if err != nil || replayed["replayed"] != true || replayed["activation"].(*RunbookActivation).ID != replacement.ID {
 		t.Fatalf("replacement replay = %#v err=%v", replayed, err)
+	}
+	delayedCall := &ActionCall{ID: "delayed-duplicate-conversation-action", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}
+	delayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: delayedCall, Run: conversationRun, Bound: bound, Arguments: resolved})
+	if err != nil || delayed["replayed"] != true || delayed["activation"].(*RunbookActivation).ID != replacement.ID {
+		t.Fatalf("replacement from distinct ActionCall did not converge = %#v err=%v", delayed, err)
+	}
+	conflicting := cloneMap(resolved)
+	conflicting["maximumOccurrences"] = float64(6)
+	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: &ActionCall{ID: "conflicting-replacement", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}, Run: conversationRun, Bound: bound, Arguments: conflicting}); !errors.Is(err, ErrRunbookActivationIdempotency) {
+		t.Fatalf("conflicting replacement error = %v, want %v", err, ErrRunbookActivationIdempotency)
+	}
+	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})
+	if err != nil || len(activations) != 2 {
+		t.Fatalf("replacement lineage contains duplicate successors: activations=%#v err=%v", activations, err)
 	}
 }
 
