@@ -45,6 +45,7 @@ type HostedTurnActionForm struct {
 	Arguments         map[string]interface{}     `json:"arguments"`
 	EvidenceRefs      []string                   `json:"evidenceRefs,omitempty"`
 	ExternalOperation *ExternalOperationIdentity `json:"externalOperation,omitempty"`
+	ReviewContext     *ApprovalReviewContext     `json:"reviewContext,omitempty"`
 }
 
 // HostedTurnFormAuthority describes which non-Skill proposal families are
@@ -122,6 +123,13 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 		Type: "skill_action", Capability: selected.Name, Summary: strings.TrimSpace(form.ProposedAction.Summary),
 		IdempotencyKey: strings.TrimSpace(form.ProposedAction.IdempotencyKey), InputRef: "/actionInputs/proposed",
 		EvidenceRefs: append([]string(nil), form.ProposedAction.EvidenceRefs...), ExternalOperation: form.ProposedAction.ExternalOperation,
+		ReviewContext: cloneApprovalReviewContext(form.ProposedAction.ReviewContext),
+	}
+	if selected.SideEffect == capability.SideEffectExternal && response.ProposedAction.ReviewContext == nil {
+		return nil, errors.New("external proposed action reviewContext is required")
+	}
+	if err := validateApprovalReviewContext(response.ProposedAction.ReviewContext); err != nil {
+		return nil, fmt.Errorf("proposed action reviewContext is invalid: %w", err)
 	}
 	return response, nil
 }
@@ -148,6 +156,7 @@ func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, er
 		Capability: response.ProposedAction.Capability, Summary: response.ProposedAction.Summary,
 		IdempotencyKey: response.ProposedAction.IdempotencyKey, Arguments: arguments,
 		EvidenceRefs: append([]string(nil), response.ProposedAction.EvidenceRefs...), ExternalOperation: response.ProposedAction.ExternalOperation,
+		ReviewContext: cloneApprovalReviewContext(response.ProposedAction.ReviewContext),
 	}
 	return form, nil
 }
@@ -238,10 +247,15 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 					"resource": map[string]interface{}{"type": "string"}, "operation": map[string]interface{}{"type": "string"},
 				}, "required": []string{"resource", "operation"},
 			},
+			"reviewContext": approvalReviewContextJSONSchema(),
+		}
+		required := []string{"capability", "summary", "idempotencyKey", "arguments"}
+		if action.SideEffect == capability.SideEffectExternal {
+			required = append(required, "reviewContext")
 		}
 		branches = append(branches, map[string]interface{}{
 			"type": "object", "additionalProperties": false, "properties": branchProperties,
-			"required": []string{"capability", "summary", "idempotencyKey", "arguments"},
+			"required": required,
 		})
 	}
 	if len(branches) == 0 {

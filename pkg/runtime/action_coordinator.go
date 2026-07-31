@@ -96,6 +96,7 @@ type ProposeActionRequest struct {
 	Actor                  ActivityActor
 	EvidenceRefs           []string
 	ExternalOperation      *ExternalOperationIdentity
+	ReviewContext          *ApprovalReviewContext
 	ContinuationCheckpoint map[string]interface{}
 	CorrelationID          string
 	CausationID            string
@@ -322,6 +323,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	if approval != nil {
 		approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)
+		if req.ReviewContext != nil {
+			approval.ProposedAction["reviewContext"] = approvalReviewContextMap(req.ReviewContext)
+		}
 	}
 	actor := req.Actor
 	if actor.Type == "" {

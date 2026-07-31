@@ -86,6 +86,7 @@ type HostedActionInvocationContract struct {
 	ModelAuthoredFields []string                            `json:"modelAuthoredFields"`
 	HostOwnedFields     []string                            `json:"hostOwnedFields"`
 	ExternalOperation   HostedExternalOperationInstructions `json:"externalOperation"`
+	ApprovalReview      string                              `json:"approvalReview"`
 	CompletionEvidence  string                              `json:"completionEvidence,omitempty"`
 }
 
@@ -121,6 +122,12 @@ func ProjectHostedActionInvocationContracts(actions []capability.ModelAction) []
 		}
 		if policy == capability.ExternalOperationRequired {
 			contract.CompletionEvidence = "After the action succeeds, any completion claim about its external effect must cite action-call:<durable actionCallId> in completionEvidenceRefs."
+		}
+		if action.SideEffect == capability.SideEffectExternal {
+			contract.ModelAuthoredFields = append(contract.ModelAuthoredFields, "reviewContext")
+			contract.ApprovalReview = "Required. Explain what the reviewer is authorizing in plain language. Include the exact externally visible content when content will be published or sent, the stable target and audience, the purpose, and any material consequences. Include only facts known from durable observations or prior successful actions. Never include authentication material, tokens, passwords, cookies, or hidden reasoning."
+		} else {
+			contract.ApprovalReview = "Optional. Include reviewContext when an operator would need semantic facts beyond the execution arguments to judge the action. Never include authentication material or hidden reasoning."
 		}
 		contracts = append(contracts, contract)
 	}

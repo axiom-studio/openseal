@@ -645,6 +645,7 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		PreparedRuntime: request.PreparedRuntime,
 		IdempotencyKey:  idempotencyKey, Summary: request.Summary,
 		ExternalOperation: request.ExternalOperation,
+		ReviewContext:     cloneApprovalReviewContext(request.ReviewContext),
 		Actor:             ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		CausationID:            turn.ID,
