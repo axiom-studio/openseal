@@ -1609,6 +1609,7 @@ const (
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
 	RunbookActionStart              = runtime.RunbookActionStart
+	RunbookActionReplaceSchedule    = runtime.RunbookActionReplaceSchedule
 	TeamManagementSkillID           = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole            = runtime.TeamActionUpdateRole
