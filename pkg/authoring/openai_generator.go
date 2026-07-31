@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const authoringSystemPrompt = `Produce one authoring proposal using submit_authoring_result.
+const authoringSystemPrompt = `Produce one authoring proposal. When submit_authoring_result is available, call it exactly once; otherwise return only the canonical AuthoringResult JSON object.
 
 Preserve explicit prompt facts as commitments. Put inferences only in assumptions. Do not invent authority, catalog identifiers, targets, credentials, source policies, or relationships. Add refinement questions only when ambiguity prevents a safe, internally consistent proposal.
 
@@ -52,13 +52,16 @@ const (
 )
 
 // OpenAICompatibleStructuredOutputMode selects how the provider transports the
-// same canonical AuthoringResult JSON document. OpenSeal validates both modes.
+// same canonical AuthoringResult JSON document. Plain mode is for compatible
+// gateways that reject both tools and response_format; OpenSeal still applies
+// the identical strict local schema and semantic validation.
 type OpenAICompatibleStructuredOutputMode string
 
 const (
 	OpenAICompatibleStructuredOutputDefault OpenAICompatibleStructuredOutputMode = ""
 	OpenAICompatibleStructuredOutputTool    OpenAICompatibleStructuredOutputMode = "tool"
 	OpenAICompatibleStructuredOutputJSON    OpenAICompatibleStructuredOutputMode = "json"
+	OpenAICompatibleStructuredOutputPlain   OpenAICompatibleStructuredOutputMode = "plain"
 )
 
 // OpenAICompatibleGeneratorOptions contains optional, provider-negotiated
@@ -117,7 +120,7 @@ func NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model string, htt
 		return nil, fmt.Errorf("unsupported OpenAI-compatible thinking mode %q", options.ThinkingMode)
 	}
 	switch options.StructuredOutputMode {
-	case OpenAICompatibleStructuredOutputDefault, OpenAICompatibleStructuredOutputTool, OpenAICompatibleStructuredOutputJSON:
+	case OpenAICompatibleStructuredOutputDefault, OpenAICompatibleStructuredOutputTool, OpenAICompatibleStructuredOutputJSON, OpenAICompatibleStructuredOutputPlain:
 	default:
 		return nil, fmt.Errorf("unsupported OpenAI-compatible structured output mode %q", options.StructuredOutputMode)
 	}
@@ -260,7 +263,7 @@ func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey 
 		payload["tool_choice"] = map[string]interface{}{
 			"type": "function", "function": map[string]string{"name": "submit_authoring_result"},
 		}
-	} else {
+	} else if mode == OpenAICompatibleStructuredOutputJSON {
 		payload["response_format"] = map[string]string{"type": "json_object"}
 	}
 	if g.options.ThinkingMode != OpenAICompatibleThinkingDefault {
