@@ -31,6 +31,12 @@ func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
 	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "resume hourly work"}); err == nil {
 		t.Fatal("replacement without a timing change must fail schema validation")
 	}
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "hourly", "cron": "0 * * * *"}); err == nil {
+		t.Fatal("replacement with a five-field cron must fail schema validation")
+	}
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "hourly", "cron": "0 0 * * * *"}); err != nil {
+		t.Fatalf("replacement with a six-field cron: %v", err)
+	}
 	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "run five times", "maximumOccurrences": float64(5)}); err != nil {
 		t.Fatalf("replacement with a timing change: %v", err)
 	}

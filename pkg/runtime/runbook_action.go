@@ -14,7 +14,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.1.1"
+	RunbookManagementSkillVersion = "1.1.2"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -70,7 +70,7 @@ func RunbookManagementSkill() *skill.Definition {
 					},
 					"properties": map[string]interface{}{
 						"activationId":       map[string]interface{}{"type": "string", "minLength": 1},
-						"cron":               map[string]interface{}{"type": "string", "minLength": 1, "description": "Optional six-field cron expression; omit to preserve the reviewed cadence."},
+						"cron":               map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Optional six-field cron expression including seconds, for example 0 0 * * * *; omit to preserve the reviewed cadence."},
 						"timezone":           map[string]interface{}{"type": "string", "minLength": 1, "description": "Optional IANA timezone; omit to preserve the reviewed timezone."},
 						"jitterSeconds":      map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 2678400, "description": "Optional timing variation; omit to preserve the reviewed value."},
 						"maximumOccurrences": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 1000000, "description": "Optional bounded number of occurrences; omit to preserve the reviewed value."},
