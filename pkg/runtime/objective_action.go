@@ -13,7 +13,7 @@ import (
 
 const (
 	ObjectiveManagementSkillID      = "openseal.objectives"
-	ObjectiveManagementSkillVersion = "1.0.2"
+	ObjectiveManagementSkillVersion = "1.0.3"
 	ObjectiveActionCreate           = "create"
 	ObjectiveActionUpdate           = "update"
 	ObjectiveActionPause            = "pause"
@@ -36,11 +36,11 @@ func ObjectiveManagementSkill() *skill.Definition {
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: ObjectiveManagementEndpoint},
 		Actions: map[string]skill.Action{
 			ObjectiveActionCreate: objectiveSkillAction(ObjectiveActionCreate, "Propose a new draft objective for this Agent or Team. The change may require human approval.", createFields, []interface{}{"title", "goal"}),
-			ObjectiveActionUpdate: objectiveSkillAction(ObjectiveActionUpdate, "Propose changes to an existing objective owned by this Agent or Team using its current revision.", updateFields, []interface{}{"objectiveId", "expectedRevision"}),
+			ObjectiveActionUpdate: objectiveSkillAction(ObjectiveActionUpdate, "Propose changes to an existing objective owned by this Agent or Team using its current revision. In an Objective channel, the kernel resolves an omitted objectiveId to that channel's Objective.", updateFields, []interface{}{"expectedRevision"}),
 			ObjectiveActionPause: objectiveSkillAction(ObjectiveActionPause, "Propose pausing an existing objective owned by this Agent or Team using its current revision.", map[string]interface{}{
 				"objectiveId":      map[string]interface{}{"type": "string", "minLength": 1},
 				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
-			}, []interface{}{"objectiveId", "expectedRevision"}),
+			}, []interface{}{"expectedRevision"}),
 		},
 	}
 }
@@ -92,6 +92,17 @@ func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Co
 		return nil, false, nil
 	}
 	arguments := cloneMap(input.Arguments)
+	if target, _ := arguments["objectiveId"].(string); strings.TrimSpace(target) == "" && input.Run != nil {
+		if conversations, ok := v.store.(ConversationStore); ok {
+			objectiveID, err := conversationObjectiveOrigin(ctx, conversations, input.Run)
+			if err != nil {
+				return nil, true, err
+			}
+			if objectiveID != "" {
+				arguments["objectiveId"] = objectiveID
+			}
+		}
+	}
 	if _, supplied := arguments["expectedRevision"]; supplied {
 		return arguments, true, nil
 	}

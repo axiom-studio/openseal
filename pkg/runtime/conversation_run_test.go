@@ -563,7 +563,7 @@ func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
 
 	conversation := &Conversation{ID: "channel-1", Title: "Operations"}
 	trigger := &ChannelMessage{ID: "message-1"}
-	goal, err := agentConversationGoal(conversation, trigger, nil)
+	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,6 +716,27 @@ func TestGovernedConversationActionCompletionProjectsProjectIdentity(t *testing.
 		len(completion.References) != 2 ||
 		completion.References[1] != (ConversationReference{Kind: ConversationReferenceProject, ID: "project-research", Version: 4}) {
 		t.Fatalf("project completion = %#v, ok=%v", completion, ok)
+	}
+}
+
+func TestGovernedConversationActionCompletionProjectsStartedRunbook(t *testing.T) {
+	run := &AgentRun{ID: "conversation-run", Checkpoint: map[string]interface{}{
+		"lastAction": map[string]interface{}{
+			"status": ActionCallStatusSucceeded,
+			"result": map[string]interface{}{
+				"resourceType": runbookActivationResourceType,
+				"operation":    RunbookActionStart,
+				"activation":   map[string]interface{}{"id": "activation-hourly", "definitionId": "hourly-review"},
+				"run":          map[string]interface{}{"id": "run-hourly"},
+				"replayed":     false,
+			},
+		},
+	}}
+	completion, ok := governedConversationActionCompletion(run)
+	if !ok || completion.ResourceType != runbookActivationResourceType || completion.ResourceID != "activation-hourly" ||
+		completion.Content != "Runbook “hourly-review” was started successfully." ||
+		len(completion.References) != 1 || completion.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: "run-hourly"}) {
+		t.Fatalf("Runbook completion = %#v, %v", completion, ok)
 	}
 }
 
