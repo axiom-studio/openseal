@@ -336,6 +336,52 @@ func TestDefinitionAllowsDistinctPerActionTransports(t *testing.T) {
 	}
 }
 
+func TestDefinitionRequiresSafeIdempotentFinalizer(t *testing.T) {
+	definition := &Definition{
+		ID: "session", Version: "1.0.0", Name: "Session",
+		Transport: TransportReference{Kind: "tool", Endpoint: "session"},
+		Actions: map[string]Action{
+			"start": {
+				Name: "start", Description: "Acquire a session", Risk: RiskLevelRead, SideEffect: SideEffectRead,
+				InputSchema:     map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+				FinalizerAction: "release", Idempotency: IdempotencySupported,
+			},
+			"release": {
+				Name: "release", Description: "Release session use", Risk: RiskLevelRead, SideEffect: SideEffectNone,
+				InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+				Idempotency: IdempotencySupported,
+			},
+		},
+	}
+	if err := validateDefinition(definition); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := cloneDefinition(definition)
+	start := missing.Actions["start"]
+	start.FinalizerAction = "missing"
+	missing.Actions["start"] = start
+	if err := validateDefinition(missing); err == nil || !strings.Contains(err.Error(), "missing finalizer") {
+		t.Fatalf("missing finalizer error = %v", err)
+	}
+
+	sideEffecting := cloneDefinition(definition)
+	release := sideEffecting.Actions["release"]
+	release.SideEffect = SideEffectWrite
+	sideEffecting.Actions["release"] = release
+	if err := validateDefinition(sideEffecting); err == nil || !strings.Contains(err.Error(), "without external side effects") {
+		t.Fatalf("side-effecting finalizer error = %v", err)
+	}
+
+	nonIdempotent := cloneDefinition(definition)
+	release = nonIdempotent.Actions["release"]
+	release.Idempotency = IdempotencyNone
+	nonIdempotent.Actions["release"] = release
+	if err := validateDefinition(nonIdempotent); err == nil || !strings.Contains(err.Error(), "must be idempotent") {
+		t.Fatalf("non-idempotent finalizer error = %v", err)
+	}
+}
+
 func TestDefinitionValidatesPortableHostingRequirements(t *testing.T) {
 	definition := testSkillDefinition()
 	definition.Requirements = Requirements{
