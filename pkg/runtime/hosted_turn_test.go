@@ -479,7 +479,8 @@ func TestHostedTurnRunnerPreservesAndExplainsProposalRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(host.request.SystemInstructions) == 0 ||
-		!strings.Contains(host.request.SystemInstructions[len(host.request.SystemInstructions)-1], proposalRecoveryCheckpointKey) {
+		!strings.Contains(host.request.SystemInstructions[len(host.request.SystemInstructions)-1], proposalRecoveryCheckpointKey) ||
+		!strings.Contains(host.request.SystemInstructions[len(host.request.SystemInstructions)-1], "Do not propose the same capability again with the same semantically invalid argument") {
 		t.Fatalf("proposal recovery instruction = %#v", host.request.SystemInstructions)
 	}
 	if !reflect.DeepEqual(outcome.ContinuationCheckpoint[proposalRecoveryCheckpointKey], recovery) {
