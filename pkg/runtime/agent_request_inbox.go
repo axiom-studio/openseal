@@ -17,12 +17,13 @@ const (
 	AgentRequestInboxContextKey = "agentRequestInbox"
 	// AgentRequestDecisionOutputKey is the only model output consumed as an
 	// AgentRequest lifecycle decision.
-	AgentRequestDecisionOutputKey = "agentRequestDecision"
+	AgentRequestDecisionOutputKey            = "agentRequestDecision"
+	acceptedAgentRequestExecutionRecoveryKey = "_opensealAcceptedAgentRequestExecutionRecovery"
 )
 
 const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest in inputContext.agentRequestInbox before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Complete the review with runOutput.agentRequestDecision set to exactly {"decision":"accept","message":"concise reason"}, {"decision":"reject","message":"concise reason"}, or {"decision":"request_clarification","message":"one concrete question"}.`
 
-const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again, and do not emit runOutput.agentRequestDecision.`
+const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again, and do not emit runOutput.agentRequestDecision. If continuationCheckpoint._opensealAcceptedAgentRequestExecutionRecovery is present, the previous execution turn was discarded because it repeated the already-completed intake decision; continue directly with the requested work and do not repeat that output.`
 
 type agentRequestTeamDefinitionStore interface {
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
@@ -91,9 +92,43 @@ func (r *acceptedAgentRequestExecutionTurnRunner) RunTurn(ctx context.Context, i
 		return outcome, err
 	}
 	if _, decisionOnly := outcome.RunOutput[AgentRequestDecisionOutputKey]; decisionOnly {
-		return nil, errors.New("accepted AgentRequest execution cannot emit an intake decision")
+		if acceptedAgentRequestExecutionRecoveryAttempt(input.Run.Checkpoint) > 0 {
+			return nil, errors.New("accepted AgentRequest execution repeatedly emitted an intake decision")
+		}
+		checkpoint := cloneMap(outcome.ContinuationCheckpoint)
+		if checkpoint == nil {
+			checkpoint = map[string]interface{}{}
+		}
+		checkpoint[acceptedAgentRequestExecutionRecoveryKey] = map[string]interface{}{
+			"attempt": 1,
+			"error":   "The AgentRequest was already accepted; continue with its requested work.",
+		}
+		outcome.ContinuationCheckpoint = checkpoint
+		outcome.NextRunStatus = AgentRunStatusRunning
+		outcome.WakeCondition = nil
+		outcome.RunOutput = nil
+		outcome.RunError = ""
+		outcome.ProposedActions = nil
+		outcome.ProposedFork = nil
+		outcome.ProposedDelegation = nil
+		outcome.ProposedRunbook = nil
+		outcome.OutputSummary = "Discarded a repeated intake decision and continued accepted work"
 	}
 	return outcome, nil
+}
+
+func acceptedAgentRequestExecutionRecoveryAttempt(checkpoint map[string]interface{}) int {
+	recovery, _ := checkpoint[acceptedAgentRequestExecutionRecoveryKey].(map[string]interface{})
+	switch value := recovery["attempt"].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
 }
 
 // AgentRequestInboxReconciler converts pending recipient work into either a
