@@ -458,8 +458,10 @@ func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testi
 			AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "accept"},
 		}}, nil
 	})
-	if _, err := executionRunner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2"}}); err == nil || !strings.Contains(err.Error(), "cannot emit an intake decision") {
-		t.Fatalf("accepted execution decision error = %v", err)
+	recovered, err := executionRunner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2"}})
+	if err != nil || recovered == nil || recovered.NextRunStatus != AgentRunStatusRunning ||
+		recovered.RunOutput != nil || acceptedAgentRequestExecutionRecoveryAttempt(recovered.ContinuationCheckpoint) != 1 {
+		t.Fatalf("accepted execution recovery=%#v error=%v", recovered, err)
 	}
 }
 
