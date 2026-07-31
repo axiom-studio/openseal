@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -443,7 +444,7 @@ func TestModelActionsHideKernelResolvedArgumentsWhileExecutionSchemaStaysStrict(
 				"type": "object", "additionalProperties": false,
 				"properties": map[string]interface{}{
 					"resourceId":       map[string]interface{}{"type": "string"},
-					"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, SchemaExtensionKernelResolved: true},
+					"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, SchemaExtensionKernelResolved: true, SchemaExtensionKernelSource: "revision"},
 				},
 				"required": []interface{}{"resourceId", "expectedRevision"},
 			},
@@ -463,6 +464,9 @@ func TestModelActionsHideKernelResolvedArgumentsWhileExecutionSchemaStaysStrict(
 	properties, _ := actions[0].InputSchema["properties"].(map[string]interface{})
 	if _, visible := properties["expectedRevision"]; visible {
 		t.Fatalf("kernel concurrency token leaked into model schema: %#v", actions[0].InputSchema)
+	}
+	if strings.Contains(fmt.Sprint(actions[0].InputSchema), SchemaExtensionKernelSource) {
+		t.Fatalf("kernel source leaked into model schema: %#v", actions[0].InputSchema)
 	}
 	if required, _ := actions[0].InputSchema["required"].([]interface{}); len(required) != 1 || required[0] != "resourceId" {
 		t.Fatalf("model required fields = %#v", required)

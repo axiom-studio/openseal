@@ -113,7 +113,7 @@ type ActionCoordinator struct {
 }
 
 func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
-	portable := []ActionProposalValidator{ObservationRefActionProposalValidator{}}
+	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
 	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString}
 }
