@@ -12,6 +12,7 @@ var (
 	ErrBindingInvalid          = errors.New("skill binding is invalid")
 	ErrBindingRevisionConflict = errors.New("skill binding revision conflict")
 	ErrBindingNotFound         = errors.New("skill binding not found")
+	ErrBindingUnavailable      = errors.New("selected skill binding is unavailable or stale")
 	ErrBindingAlreadyDisabled  = errors.New("skill binding is already disabled")
 )
 
