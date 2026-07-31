@@ -740,6 +740,48 @@ func TestGovernedConversationActionCompletionProjectsStartedRunbook(t *testing.T
 	}
 }
 
+func TestGovernedConversationActionCompletionProjectsReplacedRunbookSchedule(t *testing.T) {
+	run := &AgentRun{ID: "conversation-run", Checkpoint: map[string]interface{}{
+		"lastAction": map[string]interface{}{
+			"status": ActionCallStatusSucceeded,
+			"result": map[string]interface{}{
+				"resourceType": runbookActivationResourceType,
+				"operation":    RunbookActionReplaceSchedule,
+				"sourceActivation": map[string]interface{}{
+					"id": "activation-exhausted", "definitionId": "hourly-review",
+				},
+				"activation": map[string]interface{}{
+					"id": "activation-five-hours", "definitionId": "hourly-review",
+				},
+				"replayed": false,
+			},
+		},
+	}}
+	completion, ok := governedConversationActionCompletion(run)
+	if !ok || completion.ResourceType != runbookActivationResourceType || completion.ResourceID != "activation-five-hours" ||
+		completion.Content != "Runbook “hourly-review” now has a fresh reviewed schedule." ||
+		len(completion.References) != 1 || completion.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) {
+		t.Fatalf("Runbook replacement completion = %#v, %v", completion, ok)
+	}
+}
+
+func TestGovernedConversationActionOutcomeProjectsRejectedRunbookScheduleReplacement(t *testing.T) {
+	run := &AgentRun{ID: "conversation-run", Checkpoint: map[string]interface{}{
+		"lastAction": map[string]interface{}{
+			"status":         ActionCallStatusDenied,
+			"skillId":        RunbookManagementSkillID,
+			"action":         RunbookActionReplaceSchedule,
+			"approvalStatus": ApprovalStatusRejected,
+			"approvalId":     "approval-rejected",
+		},
+	}}
+	completion, ok := governedConversationActionOutcome(run)
+	if !ok || completion.Content != "Runbook replace schedule was not applied because approval was rejected." ||
+		len(completion.References) != 2 || completion.References[1] != (ConversationReference{Kind: ConversationReferenceApproval, ID: "approval-rejected"}) {
+		t.Fatalf("Runbook replacement rejection = %#v, %v", completion, ok)
+	}
+}
+
 func TestGovernedConversationActionCompletionProjectsAgentBehaviorIdentity(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-agent-behavior", Checkpoint: map[string]interface{}{
