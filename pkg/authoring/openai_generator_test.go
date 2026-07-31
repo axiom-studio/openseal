@@ -136,6 +136,38 @@ func TestOpenAICompatibleGeneratorNegotiatesCanonicalToolTransport(t *testing.T)
 	}
 }
 
+func TestOpenAICompatibleGeneratorSupportsPlainLocallyValidatedTransport(t *testing.T) {
+	var observed map[string]interface{}
+	content := `{"schemaVersion":"openseal.authoring-result/v1","candidate":{"agents":[]},"authoring":{"version":"openseal.authoring-form/v1"},"commitments":{}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&observed); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "stop", "message": map[string]interface{}{"content": content},
+		}}})
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{StructuredOutputMode: OpenAICompatibleStructuredOutputPlain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := generator.Generate(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"})
+	if err != nil || string(payload) != content {
+		t.Fatalf("payload=%s err=%v", payload, err)
+	}
+	if _, exists := observed["tools"]; exists {
+		t.Fatalf("plain mode emitted tools: %#v", observed)
+	}
+	if _, exists := observed["tool_choice"]; exists {
+		t.Fatalf("plain mode emitted tool_choice: %#v", observed)
+	}
+	if _, exists := observed["response_format"]; exists {
+		t.Fatalf("plain mode emitted response_format: %#v", observed)
+	}
+}
+
 func assertStrictAuthoringSchema(t *testing.T, value interface{}, path string) {
 	t.Helper()
 	switch typed := value.(type) {
