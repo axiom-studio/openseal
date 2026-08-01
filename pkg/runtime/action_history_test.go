@@ -149,6 +149,31 @@ func TestCompactActionResultPreservesMiddleFormControls(t *testing.T) {
 	}
 }
 
+func TestCompactActionResultPreservesMiddleSameOriginThreadLinks(t *testing.T) {
+	elements := make([]interface{}, 180)
+	for index := range elements {
+		elements[index] = map[string]interface{}{
+			"ref": fmt.Sprintf("s7:e%d", index+1), "role": "link", "name": fmt.Sprintf("ordinary link %d", index+1),
+			"destinationScope": "external_origin", "destinationPath": fmt.Sprintf("/article/%d", index+1),
+		}
+	}
+	elements[91] = map[string]interface{}{
+		"ref": "s7:e92", "role": "link", "name": "37 comments",
+		"destinationScope": "same_origin", "destinationPath": "/community/posts/42/",
+	}
+	compacted := compactActionResult(map[string]interface{}{
+		"url": "https://example.test/community", "elements": elements, "text": strings.Repeat("listing context ", 5000),
+	}, maximumActionHistoryResultBytes)
+	encoded, err := json.Marshal(compacted)
+	if err != nil || len(encoded) > maximumActionHistoryResultBytes {
+		t.Fatalf("compacted observation bytes=%d err=%v", len(encoded), err)
+	}
+	if !strings.Contains(string(encoded), `"ref":"s7:e92"`) ||
+		!strings.Contains(string(encoded), `"destinationPath":"/community/posts/42/"`) {
+		t.Fatalf("same-origin discussion link was omitted: %s", encoded)
+	}
+}
+
 func TestPreserveKernelActionHistoryRejectsModelRewrite(t *testing.T) {
 	current := map[string]interface{}{
 		actionHistoryCheckpointKey: []interface{}{map[string]interface{}{"actionCallId": "trusted"}},
