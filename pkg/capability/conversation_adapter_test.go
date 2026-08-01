@@ -16,6 +16,7 @@ func TestNormalizeConversationAdapterProducesStableProviderNeutralContract(t *te
 		DestinationDiscovery: []ConversationDestinationDiscovery{{
 			Action: "list-channels", Mode: ConversationEndpointChannel,
 			ItemsPath: "channels", IDPath: "id", DisplayNamePath: "name", DescriptionPath: "purpose.text",
+			InstallationIDPath: "connection.installationId", ConnectionDisplayNamePath: "connection.displayName",
 			CursorArgument: "cursor", LimitArgument: "limit", QueryArgument: "query", NextCursorPath: "nextCursor",
 		}},
 		Credentials: []CredentialRequirement{{
@@ -41,7 +42,8 @@ func TestNormalizeConversationAdapterProducesStableProviderNeutralContract(t *te
 	if !reflect.DeepEqual(adapter.EndpointModes, []ConversationEndpointMode{ConversationEndpointChannel, ConversationEndpointDirect}) ||
 		!reflect.DeepEqual(adapter.InboundEventTypes, []string{ConversationEventMessageReceived, ConversationEventReactionAdded}) ||
 		!reflect.DeepEqual(adapter.Credentials[0].OAuth2.Scopes, []string{"channels:history", "chat:write"}) ||
-		adapter.DestinationDiscovery[0].DescriptionPath != "purpose.text" {
+		adapter.DestinationDiscovery[0].DescriptionPath != "purpose.text" ||
+		adapter.DestinationDiscovery[0].InstallationIDPath != "connection.installationId" {
 		t.Fatalf("normalized adapter = %#v", adapter)
 	}
 }

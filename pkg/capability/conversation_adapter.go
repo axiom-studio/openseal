@@ -116,6 +116,9 @@ func normalizeConversationDestinationDiscovery(values []ConversationDestinationD
 		value.IDPath = strings.TrimSpace(value.IDPath)
 		value.DisplayNamePath = strings.TrimSpace(value.DisplayNamePath)
 		value.DescriptionPath = strings.TrimSpace(value.DescriptionPath)
+		value.InstallationIDPath = strings.TrimSpace(value.InstallationIDPath)
+		value.ApplicationIDPath = strings.TrimSpace(value.ApplicationIDPath)
+		value.ConnectionDisplayNamePath = strings.TrimSpace(value.ConnectionDisplayNamePath)
 		value.CursorArgument = strings.TrimSpace(value.CursorArgument)
 		value.LimitArgument = strings.TrimSpace(value.LimitArgument)
 		value.QueryArgument = strings.TrimSpace(value.QueryArgument)
@@ -126,11 +129,17 @@ func normalizeConversationDestinationDiscovery(values []ConversationDestinationD
 			!validConversationProjectionPath(value.IDPath) ||
 			!validConversationProjectionPath(value.DisplayNamePath) ||
 			!validOptionalConversationProjectionPath(value.DescriptionPath) ||
+			!validOptionalConversationProjectionPath(value.InstallationIDPath) ||
+			!validOptionalConversationProjectionPath(value.ApplicationIDPath) ||
+			!validOptionalConversationProjectionPath(value.ConnectionDisplayNamePath) ||
 			!validOptionalConversationProjectionPath(value.NextCursorPath) ||
 			!validOptionalConversationArgument(value.CursorArgument) ||
 			!validOptionalConversationArgument(value.LimitArgument) ||
 			!validOptionalConversationArgument(value.QueryArgument) {
 			return nil, errors.New("conversation adapter destination discovery is invalid")
+		}
+		if value.InstallationIDPath == "" && (value.ApplicationIDPath != "" || value.ConnectionDisplayNamePath != "") {
+			return nil, errors.New("conversation adapter destination discovery identity is incomplete")
 		}
 		if (value.CursorArgument == "") != (value.NextCursorPath == "") {
 			return nil, errors.New("conversation adapter destination discovery pagination is incomplete")

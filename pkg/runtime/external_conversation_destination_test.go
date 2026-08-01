@@ -11,7 +11,9 @@ func TestConversationDestinationDiscoveryBuildsBoundedArgumentsAndProjectsOnlyMa
 	discovery := capability.ConversationDestinationDiscovery{
 		Action: "list", Mode: capability.ConversationEndpointChannel, ItemsPath: "result.channels",
 		IDPath: "id", DisplayNamePath: "name", DescriptionPath: "purpose.text",
-		CursorArgument: "cursor", LimitArgument: "limit", QueryArgument: "query", NextCursorPath: "result.nextCursor",
+		InstallationIDPath: "connection.installationId", ApplicationIDPath: "connection.applicationId",
+		ConnectionDisplayNamePath: "connection.displayName",
+		CursorArgument:            "cursor", LimitArgument: "limit", QueryArgument: "query", NextCursorPath: "result.nextCursor",
 	}
 	definition := &capability.Definition{ID: "chat", Version: "1", Actions: map[string]capability.Action{"list": {Name: "list"}}}
 	adapter := &capability.BoundConversationAdapter{
@@ -28,6 +30,7 @@ func TestConversationDestinationDiscoveryBuildsBoundedArgumentsAndProjectsOnlyMa
 		t.Fatalf("discovery = %#v arguments = %#v error = %v", resolved, arguments, err)
 	}
 	page, err := ProjectConversationDestinationPage(discovery, map[string]interface{}{
+		"connection": map[string]interface{}{"installationId": "workspace-1", "applicationId": "app-1", "displayName": "Product workspace"},
 		"result": map[string]interface{}{
 			"channels": []interface{}{map[string]interface{}{
 				"id": "C1", "name": "product-feedback", "purpose": map[string]interface{}{"text": "Customer feedback"},
@@ -37,7 +40,8 @@ func TestConversationDestinationDiscoveryBuildsBoundedArgumentsAndProjectsOnlyMa
 		},
 	})
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != "C1" || page.Items[0].DisplayName != "product-feedback" ||
-		page.Items[0].Description != "Customer feedback" || page.NextCursor != "cursor-2" {
+		page.Items[0].Description != "Customer feedback" || page.NextCursor != "cursor-2" || page.Connection == nil ||
+		page.Connection.InstallationID != "workspace-1" || page.Connection.ApplicationID != "app-1" || page.Connection.DisplayName != "Product workspace" {
 		t.Fatalf("page = %#v error = %v", page, err)
 	}
 }

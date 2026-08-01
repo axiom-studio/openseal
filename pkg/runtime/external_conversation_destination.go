@@ -24,8 +24,9 @@ type ExternalConversationDestination struct {
 }
 
 type ExternalConversationDestinationPage struct {
-	Items      []ExternalConversationDestination `json:"items"`
-	NextCursor string                            `json:"nextCursor,omitempty"`
+	Items      []ExternalConversationDestination      `json:"items"`
+	NextCursor string                                 `json:"nextCursor,omitempty"`
+	Connection *capability.CredentialExternalIdentity `json:"connection,omitempty"`
 }
 
 // ExternalConversationDestinationDiscoveryRequest identifies one exact bound
@@ -122,6 +123,19 @@ func ProjectConversationDestinationPage(discovery capability.ConversationDestina
 		if len(page.NextCursor) > 4096 || strings.ContainsAny(page.NextCursor, "\r\n") {
 			return nil, errors.New("conversation destination next cursor is invalid")
 		}
+	}
+	if discovery.InstallationIDPath != "" {
+		connection := &capability.CredentialExternalIdentity{
+			InstallationID: conversationPathString(output, discovery.InstallationIDPath),
+			ApplicationID:  conversationPathString(output, discovery.ApplicationIDPath),
+			DisplayName:    conversationPathString(output, discovery.ConnectionDisplayNamePath),
+		}
+		if connection.InstallationID == "" || len(connection.InstallationID) > 1024 ||
+			len(connection.ApplicationID) > 1024 || len(connection.DisplayName) > 160 ||
+			strings.ContainsAny(connection.InstallationID+connection.ApplicationID+connection.DisplayName, "\r\n") {
+			return nil, errors.New("conversation destination connection identity is invalid")
+		}
+		page.Connection = connection
 	}
 	return page, nil
 }
