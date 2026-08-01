@@ -1214,7 +1214,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	}
 	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
 	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause &&
-		operation != AgentActionAmendBehavior && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule {
+		operation != AgentActionAmendBehavior && operation != AgentActionConfigureChannel && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule {
 		return nil, false
 	}
 	actionDescription := label + " " + strings.ReplaceAll(operation, "_", " ")
@@ -1290,7 +1290,7 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 		return nil, false
 	}
 	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause &&
-		action != AgentActionAmendBehavior {
+		action != AgentActionAmendBehavior && action != AgentActionConfigureChannel {
 		return nil, false
 	}
 	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, requested.InputRef)

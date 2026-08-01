@@ -1606,6 +1606,8 @@ const (
 	AgentManagementSkillID          = runtime.AgentManagementSkillID
 	AgentManagementSkillVersion     = runtime.AgentManagementSkillVersion
 	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
+	AgentActionListChannels         = runtime.AgentActionListChannels
+	AgentActionConfigureChannel     = runtime.AgentActionConfigureChannel
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
 	RunbookActionStart              = runtime.RunbookActionStart
@@ -3022,20 +3024,20 @@ func (e *Engine) configureAgentManagementActions() error {
 	if err := e.skills.Register(context.Background(), runtime.AgentManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewAgentBehaviorActionValidator(e.agents)
+	validator, err := runtime.NewAgentBehaviorActionValidator(e.agents, e.externalConversations.endpoints)
 	if err != nil {
 		return err
 	}
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher, e.externalConversations.endpoints)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionSupervisorSpecs[index].dispatcher, e.externalConversations.endpoints)
 		if dispatchErr != nil {
 			return dispatchErr
 		}

@@ -216,7 +216,7 @@ func materializeWorkforceApplication(value *authoring.ChangeSet) (*workforceAppl
 }
 
 func resolveAgentApprovalDestinations(value *authoring.ChangeSet, definition *agent.AgentDefinition) error {
-	if value == nil || definition == nil || len(definition.Authority.ApprovalDestinations) == 0 {
+	if value == nil || definition == nil {
 		return nil
 	}
 	blueprints := make(map[string]authoring.ConversationEndpointBlueprint, len(value.Result.Candidate.ConversationEndpoints))
@@ -231,6 +231,28 @@ func resolveAgentApprovalDestinations(value *authoring.ChangeSet, definition *ag
 			return fmt.Errorf("Agent %s approval destination %s has no reviewed owned conversation endpoint placement", definition.ID, blueprintID)
 		}
 		definition.Authority.ApprovalDestinations[index].EndpointID = strings.TrimSpace(placement.ID)
+	}
+	definition.Channels = nil
+	for _, blueprint := range value.Result.Candidate.ConversationEndpoints {
+		if blueprint.Owner.Type != authoring.ConversationEndpointOwnerAgent || blueprint.Owner.ID != definition.ID {
+			continue
+		}
+		placement, placed := value.Placement.ConversationEndpoints[blueprint.ID]
+		if !placed || strings.TrimSpace(placement.ID) == "" {
+			return fmt.Errorf("Agent %s channel %s has no reviewed conversation endpoint placement", definition.ID, blueprint.ID)
+		}
+		purposes := make([]string, 0, len(blueprint.Purposes))
+		for _, purpose := range blueprint.Purposes {
+			purposes = append(purposes, string(purpose))
+		}
+		if len(purposes) == 0 {
+			purposes = []string{string(authoring.ConversationEndpointPurposeConversation)}
+		}
+		definition.Channels = append(definition.Channels, agent.ChannelRoute{
+			EndpointID: strings.TrimSpace(placement.ID), Trigger: strings.TrimSpace(blueprint.Handler.Trigger),
+			MessageSelection: string(blueprint.Policy.MessageSelection), ReplyMode: string(blueprint.Policy.ReplyMode),
+			IgnoreBots: blueprint.Policy.IgnoreBots, Purposes: purposes,
+		})
 	}
 	return nil
 }

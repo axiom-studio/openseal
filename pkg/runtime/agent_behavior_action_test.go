@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,9 +10,109 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
+
+func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
+	endpoints := NewExternalConversationEndpointService(store, catalog)
+	endpoint, err := endpoints.Create(ctx, CreateExternalConversationEndpointRequest{
+		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		DeploymentID: "slack-agent", Name: "Agent approvals", Adapter: adapter,
+		Mode: capability.ConversationEndpointChannel, Address: "C012345",
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy:  ExternalConversationPolicy{MessageSelection: ExternalConversationSelectMentions, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
+		Status:  ExternalConversationEndpointActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, _ := json.Marshal("slack-agent")
+	goal, _ := json.Marshal("Handle the Slack event")
+	agents := kernelagent.NewRegistry()
+	definition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
+		ID: "slack-agent-definition", Version: "1.0.0", DisplayName: "Slack Agent", Purpose: "Handle Slack work", SystemPrompt: "Work carefully.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "slack-events", Version: "1.0.0", Name: "Slack events",
+			Entrypoints: map[string]string{"handle": "delegate"},
+			Interfaces:  map[string]runbook.Interface{"handle": {Description: "Handle one Slack event", InputSchema: map[string]interface{}{"type": "object"}}},
+			Triggers:    map[string]runbook.Trigger{"on-message": {Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived, Entrypoint: "handle", ObjectiveID: "objective:slack-agent:messages"}},
+			Steps: map[string]runbook.Step{
+				"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{AgentID: runbook.Value{Literal: self}, Goal: runbook.Value{Literal: goal}, Mode: runbook.DelegateReason, ResultPath: "/result", Budget: &runbook.BudgetAllocation{MaxTurns: 4, MaxTotalTokens: 26000}, Next: "done"}},
+				"done":     {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+			},
+		},
+		Amendments: workforce.AmendmentPolicy{AgentMayPropose: true, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "slack-agent", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: definition.ID,
+		ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive, Environment: "test", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "operator", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err = catalog.Register(ctx, AgentManagementSkill()); err != nil {
+		t.Fatal(err)
+	}
+	if err = catalog.Bind(ctx, &skill.Binding{
+		ID: "agents", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "slack-agent",
+		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
+		AllowedActions: []string{AgentActionListChannels, AgentActionConfigureChannel}, MaximumRisk: skill.RiskLevelWrite,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"}, AssignedAgentID: "slack-agent", Goal: "Configure Slack", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	validator, _ := NewAgentBehaviorActionValidator(agents, endpoints)
+	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
+	})
+	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
+		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
+		Arguments:      map[string]interface{}{"endpointId": endpoint.ID, "trigger": "on-message", "messageSelection": "all_messages", "replyMode": "thread", "purposes": []interface{}{"conversation", "approvals"}, "rationale": "Use Slack for work and approvals"},
+		IdempotencyKey: "configure-slack", Summary: "Configure Slack workflow channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
+		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-routing", Approve: true,
+		Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Approved",
+	})
+	if err != nil || resolved.Call.Status != ActionCallStatusReady {
+		t.Fatalf("resolve=%#v err=%v", resolved, err)
+	}
+	dispatcher, _ := NewAgentBehaviorActionDispatcher(store, agents, nil, endpoints)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil || executed.Call.Status != ActionCallStatusSucceeded {
+		t.Fatalf("execute status=%s callError=%q output=%#v err=%v", executed.Call.Status, executed.Call.Error, executed.Call.Output, err)
+	}
+	deployment, _ := agents.GetDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "slack-agent")
+	active, _ := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	updated, _ := endpoints.Get(ctx, scope, endpoint.ID)
+	if len(active.Channels) != 1 || active.Channels[0].Trigger != "on-message" || len(active.Authority.ApprovalDestinations) != 1 ||
+		updated.Handler.Kind != ExternalConversationHandlerRunbook || updated.Handler.Trigger != "on-message" || updated.Policy.MessageSelection != ExternalConversationSelectAllMessages {
+		t.Fatalf("definition=%#v endpoint=%#v", active, updated)
+	}
+	listed, err := dispatcher.listChannels(ctx, scope, "slack-agent")
+	if err != nil || len(listed["channels"].([]map[string]interface{})) != 1 {
+		t.Fatalf("listed=%#v err=%v", listed, err)
+	}
+}
 
 func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *testing.T) {
 	ctx := context.Background()

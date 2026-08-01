@@ -389,6 +389,12 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(stored.Channels) != 1 || stored.Channels[0].EndpointID != endpoint.ID ||
+		stored.Channels[0].Trigger != "on-message" || stored.Channels[0].MessageSelection != "direct_or_mentions" ||
+		stored.Channels[0].ReplyMode != "thread" || !stored.Channels[0].IgnoreBots ||
+		len(stored.Channels[0].Purposes) != 1 || stored.Channels[0].Purposes[0] != "conversation" {
+		t.Fatalf("materialized Agent workflow channel=%#v", stored.Channels)
+	}
 	var delegatedDeployment string
 	if err := json.Unmarshal(stored.Runbook.Steps["delegate"].Delegate.AgentID.Literal, &delegatedDeployment); err != nil ||
 		delegatedDeployment != "slack-agent-live" {
