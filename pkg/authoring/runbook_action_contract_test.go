@@ -3,6 +3,8 @@ package authoring
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -100,11 +102,9 @@ func TestCompilerRejectsInvalidRunbookActionDataflowBeforeApply(t *testing.T) {
 	result, err := compiler.Compile(context.Background(), GenerateRequest{
 		Mode: ModeCreate, Prompt: "Run the reviewed Browser routine daily.", Catalog: browserRunbookActionContractCatalog(),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Valid || !hasValidationCode(result.Validation, "runbook_action_argument_required") {
-		t.Fatalf("invalid Runbook was not rejected before apply: %#v", result.Validation)
+	var contractError *ContractGenerationError
+	if result != nil || !errors.As(err, &contractError) || !strings.Contains(contractError.Diagnostic, "runbook_action_argument_required") {
+		t.Fatalf("result=%#v contractError=%#v err=%v", result, contractError, err)
 	}
 }
 

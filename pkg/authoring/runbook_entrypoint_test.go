@@ -2,6 +2,7 @@ package authoring
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -72,6 +73,20 @@ func TestCompilerLeavesAmbiguousLocalRunbookObjectiveReferenceForRepair(t *testi
 	issues := validateCandidate(&candidate, nil)
 	if !hasValidationCode(issues, "runbook_trigger_objective_unknown") {
 		t.Fatalf("ambiguous Objective reference issues = %#v", issues)
+	}
+}
+
+func TestCompilerNeverPersistsUnknownRunbookObjectiveAsUserRepairPlan(t *testing.T) {
+	candidate := objectiveRunbookCandidate(WorkforceObjectiveKey("agent", "operator", "missing"))
+	payload, err := json.Marshal(GenerationResponse{Candidate: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create one Agent with one Objective and an hourly operation."})
+	var contractError *ContractGenerationError
+	if result != nil || !errors.As(err, &contractError) || !strings.Contains(contractError.Diagnostic, "runbook_trigger_objective_unknown") {
+		t.Fatalf("result=%#v contractError=%#v err=%v", result, contractError, err)
 	}
 }
 

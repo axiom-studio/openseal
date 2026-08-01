@@ -258,12 +258,31 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 			Diagnostic:     publicContractDiagnostic(refinementValidation),
 		}
 	}
+	if contractValidation := exhaustedInternalContractValidation(result.Validation); len(contractValidation) > 0 {
+		return nil, &ContractGenerationError{
+			RepairAttempts: contractRepairAttempts,
+			Diagnostic:     publicContractDiagnostic(contractValidation),
+		}
+	}
 	result.MissingRequirements = missingRequirements(&result.Candidate, request.Catalog)
 	result.SourcePolicyProposals = sourcePolicyProposals(&result.Candidate, result.MissingRequirements, request.Catalog)
 	result.RiskChanges = riskChanges(request.Existing, &result.Candidate)
 	result.Diff = workforceDiff(request.Existing, &result.Candidate)
 	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	return result, nil
+}
+
+// exhaustedInternalContractValidation identifies defects in a provider-built
+// canonical object. These are never user-answerable setup gaps and therefore
+// must not be persisted as a reviewable "repair plan" after bounded repair.
+func exhaustedInternalContractValidation(validation []ValidationIssue) []ValidationIssue {
+	result := make([]ValidationIssue, 0)
+	for _, issue := range validation {
+		if strings.HasPrefix(issue.Code, "runbook_") {
+			result = append(result, issue)
+		}
+	}
+	return result
 }
 
 // deferInactiveCredentialRefinements keeps creation and activation as separate

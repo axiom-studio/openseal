@@ -70,6 +70,13 @@ type Trigger struct {
 	MaximumConcurrent int                 `json:"maximumConcurrent,omitempty"`
 }
 
+func (Trigger) ContractObjectVariants() []domaincontract.ObjectVariant {
+	return []domaincontract.ObjectVariant{
+		{Name: "event", Match: map[string]string{"kind": string(TriggerEvent)}, Required: []string{"eventType"}, Forbidden: []string{"schedule"}},
+		{Name: "schedule", Match: map[string]string{"kind": string(TriggerSchedule)}, Required: []string{"schedule"}, Forbidden: []string{"eventType"}},
+	}
+}
+
 type ReportingMilestone string
 
 const (
@@ -281,6 +288,35 @@ type Step struct {
 	End        *EndStep        `json:"end,omitempty"`
 }
 
+func (Step) ContractObjectVariants() []domaincontract.ObjectVariant {
+	variants := []struct {
+		kind    StepKind
+		payload string
+	}{
+		{StepAction, "action"}, {StepDelegate, "delegate"}, {StepDecision, "decision"}, {StepTransform, "transform"},
+		{StepWait, "wait"}, {StepFork, "fork"}, {StepJoin, "join"}, {StepForEach, "forEach"},
+		{StepLoopReturn, "loopReturn"}, {StepEnd, "end"},
+	}
+	payloads := make([]string, 0, len(variants))
+	for _, variant := range variants {
+		payloads = append(payloads, variant.payload)
+	}
+	result := make([]domaincontract.ObjectVariant, 0, len(variants))
+	for _, variant := range variants {
+		forbidden := make([]string, 0, len(payloads)-1)
+		for _, payload := range payloads {
+			if payload != variant.payload {
+				forbidden = append(forbidden, payload)
+			}
+		}
+		result = append(result, domaincontract.ObjectVariant{
+			Name: string(variant.kind), Match: map[string]string{"kind": string(variant.kind)},
+			Required: []string{variant.payload}, Forbidden: forbidden,
+		})
+	}
+	return result
+}
+
 type ActionStep struct {
 	SkillID      string           `json:"skillId"`
 	SkillVersion string           `json:"skillVersion"`
@@ -412,9 +448,24 @@ type Value struct {
 	Template []TemplateSegment `json:"template,omitempty"`
 }
 
+func (Value) ContractObjectVariants() []domaincontract.ObjectVariant {
+	return []domaincontract.ObjectVariant{
+		{Name: "literal", Required: []string{"literal"}, Forbidden: []string{"ref", "template"}},
+		{Name: "ref", Required: []string{"ref"}, Forbidden: []string{"literal", "template"}},
+		{Name: "template", Required: []string{"template"}, Forbidden: []string{"literal", "ref"}, MinItems: map[string]uint64{"template": 1}},
+	}
+}
+
 type TemplateSegment struct {
 	Text string      `json:"text,omitempty"`
 	Ref  JSONPointer `json:"ref,omitempty"`
+}
+
+func (TemplateSegment) ContractObjectVariants() []domaincontract.ObjectVariant {
+	return []domaincontract.ObjectVariant{
+		{Name: "text", Required: []string{"text"}, Forbidden: []string{"ref"}},
+		{Name: "ref", Required: []string{"ref"}, Forbidden: []string{"text"}},
+	}
 }
 
 type PredicateOperator string
@@ -447,6 +498,23 @@ type Predicate struct {
 	Left     *Value            `json:"left,omitempty"`
 	Right    *Value            `json:"right,omitempty"`
 	Operands []Predicate       `json:"operands,omitempty"`
+}
+
+func (Predicate) ContractObjectVariants() []domaincontract.ObjectVariant {
+	binary := []PredicateOperator{PredicateEqual, PredicateNotEqual, PredicateGreater, PredicateAtLeast, PredicateLess, PredicateAtMost, PredicateContains}
+	unary := []PredicateOperator{PredicateExists, PredicateTruthy}
+	result := make([]domaincontract.ObjectVariant, 0, len(binary)+len(unary)+3)
+	for _, operator := range binary {
+		result = append(result, domaincontract.ObjectVariant{Name: string(operator), Match: map[string]string{"operator": string(operator)}, Required: []string{"left", "right"}, Forbidden: []string{"operands"}})
+	}
+	for _, operator := range unary {
+		result = append(result, domaincontract.ObjectVariant{Name: string(operator), Match: map[string]string{"operator": string(operator)}, Required: []string{"left"}, Forbidden: []string{"right", "operands"}})
+	}
+	for _, operator := range []PredicateOperator{PredicateAll, PredicateAny} {
+		result = append(result, domaincontract.ObjectVariant{Name: string(operator), Match: map[string]string{"operator": string(operator)}, Required: []string{"operands"}, Forbidden: []string{"left", "right"}, MinItems: map[string]uint64{"operands": 2}})
+	}
+	result = append(result, domaincontract.ObjectVariant{Name: string(PredicateNot), Match: map[string]string{"operator": string(PredicateNot)}, Required: []string{"operands"}, Forbidden: []string{"left", "right"}, MinItems: map[string]uint64{"operands": 1}, MaxItems: map[string]uint64{"operands": 1}})
+	return result
 }
 
 type Diagnostic struct {
