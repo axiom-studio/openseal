@@ -433,6 +433,36 @@ func TestAuthoringResultSchemaConstrainsRunbookContract(t *testing.T) {
 	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["milestones"]), []string{"started", "approval_required", "completed", "failed"})
 }
 
+func TestAuthoringResultSchemaProjectsEveryDomainOwnedObjectVariant(t *testing.T) {
+	schema, err := AuthoringResultJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		properties []string
+		variants   int
+	}{
+		{"trigger", []string{"kind", "eventType", "schedule", "entrypoint", "objectiveId"}, 2},
+		{"step", []string{"kind", "action", "delegate", "decision", "transform", "wait", "fork", "join", "forEach", "loopReturn", "end"}, 10},
+		{"value", []string{"literal", "ref", "template"}, 3},
+		{"template segment", []string{"text", "ref"}, 2},
+		{"predicate", []string{"operator", "left", "right", "operands"}, 12},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			object := findAuthoringObjectSchema(schema, test.properties...)
+			if object == nil {
+				t.Fatal("canonical object schema was not found")
+			}
+			variants, _ := object["oneOf"].([]interface{})
+			if len(variants) != test.variants {
+				t.Fatalf("projected variants = %d, want %d", len(variants), test.variants)
+			}
+		})
+	}
+}
+
 func resolveAuthoringSchemaReference(root map[string]interface{}, value interface{}) interface{} {
 	return expandAuthoringSchemaReferences(root, value, 0)
 }

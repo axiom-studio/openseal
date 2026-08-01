@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/internal/domaincontract"
 )
 
 const maximumIterations = 10000
@@ -84,18 +86,15 @@ func (v *validator) validate() {
 		if strings.TrimSpace(id) == "" || len(id) > 128 {
 			v.add(path, "trigger.id_invalid", "trigger id must be 1-128 characters")
 		}
+		if err := domaincontract.ValidateObject(trigger); err != nil {
+			v.add(path, "trigger.shape", "%v", err)
+		}
 		switch trigger.Kind {
 		case TriggerEvent:
 			if !concreteEventTypePattern.MatchString(trigger.EventType) || len(trigger.EventType) > 160 {
 				v.add(path+".eventType", "trigger.event_type_invalid", "event trigger must name a concrete portable event type")
 			}
-			if trigger.Schedule != nil {
-				v.add(path+".schedule", "trigger.schedule_forbidden", "event trigger cannot declare a schedule")
-			}
 		case TriggerSchedule:
-			if strings.TrimSpace(trigger.EventType) != "" {
-				v.add(path+".eventType", "trigger.event_type_forbidden", "schedule trigger cannot declare an event type")
-			}
 			if err := trigger.Schedule.Validate(); err != nil {
 				v.add(path+".schedule", "trigger.schedule_invalid", "%v", err)
 			}
@@ -212,22 +211,11 @@ func (v *validator) pathReaches(start, target string, match func(string) bool) b
 }
 
 func (v *validator) validateStep(path, id string, step Step) {
-	count := 0
-	for _, present := range []bool{
-		step.Action != nil, step.Delegate != nil, step.Decision != nil, step.Transform != nil, step.Wait != nil,
-		step.Fork != nil, step.Join != nil, step.ForEach != nil, step.LoopReturn != nil, step.End != nil,
-	} {
-		if present {
-			count++
-		}
-	}
-	if count != 1 {
-		v.add(path, "step.payload", "a step must contain exactly one typed payload")
+	if err := domaincontract.ValidateObject(step); err != nil {
+		v.add(path, "step.payload", "%v", err)
 	}
 	if !step.Kind.Valid() {
 		v.add(path+".kind", "step.kind_unsupported", "unsupported step kind %q", step.Kind)
-	} else if !stepPayloadMatchesKind(step) {
-		v.add(path, "step.kind_mismatch", "step kind %q does not match its payload", step.Kind)
 	}
 	switch step.Kind {
 	case StepAction:
@@ -373,58 +361,22 @@ func (v *validator) validateStep(path, id string, step Step) {
 	_ = id
 }
 
-func stepPayloadMatchesKind(step Step) bool {
-	switch step.Kind {
-	case StepAction:
-		return step.Action != nil
-	case StepDelegate:
-		return step.Delegate != nil
-	case StepDecision:
-		return step.Decision != nil
-	case StepTransform:
-		return step.Transform != nil
-	case StepWait:
-		return step.Wait != nil
-	case StepFork:
-		return step.Fork != nil
-	case StepJoin:
-		return step.Join != nil
-	case StepForEach:
-		return step.ForEach != nil
-	case StepLoopReturn:
-		return step.LoopReturn != nil
-	case StepEnd:
-		return step.End != nil
-	default:
-		return false
-	}
-}
-
 func (v *validator) validateValue(path string, value Value) {
-	hasLiteral := len(value.Literal) > 0
-	hasRef := strings.TrimSpace(string(value.Ref)) != ""
-	hasTemplate := len(value.Template) > 0
-	sources := 0
-	for _, present := range []bool{hasLiteral, hasRef, hasTemplate} {
-		if present {
-			sources++
-		}
-	}
-	if sources != 1 {
-		v.add(path, "value.source", "exactly one literal, ref, or template is required")
+	if err := domaincontract.ValidateObject(value); err != nil {
+		v.add(path, "value.source", "%v", err)
 		return
 	}
-	if hasLiteral && !json.Valid(value.Literal) {
+	if len(value.Literal) > 0 && !json.Valid(value.Literal) {
 		v.add(path+".literal", "value.literal_invalid", "literal must be valid JSON")
 	}
-	if hasRef {
+	if value.Ref != "" {
 		v.validatePointer(path+".ref", value.Ref)
 	}
-	if hasTemplate {
+	if len(value.Template) > 0 {
 		for index, segment := range value.Template {
 			segmentPath := fmt.Sprintf("%s.template[%d]", path, index)
-			if (segment.Text == "") == (strings.TrimSpace(string(segment.Ref)) == "") {
-				v.add(segmentPath, "template.segment", "template segment requires exactly one text or ref")
+			if err := domaincontract.ValidateObject(segment); err != nil {
+				v.add(segmentPath, "template.segment", "%v", err)
 				continue
 			}
 			if segment.Ref != "" {
@@ -441,35 +393,26 @@ func (v *validator) validatePointer(path string, pointer JSONPointer) {
 }
 
 func (v *validator) validatePredicate(path string, predicate Predicate) {
+	if !predicate.Operator.Valid() {
+		v.add(path+".operator", "predicate.operator", "unsupported predicate operator %q", predicate.Operator)
+		return
+	}
+	if err := domaincontract.ValidateObject(predicate); err != nil {
+		v.add(path, "predicate.arity", "%v", err)
+		return
+	}
 	switch predicate.Operator {
 	case PredicateAll, PredicateAny:
-		if len(predicate.Operands) < 2 {
-			v.add(path+".operands", "predicate.arity", "%s requires at least two operands", predicate.Operator)
-		}
 		for index, child := range predicate.Operands {
 			v.validatePredicate(fmt.Sprintf("%s.operands[%d]", path, index), child)
 		}
 	case PredicateNot:
-		if len(predicate.Operands) != 1 {
-			v.add(path+".operands", "predicate.arity", "not requires one operand")
-		} else {
-			v.validatePredicate(path+".operands[0]", predicate.Operands[0])
-		}
+		v.validatePredicate(path+".operands[0]", predicate.Operands[0])
 	case PredicateExists, PredicateTruthy:
-		if predicate.Left == nil || predicate.Right != nil || len(predicate.Operands) != 0 {
-			v.add(path, "predicate.arity", "%s requires only left", predicate.Operator)
-		} else {
-			v.validateValue(path+".left", *predicate.Left)
-		}
+		v.validateValue(path+".left", *predicate.Left)
 	case PredicateEqual, PredicateNotEqual, PredicateGreater, PredicateAtLeast, PredicateLess, PredicateAtMost, PredicateContains:
-		if predicate.Left == nil || predicate.Right == nil || len(predicate.Operands) != 0 {
-			v.add(path, "predicate.arity", "%s requires left and right", predicate.Operator)
-		} else {
-			v.validateValue(path+".left", *predicate.Left)
-			v.validateValue(path+".right", *predicate.Right)
-		}
-	default:
-		v.add(path+".operator", "predicate.operator", "unsupported predicate operator %q", predicate.Operator)
+		v.validateValue(path+".left", *predicate.Left)
+		v.validateValue(path+".right", *predicate.Right)
 	}
 }
 

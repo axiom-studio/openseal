@@ -51,12 +51,7 @@ func initializeAuthoringResultSchema() {
 			Anonymous:      true,
 			ExpandedStruct: true,
 			Mapper:         canonicalAuthoringScalarSchema,
-			Namer: func(value reflect.Type) string {
-				if value.Name() == "" {
-					return fmt.Sprintf("anonymous_%x", sha256.Sum256([]byte(value.String())))
-				}
-				return path.Base(value.PkgPath()) + "_" + value.Name()
-			},
+			Namer:          canonicalAuthoringTypeName,
 		}).Reflect(AuthoringResult{})
 		payload, err := json.Marshal(inferred)
 		if err != nil {
@@ -65,6 +60,10 @@ func initializeAuthoringResultSchema() {
 		}
 		if err := json.Unmarshal(payload, &authoringResultSchemaDoc); err != nil {
 			authoringResultSchemaErr = fmt.Errorf("decode authoring result schema: %w", err)
+			return
+		}
+		if err := applyAuthoringObjectContracts(authoringResultSchemaDoc, reflect.TypeOf(AuthoringResult{})); err != nil {
+			authoringResultSchemaErr = fmt.Errorf("project authoring object contracts: %w", err)
 			return
 		}
 		properties, ok := authoringResultSchemaDoc["properties"].(map[string]interface{})
@@ -83,6 +82,90 @@ func initializeAuthoringResultSchema() {
 		}
 		authoringResultValidator, authoringResultSchemaErr = compiler.Compile(authoringResultSchemaResource)
 	})
+}
+
+func canonicalAuthoringTypeName(value reflect.Type) string {
+	if value.Name() == "" {
+		return fmt.Sprintf("anonymous_%x", sha256.Sum256([]byte(value.String())))
+	}
+	return path.Base(value.PkgPath()) + "_" + value.Name()
+}
+
+// applyAuthoringObjectContracts discovers canonical object contracts from the
+// Go type graph and augments their exact reflected definitions. It does not
+// know concrete types or infer contracts from coincidental field names.
+func applyAuthoringObjectContracts(schema map[string]interface{}, root reflect.Type) error {
+	definitions, _ := schema["$defs"].(map[string]interface{})
+	contracts := map[string]domaincontract.ObjectVariants{}
+	collectAuthoringObjectContracts(root, map[reflect.Type]bool{}, contracts)
+	for name, contract := range contracts {
+		definition, ok := definitions[name].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("canonical definition %s is unavailable", name)
+		}
+		variants := contract.ContractObjectVariants()
+		if len(variants) == 0 {
+			return fmt.Errorf("canonical definition %s has no object variants", name)
+		}
+		oneOf := make([]interface{}, 0, len(variants))
+		for _, variant := range variants {
+			properties := map[string]interface{}{}
+			for field, expected := range variant.Match {
+				properties[field] = map[string]interface{}{"const": expected}
+			}
+			for _, field := range variant.Forbidden {
+				properties[field] = false
+			}
+			for field, minimum := range variant.MinItems {
+				properties[field] = mergeAuthoringPropertyConstraint(properties[field], "minItems", minimum)
+			}
+			for field, maximum := range variant.MaxItems {
+				properties[field] = mergeAuthoringPropertyConstraint(properties[field], "maxItems", maximum)
+			}
+			required := make([]interface{}, 0, len(variant.Match)+len(variant.Required))
+			for field := range variant.Match {
+				required = append(required, field)
+			}
+			for _, field := range variant.Required {
+				required = append(required, field)
+			}
+			oneOf = append(oneOf, map[string]interface{}{"title": variant.Name, "properties": properties, "required": required})
+		}
+		definition["oneOf"] = oneOf
+	}
+	return nil
+}
+
+func mergeAuthoringPropertyConstraint(existing interface{}, keyword string, value uint64) map[string]interface{} {
+	constraint, _ := existing.(map[string]interface{})
+	if constraint == nil {
+		constraint = map[string]interface{}{}
+	}
+	constraint[keyword] = value
+	return constraint
+}
+
+func collectAuthoringObjectContracts(value reflect.Type, visited map[reflect.Type]bool, contracts map[string]domaincontract.ObjectVariants) {
+	for value.Kind() == reflect.Pointer || value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
+		value = value.Elem()
+	}
+	if visited[value] {
+		return
+	}
+	visited[value] = true
+	if value.Kind() == reflect.Struct {
+		instance := reflect.New(value).Elem().Interface()
+		if contract, ok := instance.(domaincontract.ObjectVariants); ok {
+			contracts[canonicalAuthoringTypeName(value)] = contract
+		}
+		for index := 0; index < value.NumField(); index++ {
+			collectAuthoringObjectContracts(value.Field(index).Type, visited, contracts)
+		}
+		return
+	}
+	if value.Kind() == reflect.Map {
+		collectAuthoringObjectContracts(value.Elem(), visited, contracts)
+	}
 }
 
 // canonicalAuthoringScalarSchema projects provider-neutral contracts declared

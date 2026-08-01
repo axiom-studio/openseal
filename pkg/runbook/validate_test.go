@@ -106,7 +106,7 @@ func TestValidatePortableScheduledTriggers(t *testing.T) {
 	for _, diagnostic := range diagnostics {
 		codes[diagnostic.Code] = true
 	}
-	if !codes["trigger.event_type_forbidden"] || !codes["trigger.schedule_invalid"] || !codes["trigger.objective_required"] {
+	if !codes["trigger.shape"] || !codes["trigger.schedule_invalid"] || !codes["trigger.objective_required"] {
 		t.Fatalf("invalid scheduled trigger diagnostics = %#v", diagnostics)
 	}
 }
