@@ -351,6 +351,98 @@ func TestAuthoringResultSchemaOwnsRequirednessAndClosedObjects(t *testing.T) {
 	}
 }
 
+func TestAuthoringResultSchemaConstrainsRefinementQuestionVocabulary(t *testing.T) {
+	schema, err := AuthoringResultJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := findAuthoringObjectSchema(schema, "category", "blocking", "answer")
+	if question == nil {
+		t.Fatal("refinement question schema was not found")
+	}
+	properties, _ := question["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["category"]), []string{"credential", "skill", "scope", "policy", "authority", "destination", "budget", "approval", "other"})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["blocking"]), []string{"candidate", "evaluation", "apply"})
+	answer := findAuthoringObjectSchema(schema, "kind", "options", "minimum", "maximum", "pattern")
+	if answer == nil {
+		t.Fatal("refinement answer schema was not found")
+	}
+	answerProperties, _ := answer["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, answerProperties["kind"]), []string{"text", "string_list", "single_select", "multi_select", "boolean", "credential_reference", "skill_selection"})
+}
+
+func resolveAuthoringSchemaReference(root map[string]interface{}, value interface{}) interface{} {
+	return expandAuthoringSchemaReferences(root, value, 0)
+}
+
+func expandAuthoringSchemaReferences(root map[string]interface{}, value interface{}, depth int) interface{} {
+	if depth > 8 {
+		return value
+	}
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if reference, _ := typed["$ref"].(string); strings.HasPrefix(reference, "#/$defs/") {
+			definitions, _ := root["$defs"].(map[string]interface{})
+			if next, exists := definitions[strings.TrimPrefix(reference, "#/$defs/")]; exists {
+				return expandAuthoringSchemaReferences(root, next, depth+1)
+			}
+		}
+		expanded := make(map[string]interface{}, len(typed))
+		for key, child := range typed {
+			expanded[key] = expandAuthoringSchemaReferences(root, child, depth+1)
+		}
+		return expanded
+	case []interface{}:
+		expanded := make([]interface{}, len(typed))
+		for index, child := range typed {
+			expanded[index] = expandAuthoringSchemaReferences(root, child, depth+1)
+		}
+		return expanded
+	default:
+		return value
+	}
+}
+
+func findAuthoringObjectSchema(value interface{}, propertyNames ...string) map[string]interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if properties, ok := typed["properties"].(map[string]interface{}); ok {
+			matches := true
+			for _, name := range propertyNames {
+				if _, exists := properties[name]; !exists {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				return typed
+			}
+		}
+		for _, child := range typed {
+			if found := findAuthoringObjectSchema(child, propertyNames...); found != nil {
+				return found
+			}
+		}
+	case []interface{}:
+		for _, child := range typed {
+			if found := findAuthoringObjectSchema(child, propertyNames...); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
+func assertSchemaEnum(t *testing.T, value interface{}, expected []string) {
+	t.Helper()
+	encoded, _ := json.Marshal(value)
+	for _, item := range expected {
+		if !strings.Contains(string(encoded), `"`+item+`"`) {
+			t.Fatalf("schema %s does not include enum value %q", encoded, item)
+		}
+	}
+}
+
 func TestAuthoringRepairPromptTreatsSkillSelectionAsAuthoritative(t *testing.T) {
 	for _, expected := range []string{
 		"An answered server-skill-choice-* refinement is an authoritative operator decision",

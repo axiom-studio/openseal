@@ -74,6 +74,7 @@ func initializeAuthoringResultSchema() {
 			"type": "string", "const": AuthoringResultSchemaVersion,
 			"description": "Version of the OpenSeal authoring-result contract used by this proposal.",
 		}
+		constrainAuthoringRefinementVocabulary(authoringResultSchemaDoc)
 		compiler := validateschema.NewCompiler()
 		if err := compiler.AddResource(authoringResultSchemaResource, authoringResultSchemaDoc); err != nil {
 			authoringResultSchemaErr = fmt.Errorf("register authoring result schema: %w", err)
@@ -81,6 +82,60 @@ func initializeAuthoringResultSchema() {
 		}
 		authoringResultValidator, authoringResultSchemaErr = compiler.Compile(authoringResultSchemaResource)
 	})
+}
+
+// constrainAuthoringRefinementVocabulary adds the finite domain vocabulary
+// that Go's string aliases cannot communicate to the schema reflector. The
+// surrounding object shape and requiredness still come exclusively from the Go
+// domain types; OpenSeal supplies only the enum values enforced by the same
+// semantic validator.
+func constrainAuthoringRefinementVocabulary(value interface{}) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if properties, ok := typed["properties"].(map[string]interface{}); ok {
+			if _, hasCategory := properties["category"]; hasCategory {
+				if _, hasBlocking := properties["blocking"]; hasBlocking {
+					if _, hasAnswer := properties["answer"]; hasAnswer {
+						properties["category"] = map[string]interface{}{
+							"type": "string", "enum": []interface{}{
+								string(RefinementCategoryCredential), string(RefinementCategorySkill), string(RefinementCategoryScope),
+								string(RefinementCategoryPolicy), string(RefinementCategoryAuthority), string(RefinementCategoryDestination),
+								string(RefinementCategoryBudget), string(RefinementCategoryApproval), string(RefinementCategoryOther),
+							},
+						}
+						properties["blocking"] = map[string]interface{}{
+							"type": "array", "minItems": 1,
+							"items": map[string]interface{}{
+								"type": "string", "enum": []interface{}{
+									string(RefinementBlocksCandidate), string(RefinementBlocksEvaluation), string(RefinementBlocksApply),
+								},
+							},
+						}
+					}
+				}
+			}
+			if _, hasOptions := properties["options"]; hasOptions {
+				if _, hasMinimum := properties["minimum"]; hasMinimum {
+					if _, hasKind := properties["kind"]; hasKind {
+						properties["kind"] = map[string]interface{}{
+							"type": "string", "enum": []interface{}{
+								string(RefinementAnswerText), string(RefinementAnswerStringList), string(RefinementAnswerSingleSelect),
+								string(RefinementAnswerMultiSelect), string(RefinementAnswerBoolean),
+								string(RefinementAnswerCredentialReference), string(RefinementAnswerSkillSelection),
+							},
+						}
+					}
+				}
+			}
+		}
+		for _, child := range typed {
+			constrainAuthoringRefinementVocabulary(child)
+		}
+	case []interface{}:
+		for _, child := range typed {
+			constrainAuthoringRefinementVocabulary(child)
+		}
+	}
 }
 
 type AuthoringSchemaViolation struct {

@@ -431,7 +431,7 @@ type RefinementQuestionOption struct {
 }
 
 type RefinementAnswerSchema struct {
-	Kind    RefinementAnswerKind       `json:"kind"`
+	Kind    RefinementAnswerKind       `json:"kind" jsonschema:"enum=text,enum=string_list,enum=single_select,enum=multi_select,enum=boolean,enum=credential_reference,enum=skill_selection"`
 	Options []RefinementQuestionOption `json:"options,omitempty"`
 	Minimum int                        `json:"minimum,omitempty"`
 	Maximum int                        `json:"maximum,omitempty"`
@@ -444,7 +444,7 @@ type RefinementQuestionDependency struct {
 }
 
 type RefinementQuestionProvenance struct {
-	Kind      RefinementProvenanceKind `json:"kind"`
+	Kind      RefinementProvenanceKind `json:"kind" jsonschema:"enum=prompt,enum=catalog,enum=skill,enum=credential,enum=policy,enum=runtime"`
 	Reference string                   `json:"reference,omitempty"`
 	Evidence  string                   `json:"evidence,omitempty"`
 }
@@ -455,10 +455,10 @@ type RefinementQuestionProvenance struct {
 // submit an audited answer event.
 type RefinementQuestion struct {
 	ID             string                         `json:"id"`
-	Category       RefinementQuestionCategory     `json:"category"`
+	Category       RefinementQuestionCategory     `json:"category" jsonschema:"enum=credential,enum=skill,enum=scope,enum=policy,enum=authority,enum=destination,enum=budget,enum=approval,enum=other"`
 	Prompt         string                         `json:"prompt"`
 	WhyNeeded      string                         `json:"whyNeeded"`
-	Blocking       []RefinementBlockingScope      `json:"blocking"`
+	Blocking       []RefinementBlockingScope      `json:"blocking" jsonschema:"minItems=1,enum=candidate,enum=evaluation,enum=apply"`
 	Answer         RefinementAnswerSchema         `json:"answer"`
 	DependsOn      []RefinementQuestionDependency `json:"dependsOn,omitempty"`
 	Provenance     []RefinementQuestionProvenance `json:"provenance,omitempty"`
@@ -645,18 +645,24 @@ func validateRefinementQuestions(questions []RefinementQuestion) error {
 			return fmt.Errorf("duplicate refinement question %s", q.ID)
 		}
 		ids[q.ID] = true
-		if !validQuestionCategory(q.Category) || !validAnswerKind(q.Answer.Kind) || len(q.Blocking) == 0 {
-			return fmt.Errorf("refinement question %s has an invalid category, answer kind, or blocking scope", q.ID)
+		if !validQuestionCategory(q.Category) {
+			return fmt.Errorf("unresolvedQuestions[%d].category must be one of credential, skill, scope, policy, authority, destination, budget, approval, or other", i)
+		}
+		if !validAnswerKind(q.Answer.Kind) {
+			return fmt.Errorf("unresolvedQuestions[%d].answer.kind must be one of text, string_list, single_select, multi_select, boolean, credential_reference, or skill_selection", i)
+		}
+		if len(q.Blocking) == 0 {
+			return fmt.Errorf("unresolvedQuestions[%d].blocking must contain at least one of candidate, evaluation, or apply", i)
 		}
 		if q.Category == RefinementCategorySkill && q.Answer.Kind != RefinementAnswerSkillSelection {
-			return fmt.Errorf("refinement question %s has category skill and must use answer kind skill_selection", q.ID)
+			return fmt.Errorf("unresolvedQuestions[%d].answer.kind must be skill_selection when category is skill", i)
 		}
 		if q.Category == RefinementCategoryCredential && q.Answer.Kind != RefinementAnswerCredentialReference {
-			return fmt.Errorf("refinement question %s has category credential and must use answer kind credential_reference", q.ID)
+			return fmt.Errorf("unresolvedQuestions[%d].answer.kind must be credential_reference when category is credential", i)
 		}
-		for _, scope := range q.Blocking {
+		for blockingIndex, scope := range q.Blocking {
 			if scope != RefinementBlocksCandidate && scope != RefinementBlocksEvaluation && scope != RefinementBlocksApply {
-				return fmt.Errorf("refinement question %s has an invalid blocking scope", q.ID)
+				return fmt.Errorf("unresolvedQuestions[%d].blocking[%d] must be candidate, evaluation, or apply", i, blockingIndex)
 			}
 		}
 		if err := validateAnswerSchema(q.Answer); err != nil {

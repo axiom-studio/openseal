@@ -567,7 +567,7 @@ func TestCompilerRepairsLiveRefinementMissingFieldsWithExactQuestionPath(t *test
 	if err != nil || result == nil || result.Valid || len(result.UnresolvedQuestions) != 1 || generator.repairs != 2 {
 		t.Fatalf("question-path repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
 	}
-	if first := generator.repairErrors[0].Error(); !strings.Contains(first, "unresolvedQuestions[0] missing or invalid required fields: id, whyNeeded, priority") {
+	if first := generator.repairErrors[0].Error(); !strings.Contains(first, "/unresolvedQuestions/0/category") || !strings.Contains(first, "value must be one of") {
 		t.Fatalf("first refinement diagnostic = %q", first)
 	}
 	if second := generator.repairErrors[1].Error(); !strings.Contains(second, "unresolvedQuestions[0] missing or invalid required fields: priority") {
