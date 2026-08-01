@@ -489,6 +489,42 @@ func TestHostedTurnRunnerPreservesAndExplainsProposalRecovery(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerRequiresAuthoritativeBootstrapBeforeExternalWork(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "bootstrap-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Start the governed resource",
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
+		Actions: []capability.ModelAction{{
+			Name: "browser.start", SkillID: "browser", Version: "1", Action: "start",
+			SideEffect: capability.SideEffectNone,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Post one comment"},
+		Turn: &AgentTurn{ID: "bootstrap-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, instruction := range host.request.SystemInstructions {
+		if strings.Contains(instruction, "authoritative governed action history is empty") &&
+			strings.Contains(instruction, "Do not propose a write or external side effect") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("bootstrap instruction = %#v", host.request.SystemInstructions)
+	}
+}
+
 func TestHostedTurnRunnerExecutesFreshReadDuringProposalRecovery(t *testing.T) {
 	action := capability.ModelAction{
 		Name: "browser.snapshot", BindingID: "browser-binding", BindingRevision: 2,
