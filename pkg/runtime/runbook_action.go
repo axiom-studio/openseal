@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -14,7 +15,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.1.2"
+	RunbookManagementSkillVersion = "1.1.3"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -27,12 +28,12 @@ const (
 func RunbookManagementSkill() *skill.Definition {
 	return &skill.Definition{
 		ID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Name: "Runbooks", Description: "Start reviewed Runbooks or replace an exhausted schedule with a fresh, bounded activation owned by the current Agent or Team.",
+		Name: "Runbooks", Description: "Start reviewed Runbooks on demand or replace an exhausted schedule activation owned by the current Agent or Team.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
 			RunbookActionStart: {
 				Name:        RunbookActionStart,
-				Description: "Start one active, reviewed Runbook now. Omit activationId when the current Objective channel has exactly one active Runbook; otherwise use an activation ID from the conversation context.",
+				Description: "Start one reviewed Runbook now. Active activations and automatically exhausted scheduled activations remain callable on demand. Omit activationId when the current Objective channel has exactly one callable Runbook; otherwise use an activation ID from the conversation context.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
@@ -140,7 +141,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 	if err != nil {
 		return nil, true, err
 	}
-	statuses := []RunbookActivationStatus{RunbookActivationActive}
+	statuses := []RunbookActivationStatus{RunbookActivationActive, RunbookActivationRetired}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 		statuses = []RunbookActivationStatus{RunbookActivationRetired}
 	}
@@ -152,11 +153,20 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 	if err != nil {
 		return nil, true, err
 	}
+	if input.Bound.Action.Name == RunbookActionStart {
+		activations = slices.DeleteFunc(activations, func(activation *RunbookActivation) bool { return !activation.Callable() })
+		active := slices.DeleteFunc(slices.Clone(activations), func(activation *RunbookActivation) bool {
+			return activation.Status != RunbookActivationActive
+		})
+		if len(active) > 0 {
+			activations = active
+		}
+	}
 	if len(activations) == 0 {
 		if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 			return nil, true, errors.New("no retired scheduled Runbook is available in this conversation context")
 		}
-		return nil, true, errors.New("no active reviewed Runbook is available in this conversation context")
+		return nil, true, errors.New("no callable reviewed Runbook is available in this conversation context")
 	}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 		selected, selectErr := selectLatestRunbookLineage(activations)
@@ -167,7 +177,12 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		return arguments, true, nil
 	}
 	if len(activations) != 1 {
-		return nil, true, errors.New("multiple active Runbooks are available; choose one by activationId")
+		selected, selectErr := selectLatestRunbookLineage(activations)
+		if selectErr != nil {
+			return nil, true, errors.New("multiple callable Runbooks are available; choose one by activationId")
+		}
+		arguments["activationId"] = selected.ID
+		return arguments, true, nil
 	}
 	arguments["activationId"] = activations[0].ID
 	return arguments, true, nil
@@ -389,7 +404,7 @@ func resolveRunbookStart(ctx context.Context, store runbookActionStore, run *Age
 	if activation.Owner != run.Owner {
 		return args, nil, nil, errors.New("Runbook activation is not owned by the conversation Agent or Team")
 	}
-	if activation.Status != RunbookActivationActive {
+	if !activation.Callable() {
 		return args, nil, nil, ErrRunbookActivationInactive
 	}
 	objective, err := store.GetObjective(ctx, run.Scope, activation.ObjectiveID)
