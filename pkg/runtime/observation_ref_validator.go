@@ -15,6 +15,16 @@ const observationRefSchemaExtension = "x-openseal-observationRef"
 // browser- or connector-specific knowledge.
 type ObservationRefActionProposalValidator struct{}
 
+type observationAdvanceRecoveryError struct {
+	cause error
+}
+
+func (e observationAdvanceRecoveryError) Error() string { return e.cause.Error() }
+func (e observationAdvanceRecoveryError) Unwrap() error { return e.cause }
+func (e observationAdvanceRecoveryError) actionAdvanceRecovery() (string, bool) {
+	return "", true
+}
+
 func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Bound == nil || input.Bound.Action.InputSchema == nil {
 		return nil, nil
@@ -33,7 +43,7 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Co
 		}
 		element, err := currentObservationElement(input.Run, ref)
 		if err != nil {
-			return nil, fmt.Errorf("action argument %s: %w", argument, err)
+			return nil, fmt.Errorf("action argument %s: %w", argument, observationAdvanceRecoveryError{cause: err})
 		}
 		if !observationRoleAllowed(fmt.Sprint(element["role"]), constraint["roles"]) {
 			return nil, fmt.Errorf("action argument %s reference %s has role %q, which is not allowed", argument, ref, element["role"])

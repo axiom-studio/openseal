@@ -489,6 +489,72 @@ func TestHostedTurnRunnerPreservesAndExplainsProposalRecovery(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerRestrictsEvidenceRecoveryToDeclaredPrerequisite(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "repair-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Fill first",
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	actions := []capability.ModelAction{
+		{Name: "browser.commit", SkillID: "browser", Version: "1", Action: "commit", SideEffect: capability.SideEffectExternal},
+		{Name: "browser.fill", SkillID: "browser", Version: "1", Action: "fill", SideEffect: capability.SideEffectWrite},
+		{Name: "browser.snapshot", SkillID: "browser", Version: "1", Action: "snapshot", SideEffect: capability.SideEffectRead},
+	}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1", Actions: actions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "post", Checkpoint: map[string]interface{}{
+			proposalRecoveryCheckpointKey: map[string]interface{}{
+				"attempt": 1, "capability": "browser.commit", "error": "fill evidence required",
+				"requiresActionAdvance": true, "prerequisiteAction": "fill",
+			},
+		}},
+		Turn: &AgentTurn{ID: "repair-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.Actions) != 1 || host.request.Actions[0].Name != "browser.fill" {
+		t.Fatalf("recovery actions = %#v", host.request.Actions)
+	}
+}
+
+func TestHostedTurnRunnerLeavesCorrectableCapabilityAvailableWithoutActionAdvance(t *testing.T) {
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "repair-turn", NextRunStatus: AgentRunStatusRunning,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "Correct arguments",
+		ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	actions := []capability.ModelAction{
+		{Name: "browser.navigate", SkillID: "browser", Version: "1", Action: "navigate", SideEffect: capability.SideEffectRead},
+		{Name: "browser.snapshot", SkillID: "browser", Version: "1", Action: "snapshot", SideEffect: capability.SideEffectRead},
+	}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+		AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1", Actions: actions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "browse", Checkpoint: map[string]interface{}{
+			proposalRecoveryCheckpointKey: map[string]interface{}{
+				"attempt": 1, "capability": "browser.navigate", "error": "url is required",
+			},
+		}},
+		Turn: &AgentTurn{ID: "repair-turn"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(host.request.Actions, actions) {
+		t.Fatalf("correctable recovery actions = %#v", host.request.Actions)
+	}
+}
+
 func TestHostedTurnRunnerRequiresAuthoritativeBootstrapBeforeExternalWork(t *testing.T) {
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "bootstrap-turn", NextRunStatus: AgentRunStatusRunning,

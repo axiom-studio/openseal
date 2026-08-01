@@ -12,6 +12,28 @@ import (
 // that it filled, uploaded, rendered, or otherwise prepared something.
 type RequiredActionEvidenceValidator struct{}
 
+// actionAdvanceRecoveryError marks proposal failures that cannot be repaired by
+// merely changing arguments on the rejected capability. A different governed
+// action must succeed first and become part of the kernel-owned action history.
+// Implementations may name the exact prerequisite action when the Skill
+// contract declares one.
+type actionAdvanceRecoveryError interface {
+	error
+	actionAdvanceRecovery() (prerequisiteAction string, required bool)
+}
+
+type requiredActionEvidenceError struct {
+	action string
+}
+
+func (e requiredActionEvidenceError) Error() string {
+	return fmt.Sprintf("action requires successful %s evidence from the same Run", e.action)
+}
+
+func (e requiredActionEvidenceError) actionAdvanceRecovery() (string, bool) {
+	return e.action, true
+}
+
 func (RequiredActionEvidenceValidator) ValidateActionProposal(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Run == nil || input.Bound == nil || len(input.Bound.Action.RequiredEvidence) == 0 {
 		return nil, nil
@@ -41,7 +63,7 @@ func (RequiredActionEvidenceValidator) ValidateActionProposal(_ context.Context,
 			}
 		}
 		if !matched {
-			return nil, fmt.Errorf("action requires successful %s evidence from the same Run", strings.TrimSpace(requirement.Action))
+			return nil, requiredActionEvidenceError{action: strings.TrimSpace(requirement.Action)}
 		}
 	}
 	return nil, nil

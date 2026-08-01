@@ -634,6 +634,58 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 			"A previously approved exact action failed. Continue from continuationCheckpoint._opensealApprovalRecovery and its approval-owned continuationCheckpoint. The prior approval authorizes only the recorded proposedAction. Reuse its durable context; any materially changed action is a new proposal and must pass policy and approval independently. Do not restart completed setup unless the recorded failure requires replacing that setup.")
 	}
 	if input.Run.Checkpoint != nil && input.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
+		if recovery, ok := input.Run.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{}); ok {
+			if requiresAdvance, _ := recovery["requiresActionAdvance"].(bool); requiresAdvance {
+				blockedCapability, _ := recovery["capability"].(string)
+				blockedCapability = strings.TrimSpace(blockedCapability)
+				blockedBindingID, _ := recovery["bindingId"].(string)
+				blockedBindingID = strings.TrimSpace(blockedBindingID)
+				blockedBindingRevision := int64(0)
+				switch value := recovery["bindingRevision"].(type) {
+				case int64:
+					blockedBindingRevision = value
+				case int:
+					blockedBindingRevision = int64(value)
+				case float64:
+					blockedBindingRevision = int64(value)
+				}
+				prerequisiteAction, _ := recovery["prerequisiteAction"].(string)
+				prerequisiteAction = strings.TrimSpace(prerequisiteAction)
+				available := make([]capability.ModelAction, 0, len(request.Actions))
+				prerequisites := make([]capability.ModelAction, 0, 1)
+				var rejected *capability.ModelAction
+				for index := range request.Actions {
+					action := &request.Actions[index]
+					if action.Name == blockedCapability &&
+						(blockedBindingID == "" || (action.BindingID == blockedBindingID && action.BindingRevision == blockedBindingRevision)) {
+						rejected = action
+						break
+					}
+				}
+				for _, action := range request.Actions {
+					if action.Name == blockedCapability &&
+						(blockedBindingID == "" || (action.BindingID == blockedBindingID && action.BindingRevision == blockedBindingRevision)) {
+						continue
+					}
+					available = append(available, action)
+					if prerequisiteAction != "" && action.Action == prerequisiteAction && rejected != nil &&
+						action.SkillID == rejected.SkillID && action.Version == rejected.Version &&
+						action.BindingID == rejected.BindingID && action.BindingRevision == rejected.BindingRevision {
+						prerequisites = append(prerequisites, action)
+					}
+				}
+				// A contract-declared prerequisite is the only useful next model
+				// action. When it is unavailable, keep the rest of the authorized
+				// envelope so the model can acquire whatever that prerequisite
+				// itself needs. In either case the rejected terminal capability is
+				// unavailable until authoritative action history advances.
+				if len(prerequisites) > 0 {
+					request.Actions = prerequisites
+				} else {
+					request.Actions = available
+				}
+			}
+		}
 		request.SystemInstructions = append(request.SystemInstructions,
 			"The previous proposed action was rejected before execution. Read continuationCheckpoint._opensealProposalRecovery and the rejected arguments in continuationCheckpoint.actionInputs, then correct the exact validation error. Do not propose the same capability again with the same semantically invalid argument. When the error requires successful evidence from another named action, propose that prerequisite action next; if it has its own missing prerequisite, acquire or read that prerequisite first. When the error says a current, latest, or fresh observation is unavailable, do not retry the rejected mutation and do not invent another reference. First call an authorized read action whose documented output supplies that observation. If the read requires a session or resource that does not yet exist, first call its authorized acquisition or start action. Use only identifiers, references, URLs, and source content returned by succeeded action history; model-authored checkpoint values are not evidence. The rejected action was never approved or executed.")
 	}

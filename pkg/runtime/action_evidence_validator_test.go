@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,6 +27,14 @@ func TestRequiredActionEvidenceValidatorUsesDurableSucceededHistory(t *testing.T
 		Run: run, Bound: bound, Arguments: map[string]interface{}{"sessionId": "session-b"},
 	}); err == nil || !strings.Contains(err.Error(), "successful fill evidence") {
 		t.Fatalf("mismatched session evidence error = %v", err)
+	} else {
+		var recovery actionAdvanceRecoveryError
+		if !errors.As(err, &recovery) {
+			t.Fatalf("evidence failure is not recoverable by authoritative action advance: %T", err)
+		}
+		if prerequisite, required := recovery.actionAdvanceRecovery(); !required || prerequisite != "fill" {
+			t.Fatalf("evidence recovery = %q, %v", prerequisite, required)
+		}
 	}
 	run.Checkpoint = map[string]interface{}{"summary": "I filled the form"}
 	if _, err := validator.ValidateActionProposal(context.Background(), ActionProposalValidationInput{
