@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -97,6 +98,32 @@ type RunbookApprovalAudit struct {
 	CreatedAt         time.Time              `json:"createdAt"`
 	UpdatedAt         time.Time              `json:"updatedAt"`
 	DecidedAt         *time.Time             `json:"decidedAt,omitempty"`
+	Deliveries        []RunbookDeliveryAudit `json:"deliveries,omitempty"`
+}
+
+// RunbookDeliveryAudit projects the provider-neutral request/update delivery
+// facts associated with an approval. It contains routing and outcome metadata,
+// never provider credentials or message content duplicated from the canonical
+// conversation.
+type RunbookDeliveryAudit struct {
+	ID                string                                   `json:"id"`
+	Phase             string                                   `json:"phase"`
+	EndpointID        string                                   `json:"endpointId"`
+	EndpointName      string                                   `json:"endpointName,omitempty"`
+	Provider          string                                   `json:"provider,omitempty"`
+	Address           string                                   `json:"address,omitempty"`
+	IngressRoute      string                                   `json:"ingressRoute,omitempty"`
+	Adapter           ExternalConversationAdapterReference     `json:"adapter"`
+	Operation         capability.ConversationDeliveryOperation `json:"operation"`
+	Status            ExternalConversationDeliveryStatus       `json:"status"`
+	Attempt           int                                      `json:"attempt"`
+	MaximumAttempts   int                                      `json:"maximumAttempts"`
+	ProviderMessageID string                                   `json:"providerMessageId,omitempty"`
+	ErrorCode         string                                   `json:"errorCode,omitempty"`
+	Summary           string                                   `json:"summary,omitempty"`
+	CreatedAt         time.Time                                `json:"createdAt"`
+	UpdatedAt         time.Time                                `json:"updatedAt"`
+	DeliveredAt       time.Time                                `json:"deliveredAt,omitempty"`
 }
 
 type RunbookArtifactAudit struct {
@@ -234,6 +261,7 @@ func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, run
 	}
 	attachRunbookTurns(result, turns)
 	attachRunbookActions(result, actions, approvals)
+	attachRunbookApprovalDeliveries(result, s.listApprovalDeliveries(ctx, scope, approvals))
 	attachRunbookArtifacts(result, artifacts)
 	attachRunbookChildren(result, children, requests, turns, run)
 	for _, approval := range approvals {
@@ -247,6 +275,79 @@ func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, run
 		}
 	}
 	return result, nil
+}
+
+type runbookDeliveryAuditStore interface {
+	ListExternalConversationDeliveries(context.Context, ExternalConversationDeliveryFilter) ([]*ExternalConversationDelivery, error)
+	GetExternalConversationEndpoint(context.Context, Scope, string) (*ExternalConversationEndpoint, error)
+}
+
+func (s *RunbookExecutionAuditService) listApprovalDeliveries(ctx context.Context, scope Scope, approvals []*ApprovalCheckpoint) map[string][]RunbookDeliveryAudit {
+	store, ok := s.store.(runbookDeliveryAuditStore)
+	if !ok || len(approvals) == 0 {
+		return nil
+	}
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: scope, Limit: 1000})
+	if err != nil {
+		return nil
+	}
+	approvalIDs := make(map[string]struct{}, len(approvals))
+	for _, approval := range approvals {
+		if approval != nil {
+			approvalIDs[approval.ID] = struct{}{}
+		}
+	}
+	endpoints := map[string]*ExternalConversationEndpoint{}
+	result := map[string][]RunbookDeliveryAudit{}
+	for _, delivery := range deliveries {
+		if delivery == nil {
+			continue
+		}
+		approvalID := approvalIDFromDeliveryKey(delivery.IdempotencyKey)
+		if _, exists := approvalIDs[approvalID]; !exists {
+			continue
+		}
+		endpoint, exists := endpoints[delivery.EndpointID]
+		if !exists {
+			endpoint, _ = store.GetExternalConversationEndpoint(ctx, scope, delivery.EndpointID)
+			endpoints[delivery.EndpointID] = endpoint
+		}
+		audit := RunbookDeliveryAudit{
+			ID: delivery.ID, Phase: approvalDeliveryPhase(delivery.IdempotencyKey), EndpointID: delivery.EndpointID, Adapter: delivery.Adapter, Operation: delivery.Operation,
+			Status: delivery.Status, Attempt: delivery.Attempt, MaximumAttempts: delivery.MaximumAttempts,
+			ProviderMessageID: delivery.ProviderMessageID, ErrorCode: delivery.ErrorCode, Summary: delivery.Summary,
+			CreatedAt: delivery.CreatedAt, UpdatedAt: delivery.UpdatedAt, DeliveredAt: delivery.DeliveredAt,
+		}
+		if endpoint != nil {
+			audit.EndpointName, audit.Provider, audit.Address, audit.IngressRoute = endpoint.Name, endpoint.Provider, endpoint.Address, endpoint.IngressRoute
+		}
+		result[approvalID] = append(result[approvalID], audit)
+	}
+	return result
+}
+
+func approvalDeliveryPhase(key string) string {
+	key = strings.TrimSpace(key)
+	switch {
+	case strings.HasPrefix(key, "approval-delivery:"):
+		return "request"
+	case strings.HasPrefix(key, "approval-card-update:"):
+		return "card_update"
+	case strings.HasPrefix(key, "approval-outcome-delivery:"):
+		return "outcome"
+	default:
+		return "delivery"
+	}
+}
+
+func approvalIDFromDeliveryKey(key string) string {
+	for _, prefix := range []string{"approval-delivery:", "approval-card-update:", "approval-outcome-delivery:"} {
+		if remainder, found := strings.CutPrefix(strings.TrimSpace(key), prefix); found {
+			id, _, _ := strings.Cut(remainder, ":")
+			return id
+		}
+	}
+	return ""
 }
 
 func projectRunbookAuditRun(run *AgentRun, activationID string) RunbookExecutionAuditRun {
@@ -467,6 +568,23 @@ func attachRunbookActions(result *RunbookExecutionAudit, actions []*ActionCall, 
 		}
 		entry := runbookAuditVisit(result, visit)
 		entry.Approvals = append(entry.Approvals, projectRunbookApprovalAudit(approval))
+	}
+}
+
+func attachRunbookApprovalDeliveries(result *RunbookExecutionAudit, deliveries map[string][]RunbookDeliveryAudit) {
+	if result == nil || len(deliveries) == 0 {
+		return
+	}
+	for nodeIndex := range result.Nodes {
+		for visitIndex := range result.Nodes[nodeIndex].Visits {
+			for approvalIndex := range result.Nodes[nodeIndex].Visits[visitIndex].Approvals {
+				approval := &result.Nodes[nodeIndex].Visits[visitIndex].Approvals[approvalIndex]
+				approval.Deliveries = append([]RunbookDeliveryAudit(nil), deliveries[approval.ID]...)
+			}
+		}
+	}
+	for index := range result.UnassignedApprovals {
+		result.UnassignedApprovals[index].Deliveries = append([]RunbookDeliveryAudit(nil), deliveries[result.UnassignedApprovals[index].ID]...)
 	}
 }
 
