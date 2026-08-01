@@ -854,7 +854,18 @@ func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, safe
 		return nil, false
 	}
 	request := turn.RequestedActions[0]
-	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
+	// A proposal rejected before materialization has not committed any of the
+	// model-authored state emitted with that proposal. Resume from the last
+	// committed checkpoint and retain only the exact rejected arguments needed
+	// for deterministic repair; invented action IDs or observations must not
+	// become recovery context beside the kernel-owned evidence journal.
+	checkpoint := preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
+	if arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, request.InputRef); err == nil {
+		pointer := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(request.InputRef, "#")), "/continuationCheckpoint")
+		if pointer != "" {
+			_ = setRunbookPointer(checkpoint, pointer, arguments)
+		}
+	}
 	checkpoint[proposalRecoveryCheckpointKey] = map[string]interface{}{
 		"attempt": attempt, "turnId": turn.ID, "capability": request.Capability,
 		"summary": strings.TrimSpace(request.Summary), "inputRef": request.InputRef, "error": safeCause,
