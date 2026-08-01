@@ -578,7 +578,7 @@ func validAuthoringIntentKey(value string) bool {
 
 func authoringPortableKey(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = regexp.MustCompile(`[^a-z0-9_-]+`).ReplaceAllString(value, "-")
+	value = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(value, "-")
 	value = strings.Trim(value, "-_")
 	if value == "" || value[0] < 'a' || value[0] > 'z' {
 		value = "work-" + value
