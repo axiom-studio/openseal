@@ -272,6 +272,9 @@ func materializeRunbookSourceTargets(route sourceScopeRunbook, targets, inputKey
 		route.definition.Interfaces = map[string]runbook.Interface{}
 	}
 	contract := route.definition.Interfaces[route.entrypoint]
+	if strings.TrimSpace(contract.Description) == "" {
+		contract.Description = "Invoke " + route.entrypoint + " with the reviewed source scope."
+	}
 	if contract.InputSchema == nil {
 		contract.InputSchema = map[string]interface{}{"type": "object", "additionalProperties": false}
 	}

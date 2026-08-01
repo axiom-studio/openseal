@@ -470,6 +470,31 @@ func TestAuthoringSchemaRejectsRunbookShapesOwnedByRuntimeContract(t *testing.T)
 	}
 }
 
+func TestCompilerNeverPersistsRunbookGraphDefectsAsUserRepairPlan(t *testing.T) {
+	valid, _ := deterministicRunbookPayloads(t)
+	var document map[string]interface{}
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	steps := document["candidate"].(map[string]interface{})["agents"].([]interface{})[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	steps["render"].(map[string]interface{})["action"].(map[string]interface{})["next"] = "missing"
+	payload, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, _ := NewCompiler(staticGenerator{payload: payload})
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"}, MaximumRisk: capability.RiskLevelWrite},
+		}},
+	})
+	var contractError *ContractGenerationError
+	if result != nil || !errors.As(err, &contractError) || !strings.Contains(contractError.Diagnostic, "runbook_step_") {
+		t.Fatalf("result=%#v contractError=%#v err=%v", result, contractError, err)
+	}
+}
+
 func TestCompilerRepairsRunbookResultPathAsJSONPointer(t *testing.T) {
 	valid, _ := deterministicRunbookPayloads(t)
 	var document map[string]interface{}
