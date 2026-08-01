@@ -170,17 +170,20 @@ func TestSemanticIntentRoundTripsAmendmentIdentityWithoutRuntimeJSON(t *testing.
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "research", Title: "Research", Goal: "Find useful evidence", Priority: 1}},
 		Runbook: &runbook.Definition{
 			APIVersion: runbook.APIVersion, ID: "research-operations", Version: "2.4.9", Name: "Research operations",
-			Entrypoints: map[string]string{"scan": "scan"}, Interfaces: map[string]runbook.Interface{"scan": {Description: "Scan every hour", InputSchema: map[string]interface{}{"type": "object"}}},
-			Triggers: map[string]runbook.Trigger{"scan": {Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "scan", ObjectiveID: "agent:tenant/example/researcher:research"}},
+			Entrypoints: map[string]string{"scan_and_report": "scan_and_report"}, Interfaces: map[string]runbook.Interface{"scan_and_report": {Description: "Scan every hour", InputSchema: map[string]interface{}{"type": "object"}}},
+			Triggers: map[string]runbook.Trigger{"scan_schedule": {Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "scan_and_report", ObjectiveID: "agent:tenant/example/researcher:research"}},
 			Steps: map[string]runbook.Step{
-				"scan": {Kind: runbook.StepDelegate, Name: "Scan", Delegate: &runbook.DelegateStep{AgentID: literalRunbookValue("tenant/example/researcher"), Goal: literalRunbookValue("Find useful evidence"), Mode: runbook.DelegateReason, ResultPath: "/results/scan", Next: "done"}},
-				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+				"scan_and_report": {Kind: runbook.StepDelegate, Name: "Scan", Delegate: &runbook.DelegateStep{AgentID: literalRunbookValue("tenant/example/researcher"), Goal: literalRunbookValue("Find useful evidence"), Mode: runbook.DelegateReason, ResultPath: "/results/scan", Next: "done"}},
+				"done":            {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 			},
 		},
 	}}}
 	intent := ProjectAuthoringIntent(&existing)
 	if intent == nil {
 		t.Fatal("semantic projection is nil")
+	}
+	if operation := intent.Agents[0].Operations[0]; operation.Key != "scan-and-report" || !validAuthoringIntentKey(operation.Key) {
+		t.Fatalf("projected operation key = %q", operation.Key)
 	}
 	intent.Agents[0].Name = "Senior Researcher"
 	generated, err := CompileAuthoringIntent(*intent, GenerateRequest{Mode: ModeAmend, Prompt: "Rename the Agent", Existing: &existing})
@@ -191,7 +194,7 @@ func TestSemanticIntentRoundTripsAmendmentIdentityWithoutRuntimeJSON(t *testing.
 	if definition.ID != "tenant/example/researcher" || definition.Version != "2.4.10" || definition.DisplayName != "Senior Researcher" {
 		t.Fatalf("amended identity = %#v", definition)
 	}
-	if trigger := definition.Runbook.Triggers["scan"]; trigger.ObjectiveID != "agent:tenant/example/researcher:research" {
+	if trigger := definition.Runbook.Triggers["scan-and-report"]; trigger.ObjectiveID != "agent:tenant/example/researcher:research" {
 		t.Fatalf("amended trigger = %#v", trigger)
 	}
 }
