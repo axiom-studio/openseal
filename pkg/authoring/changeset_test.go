@@ -1767,6 +1767,45 @@ func TestChangeSetApprovalSeparationGroupRequiresDifferentPrincipals(t *testing.
 	}
 }
 
+func TestReconcilePlacementToCandidatePrunesStaleInheritedOwnersAndSkills(t *testing.T) {
+	candidate := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
+		ID: "tenant/one/researcher", SkillRequirements: []agent.SkillRequirement{{SkillID: "browser"}},
+	}}}
+	placement := ChangeSetPlacement{
+		TeamDeploymentID: "team:stale", TeamExpectedRevision: 4,
+		AgentDeploymentIDs:     map[string]string{"tenant/one/researcher": "agent:current", "tenant/one/": "agent:stale"},
+		AgentExpectedRevisions: map[string]int64{"tenant/one/researcher": 2, "tenant/one/": 1},
+		CredentialReferences: map[string]map[string]capability.CredentialReference{
+			"tenant/one/researcher": {"username": {Kind: "basic", ID: "vault://browser.username"}},
+			"tenant/one/":           {"password": {Kind: "basic", ID: "vault://stale.password"}},
+		},
+		SkillSourceIdentities: map[string]map[string]string{
+			"tenant/one/researcher": {"browser": "registry::browser", "removed": "registry::removed"},
+			"tenant/one/":           {"browser": "registry::browser"},
+		},
+		SkillSourceVersions: map[string]map[string]string{
+			"tenant/one/researcher": {"browser": "1.0.0", "removed": "1.0.0"},
+		},
+		SkillRuntimeIdentities: map[string]map[string]capability.SkillIdentity{
+			"tenant/one/researcher": {
+				"browser": capability.NewSkillIdentity("browser", "1.0.0", "registry::browser"),
+				"removed": capability.NewSkillIdentity("removed", "1.0.0", "registry::removed"),
+			},
+		},
+		PlannedSkillInstallations: []SkillInstallationIntent{{SkillID: "browser"}, {SkillID: "removed"}},
+	}
+	reconcilePlacementToCandidate(&placement, &candidate)
+	if placement.TeamDeploymentID != "" || placement.TeamExpectedRevision != 0 || placement.AgentDeploymentIDs["tenant/one/"] != "" || placement.AgentExpectedRevisions["tenant/one/"] != 0 {
+		t.Fatalf("stale owners retained: %#v", placement)
+	}
+	if _, exists := placement.SkillSourceIdentities["tenant/one/researcher"]["removed"]; exists || len(placement.PlannedSkillInstallations) != 1 || placement.PlannedSkillInstallations[0].SkillID != "browser" {
+		t.Fatalf("stale Skills retained: %#v", placement)
+	}
+	if placement.SkillSourceIdentities["tenant/one/researcher"]["browser"] != "registry::browser" || placement.CredentialReferences["tenant/one/researcher"]["username"].ID == "" {
+		t.Fatalf("active setup was not preserved: %#v", placement)
+	}
+}
+
 func jsonMarshal(value interface{}) ([]byte, error) {
 	return json.Marshal(value)
 }
