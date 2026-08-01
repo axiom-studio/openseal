@@ -438,6 +438,36 @@ func deterministicRunbookPayloads(t *testing.T) (valid, invalid []byte) {
 	return valid, invalid
 }
 
+func TestCompilerRepairsRunbookResultPathAsJSONPointer(t *testing.T) {
+	valid, _ := deterministicRunbookPayloads(t)
+	var document map[string]interface{}
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
+	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	steps["render"].(map[string]interface{})["action"].(map[string]interface{})["resultPath"] = "results/report"
+	invalid, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{valid}}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a deterministic report publisher.", InvocationKey: "change-set:runbook-pointer:0",
+		Catalog: CapabilityCatalog{Skills: map[string]SkillCapability{
+			"openseal.document": {ID: "openseal.document", Version: "1.0.2", Actions: []string{"render_pdf"}, MaximumRisk: capability.RiskLevelWrite},
+		}},
+	})
+	if err != nil || result == nil || !result.Valid || generator.repairs != 1 {
+		t.Fatalf("JSON Pointer repair result=%#v repairs=%d err=%v", result, generator.repairs, err)
+	}
+	diagnostic := generator.repairErrors[0].Error()
+	if !strings.Contains(diagnostic, "/candidate/agents/0/runbook/steps/render/action/resultPath") || !strings.Contains(diagnostic, "pattern") {
+		t.Fatalf("JSON Pointer repair diagnostic = %q", diagnostic)
+	}
+}
+
 func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
 	valid, invalid := deterministicRunbookPayloads(t)
 	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{invalid, valid}}

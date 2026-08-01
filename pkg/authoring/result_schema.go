@@ -75,6 +75,7 @@ func initializeAuthoringResultSchema() {
 			"description": "Version of the OpenSeal authoring-result contract used by this proposal.",
 		}
 		constrainAuthoringRefinementVocabulary(authoringResultSchemaDoc)
+		constrainAuthoringRunbookPointers(authoringResultSchemaDoc)
 		compiler := validateschema.NewCompiler()
 		if err := compiler.AddResource(authoringResultSchemaResource, authoringResultSchemaDoc); err != nil {
 			authoringResultSchemaErr = fmt.Errorf("register authoring result schema: %w", err)
@@ -82,6 +83,33 @@ func initializeAuthoringResultSchema() {
 		}
 		authoringResultValidator, authoringResultSchemaErr = compiler.Compile(authoringResultSchemaResource)
 	})
+}
+
+// constrainAuthoringRunbookPointers projects the portable Runbook validator's
+// JSON Pointer invariant into the provider-facing schema. Runtime validation
+// remains authoritative; this earlier boundary gives structured-output repair
+// an exact field path before an invalid Runbook can become a review task.
+func constrainAuthoringRunbookPointers(value interface{}) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if properties, ok := typed["properties"].(map[string]interface{}); ok {
+			if _, hasResultPath := properties["resultPath"]; hasResultPath {
+				if _, hasNext := properties["next"]; hasNext {
+					properties["resultPath"] = map[string]interface{}{
+						"type": "string", "minLength": 1, "pattern": "^/",
+						"description": "Non-empty JSON Pointer where this step stores its durable result.",
+					}
+				}
+			}
+		}
+		for _, child := range typed {
+			constrainAuthoringRunbookPointers(child)
+		}
+	case []interface{}:
+		for _, child := range typed {
+			constrainAuthoringRunbookPointers(child)
+		}
+	}
 }
 
 // constrainAuthoringRefinementVocabulary adds the finite domain vocabulary

@@ -371,6 +371,31 @@ func TestAuthoringResultSchemaConstrainsRefinementQuestionVocabulary(t *testing.
 	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, answerProperties["kind"]), []string{"text", "string_list", "single_select", "multi_select", "boolean", "credential_reference", "skill_selection"})
 }
 
+func TestAuthoringResultSchemaConstrainsRunbookResultPaths(t *testing.T) {
+	schema, err := AuthoringResultJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := findAuthoringObjectSchema(schema, "skillId", "skillVersion", "action", "resultPath", "next")
+	if action == nil {
+		t.Fatal("Runbook action schema was not found")
+	}
+	properties, _ := action["properties"].(map[string]interface{})
+	resultPath, _ := resolveAuthoringSchemaReference(schema, properties["resultPath"]).(map[string]interface{})
+	if resultPath["pattern"] != "^/" || resultPath["minLength"] != float64(1) {
+		t.Fatalf("Runbook action resultPath schema = %#v", resultPath)
+	}
+	delegate := findAuthoringObjectSchema(schema, "agentId", "goal", "resultPath", "next")
+	if delegate == nil {
+		t.Fatal("Runbook delegate schema was not found")
+	}
+	properties, _ = delegate["properties"].(map[string]interface{})
+	resultPath, _ = resolveAuthoringSchemaReference(schema, properties["resultPath"]).(map[string]interface{})
+	if resultPath["pattern"] != "^/" || resultPath["minLength"] != float64(1) {
+		t.Fatalf("Runbook delegate resultPath schema = %#v", resultPath)
+	}
+}
+
 func resolveAuthoringSchemaReference(root map[string]interface{}, value interface{}) interface{} {
 	return expandAuthoringSchemaReferences(root, value, 0)
 }
