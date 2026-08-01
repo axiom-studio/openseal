@@ -177,6 +177,39 @@ func TestScheduleIntentAuditedAnswerAuthorizesExactTrigger(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentAmbiguousAnswerProducesANewBlockingClarification(t *testing.T) {
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
+		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
+		Value: RefinementProviderAnswerValue{Text: "daily at a varied time, 10 times between 08:00 and 20:00"},
+	}}}
+	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), refinement, nil)
+	if result.Valid || candidateSchedule(result) != nil || len(result.UnresolvedQuestions) != 1 {
+		t.Fatalf("ambiguous answered schedule = %#v", result)
+	}
+	question := result.UnresolvedQuestions[0]
+	if question.ID != scheduleIntentClarificationQuestionIDPrefix+"1" || !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
+		t.Fatalf("schedule clarification = %#v", question)
+	}
+	if unanswered := unansweredRefinementQuestions(result.UnresolvedQuestions, ChangeSetRefinement{Answers: []RefinementAnswerEvent{{
+		QuestionID: scheduleIntentQuestionID, Value: RefinementAnswerValue{Text: "daily at a varied time, 10 times between 08:00 and 20:00"},
+	}}}); len(unanswered) != 1 || unanswered[0].ID != question.ID {
+		t.Fatalf("new clarification was incorrectly treated as answered: %#v", unanswered)
+	}
+}
+
+func TestScheduleIntentExactFollowupAuthorizesTrigger(t *testing.T) {
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{
+		{QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: "daily at a varied time, 10 times between 08:00 and 20:00"}},
+		{QuestionID: scheduleIntentClarificationQuestionIDPrefix + "1", Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: `cron "0 0 9 * * *" timezone UTC jitter 300 seconds`}},
+	}}
+	schedule := dailySchedule("09:00", "UTC")
+	schedule.JitterSeconds = 300
+	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(schedule), refinement, nil)
+	if !result.Valid || hasScheduleIntentQuestion(result.UnresolvedQuestions) || !reflect.DeepEqual(candidateSchedule(result), schedule) {
+		t.Fatalf("exact schedule clarification = %#v", result)
+	}
+}
+
 func TestScheduleIntentMismatchedTriggerFailsClosed(t *testing.T) {
 	result := compileScheduledCandidate(t, "Create one Agent that runs daily at 09:00 UTC", scheduledAuthoringCandidate(dailySchedule("10:00", "UTC")), nil, nil)
 	if result.Valid || candidateSchedule(result) == nil || !hasValidationCode(result.Validation, "schedule_intent_mismatch") || !hasValidationCode(result.Validation, "requested_schedule_missing") {
