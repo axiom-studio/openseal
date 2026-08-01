@@ -200,6 +200,9 @@ type (
 	WorkforceProjectDeliverableBlueprint      = authoring.ProjectDeliverableBlueprint
 	WorkforceAuthoringRequest                 = authoring.GenerateRequest
 	WorkforceAuthoringGenerator               = authoring.Generator
+	WorkforceAuthoringIntent                  = authoring.AuthoringIntent
+	WorkforceAuthoringIntentGenerator         = authoring.IntentGenerator
+	WorkforceAuthoringIntentRepairGenerator   = authoring.IntentRepairGenerator
 	WorkforceAuthoringResult                  = authoring.CompileResult
 	WorkforceAuthoringValidationIssue         = authoring.ValidationIssue
 	WorkforceAuthoringMissingRequirement      = authoring.MissingRequirement
