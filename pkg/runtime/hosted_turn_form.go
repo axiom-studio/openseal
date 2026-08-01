@@ -60,7 +60,9 @@ type HostedTurnFormAuthority struct {
 
 // CompileHostedTurnForm validates the selected action against the exact
 // authorized contract and compiles its inline form into the canonical kernel
-// response. It never supplies missing model values or widens authority.
+// response. Kernel control metadata already present in the proposal envelope
+// may be projected into an action contract that declares the same field; domain
+// arguments remain model-authored and authority is never widened.
 func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction) (*HostedTurnResponse, error) {
 	if form.SchemaVersion != HostedTurnFormSchemaVersion {
 		return nil, fmt.Errorf("hosted turn form schemaVersion must be %q", HostedTurnFormSchemaVersion)
@@ -104,8 +106,10 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 	if form.ProposedAction.Arguments == nil {
 		return nil, errors.New("proposed action arguments are required")
 	}
+	arguments := cloneHostedTurnObjectValue(form.ProposedAction.Arguments)
+	projectHostedTurnActionControlArguments(arguments, selected.InputSchema, form.ProposedAction)
 	if len(selected.InputSchema) > 0 {
-		if err := runbook.ValidateInterfaceInput(selected.InputSchema, form.ProposedAction.Arguments); err != nil {
+		if err := runbook.ValidateInterfaceInput(selected.InputSchema, arguments); err != nil {
 			return nil, fmt.Errorf("proposed action %q input does not match its authorized schema: %w", selected.Name, err)
 		}
 	}
@@ -118,7 +122,7 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 		actionInputs = map[string]interface{}{}
 		checkpoint["actionInputs"] = actionInputs
 	}
-	actionInputs["proposed"] = cloneHostedTurnValue(form.ProposedAction.Arguments)
+	actionInputs["proposed"] = arguments
 	response.ProposedAction = &TurnAction{
 		Type: "skill_action", Capability: selected.Name, Summary: strings.TrimSpace(form.ProposedAction.Summary),
 		IdempotencyKey: strings.TrimSpace(form.ProposedAction.IdempotencyKey), InputRef: "/actionInputs/proposed",
@@ -132,6 +136,35 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 		return nil, fmt.Errorf("proposed action reviewContext is invalid: %w", err)
 	}
 	return response, nil
+}
+
+// projectHostedTurnActionControlArguments removes a duplicated model burden:
+// idempotency is already a required, kernel-governed field on the proposal
+// envelope. When an authorized Skill contract also exposes that standard field,
+// compile it from the envelope instead of asking the model to repeat it exactly.
+// Arbitrary Skill inputs are deliberately untouched.
+func projectHostedTurnActionControlArguments(arguments, inputSchema map[string]interface{}, proposal *HostedTurnActionForm) {
+	if arguments == nil || proposal == nil {
+		return
+	}
+	properties, _ := inputSchema["properties"].(map[string]interface{})
+	if _, declared := properties["idempotencyKey"]; !declared {
+		return
+	}
+	if value, exists := arguments["idempotencyKey"]; exists {
+		if text, ok := value.(string); !ok || strings.TrimSpace(text) != "" {
+			return
+		}
+	}
+	arguments["idempotencyKey"] = strings.TrimSpace(proposal.IdempotencyKey)
+}
+
+func cloneHostedTurnObjectValue(value map[string]interface{}) map[string]interface{} {
+	if value == nil {
+		return nil
+	}
+	cloned, _ := cloneHostedTurnValue(value).(map[string]interface{})
+	return cloned
 }
 
 // HostedTurnFormFromResponse is the inverse projection used by hosts, tests,

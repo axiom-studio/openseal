@@ -45,6 +45,39 @@ func TestHostedTurnFormCompilesAndRoundTripsExactActionArguments(t *testing.T) {
 	}
 }
 
+func TestHostedTurnFormProjectsEnvelopeIdempotencyIntoActionContract(t *testing.T) {
+	action := capability.ModelAction{
+		Name: "browser.fill", SkillID: "browser", Version: "1", Action: "fill",
+		InputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"target":         map[string]interface{}{"type": "string"},
+				"idempotencyKey": map[string]interface{}{"type": "string", "minLength": 1},
+			},
+			"required": []interface{}{"target", "idempotencyKey"},
+		},
+	}
+	form := HostedTurnForm{
+		SchemaVersion: HostedTurnFormSchemaVersion,
+		ProposedAction: &HostedTurnActionForm{
+			Capability: action.Name, Summary: "Fill the reviewed draft",
+			IdempotencyKey: "turn-fill-1", Arguments: map[string]interface{}{"target": "s1:e42"},
+		},
+		NextRunStatus: AgentRunStatusRunning,
+	}
+	response, err := CompileHostedTurnForm(form, []capability.ModelAction{action})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := response.ContinuationCheckpoint["actionInputs"].(map[string]interface{})["proposed"].(map[string]interface{})
+	if arguments["idempotencyKey"] != "turn-fill-1" {
+		t.Fatalf("projected arguments = %#v", arguments)
+	}
+	if _, modelMutated := form.ProposedAction.Arguments["idempotencyKey"]; modelMutated {
+		t.Fatalf("model form was mutated: %#v", form.ProposedAction.Arguments)
+	}
+}
+
 func TestHostedTurnFormRejectsMissingOrInventedActionValues(t *testing.T) {
 	action := capability.ModelAction{Name: "browser.click", InputSchema: map[string]interface{}{
 		"type": "object", "additionalProperties": false,
