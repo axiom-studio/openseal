@@ -56,6 +56,13 @@ func TestAuthoringIntentSchemaRejectsProseConversationPurpose(t *testing.T) {
 	}
 }
 
+func TestAuthoringIntentSchemaRejectsBlankRequiredAgentAnswers(t *testing.T) {
+	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v3","kind":"agent","name":"Scout","purpose":"Scout communities","agents":[{"key":"scout","name":"Scout","purpose":"Scout communities","behavior":"   "}]}`)
+	if _, err := decodeAuthoringIntent(payload); err == nil {
+		t.Fatal("blank required Agent behavior passed the typed provider form")
+	}
+}
+
 func TestAuthoringProviderRequestProjectsExistingStateSemantically(t *testing.T) {
 	existing := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
 		ID: "tenant/example/analyst", Version: "1.0.0", DisplayName: "Analyst", Purpose: "Analyze evidence", SystemPrompt: "Analyze evidence accurately.",
