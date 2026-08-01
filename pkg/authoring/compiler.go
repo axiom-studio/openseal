@@ -17,6 +17,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -601,7 +602,15 @@ func validateCandidate(candidate *WorkforceCandidate, existing *WorkforceCandida
 		}
 		agents[definition.ID] = definition
 		if err := definition.Validate(); err != nil {
-			issues = append(issues, issue(path, "invalid_agent", err.Error()))
+			var runbookError *runbook.ValidationError
+			if errors.As(err, &runbookError) {
+				for _, diagnostic := range runbookError.Diagnostics {
+					code := "runbook_" + strings.NewReplacer(".", "_", "-", "_").Replace(diagnostic.Code)
+					issues = append(issues, issue(path+".runbook."+diagnostic.Path, code, diagnostic.Message))
+				}
+			} else {
+				issues = append(issues, issue(path, "invalid_agent", err.Error()))
+			}
 		}
 		issues = append(issues, validateAgentSkillAuthority(path, definition)...)
 	}

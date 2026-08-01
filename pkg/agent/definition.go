@@ -235,7 +235,7 @@ func (d *AgentDefinition) Validate() error {
 	}
 	if d.Runbook != nil {
 		if diagnostics := runbook.Validate(d.Runbook); len(diagnostics) > 0 {
-			return fmt.Errorf("agent definition runbook %s: %s", diagnostics[0].Path, diagnostics[0].Message)
+			return fmt.Errorf("agent definition %w", &runbook.ValidationError{Diagnostics: diagnostics})
 		}
 		for stepID, step := range d.Runbook.Steps {
 			if step.Action != nil && !seenSkills[step.Action.SkillID] {

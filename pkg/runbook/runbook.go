@@ -522,3 +522,18 @@ type Diagnostic struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+// ValidationError preserves typed Runbook diagnostics across package
+// boundaries. Callers may render the message for humans or retain exact paths
+// and codes for bounded machine repair.
+type ValidationError struct {
+	Diagnostics []Diagnostic
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil || len(e.Diagnostics) == 0 {
+		return "runbook validation failed"
+	}
+	first := e.Diagnostics[0]
+	return fmt.Sprintf("runbook %s: %s", first.Path, first.Message)
+}
