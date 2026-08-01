@@ -478,6 +478,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	canonicalizeCandidateScope(&result.Candidate, request.Scope)
 	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, inheritedRefinement)
 	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
+	reconcilePlacementToCandidate(&request.Placement, &result.Candidate)
 	seedExactCatalogSkillPlacement(&result.Candidate, request.Catalog, &request.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
 	result.Validation = validateCandidate(&result.Candidate, existing)
@@ -788,6 +789,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
 	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, changeSet.Refinement)
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
+	reconcilePlacementToCandidate(&changeSet.Placement, &result.Candidate)
 	seedExactCatalogSkillPlacement(&result.Candidate, changeSet.Catalog, &changeSet.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
 	result.Validation = validateCandidate(&result.Candidate, existing)
@@ -2291,6 +2293,140 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	}
 	if candidate.Team != nil {
 		add("team", candidate.Team.ID, candidate.Team.ObjectiveTemplates)
+	}
+}
+
+// reconcilePlacementToCandidate removes inherited bindings whose owning
+// resource or declared Skill no longer exists in an amended candidate. The
+// remaining placement is still validated normally; this only prevents stale
+// parent state from making an otherwise valid revision impossible to configure.
+func reconcilePlacementToCandidate(placement *ChangeSetPlacement, candidate *WorkforceCandidate) {
+	if placement == nil || candidate == nil {
+		return
+	}
+	agents := map[string]bool{}
+	owners := map[string]bool{}
+	ownerSkills := map[string]map[string]bool{}
+	selectedSkills := map[string]bool{}
+	objectives := map[string]bool{}
+	endpoints := map[string]bool{}
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		agents[definition.ID], owners[definition.ID] = true, true
+		ownerSkills[definition.ID] = map[string]bool{}
+		for _, requirement := range definition.SkillRequirements {
+			skillID := strings.TrimSpace(requirement.SkillID)
+			ownerSkills[definition.ID][skillID], selectedSkills[skillID] = true, true
+		}
+		for _, objective := range definition.ObjectiveTemplates {
+			objectives[WorkforceObjectiveKey("agent", definition.ID, objective.ID)] = true
+		}
+	}
+	if candidate.Team == nil {
+		placement.TeamDeploymentID, placement.TeamExpectedRevision = "", 0
+	} else {
+		owners[candidate.Team.ID] = true
+		ownerSkills[candidate.Team.ID] = map[string]bool{}
+		for _, role := range candidate.Team.Roles {
+			for _, grant := range role.SkillGrants {
+				skillID := strings.TrimSpace(grant.CatalogID)
+				if skillID == "" {
+					skillID = strings.TrimSpace(grant.SkillID)
+				}
+				ownerSkills[candidate.Team.ID][skillID], selectedSkills[skillID] = true, true
+			}
+		}
+		for _, objective := range candidate.Team.ObjectiveTemplates {
+			objectives[WorkforceObjectiveKey("team", candidate.Team.ID, objective.ID)] = true
+		}
+	}
+	for _, endpoint := range candidate.ConversationEndpoints {
+		endpoints[endpoint.ID] = true
+		if ownerSkills[endpoint.Owner.ID] == nil {
+			ownerSkills[endpoint.Owner.ID] = map[string]bool{}
+		}
+		skillID := strings.TrimSpace(endpoint.SkillID)
+		ownerSkills[endpoint.Owner.ID][skillID], selectedSkills[skillID] = true, true
+	}
+	for id := range placement.AgentDeploymentIDs {
+		if !agents[id] {
+			delete(placement.AgentDeploymentIDs, id)
+		}
+	}
+	for id := range placement.AgentExpectedRevisions {
+		if !agents[id] {
+			delete(placement.AgentExpectedRevisions, id)
+		}
+	}
+	for id := range placement.CredentialReferences {
+		if !owners[id] {
+			delete(placement.CredentialReferences, id)
+		}
+	}
+	pruneSkillMap := func(values map[string]map[string]string) {
+		for ownerID, skills := range values {
+			if !owners[ownerID] {
+				delete(values, ownerID)
+				continue
+			}
+			for skillID := range skills {
+				if !ownerSkills[ownerID][skillID] {
+					delete(skills, skillID)
+				}
+			}
+			if len(skills) == 0 {
+				delete(values, ownerID)
+			}
+		}
+	}
+	pruneSkillMap(placement.SkillSourceIdentities)
+	pruneSkillMap(placement.SkillSourceVersions)
+	for ownerID, skills := range placement.SkillRuntimeIdentities {
+		if !owners[ownerID] {
+			delete(placement.SkillRuntimeIdentities, ownerID)
+			continue
+		}
+		for skillID := range skills {
+			if !ownerSkills[ownerID][skillID] {
+				delete(skills, skillID)
+			}
+		}
+		if len(skills) == 0 {
+			delete(placement.SkillRuntimeIdentities, ownerID)
+		}
+	}
+	for ownerID, skills := range placement.BindingConfigs {
+		if !owners[ownerID] {
+			delete(placement.BindingConfigs, ownerID)
+			continue
+		}
+		for skillID := range skills {
+			if !ownerSkills[ownerID][skillID] {
+				delete(skills, skillID)
+			}
+		}
+		if len(skills) == 0 {
+			delete(placement.BindingConfigs, ownerID)
+		}
+	}
+	planned := placement.PlannedSkillInstallations[:0]
+	for _, installation := range placement.PlannedSkillInstallations {
+		if selectedSkills[strings.TrimSpace(installation.SkillID)] {
+			planned = append(planned, installation)
+		}
+	}
+	placement.PlannedSkillInstallations = planned
+	for key := range placement.Objectives {
+		if !objectives[key] {
+			delete(placement.Objectives, key)
+		}
+	}
+	for id := range placement.ConversationEndpoints {
+		if !endpoints[id] {
+			delete(placement.ConversationEndpoints, id)
+		}
 	}
 }
 
