@@ -97,11 +97,15 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 		ID: "delivery-1", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
 		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
-		Status: ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
+		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: "approval-1", Phase: "request"},
+		Status:      ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := primary.EnqueueExternalConversationDelivery(ctx, delivery); err != nil {
 		t.Fatal(err)
+	}
+	if correlated, err := replica.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: scope, CorrelationKind: "approval", CorrelationID: "approval-1", Limit: 10}); err != nil || len(correlated) != 1 {
+		t.Fatalf("correlated deliveries = %#v, %v", correlated, err)
 	}
 
 	var inboxClaims, deliveryClaims int

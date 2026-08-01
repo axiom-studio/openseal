@@ -401,6 +401,8 @@ func (s *MemoryStore) ListExternalConversationDeliveries(_ context.Context, filt
 	for _, delivery := range s.externalDeliveries {
 		if delivery.Scope != filter.Scope || (filter.EndpointID != "" && delivery.EndpointID != filter.EndpointID) ||
 			(filter.ConversationID != "" && delivery.ConversationID != filter.ConversationID) ||
+			(filter.CorrelationKind != "" && (delivery.Correlation == nil || delivery.Correlation.Kind != filter.CorrelationKind)) ||
+			(filter.CorrelationID != "" && (delivery.Correlation == nil || delivery.Correlation.ID != filter.CorrelationID)) ||
 			!externalConversationDeliveryStatusMatches(delivery.Status, filter.Statuses) {
 			continue
 		}
@@ -529,7 +531,8 @@ func sameExternalConversationDeliveryEffect(existing, candidate *ExternalConvers
 		existing.EndpointID == candidate.EndpointID && existing.Operation == candidate.Operation &&
 		existing.ConversationID == candidate.ConversationID && existing.ChannelMessageID == candidate.ChannelMessageID &&
 		existing.ExternalThreadID == candidate.ExternalThreadID && existing.OrderingKey == candidate.OrderingKey &&
-		sameExternalConversationJSON(existing.Parameters, candidate.Parameters) && existing.IdempotencyKey == candidate.IdempotencyKey
+		sameExternalConversationJSON(existing.Parameters, candidate.Parameters) &&
+		sameExternalConversationJSON(existing.Correlation, candidate.Correlation) && existing.IdempotencyKey == candidate.IdempotencyKey
 }
 
 func rebindExternalConversationDelivery(existing, candidate *ExternalConversationDelivery) (*ExternalConversationDelivery, bool) {
@@ -537,7 +540,8 @@ func rebindExternalConversationDelivery(existing, candidate *ExternalConversatio
 		existing.EndpointID != candidate.EndpointID || existing.Operation != candidate.Operation ||
 		existing.ConversationID != candidate.ConversationID || existing.ChannelMessageID != candidate.ChannelMessageID ||
 		existing.ExternalThreadID != candidate.ExternalThreadID || existing.OrderingKey != candidate.OrderingKey ||
-		!sameExternalConversationJSON(existing.Parameters, candidate.Parameters) || existing.IdempotencyKey != candidate.IdempotencyKey ||
+		!sameExternalConversationJSON(existing.Parameters, candidate.Parameters) ||
+		!sameExternalConversationJSON(existing.Correlation, candidate.Correlation) || existing.IdempotencyKey != candidate.IdempotencyKey ||
 		(existing.Status != ExternalConversationDeliveryPending && existing.Status != ExternalConversationDeliveryRetry &&
 			existing.Status != ExternalConversationDeliveryFailed) ||
 		existing.ProviderMessageID != "" || !existing.DeliveredAt.IsZero() || existing.LeaseOwner != "" || !existing.LeaseExpiresAt.IsZero() {
