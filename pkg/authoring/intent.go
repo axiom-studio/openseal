@@ -2,7 +2,7 @@ package authoring
 
 import "github.com/axiom-studio/openseal/internal/domaincontract"
 
-const AuthoringIntentSchemaVersion = "openseal.authoring-intent/v2"
+const AuthoringIntentSchemaVersion = "openseal.authoring-intent/v3"
 
 // AuthoringResourceKind is the product resource shape requested by the user.
 // It is intentionally semantic: the compiler, not the model, constructs the
@@ -143,13 +143,31 @@ type AuthoringRoleIntent struct {
 }
 
 type AuthoringChannelIntent struct {
-	Key           string   `json:"key"`
-	Name          string   `json:"name"`
-	OwnerKey      string   `json:"ownerKey"`
-	Provider      string   `json:"provider"`
-	Destination   string   `json:"destination,omitempty"`
-	Purposes      []string `json:"purposes"`
-	ReplyInThread bool     `json:"replyInThread"`
+	Key           string                    `json:"key"`
+	Name          string                    `json:"name"`
+	OwnerKey      string                    `json:"ownerKey"`
+	Provider      string                    `json:"provider"`
+	Destination   string                    `json:"destination,omitempty"`
+	Purposes      []AuthoringChannelPurpose `json:"purposes"`
+	ReplyInThread bool                      `json:"replyInThread"`
+}
+
+// AuthoringChannelPurpose is the small semantic form control for why a
+// conversation endpoint exists. Natural descriptions belong in Name; the
+// provider chooses only these compiler-supported behaviors.
+type AuthoringChannelPurpose string
+
+const (
+	AuthoringChannelConversation AuthoringChannelPurpose = "conversation"
+	AuthoringChannelApprovals    AuthoringChannelPurpose = "approvals"
+)
+
+func (AuthoringChannelPurpose) ContractValues() []string {
+	return []string{string(AuthoringChannelConversation), string(AuthoringChannelApprovals)}
+}
+
+func (purpose AuthoringChannelPurpose) Valid() bool {
+	return domaincontract.Allows(string(purpose), purpose)
 }
 
 // AuthoringClarification is deliberately prose-level. OpenSeal maps it to a

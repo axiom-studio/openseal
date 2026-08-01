@@ -42,10 +42,17 @@ func TestAuthoringIntentSchemaConstrainsSemanticVocabularies(t *testing.T) {
 	}
 	payload, _ := json.Marshal(schema)
 	text := string(payload)
-	for _, expected := range []string{`"agent"`, `"team"`, `"workforce"`, `"on_demand"`, `"schedule"`, `"event"`, `"by_policy"`} {
+	for _, expected := range []string{`"agent"`, `"team"`, `"workforce"`, `"on_demand"`, `"schedule"`, `"event"`, `"by_policy"`, `"conversation"`, `"approvals"`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("semantic schema is missing %s", expected)
 		}
+	}
+}
+
+func TestAuthoringIntentSchemaRejectsProseConversationPurpose(t *testing.T) {
+	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v3","kind":"agent","name":"Scout","purpose":"Scout communities","agents":[{"key":"scout","name":"Scout","purpose":"Scout communities","behavior":"Find useful discussions."}],"conversations":[{"key":"approvals","name":"Approval channel","ownerKey":"scout","provider":"slack","purposes":["Post proposed actions for human approval"],"replyInThread":true}]}`)
+	if _, err := decodeAuthoringIntent(payload); err == nil {
+		t.Fatal("prose conversation purpose passed the typed provider form")
 	}
 }
 

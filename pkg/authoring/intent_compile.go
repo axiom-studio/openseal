@@ -182,13 +182,9 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 		if endpoint.Owner.Type == ConversationEndpointOwnerTeam && result.Team != nil {
 			ownerKey = result.Team.Key
 		}
-		purposes := make([]string, 0, len(endpoint.Purposes))
-		for _, purpose := range endpoint.Purposes {
-			purposes = append(purposes, string(purpose))
-		}
 		result.Conversations = append(result.Conversations, AuthoringChannelIntent{
 			Key: endpoint.ID, Name: endpoint.Name, OwnerKey: ownerKey, Provider: endpointProvider(candidate, endpoint), Destination: endpoint.Address,
-			Purposes: purposes, ReplyInThread: endpoint.Policy.ReplyMode == ConversationReplyThread,
+			Purposes: authoringChannelPurposes(endpoint.Purposes), ReplyInThread: endpoint.Policy.ReplyMode == ConversationReplyThread,
 		})
 	}
 	return result
@@ -523,11 +519,11 @@ func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*ag
 		}
 		purposes := make([]ConversationEndpointPurpose, 0, len(answer.Purposes))
 		optionIDs := make([]string, 0, len(answer.Purposes))
-		for _, raw := range answer.Purposes {
-			purpose := ConversationEndpointPurpose(strings.TrimSpace(raw))
-			if purpose != ConversationEndpointPurposeConversation && purpose != ConversationEndpointPurposeApprovals {
-				return nil, nil, fmt.Errorf("conversation %s has unsupported purpose %q", answer.Key, raw)
+		for _, selectedPurpose := range answer.Purposes {
+			if !selectedPurpose.Valid() {
+				return nil, nil, fmt.Errorf("conversation %s has unsupported purpose %q", answer.Key, selectedPurpose)
 			}
+			purpose := ConversationEndpointPurpose(selectedPurpose)
 			if !hasConversationEndpointPurpose(purposes, purpose) {
 				purposes = append(purposes, purpose)
 				optionIDs = append(optionIDs, string(purpose))
@@ -554,6 +550,14 @@ func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*ag
 		}
 	}
 	return endpoints, formValues, nil
+}
+
+func authoringChannelPurposes(values []ConversationEndpointPurpose) []AuthoringChannelPurpose {
+	result := make([]AuthoringChannelPurpose, 0, len(values))
+	for _, value := range values {
+		result = append(result, AuthoringChannelPurpose(value))
+	}
+	return result
 }
 
 func selectedSkillRisk(skill SkillCapability, actions []string) capability.RiskLevel {
