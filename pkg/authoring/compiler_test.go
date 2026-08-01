@@ -438,6 +438,38 @@ func deterministicRunbookPayloads(t *testing.T) (valid, invalid []byte) {
 	return valid, invalid
 }
 
+func TestAuthoringSchemaRejectsRunbookShapesOwnedByRuntimeContract(t *testing.T) {
+	valid, _ := deterministicRunbookPayloads(t)
+	tests := map[string]func(map[string]interface{}){
+		"step payload does not match discriminator": func(document map[string]interface{}) {
+			steps := document["candidate"].(map[string]interface{})["agents"].([]interface{})[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+			steps["render"].(map[string]interface{})["end"] = map[string]interface{}{}
+		},
+		"value has multiple sources": func(document map[string]interface{}) {
+			steps := document["candidate"].(map[string]interface{})["agents"].([]interface{})[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+			artifact := steps["done"].(map[string]interface{})["end"].(map[string]interface{})["outputs"].(map[string]interface{})["artifact"].(map[string]interface{})
+			artifact["literal"] = "duplicate source"
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			var document map[string]interface{}
+			if err := json.Unmarshal(valid, &document); err != nil {
+				t.Fatal(err)
+			}
+			mutate(document)
+			payload, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schemaError *AuthoringSchemaValidationError
+			if err := validateAuthoringResultDocument(payload); !errors.As(err, &schemaError) {
+				t.Fatalf("malformed Runbook shape reached runtime validation: %v", err)
+			}
+		})
+	}
+}
+
 func TestCompilerRepairsRunbookResultPathAsJSONPointer(t *testing.T) {
 	valid, _ := deterministicRunbookPayloads(t)
 	var document map[string]interface{}
