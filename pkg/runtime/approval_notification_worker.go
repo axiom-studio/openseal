@@ -141,6 +141,7 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
 		IdempotencyKey: deliveryKey,
+		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: approval.ID, Phase: "outcome"},
 	})
 	return err
 }
@@ -221,6 +222,7 @@ func enqueueApprovalCardUpdate(
 		ExternalThreadID: delivery.ExternalThreadID,
 		Parameters:       parameters,
 		IdempotencyKey:   idempotencyKey,
+		Correlation:      &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: approval.ID, Phase: "card_update"},
 	})
 	return err
 }
@@ -314,6 +316,7 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
 		Parameters:     map[string]interface{}{"approval": approvalNotificationPayload(approval, call)},
 		IdempotencyKey: deliveryKey,
+		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: approval.ID, Phase: "request"},
 	})
 	if err != nil {
 		return fmt.Errorf("enqueue approval delivery: %w", err)

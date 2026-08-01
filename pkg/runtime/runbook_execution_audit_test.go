@@ -109,7 +109,8 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 		ID: "approval-delivery", Scope: scope, EndpointID: "slack-approvals", EndpointRevision: 1, Adapter: adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "approval-conversation", ChannelMessageID: "approval-message",
 		OrderingKey: "approval-conversation", IdempotencyKey: "approval-delivery:approval-browse:slack-approvals",
-		Status: ExternalConversationDeliveryDelivered, Attempt: 1, MaximumAttempts: 5, AvailableAt: now,
+		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: "approval-browse", Phase: "request"},
+		Status:      ExternalConversationDeliveryDelivered, Attempt: 1, MaximumAttempts: 5, AvailableAt: now,
 		ProviderMessageID: "slack-message-1", Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute), DeliveredAt: now.Add(time.Minute),
 	}
 	store.artifacts[artifactStorageKey(scope, "evidence")] = map[int64]*Artifact{1: {

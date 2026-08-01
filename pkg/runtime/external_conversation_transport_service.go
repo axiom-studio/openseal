@@ -41,6 +41,7 @@ type EnqueueExternalConversationDeliveryRequest struct {
 	ChannelMessageID string
 	ExternalThreadID string
 	Parameters       map[string]interface{}
+	Correlation      *ExternalConversationDeliveryCorrelation
 	IdempotencyKey   string
 	MaximumAttempts  int
 }
@@ -263,7 +264,8 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		Operation: req.Operation, ConversationID: message.ConversationID, ChannelMessageID: message.ID,
 		ExternalThreadID: strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
 		Parameters: cloneMap(req.Parameters), IdempotencyKey: idempotencyKey,
-		Status: ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,
+		Correlation: cloneExternalConversationDeliveryCorrelation(req.Correlation),
+		Status:      ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	stored, replayed, err := s.store.EnqueueExternalConversationDelivery(ctx, delivery)

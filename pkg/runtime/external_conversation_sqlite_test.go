@@ -72,11 +72,15 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 		ID: "delivery-1", Scope: scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
 		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
-		Status: ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
+		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "approval", ID: "approval-1", Phase: "request"},
+		Status:      ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, replayed, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil || replayed {
 		t.Fatalf("enqueue replayed=%v, %v", replayed, err)
+	}
+	if correlated, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: scope, CorrelationKind: "approval", CorrelationID: "approval-1", Limit: 10}); err != nil || len(correlated) != 1 {
+		t.Fatalf("correlated deliveries = %#v, %v", correlated, err)
 	}
 	firstInboxLease, err := store.ClaimExternalConversationInbox(ctx, scope, "worker-before-restart", now, time.Minute)
 	if err != nil || firstInboxLease == nil {
