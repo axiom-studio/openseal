@@ -122,10 +122,7 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive {
 		return fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
 	}
-	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
-		Scope: approval.Scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals",
-		IdempotencyKey: "approval-notifications:" + endpoint.ID,
-	})
+	conversation, err := w.approvalConversation(ctx, approval.Scope, endpoint)
 	if err != nil {
 		return err
 	}
@@ -297,10 +294,7 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 	if err != nil {
 		return err
 	}
-	conversationKey := "approval-notifications:" + endpoint.ID
-	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
-		Scope: approval.Scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals", IdempotencyKey: conversationKey,
-	})
+	conversation, err := w.approvalConversation(ctx, approval.Scope, endpoint)
 	if err != nil {
 		return err
 	}
@@ -319,6 +313,48 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		return fmt.Errorf("enqueue approval delivery: %w", err)
 	}
 	return nil
+}
+
+// approvalConversation returns the stable canonical conversation for an
+// endpoint. Endpoint names are mutable presentation metadata: renaming or
+// moving a destination must not invalidate the durable approval projection
+// keyed by the endpoint identity. Ownership remains invariant so an endpoint
+// cannot adopt another owner's approval history through a rename.
+func (w *ApprovalNotificationWorker) approvalConversation(
+	ctx context.Context,
+	scope Scope,
+	endpoint *ExternalConversationEndpoint,
+) (*Conversation, error) {
+	if endpoint == nil {
+		return nil, fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
+	}
+	key := "approval-notifications:" + endpoint.ID
+	existing, err := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Owner != endpoint.Owner {
+			return nil, ErrMessageConflict
+		}
+		return existing, nil
+	}
+	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals", IdempotencyKey: key,
+	})
+	if !errors.Is(err, ErrMessageConflict) {
+		return conversation, err
+	}
+	// A concurrent creator may have won between the lookup and create. Reload
+	// the stable key and apply the same ownership check before accepting it.
+	existing, findErr := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if existing == nil || existing.Owner != endpoint.Owner {
+		return nil, err
+	}
+	return existing, nil
 }
 
 func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
