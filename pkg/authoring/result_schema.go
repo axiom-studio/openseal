@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	inferschema "github.com/invopop/jsonschema"
 	validateschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -49,6 +50,7 @@ func initializeAuthoringResultSchema() {
 		inferred := (&inferschema.Reflector{
 			Anonymous:      true,
 			ExpandedStruct: true,
+			Mapper:         canonicalAuthoringScalarSchema,
 			Namer: func(value reflect.Type) string {
 				if value.Name() == "" {
 					return fmt.Sprintf("anonymous_%x", sha256.Sum256([]byte(value.String())))
@@ -74,8 +76,6 @@ func initializeAuthoringResultSchema() {
 			"type": "string", "const": AuthoringResultSchemaVersion,
 			"description": "Version of the OpenSeal authoring-result contract used by this proposal.",
 		}
-		constrainAuthoringRefinementVocabulary(authoringResultSchemaDoc)
-		constrainAuthoringRunbookPointers(authoringResultSchemaDoc)
 		compiler := validateschema.NewCompiler()
 		if err := compiler.AddResource(authoringResultSchemaResource, authoringResultSchemaDoc); err != nil {
 			authoringResultSchemaErr = fmt.Errorf("register authoring result schema: %w", err)
@@ -85,84 +85,40 @@ func initializeAuthoringResultSchema() {
 	})
 }
 
-// constrainAuthoringRunbookPointers projects the portable Runbook validator's
-// JSON Pointer invariant into the provider-facing schema. Runtime validation
-// remains authoritative; this earlier boundary gives structured-output repair
-// an exact field path before an invalid Runbook can become a review task.
-func constrainAuthoringRunbookPointers(value interface{}) {
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		if properties, ok := typed["properties"].(map[string]interface{}); ok {
-			if _, hasResultPath := properties["resultPath"]; hasResultPath {
-				if _, hasNext := properties["next"]; hasNext {
-					properties["resultPath"] = map[string]interface{}{
-						"type": "string", "minLength": 1, "pattern": "^/",
-						"description": "Non-empty JSON Pointer where this step stores its durable result.",
-					}
-				}
-			}
+// canonicalAuthoringScalarSchema maps exact canonical domain types to their
+// closed provider vocabulary. It deliberately never infers semantics from
+// field names or object shapes.
+func canonicalAuthoringScalarSchema(value reflect.Type) *inferschema.Schema {
+	enum := func(values ...string) *inferschema.Schema {
+		items := make([]interface{}, len(values))
+		for index, value := range values {
+			items[index] = value
 		}
-		for _, child := range typed {
-			constrainAuthoringRunbookPointers(child)
-		}
-	case []interface{}:
-		for _, child := range typed {
-			constrainAuthoringRunbookPointers(child)
-		}
+		return &inferschema.Schema{Type: "string", Enum: items}
 	}
-}
-
-// constrainAuthoringRefinementVocabulary adds the finite domain vocabulary
-// that Go's string aliases cannot communicate to the schema reflector. The
-// surrounding object shape and requiredness still come exclusively from the Go
-// domain types; OpenSeal supplies only the enum values enforced by the same
-// semantic validator.
-func constrainAuthoringRefinementVocabulary(value interface{}) {
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		if properties, ok := typed["properties"].(map[string]interface{}); ok {
-			if _, hasCategory := properties["category"]; hasCategory {
-				if _, hasBlocking := properties["blocking"]; hasBlocking {
-					if _, hasAnswer := properties["answer"]; hasAnswer {
-						properties["category"] = map[string]interface{}{
-							"type": "string", "enum": []interface{}{
-								string(RefinementCategoryCredential), string(RefinementCategorySkill), string(RefinementCategoryScope),
-								string(RefinementCategoryPolicy), string(RefinementCategoryAuthority), string(RefinementCategoryDestination),
-								string(RefinementCategoryBudget), string(RefinementCategoryApproval), string(RefinementCategoryOther),
-							},
-						}
-						properties["blocking"] = map[string]interface{}{
-							"type": "array", "minItems": 1,
-							"items": map[string]interface{}{
-								"type": "string", "enum": []interface{}{
-									string(RefinementBlocksCandidate), string(RefinementBlocksEvaluation), string(RefinementBlocksApply),
-								},
-							},
-						}
-					}
-				}
-			}
-			if _, hasOptions := properties["options"]; hasOptions {
-				if _, hasMinimum := properties["minimum"]; hasMinimum {
-					if _, hasKind := properties["kind"]; hasKind {
-						properties["kind"] = map[string]interface{}{
-							"type": "string", "enum": []interface{}{
-								string(RefinementAnswerText), string(RefinementAnswerStringList), string(RefinementAnswerSingleSelect),
-								string(RefinementAnswerMultiSelect), string(RefinementAnswerBoolean),
-								string(RefinementAnswerCredentialReference), string(RefinementAnswerSkillSelection),
-							},
-						}
-					}
-				}
-			}
-		}
-		for _, child := range typed {
-			constrainAuthoringRefinementVocabulary(child)
-		}
-	case []interface{}:
-		for _, child := range typed {
-			constrainAuthoringRefinementVocabulary(child)
-		}
+	switch value {
+	case reflect.TypeOf(RefinementQuestionCategory("")):
+		return enum(string(RefinementCategoryCredential), string(RefinementCategorySkill), string(RefinementCategoryScope), string(RefinementCategoryPolicy), string(RefinementCategoryAuthority), string(RefinementCategoryDestination), string(RefinementCategoryBudget), string(RefinementCategoryApproval), string(RefinementCategoryOther))
+	case reflect.TypeOf(RefinementAnswerKind("")):
+		return enum(string(RefinementAnswerText), string(RefinementAnswerStringList), string(RefinementAnswerSingleSelect), string(RefinementAnswerMultiSelect), string(RefinementAnswerBoolean), string(RefinementAnswerCredentialReference), string(RefinementAnswerSkillSelection))
+	case reflect.TypeOf(RefinementProvenanceKind("")):
+		return enum(string(RefinementProvenancePrompt), string(RefinementProvenanceCatalog), string(RefinementProvenanceSkill), string(RefinementProvenanceCredential), string(RefinementProvenancePolicy), string(RefinementProvenanceRuntime))
+	case reflect.TypeOf(RefinementBlockingScope("")):
+		return enum(string(RefinementBlocksCandidate), string(RefinementBlocksEvaluation), string(RefinementBlocksApply))
+	case reflect.TypeOf(runbook.TriggerKind("")):
+		return enum(string(runbook.TriggerEvent), string(runbook.TriggerSchedule))
+	case reflect.TypeOf(runbook.ReportingMilestone("")):
+		return enum(string(runbook.ReportingStarted), string(runbook.ReportingApprovalRequired), string(runbook.ReportingCompleted), string(runbook.ReportingFailed))
+	case reflect.TypeOf(runbook.StepKind("")):
+		return enum(string(runbook.StepAction), string(runbook.StepDelegate), string(runbook.StepDecision), string(runbook.StepTransform), string(runbook.StepWait), string(runbook.StepFork), string(runbook.StepJoin), string(runbook.StepForEach), string(runbook.StepLoopReturn), string(runbook.StepEnd))
+	case reflect.TypeOf(runbook.DelegateMode("")):
+		return enum(string(runbook.DelegateBehavior), string(runbook.DelegateReason))
+	case reflect.TypeOf(runbook.JoinMode("")):
+		return enum(string(runbook.JoinAll), string(runbook.JoinAny))
+	case reflect.TypeOf(runbook.PredicateOperator("")):
+		return enum(string(runbook.PredicateEqual), string(runbook.PredicateNotEqual), string(runbook.PredicateExists), string(runbook.PredicateTruthy), string(runbook.PredicateGreater), string(runbook.PredicateAtLeast), string(runbook.PredicateLess), string(runbook.PredicateAtMost), string(runbook.PredicateContains), string(runbook.PredicateAll), string(runbook.PredicateAny), string(runbook.PredicateNot))
+	default:
+		return nil
 	}
 }
 
