@@ -19,7 +19,7 @@ func (g semanticIntentGenerator) GenerateIntent(context.Context, GenerateRequest
 func TestCompilerUsesSemanticIntentBoundary(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
-		Name: "Analyst", Purpose: "Analyze evidence", Activation: WorkforceActivationInactive,
+		Name: "Analyst", Purpose: "Analyze evidence",
 		Agents: []AuthoringAgentIntent{{Key: "analyst", Name: "Analyst", Purpose: "Analyze evidence", Behavior: "Analyze supplied evidence accurately."}},
 	}
 	compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
@@ -35,6 +35,27 @@ func TestCompilerUsesSemanticIntentBoundary(t *testing.T) {
 	}
 }
 
+func TestCompileAuthoringIntentOwnsLifecycleActivation(t *testing.T) {
+	intent := AuthoringIntent{
+		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
+		Name: "Analyst", Purpose: "Analyze evidence",
+		Agents: []AuthoringAgentIntent{{Key: "analyst", Name: "Analyst", Purpose: "Analyze evidence", Behavior: "Analyze supplied evidence accurately."}},
+	}
+	created, err := CompileAuthoringIntent(intent, GenerateRequest{Mode: ModeCreate, Prompt: "Create an Analyst Agent"})
+	if err != nil || created.Candidate.Activation != WorkforceActivationActive {
+		t.Fatalf("created activation=%q err=%v", created.Candidate.Activation, err)
+	}
+	inactive, err := CompileAuthoringIntent(intent, GenerateRequest{Mode: ModeCreate, Prompt: "Create an inactive Analyst Agent"})
+	if err != nil || inactive.Candidate.Activation != WorkforceActivationInactive {
+		t.Fatalf("inactive activation=%q err=%v", inactive.Candidate.Activation, err)
+	}
+	existing := inactive.Candidate
+	amended, err := CompileAuthoringIntent(intent, GenerateRequest{Mode: ModeAmend, Prompt: "Rename the Agent", Existing: &existing})
+	if err != nil || amended.Candidate.Activation != WorkforceActivationInactive {
+		t.Fatalf("amended activation=%q err=%v", amended.Candidate.Activation, err)
+	}
+}
+
 func TestCompileAuthoringIntentOwnsScheduledRunbookStructure(t *testing.T) {
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
 		"skill-browser": {
@@ -45,7 +66,7 @@ func TestCompileAuthoringIntentOwnsScheduledRunbookStructure(t *testing.T) {
 	}}
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
-		Name: "Reddit Researcher", Purpose: "Find and discuss relevant engineering posts", Activation: WorkforceActivationActive,
+		Name: "Reddit Researcher", Purpose: "Find and discuss relevant engineering posts",
 		Agents: []AuthoringAgentIntent{{
 			Key: "reddit-researcher", Name: "Reddit Researcher", Purpose: "Research relevant communities",
 			Behavior:   "Read the full discussion, contribute useful context, and report the result.",
@@ -81,7 +102,7 @@ func TestCompileAuthoringIntentOwnsScheduledRunbookStructure(t *testing.T) {
 func TestCompileAuthoringIntentBuildsTeamRolesAndAssignments(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceTeam,
-		Name: "Release Team", Purpose: "Prepare and review releases", Activation: WorkforceActivationInactive,
+		Name: "Release Team", Purpose: "Prepare and review releases",
 		Agents: []AuthoringAgentIntent{
 			{Key: "author", Name: "Release Author", Purpose: "Draft release material", Behavior: "Draft accurate release material."},
 			{Key: "reviewer", Name: "Release Reviewer", Purpose: "Review release material", Behavior: "Review claims against evidence."},
@@ -109,7 +130,7 @@ func TestCompileAuthoringIntentBuildsTeamRolesAndAssignments(t *testing.T) {
 func TestCompileAuthoringIntentMapsClarificationWithoutModelOwnedWireEnums(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
-		Name: "Researcher", Purpose: "Research sources", Activation: WorkforceActivationInactive,
+		Name: "Researcher", Purpose: "Research sources",
 		Agents:         []AuthoringAgentIntent{{Key: "researcher", Name: "Researcher", Purpose: "Research sources", Behavior: "Research only permitted sources."}},
 		Clarifications: []AuthoringClarification{{Key: "report-format", Question: "Which report format should be used?", WhyNeeded: "The requested output format is ambiguous.", Choices: []string{"PDF", "Markdown"}}},
 	}
@@ -133,7 +154,7 @@ func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) 
 	catalog.Skills["slack"] = slack
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
-		Name: "Slack Helper", Purpose: "Help in a Slack channel", Activation: WorkforceActivationActive,
+		Name: "Slack Helper", Purpose: "Help in a Slack channel",
 		Agents: []AuthoringAgentIntent{{Key: "slack-helper", Name: "Slack Helper", Purpose: "Help in Slack", Behavior: "Answer channel questions accurately."}},
 		Conversations: []AuthoringChannelIntent{{
 			Key: "slack-help", Name: "Slack help channel", OwnerKey: "slack-helper", Provider: "slack", Destination: "#help",

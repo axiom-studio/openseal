@@ -2,7 +2,7 @@ package authoring
 
 import "github.com/axiom-studio/openseal/internal/domaincontract"
 
-const AuthoringIntentSchemaVersion = "openseal.authoring-intent/v1"
+const AuthoringIntentSchemaVersion = "openseal.authoring-intent/v2"
 
 // AuthoringResourceKind is the product resource shape requested by the user.
 // It is intentionally semantic: the compiler, not the model, constructs the
@@ -61,16 +61,15 @@ func (intent AuthoringApprovalIntent) Valid() bool {
 // no runtime graph, JSON Pointer, authority grant, binding, deployment, budget,
 // version, or generated identifier. OpenSeal compiles those details.
 type AuthoringIntent struct {
-	SchemaVersion  string                    `json:"schemaVersion" jsonschema:"Version of the semantic authoring answer contract."`
-	Kind           AuthoringResourceKind     `json:"kind"`
-	Name           string                    `json:"name"`
-	Purpose        string                    `json:"purpose"`
-	Agents         []AuthoringAgentIntent    `json:"agents"`
-	Team           *AuthoringTeamIntent      `json:"team,omitempty"`
-	Conversations  []AuthoringChannelIntent  `json:"conversations,omitempty"`
-	Activation     WorkforceActivationIntent `json:"activation"`
-	Assumptions    []string                  `json:"assumptions,omitempty"`
-	Clarifications []AuthoringClarification  `json:"clarifications,omitempty"`
+	SchemaVersion  string                   `json:"schemaVersion" jsonschema:"Version of the semantic authoring answer contract."`
+	Kind           AuthoringResourceKind    `json:"kind"`
+	Name           string                   `json:"name"`
+	Purpose        string                   `json:"purpose"`
+	Agents         []AuthoringAgentIntent   `json:"agents"`
+	Team           *AuthoringTeamIntent     `json:"team,omitempty"`
+	Conversations  []AuthoringChannelIntent `json:"conversations,omitempty"`
+	Assumptions    []string                 `json:"assumptions,omitempty"`
+	Clarifications []AuthoringClarification `json:"clarifications,omitempty"`
 }
 
 // AuthoringIntentRequest is the complete provider projection. Existing state

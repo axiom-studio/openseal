@@ -133,6 +133,49 @@ func TestScheduleIntentExactWeekdaysUsesPortableCronTrigger(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentWindowRequiresExactTimezoneAndCompilesPortableCron(t *testing.T) {
+	if parsed := parseScheduleIntent("every 3 hours between 08:00 and 20:00 local time"); parsed.kind != scheduleIntentAmbiguous {
+		t.Fatalf("local-time window = %#v", parsed)
+	}
+	parsed := parseScheduleIntent("every 3 hours between 08:00 and 20:00 Asia/Kolkata")
+	if parsed.kind != scheduleIntentExact || parsed.cronExpression != "0 00 8-20/3 * * *" || parsed.timezone != "Asia/Kolkata" {
+		t.Fatalf("exact window = %#v", parsed)
+	}
+	schedule, err := scheduleForIntent(parsed)
+	if err != nil || schedule.Cron != parsed.cronExpression || schedule.Timezone != parsed.timezone {
+		t.Fatalf("portable window schedule=%#v err=%v", schedule, err)
+	}
+}
+
+func TestSemanticIntentAmbiguousScheduleBecomesGuidedQuestion(t *testing.T) {
+	intent := AuthoringIntent{
+		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
+		Name: "Scout", Purpose: "Scout relevant communities",
+		Agents: []AuthoringAgentIntent{{
+			Key: "scout", Name: "Scout", Purpose: "Scout relevant communities", Behavior: "Find useful discussions.",
+			Objectives: []AuthoringObjectiveIntent{{Key: "research", Title: "Research", Outcome: "Find useful discussions", Priority: 1}},
+			Operations: []AuthoringOperationIntent{{
+				Key: "scan", Name: "Scan communities", Goal: "Find useful discussions", ObjectiveKey: "research",
+				Wake: AuthoringWakeSchedule, Schedule: "every 3 hours between 08:00 and 20:00 local time",
+				Approval: AuthoringApprovalByPolicy,
+			}},
+		}},
+	}
+	compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create a Scout that runs every 3 hours between 08:00 and 20:00 local time",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid || len(result.UnresolvedQuestions) != 1 || !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
+		t.Fatalf("ambiguous semantic schedule = %#v", result)
+	}
+}
+
 func TestScheduleIntentAmbiguousRecurrenceProducesTypedGuidance(t *testing.T) {
 	result := compileScheduledCandidate(t, "Create one Agent that runs regularly", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil)
 	if result.Valid || candidateSchedule(result) != nil || len(result.UnresolvedQuestions) != 1 {

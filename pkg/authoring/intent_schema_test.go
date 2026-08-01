@@ -22,6 +22,7 @@ func TestAuthoringIntentSchemaExcludesRuntimeDomainContracts(t *testing.T) {
 	for _, forbidden := range []string{
 		"WorkforceCandidate", "AgentDefinition", "runbook_Definition", "runbook_Step",
 		"resultPath", "entrypoints", "maxTotalTokens", "standingGrants", "approvalDestinations",
+		`"activation"`,
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("provider form exposes compiler-owned contract %q", forbidden)
