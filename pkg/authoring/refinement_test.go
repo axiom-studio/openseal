@@ -375,6 +375,36 @@ func TestRefinementQuestionsRejectCyclesAndSecretShapedAnswers(t *testing.T) {
 	}
 }
 
+func TestRefinementQuestionDiagnosticsIdentifyExactInvalidField(t *testing.T) {
+	base := RefinementQuestion{
+		ID: "targets", Category: RefinementCategoryScope, Prompt: "Which targets?", WhyNeeded: "The source scope must be explicit.",
+		Blocking: []RefinementBlockingScope{RefinementBlocksCandidate}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerStringList},
+		Priority: 1, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenancePrompt}},
+	}
+	tests := []struct {
+		name string
+		edit func(*RefinementQuestion)
+		want string
+	}{
+		{name: "category", edit: func(question *RefinementQuestion) { question.Category = "source" }, want: "unresolvedQuestions[0].category must be one of"},
+		{name: "answer kind", edit: func(question *RefinementQuestion) { question.Answer.Kind = "list" }, want: "unresolvedQuestions[0].answer.kind must be one of"},
+		{name: "missing blocking", edit: func(question *RefinementQuestion) { question.Blocking = nil }, want: "unresolvedQuestions[0].blocking must contain at least one"},
+		{name: "blocking value", edit: func(question *RefinementQuestion) { question.Blocking = []RefinementBlockingScope{"generation"} }, want: "unresolvedQuestions[0].blocking[0] must be"},
+		{name: "credential kind", edit: func(question *RefinementQuestion) { question.Category = RefinementCategoryCredential }, want: "unresolvedQuestions[0].answer.kind must be credential_reference"},
+		{name: "skill kind", edit: func(question *RefinementQuestion) { question.Category = RefinementCategorySkill }, want: "unresolvedQuestions[0].answer.kind must be skill_selection"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			question := base
+			test.edit(&question)
+			err := validateRefinementQuestions([]RefinementQuestion{question})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("diagnostic = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestProviderRefinementProjectionRedactsOpaqueCredentialReference(t *testing.T) {
 	value := ChangeSetRefinement{
 		Questions: []RefinementQuestion{{ID: "credential", Category: RefinementCategoryCredential, Prompt: "Configure credential", WhyNeeded: "Execution requires it", Blocking: []RefinementBlockingScope{RefinementBlocksApply}, Answer: RefinementAnswerSchema{Kind: RefinementAnswerCredentialReference}, Priority: 1, AutoResolvable: true, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCredential}}}},
@@ -548,7 +578,7 @@ func TestRefinementSkillCategoryRequiresSkillSelectionAnswer(t *testing.T) {
 		Priority: 1, Provenance: []RefinementQuestionProvenance{{Kind: RefinementProvenanceCatalog}},
 	}
 	err := validateRefinementQuestions([]RefinementQuestion{question})
-	if err == nil || !strings.Contains(err.Error(), "category skill") || !strings.Contains(err.Error(), "skill_selection") {
+	if err == nil || !strings.Contains(err.Error(), "unresolvedQuestions[0].answer.kind") || !strings.Contains(err.Error(), "skill_selection") {
 		t.Fatalf("generic Skill question diagnostic=%v", err)
 	}
 }

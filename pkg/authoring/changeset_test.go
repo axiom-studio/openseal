@@ -482,14 +482,14 @@ func TestPreparedInvalidRunbookGenerationNeverPersistsCandidate(t *testing.T) {
 
 func TestSchemaGenerationFailureClassificationIsActionable(t *testing.T) {
 	code, message := classifyGenerationFailure(&SchemaGenerationError{RepairAttempts: 2, Diagnostic: "field candidate.team.roles expects []team.RoleSlot but received string"})
-	if code != "schema_failed" || !strings.Contains(message, "2 bounded schema repairs") || !strings.Contains(message, "candidate.team.roles") {
+	if code != "schema_failed" || message != "We couldn't finish this proposal automatically. Your request and answers are saved; try again." || strings.Contains(message, "candidate.team.roles") {
 		t.Fatalf("schema failure classification = %q / %q", code, message)
 	}
 }
 
 func TestContractGenerationFailureClassificationIsActionable(t *testing.T) {
 	code, message := classifyGenerationFailure(&ContractGenerationError{RepairAttempts: 1, Diagnostic: "invalid_refinement_question: answer kind is required"})
-	if code != "contract_failed" || !strings.Contains(message, "1 bounded contract repairs") || !strings.Contains(message, "invalid_refinement_question") {
+	if code != "contract_failed" || message != "We couldn't finish this proposal automatically. Your request and answers are saved; try again." || strings.Contains(message, "invalid_refinement_question") {
 		t.Fatalf("contract failure classification = %q / %q", code, message)
 	}
 }
@@ -527,7 +527,7 @@ func TestChangeSetRepairsGenericSkillQuestionAndPersistsCanonicalSelection(t *te
 	if err != nil || replay || generator.repairs != 1 || created.Status != ChangeSetBlocked || len(created.Result.Validation) != 0 || len(created.Refinement.Questions) != 1 {
 		t.Fatalf("created=%#v replay=%t repairs=%d err=%v", created, replay, generator.repairs, err)
 	}
-	if got := generator.lastError.Error(); !strings.Contains(got, "category skill") || !strings.Contains(got, "skill_selection") {
+	if got := generator.lastError.Error(); !strings.Contains(got, "unresolvedQuestions[0].answer.kind") || !strings.Contains(got, "skill_selection") {
 		t.Fatalf("repair diagnostic=%s", got)
 	}
 	persisted := created.Refinement.Questions[0]

@@ -1137,9 +1137,9 @@ func classifyGenerationFailure(err error) (string, string) {
 	case errors.Is(err, context.Canceled):
 		return "canceled", "Workforce generation was canceled"
 	case errors.As(err, &schemaError):
-		return "schema_failed", fmt.Sprintf("The provider response remained invalid after %d bounded schema repairs: %s", schemaError.RepairAttempts, schemaError.Diagnostic)
+		return "schema_failed", "We couldn't finish this proposal automatically. Your request and answers are saved; try again."
 	case errors.As(err, &contractError):
-		return "contract_failed", fmt.Sprintf("The provider response remained semantically invalid after %d bounded contract repairs: %s", contractError.RepairAttempts, contractError.Diagnostic)
+		return "contract_failed", "We couldn't finish this proposal automatically. Your request and answers are saved; try again."
 	case strings.Contains(err.Error(), "decode workforce candidate"), strings.Contains(err.Error(), "decode repaired workforce candidate"),
 		strings.Contains(err.Error(), "generated workforce candidate must"), strings.Contains(err.Error(), "repaired workforce candidate must"):
 		return "schema_failed", "The provider returned an invalid workforce candidate"
