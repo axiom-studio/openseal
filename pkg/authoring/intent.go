@@ -73,6 +73,18 @@ type AuthoringIntent struct {
 	Clarifications []AuthoringClarification  `json:"clarifications,omitempty"`
 }
 
+// AuthoringIntentRequest is the complete provider projection. Existing state
+// is represented through the same semantic answer sheet; canonical resource
+// structs and the compiler-owned authoring form never enter model context.
+type AuthoringIntentRequest struct {
+	Mode                    Mode                            `json:"mode"`
+	Prompt                  string                          `json:"prompt"`
+	Existing                *AuthoringIntent                `json:"existing,omitempty"`
+	Catalog                 CapabilityCatalog               `json:"catalog"`
+	CompositionRequirements *RuntimeCompositionRequirements `json:"compositionRequirements,omitempty"`
+	Refinement              *RefinementContext              `json:"refinement,omitempty"`
+}
+
 type AuthoringAgentIntent struct {
 	Key                 string                     `json:"key"`
 	Name                string                     `json:"name"`

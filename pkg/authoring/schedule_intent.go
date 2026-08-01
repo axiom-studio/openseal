@@ -40,6 +40,7 @@ var (
 	scheduleIntervalPattern   = regexp.MustCompile(`(?i)\bevery\s+(\d{1,7})\s+(second|seconds|minute|minutes|hour|hours|day|days)\b`)
 	scheduleDurationPattern   = regexp.MustCompile(`(?i)\bfor\s+(\d{1,7})\s*(second|seconds|minute|minutes|hour|hours|day|days)\b`)
 	scheduleOccurrencePattern = regexp.MustCompile(`(?i)\bfor\s+(\d{1,7})\s+(run|runs|occurrence|occurrences|time|times)\b`)
+	scheduleCronPattern       = regexp.MustCompile(`(?i)\bcron\s+"([^"]+)"\s+timezone\s+([A-Za-z][A-Za-z0-9_+.-]*/?[A-Za-z0-9_+./-]*)(?:\s+jitter\s+(\d{1,8})\s+seconds)?\b`)
 )
 
 // enforceScheduleIntentAuthority is the deterministic authority boundary for
@@ -100,6 +101,17 @@ func parseScheduleIntent(value string) scheduleIntent {
 		"no recurring", "without recurring", "non recurring",
 	) {
 		return scheduleIntent{kind: scheduleIntentManual}
+	}
+	if match := scheduleCronPattern.FindStringSubmatch(value); len(match) >= 3 {
+		jitter := int64(0)
+		if len(match) == 4 && match[3] != "" {
+			jitter, _ = strconv.ParseInt(match[3], 10, 64)
+		}
+		intent := scheduleIntent{kind: scheduleIntentExact, cadenceType: "cron", cronExpression: match[1], timezone: match[2], jitterSeconds: jitter}
+		if schedule, err := scheduleForIntent(intent); err == nil && schedule != nil {
+			return intent
+		}
+		return scheduleIntent{kind: scheduleIntentAmbiguous}
 	}
 
 	if match := scheduleIntervalPattern.FindStringSubmatch(value); len(match) == 3 {

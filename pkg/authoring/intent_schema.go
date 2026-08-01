@@ -1,20 +1,26 @@
 package authoring
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"sync"
 
 	inferschema "github.com/invopop/jsonschema"
+	validateschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 var (
 	authoringIntentSchemaOnce sync.Once
 	authoringIntentSchemaDoc  map[string]interface{}
+	authoringIntentValidator  *validateschema.Schema
 	authoringIntentSchemaErr  error
 )
+
+const authoringIntentSchemaResource = "openseal-authoring-intent-v1.json"
 
 // AuthoringIntentJSONSchema is the only schema sent to an authoring model.
 // Canonical runtime and resource types must never become reachable from it.
@@ -64,5 +70,44 @@ func initializeAuthoringIntentSchema() {
 			"type": "string", "const": AuthoringIntentSchemaVersion,
 			"description": "Version of the semantic authoring answer contract.",
 		}
+		compiler := validateschema.NewCompiler()
+		if err := compiler.AddResource(authoringIntentSchemaResource, authoringIntentSchemaDoc); err != nil {
+			authoringIntentSchemaErr = fmt.Errorf("register authoring intent schema: %w", err)
+			return
+		}
+		authoringIntentValidator, authoringIntentSchemaErr = compiler.Compile(authoringIntentSchemaResource)
 	})
+}
+
+func decodeAuthoringIntent(payload []byte) (AuthoringIntent, error) {
+	initializeAuthoringIntentSchema()
+	if authoringIntentSchemaErr != nil {
+		return AuthoringIntent{}, authoringIntentSchemaErr
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
+		return AuthoringIntent{}, &AuthoringSchemaValidationError{Violations: []AuthoringSchemaViolation{{Path: "", Message: err.Error()}}}
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err == nil {
+		return AuthoringIntent{}, &AuthoringSchemaValidationError{Violations: []AuthoringSchemaViolation{{Path: "", Message: "must contain exactly one JSON value"}}}
+	} else if !errors.Is(err, io.EOF) {
+		return AuthoringIntent{}, &AuthoringSchemaValidationError{Violations: []AuthoringSchemaViolation{{Path: "", Message: err.Error()}}}
+	}
+	if err := authoringIntentValidator.Validate(document); err != nil {
+		var validation *validateschema.ValidationError
+		if errors.As(err, &validation) {
+			return AuthoringIntent{}, &AuthoringSchemaValidationError{Violations: flattenAuthoringSchemaViolations(validation, nil)}
+		}
+		return AuthoringIntent{}, err
+	}
+	strict := json.NewDecoder(bytes.NewReader(payload))
+	strict.DisallowUnknownFields()
+	var result AuthoringIntent
+	if err := strict.Decode(&result); err != nil {
+		return AuthoringIntent{}, err
+	}
+	return result, nil
 }
