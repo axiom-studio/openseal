@@ -238,16 +238,19 @@ type ConversationAdapterTransport struct {
 // the action output (ItemsPath, NextCursorPath) or one item (the remaining
 // paths).
 type ConversationDestinationDiscovery struct {
-	Action          string                   `json:"action"`
-	Mode            ConversationEndpointMode `json:"mode"`
-	ItemsPath       string                   `json:"itemsPath"`
-	IDPath          string                   `json:"idPath"`
-	DisplayNamePath string                   `json:"displayNamePath"`
-	DescriptionPath string                   `json:"descriptionPath,omitempty"`
-	CursorArgument  string                   `json:"cursorArgument,omitempty"`
-	LimitArgument   string                   `json:"limitArgument,omitempty"`
-	QueryArgument   string                   `json:"queryArgument,omitempty"`
-	NextCursorPath  string                   `json:"nextCursorPath,omitempty"`
+	Action                    string                   `json:"action"`
+	Mode                      ConversationEndpointMode `json:"mode"`
+	ItemsPath                 string                   `json:"itemsPath"`
+	IDPath                    string                   `json:"idPath"`
+	DisplayNamePath           string                   `json:"displayNamePath"`
+	DescriptionPath           string                   `json:"descriptionPath,omitempty"`
+	InstallationIDPath        string                   `json:"installationIdPath,omitempty"`
+	ApplicationIDPath         string                   `json:"applicationIdPath,omitempty"`
+	ConnectionDisplayNamePath string                   `json:"connectionDisplayNamePath,omitempty"`
+	CursorArgument            string                   `json:"cursorArgument,omitempty"`
+	LimitArgument             string                   `json:"limitArgument,omitempty"`
+	QueryArgument             string                   `json:"queryArgument,omitempty"`
+	NextCursorPath            string                   `json:"nextCursorPath,omitempty"`
 }
 
 // ConversationAdapter declares one provider adapter supplied by a Skill.
