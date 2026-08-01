@@ -115,6 +115,13 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 	if err := enqueueApprovalCardUpdate(ctx, w.store, w.transport, approval, call, destination, ""); err != nil {
 		return err
 	}
+	phase := approvalCardPhase(approval, call)
+	deliveryKey := "approval-outcome-delivery:" + approval.ID + ":" + destination.EndpointID + ":" + phase
+	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, destination.EndpointID, deliveryKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, strings.TrimSpace(destination.EndpointID))
 	if err != nil {
 		return err
@@ -126,16 +133,9 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 	if err != nil {
 		return err
 	}
-	phase := approvalCardPhase(approval, call)
 	posted, err := w.postOutcomeMessage(ctx, approval, call, conversation.ID, "approval-outcome:"+approval.ID+":"+phase)
 	if err != nil {
 		return err
-	}
-	deliveryKey := "approval-outcome-delivery:" + approval.ID + ":" + endpoint.ID + ":" + phase
-	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, endpoint.ID, deliveryKey); err != nil {
-		return err
-	} else if exists {
-		return nil
 	}
 	_, err = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
@@ -283,6 +283,12 @@ func approvalCardPhase(approval *ApprovalCheckpoint, call *ActionCall) string {
 }
 
 func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
+	deliveryKey := "approval-delivery:" + approval.ID + ":" + destination.EndpointID
+	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, destination.EndpointID, deliveryKey); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, strings.TrimSpace(destination.EndpointID))
 	if err != nil {
 		return err
@@ -307,7 +313,7 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		Scope: approval.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
 		Parameters:     map[string]interface{}{"approval": approvalNotificationPayload(approval, call)},
-		IdempotencyKey: "approval-delivery:" + approval.ID + ":" + endpoint.ID,
+		IdempotencyKey: deliveryKey,
 	})
 	if err != nil {
 		return fmt.Errorf("enqueue approval delivery: %w", err)
