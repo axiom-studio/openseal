@@ -75,6 +75,13 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	store.actions[portfolioKey(scope, "reuse-call")] = &ActionCall{
+		ID: "reuse-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
+		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
+		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
+		Revision: 1, CreatedAt: now.Add(time.Millisecond), UpdatedAt: now.Add(time.Millisecond),
+	}
 	store.mu.Unlock()
 	activity := NewRunActivityService(store, store)
 	activity.now = func() time.Time { return now.Add(time.Second) }
