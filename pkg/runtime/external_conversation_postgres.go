@@ -662,6 +662,16 @@ func (s *PostgresStore) ListExternalConversationDeliveries(ctx context.Context, 
 		args = append(args, filter.ConversationID)
 		placeholder++
 	}
+	if filter.CorrelationKind != "" {
+		query += fmt.Sprintf(` AND payload->'correlation'->>'kind'=$%d`, placeholder)
+		args = append(args, filter.CorrelationKind)
+		placeholder++
+	}
+	if filter.CorrelationID != "" {
+		query += fmt.Sprintf(` AND payload->'correlation'->>'id'=$%d`, placeholder)
+		args = append(args, filter.CorrelationID)
+		placeholder++
+	}
 	statuses := make([]string, 0, len(filter.Statuses))
 	for _, status := range filter.Statuses {
 		statuses = append(statuses, string(status))

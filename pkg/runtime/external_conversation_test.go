@@ -469,6 +469,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	enqueued, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
+		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "run", ID: "run-one", Phase: "reply"},
 	})
 	if err != nil || enqueued.Replayed || enqueued.Delivery.Status != ExternalConversationDeliveryPending {
 		t.Fatalf("enqueued reply = %#v, %v", enqueued, err)
@@ -476,9 +477,16 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	replayedDelivery, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
+		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "run", ID: "run-one", Phase: "reply"},
 	})
 	if err != nil || !replayedDelivery.Replayed || replayedDelivery.Delivery.ID != enqueued.Delivery.ID {
 		t.Fatalf("replayed delivery = %#v, %v", replayedDelivery, err)
+	}
+	correlated, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+		Scope: scope, CorrelationKind: "run", CorrelationID: "run-one", Limit: 10,
+	})
+	if err != nil || len(correlated) != 1 || correlated[0].Correlation == nil || correlated[0].Correlation.Phase != "reply" {
+		t.Fatalf("correlated deliveries = %#v, %v", correlated, err)
 	}
 	if _, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageUpdate,

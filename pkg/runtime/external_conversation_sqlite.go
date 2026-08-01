@@ -717,6 +717,14 @@ func (s *SQLiteStore) ListExternalConversationDeliveries(ctx context.Context, fi
 		query += ` AND conversation_id=?`
 		args = append(args, filter.ConversationID)
 	}
+	if filter.CorrelationKind != "" {
+		query += ` AND json_extract(payload,'$.correlation.kind')=?`
+		args = append(args, filter.CorrelationKind)
+	}
+	if filter.CorrelationID != "" {
+		query += ` AND json_extract(payload,'$.correlation.id')=?`
+		args = append(args, filter.CorrelationID)
+	}
 	statuses := make([]string, 0, len(filter.Statuses))
 	for _, status := range filter.Statuses {
 		statuses = append(statuses, string(status))

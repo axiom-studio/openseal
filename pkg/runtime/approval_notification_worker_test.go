@@ -114,6 +114,10 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if err != nil || len(deliveries) != 1 {
 		t.Fatalf("deliveries = %#v, %v", deliveries, err)
 	}
+	if deliveries[0].Correlation == nil || deliveries[0].Correlation.Kind != "approval" ||
+		deliveries[0].Correlation.ID != approval.ID || deliveries[0].Correlation.Phase != "request" {
+		t.Fatalf("approval request correlation = %#v", deliveries[0].Correlation)
+	}
 	card := deliveries[0].Parameters["approval"].(map[string]interface{})
 	if card["id"] != approval.ID || card["invocationDigest"] != call.InvocationDigest {
 		t.Fatalf("card = %#v", card)
@@ -197,6 +201,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if decisionDelivery == nil {
 		t.Fatalf("decision update missing: %#v", deliveries)
 	}
+	if decisionDelivery.Correlation == nil || decisionDelivery.Correlation.Phase != "card_update" {
+		t.Fatalf("decision correlation = %#v", decisionDelivery.Correlation)
+	}
 	decisionCard, _ := decisionDelivery.Parameters["approval"].(map[string]interface{})
 	if decisionCard["status"] != ApprovalStatusApproved || decisionCard["actionStatus"] != ActionCallStatusReady || decisionCard["providerApproverId"] != "U1" {
 		t.Fatalf("decision card = %#v in %#v", decisionCard, decisionDelivery)
@@ -229,7 +236,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	var outcomeMessage, outcomeCard bool
 	for _, delivery := range deliveries {
 		if strings.HasPrefix(delivery.IdempotencyKey, "approval-outcome-delivery:") {
-			outcomeMessage = true
+			outcomeMessage = delivery.Correlation != nil && delivery.Correlation.Phase == "outcome"
 		}
 		if delivery.Operation == capability.ConversationDeliveryMessageUpdate {
 			projected, _ := delivery.Parameters["approval"].(map[string]interface{})

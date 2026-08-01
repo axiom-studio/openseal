@@ -663,6 +663,25 @@ const (
 	ExternalConversationDeliveryCanceled  ExternalConversationDeliveryStatus = "canceled"
 )
 
+// ExternalConversationDeliveryCorrelation links one provider delivery to the
+// canonical resource transition that caused it. It is intentionally
+// provider-neutral and contains identifiers only; message content remains in
+// the canonical conversation and credentials remain in the Skill binding.
+type ExternalConversationDeliveryCorrelation struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Phase string `json:"phase"`
+}
+
+func (c ExternalConversationDeliveryCorrelation) Validate() error {
+	if !validOpaqueIdentifier(strings.TrimSpace(c.Kind), 64) ||
+		!validOpaqueIdentifier(strings.TrimSpace(c.ID), 256) ||
+		!validOpaqueIdentifier(strings.TrimSpace(c.Phase), 64) {
+		return ErrInvalidExternalConversation
+	}
+	return nil
+}
+
 // ExternalConversationDelivery is the durable provider-neutral outbox. Content
 // is loaded from the canonical ChannelMessage at dispatch time, so this record
 // cannot drift into a second source of conversational truth.
@@ -678,6 +697,7 @@ type ExternalConversationDelivery struct {
 	ExternalThreadID  string                                   `json:"externalThreadId,omitempty"`
 	OrderingKey       string                                   `json:"orderingKey"`
 	Parameters        map[string]interface{}                   `json:"parameters,omitempty"`
+	Correlation       *ExternalConversationDeliveryCorrelation `json:"correlation,omitempty"`
 	IdempotencyKey    string                                   `json:"idempotencyKey"`
 	Status            ExternalConversationDeliveryStatus       `json:"status"`
 	Attempt           int                                      `json:"attempt"`
@@ -712,6 +732,11 @@ func (d *ExternalConversationDelivery) Validate() error {
 	}
 	if err := validateExternalConversationConfiguration(d.Parameters); err != nil {
 		return err
+	}
+	if d.Correlation != nil {
+		if err := d.Correlation.Validate(); err != nil {
+			return err
+		}
 	}
 	switch d.Status {
 	case ExternalConversationDeliveryPending, ExternalConversationDeliveryRetry:
@@ -748,12 +773,14 @@ type ExternalConversationInboxFilter struct {
 }
 
 type ExternalConversationDeliveryFilter struct {
-	Scope          Scope
-	EndpointID     string
-	ConversationID string
-	Statuses       []ExternalConversationDeliveryStatus
-	Limit          int
-	Offset         int
+	Scope           Scope
+	EndpointID      string
+	ConversationID  string
+	CorrelationKind string
+	CorrelationID   string
+	Statuses        []ExternalConversationDeliveryStatus
+	Limit           int
+	Offset          int
 }
 
 // ExternalConversationTransportStore is the durable inbox, mapping, and
@@ -907,6 +934,18 @@ func cloneExternalConversationDelivery(value *ExternalConversationDelivery) *Ext
 	}
 	copy := *value
 	copy.Parameters = cloneMap(value.Parameters)
+	if value.Correlation != nil {
+		correlation := *value.Correlation
+		copy.Correlation = &correlation
+	}
+	return &copy
+}
+
+func cloneExternalConversationDeliveryCorrelation(value *ExternalConversationDeliveryCorrelation) *ExternalConversationDeliveryCorrelation {
+	if value == nil {
+		return nil
+	}
+	copy := *value
 	return &copy
 }
 
