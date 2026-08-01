@@ -495,6 +495,18 @@ type RepairGenerator interface {
 	Repair(context.Context, GenerateRequest, []byte, error) ([]byte, error)
 }
 
+// IntentGenerator is the preferred probabilistic boundary. It returns only a
+// semantic answer sheet; OpenSeal deterministically compiles the canonical
+// resource and runtime contracts. Generator remains temporarily accepted for
+// deterministic fixtures while embedders move to this safer boundary.
+type IntentGenerator interface {
+	GenerateIntent(context.Context, GenerateRequest) (AuthoringIntent, error)
+}
+
+type IntentRepairGenerator interface {
+	RepairIntent(context.Context, GenerateRequest, AuthoringIntent, error) (AuthoringIntent, error)
+}
+
 // CompilePhase identifies the current deterministic boundary of probabilistic
 // workforce authoring. It is deliberately credential- and payload-free so a
 // host can safely persist it as Run progress.

@@ -136,6 +136,66 @@ func TestOpenAICompatibleGeneratorNegotiatesCanonicalToolTransport(t *testing.T)
 	}
 }
 
+func TestOpenAICompatibleIntentTransportExposesOnlySemanticForm(t *testing.T) {
+	var observed map[string]interface{}
+	arguments := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}],"activation":"inactive"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&observed); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "tool_calls", "message": map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{
+				"type": "function", "function": map[string]interface{}{"name": "submit_authoring_intent", "arguments": arguments},
+			}}},
+		}}})
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := generator.GenerateIntent(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Analyst Agent"})
+	if err != nil || intent.Agents[0].Key != "analyst" {
+		t.Fatalf("intent=%#v err=%v", intent, err)
+	}
+	function := observed["tools"].([]interface{})[0].(map[string]interface{})["function"].(map[string]interface{})
+	if function["name"] != "submit_authoring_intent" {
+		t.Fatalf("semantic function = %#v", function)
+	}
+	schemaBytes, _ := json.Marshal(function["parameters"])
+	for _, forbidden := range []string{"WorkforceCandidate", "AgentDefinition", "runbook_Definition", "resultPath", "standingGrants"} {
+		if strings.Contains(string(schemaBytes), forbidden) {
+			t.Fatalf("semantic provider contract contains %q", forbidden)
+		}
+	}
+}
+
+func TestOpenAICompatibleIntentTransportRepairsMalformedSmallForm(t *testing.T) {
+	valid := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}],"activation":"inactive"}`
+	malformed := strings.Replace(valid, `}],"activation"`, `}]],"activation"`, 1)
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		arguments := malformed
+		if attempts > 1 {
+			arguments = valid
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "tool_calls", "message": map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{
+				"type": "function", "function": map[string]interface{}{"name": "submit_authoring_intent", "arguments": arguments},
+			}}},
+		}}})
+	}))
+	defer server.Close()
+	generator, _ := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	intent, err := generator.GenerateIntent(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Analyst Agent"})
+	if err != nil || attempts != 2 || intent.Name != "Analyst" {
+		t.Fatalf("intent=%#v attempts=%d err=%v", intent, attempts, err)
+	}
+}
+
 func TestOpenAICompatibleGeneratorSupportsPlainLocallyValidatedTransport(t *testing.T) {
 	var observed map[string]interface{}
 	content := `{"schemaVersion":"openseal.authoring-result/v1","candidate":{"agents":[]},"authoring":{"version":"openseal.authoring-form/v1"},"commitments":{}}`
@@ -295,7 +355,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 	}
 	projected := modelRequest.Catalog.Skills["source"]
 	if projected.ID != "source" || projected.Version != "1.2.3" || projected.SourceIdentity != "registry::publisher/source" ||
-		projected.RuntimeIdentity != nil || len(projected.ActionContracts) != 1 ||
+		projected.RuntimeIdentity != nil || len(projected.ActionContracts) != 0 ||
 		len(projected.Actions) != 1 || projected.Actions[0] != "read" || projected.Readiness != SkillReadinessNeedsBinding ||
 		len(projected.CredentialKinds) != 1 || len(projected.Compatibility) != 1 || projected.Compatibility[0].Requirement != "credential:oauth" {
 		t.Fatalf("projected Skill = %#v", projected)
@@ -322,7 +382,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 
 func TestAuthoringPromptKeepsDomainSemanticsWithoutDuplicatingSchema(t *testing.T) {
 	prompt := authoringModelSystemPrompt()
-	for _, expected := range []string{"Interactive browser work is cognitive", "delegate bounded work to the Agent", "never guess DOM targets", "Objectives are durable outcomes", "Select only exact catalog Skill ids, versions, and actions"} {
+	for _, expected := range []string{"semantic authoring answer sheet", "OpenSeal—not you—creates identifiers", "Objectives are durable outcomes", "Select only exact catalog Skill ids and actions", "Never include secret values"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt omitted %q", expected)
 		}
