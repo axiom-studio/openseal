@@ -315,6 +315,32 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 	}
 }
 
+func TestApprovalNotificationReusesConversationAfterEndpointRename(t *testing.T) {
+	ctx := t.Context()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog))
+
+	first, err := worker.approvalConversation(ctx, endpoint.Scope, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := cloneExternalConversationEndpoint(endpoint)
+	renamed.Name = "Approvals in the new channel"
+	renamed.Revision++
+	renamed.UpdatedAt = renamed.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, renamed, endpoint.Revision); err != nil {
+		t.Fatal(err)
+	}
+
+	replayed, err := worker.approvalConversation(ctx, renamed.Scope, renamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.ID != first.ID || replayed.Owner != first.Owner {
+		t.Fatalf("renamed endpoint conversation = %#v, want stable %#v", replayed, first)
+	}
+}
+
 func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
