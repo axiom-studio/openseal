@@ -510,7 +510,8 @@ func TestAgentRunWorkerRequeuesAgentProposalFailureWithinBoundedRecovery(t *test
 		t.Fatal(err)
 	}
 	turn := &AgentTurn{ID: "turn-commit", ContinuationCheckpoint: map[string]interface{}{
-		"actionInputs": map[string]interface{}{"call": map[string]interface{}{"target": "s4:e9"}},
+		"actionInputs":         map[string]interface{}{"call": map[string]interface{}{"target": "s4:e9"}},
+		"inventedFillActionId": "action-call:not-real",
 	}, RequestedActions: []TurnAction{{
 		Type: "skill_action", Capability: "skill-browser.camoufox-commit", Summary: "Publish comment", InputRef: "/actionInputs/call",
 	}}}
@@ -525,6 +526,13 @@ func TestAgentRunWorkerRequeuesAgentProposalFailureWithinBoundedRecovery(t *test
 		fmt.Sprint(recovery["attempt"]) != "1" || recovery["capability"] != "skill-browser.camoufox-commit" ||
 		recovery["error"] != "target requires a current observation" {
 		t.Fatalf("requeued proposal recovery = %#v", requeued)
+	}
+	if requeued.Checkpoint["inventedFillActionId"] != nil {
+		t.Fatalf("rejected model checkpoint state survived recovery: %#v", requeued.Checkpoint)
+	}
+	arguments, err := resolveTurnActionInput(requeued.Checkpoint, "/actionInputs/call")
+	if err != nil || arguments["target"] != "s4:e9" {
+		t.Fatalf("rejected action arguments were not retained: %#v, %v", arguments, err)
 	}
 	second, ok := checkpointGovernedAgentProposalFailure(requeued, turn, "target still requires a current observation")
 	if !ok || fmt.Sprint(second[proposalRecoveryCheckpointKey].(map[string]interface{})["attempt"]) != "2" {
