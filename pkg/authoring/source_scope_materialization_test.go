@@ -148,6 +148,9 @@ func TestCompilerBlocksAmbiguousSourceScopeMaterialization(t *testing.T) {
 
 func TestCompilerBindsSourceScopeToSingleRunbookWhenSeveralSkillActionsParticipate(t *testing.T) {
 	definition := sourceScopeAgent("1.0.0", true)
+	search := definition.Runbook.Steps["search"]
+	search.Action.Next = "snapshot"
+	definition.Runbook.Steps["search"] = search
 	definition.Runbook.Steps["snapshot"] = runbook.Step{Kind: runbook.StepAction, Action: &runbook.ActionStep{
 		SkillID: "reddit-search", SkillVersion: "2.0.0", Action: "search",
 		Arguments: map[string]runbook.Value{"query": literalActionValue("recent")}, ResultPath: "/results/snapshot", Next: "done",
