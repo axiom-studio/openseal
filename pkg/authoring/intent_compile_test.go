@@ -158,7 +158,7 @@ func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) 
 		Agents: []AuthoringAgentIntent{{Key: "slack-helper", Name: "Slack Helper", Purpose: "Help in Slack", Behavior: "Answer channel questions accurately."}},
 		Conversations: []AuthoringChannelIntent{{
 			Key: "slack-help", Name: "Slack help channel", OwnerKey: "slack-helper", Provider: "slack", Destination: "#help",
-			Purposes: []string{"conversation", "approvals"}, ReplyInThread: true,
+			Purposes: []AuthoringChannelPurpose{AuthoringChannelConversation, AuthoringChannelApprovals}, ReplyInThread: true,
 		}},
 	}
 	generated, err := CompileAuthoringIntent(intent, GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog})
