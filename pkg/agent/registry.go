@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -372,7 +373,7 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	}
 	allowedFields := append(append([]string(nil), base.Amendments.AllowedFields...), additionalAllowedFields...)
 	if !isSubset(changedFields, allowedFields) {
-		return nil, errors.New("amendment changes fields outside the definition policy")
+		return nil, fmt.Errorf("amendment changes fields outside the definition policy: changed=%v allowed=%v", changedFields, allowedFields)
 	}
 	riskWidening := riskRank(candidate.Authority.MaximumRisk) > riskRank(base.Authority.MaximumRisk) || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !isSubset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs)
 	if riskWidening && len(base.Amendments.ApproverPrincipals) == 0 {

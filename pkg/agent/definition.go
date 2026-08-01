@@ -45,6 +45,19 @@ type ApprovalDestination struct {
 	EndpointID string `json:"endpointId"`
 }
 
+// ChannelRoute is the reviewed workflow edge between an Agent and one
+// externally materialized conversation endpoint. The endpoint owns provider
+// installation, address, credentials, and callback route; this immutable
+// definition owns only how that endpoint participates in Agent work.
+type ChannelRoute struct {
+	EndpointID       string   `json:"endpointId"`
+	Trigger          string   `json:"trigger,omitempty"`
+	MessageSelection string   `json:"messageSelection"`
+	ReplyMode        string   `json:"replyMode"`
+	IgnoreBots       bool     `json:"ignoreBots"`
+	Purposes         []string `json:"purposes"`
+}
+
 // ApprovalTimeoutPolicy defines the reviewed fallback for an unanswered
 // approval. It is opt-in: omitting it preserves fail-closed expiration.
 type ApprovalTimeoutPolicy struct {
@@ -99,6 +112,7 @@ type AgentDefinition struct {
 	ObjectiveTemplates  []ObjectiveTemplate    `json:"objectiveTemplates,omitempty"`
 	Evaluations         []EvaluationCriterion  `json:"evaluations,omitempty"`
 	Runbook             *runbook.Definition    `json:"runbook,omitempty"`
+	Channels            []ChannelRoute         `json:"channels,omitempty"`
 	Amendments          AmendmentPolicy        `json:"amendments,omitempty"`
 	Provenance          DefinitionProvenance   `json:"provenance,omitempty"`
 	Digest              string                 `json:"digest,omitempty"`
@@ -147,6 +161,46 @@ func (d *AgentDefinition) Validate() error {
 			return errors.New("agent approval destinations require unique portable endpoint ids")
 		}
 		seenDestinations[id] = true
+	}
+	seenChannels := make(map[string]bool, len(d.Channels))
+	for _, channel := range d.Channels {
+		endpointID := strings.TrimSpace(channel.EndpointID)
+		if endpointID == "" || len(endpointID) > 256 || seenChannels[endpointID] {
+			return errors.New("agent channels require unique portable endpoint ids")
+		}
+		seenChannels[endpointID] = true
+		switch channel.MessageSelection {
+		case "all_messages", "mentions", "direct_or_mentions":
+		default:
+			return fmt.Errorf("agent channel %s has invalid message selection", endpointID)
+		}
+		switch channel.ReplyMode {
+		case "provider_default", "thread", "channel":
+		default:
+			return fmt.Errorf("agent channel %s has invalid reply mode", endpointID)
+		}
+		if len(channel.Purposes) == 0 {
+			return fmt.Errorf("agent channel %s requires at least one workflow purpose", endpointID)
+		}
+		seenPurposes := map[string]bool{}
+		for _, purpose := range channel.Purposes {
+			if (purpose != "conversation" && purpose != "approvals") || seenPurposes[purpose] {
+				return fmt.Errorf("agent channel %s has invalid or duplicate purpose", endpointID)
+			}
+			seenPurposes[purpose] = true
+		}
+		if trigger := strings.TrimSpace(channel.Trigger); trigger != "" {
+			if d.Runbook == nil {
+				return fmt.Errorf("agent channel %s references a trigger without a Runbook", endpointID)
+			}
+			value, ok := d.Runbook.Triggers[trigger]
+			if !ok || value.Kind != runbook.TriggerEvent {
+				return fmt.Errorf("agent channel %s must reference an event trigger", endpointID)
+			}
+		}
+		if seenPurposes["approvals"] && !seenDestinations[endpointID] {
+			return fmt.Errorf("agent channel %s approval purpose requires an approval destination", endpointID)
+		}
 	}
 	if timeout := d.Authority.ApprovalTimeout; timeout != nil {
 		if timeout.AfterSeconds <= 0 || timeout.AfterSeconds > int64((30*24*time.Hour)/time.Second) || (timeout.Decision != "expire" && timeout.Decision != "approve") {

@@ -18,7 +18,9 @@ func TestAgentManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 	}
 	definition, err := engine.GetSkillDefinition(context.Background(), AgentManagementSkillID, AgentManagementSkillVersion)
 	if err != nil || definition == nil || definition.Version != AgentManagementSkillVersion ||
-		definition.Actions[AgentActionAmendBehavior].Name != AgentActionAmendBehavior {
+		definition.Actions[AgentActionAmendBehavior].Name != AgentActionAmendBehavior ||
+		definition.Actions[AgentActionListChannels].Name != AgentActionListChannels ||
+		definition.Actions[AgentActionConfigureChannel].Name != AgentActionConfigureChannel {
 		t.Fatalf("built-in Agent management definition = %#v, %v", definition, err)
 	}
 	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
