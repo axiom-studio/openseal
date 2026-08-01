@@ -293,7 +293,7 @@ func materializeRunbookSourceTargets(route sourceScopeRunbook, targets, inputKey
 			if step.Delegate.Context == nil {
 				step.Delegate.Context = map[string]runbook.Value{}
 			}
-			step.Delegate.Context[key] = runbook.Value{Ref: "/input/" + key}
+			step.Delegate.Context[key] = runbook.Value{Ref: runbook.JSONPointer("/input/" + key)}
 			route.definition.Steps[stepID] = step
 		}
 	}

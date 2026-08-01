@@ -224,9 +224,7 @@ func (v *validator) validateStep(path, id string, step Step) {
 	if count != 1 {
 		v.add(path, "step.payload", "a step must contain exactly one typed payload")
 	}
-	validKind := step.Kind == StepAction || step.Kind == StepDelegate || step.Kind == StepDecision || step.Kind == StepTransform || step.Kind == StepWait ||
-		step.Kind == StepFork || step.Kind == StepJoin || step.Kind == StepForEach || step.Kind == StepLoopReturn || step.Kind == StepEnd
-	if !validKind {
+	if !step.Kind.Valid() {
 		v.add(path+".kind", "step.kind_unsupported", "unsupported step kind %q", step.Kind)
 	} else if !stepPayloadMatchesKind(step) {
 		v.add(path, "step.kind_mismatch", "step kind %q does not match its payload", step.Kind)
@@ -236,7 +234,7 @@ func (v *validator) validateStep(path, id string, step Step) {
 		if step.Action == nil {
 			return
 		}
-		for field, value := range map[string]string{"skillId": step.Action.SkillID, "skillVersion": step.Action.SkillVersion, "action": step.Action.Action, "resultPath": step.Action.ResultPath} {
+		for field, value := range map[string]string{"skillId": step.Action.SkillID, "skillVersion": step.Action.SkillVersion, "action": step.Action.Action, "resultPath": string(step.Action.ResultPath)} {
 			if strings.TrimSpace(value) == "" {
 				v.add(path+".action."+field, "action.identity_required", "%s is required", field)
 			}
@@ -259,7 +257,7 @@ func (v *validator) validateStep(path, id string, step Step) {
 			v.validateValue(path+".delegate.context."+key, value)
 		}
 		v.validatePointer(path+".delegate.resultPath", step.Delegate.ResultPath)
-		if step.Delegate.Mode != "" && step.Delegate.Mode != DelegateBehavior && step.Delegate.Mode != DelegateReason {
+		if step.Delegate.Mode != "" && !step.Delegate.Mode.Valid() {
 			v.add(path+".delegate.mode", "delegate.mode", "delegation mode must be behavior or reason")
 		}
 		if step.Delegate.Timeout < 0 {
@@ -294,7 +292,7 @@ func (v *validator) validateStep(path, id string, step Step) {
 			v.add(path+".transform.assignments", "transform.assignment_required", "at least one assignment is required")
 		}
 		for pointer, value := range step.Transform.Assignments {
-			v.validatePointer(path+".transform.assignments."+pointer, pointer)
+			v.validatePointer(path+".transform.assignments."+pointer, JSONPointer(pointer))
 			v.validateValue(path+".transform.assignments."+pointer, value)
 		}
 		v.requireStep(path+".transform.next", step.Transform.Next)
@@ -342,7 +340,7 @@ func (v *validator) validateStep(path, id string, step Step) {
 			return
 		}
 		v.requireKind(path+".join.fork", step.Join.Fork, StepFork)
-		if step.Join.Mode != JoinAll && step.Join.Mode != JoinAny {
+		if !step.Join.Mode.Valid() {
 			v.add(path+".join.mode", "join.mode", "join mode must be all or any")
 		}
 		v.requireStep(path+".join.next", step.Join.Next)
@@ -404,7 +402,7 @@ func stepPayloadMatchesKind(step Step) bool {
 
 func (v *validator) validateValue(path string, value Value) {
 	hasLiteral := len(value.Literal) > 0
-	hasRef := strings.TrimSpace(value.Ref) != ""
+	hasRef := strings.TrimSpace(string(value.Ref)) != ""
 	hasTemplate := len(value.Template) > 0
 	sources := 0
 	for _, present := range []bool{hasLiteral, hasRef, hasTemplate} {
@@ -425,7 +423,7 @@ func (v *validator) validateValue(path string, value Value) {
 	if hasTemplate {
 		for index, segment := range value.Template {
 			segmentPath := fmt.Sprintf("%s.template[%d]", path, index)
-			if (segment.Text == "") == (strings.TrimSpace(segment.Ref) == "") {
+			if (segment.Text == "") == (strings.TrimSpace(string(segment.Ref)) == "") {
 				v.add(segmentPath, "template.segment", "template segment requires exactly one text or ref")
 				continue
 			}
@@ -436,8 +434,8 @@ func (v *validator) validateValue(path string, value Value) {
 	}
 }
 
-func (v *validator) validatePointer(path, pointer string) {
-	if pointer == "" || !strings.HasPrefix(pointer, "/") {
+func (v *validator) validatePointer(path string, pointer JSONPointer) {
+	if !pointer.Valid() {
 		v.add(path, "pointer.invalid", "value must be a non-empty JSON Pointer")
 	}
 }

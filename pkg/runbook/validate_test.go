@@ -10,7 +10,7 @@ func literal(value interface{}) Value {
 	encoded, _ := json.Marshal(value)
 	return Value{Literal: encoded}
 }
-func ref(pointer string) Value { return Value{Ref: pointer} }
+func ref(pointer string) Value { return Value{Ref: JSONPointer(pointer)} }
 
 func TestValidateRepresentativeGovernedRunbook(t *testing.T) {
 	definition := &Definition{

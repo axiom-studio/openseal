@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/internal/domaincontract"
 	inferschema "github.com/invopop/jsonschema"
 	validateschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -85,41 +85,34 @@ func initializeAuthoringResultSchema() {
 	})
 }
 
-// canonicalAuthoringScalarSchema maps exact canonical domain types to their
-// closed provider vocabulary. It deliberately never infers semantics from
-// field names or object shapes.
+// canonicalAuthoringScalarSchema projects provider-neutral contracts declared
+// by canonical domain types. It deliberately never infers semantics from
+// field names or object shapes and has no knowledge of concrete domain types.
 func canonicalAuthoringScalarSchema(value reflect.Type) *inferschema.Schema {
-	enum := func(values ...string) *inferschema.Schema {
+	if value.Kind() != reflect.String {
+		return nil
+	}
+
+	contract := reflect.New(value).Elem().Interface()
+	var schema *inferschema.Schema
+	if vocabulary, ok := contract.(domaincontract.StringVocabulary); ok {
+		values := vocabulary.ContractValues()
 		items := make([]interface{}, len(values))
 		for index, value := range values {
 			items[index] = value
 		}
-		return &inferschema.Schema{Type: "string", Enum: items}
+		schema = &inferschema.Schema{Type: "string", Enum: items}
 	}
-	switch value {
-	case reflect.TypeOf(RefinementQuestionCategory("")):
-		return enum(string(RefinementCategoryCredential), string(RefinementCategorySkill), string(RefinementCategoryScope), string(RefinementCategoryPolicy), string(RefinementCategoryAuthority), string(RefinementCategoryDestination), string(RefinementCategoryBudget), string(RefinementCategoryApproval), string(RefinementCategoryOther))
-	case reflect.TypeOf(RefinementAnswerKind("")):
-		return enum(string(RefinementAnswerText), string(RefinementAnswerStringList), string(RefinementAnswerSingleSelect), string(RefinementAnswerMultiSelect), string(RefinementAnswerBoolean), string(RefinementAnswerCredentialReference), string(RefinementAnswerSkillSelection))
-	case reflect.TypeOf(RefinementProvenanceKind("")):
-		return enum(string(RefinementProvenancePrompt), string(RefinementProvenanceCatalog), string(RefinementProvenanceSkill), string(RefinementProvenanceCredential), string(RefinementProvenancePolicy), string(RefinementProvenanceRuntime))
-	case reflect.TypeOf(RefinementBlockingScope("")):
-		return enum(string(RefinementBlocksCandidate), string(RefinementBlocksEvaluation), string(RefinementBlocksApply))
-	case reflect.TypeOf(runbook.TriggerKind("")):
-		return enum(string(runbook.TriggerEvent), string(runbook.TriggerSchedule))
-	case reflect.TypeOf(runbook.ReportingMilestone("")):
-		return enum(string(runbook.ReportingStarted), string(runbook.ReportingApprovalRequired), string(runbook.ReportingCompleted), string(runbook.ReportingFailed))
-	case reflect.TypeOf(runbook.StepKind("")):
-		return enum(string(runbook.StepAction), string(runbook.StepDelegate), string(runbook.StepDecision), string(runbook.StepTransform), string(runbook.StepWait), string(runbook.StepFork), string(runbook.StepJoin), string(runbook.StepForEach), string(runbook.StepLoopReturn), string(runbook.StepEnd))
-	case reflect.TypeOf(runbook.DelegateMode("")):
-		return enum(string(runbook.DelegateBehavior), string(runbook.DelegateReason))
-	case reflect.TypeOf(runbook.JoinMode("")):
-		return enum(string(runbook.JoinAll), string(runbook.JoinAny))
-	case reflect.TypeOf(runbook.PredicateOperator("")):
-		return enum(string(runbook.PredicateEqual), string(runbook.PredicateNotEqual), string(runbook.PredicateExists), string(runbook.PredicateTruthy), string(runbook.PredicateGreater), string(runbook.PredicateAtLeast), string(runbook.PredicateLess), string(runbook.PredicateAtMost), string(runbook.PredicateContains), string(runbook.PredicateAll), string(runbook.PredicateAny), string(runbook.PredicateNot))
-	default:
-		return nil
+	if format, ok := contract.(domaincontract.StringFormat); ok {
+		if schema == nil {
+			schema = &inferschema.Schema{Type: "string"}
+		}
+		schema.Pattern = format.ContractPattern()
+		if minimum := format.ContractMinLength(); minimum > 0 {
+			schema.MinLength = &minimum
+		}
 	}
+	return schema
 }
 
 type AuthoringSchemaViolation struct {
