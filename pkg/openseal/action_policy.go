@@ -57,7 +57,8 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	// This also lets the narrow management capability propose fields outside
 	// the Agent's autonomous self-amendment allowlist without silently widening
 	// what the Agent may change on its own.
-	requiresBehaviorReview := input.Bound.Definition.ID == runtime.AgentManagementSkillID && input.Bound.Action.Name == runtime.AgentActionAmendBehavior
+	requiresBehaviorReview := input.Bound.Definition.ID == runtime.AgentManagementSkillID &&
+		(input.Bound.Action.Name == runtime.AgentActionAmendBehavior || input.Bound.Action.Name == runtime.AgentActionConfigureChannel)
 	if !requiresBehaviorReview {
 		if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
 			return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
