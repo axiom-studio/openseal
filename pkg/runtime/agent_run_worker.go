@@ -459,8 +459,9 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 	if sharedContext == nil {
 		sharedContext = make(map[string]interface{})
 	}
-	if origin := delegatedRunbookOrigin(run.Context); origin != nil {
-		sharedContext["triggerInput"] = origin
+	runbookOrigin := delegatedRunbookOrigin(run.Context)
+	if runbookOrigin != nil {
+		sharedContext["triggerInput"] = runbookOrigin
 	}
 	if proposal.Mode != "" {
 		sharedContext[DelegationModeContextKey] = proposal.Mode
@@ -502,12 +503,21 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 	if err != nil {
 		return nil, err
 	}
+	acceptancePolicy := AgentRequestAcceptanceRecipientReview
+	if runbookOrigin != nil {
+		// The kernel-authored Runbook turn has already selected the exact
+		// recipient under an immutable governed definition. A second model
+		// admission turn adds no authority and can only make deterministic
+		// scheduled work less reliable. Conversational/model-authored
+		// delegation continues to require recipient review.
+		acceptancePolicy = AgentRequestAcceptancePreauthorized
+	}
 	created, err := p.collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 		ID: requestID, Scope: run.Scope, Kind: AgentRequestKindRequest,
 		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: proposal.AssignedAgentID},
 		SourceRunID: run.ID, Goal: proposal.Goal, SharedContext: sharedContext, ChildCheckpoint: proposal.Checkpoint,
-		AcceptancePolicy: AgentRequestAcceptanceRecipientReview,
+		AcceptancePolicy: acceptancePolicy,
 		BudgetAllocation: budget, IdempotencyKey: key,
 	})
 	if err != nil {
