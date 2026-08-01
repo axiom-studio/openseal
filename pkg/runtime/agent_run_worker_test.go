@@ -934,6 +934,51 @@ func TestAgentRunWorkerRecoversPendingDelegationMaterializationIdempotently(t *t
 	}
 }
 
+func TestAgentRunWorkerPreauthorizesScheduledRunbookDelegation(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "scheduled-runbook-delegation"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
+		Goal: "execute governed schedule", Source: RunSourceSchedule,
+		Context: map[string]interface{}{
+			"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2",
+			"runbookActivationId": "activation-one", "runbookTriggerId": "hourly",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &TurnDelegationProposal{
+		StepID: "perform-hourly", AssignedAgentID: "specialist", Goal: "Perform governed hourly work",
+		Checkpoint: map[string]interface{}{}, Mode: runbook.DelegateReason,
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := pool.materializeTurnDelegation(t.Context(), "worker", source, &AgentTurn{ID: "turn", RequestedDelegation: proposal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting.Status != AgentRunStatusWaitingForAgent {
+		t.Fatalf("source = %#v", waiting)
+	}
+	requests, err := store.ListAgentRequests(t.Context(), AgentRequestFilter{Scope: scope, SourceRunID: source.ID, Limit: 10})
+	if err != nil || len(requests) != 1 || requests[0].AcceptancePolicy != AgentRequestAcceptancePreauthorized {
+		t.Fatalf("requests = %#v, error = %v", requests, err)
+	}
+	reconciled, err := pool.requestInbox.Reconcile(t.Context(), scope, "specialist")
+	if err != nil || reconciled.RequestsAccepted != 1 {
+		t.Fatalf("reconciled = %#v, error = %v", reconciled, err)
+	}
+	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(children) != 1 || children[0].Source != RunSourceRequest || children[0].AssignedAgentID != "specialist" {
+		t.Fatalf("children = %#v, error = %v", children, err)
+	}
+}
+
 func TestAgentRunWorkerCompletesPartialBoundedDelegationBudget(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "partial-delegation-budget"}
