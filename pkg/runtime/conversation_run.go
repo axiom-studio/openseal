@@ -875,13 +875,16 @@ type agentConversationObjective struct {
 }
 
 type agentConversationRunbook struct {
-	ActivationID      string                  `json:"activationId"`
-	ObjectiveID       string                  `json:"objectiveId"`
-	DefinitionID      string                  `json:"definitionId"`
-	DefinitionVersion string                  `json:"definitionVersion"`
-	Entrypoint        string                  `json:"entrypoint"`
-	Status            RunbookActivationStatus `json:"status"`
-	TriggerKind       string                  `json:"triggerKind"`
+	ActivationID       string                  `json:"activationId"`
+	ObjectiveID        string                  `json:"objectiveId"`
+	DefinitionID       string                  `json:"definitionId"`
+	DefinitionVersion  string                  `json:"definitionVersion"`
+	Entrypoint         string                  `json:"entrypoint"`
+	Status             RunbookActivationStatus `json:"status"`
+	TriggerKind        string                  `json:"triggerKind"`
+	Callable           bool                    `json:"callable"`
+	Occurrences        int64                   `json:"occurrencesProcessed,omitempty"`
+	MaximumOccurrences int64                   `json:"maximumOccurrences,omitempty"`
 }
 
 func (r *ConversationRunTurnRunner) agentConversationGoal(ctx context.Context, conversation *Conversation, trigger *ChannelMessage, recent []*ChannelMessage) (string, error) {
@@ -941,10 +944,15 @@ func (r *ConversationRunTurnRunner) agentConversationGoal(ctx context.Context, c
 			if activation == nil {
 				continue
 			}
+			maximumOccurrences := int64(0)
+			if activation.Trigger.Schedule != nil {
+				maximumOccurrences = activation.Trigger.Schedule.MaximumOccurrences
+			}
 			payload.Runbooks = append(payload.Runbooks, agentConversationRunbook{
 				ActivationID: activation.ID, ObjectiveID: activation.ObjectiveID, DefinitionID: activation.DefinitionID,
 				DefinitionVersion: activation.DefinitionVersion, Entrypoint: activation.Trigger.Entrypoint,
-				Status: activation.Status, TriggerKind: string(activation.Trigger.Kind),
+				Status: activation.Status, TriggerKind: string(activation.Trigger.Kind), Callable: activation.Callable(),
+				Occurrences: activation.OccurrencesProcessed, MaximumOccurrences: maximumOccurrences,
 			})
 		}
 	}
@@ -1290,7 +1298,8 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 		return nil, false
 	}
 	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause &&
-		action != AgentActionAmendBehavior && action != AgentActionConfigureChannel {
+		action != AgentActionAmendBehavior && action != AgentActionConfigureChannel &&
+		action != RunbookActionStart && action != RunbookActionReplaceSchedule {
 		return nil, false
 	}
 	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, requested.InputRef)

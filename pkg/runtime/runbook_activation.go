@@ -111,6 +111,23 @@ type RunbookActivation struct {
 	CreationFingerprint  string                  `json:"creationFingerprint,omitempty"`
 }
 
+// Callable reports whether an activation can be started on demand. A schedule
+// that reached its reviewed occurrence ceiling is no longer scheduler-active,
+// but its immutable reviewed operation remains safe to invoke off-cycle.
+// Paused activations and explicitly retired activations without an exhausted
+// schedule remain unavailable.
+func (a *RunbookActivation) Callable() bool {
+	if a == nil {
+		return false
+	}
+	if a.Status == RunbookActivationActive {
+		return true
+	}
+	return a.Status == RunbookActivationRetired && a.Trigger.Kind == runbook.TriggerSchedule &&
+		a.Trigger.Schedule != nil && a.Trigger.Schedule.MaximumOccurrences > 0 &&
+		a.OccurrencesProcessed >= a.Trigger.Schedule.MaximumOccurrences
+}
+
 func (a *RunbookActivation) Validate() error {
 	if a == nil {
 		return errors.New("Runbook activation is required")
@@ -261,7 +278,7 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 	if activation == nil {
 		return nil, ErrRunbookActivationNotFound
 	}
-	if activation.Status != RunbookActivationActive {
+	if !activation.Callable() {
 		return nil, ErrRunbookActivationInactive
 	}
 	objective, err := store.GetObjective(ctx, scope, activation.ObjectiveID)
