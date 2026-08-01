@@ -91,12 +91,12 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	store.actions[portfolioKey(scope, "action-browse")] = &ActionCall{
 		ID: "action-browse", Scope: scope, RunID: run.ID, TurnID: "turn-browse", DeploymentID: owner.ID,
 		SkillID: "browser", SkillVersion: "1", Action: "browse", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead,
-		Arguments: map[string]interface{}{"password": "never-project-this"}, Output: map[string]interface{}{"token": "nor-this"}, ApprovalID: "approval-browse",
+		Arguments: map[string]interface{}{"url": "https://example.test/article", "password": "never-project-this"}, Output: map[string]interface{}{"title": "Useful article", "token": "nor-this"}, ApprovalID: "approval-browse",
 		Attempt: 1, MaxAttempts: 2, Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute),
 	}
 	store.approvals[portfolioKey(scope, "approval-browse")] = &ApprovalCheckpoint{
 		ID: "approval-browse", Scope: scope, RunID: run.ID, ActionCallID: "action-browse", Status: ApprovalStatusPending,
-		Risk: skill.RiskLevelRead, Summary: "Approve browsing", ProposedAction: map[string]interface{}{"password": "also-never-project-this"},
+		Risk: skill.RiskLevelRead, Summary: "Approve browsing", ProposedAction: map[string]interface{}{"comment": "A concise reviewed reply", "password": "also-never-project-this"},
 		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	store.artifacts[artifactStorageKey(scope, "evidence")] = map[int64]*Artifact{1: {
@@ -129,6 +129,11 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	browseVisit := nodes["browse"].Visits[0]
 	if nodes["browse"].Status != RunbookStepTraceSucceeded || len(browseVisit.Actions) != 1 || len(browseVisit.Approvals) != 1 || len(browseVisit.Artifacts) != 1 || len(browseVisit.Trace.Outputs) != 1 || browseVisit.Trace.Outputs[0].Shape != "object" {
 		t.Fatalf("browse node=%#v", nodes["browse"])
+	}
+	if browseVisit.Actions[0].Arguments["url"] != "https://example.test/article" || browseVisit.Actions[0].Arguments["password"] != "[REDACTED]" ||
+		browseVisit.Actions[0].Result["title"] != "Useful article" || browseVisit.Actions[0].Result["token"] != "[REDACTED]" ||
+		browseVisit.Approvals[0].ProposedAction["comment"] != "A concise reviewed reply" || browseVisit.Approvals[0].ProposedAction["password"] != "[REDACTED]" {
+		t.Fatalf("safe action and approval facts=%#v %#v", browseVisit.Actions[0], browseVisit.Approvals[0])
 	}
 	reviewVisit := nodes["review"].Visits[0]
 	if nodes["review"].Status != RunbookStepTraceWaiting || len(reviewVisit.ChildRuns) != 1 || reviewVisit.ChildRuns[0].ID != childID || len(reviewVisit.Trace.Inputs) != 1 || reviewVisit.Trace.Inputs[0].Availability != RunbookDataAvailable {
