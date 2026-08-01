@@ -138,7 +138,7 @@ func TestOpenAICompatibleGeneratorNegotiatesCanonicalToolTransport(t *testing.T)
 
 func TestOpenAICompatibleIntentTransportExposesOnlySemanticForm(t *testing.T) {
 	var observed map[string]interface{}
-	arguments := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}],"activation":"inactive"}`
+	arguments := `{"schemaVersion":"openseal.authoring-intent/v2","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if err := json.NewDecoder(request.Body).Decode(&observed); err != nil {
 			t.Fatal(err)
@@ -164,7 +164,7 @@ func TestOpenAICompatibleIntentTransportExposesOnlySemanticForm(t *testing.T) {
 		t.Fatalf("semantic function = %#v", function)
 	}
 	schemaBytes, _ := json.Marshal(function["parameters"])
-	for _, forbidden := range []string{"WorkforceCandidate", "AgentDefinition", "runbook_Definition", "resultPath", "standingGrants"} {
+	for _, forbidden := range []string{"WorkforceCandidate", "AgentDefinition", "runbook_Definition", "resultPath", "standingGrants", `"activation"`} {
 		if strings.Contains(string(schemaBytes), forbidden) {
 			t.Fatalf("semantic provider contract contains %q", forbidden)
 		}
@@ -172,8 +172,8 @@ func TestOpenAICompatibleIntentTransportExposesOnlySemanticForm(t *testing.T) {
 }
 
 func TestOpenAICompatibleIntentTransportRepairsMalformedSmallForm(t *testing.T) {
-	valid := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}],"activation":"inactive"}`
-	malformed := strings.Replace(valid, `}],"activation"`, `}]],"activation"`, 1)
+	valid := `{"schemaVersion":"openseal.authoring-intent/v2","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}]}`
+	malformed := strings.Replace(valid, `}]}`, `}]]}`, 1)
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
@@ -197,8 +197,8 @@ func TestOpenAICompatibleIntentTransportRepairsMalformedSmallForm(t *testing.T) 
 }
 
 func TestOpenAICompatibleIntentTransportRepairsWithExactSemanticDiagnostics(t *testing.T) {
-	valid := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}],"activation":"inactive"}`
-	invalid := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately.","skills":[{"catalogId":"missing-skill","required":true}]}],"activation":"inactive"}`
+	valid := `{"schemaVersion":"openseal.authoring-intent/v2","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}]}`
+	invalid := `{"schemaVersion":"openseal.authoring-intent/v2","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately.","skills":[{"catalogId":"missing-skill","required":true}]}]}`
 	attempts := 0
 	var repairPrompt string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
