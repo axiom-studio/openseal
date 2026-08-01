@@ -474,6 +474,15 @@ func priorityObservationElement(item map[string]interface{}) bool {
 	if role == "textbox" || role == "combobox" || role == "textarea" || role == "checkbox" || role == "radio" || role == "option" {
 		return true
 	}
+	if role == "link" && strings.EqualFold(strings.TrimSpace(fmt.Sprint(item["destinationScope"])), "same_origin") &&
+		strings.TrimSpace(fmt.Sprint(item["destinationPath"])) != "" {
+		name := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["name"])))
+		for _, token := range []string{"comment", "discussion", "permalink", "repl", "thread", "view post"} {
+			if strings.Contains(name, token) {
+				return true
+			}
+		}
+	}
 	if role != "button" {
 		return false
 	}
