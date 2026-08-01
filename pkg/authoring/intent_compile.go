@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -32,10 +33,16 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 		Assumptions:   normalized(intent.Assumptions),
 	}
 	agents := make(map[string]*agent.AgentDefinition, len(intent.Agents))
+	existingAgents := existingAuthoringAgentsByKey(request.Existing)
 	for _, answer := range intent.Agents {
 		definition, err := compileAuthoringAgent(answer, request)
 		if err != nil {
 			return GenerationResponse{}, err
+		}
+		if current := existingAgents[answer.Key]; current != nil {
+			definition.ID = current.ID
+			definition.Version = nextAuthoringVersion(current.Version)
+			canonicalizeIntentRunbookOwner(definition, answer.Key)
 		}
 		agents[answer.Key] = definition
 		result.Candidate.Agents = append(result.Candidate.Agents, definition)
@@ -45,8 +52,20 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 		if err != nil {
 			return GenerationResponse{}, err
 		}
+		if request.Existing != nil && request.Existing.Team != nil {
+			definition.ID = request.Existing.Team.ID
+			definition.Version = nextAuthoringVersion(request.Existing.Team.Version)
+		}
 		result.Candidate.Team = definition
 		result.Candidate.Assignments = assignments
+	}
+	endpoints, formValues, err := compileAuthoringConversations(intent, agents, result.Candidate.Team, request.Catalog)
+	if err != nil {
+		return GenerationResponse{}, err
+	}
+	result.Candidate.ConversationEndpoints = endpoints
+	if len(formValues) > 0 {
+		result.Authoring.Values = formValues
 	}
 	questions, err := compileAuthoringClarifications(intent.Clarifications)
 	if err != nil {
@@ -54,6 +73,125 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 	}
 	result.UnresolvedQuestions = questions
 	return result, nil
+}
+
+// ProjectAuthoringIntent is the struct-to-form half of the semantic codec. It
+// is used for amendments so a model sees current user-facing intent without
+// receiving canonical runtime structs.
+func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
+	if candidate == nil || len(candidate.Agents) == 0 {
+		return nil
+	}
+	result := &AuthoringIntent{SchemaVersion: AuthoringIntentSchemaVersion, Activation: candidate.Activation}
+	if candidate.Team != nil {
+		result.Kind, result.Name, result.Purpose = AuthoringResourceTeam, candidate.Team.DisplayName, candidate.Team.Purpose
+	} else if len(candidate.Agents) == 1 {
+		result.Kind, result.Name, result.Purpose = AuthoringResourceAgent, candidate.Agents[0].DisplayName, candidate.Agents[0].Purpose
+	} else {
+		result.Kind, result.Name, result.Purpose = AuthoringResourceWorkforce, "Workforce", "Coordinate the requested Agents"
+	}
+	keys := semanticAgentKeys(candidate.Agents)
+	for _, definition := range candidate.Agents {
+		if definition == nil {
+			continue
+		}
+		answer := AuthoringAgentIntent{
+			Key: keys[definition.ID], Name: definition.DisplayName, Purpose: definition.Purpose, Behavior: definition.SystemPrompt,
+			Personality: definition.Personality, OperatingPrinciples: append([]string(nil), definition.OperatingPrinciples...),
+		}
+		for _, requirement := range definition.SkillRequirements {
+			answer.Skills = append(answer.Skills, AuthoringSkillIntent{CatalogID: requirement.SkillID, Actions: append([]string(nil), requirement.RequiredActions...), Required: !requirement.Optional})
+		}
+		objectiveKeys := map[string]string{}
+		for _, objective := range definition.ObjectiveTemplates {
+			answer.Objectives = append(answer.Objectives, AuthoringObjectiveIntent{
+				Key: objective.ID, Title: objective.Title, Outcome: objective.Goal,
+				SuccessCriteria: objectStringList(objective.SuccessCriteria), Constraints: objectStringList(objective.Constraints), Priority: objective.Priority,
+			})
+			objectiveKeys[WorkforceObjectiveKey("agent", definition.ID, objective.ID)] = objective.ID
+			objectiveKeys[objective.ID] = objective.ID
+		}
+		if definition.Runbook != nil {
+			for key, start := range definition.Runbook.Entrypoints {
+				contract := definition.Runbook.Interfaces[key]
+				operation := AuthoringOperationIntent{
+					Key: authoringPortableKey(key), Name: contract.Description, Goal: contract.Description,
+					Wake: AuthoringWakeOnDemand, Approval: AuthoringApprovalByPolicy,
+				}
+				if step := definition.Runbook.Steps[start]; strings.TrimSpace(step.Name) != "" {
+					operation.Name = step.Name
+				}
+				for _, trigger := range definition.Runbook.Triggers {
+					if trigger.Entrypoint != key {
+						continue
+					}
+					operation.ObjectiveKey = objectiveKeys[trigger.ObjectiveID]
+					operation.ReportProgress = trigger.Reporting != nil
+					switch trigger.Kind {
+					case runbook.TriggerSchedule:
+						operation.Wake, operation.Schedule = AuthoringWakeSchedule, projectAuthoringSchedule(trigger.Schedule)
+					case runbook.TriggerEvent:
+						operation.Wake, operation.EventType = AuthoringWakeEvent, trigger.EventType
+					}
+					break
+				}
+				if operation.ObjectiveKey == "" && len(answer.Objectives) > 0 {
+					operation.ObjectiveKey = answer.Objectives[0].Key
+				}
+				for _, requirement := range definition.SkillRequirements {
+					operation.SkillCatalogIDs = append(operation.SkillCatalogIDs, requirement.SkillID)
+				}
+				if definition.Authority.RequireApprovalAt != "" {
+					operation.Approval = AuthoringApprovalRequired
+				}
+				answer.Operations = append(answer.Operations, operation)
+			}
+		}
+		result.Agents = append(result.Agents, answer)
+	}
+	if candidate.Team != nil {
+		teamAnswer := &AuthoringTeamIntent{
+			Key: authoringPortableKey(candidate.Team.ID), Name: candidate.Team.DisplayName, Purpose: candidate.Team.Purpose,
+			OperatingPrinciples: append([]string(nil), candidate.Team.OperatingPrinciples...),
+		}
+		assignments := map[string][]string{}
+		for _, assignment := range candidate.Assignments {
+			assignments[assignment.RoleID] = append(assignments[assignment.RoleID], keys[assignment.AgentDefinitionID])
+		}
+		for _, role := range candidate.Team.Roles {
+			roleAnswer := AuthoringRoleIntent{
+				Key: role.ID, Name: role.DisplayName, Purpose: role.Purpose, AgentKeys: assignments[role.ID],
+				CanSpeakInChannels: role.ChannelParticipation == "" || role.ChannelParticipation == team.RoleChannelActive,
+			}
+			for _, grant := range role.SkillGrants {
+				catalogID := grant.CatalogID
+				if catalogID == "" {
+					catalogID = grant.SkillID
+				}
+				roleAnswer.SkillCatalogIDs = append(roleAnswer.SkillCatalogIDs, catalogID)
+			}
+			teamAnswer.Roles = append(teamAnswer.Roles, roleAnswer)
+		}
+		for _, objective := range candidate.Team.ObjectiveTemplates {
+			teamAnswer.Objectives = append(teamAnswer.Objectives, AuthoringObjectiveIntent{Key: objective.ID, Title: objective.Title, Outcome: objective.Goal, Priority: objective.Priority, SuccessCriteria: objectStringList(objective.SuccessCriteria), Constraints: objectStringList(objective.Constraints)})
+		}
+		result.Team = teamAnswer
+	}
+	for _, endpoint := range candidate.ConversationEndpoints {
+		ownerKey := keys[endpoint.Owner.ID]
+		if endpoint.Owner.Type == ConversationEndpointOwnerTeam && result.Team != nil {
+			ownerKey = result.Team.Key
+		}
+		purposes := make([]string, 0, len(endpoint.Purposes))
+		for _, purpose := range endpoint.Purposes {
+			purposes = append(purposes, string(purpose))
+		}
+		result.Conversations = append(result.Conversations, AuthoringChannelIntent{
+			Key: endpoint.ID, Name: endpoint.Name, OwnerKey: ownerKey, Provider: endpointProvider(candidate, endpoint), Destination: endpoint.Address,
+			Purposes: purposes, ReplyInThread: endpoint.Policy.ReplyMode == ConversationReplyThread,
+		})
+	}
+	return result
 }
 
 func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) error {
@@ -89,7 +227,7 @@ func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) 
 			}
 			seenSkills[selection.CatalogID] = true
 			for _, action := range selection.Actions {
-				if !containsString(skill.Actions, action) {
+				if !containsExactString(skill.Actions, action) {
 					return fmt.Errorf("Agent %s selects unknown action %s.%s", answer.Key, selection.CatalogID, action)
 				}
 			}
@@ -323,6 +461,84 @@ func compileAuthoringClarifications(values []AuthoringClarification) ([]Refineme
 	return result, nil
 }
 
+func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*agent.AgentDefinition, teamDefinition *team.Definition, catalog CapabilityCatalog) ([]ConversationEndpointBlueprint, []AuthoringFormValue, error) {
+	endpoints := make([]ConversationEndpointBlueprint, 0, len(intent.Conversations))
+	formValues := make([]AuthoringFormValue, 0, len(intent.Conversations))
+	seen := map[string]bool{}
+	for _, answer := range intent.Conversations {
+		if !validAuthoringIntentKey(answer.Key) || seen[answer.Key] || strings.TrimSpace(answer.Name) == "" || strings.TrimSpace(answer.OwnerKey) == "" || strings.TrimSpace(answer.Provider) == "" {
+			return nil, nil, fmt.Errorf("invalid conversation answer %q", answer.Key)
+		}
+		seen[answer.Key] = true
+		type adapterSelection struct {
+			skillID string
+			skill   SkillCapability
+			adapter ConversationAdapterCapability
+		}
+		matches := make([]adapterSelection, 0, 1)
+		for skillID, skill := range catalog.Skills {
+			for _, adapter := range skill.ConversationAdapters {
+				if strings.EqualFold(strings.TrimSpace(adapter.Provider), strings.TrimSpace(answer.Provider)) || skillID == strings.TrimSpace(answer.Provider) {
+					matches = append(matches, adapterSelection{skillID: skillID, skill: skill, adapter: adapter})
+				}
+			}
+		}
+		if len(matches) != 1 {
+			return nil, nil, fmt.Errorf("conversation %s requires exactly one authorized %s adapter; found %d", answer.Key, answer.Provider, len(matches))
+		}
+		selection := matches[0]
+		mode := capability.ConversationEndpointDirect
+		if containsConversationMode(selection.adapter.EndpointModes, capability.ConversationEndpointChannel) {
+			mode = capability.ConversationEndpointChannel
+		} else if !containsConversationMode(selection.adapter.EndpointModes, mode) {
+			return nil, nil, fmt.Errorf("conversation %s adapter has no supported endpoint mode", answer.Key)
+		}
+		owner := ConversationEndpointOwner{}
+		handler := ConversationHandlerBlueprint{}
+		if definition := agents[answer.OwnerKey]; definition != nil {
+			owner = ConversationEndpointOwner{Type: ConversationEndpointOwnerAgent, ID: definition.ID}
+			handler = ConversationHandlerBlueprint{Kind: ConversationHandlerAgent, AgentDefinitionID: definition.ID}
+		} else if teamDefinition != nil && answer.OwnerKey == intent.Team.Key {
+			owner = ConversationEndpointOwner{Type: ConversationEndpointOwnerTeam, ID: teamDefinition.ID}
+			handler = ConversationHandlerBlueprint{Kind: ConversationHandlerTeam}
+		} else {
+			return nil, nil, fmt.Errorf("conversation %s references unknown owner %q", answer.Key, answer.OwnerKey)
+		}
+		purposes := make([]ConversationEndpointPurpose, 0, len(answer.Purposes))
+		optionIDs := make([]string, 0, len(answer.Purposes))
+		for _, raw := range answer.Purposes {
+			purpose := ConversationEndpointPurpose(strings.TrimSpace(raw))
+			if purpose != ConversationEndpointPurposeConversation && purpose != ConversationEndpointPurposeApprovals {
+				return nil, nil, fmt.Errorf("conversation %s has unsupported purpose %q", answer.Key, raw)
+			}
+			if !hasConversationEndpointPurpose(purposes, purpose) {
+				purposes = append(purposes, purpose)
+				optionIDs = append(optionIDs, string(purpose))
+			}
+		}
+		if len(purposes) == 0 {
+			purposes = []ConversationEndpointPurpose{ConversationEndpointPurposeConversation}
+			optionIDs = []string{string(ConversationEndpointPurposeConversation)}
+		}
+		replyMode := ConversationReplyChannel
+		if answer.ReplyInThread && containsConversationFeature(selection.adapter.Features, capability.ConversationFeatureThreads) {
+			replyMode = ConversationReplyThread
+		}
+		endpoints = append(endpoints, ConversationEndpointBlueprint{
+			ID: answer.Key, Name: strings.TrimSpace(answer.Name), Owner: owner,
+			SkillID: selection.skillID, SkillVersion: selection.skill.Version, AdapterID: selection.adapter.ID,
+			Mode: mode, Address: strings.TrimSpace(answer.Destination), Handler: handler,
+			Policy:         ConversationEndpointPolicyBlueprint{MessageSelection: ConversationSelectDirectOrMention, ReplyMode: replyMode, IgnoreBots: true},
+			CanonicalReply: true, Purposes: purposes,
+			ArchitectureReason: "The authorized conversation adapter connects this reviewed channel directly to its canonical workforce owner.",
+		})
+		if catalogSupportsApprovalDecisions(catalog) {
+			formValues = append(formValues, AuthoringFormValue{FieldID: conversationEndpointPurposesFieldID, SubjectID: answer.Key, OptionIDs: optionIDs})
+		}
+	}
+	return endpoints, formValues, nil
+}
+
 func selectedSkillRisk(skill SkillCapability, actions []string) capability.RiskLevel {
 	risk := skill.MaximumRisk
 	if risk == "" {
@@ -378,4 +594,111 @@ func maxInt(left, right int) int {
 		return left
 	}
 	return right
+}
+
+func existingAuthoringAgentsByKey(candidate *WorkforceCandidate) map[string]*agent.AgentDefinition {
+	result := map[string]*agent.AgentDefinition{}
+	if candidate == nil {
+		return result
+	}
+	for id, key := range semanticAgentKeys(candidate.Agents) {
+		for _, definition := range candidate.Agents {
+			if definition != nil && definition.ID == id {
+				result[key] = definition
+				break
+			}
+		}
+	}
+	return result
+}
+
+func semanticAgentKeys(definitions []*agent.AgentDefinition) map[string]string {
+	result, used := map[string]string{}, map[string]bool{}
+	for index, definition := range definitions {
+		if definition == nil {
+			continue
+		}
+		base := authoringPortableKey(definition.ID)
+		if base == "" {
+			base = fmt.Sprintf("agent-%d", index+1)
+		}
+		key := base
+		for suffix := 2; used[key]; suffix++ {
+			key = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		used[key], result[definition.ID] = true, key
+	}
+	return result
+}
+
+func nextAuthoringVersion(value string) string {
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) == 3 {
+		if patch, err := strconv.Atoi(parts[2]); err == nil && patch >= 0 {
+			return parts[0] + "." + parts[1] + "." + strconv.Itoa(patch+1)
+		}
+	}
+	if value == "" {
+		return "1.0.0"
+	}
+	return value + ".1"
+}
+
+func canonicalizeIntentRunbookOwner(definition *agent.AgentDefinition, previousID string) {
+	if definition == nil || definition.Runbook == nil {
+		return
+	}
+	for id, trigger := range definition.Runbook.Triggers {
+		prefix := "agent:" + previousID + ":"
+		if strings.HasPrefix(trigger.ObjectiveID, prefix) {
+			trigger.ObjectiveID = "agent:" + definition.ID + ":" + strings.TrimPrefix(trigger.ObjectiveID, prefix)
+			definition.Runbook.Triggers[id] = trigger
+		}
+	}
+	for id, step := range definition.Runbook.Steps {
+		if step.Delegate == nil || len(step.Delegate.AgentID.Literal) == 0 {
+			continue
+		}
+		var owner string
+		if json.Unmarshal(step.Delegate.AgentID.Literal, &owner) == nil && owner == previousID {
+			step.Delegate.AgentID.Literal, _ = json.Marshal(definition.ID)
+			definition.Runbook.Steps[id] = step
+		}
+	}
+}
+
+func projectAuthoringSchedule(value *runbook.Schedule) string {
+	if value == nil {
+		return ""
+	}
+	switch normalizeWhitespace(value.Cron) {
+	case "0 0 * * * *":
+		return "every hour"
+	case "0 0 0 * * *":
+		return "daily at 00:00 " + value.Timezone
+	default:
+		return fmt.Sprintf("cron %q timezone %s jitter %d seconds", normalizeWhitespace(value.Cron), value.Timezone, value.JitterSeconds)
+	}
+}
+
+func objectStringList(value map[string]interface{}) []string {
+	items, _ := value["items"].([]string)
+	if len(items) > 0 {
+		return append([]string(nil), items...)
+	}
+	raw, _ := value["items"].([]interface{})
+	result := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if text, ok := item.(string); ok {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func endpointProvider(_ *WorkforceCandidate, endpoint ConversationEndpointBlueprint) string {
+	// The portable endpoint stores an exact Skill adapter rather than a second
+	// provider label. Catalog ids are the stable semantic fallback on amend;
+	// the current catalog resolves the adapter again during compilation.
+	return endpoint.SkillID
 }

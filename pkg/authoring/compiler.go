@@ -61,12 +61,17 @@ func (e *ContractGenerationError) Error() string {
 }
 
 type Compiler struct {
-	generator Generator
+	generator interface{}
 }
 
-func NewCompiler(generator Generator) (*Compiler, error) {
+func NewCompiler(generator interface{}) (*Compiler, error) {
 	if generator == nil {
 		return nil, errors.New("workforce authoring generator is required")
+	}
+	if _, intent := generator.(IntentGenerator); !intent {
+		if _, legacy := generator.(Generator); !legacy {
+			return nil, errors.New("workforce authoring generator must provide semantic intent")
+		}
 	}
 	return &Compiler{generator: generator}, nil
 }
@@ -103,7 +108,20 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	request.Form = form
 	reportCompileProgress(observe, CompilePhaseProviderRequest, 1, 1)
-	payload, err := c.generator.Generate(ctx, request)
+	var currentIntent AuthoringIntent
+	var payload []byte
+	if generator, ok := c.generator.(IntentGenerator); ok {
+		currentIntent, err = generator.GenerateIntent(ctx, request)
+		if err == nil {
+			var compiled GenerationResponse
+			compiled, err = CompileAuthoringIntent(currentIntent, request)
+			if err == nil {
+				payload, err = json.Marshal(compiled)
+			}
+		}
+	} else {
+		payload, err = c.generator.(Generator).Generate(ctx, request)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("generate workforce candidate: %w", err)
 	}
@@ -112,10 +130,30 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	reportCompileProgress(observe, CompilePhaseCandidateValidate, 1, 1)
 	generated, decodeErr := decodeGenerationResponse(payload)
+	repairCandidate := func(repairRequest GenerateRequest, invalid []byte, reason error) ([]byte, error) {
+		if repairer, ok := c.generator.(IntentRepairGenerator); ok {
+			repairedIntent, repairErr := repairer.RepairIntent(ctx, repairRequest, currentIntent, reason)
+			if repairErr != nil {
+				return nil, repairErr
+			}
+			compiled, compileErr := CompileAuthoringIntent(repairedIntent, repairRequest)
+			if compileErr != nil {
+				return nil, compileErr
+			}
+			currentIntent = repairedIntent
+			return json.Marshal(compiled)
+		}
+		if repairer, ok := c.generator.(RepairGenerator); ok {
+			return repairer.Repair(ctx, repairRequest, invalid, reason)
+		}
+		return nil, errors.New("authoring generator does not support bounded repair")
+	}
+	_, canRepairIntent := c.generator.(IntentRepairGenerator)
+	_, canRepairLegacy := c.generator.(RepairGenerator)
+	canRepair := canRepairIntent || canRepairLegacy
 	repairAttempts := 0
 	for decodeErr != nil {
-		repairer, ok := c.generator.(RepairGenerator)
-		if !ok {
+		if !canRepair {
 			return nil, fmt.Errorf("decode workforce candidate: %w", decodeErr)
 		}
 		if repairAttempts >= maximumRepairAttempts {
@@ -127,7 +165,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 			repairRequest.InvocationKey = fmt.Sprintf("%s:repair:%d", repairRequest.InvocationKey, repairAttempts)
 		}
 		reportCompileProgress(observe, CompilePhaseSchemaRepair, repairAttempts, maximumRepairAttempts)
-		payload, err = repairer.Repair(ctx, repairRequest, payload, decodeErr)
+		payload, err = repairCandidate(repairRequest, payload, decodeErr)
 		if err != nil {
 			return nil, fmt.Errorf("repair workforce candidate schema attempt %d: %w", repairAttempts, err)
 		}
@@ -186,7 +224,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	// Schema and semantic repair share one two-attempt budget. Every repair is
 	// revalidated from the raw AuthoringResult before it may replace the proposal.
 	contractRepairAttempts := repairAttempts
-	if repairer, ok := c.generator.(RepairGenerator); ok {
+	if canRepair {
 		repairReason := deterministicContractError(validation, repairableMissing)
 		for repairAttempts < maximumRepairAttempts && (len(validation) > 0 || len(repairableMissing) > 0) {
 			repairAttempts++
@@ -196,7 +234,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 				repairRequest.InvocationKey = fmt.Sprintf("%s:repair:%d", repairRequest.InvocationKey, repairAttempts)
 			}
 			reportCompileProgress(observe, CompilePhaseContractRepair, repairAttempts, maximumRepairAttempts)
-			repaired, repairErr := repairer.Repair(ctx, repairRequest, payload, repairReason)
+			repaired, repairErr := repairCandidate(repairRequest, payload, repairReason)
 			if repairErr != nil || len(repaired) == 0 || len(repaired) > maximumGenerationBytes {
 				break
 			}

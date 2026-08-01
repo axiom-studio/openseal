@@ -12,21 +12,19 @@ import (
 	"time"
 )
 
-const authoringSystemPrompt = `Produce one authoring proposal. When submit_authoring_result is available, call it exactly once; otherwise return only the canonical AuthoringResult JSON object.
+const authoringSystemPrompt = `Fill one semantic authoring answer sheet using submit_authoring_intent. Do not construct runtime resources or implementation JSON.
 
-Preserve explicit prompt facts as commitments. Put inferences only in assumptions. Do not invent authority, catalog identifiers, targets, credentials, source policies, or relationships. Add refinement questions only when ambiguity prevents a safe, internally consistent proposal.
+Describe only user-facing intent: the requested Agent or Team shape, names, roles, outcomes, behavior, persona, cadence or event intent, exact catalog Skills/actions, approval intent, reporting intent, assumptions, and genuinely blocking clarification questions.
 
-OpenSeal supplies the authoritative result schema, typed authoring form, capability catalog, and runtime-composition constraints. Fill the enabled authoring form controls and proposal fields using those definitions. Never emit compilerOutput form fields; OpenSeal derives those immutable values deterministically.
+OpenSeal—not you—creates identifiers, versions, Agent and Team definitions, assignments, Runbook graphs, triggers, node edges, JSON Pointers, budgets, authority grants, bindings, channels, and policy defaults. Never place any of those compiler-owned structures in an answer field.
 
-Objectives are durable outcomes. Recurring, event-driven, deterministic, or reusable execution belongs in a Runbook whose triggers reference exact Objective identifiers. Interactive browser work is cognitive: delegate bounded work to the Agent and let it choose only from authorized browser actions at run time; never guess DOM targets in a deterministic graph. Scheduled background work reports to a durable internal work channel unless the user explicitly requests silence.
+Use a short stable lowercase key for each answer subject and reference only keys declared in the same sheet. Select only exact catalog Skill ids and actions. Never invent credentials, source authority, external destinations, or catalog entries. Never include secret values. A standing-authority answer records user intent only and does not create a grant.
 
-Select only exact catalog Skill ids, versions, and actions. Every selected action must be authorized by the Agent and must stay within catalog risk and source-policy limits. Never treat installation, credential binding, or a proposed source policy as active authority. Credentials and secret values never appear in the proposal, questions, assumptions, provenance, or activity.
+Objectives are durable outcomes. Operations are reusable ways to work toward one Objective. Use on_demand for callable work, schedule only when the user requested recurring work, and event only for a concrete requested event. Preserve the user's schedule wording in the schedule answer; OpenSeal compiles it or asks the user for missing timing details.
 
-A standing grant exempts only one exact, explicitly authorized operation from per-run approval. Never infer one. Preserve explicit approval requirements as commitments and authority policy. Conversation endpoints use only supplied adapters, modes, handlers, and destinations. Canonical replies use the conversation outbox rather than a proactive send action.
+Create a Team only when the user requested one or distinct collaborating roles require it. Every role must name its participating Agent keys. Keep a standalone Agent standalone.
 
-Create a Team only when requested or genuinely required for distinct collaborating roles. Roles must be meaningful, staffed by valid assignments, and able to participate naturally. Create a Project only when several Objectives need shared milestones, evidence, hypotheses, artifacts, or delivery context. Keep standalone Agents standalone.
-
-Questions are dependency-blocking requests, not suggestions. Use typed skill-selection and credential-reference controls for those categories; never ask for secret text. Respect prior refinement answers as authoritative operator input. Definitions are immutable: amendments preserve ids and advance versions. Use conservative risk, bounded concurrency, and explicit, reviewable policy.`
+Clarifications contain only the natural question, why it blocks a sound proposal, and optional human-readable choices. OpenSeal owns the canonical question category, answer type, blocking scope, provenance, and validation.`
 
 const authoringSourceIdentityPrompt = " Treat sourceIdentity as exact immutable provenance whenever it is supplied; never substitute another publisher variant with the same id and version."
 const authoringSkillOptionActionsPrompt = " A skill_selection option may include actions, but every value must be an exact action exposed by that catalog Skill. Other answer option kinds must not include actions."
@@ -145,6 +143,78 @@ func (g *OpenAICompatibleGenerator) Generate(ctx context.Context, request Genera
 	})
 }
 
+// GenerateIntent is the production authoring boundary. The provider fills a
+// semantic form; it never receives the canonical runtime schema.
+func (g *OpenAICompatibleGenerator) GenerateIntent(ctx context.Context, request GenerateRequest) (AuthoringIntent, error) {
+	input, err := json.Marshal(promptGenerateRequest(request))
+	if err != nil {
+		return AuthoringIntent{}, err
+	}
+	return g.completeAuthoringIntent(ctx, request, request.InvocationKey, []map[string]string{
+		{"role": "system", "content": authoringModelSystemPrompt()},
+		{"role": "user", "content": string(input)},
+	})
+}
+
+func (g *OpenAICompatibleGenerator) RepairIntent(ctx context.Context, request GenerateRequest, invalid AuthoringIntent, validationErr error) (AuthoringIntent, error) {
+	if validationErr == nil {
+		return AuthoringIntent{}, errors.New("authoring intent repair requires a validation error")
+	}
+	requestPayload, err := json.Marshal(promptGenerateRequest(request))
+	if err != nil {
+		return AuthoringIntent{}, err
+	}
+	previous, err := json.Marshal(invalid)
+	if err != nil {
+		return AuthoringIntent{}, err
+	}
+	repair, err := json.Marshal(map[string]string{
+		"previousSemanticAnswers": string(previous),
+		"validationError":         validationErr.Error(),
+	})
+	if err != nil {
+		return AuthoringIntent{}, err
+	}
+	invocationKey := request.InvocationKey
+	if invocationKey != "" {
+		invocationKey += ":intent-repair"
+	}
+	return g.completeAuthoringIntent(ctx, request, invocationKey, []map[string]string{
+		{"role": "system", "content": authoringModelSystemPrompt()},
+		{"role": "user", "content": string(requestPayload)},
+		{"role": "user", "content": "Correct only the semantic answer fields identified by this validation result. Preserve the user's intent.\n" + string(repair)},
+	})
+}
+
+func (g *OpenAICompatibleGenerator) completeAuthoringIntent(ctx context.Context, request GenerateRequest, invocationKey string, messages []map[string]string) (AuthoringIntent, error) {
+	var lastErr error
+	for attempt := 0; attempt <= maximumSchemaRepairAttempts; attempt++ {
+		raw, err := g.completeContract(ctx, invocationKey, messages, authoringIntentContract())
+		if err != nil {
+			return AuthoringIntent{}, err
+		}
+		intent, err := decodeAuthoringIntent(raw)
+		if err == nil {
+			err = validateAuthoringIntent(intent, request.Catalog)
+		}
+		if err == nil {
+			return intent, nil
+		}
+		lastErr = err
+		if attempt == maximumSchemaRepairAttempts {
+			break
+		}
+		diagnostic, _ := json.Marshal(map[string]string{"validationError": publicSchemaDiagnostic(err)})
+		messages = append(messages, map[string]string{
+			"role": "user", "content": "The semantic answer sheet was invalid. Correct only this validation error and submit a complete replacement answer sheet.\n" + string(diagnostic),
+		})
+		if invocationKey != "" {
+			invocationKey += fmt.Sprintf(":semantic-repair:%d", attempt+1)
+		}
+	}
+	return AuthoringIntent{}, &SchemaGenerationError{RepairAttempts: maximumSchemaRepairAttempts, Diagnostic: publicSchemaDiagnostic(lastErr)}
+}
+
 func (g *OpenAICompatibleGenerator) Repair(ctx context.Context, request GenerateRequest, invalid []byte, validationErr error) ([]byte, error) {
 	if len(invalid) == 0 || len(invalid) > maximumGenerationBytes || validationErr == nil {
 		return nil, errors.New("bounded invalid output and validation error are required for authoring repair")
@@ -188,13 +258,21 @@ func authoringModelSystemPrompt() string {
 	return authoringSystemPrompt + authoringSourceIdentityPrompt + authoringSkillOptionActionsPrompt
 }
 
-func promptGenerateRequest(request GenerateRequest) GenerateRequest {
-	request.InvocationKey = ""
+func promptGenerateRequest(request GenerateRequest) AuthoringIntentRequest {
 	// Capability needs are verified server decisions used by the deterministic
 	// compiler refinement layer. They are not model instructions. The selected
 	// Skill reaches refinement-mode generation through the audited answer.
-	request.Catalog = compactPromptCapabilityCatalog(request.Catalog)
-	return request
+	catalog := compactPromptCapabilityCatalog(request.Catalog)
+	// The semantic planner selects capability identities and actions. Exact
+	// action schemas, hosted budgets, and runtime composition are compiler-owned.
+	for id, skill := range catalog.Skills {
+		skill.ActionContracts = nil
+		catalog.Skills[id] = skill
+	}
+	return AuthoringIntentRequest{
+		Mode: request.Mode, Prompt: request.Prompt, Existing: ProjectAuthoringIntent(request.Existing),
+		Catalog: catalog, CompositionRequirements: request.CompositionRequirements, Refinement: request.Refinement,
+	}
 }
 
 // compactPromptCapabilityCatalog removes positive provenance receipts that are
@@ -239,6 +317,24 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 }
 
 func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey string, messages []map[string]string) ([]byte, error) {
+	return g.completeContract(ctx, invocationKey, messages, authoringResultContract())
+}
+
+type authoringProviderContract struct {
+	Name        string
+	Description string
+	Schema      func() (map[string]interface{}, error)
+}
+
+func authoringResultContract() authoringProviderContract {
+	return authoringProviderContract{Name: "submit_authoring_result", Description: "Submit the completed OpenSeal authoring proposal.", Schema: AuthoringResultJSONSchema}
+}
+
+func authoringIntentContract() authoringProviderContract {
+	return authoringProviderContract{Name: "submit_authoring_intent", Description: "Submit semantic answers for OpenSeal to compile into an authoring proposal.", Schema: AuthoringIntentJSONSchema}
+}
+
+func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invocationKey string, messages []map[string]string, contract authoringProviderContract) ([]byte, error) {
 	payload := map[string]interface{}{
 		"model":    g.model,
 		"messages": messages,
@@ -248,20 +344,20 @@ func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey 
 		mode = OpenAICompatibleStructuredOutputTool
 	}
 	if mode == OpenAICompatibleStructuredOutputTool {
-		schema, err := AuthoringResultJSONSchema()
+		schema, err := contract.Schema()
 		if err != nil {
 			return nil, err
 		}
 		payload["tools"] = []interface{}{map[string]interface{}{
 			"type": "function",
 			"function": map[string]interface{}{
-				"name":        "submit_authoring_result",
-				"description": "Submit the completed OpenSeal authoring proposal.",
+				"name":        contract.Name,
+				"description": contract.Description,
 				"parameters":  schema,
 			},
 		}}
 		payload["tool_choice"] = map[string]interface{}{
-			"type": "function", "function": map[string]string{"name": "submit_authoring_result"},
+			"type": "function", "function": map[string]string{"name": contract.Name},
 		}
 	} else if mode == OpenAICompatibleStructuredOutputJSON {
 		payload["response_format"] = map[string]string{"type": "json_object"}
@@ -333,11 +429,11 @@ func (g *OpenAICompatibleGenerator) complete(ctx context.Context, invocationKey 
 	}
 	if mode == OpenAICompatibleStructuredOutputTool {
 		if len(choice.Message.ToolCalls) != 1 {
-			return nil, errors.New("authoring provider must return exactly one submit_authoring_result tool call")
+			return nil, fmt.Errorf("authoring provider must return exactly one %s tool call", contract.Name)
 		}
 		call := choice.Message.ToolCalls[0]
-		if call.Type != "function" || call.Function.Name != "submit_authoring_result" || strings.TrimSpace(call.Function.Arguments) == "" {
-			return nil, errors.New("authoring provider returned an invalid submit_authoring_result tool call")
+		if call.Type != "function" || call.Function.Name != contract.Name || strings.TrimSpace(call.Function.Arguments) == "" {
+			return nil, fmt.Errorf("authoring provider returned an invalid %s tool call", contract.Name)
 		}
 		return []byte(strings.TrimSpace(call.Function.Arguments)), nil
 	}

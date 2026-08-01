@@ -1,11 +1,39 @@
 package authoring
 
 import (
+	"context"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
+
+type semanticIntentGenerator struct{ intent AuthoringIntent }
+
+func (g semanticIntentGenerator) GenerateIntent(context.Context, GenerateRequest) (AuthoringIntent, error) {
+	return g.intent, nil
+}
+
+func TestCompilerUsesSemanticIntentBoundary(t *testing.T) {
+	intent := AuthoringIntent{
+		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
+		Name: "Analyst", Purpose: "Analyze evidence", Activation: WorkforceActivationInactive,
+		Agents: []AuthoringAgentIntent{{Key: "analyst", Name: "Analyst", Purpose: "Analyze evidence", Behavior: "Analyze supplied evidence accurately."}},
+	}
+	compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Analyst Agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.Candidate.Agents) != 1 || result.Candidate.Agents[0].ID != "analyst" {
+		t.Fatalf("semantic compile result = %#v", result)
+	}
+}
 
 func TestCompileAuthoringIntentOwnsScheduledRunbookStructure(t *testing.T) {
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
@@ -95,5 +123,75 @@ func TestCompileAuthoringIntentMapsClarificationWithoutModelOwnedWireEnums(t *te
 	}
 	if err := validateRefinementQuestions(generated.UnresolvedQuestions); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) {
+	catalog := slackChatbotCatalog()
+	slack := catalog.Skills["slack"]
+	slack.ConversationAdapters[0].InboundEventTypes = []string{capability.ConversationEventApprovalDecided, capability.ConversationEventMessageReceived}
+	catalog.Skills["slack"] = slack
+	intent := AuthoringIntent{
+		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
+		Name: "Slack Helper", Purpose: "Help in a Slack channel", Activation: WorkforceActivationActive,
+		Agents: []AuthoringAgentIntent{{Key: "slack-helper", Name: "Slack Helper", Purpose: "Help in Slack", Behavior: "Answer channel questions accurately."}},
+		Conversations: []AuthoringChannelIntent{{
+			Key: "slack-help", Name: "Slack help channel", OwnerKey: "slack-helper", Provider: "slack", Destination: "#help",
+			Purposes: []string{"conversation", "approvals"}, ReplyInThread: true,
+		}},
+	}
+	generated, err := CompileAuthoringIntent(intent, GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form, err := ProjectWorkforceAuthoringForm(catalog, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := CompileWorkforceAuthoringForm(&generated.Candidate, form, generated.Authoring); len(issues) > 0 {
+		t.Fatalf("conversation form issues = %#v", issues)
+	}
+	endpoint := generated.Candidate.ConversationEndpoints[0]
+	if endpoint.Handler.Kind != ConversationHandlerAgent || endpoint.Policy.ReplyMode != ConversationReplyThread || len(generated.Candidate.Agents[0].Authority.ApprovalDestinations) != 1 {
+		t.Fatalf("compiled conversation = %#v authority=%#v", endpoint, generated.Candidate.Agents[0].Authority)
+	}
+	if issues := validateCandidate(&generated.Candidate, nil); len(issues) > 0 {
+		t.Fatalf("candidate issues = %#v", issues)
+	}
+	if issues := validateConversationComposition(&generated.Candidate, GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog}); len(issues) > 0 {
+		t.Fatalf("conversation issues = %#v", issues)
+	}
+}
+
+func TestSemanticIntentRoundTripsAmendmentIdentityWithoutRuntimeJSON(t *testing.T) {
+	existing := WorkforceCandidate{Activation: WorkforceActivationActive, Agents: []*agent.AgentDefinition{{
+		ID: "tenant/example/researcher", Version: "2.4.9", DisplayName: "Researcher", Purpose: "Research evidence", SystemPrompt: "Research evidence accurately.",
+		Authority:          agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "research", Title: "Research", Goal: "Find useful evidence", Priority: 1}},
+		Runbook: &runbook.Definition{
+			APIVersion: runbook.APIVersion, ID: "research-operations", Version: "2.4.9", Name: "Research operations",
+			Entrypoints: map[string]string{"scan": "scan"}, Interfaces: map[string]runbook.Interface{"scan": {Description: "Scan every hour", InputSchema: map[string]interface{}{"type": "object"}}},
+			Triggers: map[string]runbook.Trigger{"scan": {Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}, Entrypoint: "scan", ObjectiveID: "agent:tenant/example/researcher:research"}},
+			Steps: map[string]runbook.Step{
+				"scan": {Kind: runbook.StepDelegate, Name: "Scan", Delegate: &runbook.DelegateStep{AgentID: literalRunbookValue("tenant/example/researcher"), Goal: literalRunbookValue("Find useful evidence"), Mode: runbook.DelegateReason, ResultPath: "/results/scan", Next: "done"}},
+				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+			},
+		},
+	}}}
+	intent := ProjectAuthoringIntent(&existing)
+	if intent == nil {
+		t.Fatal("semantic projection is nil")
+	}
+	intent.Agents[0].Name = "Senior Researcher"
+	generated, err := CompileAuthoringIntent(*intent, GenerateRequest{Mode: ModeAmend, Prompt: "Rename the Agent", Existing: &existing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := generated.Candidate.Agents[0]
+	if definition.ID != "tenant/example/researcher" || definition.Version != "2.4.10" || definition.DisplayName != "Senior Researcher" {
+		t.Fatalf("amended identity = %#v", definition)
+	}
+	if trigger := definition.Runbook.Triggers["scan"]; trigger.ObjectiveID != "agent:tenant/example/researcher:research" {
+		t.Fatalf("amended trigger = %#v", trigger)
 	}
 }
