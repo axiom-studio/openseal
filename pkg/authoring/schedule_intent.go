@@ -11,7 +11,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-const scheduleIntentQuestionID = "schedule-intent"
+const (
+	scheduleIntentQuestionID                    = "schedule-intent"
+	scheduleIntentClarificationQuestionIDPrefix = scheduleIntentQuestionID + "-clarification-"
+)
 
 type scheduleIntentKind int
 
@@ -67,7 +70,7 @@ func enforceScheduleIntentAuthority(generated *GenerationResponse, request Gener
 		return nil
 	case scheduleIntentAmbiguous:
 		restoreExistingAndRemoveNewSchedules(&generated.Candidate, request.Existing)
-		upsertScheduleIntentQuestion(generated)
+		upsertScheduleIntentQuestion(generated, request)
 		return nil
 	case scheduleIntentExact:
 		removeScheduleIntentQuestion(generated)
@@ -83,7 +86,7 @@ func scheduleIntentAuthorityText(request GenerateRequest) string {
 		return text
 	}
 	for _, answer := range request.Refinement.Answers {
-		if answer.QuestionID != scheduleIntentQuestionID {
+		if !isScheduleIntentQuestionID(answer.QuestionID) {
 			continue
 		}
 		if value := strings.TrimSpace(answer.Value.Text); value != "" {
@@ -250,13 +253,20 @@ func containsWord(value, word string) bool {
 	return false
 }
 
-func upsertScheduleIntentQuestion(generated *GenerationResponse) {
+func upsertScheduleIntentQuestion(generated *GenerationResponse, request GenerateRequest) {
 	removeScheduleIntentQuestion(generated)
+	questionID := nextScheduleIntentQuestionID(request.Refinement)
+	prompt := "When should this work run? Choose “on demand”, specify an exact time such as “daily at 09:00 UTC”, or a bounded varied window such as “daily at a varied time UTC”."
+	whyNeeded := "This source is ready, but OpenSeal needs to know whether the Agent should wait for you or run automatically."
+	if questionID != scheduleIntentQuestionID {
+		prompt = "The previous timing answer cannot be compiled exactly. Specify an exact portable cadence such as “every hour”, “daily at 09:00 UTC”, or `cron \"0 0 9 * * *\" timezone UTC jitter 300 seconds`; otherwise choose “on demand”."
+		whyNeeded = "Recurring work is not activated from prose that the scheduler cannot represent exactly. A precise cadence is required before OpenSeal can create the Objective-owned Runbook trigger."
+	}
 	generated.UnresolvedQuestions = append(generated.UnresolvedQuestions, RefinementQuestion{
-		ID:        scheduleIntentQuestionID,
+		ID:        questionID,
 		Category:  RefinementCategoryPolicy,
-		Prompt:    "When should this work run? Choose “on demand”, specify an exact time such as “daily at 09:00 UTC”, or a bounded varied window such as “daily at a varied time UTC”.",
-		WhyNeeded: "This source is ready, but OpenSeal needs to know whether the Agent should wait for you or run automatically.",
+		Prompt:    prompt,
+		WhyNeeded: whyNeeded,
 		Blocking:  []RefinementBlockingScope{RefinementBlocksCandidate, RefinementBlocksApply},
 		Answer: RefinementAnswerSchema{
 			Kind: RefinementAnswerText, Minimum: 1, Maximum: 256,
@@ -280,7 +290,7 @@ func sourceCapabilityRequiresDurableAction(request GenerateRequest) bool {
 func removeScheduleIntentQuestion(generated *GenerationResponse) {
 	questions := generated.UnresolvedQuestions[:0]
 	for _, question := range generated.UnresolvedQuestions {
-		if question.ID != scheduleIntentQuestionID {
+		if !isScheduleIntentQuestionID(question.ID) {
 			questions = append(questions, question)
 		}
 	}
@@ -289,11 +299,35 @@ func removeScheduleIntentQuestion(generated *GenerationResponse) {
 
 func hasScheduleIntentQuestion(questions []RefinementQuestion) bool {
 	for _, question := range questions {
-		if question.ID == scheduleIntentQuestionID {
+		if isScheduleIntentQuestionID(question.ID) {
 			return true
 		}
 	}
 	return false
+}
+
+func isScheduleIntentQuestionID(id string) bool {
+	id = strings.TrimSpace(id)
+	return id == scheduleIntentQuestionID || strings.HasPrefix(id, scheduleIntentClarificationQuestionIDPrefix)
+}
+
+func nextScheduleIntentQuestionID(refinement *RefinementContext) string {
+	if refinement == nil {
+		return scheduleIntentQuestionID
+	}
+	answered := map[string]bool{}
+	for _, answer := range refinement.Answers {
+		answered[strings.TrimSpace(answer.QuestionID)] = true
+	}
+	if !answered[scheduleIntentQuestionID] {
+		return scheduleIntentQuestionID
+	}
+	for revision := 1; ; revision++ {
+		id := fmt.Sprintf("%s%d", scheduleIntentClarificationQuestionIDPrefix, revision)
+		if !answered[id] {
+			return id
+		}
+	}
 }
 
 func deferScheduleBlockedMaterializationIssues(issues []ValidationIssue) []ValidationIssue {
