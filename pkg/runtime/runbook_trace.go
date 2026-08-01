@@ -370,9 +370,9 @@ func runbookStepOutputRefs(stepID string, step runbook.Step) []string {
 	refs := make([]string, 0)
 	switch step.Kind {
 	case runbook.StepAction:
-		refs = append(refs, step.Action.ResultPath)
+		refs = append(refs, string(step.Action.ResultPath))
 	case runbook.StepDelegate:
-		refs = append(refs, step.Delegate.ResultPath)
+		refs = append(refs, string(step.Delegate.ResultPath))
 	case runbook.StepTransform:
 		for pointer := range step.Transform.Assignments {
 			refs = append(refs, pointer)
@@ -401,12 +401,12 @@ func runbookTraceMetadata(values map[string]interface{}) map[string]string {
 
 func runbookValueRefs(value runbook.Value) []string {
 	refs := make([]string, 0, 1+len(value.Template))
-	if strings.TrimSpace(value.Ref) != "" {
-		refs = append(refs, strings.TrimSpace(value.Ref))
+	if strings.TrimSpace(string(value.Ref)) != "" {
+		refs = append(refs, strings.TrimSpace(string(value.Ref)))
 	}
 	for _, segment := range value.Template {
-		if strings.TrimSpace(segment.Ref) != "" {
-			refs = append(refs, strings.TrimSpace(segment.Ref))
+		if strings.TrimSpace(string(segment.Ref)) != "" {
+			refs = append(refs, strings.TrimSpace(string(segment.Ref)))
 		}
 	}
 	return refs

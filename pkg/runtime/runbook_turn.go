@@ -165,7 +165,7 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 					}
 					return r.failed(checkpoint, state, decisions, message), nil
 				}
-				if err := setRunbookPointer(checkpoint, step.Action.ResultPath, last["result"]); err != nil {
+				if err := setRunbookPointer(checkpoint, string(step.Action.ResultPath), last["result"]); err != nil {
 					return nil, stepError(state.Current, err)
 				}
 				metadata := runbookTraceMetadata(last)
@@ -641,7 +641,7 @@ func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interf
 		}
 		output, _ := result["output"].(map[string]interface{})
 		step := r.definition.Steps[stepID]
-		if err := setRunbookPointer(checkpoint, step.Delegate.ResultPath, cloneMap(output)); err != nil {
+		if err := setRunbookPointer(checkpoint, string(step.Delegate.ResultPath), cloneMap(output)); err != nil {
 			return false, nil, stepError(stepID, err)
 		}
 		state.PendingDelegation = ""
@@ -661,7 +661,7 @@ func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interf
 	result, _ := dependency["result"].(map[string]interface{})
 	output, _ := result["output"].(map[string]interface{})
 	step := r.definition.Steps[stepID]
-	if err := setRunbookPointer(checkpoint, step.Delegate.ResultPath, cloneMap(output)); err != nil {
+	if err := setRunbookPointer(checkpoint, string(step.Delegate.ResultPath), cloneMap(output)); err != nil {
 		return false, nil, stepError(stepID, err)
 	}
 	state.PendingDelegation = ""
@@ -724,7 +724,7 @@ func encodeRunbookState(checkpoint map[string]interface{}, state runbookExecutio
 
 func resolveRunbookValue(root map[string]interface{}, value runbook.Value) (interface{}, error) {
 	if value.Ref != "" {
-		return getRunbookPointer(root, value.Ref)
+		return getRunbookPointer(root, string(value.Ref))
 	}
 	if len(value.Template) > 0 {
 		var builder strings.Builder
@@ -733,7 +733,7 @@ func resolveRunbookValue(root map[string]interface{}, value runbook.Value) (inte
 				builder.WriteString(segment.Text)
 				continue
 			}
-			resolved, err := getRunbookPointer(root, segment.Ref)
+			resolved, err := getRunbookPointer(root, string(segment.Ref))
 			if err != nil {
 				// Embedded templates preserve ordinary shell/UI interpolation
 				// semantics: an absent optional value contributes an empty string.

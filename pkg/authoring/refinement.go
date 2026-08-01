@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/internal/domaincontract"
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
@@ -388,6 +389,14 @@ const (
 	RefinementCategoryOther       RefinementQuestionCategory = "other"
 )
 
+func (RefinementQuestionCategory) ContractValues() []string {
+	return []string{string(RefinementCategoryCredential), string(RefinementCategorySkill), string(RefinementCategoryScope), string(RefinementCategoryPolicy), string(RefinementCategoryAuthority), string(RefinementCategoryDestination), string(RefinementCategoryBudget), string(RefinementCategoryApproval), string(RefinementCategoryOther)}
+}
+
+func (category RefinementQuestionCategory) Valid() bool {
+	return domaincontract.Allows(string(category), category)
+}
+
 type RefinementAnswerKind string
 
 const (
@@ -400,6 +409,12 @@ const (
 	RefinementAnswerSkillSelection      RefinementAnswerKind = "skill_selection"
 )
 
+func (RefinementAnswerKind) ContractValues() []string {
+	return []string{string(RefinementAnswerText), string(RefinementAnswerStringList), string(RefinementAnswerSingleSelect), string(RefinementAnswerMultiSelect), string(RefinementAnswerBoolean), string(RefinementAnswerCredentialReference), string(RefinementAnswerSkillSelection)}
+}
+
+func (kind RefinementAnswerKind) Valid() bool { return domaincontract.Allows(string(kind), kind) }
+
 type RefinementBlockingScope string
 
 const (
@@ -407,6 +422,14 @@ const (
 	RefinementBlocksEvaluation RefinementBlockingScope = "evaluation"
 	RefinementBlocksApply      RefinementBlockingScope = "apply"
 )
+
+func (RefinementBlockingScope) ContractValues() []string {
+	return []string{string(RefinementBlocksCandidate), string(RefinementBlocksEvaluation), string(RefinementBlocksApply)}
+}
+
+func (scope RefinementBlockingScope) Valid() bool {
+	return domaincontract.Allows(string(scope), scope)
+}
 
 type RefinementProvenanceKind string
 
@@ -418,6 +441,14 @@ const (
 	RefinementProvenancePolicy     RefinementProvenanceKind = "policy"
 	RefinementProvenanceRuntime    RefinementProvenanceKind = "runtime"
 )
+
+func (RefinementProvenanceKind) ContractValues() []string {
+	return []string{string(RefinementProvenancePrompt), string(RefinementProvenanceCatalog), string(RefinementProvenanceSkill), string(RefinementProvenanceCredential), string(RefinementProvenancePolicy), string(RefinementProvenanceRuntime)}
+}
+
+func (kind RefinementProvenanceKind) Valid() bool {
+	return domaincontract.Allows(string(kind), kind)
+}
 
 type RefinementQuestionOption struct {
 	ID          string `json:"id"`
@@ -431,7 +462,7 @@ type RefinementQuestionOption struct {
 }
 
 type RefinementAnswerSchema struct {
-	Kind    RefinementAnswerKind       `json:"kind" jsonschema:"enum=text,enum=string_list,enum=single_select,enum=multi_select,enum=boolean,enum=credential_reference,enum=skill_selection"`
+	Kind    RefinementAnswerKind       `json:"kind"`
 	Options []RefinementQuestionOption `json:"options,omitempty"`
 	Minimum int                        `json:"minimum,omitempty"`
 	Maximum int                        `json:"maximum,omitempty"`
@@ -444,7 +475,7 @@ type RefinementQuestionDependency struct {
 }
 
 type RefinementQuestionProvenance struct {
-	Kind      RefinementProvenanceKind `json:"kind" jsonschema:"enum=prompt,enum=catalog,enum=skill,enum=credential,enum=policy,enum=runtime"`
+	Kind      RefinementProvenanceKind `json:"kind"`
 	Reference string                   `json:"reference,omitempty"`
 	Evidence  string                   `json:"evidence,omitempty"`
 }
@@ -455,10 +486,10 @@ type RefinementQuestionProvenance struct {
 // submit an audited answer event.
 type RefinementQuestion struct {
 	ID             string                         `json:"id"`
-	Category       RefinementQuestionCategory     `json:"category" jsonschema:"enum=credential,enum=skill,enum=scope,enum=policy,enum=authority,enum=destination,enum=budget,enum=approval,enum=other"`
+	Category       RefinementQuestionCategory     `json:"category"`
 	Prompt         string                         `json:"prompt"`
 	WhyNeeded      string                         `json:"whyNeeded"`
-	Blocking       []RefinementBlockingScope      `json:"blocking" jsonschema:"minItems=1,enum=candidate,enum=evaluation,enum=apply"`
+	Blocking       []RefinementBlockingScope      `json:"blocking" jsonschema:"minItems=1"`
 	Answer         RefinementAnswerSchema         `json:"answer"`
 	DependsOn      []RefinementQuestionDependency `json:"dependsOn,omitempty"`
 	Provenance     []RefinementQuestionProvenance `json:"provenance,omitempty"`
@@ -720,12 +751,7 @@ func validateRefinementQuestions(questions []RefinementQuestion) error {
 }
 
 func validProvenanceKind(kind RefinementProvenanceKind) bool {
-	switch kind {
-	case RefinementProvenancePrompt, RefinementProvenanceCatalog, RefinementProvenanceSkill, RefinementProvenanceCredential, RefinementProvenancePolicy, RefinementProvenanceRuntime:
-		return true
-	default:
-		return false
-	}
+	return kind.Valid()
 }
 
 func validateRefinementCatalog(questions []RefinementQuestion, catalog CapabilityCatalog) error {
@@ -1129,23 +1155,11 @@ func refinementCatalogOptionError(questionID, optionID string, skills map[string
 }
 
 func validQuestionCategory(category RefinementQuestionCategory) bool {
-	switch category {
-	case RefinementCategoryCredential, RefinementCategorySkill, RefinementCategoryScope, RefinementCategoryPolicy,
-		RefinementCategoryAuthority, RefinementCategoryDestination, RefinementCategoryBudget, RefinementCategoryApproval, RefinementCategoryOther:
-		return true
-	default:
-		return false
-	}
+	return category.Valid()
 }
 
 func validAnswerKind(kind RefinementAnswerKind) bool {
-	switch kind {
-	case RefinementAnswerText, RefinementAnswerStringList, RefinementAnswerSingleSelect, RefinementAnswerMultiSelect,
-		RefinementAnswerBoolean, RefinementAnswerCredentialReference, RefinementAnswerSkillSelection:
-		return true
-	default:
-		return false
-	}
+	return kind.Valid()
 }
 
 func validateAnswerSchema(schema RefinementAnswerSchema) error {

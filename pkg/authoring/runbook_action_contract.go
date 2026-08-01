@@ -62,7 +62,7 @@ func runbookActionOutputs(definition *runbook.Definition, catalog CapabilityCata
 		return result
 	}
 	for stepID, step := range definition.Steps {
-		if step.Action == nil || strings.TrimSpace(step.Action.ResultPath) == "" {
+		if step.Action == nil || strings.TrimSpace(string(step.Action.ResultPath)) == "" {
 			continue
 		}
 		skill, ok := catalog.Skills[strings.TrimSpace(step.Action.SkillID)]
@@ -73,7 +73,7 @@ func runbookActionOutputs(definition *runbook.Definition, catalog CapabilityCata
 		if !ok {
 			continue
 		}
-		result = append(result, runbookActionOutput{stepID: stepID, resultPath: step.Action.ResultPath, schema: contract.OutputSchema})
+		result = append(result, runbookActionOutput{stepID: stepID, resultPath: string(step.Action.ResultPath), schema: contract.OutputSchema})
 	}
 	sort.Slice(result, func(left, right int) bool {
 		if len(result[left].resultPath) == len(result[right].resultPath) {
@@ -148,7 +148,7 @@ func validateRunbookActionReferences(path, consumerStep string, arguments map[st
 		value := arguments[name]
 		expected, _ := properties[name].(map[string]interface{})
 		if value.Ref != "" {
-			issues = append(issues, validateRunbookActionReference(path+"."+name, consumerStep, value.Ref, expected, definition, outputs)...)
+			issues = append(issues, validateRunbookActionReference(path+"."+name, consumerStep, string(value.Ref), expected, definition, outputs)...)
 		}
 		if len(value.Template) > 0 {
 			if !schemasTypeCompatible(expected, map[string]interface{}{"type": "string"}) {
@@ -157,7 +157,7 @@ func validateRunbookActionReferences(path, consumerStep string, arguments map[st
 			for index, segment := range value.Template {
 				if segment.Ref != "" {
 					segmentPath := fmt.Sprintf("%s.%s.template[%d].ref", path, name, index)
-					issues = append(issues, validateRunbookActionReference(segmentPath, consumerStep, segment.Ref, nil, definition, outputs)...)
+					issues = append(issues, validateRunbookActionReference(segmentPath, consumerStep, string(segment.Ref), nil, definition, outputs)...)
 				}
 			}
 		}

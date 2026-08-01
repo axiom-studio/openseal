@@ -369,6 +369,12 @@ func TestAuthoringResultSchemaConstrainsRefinementQuestionVocabulary(t *testing.
 	}
 	answerProperties, _ := answer["properties"].(map[string]interface{})
 	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, answerProperties["kind"]), []string{"text", "string_list", "single_select", "multi_select", "boolean", "credential_reference", "skill_selection"})
+	provenance := findAuthoringObjectSchema(schema, "kind", "reference", "evidence")
+	if provenance == nil {
+		t.Fatal("refinement provenance schema was not found")
+	}
+	provenanceProperties, _ := provenance["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, provenanceProperties["kind"]), []string{"prompt", "catalog", "skill", "credential", "policy", "runtime"})
 }
 
 func TestAuthoringResultSchemaConstrainsRunbookContract(t *testing.T) {
@@ -419,6 +425,12 @@ func TestAuthoringResultSchemaConstrainsRunbookContract(t *testing.T) {
 	}
 	properties, _ = predicate["properties"].(map[string]interface{})
 	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["operator"]), []string{"equal", "not_equal", "exists", "truthy", "greater", "at_least", "less", "at_most", "contains", "all", "any", "not"})
+	reporting := findAuthoringObjectSchema(schema, "channel", "title", "milestones")
+	if reporting == nil {
+		t.Fatal("Runbook reporting policy schema was not found")
+	}
+	properties, _ = reporting["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["milestones"]), []string{"started", "approval_required", "completed", "failed"})
 }
 
 func resolveAuthoringSchemaReference(root map[string]interface{}, value interface{}) interface{} {
