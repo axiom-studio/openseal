@@ -99,6 +99,19 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 		Risk: skill.RiskLevelRead, Summary: "Approve browsing", ProposedAction: map[string]interface{}{"comment": "A concise reviewed reply", "password": "also-never-project-this"},
 		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	adapter := ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1", BindingID: "slack-binding", BindingRevision: 1, AdapterID: "slack"}
+	store.externalEndpoints[externalConversationEndpointKey(scope, "slack-approvals")] = &ExternalConversationEndpoint{
+		ID: "slack-approvals", IngressRoute: "slack-callback", Scope: scope, Owner: owner, DeploymentID: owner.ID,
+		Name: "Reddit approvals", Adapter: adapter, Provider: "slack", Mode: capability.ConversationEndpointChannel,
+		Address: "#team-reddit-agent-approvals", Status: ExternalConversationEndpointActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	store.externalDeliveries[externalConversationDeliveryKey(scope, "approval-delivery")] = &ExternalConversationDelivery{
+		ID: "approval-delivery", Scope: scope, EndpointID: "slack-approvals", EndpointRevision: 1, Adapter: adapter,
+		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "approval-conversation", ChannelMessageID: "approval-message",
+		OrderingKey: "approval-conversation", IdempotencyKey: "approval-delivery:approval-browse:slack-approvals",
+		Status: ExternalConversationDeliveryDelivered, Attempt: 1, MaximumAttempts: 5, AvailableAt: now,
+		ProviderMessageID: "slack-message-1", Revision: 2, CreatedAt: now, UpdatedAt: now.Add(time.Minute), DeliveredAt: now.Add(time.Minute),
+	}
 	store.artifacts[artifactStorageKey(scope, "evidence")] = map[int64]*Artifact{1: {
 		ID: "evidence", Version: 1, Scope: scope, Name: "Evidence", ContentRef: "opaque-secret-storage-ref", Digest: strings.Repeat("a", 64), SizeBytes: 12,
 		Classification: ArtifactClassificationInternal, Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: owner.ID}, RunID: run.ID, TurnID: "turn-browse", ActionID: "action-browse"}, CreatedAt: now,
@@ -134,6 +147,10 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 		browseVisit.Actions[0].Result["title"] != "Useful article" || browseVisit.Actions[0].Result["token"] != "[REDACTED]" ||
 		browseVisit.Approvals[0].ProposedAction["comment"] != "A concise reviewed reply" || browseVisit.Approvals[0].ProposedAction["password"] != "[REDACTED]" {
 		t.Fatalf("safe action and approval facts=%#v %#v", browseVisit.Actions[0], browseVisit.Approvals[0])
+	}
+	if deliveries := browseVisit.Approvals[0].Deliveries; len(deliveries) != 1 || deliveries[0].Provider != "slack" ||
+		deliveries[0].Address != "#team-reddit-agent-approvals" || deliveries[0].Status != ExternalConversationDeliveryDelivered {
+		t.Fatalf("approval deliveries=%#v", deliveries)
 	}
 	reviewVisit := nodes["review"].Visits[0]
 	if nodes["review"].Status != RunbookStepTraceWaiting || len(reviewVisit.ChildRuns) != 1 || reviewVisit.ChildRuns[0].ID != childID || len(reviewVisit.Trace.Inputs) != 1 || reviewVisit.Trace.Inputs[0].Availability != RunbookDataAvailable {
