@@ -62,38 +62,41 @@ type RunbookTurnAudit struct {
 }
 
 type RunbookActionAudit struct {
-	ID           string           `json:"id"`
-	TurnID       string           `json:"turnId,omitempty"`
-	SkillID      string           `json:"skillId"`
-	SkillVersion string           `json:"skillVersion"`
-	Action       string           `json:"action"`
-	Status       ActionCallStatus `json:"status"`
-	Risk         string           `json:"risk,omitempty"`
-	SideEffect   string           `json:"sideEffect,omitempty"`
-	ApprovalID   string           `json:"approvalId,omitempty"`
-	Attempt      int              `json:"attempt"`
-	MaxAttempts  int              `json:"maxAttempts"`
-	EvidenceRefs []string         `json:"evidenceRefs,omitempty"`
-	Error        string           `json:"error,omitempty"`
-	CreatedAt    time.Time        `json:"createdAt"`
-	UpdatedAt    time.Time        `json:"updatedAt"`
-	StartedAt    *time.Time       `json:"startedAt,omitempty"`
-	CompletedAt  *time.Time       `json:"completedAt,omitempty"`
+	ID           string                 `json:"id"`
+	TurnID       string                 `json:"turnId,omitempty"`
+	SkillID      string                 `json:"skillId"`
+	SkillVersion string                 `json:"skillVersion"`
+	Action       string                 `json:"action"`
+	Status       ActionCallStatus       `json:"status"`
+	Risk         string                 `json:"risk,omitempty"`
+	SideEffect   string                 `json:"sideEffect,omitempty"`
+	ApprovalID   string                 `json:"approvalId,omitempty"`
+	Attempt      int                    `json:"attempt"`
+	MaxAttempts  int                    `json:"maxAttempts"`
+	EvidenceRefs []string               `json:"evidenceRefs,omitempty"`
+	Arguments    map[string]interface{} `json:"arguments,omitempty"`
+	Result       map[string]interface{} `json:"result,omitempty"`
+	Error        string                 `json:"error,omitempty"`
+	CreatedAt    time.Time              `json:"createdAt"`
+	UpdatedAt    time.Time              `json:"updatedAt"`
+	StartedAt    *time.Time             `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time             `json:"completedAt,omitempty"`
 }
 
 type RunbookApprovalAudit struct {
-	ID                string              `json:"id"`
-	ActionCallID      string              `json:"actionCallId"`
-	Status            ApprovalStatus      `json:"status"`
-	Summary           string              `json:"summary"`
-	PolicyReason      string              `json:"policyReason,omitempty"`
-	EligibleApprovers []ApprovalPrincipal `json:"eligibleApprovers,omitempty"`
-	DecisionBy        *ApprovalPrincipal  `json:"decisionBy,omitempty"`
-	DecisionReason    string              `json:"decisionReason,omitempty"`
-	ExpiresAt         time.Time           `json:"expiresAt"`
-	CreatedAt         time.Time           `json:"createdAt"`
-	UpdatedAt         time.Time           `json:"updatedAt"`
-	DecidedAt         *time.Time          `json:"decidedAt,omitempty"`
+	ID                string                 `json:"id"`
+	ActionCallID      string                 `json:"actionCallId"`
+	Status            ApprovalStatus         `json:"status"`
+	Summary           string                 `json:"summary"`
+	PolicyReason      string                 `json:"policyReason,omitempty"`
+	ProposedAction    map[string]interface{} `json:"proposedAction,omitempty"`
+	EligibleApprovers []ApprovalPrincipal    `json:"eligibleApprovers,omitempty"`
+	DecisionBy        *ApprovalPrincipal     `json:"decisionBy,omitempty"`
+	DecisionReason    string                 `json:"decisionReason,omitempty"`
+	ExpiresAt         time.Time              `json:"expiresAt"`
+	CreatedAt         time.Time              `json:"createdAt"`
+	UpdatedAt         time.Time              `json:"updatedAt"`
+	DecidedAt         *time.Time             `json:"decidedAt,omitempty"`
 }
 
 type RunbookArtifactAudit struct {
@@ -586,19 +589,24 @@ func runbookAuditVisitForChild(result *RunbookExecutionAudit, stepID string, cre
 }
 
 func projectRunbookActionAudit(call *ActionCall) RunbookActionAudit {
+	arguments, _ := sanitizePersistedApprovalValue(call.Arguments).(map[string]interface{})
+	result, _ := sanitizePersistedApprovalValue(call.Output).(map[string]interface{})
 	return RunbookActionAudit{
 		ID: call.ID, TurnID: call.TurnID, SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action,
 		Status: call.Status, Risk: string(call.Risk), SideEffect: string(call.SideEffect), ApprovalID: call.ApprovalID,
-		Attempt: call.Attempt, MaxAttempts: call.MaxAttempts, EvidenceRefs: append([]string(nil), call.EvidenceRefs...), Error: call.Error,
+		Attempt: call.Attempt, MaxAttempts: call.MaxAttempts, EvidenceRefs: append([]string(nil), call.EvidenceRefs...),
+		Arguments: arguments, Result: result, Error: call.Error,
 		CreatedAt: call.CreatedAt, UpdatedAt: call.UpdatedAt, StartedAt: call.StartedAt, CompletedAt: call.CompletedAt,
 	}
 }
 
 func projectRunbookApprovalAudit(approval *ApprovalCheckpoint) RunbookApprovalAudit {
+	proposedAction, _ := sanitizePersistedApprovalValue(approval.ProposedAction).(map[string]interface{})
 	return RunbookApprovalAudit{
 		ID: approval.ID, ActionCallID: approval.ActionCallID, Status: approval.Status, Summary: approval.Summary,
-		PolicyReason: approval.PolicyReason, EligibleApprovers: append([]ApprovalPrincipal(nil), approval.EligibleApprovers...),
-		DecisionBy: approval.DecisionBy, DecisionReason: approval.DecisionReason, ExpiresAt: approval.ExpiresAt,
+		PolicyReason: approval.PolicyReason, ProposedAction: proposedAction,
+		EligibleApprovers: append([]ApprovalPrincipal(nil), approval.EligibleApprovers...),
+		DecisionBy:        approval.DecisionBy, DecisionReason: approval.DecisionReason, ExpiresAt: approval.ExpiresAt,
 		CreatedAt: approval.CreatedAt, UpdatedAt: approval.UpdatedAt, DecidedAt: approval.DecidedAt,
 	}
 }
