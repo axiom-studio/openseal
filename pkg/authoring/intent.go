@@ -63,9 +63,9 @@ func (intent AuthoringApprovalIntent) Valid() bool {
 type AuthoringIntent struct {
 	SchemaVersion  string                   `json:"schemaVersion" jsonschema:"Version of the semantic authoring answer contract."`
 	Kind           AuthoringResourceKind    `json:"kind"`
-	Name           string                   `json:"name"`
-	Purpose        string                   `json:"purpose"`
-	Agents         []AuthoringAgentIntent   `json:"agents"`
+	Name           string                   `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	Purpose        string                   `json:"purpose" jsonschema:"minLength=1,pattern=\\S"`
+	Agents         []AuthoringAgentIntent   `json:"agents" jsonschema:"minItems=1"`
 	Team           *AuthoringTeamIntent     `json:"team,omitempty"`
 	Conversations  []AuthoringChannelIntent `json:"conversations,omitempty"`
 	Assumptions    []string                 `json:"assumptions,omitempty"`
@@ -85,10 +85,10 @@ type AuthoringIntentRequest struct {
 }
 
 type AuthoringAgentIntent struct {
-	Key                 string                     `json:"key"`
-	Name                string                     `json:"name"`
-	Purpose             string                     `json:"purpose"`
-	Behavior            string                     `json:"behavior"`
+	Key                 string                     `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name                string                     `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	Purpose             string                     `json:"purpose" jsonschema:"minLength=1,pattern=\\S"`
+	Behavior            string                     `json:"behavior" jsonschema:"minLength=1,pattern=\\S"`
 	Personality         string                     `json:"personality,omitempty"`
 	OperatingPrinciples []string                   `json:"operatingPrinciples,omitempty"`
 	Skills              []AuthoringSkillIntent     `json:"skills,omitempty"`
@@ -97,25 +97,25 @@ type AuthoringAgentIntent struct {
 }
 
 type AuthoringSkillIntent struct {
-	CatalogID string   `json:"catalogId"`
+	CatalogID string   `json:"catalogId" jsonschema:"minLength=1,pattern=\\S"`
 	Actions   []string `json:"actions,omitempty"`
 	Required  bool     `json:"required"`
 }
 
 type AuthoringObjectiveIntent struct {
-	Key             string   `json:"key"`
-	Title           string   `json:"title"`
-	Outcome         string   `json:"outcome"`
+	Key             string   `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Title           string   `json:"title" jsonschema:"minLength=1,pattern=\\S"`
+	Outcome         string   `json:"outcome" jsonschema:"minLength=1,pattern=\\S"`
 	SuccessCriteria []string `json:"successCriteria,omitempty"`
 	Constraints     []string `json:"constraints,omitempty"`
-	Priority        int      `json:"priority"`
+	Priority        int      `json:"priority" jsonschema:"minimum=0"`
 }
 
 type AuthoringOperationIntent struct {
-	Key             string                  `json:"key"`
-	Name            string                  `json:"name"`
-	Goal            string                  `json:"goal"`
-	ObjectiveKey    string                  `json:"objectiveKey"`
+	Key             string                  `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name            string                  `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	Goal            string                  `json:"goal" jsonschema:"minLength=1,pattern=\\S"`
+	ObjectiveKey    string                  `json:"objectiveKey" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
 	Wake            AuthoringOperationWake  `json:"wake"`
 	Schedule        string                  `json:"schedule,omitempty"`
 	EventType       string                  `json:"eventType,omitempty"`
@@ -125,28 +125,28 @@ type AuthoringOperationIntent struct {
 }
 
 type AuthoringTeamIntent struct {
-	Key                 string                     `json:"key"`
-	Name                string                     `json:"name"`
-	Purpose             string                     `json:"purpose"`
+	Key                 string                     `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name                string                     `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	Purpose             string                     `json:"purpose" jsonschema:"minLength=1,pattern=\\S"`
 	OperatingPrinciples []string                   `json:"operatingPrinciples,omitempty"`
-	Roles               []AuthoringRoleIntent      `json:"roles"`
+	Roles               []AuthoringRoleIntent      `json:"roles" jsonschema:"minItems=1"`
 	Objectives          []AuthoringObjectiveIntent `json:"objectives,omitempty"`
 }
 
 type AuthoringRoleIntent struct {
-	Key                string   `json:"key"`
-	Name               string   `json:"name"`
-	Purpose            string   `json:"purpose"`
-	AgentKeys          []string `json:"agentKeys"`
+	Key                string   `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name               string   `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	Purpose            string   `json:"purpose" jsonschema:"minLength=1,pattern=\\S"`
+	AgentKeys          []string `json:"agentKeys" jsonschema:"minItems=1"`
 	SkillCatalogIDs    []string `json:"skillCatalogIds,omitempty"`
 	CanSpeakInChannels bool     `json:"canSpeakInChannels"`
 }
 
 type AuthoringChannelIntent struct {
-	Key           string                    `json:"key"`
-	Name          string                    `json:"name"`
-	OwnerKey      string                    `json:"ownerKey"`
-	Provider      string                    `json:"provider"`
+	Key           string                    `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name          string                    `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	OwnerKey      string                    `json:"ownerKey" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Provider      string                    `json:"provider" jsonschema:"minLength=1,pattern=\\S"`
 	Destination   string                    `json:"destination,omitempty"`
 	Purposes      []AuthoringChannelPurpose `json:"purposes"`
 	ReplyInThread bool                      `json:"replyInThread"`
@@ -174,8 +174,8 @@ func (purpose AuthoringChannelPurpose) Valid() bool {
 // canonical, answerable refinement question and owns category, blocking scope,
 // provenance, validation, and credential-safe input kinds.
 type AuthoringClarification struct {
-	Key       string   `json:"key"`
-	Question  string   `json:"question"`
-	WhyNeeded string   `json:"whyNeeded"`
+	Key       string   `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Question  string   `json:"question" jsonschema:"minLength=1,pattern=\\S"`
+	WhyNeeded string   `json:"whyNeeded" jsonschema:"minLength=1,pattern=\\S"`
 	Choices   []string `json:"choices,omitempty"`
 }
