@@ -41,6 +41,7 @@ var (
 	scheduleClockPattern      = regexp.MustCompile(`(?i)\b([01]?\d|2[0-3]):([0-5]\d)\b`)
 	scheduleTimezonePattern   = regexp.MustCompile(`\b(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+.-]*/[A-Za-z][A-Za-z0-9_+./-]*)\b`)
 	scheduleIntervalPattern   = regexp.MustCompile(`(?i)\bevery\s+(\d{1,7})\s+(second|seconds|minute|minutes|hour|hours|day|days)\b`)
+	scheduleWindowPattern     = regexp.MustCompile(`(?i)\b(?:between|from)\s+([01]?\d|2[0-3]):([0-5]\d)\s+(?:and|to)\s+([01]?\d|2[0-3]):([0-5]\d)\b`)
 	scheduleDurationPattern   = regexp.MustCompile(`(?i)\bfor\s+(\d{1,7})\s*(second|seconds|minute|minutes|hour|hours|day|days)\b`)
 	scheduleOccurrencePattern = regexp.MustCompile(`(?i)\bfor\s+(\d{1,7})\s+(run|runs|occurrence|occurrences|time|times)\b`)
 	scheduleCronPattern       = regexp.MustCompile(`(?i)\bcron\s+"([^"]+)"\s+timezone\s+([A-Za-z][A-Za-z0-9_+.-]*/?[A-Za-z0-9_+./-]*)(?:\s+jitter\s+(\d{1,8})\s+seconds)?\b`)
@@ -122,6 +123,19 @@ func parseScheduleIntent(value string) scheduleIntent {
 		if err == nil && count > 0 {
 			multipliers := map[string]int64{"second": 1, "seconds": 1, "minute": 60, "minutes": 60, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}
 			interval := count * multipliers[strings.ToLower(match[2])]
+			if window := scheduleWindowPattern.FindStringSubmatch(value); len(window) == 5 {
+				zone := validScheduleTimezone(value)
+				startHour, _ := strconv.Atoi(window[1])
+				endHour, _ := strconv.Atoi(window[3])
+				if zone == "" || startHour > endHour || window[2] != window[4] || interval%3600 != 0 || interval/3600 > 23 {
+					return scheduleIntent{kind: scheduleIntentAmbiguous}
+				}
+				return scheduleIntent{
+					kind: scheduleIntentExact, cadenceType: "cron",
+					cronExpression: fmt.Sprintf("0 %s %d-%d/%d * * *", window[2], startHour, endHour, interval/3600),
+					timezone:       zone,
+				}
+			}
 			return scheduleIntent{kind: scheduleIntentExact, cadenceType: "interval", intervalSeconds: interval, maximumOccurrences: boundedScheduleOccurrences(value, interval)}
 		}
 	}

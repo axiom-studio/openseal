@@ -28,7 +28,7 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 	}
 	result := GenerationResponse{
 		SchemaVersion: AuthoringResultSchemaVersion,
-		Candidate:     WorkforceCandidate{Activation: intent.Activation},
+		Candidate:     WorkforceCandidate{Activation: deterministicAuthoringActivation(request)},
 		Authoring:     AuthoringFormSubmission{Version: AuthoringFormVersionV1},
 		Assumptions:   normalized(intent.Assumptions),
 	}
@@ -82,7 +82,7 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 	if candidate == nil || len(candidate.Agents) == 0 {
 		return nil
 	}
-	result := &AuthoringIntent{SchemaVersion: AuthoringIntentSchemaVersion, Activation: candidate.Activation}
+	result := &AuthoringIntent{SchemaVersion: AuthoringIntentSchemaVersion}
 	if candidate.Team != nil {
 		result.Kind, result.Name, result.Purpose = AuthoringResourceTeam, candidate.Team.DisplayName, candidate.Team.Purpose
 	} else if len(candidate.Agents) == 1 {
@@ -201,9 +201,6 @@ func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) 
 	if !intent.Kind.Valid() || strings.TrimSpace(intent.Name) == "" || strings.TrimSpace(intent.Purpose) == "" {
 		return errors.New("authoring intent requires a resource kind, name, and purpose")
 	}
-	if _, err := EffectiveWorkforceActivationIntent(intent.Activation); err != nil {
-		return err
-	}
 	if len(intent.Agents) == 0 {
 		return errors.New("authoring intent requires at least one Agent")
 	}
@@ -287,6 +284,24 @@ func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) 
 	return nil
 }
 
+// deterministicAuthoringActivation keeps lifecycle authority out of the model
+// answer sheet. New proposals use the normal active review path, amendments
+// preserve their current lifecycle, and only OpenSeal's typed prompt grammar
+// may explicitly request an inactive result. PrepareActivation remains the
+// sole operation that activates an already-applied inactive proposal.
+func deterministicAuthoringActivation(request GenerateRequest) WorkforceActivationIntent {
+	activation := WorkforceActivationActive
+	if request.Existing != nil {
+		if current, err := EffectiveWorkforceActivationIntent(request.Existing.Activation); err == nil {
+			activation = current
+		}
+	}
+	if extractExplicitPromptCommitments(request.Prompt).Activation == ActivationCommitmentInactive {
+		activation = WorkforceActivationInactive
+	}
+	return activation
+}
+
 func compileAuthoringAgent(answer AuthoringAgentIntent, request GenerateRequest) (*agent.AgentDefinition, error) {
 	definition := &agent.AgentDefinition{
 		ID: answer.Key, Version: "1.0.0", DisplayName: strings.TrimSpace(answer.Name),
@@ -357,19 +372,21 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 			Outputs: map[string]runbook.Value{"result": {Ref: runbook.JSONPointer("/results/" + operation.Key)}},
 		}}
 		trigger := runbook.Trigger{Entrypoint: operation.Key, ObjectiveID: "agent:" + definition.ID + ":" + operation.ObjectiveKey, MaximumConcurrent: 1}
+		materializedTrigger := false
 		switch operation.Wake {
 		case AuthoringWakeSchedule:
 			parsed := parseScheduleIntent(operation.Schedule)
-			if parsed.kind != scheduleIntentExact {
-				return nil, fmt.Errorf("operation %s schedule is incomplete and requires clarification", operation.Key)
+			if parsed.kind == scheduleIntentExact {
+				schedule, err := scheduleForIntent(parsed)
+				if err != nil {
+					return nil, fmt.Errorf("compile operation %s schedule: %w", operation.Key, err)
+				}
+				trigger.Kind, trigger.Schedule = runbook.TriggerSchedule, schedule
+				materializedTrigger = true
 			}
-			schedule, err := scheduleForIntent(parsed)
-			if err != nil {
-				return nil, fmt.Errorf("compile operation %s schedule: %w", operation.Key, err)
-			}
-			trigger.Kind, trigger.Schedule = runbook.TriggerSchedule, schedule
 		case AuthoringWakeEvent:
 			trigger.Kind, trigger.EventType = runbook.TriggerEvent, strings.TrimSpace(operation.EventType)
+			materializedTrigger = true
 		}
 		if operation.ReportProgress {
 			trigger.Reporting = &runbook.ReportingPolicy{
@@ -377,7 +394,7 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 				Milestones: []runbook.ReportingMilestone{runbook.ReportingStarted, runbook.ReportingApprovalRequired, runbook.ReportingCompleted, runbook.ReportingFailed},
 			}
 		}
-		if operation.Wake != AuthoringWakeOnDemand {
+		if materializedTrigger {
 			result.Triggers[operation.Key] = trigger
 		}
 		if operation.Approval == AuthoringApprovalRequired {
