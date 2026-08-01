@@ -133,6 +133,59 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	}
 }
 
+func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "3"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Community participation", Goal: "Contribute useful advice", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		ID: "exhausted-community-review", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC", MaximumOccurrences: 2}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedRevision := activation.Revision
+	activation.Status, activation.OccurrencesProcessed, activation.Revision = RunbookActivationRetired, 2, activation.Revision+1
+	if err := store.UpdateRunbookActivation(ctx, activation, expectedRevision); err != nil {
+		t.Fatal(err)
+	}
+	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: owner, Title: objective.Title,
+		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel-exhausted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversationRun, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
+		Goal: "Run this objective now", Source: RunSourceChat,
+		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := RunbookManagementSkill()
+	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: definition.Actions[RunbookActionStart]}
+	validator, err := NewRunbookActionValidator(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, handled, err := validator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+		Run: conversationRun, Bound: bound, Arguments: map[string]interface{}{"reason": "User requested an off-cycle run"},
+	})
+	if err != nil || !handled || resolved["activationId"] != activation.ID {
+		t.Fatalf("resolved exhausted Runbook=%#v handled=%v err=%v", resolved, handled, err)
+	}
+}
+
 func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

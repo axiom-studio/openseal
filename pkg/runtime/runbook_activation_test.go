@@ -367,3 +367,37 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 		t.Fatal("retired Runbook resumed")
 	}
 }
+
+func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "3"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "work", DefinitionVersion: "1", TriggerID: "hourly",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{
+			Cron: "0 0 * * * *", Timezone: "UTC", MaximumOccurrences: 2,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation.Status = RunbookActivationRetired
+	activation.OccurrencesProcessed = 2
+	expectedRevision := activation.Revision
+	activation.Revision++
+	if err := store.UpdateRunbookActivation(ctx, activation, expectedRevision); err != nil {
+		t.Fatal(err)
+	}
+	started, err := StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{IdempotencyKey: "off-cycle"})
+	if err != nil || started.Run == nil || started.Run.Source != RunSourceManual {
+		t.Fatalf("off-cycle exhausted start=%#v err=%v", started, err)
+	}
+}
