@@ -258,7 +258,7 @@ type ActionStep struct {
 	SkillVersion string           `json:"skillVersion"`
 	Action       string           `json:"action"`
 	Arguments    map[string]Value `json:"arguments,omitempty"`
-	ResultPath   string           `json:"resultPath"`
+	ResultPath   string           `json:"resultPath" jsonschema:"minLength=1,pattern=^/"`
 	Next         string           `json:"next"`
 }
 
@@ -270,7 +270,7 @@ type DelegateStep struct {
 	Goal       Value             `json:"goal"`
 	Context    map[string]Value  `json:"context,omitempty"`
 	Mode       DelegateMode      `json:"mode,omitempty"`
-	ResultPath string            `json:"resultPath"`
+	ResultPath string            `json:"resultPath" jsonschema:"minLength=1,pattern=^/"`
 	Timeout    time.Duration     `json:"timeout,omitempty"`
 	Budget     *BudgetAllocation `json:"budget,omitempty"`
 	Next       string            `json:"next"`
@@ -371,13 +371,13 @@ type EndStep struct {
 // runbook context. Exactly one source must be present.
 type Value struct {
 	Literal  json.RawMessage   `json:"literal,omitempty"`
-	Ref      string            `json:"ref,omitempty"`
+	Ref      string            `json:"ref,omitempty" jsonschema:"minLength=1,pattern=^/"`
 	Template []TemplateSegment `json:"template,omitempty"`
 }
 
 type TemplateSegment struct {
 	Text string `json:"text,omitempty"`
-	Ref  string `json:"ref,omitempty"`
+	Ref  string `json:"ref,omitempty" jsonschema:"minLength=1,pattern=^/"`
 }
 
 type PredicateOperator string

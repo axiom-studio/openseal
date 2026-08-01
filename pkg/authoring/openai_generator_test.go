@@ -371,7 +371,7 @@ func TestAuthoringResultSchemaConstrainsRefinementQuestionVocabulary(t *testing.
 	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, answerProperties["kind"]), []string{"text", "string_list", "single_select", "multi_select", "boolean", "credential_reference", "skill_selection"})
 }
 
-func TestAuthoringResultSchemaConstrainsRunbookResultPaths(t *testing.T) {
+func TestAuthoringResultSchemaConstrainsRunbookContract(t *testing.T) {
 	schema, err := AuthoringResultJSONSchema()
 	if err != nil {
 		t.Fatal(err)
@@ -390,10 +390,35 @@ func TestAuthoringResultSchemaConstrainsRunbookResultPaths(t *testing.T) {
 		t.Fatal("Runbook delegate schema was not found")
 	}
 	properties, _ = delegate["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["mode"]), []string{"behavior", "reason"})
 	resultPath, _ = resolveAuthoringSchemaReference(schema, properties["resultPath"]).(map[string]interface{})
 	if resultPath["pattern"] != "^/" || resultPath["minLength"] != float64(1) {
 		t.Fatalf("Runbook delegate resultPath schema = %#v", resultPath)
 	}
+	trigger := findAuthoringObjectSchema(schema, "kind", "eventType", "schedule", "entrypoint", "objectiveId")
+	if trigger == nil {
+		t.Fatal("Runbook trigger schema was not found")
+	}
+	properties, _ = trigger["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["kind"]), []string{"event", "schedule"})
+	step := findAuthoringObjectSchema(schema, "kind", "action", "delegate", "decision", "transform", "wait", "fork", "join", "forEach", "loopReturn", "end")
+	if step == nil {
+		t.Fatal("Runbook step schema was not found")
+	}
+	properties, _ = step["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["kind"]), []string{"action", "delegate", "decision", "transform", "wait", "fork", "join", "for_each", "loop_return", "end"})
+	join := findAuthoringObjectSchema(schema, "fork", "mode", "next")
+	if join == nil {
+		t.Fatal("Runbook join schema was not found")
+	}
+	properties, _ = join["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["mode"]), []string{"all", "any"})
+	predicate := findAuthoringObjectSchema(schema, "operator", "left", "right", "operands")
+	if predicate == nil {
+		t.Fatal("Runbook predicate schema was not found")
+	}
+	properties, _ = predicate["properties"].(map[string]interface{})
+	assertSchemaEnum(t, resolveAuthoringSchemaReference(schema, properties["operator"]), []string{"equal", "not_equal", "exists", "truthy", "greater", "at_least", "less", "at_most", "contains", "all", "any", "not"})
 }
 
 func resolveAuthoringSchemaReference(root map[string]interface{}, value interface{}) interface{} {

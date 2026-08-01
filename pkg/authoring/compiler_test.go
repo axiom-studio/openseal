@@ -468,6 +468,57 @@ func TestCompilerRepairsRunbookResultPathAsJSONPointer(t *testing.T) {
 	}
 }
 
+func TestCompilerRepairsRunbookDelegationMode(t *testing.T) {
+	candidate := objectiveRunbookCandidate(WorkforceObjectiveKey("agent", "operator", "operate"))
+	candidate.Agents[0].Runbook.Triggers = nil
+	candidate.Agents[0].Runbook.Entrypoints["operate"] = "scout"
+	candidate.Agents[0].Runbook.Steps = map[string]runbook.Step{
+		"scout": {
+			Kind: runbook.StepDelegate,
+			Delegate: &runbook.DelegateStep{
+				AgentID: runbook.Value{Literal: json.RawMessage(`"operator"`)},
+				Goal:    runbook.Value{Literal: json.RawMessage(`"Inspect the selected sources."`)},
+				Mode:    runbook.DelegateBehavior, ResultPath: "/results/scout", Next: "done",
+			},
+		},
+		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+	}
+	one := 1
+	valid, err := json.Marshal(GenerationResponse{
+		Candidate: candidate,
+		Commitments: PromptCommitments{
+			AgentCount:      &one,
+			ObjectiveCounts: []ObjectiveCountCommitment{{OwnerType: CommitmentOwnerAgent, Count: 1}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]interface{}
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	agents := document["candidate"].(map[string]interface{})["agents"].([]interface{})
+	steps := agents[0].(map[string]interface{})["runbook"].(map[string]interface{})["steps"].(map[string]interface{})
+	steps["scout"].(map[string]interface{})["delegate"].(map[string]interface{})["mode"] = "agent"
+	invalid, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{valid}}
+	compiler, _ := NewCompiler(generator)
+	result, err := compiler.Compile(t.Context(), GenerateRequest{
+		Mode: ModeCreate, Prompt: "Create one Agent with one Objective and a delegated operation.", InvocationKey: "change-set:delegate-mode:0",
+	})
+	if err != nil || result == nil || generator.repairs != 1 {
+		t.Fatalf("delegate mode repair result=%#v repairs=%d errors=%v err=%v", result, generator.repairs, generator.repairErrors, err)
+	}
+	diagnostic := generator.repairErrors[0].Error()
+	if !strings.Contains(diagnostic, "/candidate/agents/0/runbook/steps/scout/delegate/mode") || !strings.Contains(diagnostic, "behavior") || !strings.Contains(diagnostic, "reason") {
+		t.Fatalf("delegate mode repair diagnostic = %q", diagnostic)
+	}
+}
+
 func TestCompilerRepairsUnknownFieldInsideTypedRunbookStepMap(t *testing.T) {
 	valid, invalid := deterministicRunbookPayloads(t)
 	generator := &repairingGenerator{generated: invalid, repairSequence: [][]byte{invalid, valid}}
