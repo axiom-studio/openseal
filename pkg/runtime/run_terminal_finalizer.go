@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -69,6 +70,7 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		return err
 	}
 	finalized := 0
+	seenFinalizers := make(map[string]struct{})
 	for index := len(calls) - 1; index >= 0; index-- {
 		call := calls[index]
 		if call == nil {
@@ -102,6 +104,18 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		if err := f.catalog.ValidateInput(ctx, finalizer, arguments); err != nil {
 			return fmt.Errorf("project finalizer inputs for action %s: %w", call.ID, err)
 		}
+		encodedArguments, err := json.Marshal(arguments)
+		if err != nil {
+			return fmt.Errorf("encode finalizer inputs for action %s: %w", call.ID, err)
+		}
+		finalizerKey := strings.Join([]string{
+			call.BindingID, fmt.Sprint(call.BindingRevision), call.SkillID,
+			call.SkillVersion, finalizerName, string(encodedArguments),
+		}, "\x00")
+		if _, seen := seenFinalizers[finalizerKey]; seen {
+			continue
+		}
+		seenFinalizers[finalizerKey] = struct{}{}
 		finalizerCall := &ActionCall{
 			ID: f.newID(), Scope: run.Scope, RunID: run.ID, DeploymentID: call.DeploymentID,
 			BindingID: call.BindingID, BindingRevision: call.BindingRevision,
