@@ -105,12 +105,12 @@ func TestCompilerRejectsQuestionThatFailsBoundedContractRepairBeforePersistence(
 		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "Create a research Team and ask which reporting Skill to use.",
 		Catalog: repairPhaseCatalog(), Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "invalid-after-contract-repair",
 	})
-	var contractError *ContractGenerationError
-	if !errors.As(err, &contractError) || replay || created != nil || generator.repairs != 2 {
+	var schemaError *SchemaGenerationError
+	if !errors.As(err, &schemaError) || replay || created != nil || generator.repairs != 2 {
 		t.Fatalf("created=%#v replay=%t repairs=%d err=%v", created, replay, generator.repairs, err)
 	}
-	if contractError.RepairAttempts != 2 || !strings.Contains(contractError.Diagnostic, "invalid_refinement_question") {
-		t.Fatalf("contract error=%#v", contractError)
+	if schemaError.RepairAttempts != 2 || !strings.Contains(schemaError.Diagnostic, "/unresolvedQuestions/0/answer/kind") || !strings.Contains(schemaError.Diagnostic, "value must be one of") {
+		t.Fatalf("schema error=%#v", schemaError)
 	}
 }
 
@@ -132,9 +132,12 @@ func TestPreparedGenerationPersistsFailureWithoutInvalidRefinementPayload(t *tes
 		t.Fatal(err)
 	}
 	failed, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision)
-	var contractError *ContractGenerationError
-	if !errors.As(err, &contractError) || failed == nil || failed.Status != ChangeSetFailed || failed.Generation.FailureCode != "contract_failed" {
+	var schemaError *SchemaGenerationError
+	if !errors.As(err, &schemaError) || failed == nil || failed.Status != ChangeSetFailed || failed.Generation.FailureCode != "schema_failed" {
 		t.Fatalf("failed=%#v err=%v", failed, err)
+	}
+	if failed.Generation.LastError != "We couldn't finish this proposal automatically. Your request and answers are saved; try again." || strings.Contains(failed.Generation.LastError, "invalid_refinement_question") {
+		t.Fatalf("public failure leaked diagnostics: %q", failed.Generation.LastError)
 	}
 	if len(failed.Result.UnresolvedQuestions) != 0 || len(failed.Refinement.Questions) != 0 {
 		t.Fatalf("invalid refinement payload persisted: result=%#v refinement=%#v", failed.Result.UnresolvedQuestions, failed.Refinement.Questions)
