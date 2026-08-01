@@ -139,6 +139,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	if err := ValidateWorkforceCandidateSensitiveInput(&generated.Candidate); err != nil {
 		return nil, err
 	}
+	canonicalizeGeneratedRunbookObjectiveReferences(&generated.Candidate)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 	synthesizeCapabilityNeedRefinements(&generated, request)
 	scheduleIntentIssues := enforceScheduleIntentAuthority(&generated, request)
@@ -209,6 +210,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 			if err := ValidateWorkforceCandidateSensitiveInput(&generated.Candidate); err != nil {
 				return nil, err
 			}
+			canonicalizeGeneratedRunbookObjectiveReferences(&generated.Candidate)
 			materializationIssues = materializeAnsweredCapabilitySourceScopes(&generated.Candidate, request)
 			synthesizeCapabilityNeedRefinements(&generated, request)
 			scheduleIntentIssues = enforceScheduleIntentAuthority(&generated, request)
